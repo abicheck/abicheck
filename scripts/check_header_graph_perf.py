@@ -131,6 +131,17 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Sibling module (this script's own directory) — the shared median/percentile/
+# regression-threshold math this script and benchmark_scaling.py both use.
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from perf_measurement import (  # noqa: E402
+    combined_regression_threshold,
+    summarize_samples,
+)
+
 # Unlike ``check_mutation_score.py``'s ``SURVIVOR_BASELINE`` (a single
 # in-module constant), the baseline here is a per-size JSON report on disk
 # (``--json-out``/``--baseline``) since it's a curve, not a scalar. A run
@@ -140,6 +151,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 DEFAULT_SIZES: tuple[int, ...] = (25, 100, 400)
 DEFAULT_REPEAT = 3
 DEFAULT_REGRESS_TOLERANCE = 0.5  # attach_ms may grow at most 50% vs. baseline
+#: Absolute-ms floor combined with DEFAULT_REGRESS_TOLERANCE via max() — see
+#: perf_measurement.combined_regression_threshold. 0.0 preserves the
+#: historical pure-percentage-tolerance behaviour by default.
+DEFAULT_REGRESS_MIN_DELTA_MS = 0.0
 
 
 def _have(tool: str) -> bool:
@@ -310,15 +325,20 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     attach hit the memo instead of a disk-cache reload (Codex review: calling
     ``dumper.dump()`` with no surrounding scope, as an earlier version of this
     script did, never writes the memo at all).
+
+    Runs one untimed warmup pair (its own fresh temp dir, same as every timed
+    repeat — it doesn't skip ``_build_fixture``'s deliberate per-repeat
+    AST-disk-cache-miss design) before the *repeat* timed pairs, then reports
+    the **median** of the timed samples via
+    ``perf_measurement.summarize_samples`` — not the minimum (see that
+    module's own docstring for why "keep the fastest" hides regressions).
     """
     from abicheck import dumper_cache
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
     from abicheck.service import _attach_header_graph
 
-    baseline_samples: list[float] = []
-    attach_samples: list[float] = []
-    for _ in range(repeat):
+    def _one_pair() -> tuple[float, float]:
         with tempfile.TemporaryDirectory(prefix="hgperf_") as tmp:
             so, header = _build_fixture(Path(tmp), n)
             inc_extra, deferred_tokens, extra_hash_dirs = _resolve_includes(header)
@@ -346,7 +366,6 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                     extra_hash_dirs=extra_hash_dirs,
                 )
             t1 = time.perf_counter()
-            baseline_samples.append((t1 - t0) * 1000.0)
 
             t2 = time.perf_counter()
             attached = _attach_header_graph(
@@ -375,13 +394,25 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
             )
             t3 = time.perf_counter()
             _require_real_ast_attach(attached, n, backend)
-            attach_samples.append((t3 - t2) * 1000.0)
+            return (t1 - t0) * 1000.0, (t3 - t2) * 1000.0
 
+    _one_pair()  # untimed warmup — discarded
+    baseline_samples: list[float] = []
+    attach_samples: list[float] = []
+    for _ in range(repeat):
+        baseline_ms, attach_ms = _one_pair()
+        baseline_samples.append(baseline_ms)
+        attach_samples.append(attach_ms)
+
+    baseline_stats = summarize_samples(baseline_samples)
+    attach_stats = summarize_samples(attach_samples)
     return {
-        "baseline_ms": min(baseline_samples),
-        "attach_ms": min(attach_samples),
+        "baseline_ms": baseline_stats.median,
+        "attach_ms": attach_stats.median,
         "baseline_ms_samples": baseline_samples,
         "attach_ms_samples": attach_samples,
+        "baseline_ms_cv": baseline_stats.cv,
+        "attach_ms_cv": attach_stats.cv,
     }
 
 
@@ -495,28 +526,44 @@ def check_regressions(
     points: list[dict[str, Any]],
     baseline: dict[tuple[int, str], float],
     tolerance: float,
+    *,
+    min_delta_ms: float = DEFAULT_REGRESS_MIN_DELTA_MS,
 ) -> list[str]:
-    """Return one message per (size, backend) that regressed beyond *tolerance*."""
+    """Return one message per (size, backend) that regressed beyond *tolerance*.
+
+    A point regresses once ``attach_ms`` exceeds the baseline by more than
+    ``max(tolerance * baseline, min_delta_ms)`` — see
+    ``perf_measurement.combined_regression_threshold``. ``min_delta_ms=0``
+    (the default) reduces to the historical pure-percentage-tolerance rule.
+    """
     failures = []
     for p in points:
         base = baseline.get(_point_key(p))
         if base is None or base <= 0:
             continue
         current = float(p["attach_ms"])
-        allowed = base * (1.0 + tolerance)
+        allowed_delta = combined_regression_threshold(base, tolerance, min_delta_ms)
+        allowed = base + allowed_delta
         if current > allowed:
             pct = (current / base - 1.0) * 100.0
             size, backend = _point_key(p)
             failures.append(
                 f"size={size} backend={backend}: attach_ms {current:.1f} > "
-                f"baseline {base:.1f} x{1 + tolerance:.2f} ({pct:+.0f}%)"
+                f"baseline {base:.1f} + {allowed_delta:.1f} allowed ({pct:+.0f}%)"
             )
     return failures
 
 
+def _attach_cv_pct(p: dict[str, Any]) -> float:
+    """``attach_ms``'s coefficient of variation as a percentage, or NaN if unset."""
+    cv = p.get("attach_ms_cv")
+    return cv * 100.0 if cv is not None else float("nan")
+
+
 def _print_table(points: list[dict[str, Any]]) -> None:
     print(
-        f"{'size':>8} {'backend':>9} {'baseline_ms':>12} {'attach_ms':>12} {'attach_%':>10}"
+        f"{'size':>8} {'backend':>9} {'baseline_ms':>12} {'attach_ms':>12} "
+        f"{'attach_%':>10} {'attach_cv%':>11}"
     )
     for p in points:
         baseline_ms = p["baseline_ms"]
@@ -524,20 +571,20 @@ def _print_table(points: list[dict[str, Any]]) -> None:
         pct = (attach_ms / baseline_ms * 100.0) if baseline_ms else float("nan")
         print(
             f"{p['size']:>8} {p.get('backend', 'clang'):>9} {baseline_ms:>12.1f} "
-            f"{attach_ms:>12.1f} {pct:>9.1f}%"
+            f"{attach_ms:>12.1f} {pct:>9.1f}% {_attach_cv_pct(p):>10.1f}%"
         )
 
 
 def _print_markdown(points: list[dict[str, Any]]) -> None:
-    print("| size | backend | baseline_ms | attach_ms | attach_% |")
-    print("|---:|---|---:|---:|---:|")
+    print("| size | backend | baseline_ms | attach_ms | attach_% | attach_cv% |")
+    print("|---:|---|---:|---:|---:|---:|")
     for p in points:
         baseline_ms = p["baseline_ms"]
         attach_ms = p["attach_ms"]
         pct = (attach_ms / baseline_ms * 100.0) if baseline_ms else float("nan")
         print(
             f"| {p['size']} | {p.get('backend', 'clang')} | {baseline_ms:.1f} | "
-            f"{attach_ms:.1f} | {pct:.1f}% |"
+            f"{attach_ms:.1f} | {pct:.1f}% | {_attach_cv_pct(p):.1f}% |"
         )
 
 
@@ -592,7 +639,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--repeat",
         type=_positive_int,
         default=DEFAULT_REPEAT,
-        help="Repeats per size; the minimum is reported (default: %(default)s)",
+        help="Timed repeats per size (plus one untimed warmup); the MEDIAN is "
+        "reported (default: %(default)s)",
     )
     p.add_argument(
         "--baseline",
@@ -605,7 +653,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=_finite_nonnegative_float,
         default=DEFAULT_REGRESS_TOLERANCE,
         help="Fractional attach_ms growth allowed vs. baseline before failing "
-        "(default: %(default)s = 50%%)",
+        "(default: %(default)s = 50%%). The actual allowed delta is "
+        "max(this fraction x baseline, --regress-min-delta-ms).",
+    )
+    p.add_argument(
+        "--regress-min-delta-ms",
+        type=_finite_nonnegative_float,
+        default=DEFAULT_REGRESS_MIN_DELTA_MS,
+        help="Absolute-ms floor combined with --regress-tolerance via max() -- "
+        "protects a small attach_ms baseline from flagging on run-to-run "
+        "noise alone (default: %(default)s = pure percentage tolerance, the "
+        "historical behaviour).",
     )
     p.add_argument("--json-out", type=Path, default=None, help="Write a JSON report")
     p.add_argument(
@@ -761,7 +819,12 @@ def main(argv: list[str] | None = None) -> int:
             "baseline was generated with, or regenerate it via --json-out."
         )
         return 1
-    failures = check_regressions(points, baseline, args.regress_tolerance)
+    failures = check_regressions(
+        points,
+        baseline,
+        args.regress_tolerance,
+        min_delta_ms=args.regress_min_delta_ms,
+    )
     if failures:
         print("\nFAIL: header-graph attach-cost regression:")
         for f in failures:

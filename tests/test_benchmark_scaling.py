@@ -23,17 +23,23 @@ bench = importlib.util.module_from_spec(_spec)
 sys.modules["benchmark_scaling"] = bench
 _spec.loader.exec_module(bench)
 
+# The baseline-regression comparison functions live in the sibling
+# scripts/perf_baseline.py (split out to keep benchmark_scaling.py under the
+# file-size cap) — importing benchmark_scaling.py above already put
+# scripts/ on sys.path as a side effect, so a plain import resolves it.
+import perf_baseline  # noqa: E402
+
 
 # ── Baseline regression comparison ────────────────────────────────────────────
 def test_baseline_points_parses_scenarios() -> None:
     base = {"scenarios": {"add_remove": {"points": [{"size": 500, "seconds": 0.1}]}}}
-    assert bench._baseline_points(base) == {("add_remove", 500): 0.1}
+    assert perf_baseline.baseline_points_from_report(base) == {("add_remove", 500): 0.1}
 
 
 def test_baseline_points_tolerates_garbage() -> None:
-    assert bench._baseline_points({}) == {}
-    assert bench._baseline_points({"scenarios": "nope"}) == {}
-    assert bench._baseline_points({"scenarios": {"x": "bad"}}) == {}
+    assert perf_baseline.baseline_points_from_report({}) == {}
+    assert perf_baseline.baseline_points_from_report({"scenarios": "nope"}) == {}
+    assert perf_baseline.baseline_points_from_report({"scenarios": {"x": "bad"}}) == {}
 
 
 def test_check_regressions_flags_slowdown() -> None:
@@ -59,6 +65,46 @@ def test_check_regressions_skips_unknown_size() -> None:
     # Size absent from the baseline (e.g. a scenario new in this PR) is skipped.
     bp = {("s", 500): 0.2}
     assert bench.check_regressions([bench.Point(1000, 5.0, 1000)], "s", bp, 0.5) == []
+
+
+def test_check_regressions_combined_threshold_absolute_floor_protects_tiny_baseline() -> (
+    None
+):
+    # A tiny baseline (well under regress-min-delta-seconds) must not flag on
+    # a relatively huge but absolutely tiny slowdown.
+    bp = {("s", 1000): 0.10}
+    msgs = bench.check_regressions(
+        [bench.Point(1000, 0.15, 1000)],  # +50% but only +0.05s
+        "s",
+        bp,
+        0.15,
+        min_delta_seconds=0.1,
+    )
+    assert msgs == []
+
+
+def test_check_regressions_combined_threshold_still_catches_a_real_regression() -> None:
+    bp = {("s", 1000): 0.10}
+    msgs = bench.check_regressions(
+        [bench.Point(1000, 0.30, 1000)],  # +200%, well past both floors
+        "s",
+        bp,
+        0.15,
+        min_delta_seconds=0.1,
+    )
+    assert len(msgs) == 1
+
+
+def test_matched_baseline_points_empty_when_no_overlap() -> None:
+    points = [bench.Point(1000, 0.4, 1000)]
+    bp = {("s", 999): 0.2}  # different size entirely
+    assert bench.matched_baseline_points(points, "s", bp) == []
+
+
+def test_matched_baseline_points_returns_overlapping_subset() -> None:
+    points = [bench.Point(1000, 0.4, 1000), bench.Point(2000, 0.8, 2000)]
+    bp = {("s", 1000): 0.2}
+    assert bench.matched_baseline_points(points, "s", bp) == [points[0]]
 
 
 # ── Every scenario is wired correctly ─────────────────────────────────────────

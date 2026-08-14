@@ -87,8 +87,17 @@ jobs:
 
   source-tier:
     name: Source tier (L3/L4/L5) coverage
-    # Exploratory: clones+configures upstreams and records coverage. The binary
-    # tier is the gate; this is informational, so never block a merge on it.
+    # Exploratory *per library*: one library's own build/network hiccup is
+    # tolerated and never blocks a merge (eval/runner.py's source_tier_broken()
+    # only trips on a *systemic* failure — see --fail-on-empty-source below).
+    # continue-on-error is deliberately NOT set at the job level anymore: it
+    # previously masked exactly the failure mode this gate now exists to
+    # catch. `--depth full` (retired from the CLI, ADR-043 D2) made every
+    # single source-tier scan fail identically for a stretch — 0 of N
+    # libraries scanned — and continue-on-error let that read as a passing,
+    # green job (and REPORT.md's source-tier table still published, looking
+    # like real coverage). See docs/contribute/performance.md "Coverage gaps
+    # this workflow does not close" for the incident.
     # Same PR-label opt-in as the binary job; skipped for a `tier: binary` dispatch.
     if: >-
       (github.event_name != 'pull_request' ||
@@ -96,7 +105,6 @@ jobs:
       && github.event.inputs.tier != 'binary'
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -114,13 +122,20 @@ jobs:
           # git+cmake produce the compile DB; clang makes L4 decls/types non-partial.
           sudo apt-get update -qq && sudo apt-get install -y zstd binutils git cmake clang
 
-      - name: Run source tier (coverage only, non-gating)
+      - name: Run source tier (coverage; gated only against systemic breakage)
         run: |
+          set -euo pipefail
           ONLY=""
           if [ -n "${{ github.event.inputs.only }}" ]; then
             ONLY="--only ${{ github.event.inputs.only }}"
           fi
-          python eval/runner.py --tier source $ONLY
+          # --fail-on-empty-source fails only when the WHOLE tier is broken
+          # (zero libraries scanned, or every "successful" scan captured zero
+          # real L3 evidence) — an individual library's own build/network
+          # failure is still recorded as a per-row error and does not fail
+          # this step, matching this job's own "exploratory per library"
+          # design (see eval/runner.py's source_tier_broken() docstring).
+          python eval/runner.py --tier source --fail-on-empty-source $ONLY
 
       - name: Write coverage to job summary
         if: always()

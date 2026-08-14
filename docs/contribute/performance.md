@@ -165,19 +165,56 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
 `compare()` scenario is linear, the lane is **gating**:
 
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
-  inputs), and **automatically on any PR that changes the detector core**
+  inputs), and **automatically on any PR that changes the detector core, the
+  L2/L3/L4/L5 build-source pipeline, or scan/compare/dump orchestration**
   (`abicheck/diff_*.py`, `checker.py`, `post_processing.py`, `demangle.py`,
-  `binary_fingerprint.py`, `surface.py`, the benchmark script, or the perf
-  test). Adding the **`performance`** label
-  re-triggers the lane; for a PR that does not touch the detector core, run it
-  on demand with `workflow_dispatch`.
+  `binary_fingerprint.py`, `surface.py`, all of `abicheck/buildsource/**`,
+  `service_scan.py`/`service_input_resolution.py`/`scan_engine.py` and the
+  other `service_*`/cache modules, the benchmark scripts, or the perf tests —
+  the `paths` filter previously covered only the detector core, so a real,
+  perf-relevant `buildsource`/scan-orchestration change (e.g. the P0.2 Bazel
+  `aquery`/`cquery` root-target scoping or the P0.3 auto-applied-L3-context-to-
+  L2-headers change) could merge with **no Performance check run at all**).
+  Adding the **`performance`** label re-triggers the lane; for a PR that
+  touches neither, run it on demand with `workflow_dispatch`.
 - **Armed budgets:** the scaling step runs with `--max-exponent 1.4` (the tail,
-  largest-two-size slope) and `--max-rss-mb 2048`; the `regression` job blocks on
-  a >50 % PR-vs-base slowdown (`--regress-tolerance 0.5`). `continue-on-error` is
-  dropped on both, so a catastrophic regression fails the lane. The thresholds
-  are CLI flags so the budget lives in the workflow, not the script — **loosen a
-  threshold rather than re-adding `continue-on-error`** if normal drift ever
-  flakes a lane.
+  largest-two-size slope) and `--max-rss-mb 2048`; the `regression` job blocks
+  on a PR-vs-base slowdown exceeding `max(15%, 100ms)` per (scenario, size)
+  point (`--regress-tolerance 0.15 --regress-min-delta-seconds 0.1` — the
+  "stable synthetic PR scenario" tier; a flat 50 % tolerance is an emergency
+  stop, not real regression protection — several consecutive +15 % merges
+  would otherwise nearly double the runtime before anything caught it).
+  `continue-on-error` is dropped on both, so a catastrophic regression fails
+  the lane; `scripts/benchmark_scaling.py`'s own `main()` additionally fails
+  closed if `--baseline` loads to zero points, or if zero (scenario, size)
+  points end up shared between base and head — so a scenario-set/`--sizes`
+  mismatch can't silently turn the comparison into a no-op that reports a
+  clean pass. The thresholds are CLI flags so the budget lives in the
+  workflow, not the script — **loosen a threshold rather than re-adding
+  `continue-on-error`** if normal drift ever flakes a lane.
+- **Per-scenario tuned sweeps, not one global `--sizes`.** The PR/schedule
+  triggers no longer pass `--sizes` at all, so each scenario's own tuned
+  default sweep (`SCENARIOS` in `benchmark_scaling.py`) applies —
+  `onedal_large_surface` reaches its tuned 5k-20k range, `nested_types` gets
+  its full multi-point sweep (so a tail exponent is actually computable), and
+  `rename_churn`/`opaque_filter` keep all three of their tuned points. A
+  previous version of this workflow always passed a single
+  `500 1000 2000 4000` ladder to every scenario regardless, silently
+  overriding all of the above. `--sizes` (and the `workflow_dispatch` input of
+  the same name) still works for a manual, deliberately-scoped run.
+- **Median, not fastest-of-N.** Each point runs one untimed warmup, then 5
+  timed repeats on every trigger (7 on the weekly schedule, since it isn't
+  blocking a merge) — the reported/gated figure is the **median** of those
+  repeats, with min/max/p95/coefficient-of-variation recorded alongside it
+  (`scripts/perf_measurement.py`). Keeping the *fastest* of a couple of runs
+  (the previous behaviour, `--repeat 2` + `min()`) systematically favours the
+  run least likely to have hit GC/scheduler noise — i.e. the one least
+  representative of what a regression would actually look like — and gives no
+  noise signal at all.
+- **Base/head identity in the JSON report.** `--meta git_sha=... --meta
+  side=base|head --meta os_image=...` stamps the report each side was
+  actually measured on, so a report downloaded later can be matched back to
+  the exact commit/runner it came from.
 - The `--max-exponent` gate is **per-scenario opt-out**: `nested_types` is an
   inherently super-linear embedding chain, so it carries `gate_exponent=False`
   and is exempted (its tail slope is still printed for visibility, just not
@@ -203,6 +240,73 @@ number would survive a runner/toolchain change, the same reasoning
 same-runner base-vs-head pattern (see [Baseline regression](#baseline-regression)
 below) and gates from day one, since that pattern never needs a stale
 committed number to begin with.
+
+## Coverage gaps this workflow does not close
+
+An external performance audit (2026-08) found that `compare()`/dump/scan
+scaling has real CI protection (this page's own subject), but two adjacent
+lanes had **false-green** failure modes — a check reporting success while
+actually verifying nothing. Both are fixed; recorded here so a future reader
+doesn't rediscover them from scratch.
+
+**The `eval-suite.yml` source-tier (L3/L4/L5) lane reported success while
+scanning zero libraries.** `eval/runner.py`'s `_dump_sources()` called
+`abicheck dump --sources ... --depth full` — a rung retired from the public
+CLI (ADR-043 D2, collapsed into `--depth source`; see the "Scan-level
+scalability sweep" note above for the same retirement). Every source-tier
+scan therefore failed identically with the same `click.BadParameter`, and the
+`source-tier` job's blanket `continue-on-error: true` (deliberately set,
+since one library's own build/network flakiness is meant to be tolerated —
+see the job's own comment) meant a **0-of-N-scanned** run still reported as a
+passing, green job, with `REPORT.md`'s source-tier table still published
+looking like real coverage. Fixed two ways, matching this page's own
+"gate on the systemic signal, not the individual one" pattern: the `--depth
+full` → `--depth source` argv fix itself, and a new
+`eval/runner.py --fail-on-empty-source` gate (`source_tier_broken()`) that
+fails only when the *whole* tier is broken — zero libraries scanned
+successfully, or every "successful" scan captured zero real L3 build
+evidence — while still tolerating one library's own failure exactly as
+before. `continue-on-error` is no longer set at the job level; the new gate
+is what now distinguishes "tolerable per-library flake" (still passes) from
+"the tool itself is broken" (now fails loudly).
+
+**Still open, deliberately not attempted in this pass** (each needs its own
+scoped design, per this repo's "known gaps over risky reactive patches"
+convention — root `AGENTS.md`):
+
+- **True interleaved base/head measurement.** The `regression` job runs the
+  base branch to completion, then the head branch to completion, on the same
+  runner — not alternating scenario-by-scenario. Interleaving would average
+  out slow drift over the run's wall-clock (thermal throttling, a noisy
+  neighbour) that a strictly-sequential base-then-head comparison cannot
+  distinguish from a real regression. Doing this soundly needs each
+  `benchmark_scaling.py` invocation to run a *single* repeat and be invoked
+  alternately from the workflow (or a driver script that shells out to both
+  venvs in turn), then aggregates medians across rounds — a real, separate
+  piece of orchestration, not a flag on the existing single-shot invocation.
+- **A maintained end-to-end depth/backend matrix.** The `slow` perf tests and
+  the scaling/header-graph harnesses cover `compare()` and the L2 attach cost
+  well; there is no equivalent maintained CI matrix over binary / headers
+  (clang + castxml) / build (CMake + Bazel scoped/fallback) / source (seeded +
+  unseeded) × cold/warm cache. `eval/scan_level_scaling.py` sweeps the level
+  axis but is manual-only (real clang time), and `eval/scaling.py`'s
+  `ABICHECK_L4_JOBS` sweep is likewise manual.
+- **Per-scan performance receipts.** Nothing today emits a structured
+  wall/user/sys + process-tree RSS + per-phase-timing + cache-hit/miss record
+  for a single `scan`/`compare` run, the way `--json-out` does for the
+  synthetic harnesses. Building one would let a real regression (an extra
+  Bazel query, a lost L4 cache hit, an unexpected full-TU replay) be diagnosed
+  from one run's own output instead of only from a before/after harness
+  comparison.
+- **Repeated L3 collection under `dump --sources`/`--build-info` (P0.3).**
+  Include seeding and compile-context derivation each independently trigger
+  L3 collection, and build-source evidence is collected again for embedding —
+  up to three L3 collection passes per side for some input shapes. This is
+  documented as an accepted, known cost in root `AGENTS.md`'s "Known gaps"
+  entry for P0.3 (`abicheck/service_input_resolution.py`), not re-litigated
+  here; it is now at least in scope for `performance.yml`'s `paths` filter
+  (see "CI integration" above), so a change to it will run this workflow even
+  though no benchmark scenario targets its specific cost yet.
 
 ## Coverage gap analysis & remaining gaps
 
@@ -250,24 +354,58 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 ## Baseline regression
 
 The per-run scaling exponent catches *catastrophic* blow-ups but not a gradual
-20–30 % slowdown. To catch drift, the harness can compare against a baseline:
+15–20 % slowdown. To catch drift, the harness can compare against a baseline:
 
 ```bash
-# On the base branch / a prior commit, capture a baseline:
-python scripts/benchmark_scaling.py --json-out base.json
+# On the base branch / a prior commit, capture a baseline (5 repeats -> a
+# meaningful median/cv; --meta records who/what this measurement is):
+python scripts/benchmark_scaling.py --repeat 5 \
+    --meta git_sha=$(git rev-parse HEAD) --meta side=base \
+    --json-out base.json
 
-# On the PR head, measure and compare (fails if any shared scenario is >50% slower):
-python scripts/benchmark_scaling.py --baseline base.json --regress-tolerance 0.5
+# On the PR head, measure and compare (fails if any shared point regresses
+# by more than max(15%, 100ms) vs. its baseline):
+python scripts/benchmark_scaling.py --repeat 5 \
+    --meta git_sha=$(git rev-parse HEAD) --meta side=head \
+    --baseline base.json \
+    --regress-tolerance 0.15 --regress-min-delta-seconds 0.1
 ```
 
+Each point's reported/gated figure is the **median** of its timed repeats (plus
+one untimed warmup) — not the fastest one; see `scripts/perf_measurement.py`
+for why "keep the minimum across a couple of runs" systematically hides
+regressions rather than catching them, and reports no run-to-run noise signal
+at all (`min`/`max`/`p95`/coefficient-of-variation are recorded alongside the
+median for exactly that reason).
+
 Only scenarios present on **both** sides are compared (a scenario new in the PR
-has no baseline and is skipped), and baseline times below a 50 ms noise floor are
-ignored. The [`regression`](https://github.com/abicheck/abicheck/blob/main/.github/workflows/performance.yml)
+has no baseline and is skipped), and baseline times below a 50 ms noise floor
+are ignored regardless of the threshold rule. A point regresses once its
+absolute slowdown exceeds `max(tolerance x baseline, --regress-min-delta-
+seconds)` — the combined relative/absolute rule protects a small baseline (a
+few ms) from flagging on ordinary noise while still catching a genuinely large
+percentage regression on a large baseline; `--regress-min-delta-seconds 0`
+(the default) reduces to a pure percentage tolerance. **A `--baseline` that
+loads to zero points, or that shares zero (scenario, size) points with what
+was actually measured, is a hard failure**, not a silently-skipped comparison
+that reports a clean pass — this closes a real incident where the `regression`
+job's base-measurement step swallowed its own failure with `|| true`, so a
+PR could merge having "compared" against a baseline that was never actually
+captured.
+
+The [`regression`](https://github.com/abicheck/abicheck/blob/main/.github/workflows/performance.yml)
 workflow job automates this on PRs: it installs the base branch and the PR head
 into separate venvs on the same runner, runs both, and prints the regressions to
-the job summary. It now **gates** (a >50 % slowdown fails the job) — loosen
-`--regress-tolerance` rather than re-adding `continue-on-error` if runner variance
-proves noisy.
+the job summary. It **gates** (a regression past the threshold above fails the
+job) — loosen `--regress-tolerance`/`--regress-min-delta-seconds` rather than
+re-adding `continue-on-error` if runner variance proves noisy.
+
+The header-graph attach-cost gate
+(`scripts/check_header_graph_perf.py`, see below) follows the identical
+median/warmup/combined-threshold design over its own `--repeat`/
+`--regress-tolerance`/`--regress-min-delta-ms` flags — the two scripts share
+the underlying statistics via `scripts/perf_measurement.py` so their
+regression math can't independently drift.
 
 ### Scan level cost model: one cliff at L4
 
@@ -323,13 +461,16 @@ C++ trees of increasing TU count, builds them with the host compiler, and runs
 `scan` at each level against a slightly-changed baseline — recording wall time
 and **peak child RSS** (`os.wait4`) per (size, level).
 
-Two results:
+Two results (measured back when the harness still had a separate `full` (s6)
+sweep entry alongside seedless `source` (s5) — see the note at the end of this
+section for why that entry was later removed, without invalidating either
+finding below):
 
 - **The cheap tier is flat in TU count.** `binary`/`headers`/`build`/`graph`
   (s4) cost the same at 4, 8, and 16 TUs (tail exponent ≈0) — they are priced on
   the binary dump + L2 header AST + L3 compile-DB parse, none of which grow with
-  the number of `.cpp` files. `full` (s6) is **linear** in TU count (every TU is
-  replayed). Both as expected.
+  the number of `.cpp` files. Seedless (full-tree-replay) source-level scanning
+  is **linear** in TU count (every TU is replayed). Both as expected.
 - **Seedless `--depth source` (s5) used to hide a full-tree cost — now fixed.**
   It cost ~2× the wall time and ~2.5× the RSS of the *seeded* run for the
   **identical** L4 coverage (both report `L4=1/1`), and the gap *widened* with TU
@@ -339,8 +480,22 @@ Two results:
   `clang -ast-dump=json` over every TU. The unseeded call-graph pass now scopes to
   the **same** compile units the L4 replay used (headers-only), so it is
   consistent with the L4 surface and no longer scales with the tree
-  (~2.4× faster on a synthetic n=8 tree, identical verdict). Seeded runs and
-  `--depth full` are unchanged.
+  (~2.4× faster on a synthetic n=8 tree, identical verdict). Seeded runs are
+  unchanged.
+
+**Why there is no separate `full` sweep entry anymore.** ADR-043 D2 retired
+`--depth full` from the public CLI ladder entirely — it collapsed into
+`--depth source`, since replay *scope* (a change seed present vs. absent), not
+evidence depth, was the only thing distinguishing them, and `scan` itself now
+resolves that scope from whether `--since`/`--changed-path` was given (see
+`abicheck/buildsource/scan_levels.py`'s `EvidenceDepth.FULL`/`SourceScope`
+docstrings). The harness's own seedless `"source"` entry *is* the shape the
+old `"full"` entry measured — keeping both would just re-run the identical
+`--depth source` argv twice under two names. (Concretely, before this fix
+`--depth full` was a hard `click.BadParameter` — a harness bug in the same
+family as the `eval/runner.py` one described in "Coverage gaps this workflow
+does not close" below, just in a manual-only harness rather than a scheduled
+CI lane, so it never produced a false-green.)
 
 That whole-DB call-graph pass shells out to the same multi-GiB
 `clang -ast-dump=json` as the L4 replay, but its worker count

@@ -59,12 +59,16 @@ on:
       - "tests/test_perf_binary_scan.py"
       - "tests/test_perf_dump_scaling.py"
       - "tests/test_benchmark_scaling.py"
-      - "abicheck/buildsource/header_graph.py"
-      - "abicheck/buildsource/include_graph.py"
-      - "abicheck/buildsource/call_graph.py"
-      - "abicheck/buildsource/source_graph.py"
-      - "abicheck/buildsource/graph_facts.py"
-      - "abicheck/buildsource/type_graph.py"
+      # Every buildsource module (header/include/call/type graph, L3 build
+      # evidence collection, Bazel/CMake/Ninja/Make adapters, S1-S6 source
+      # replay, the preprocessor pre-scan, ...) — a single directory glob
+      # rather than an enumerated file list, since this tree gained real,
+      # previously-unguarded perf-sensitive changes the old per-file list
+      # missed entirely (P0.2 Bazel aquery/cquery scoping, P0.3 auto-applying
+      # L3 compiler context to every L2 header parse — both merged with no
+      # Performance check run at all; see docs/contribute/performance.md
+      # "Coverage gaps this workflow does not close").
+      - "abicheck/buildsource/**"
       - "abicheck/provenance.py"
       - "abicheck/dumper_cache.py"
       - "abicheck/dumper_ast_config.py"
@@ -79,6 +83,30 @@ on:
       - "action/install-castxml.sh"
       - "scripts/check_header_graph_perf.py"
       - "tests/test_header_graph_perf_gate.py"
+      # scan()/dump()/compare() orchestration, resolution, and caching — the
+      # owners of scan latency the path filter above previously missed
+      # entirely (no scan-shaped scenario ran under this workflow at all for
+      # a change to any of these).
+      - "abicheck/service_input_resolution.py"
+      - "abicheck/service_scan.py"
+      - "abicheck/service_dump_pipeline.py"
+      - "abicheck/service_compare_pipeline.py"
+      - "abicheck/service_dump_cache.py"
+      - "abicheck/scan_engine.py"
+      - "abicheck/snapshot_cache.py"
+      - "abicheck/cli_buildsource.py"
+      - "abicheck/cli_buildsource_helpers.py"
+      - "abicheck/cli_dump_helpers.py"
+      - "abicheck/cli_resolve.py"
+      # The eval-suite scan-level scalability harness, and the shared
+      # measurement/threshold modules the two perf-gate scripts above both
+      # import — a change here that regresses the harness's own measurement
+      # (see eval/CLAUDE.md) should be caught the same way a change to
+      # benchmark_scaling.py/check_header_graph_perf.py already is.
+      - "eval/scan_level_scaling.py"
+      - "eval/scaling.py"
+      - "scripts/perf_measurement.py"
+      - "scripts/perf_baseline.py"
       - ".github/workflows/performance.yml"
 
 concurrency:
@@ -125,14 +153,37 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports/perf
-          SIZES="${{ github.event.inputs.sizes || '500 1000 2000 4000' }}"
+          # Only override --sizes when workflow_dispatch explicitly asked for
+          # one. Unconditionally passing a global --sizes here used to
+          # silently override EVERY scenario's own individually-tuned sweep
+          # (scripts/benchmark_scaling.py's SCENARIOS table) with the same
+          # 500/1000/2000/4000 ladder -- so onedal_large_surface never swept
+          # past 4k (it's tuned for 5k-20k), nested_types collapsed to one
+          # point (no tail exponent computable), and rename_churn/
+          # opaque_filter kept only two of their three tuned points. Omitting
+          # --sizes on every non-dispatch trigger (PR/schedule) restores each
+          # scenario's own default sweep.
+          SIZES_ARG=""
+          if [ -n "${{ github.event.inputs.sizes }}" ]; then
+            SIZES_ARG="--sizes ${{ github.event.inputs.sizes }}"
+          fi
           GATE=""
           if [ -n "${{ github.event.inputs.max_seconds }}" ]; then
             GATE="--max-seconds ${{ github.event.inputs.max_seconds }}"
           fi
+          # 5 timed repeats (+1 untimed warmup, always run — see
+          # scripts/benchmark_scaling.py) on every trigger; the weekly
+          # schedule affords more since it isn't blocking a PR merge. Each
+          # point's reported figure is the MEDIAN of these repeats, not the
+          # fastest one (docs/contribute/performance.md "Baseline
+          # regression").
+          REPEAT=5
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            REPEAT=7
+          fi
           python scripts/benchmark_scaling.py \
-            --sizes $SIZES \
-            --repeat 2 \
+            $SIZES_ARG \
+            --repeat "$REPEAT" \
             --max-exponent 1.4 \
             --max-rss-mb 2048 \
             --json-out reports/perf/scaling.json \
@@ -166,8 +217,18 @@ jobs:
   # runs on PRs (there is no baseline branch for schedule/dispatch). Base and
   # head are installed into separate venvs so the same package name can coexist;
   # the comparison is over the scenarios present on *both* branches. Gating: the
-  # step fails (and blocks) on a >50% slowdown — loosen --regress-tolerance rather
-  # than re-adding continue-on-error if runner variance proves too noisy.
+  # step fails (and blocks) on a regression exceeding max(15%, 100ms) per point
+  # (the "stable synthetic PR scenario" tier — see docs/contribute/
+  # performance.md "Baseline regression") — loosen --regress-tolerance/
+  # --regress-min-delta-seconds rather than re-adding continue-on-error if
+  # runner variance proves too noisy. The base-measurement step is NOT allowed
+  # to fail silently (no `|| true`): a base measurement that never ran (a
+  # broken venv, a crash, an install failure) must fail this job, not degrade
+  # to comparing head against nothing — scripts/benchmark_scaling.py's own
+  # main() additionally fails closed if --baseline loads to zero points, or if
+  # zero (scenario, size) points end up shared between the two runs, so a
+  # scenario-set/--sizes mismatch between base and head can't silently turn
+  # this into a no-op comparison either.
   regression:
     name: Baseline regression (PR vs base)
     if: github.event_name == 'pull_request'
@@ -193,15 +254,17 @@ jobs:
 
       - name: Measure base branch
         run: |
+          set -euo pipefail
           sudo apt-get update -qq && sudo apt-get install -y binutils
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
-          # The base script may predate newer flags/scenarios; only the scenarios
-          # present on both branches are compared, so `|| true` keeps it robust.
           ./base_env/bin/python base/scripts/benchmark_scaling.py \
-            --sizes 500 1000 2000 --repeat 2 \
-            --json-out base.json || true
+            --sizes 500 1000 2000 --repeat 5 \
+            --meta git_sha=${{ github.event.pull_request.base.sha }} \
+            --meta side=base \
+            --meta os_image=${ImageOS:-unknown} \
+            --json-out base.json
 
       - name: Measure head and compare to base
         run: |
@@ -214,8 +277,12 @@ jobs:
           ./head_env/bin/pip install -q --upgrade pip
           ./head_env/bin/pip install -q -e "./head[dev]"
           ./head_env/bin/python head/scripts/benchmark_scaling.py \
-            --sizes 500 1000 2000 --repeat 2 --no-memory \
-            --baseline base.json --regress-tolerance 0.5 \
+            --sizes 500 1000 2000 --repeat 5 --no-memory \
+            --meta git_sha=${{ github.event.pull_request.head.sha }} \
+            --meta side=head \
+            --meta os_image=${ImageOS:-unknown} \
+            --baseline base.json \
+            --regress-tolerance 0.15 --regress-min-delta-seconds 0.1 \
             | tee regression.txt
 
       - name: Write job summary
@@ -370,7 +437,7 @@ jobs:
           if [ -f base/scripts/check_header_graph_perf.py ]; then
             set +e
             ./base_env/bin/python base/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 --require-castxml \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
               --json-out base_header_graph.json 2>&1 | tee base_measure.log
             status=${PIPESTATUS[0]}
             set -e
@@ -404,14 +471,15 @@ jobs:
           ./head_env/bin/pip install -q -e "./head[dev]"
           if [ -s base_header_graph.json ]; then
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 --require-castxml \
-              --baseline base_header_graph.json --regress-tolerance 0.5 \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
+              --baseline base_header_graph.json \
+              --regress-tolerance 0.3 --regress-min-delta-ms 10 \
               | tee header_graph_regression.txt
           else
             echo "No base measurement available (gate not present on base branch) -- report-only." \
               | tee header_graph_regression.txt
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 --require-castxml \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
               | tee -a header_graph_regression.txt
           fi
 

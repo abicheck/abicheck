@@ -26,8 +26,19 @@ is safe to run unconditionally in CI as an informational job. Pass
 and a stable budget exists. ``--max-exponent`` skips scenarios marked
 ``gate_exponent=False`` (inherently super-linear, e.g. ``nested_types``).
 Pass ``--baseline <scaling.json>`` (e.g. produced from the base branch) with
-``--regress-tolerance`` to flag scenarios that got slower than the baseline —
-this catches *gradual* drift that the per-run scaling exponent misses.
+``--regress-tolerance``/``--regress-min-delta-seconds`` to flag scenarios that
+got slower than the baseline — this catches *gradual* drift that the per-run
+scaling exponent misses. A ``--baseline`` that shares zero (scenario, size)
+points with what this run actually measured is a hard failure, not a silent
+no-op comparison (see ``perf_baseline.py``); ``--meta KEY=VALUE`` (repeatable)
+records caller-supplied identity (base/head git SHA, CI runner image, ...)
+into the JSON report's ``meta`` object.
+
+Each point runs one **untimed warmup**, then ``--repeat`` timed samples; the
+reported/gated figure is the **median**, not the fastest sample (see
+``perf_measurement.py``'s module docstring for why "keep the minimum" hides
+regressions) — min/max/p95/coefficient-of-variation are recorded alongside it
+for tail and noise visibility.
 
 Beyond ``compare()``, scenarios also cover PE/Mach-O diff arms, typedef/union/
 wide-struct/vtable churn, the opaque-handle size filter, suppression audit,
@@ -81,6 +92,7 @@ import functools
 import gc
 import json
 import math
+import platform
 import shutil
 import sys
 import time
@@ -101,6 +113,21 @@ from typing import Any
 REPO_DIR = Path(__file__).resolve().parent.parent
 if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
+
+# Sibling module (this script's own directory, not the repo root above) — the
+# shared median/percentile/regression-threshold math this script and
+# check_header_graph_perf.py both use. Same sys.path pattern
+# check_ai_readiness.py uses for its own sibling gate modules.
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from perf_baseline import (  # noqa: E402
+    check_regressions,
+    load_baseline as _load_baseline,
+    matched_baseline_points,
+)
+from perf_measurement import SampleStats, summarize_samples  # noqa: E402
 
 from abicheck.checker import (  # noqa: E402
     Change,
@@ -1310,6 +1337,10 @@ SCENARIOS: dict[str, Scenario] = {
 @dataclass
 class Point:
     size: int
+    # The MEDIAN wall-clock seconds across this point's timed samples — not the
+    # fastest (see ``measure()``'s own docstring for why "keep the minimum"
+    # systematically hides regressions). Every gate/exponent/baseline
+    # comparison reads this field.
     seconds: float
     changes: int
     # Peak heap allocated during the timed call (MiB), via ``tracemalloc``.
@@ -1326,6 +1357,16 @@ class Point:
     # final/largest value is the figure to gate; it overstates a single call's
     # own footprint (inputs are built in-process too).
     rss_mb: float | None = None
+    # Tail/noise visibility alongside the median ``seconds`` above — ``None``
+    # when ``repeat`` produced fewer samples than these need (min/max/p95 are
+    # always available from a single sample; ``cv`` needs at least two).
+    min_seconds: float | None = None
+    max_seconds: float | None = None
+    p95_seconds: float | None = None
+    # Coefficient of variation (population stdev / mean) over the timed
+    # samples — a scale-free run-to-run noise signal. ``None`` with a single
+    # ``--repeat`` (nothing to compute variance from).
+    cv: float | None = None
 
 
 def _has_demangler() -> bool:
@@ -1376,19 +1417,31 @@ def _clear_process_caches() -> None:
 def measure(
     scenario: str, sizes: list[int], repeat: int, *, track_memory: bool = True
 ) -> list[Point]:
+    """Time *scenario* at each of *sizes*: one untimed warmup, then *repeat*
+    timed samples, summarized via :func:`perf_measurement.summarize_samples`.
+
+    The reported/gated ``Point.seconds`` is the **median**, not the fastest
+    sample — see this module's own docstring and ``perf_measurement.py``'s for
+    why "keep the minimum across N runs" systematically hides regressions
+    (the minimum is the run *least* likely to have hit GC/scheduler/cold-cache
+    noise, i.e. least representative of real usage) and gives no noise signal
+    at all. The warmup discards import/JIT-adjacent one-time costs a real
+    long-lived process pays once, so they don't inflate every timed sample.
+    """
     spec = SCENARIOS[scenario]
     points: list[Point] = []
     for n in sizes:
         if n > spec.max_size:
             continue
         prepared = spec.build(n)
-        best = math.inf
-        changes = 0
+        changes = spec.run(prepared)  # untimed warmup — discarded
+        samples: list[float] = []
         for _ in range(repeat):
             t0 = time.monotonic()
             changes = spec.run(prepared)
             dt = time.monotonic() - t0
-            best = min(best, dt)
+            samples.append(dt)
+        stats: SampleStats = summarize_samples(samples)
         peak_mb: float | None = None
         if track_memory:
             # Inputs are built outside the traced window, and process-wide caches
@@ -1404,10 +1457,14 @@ def measure(
         points.append(
             Point(
                 size=n,
-                seconds=round(best, 4),
+                seconds=round(stats.median, 4),
                 changes=changes,
                 peak_mb=peak_mb,
                 rss_mb=_peak_rss_mb(),
+                min_seconds=round(stats.min, 4),
+                max_seconds=round(stats.max, 4),
+                p95_seconds=round(stats.p95, 4),
+                cv=round(stats.cv, 4) if stats.cv is not None else None,
             )
         )
     return points
@@ -1476,51 +1533,11 @@ def tail_exponent(points: list[Point]) -> float | None:
 
 
 # ── Baseline regression ───────────────────────────────────────────────────────
-def _baseline_points(baseline: dict[str, object]) -> dict[tuple[str, int], float]:
-    """Map ``(scenario, size) -> seconds`` from a baseline report's JSON."""
-    out: dict[tuple[str, int], float] = {}
-    scenarios = baseline.get("scenarios", {})
-    if not isinstance(scenarios, dict):
-        return out
-    for name, body in scenarios.items():
-        if not isinstance(body, dict):
-            continue
-        for pt in body.get("points", []):
-            if isinstance(pt, dict) and "size" in pt and "seconds" in pt:
-                out[(name, int(pt["size"]))] = float(pt["seconds"])
-    return out
-
-
-def check_regressions(
-    current: list[Point],
-    scenario: str,
-    baseline: dict[tuple[str, int], float],
-    tolerance: float,
-    *,
-    floor_seconds: float = 0.05,
-) -> list[str]:
-    """Return regression messages where *current* is slower than *baseline*.
-
-    A point regresses when its time exceeds the baseline's by more than
-    ``tolerance`` (a fraction, e.g. ``0.5`` = 50 %). Points whose *baseline* time
-    is below ``floor_seconds`` are skipped — sub-50 ms timings are dominated by
-    noise and would flag spuriously. Sizes absent from the baseline (e.g. a
-    scenario new in this PR) are skipped, so the comparison is over the
-    intersection only.
-    """
-    msgs: list[str] = []
-    for p in current:
-        base = baseline.get((scenario, p.size))
-        if base is None or base < floor_seconds or p.seconds <= 0:
-            continue
-        ratio = (p.seconds - base) / base
-        if ratio > tolerance:
-            msgs.append(
-                f"{scenario} @ size={p.size}: {p.seconds:.3f}s vs baseline "
-                f"{base:.3f}s (+{ratio * 100:.0f}%, tolerance "
-                f"{tolerance * 100:.0f}%)"
-            )
-    return msgs
+# baseline_points_from_report/matched_baseline_points/check_regressions/
+# load_baseline live in perf_baseline.py (imported above under their
+# historical `_baseline_points`/`_load_baseline` names for the two that this
+# module's own code still refers to by that name) — split out to stay under
+# this file's line-count cap; see that module's docstring.
 
 
 # ── Reporting ─────────────────────────────────────────────────────────────────
@@ -1540,7 +1557,10 @@ def _print_table(
     print(f"\nScenario: {scenario}")
     has_mem = any(p.peak_mb is not None for p in points)
     has_rss = any(p.rss_mb is not None for p in points)
+    has_cv = any(p.cv is not None for p in points)
     header = f"  {'size':>8} {'changes':>9} {'seconds':>10} {'us/change':>11}"
+    if has_cv:
+        header += f" {'cv%':>7} {'max_s':>9}"
     if has_mem:
         header += f" {'peak_mb':>9}"
     if has_rss:
@@ -1549,6 +1569,10 @@ def _print_table(
     for p in points:
         per = (p.seconds / p.changes * 1e6) if p.changes else float("nan")
         row = f"  {p.size:>8} {p.changes:>9} {p.seconds:>10.3f} {per:>11.1f}"
+        if has_cv:
+            cv_pct = p.cv * 100 if p.cv is not None else float("nan")
+            max_s = p.max_seconds if p.max_seconds is not None else float("nan")
+            row += f" {cv_pct:>6.1f}% {max_s:>9.3f}"
         if has_mem:
             row += f" {(p.peak_mb if p.peak_mb is not None else float('nan')):>9.2f}"
         if has_rss:
@@ -1584,7 +1608,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--repeat",
         type=int,
         default=1,
-        help="Repetitions per size; the fastest run is kept (default: 1)",
+        help="Timed repetitions per size (plus one untimed warmup); the "
+        "MEDIAN is reported/gated, with min/max/p95/coefficient-of-variation "
+        "recorded alongside it for noise visibility (default: 1 — pass a "
+        "higher value, e.g. 5, for a meaningful median/cv; CI lanes do)",
     )
     p.add_argument(
         "--json-out",
@@ -1633,30 +1660,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=0.5,
         help="GATE (with --baseline): fail if a scenario is slower than its "
-        "baseline by more than this fraction (default 0.5 = 50%%)",
+        "baseline by more than this fraction (default 0.5 = 50%%). The actual "
+        "allowed delta is max(this fraction x baseline, --regress-min-delta-seconds) "
+        "— see that flag to also set an absolute floor.",
+    )
+    p.add_argument(
+        "--regress-min-delta-seconds",
+        type=float,
+        default=0.0,
+        help="GATE (with --baseline): absolute-seconds floor combined with "
+        "--regress-tolerance via max() — protects a small baseline (a few ms) "
+        "from flagging on run-to-run noise alone (default 0.0 = pure "
+        "percentage tolerance, the historical behaviour). CI passes a nonzero "
+        "value; see docs/contribute/performance.md.",
+    )
+    p.add_argument(
+        "--meta",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Extra metadata to record in the JSON report's top-level `meta` "
+        "object (repeatable), e.g. --meta git_sha=$(git rev-parse HEAD) "
+        "--meta os_image=$ImageOS — lets a CI caller stamp base/head SHA and "
+        "host/toolchain identity onto the report without this script needing "
+        "to know about CI at all.",
     )
     return p.parse_args(argv)
-
-
-def _load_baseline(
-    baseline_path: Path, regress_tolerance: float
-) -> dict[tuple[str, int], float]:
-    """Load baseline scaling JSON and return its (scenario, size) -> seconds mapping.
-
-    Prints a summary line on success and a warning on failure; returns an empty
-    dict when the file cannot be read or parsed.
-    """
-    try:
-        points = _baseline_points(json.loads(baseline_path.read_text()))
-        print(
-            f"Comparing against baseline {baseline_path} "
-            f"({len(points)} points, tolerance "
-            f"{regress_tolerance * 100:.0f}%)"
-        )
-        return points
-    except (OSError, ValueError) as e:
-        print(f"WARNING: could not load baseline {baseline_path}: {e}")
-        return {}
 
 
 def _check_seconds_gate(
@@ -1753,16 +1782,20 @@ def _run_scenario(
     track_memory: bool,
     baseline_points: dict[tuple[str, int], float],
     report: dict[str, object],
-) -> list[str]:
-    """Run a single scenario and return any gate-failure messages.
+) -> tuple[list[str], int]:
+    """Run a single scenario; return (gate-failure messages, baseline-overlap count).
 
-    Returns an empty list when the scenario is skipped or all gates pass.
-    Updates *report* in-place with the scenario's results.
+    The failure list is empty when the scenario is skipped or all gates pass.
+    The overlap count is how many of this scenario's points had a usable
+    matching *baseline_points* entry (see ``matched_baseline_points``) — summed
+    across scenarios by the caller to detect a ``--baseline`` that shares zero
+    points with this run (main()'s own "gate was a no-op" check). Updates
+    *report* in-place with the scenario's results.
     """
     spec = SCENARIOS[scenario]
     if spec.needs_demangler and not _has_demangler():
         print(f"\nScenario: {scenario}  SKIP (no c++filt/cxxfilt demangler available)")
-        return []
+        return [], 0
 
     sizes = args.sizes if args.sizes is not None else list(spec.sizes)
     points = measure(scenario, sizes, args.repeat, track_memory=track_memory)
@@ -1771,7 +1804,7 @@ def _run_scenario(
             f"\nScenario: {scenario}  SKIP (all requested sizes exceed its cap "
             f"of {SCENARIOS[scenario].max_size})"
         )
-        return []
+        return [], 0
 
     exponent = scaling_exponent(points)
     tail = tail_exponent(points)
@@ -1803,11 +1836,20 @@ def _run_scenario(
         failures.extend(_check_memory_gate(scenario, points, args.max_memory_mb))
     if args.max_rss_mb is not None:
         failures.extend(_check_rss_gate(scenario, points, args.max_rss_mb))
+    overlap = 0
     if baseline_points:
+        matched = matched_baseline_points(points, scenario, baseline_points)
+        overlap = len(matched)
         failures.extend(
-            check_regressions(points, scenario, baseline_points, args.regress_tolerance)
+            check_regressions(
+                points,
+                scenario,
+                baseline_points,
+                args.regress_tolerance,
+                min_delta_seconds=args.regress_min_delta_seconds,
+            )
         )
-    return failures
+    return failures, overlap
 
 
 def _write_json_out(json_out: Path, report: dict[str, object]) -> None:
@@ -1817,32 +1859,90 @@ def _write_json_out(json_out: Path, report: dict[str, object]) -> None:
     print(f"\nWrote {json_out}")
 
 
+def _parse_meta(raw: list[str]) -> dict[str, str]:
+    """Parse repeated ``--meta KEY=VALUE`` entries into a dict.
+
+    An entry with no ``=`` is dropped with a warning rather than raising —
+    this is caller-supplied metadata, not load-bearing gate input, so a typo
+    here should not abort an otherwise-valid run.
+    """
+    meta: dict[str, str] = {}
+    for entry in raw:
+        if "=" not in entry:
+            print(f"WARNING: ignoring malformed --meta {entry!r} (expected KEY=VALUE)")
+            continue
+        key, _, value = entry.partition("=")
+        meta[key] = value
+    return meta
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     scenarios = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     track_memory = not args.no_memory
+    meta = _parse_meta(args.meta)
     report: dict[str, object] = {
-        "schema": "abicheck-scaling/1.2",
+        "schema": "abicheck-scaling/1.3",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sizes": args.sizes,
         "repeat": args.repeat,
         "track_memory": track_memory,
+        # Host/toolchain identity, recorded unconditionally — cheap, and lets a
+        # later reader tell two reports apart without relying on the caller to
+        # have remembered --meta. Caller-supplied identity (base/head git SHA,
+        # CI runner image, ...) goes in "meta" below instead, since this script
+        # has no way to know those on its own.
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
         "scenarios": {},
     }
+    if meta:
+        report["meta"] = meta
     failures: list[str] = []
 
     baseline_points: dict[tuple[str, int], float] = {}
-    if args.baseline is not None:
+    baseline_required = args.baseline is not None
+    if baseline_required:
         baseline_points = _load_baseline(args.baseline, args.regress_tolerance)
+        if not baseline_points:
+            # Fail closed rather than silently degrading to a report-only run:
+            # an explicitly-requested --baseline that loaded to zero points
+            # (missing file, malformed JSON, or a genuinely empty report) means
+            # the caller asked for a regression gate that cannot run, not that
+            # no gate was requested at all -- see docs/contribute/performance.md
+            # "Baseline regression" for the incident this guards against (a PR
+            # merging with its base-branch measurement silently absent).
+            print(
+                f"\nPERFORMANCE GATE FAILED: --baseline {args.baseline} loaded zero "
+                "(scenario, size) points -- cannot validate a regression gate "
+                "against an empty baseline. Check that the base measurement step "
+                "actually ran and wrote a non-empty --json-out."
+            )
+            return 1
 
+    overlap_total = 0
     for scenario in scenarios:
-        failures.extend(
-            _run_scenario(scenario, args, track_memory, baseline_points, report)
+        scenario_failures, overlap = _run_scenario(
+            scenario, args, track_memory, baseline_points, report
         )
+        failures.extend(scenario_failures)
+        overlap_total += overlap
 
     if args.json_out:
         _write_json_out(args.json_out, report)
+
+    if baseline_required and overlap_total == 0:
+        # baseline_points is non-empty (checked above) but shares no
+        # (scenario, size) point with anything this run actually measured --
+        # every check_regressions() call above was comparing nothing, and
+        # `failures` would otherwise be empty here, reading as a clean pass.
+        failures.append(
+            f"--baseline {args.baseline} shares zero (scenario, size) points with "
+            "this run's measurements -- the regression comparison was a no-op "
+            "(check --scenario/--sizes match what the baseline was generated "
+            "with, and that its scenarios weren't all below the noise floor)"
+        )
 
     if failures:
         print("\nPERFORMANCE GATE FAILED:")

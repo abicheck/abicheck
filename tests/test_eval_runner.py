@@ -108,6 +108,87 @@ def test_drift_rows_empty_when_all_match() -> None:
     assert runner.drift_rows(payload) == []
 
 
+def test_dump_sources_uses_depth_source_not_the_retired_full_rung() -> None:
+    """Regression guard for the P0 false-green incident: `--depth full` was
+    retired (ADR-043 D2, collapsed into `source`) and is now a hard CLI
+    error, so every source-tier scan failed identically while the scheduled
+    workflow still reported success (0/N scanned, tolerated as "some
+    libraries failed to build"). Pin the exact argv this runner shells out
+    with, not just that it doesn't crash.
+    """
+    import inspect
+
+    src = inspect.getsource(runner._dump_sources)
+    assert '"--depth", "source"' in src
+    assert '"--depth", "full"' not in src
+
+
+class TestSourceTierBroken:
+    def _row(self, lib: str, *, error: str | None = None, l3: int = 3) -> dict:
+        if error is not None:
+            return {"lib": lib, "error": error}
+        return {
+            "lib": lib,
+            "verdict": "COMPATIBLE",
+            "new_coverage": {"l3_compile_units": l3},
+        }
+
+    def test_none_when_no_source_entries_requested(self) -> None:
+        # Binary-only run (or a manifest with no `source:` blocks) — nothing
+        # to be broken about.
+        assert runner.source_tier_broken({"source_results": []}) is None
+        assert runner.source_tier_broken({}) is None
+
+    def test_none_when_every_entry_scanned_with_real_evidence(self) -> None:
+        payload = {"source_results": [self._row("zlib"), self._row("zstd")]}
+        assert runner.source_tier_broken(payload) is None
+
+    def test_none_on_ordinary_partial_per_library_failure(self) -> None:
+        # One library's own build/network hiccup is tolerated — the tier as
+        # a whole is still healthy.
+        payload = {
+            "source_results": [
+                self._row("zlib"),
+                self._row("snappy", error="git clone timed out"),
+            ]
+        }
+        assert runner.source_tier_broken(payload) is None
+
+    def test_flags_zero_scanned_as_systemic_failure(self) -> None:
+        # The exact shape of the `--depth full` incident: every entry fails
+        # identically (the same CLI usage error), not a per-library issue.
+        payload = {
+            "source_results": [
+                self._row("zlib", error="Invalid value for '--depth': ..."),
+                self._row("zstd", error="Invalid value for '--depth': ..."),
+                self._row("snappy", error="Invalid value for '--depth': ..."),
+            ]
+        }
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "0/3" in reason
+
+    def test_flags_zero_evidence_despite_reported_success(self) -> None:
+        # Every scan "succeeds" (no `error` key) but none actually collected
+        # L3 build evidence — a quieter false-green than a hard CLI error.
+        payload = {"source_results": [self._row("zlib", l3=0), self._row("zstd", l3=0)]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "2/2" in reason
+        assert "l3_compile_units" in reason
+
+    def test_source_scan_summary_counts(self) -> None:
+        payload = {
+            "source_results": [
+                self._row("zlib"),
+                self._row("zstd", l3=0),
+                self._row("snappy", error="boom"),
+            ]
+        }
+        summary = runner.source_scan_summary(payload)
+        assert summary == {"total": 3, "scanned": 2, "with_evidence": 1}
+
+
 def test_source_entries_filters_to_source_blocks_and_only() -> None:
     manifest = {
         "libraries": [
