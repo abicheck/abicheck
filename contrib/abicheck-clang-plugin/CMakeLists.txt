@@ -13,7 +13,20 @@ find_package(Clang REQUIRED CONFIG)
 
 add_library(abicheck-facts MODULE AbicheckFactsPlugin.cpp)
 target_include_directories(abicheck-facts SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
-target_compile_definitions(abicheck-facts PRIVATE ${LLVM_DEFINITIONS})
+
+# LLVMConfig.cmake documents LLVM_DEFINITIONS as "a list of definitions to
+# pass to add_definitions", but in practice it populates a single
+# space-separated string (e.g. "-D_GLIBCXX_USE_CXX11_ABI=1
+# -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS"),
+# not a proper CMake ;-separated list. Passing that string to
+# target_compile_definitions() unsplit collapses the whole thing into ONE
+# malformed definition
+# (-D_GLIBCXX_USE_CXX11_ABI="1 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS
+# -D__STDC_LIMIT_MACROS") instead of four independent flags -- confirmed
+# against a real build against a vendor-bundled LLVM/Clang CMake package.
+# Split on whitespace first so each flag reaches the compiler independently.
+separate_arguments(_abicheck_llvm_definitions UNIX_COMMAND "${LLVM_DEFINITIONS}")
+target_compile_definitions(abicheck-facts PRIVATE ${_abicheck_llvm_definitions})
 target_compile_features(abicheck-facts PRIVATE cxx_std_17)
 
 # Explicit overrides for the two ABI knobs a downstream LLVM fork can get

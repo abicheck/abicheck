@@ -63,6 +63,22 @@ A build of this plugin only loads into the exact clang it was built against
   refusal to "fix" a user's build failure; point them at `llvm-cmake-prefix`
   (a genuine vendor SDK) or `plugin-artifact` (a pre-certified binary)
   instead, per the README's recommended distribution model.
+  **Confirmed necessary-but-not-sufficient in a later re-run**: with both
+  fixes applied, a *full* plugin build against upstream LLVM 22 still
+  crashes inside real `icx` past `FactsAction::CreateASTConsumer`, in
+  `deriveRootsFromIncludes` — same LLVM major, RTTI, and stdlib all
+  matched, still incompatible frontend object layout. See README.md's
+  "Status update" subsection under the Intel section for the full finding.
+  Two follow-ups this surfaced, still open: (1) the SHA-256 pin on
+  `plugin-artifact` verifies file integrity, not compiler compatibility —
+  there is no machine-checked manifest tying an artifact to the exact
+  compiler build/target/RTTI/stdlib it was built for, so a mismatched
+  artifact is only caught by the runtime smoke test, not rejected upfront;
+  (2) the smoke-test failure message reads as an LLVM-major mismatch, which
+  is misleading when the major already matches and the real cause is
+  fork-internal ABI drift — don't "fix" a report of this failure by
+  re-checking the major, and don't reword the message without keeping both
+  causes distinguishable.
 - This asymmetry is *why* the plugin is optional infrastructure: Full source
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing

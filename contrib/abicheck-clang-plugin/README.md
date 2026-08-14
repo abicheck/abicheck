@@ -375,6 +375,55 @@ remain Full source scan (`dump --sources`) and the `abicheck-cc` wrapper
 `icpx`'s SYCL host/device handling); the plugin is an optional, opt-in
 optimization on top of that, same as for every other toolchain.
 
+### Status update: guardrails hold, full plugin still fails inside real `icx`/`icpx`
+
+A follow-up end-to-end re-run (real Intel(R) oneAPI DPC++/C++ Compiler
+2026.1.1, build 20260724) against the guardrails this section already
+documents (`producer: clang-plugin`'s same-major-apt-fallback refusal,
+`ABICHECK_PLUGIN_RTTI=off`, `ABICHECK_PLUGIN_STDLIB=libc++`, and the
+`plugin-artifact`/`plugin-artifact-sha256` inputs) confirms the guardrails
+work as designed and narrows what "experimental" means in practice:
+
+- **The apt-fallback refusal fires correctly.** With no vendor SDK on hand,
+  `collect-facts` refuses to build against a same-major distro Clang for
+  this compiler and fails loudly before ever producing a broken artifact —
+  the failure mode this section exists to prevent.
+- **The RTTI/libc++ fixes are necessary but not sufficient for the *full*
+  plugin.** They resolve the load-time and `ParseArgs`-crossing crashes
+  documented above, but a full build (`AbicheckFactsPlugin.cpp`, not the
+  minimal argument-blind probe mentioned above) built against upstream LLVM
+  22 with both fixes applied still crashes inside real `icx` once it
+  actually walks the AST — reproduced past `FactsAction::CreateASTConsumer`,
+  down into `deriveRootsFromIncludes(const clang::HeaderSearchOptions &)`.
+  Same LLVM major, RTTI and standard-library ABI both matched, and it still
+  crashes: `__clang_major__`/`__INTEL_LLVM_COMPILER` parity is not frontend
+  object-layout parity (`CompilerInstance`/`HeaderSearchOptions`/
+  `Preprocessor`/`ASTContext`/`Decl` hierarchy) for this fork — confirming,
+  with a concrete stack rather than a hypothesis, this section's existing
+  "building against a matching upstream Clang is not a safe substitute for
+  this fork" statement. A **mismatched** `plugin-artifact` (this same
+  upstream-LLVM-22 build) is correctly caught by `collect-facts`'s runtime
+  smoke test before it reaches a real build, so the failure mode here is
+  "the certified-artifact path has no certified artifact yet to point at,"
+  not "an incompatible artifact silently ships."
+- **The `abicheck-cc` wrapper path is the one confirmed working end to end
+  against real `icpx`** in this same re-run: `abicheck-cc icpx` observing a
+  real compile, through `abicheck dump --build-info`, to a `scan
+  --build-info --depth source` producing L4 source-ABI replay and an L5
+  source graph. Prefer it (or full source scan) for `icpx`/`icx` today; the
+  plugin remains an optional optimization with no certified path yet, not a
+  regression from the state described above.
+
+None of this changes the section's guidance: the plugin is not a certified
+producer for `icx`/`icpx` today, and the only path to one is building against
+the exact toolchain image that will load it (see "Recommended distribution
+model" below) — this re-run is further evidence for that, not a new
+requirement. See `contrib/abicheck-clang-plugin/AGENTS.md`'s Intel paragraph
+for the agent-facing summary and the remaining open items (a machine-checked
+compiler/artifact compatibility manifest beyond the SHA-256 integrity check,
+and smoke-test wording that currently reads as an LLVM-major mismatch even
+when the major already matches).
+
 ### Recommended distribution model: certified artifact, not same-major rebuild
 
 A vendor toolchain's own plugin-development SDK is rarely available as an
