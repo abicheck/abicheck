@@ -78,6 +78,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Generic, TypeVar
 
+from .finding_identity_atomic import canonicalize_atomic_slot
 from .name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
@@ -1189,84 +1190,6 @@ def _canonicalize_params_list(value: str) -> str:
     )
 
 
-# Matches an `_Atomic`-qualified spelling in either form castxml/clang emit:
-# a bare `_Atomic` sentinel (castxml, see below) or a real wrapped spelling
-# like `_Atomic(struct Foo *)` (clang). Anchored to the whole string (after
-# stripping) rather than reusing diff_atomic.py's own word-boundary search,
-# since this helper's job is "is this ENTIRE type-slot spelling the atomic
-# side of the transition", not "does _Atomic appear anywhere".
-_ATOMIC_SLOT_RE = re.compile(r"^_Atomic\b")
-
-
-def _canonicalize_atomic_slot(value: str) -> str:
-    """Canonicalize one ``diff_atomic.py`` type-slot spelling for the
-    identity discriminator (Codex review, two rounds).
-
-    ``dumper_castxml.py`` cannot model C11 ``_Atomic`` -- it emits a bare
-    ``Unimplemented`` node with no reference to the wrapped type, so its
-    ``_type_name()`` spells the qualifier's *inner content* as the literal,
-    lossy sentinel ``"_Atomic"``. The direct-clang backend retains the real
-    wrapped spelling (e.g. ``"_Atomic(struct Foo *)"``). Plain
-    :func:`canonicalize_type_name` has no notion these name the same
-    qualified type, so without this helper CastXML's sentinel and Clang's
-    concrete spelling never hash to the same canonical id.
-
-    Safe to collapse everything *inside* an ``_Atomic(...)`` wrapper (or a
-    bare ``"_Atomic"``) to a fixed marker: ``diff_atomic.py``'s own
-    detection (``_has_atomic``) only tests qualifier *presence*, never
-    compares the wrapped type across old/new, so no discriminating
-    information about the wrapped content is lost.
-
-    **Not** safe to collapse a declarator applied *outside* the wrapper
-    (round 2): ``dumper_castxml.py``'s ``PointerType``/``ReferenceType``
-    handling appends its own sigil suffix onto whatever it wraps, so
-    "pointer to atomic T" (``_Atomic(T) *`` on Clang) spells as
-    ``"_Atomic*"`` on CastXML -- distinguishably different from "atomic
-    pointer to T" (``_Atomic(T *)`` on Clang), spelled as the bare
-    ``"_Atomic"`` sentinel (the Atomic node wraps the pointer, so no outer
-    sigil is ever appended). These are two different qualified types --
-    collapsing both to one sentinel would let a ``finding_id`` suppression
-    accepted for one silently suppress the other. Splitting on the
-    wrapper's own matching close paren and canonicalizing only what
-    follows preserves this one signal CastXML retains, while discarding
-    the wrapped inner content it cannot recover.
-
-    The *unqualified* side of the transition (spelled reliably by both
-    backends) is left to ordinary :func:`canonicalize_type_name`
-    normalization by this function's only caller.
-    """
-    stripped = value.strip()
-    match = _ATOMIC_SLOT_RE.match(stripped)
-    if not match:
-        return canonicalize_type_name(stripped)
-    trailing = stripped[match.end() :]
-    if trailing.startswith("("):
-        # Find the close paren matching the one right after "_Atomic",
-        # tracking nesting depth so an inner type that itself contains
-        # parens (a function-pointer pointee, say) doesn't end the search
-        # early. Everything up to and including that close paren is the
-        # wrapped inner content being discarded; anything after it is an
-        # outer declarator that must survive.
-        depth = 0
-        close_idx = None
-        for i, ch in enumerate(trailing):
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0:
-                    close_idx = i
-                    break
-        # Unbalanced parens shouldn't occur for a real type-slot spelling,
-        # but degrade to "no trailing declarator" rather than raising or
-        # keeping unparsed text in the identity.
-        trailing = trailing[close_idx + 1 :] if close_idx is not None else ""
-    trailing = trailing.strip()
-    if not trailing:
-        return "_Atomic"
-    return f"_Atomic {canonicalize_type_name(trailing)}"
-
-
 def _stringify_change_value(value: object) -> str:
     """Deterministic string form of a ``Change.old_value``/``new_value``.
 
@@ -1485,12 +1408,15 @@ def _change_discriminator(
             old_str = _canonicalize_params_list(old_str)
             new_str = _canonicalize_params_list(new_str)
         elif kind_value == "atomic_qualifier_changed":
-            # See _canonicalize_atomic_slot's own docstring: CastXML's bare
-            # "_Atomic" sentinel and Clang's real wrapped spelling must
-            # collapse to the same value, which plain canonicalize_type_name
-            # cannot do on its own.
-            old_str = _canonicalize_atomic_slot(old_str)
-            new_str = _canonicalize_atomic_slot(new_str)
+            # See canonicalize_atomic_slot's own docstring
+            # (finding_identity_atomic.py): CastXML's bare "_Atomic"
+            # sentinel and Clang's real wrapped spelling must collapse to
+            # the same value, which plain canonicalize_type_name cannot do
+            # on its own. Each side needs the OTHER side's raw spelling to
+            # tell a redundant qualifier-only wrap apart from a compound
+            # change that also altered the payload.
+            old_str = canonicalize_atomic_slot(raw_old_str, raw_new_str)
+            new_str = canonicalize_atomic_slot(raw_new_str, raw_old_str)
         else:
             old_str = canonicalize_type_name(old_str)
             new_str = canonicalize_type_name(new_str)

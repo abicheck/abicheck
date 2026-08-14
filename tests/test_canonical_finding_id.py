@@ -377,7 +377,7 @@ class TestCanonicalFindingIdScopedCanonicalization:
             # type-slot spellings. CastXML cannot model _Atomic at all and
             # spells the qualified side as the bare, lossy sentinel
             # "_Atomic" (dumper_castxml.py's own _type_name()); Clang keeps
-            # the real wrapped spelling -- _canonicalize_atomic_slot is what
+            # the real wrapped spelling -- canonicalize_atomic_slot is what
             # collapses these to the same canonical id.
             (
                 ChangeKind.ATOMIC_QUALIFIER_CHANGED,
@@ -527,7 +527,7 @@ class TestCanonicalFindingIdScopedCanonicalization:
         # canonicalize_type_name has no notion that these name the same
         # qualified type, so the fix's first revision (canonicalize_type_name
         # alone) still failed to match here even after atomic_qualifier_changed
-        # was added to the allowlist -- _canonicalize_atomic_slot is what
+        # was added to the allowlist -- canonicalize_atomic_slot is what
         # closes it.
         castxml = make_change(
             ChangeKind.ATOMIC_QUALIFIER_CHANGED,
@@ -551,7 +551,7 @@ class TestCanonicalFindingIdScopedCanonicalization:
 
     def test_atomic_qualifier_changed_preserves_outer_declarator(self):
         # Regression (Codex review, canonical-id-backend-gap, second P1
-        # finding): an earlier revision of _canonicalize_atomic_slot
+        # finding): an earlier revision of canonicalize_atomic_slot
         # collapsed the ENTIRE qualified spelling to the bare "_Atomic"
         # sentinel regardless of what followed it -- but "atomic pointer to
         # T" (_Atomic(T *) on Clang, "_Atomic" on CastXML -- the Atomic node
@@ -607,6 +607,91 @@ class TestCanonicalFindingIdScopedCanonicalization:
         assert report_canonical_finding_id(
             atomic_pointer_castxml
         ) != report_canonical_finding_id(pointer_to_atomic_castxml)
+
+    def test_atomic_qualifier_changed_preserves_compound_payload_change(self):
+        # Regression (Codex review, canonical-id-backend-gap, third P1
+        # finding): a slot that both gains the qualifier AND changes its
+        # base type in the same transition (e.g. int -> _Atomic(long)) must
+        # not collapse to the same canonical id as a pure qualifier-only
+        # change on the identical unqualified type (int -> _Atomic(int)) --
+        # these are two structurally different ABI transitions, and a
+        # finding_id suppression accepted for one must not silently
+        # suppress the other.
+        qualifier_only = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooi",
+            name="parameter 0 of '_Z3fooi'",
+            detail="qualifier added",
+            old="int",
+            new="_Atomic(int)",
+        )
+        compound_change = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooi",
+            name="parameter 0 of '_Z3fooi'",
+            detail="qualifier added",
+            old="int",
+            new="_Atomic(long)",
+        )
+        assert report_canonical_finding_id(
+            qualifier_only
+        ) != report_canonical_finding_id(compound_change)
+
+        # The compound change still matches an equivalent spelling of
+        # itself (same payload, different pointer spacing).
+        compound_change_respaced = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooi",
+            name="parameter 0 of '_Z3fooi'",
+            detail="qualifier added",
+            old="int",
+            new="_Atomic( long )",
+        )
+        assert report_canonical_finding_id(
+            compound_change
+        ) == report_canonical_finding_id(compound_change_respaced)
+
+    def test_atomic_qualifier_changed_normalizes_cv_qualified_spellings(self):
+        # Regression (Codex review, canonical-id-backend-gap, fourth P1
+        # finding): a const/volatile-qualified atomic slot spells
+        # differently across backends too -- CastXML's CvQualifiedType
+        # wraps the lossy Atomic node as "const _Atomic" (prefix form, since
+        # the wrapped node isn't a pointer value), while Clang keeps
+        # "const _Atomic(int)". The leading "const "/"volatile " prefix
+        # broke the anchored _Atomic-detection regex, so both fell back to
+        # plain canonicalize_type_name and stayed distinct.
+        castxml = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooi",
+            name="parameter 0 of '_Z3fooi'",
+            detail="qualifier added",
+            old="const int",
+            new="const _Atomic",
+        )
+        clang = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooi",
+            name="parameter 0 of '_Z3fooi'",
+            detail="qualifier added",
+            old="const int",
+            new="const _Atomic(int)",
+        )
+        assert report_canonical_finding_id(castxml) == report_canonical_finding_id(
+            clang
+        )
+        # A cv-qualified compound change (payload also differs) must still
+        # stay distinct from the plain cv-qualified qualifier-only change.
+        clang_compound = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooi",
+            name="parameter 0 of '_Z3fooi'",
+            detail="qualifier added",
+            old="const int",
+            new="const _Atomic(long)",
+        )
+        assert report_canonical_finding_id(clang) != report_canonical_finding_id(
+            clang_compound
+        )
 
     def test_atomic_qualifier_changed_description_substitution_handles_containment(
         self,
