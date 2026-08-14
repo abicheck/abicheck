@@ -1148,6 +1148,35 @@ def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
     assert "directory/package" in result.output
 
 
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("--compiler", "/custom/clang"),
+        ("--compiler-prefix", "aarch64-linux-gnu-"),
+        ("--compiler-option", "-DX=1"),
+    ],
+)
+def test_compare_rejects_compiler_aliases_for_set_inputs(
+    tmp_path: Path, flag: str, value: str
+) -> None:
+    """The --compiler*/--gcc-* aliases (CLI audit PR 2/5) must be rejected for
+    directory/package operands exactly like their legacy gcc_* counterparts
+    (test_compare_rejects_compile_context_for_set_inputs above) -- without
+    this, --compiler would silently no-op instead of raising, unlike
+    --gcc-path (Codex review, PR #757)."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_dir), str(new_dir), flag, value],
+    )
+    assert result.exit_code != 0
+    assert flag in result.output
+    assert "directory/package" in result.output
+
+
 def test_compare_set_inputs_without_compile_flags_not_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1433,16 +1462,36 @@ def test_new_compiler_flag_wins_when_both_given(_compile_context_probe) -> None:
     assert "deprecated" not in result.output.lower()
 
 
-def test_compiler_option_tokens_concatenate_both_flags(_compile_context_probe) -> None:
-    """--compiler-option and --gcc-option are both repeatable/additive, so
-    both lists survive (concatenated, new-first) rather than one silently
-    dropping the other's tokens."""
+def test_compiler_option_tokens_new_wins_entirely_when_both_given(
+    _compile_context_probe,
+) -> None:
+    """--compiler-option and --gcc-option deliberately do NOT concatenate when
+    both are given: Click hands back two independently-collected tuples with
+    no record of their original relative argv order, so naively concatenating
+    them can silently separate a flag from its own operand across spellings
+    (Codex review, PR #757 -- e.g. --gcc-option=-include plus a --compiler-option
+    value would land in the wrong position relative to each other). Whichever
+    spelling was given wins entirely, same precedence as the scalar flags."""
     result = CliRunner().invoke(
         _compile_context_probe,
         ["--compiler-option", "-DNEW", "--gcc-option", "-DOLD"],
     )
     assert result.exit_code == 0, result.output
-    assert "tokens=('-DNEW', '-DOLD')" in result.output
+    assert "tokens=('-DNEW',)" in result.output
+    assert "--gcc-option (ignored: --compiler-option was also given" in result.output
+
+
+def test_compiler_option_tokens_legacy_alone_still_works(
+    _compile_context_probe,
+) -> None:
+    """--gcc-option alone (no --compiler-option) is unaffected -- still fully
+    functional, still deprecation-noted, same as before this fix."""
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--gcc-option", "-include", "--gcc-option", "some header.h"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "tokens=('-include', 'some header.h')" in result.output
     assert "--gcc-option (use --compiler-option)" in result.output
 
 

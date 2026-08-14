@@ -955,12 +955,23 @@ def _merge_compiler_aliases(
     CLI audit PR 2/5: ``--compiler``/``--compiler-prefix``/``--compiler-option``
     are the new, neutral spellings (the old ``gcc`` name was always misleading —
     it always accepted a Clang binary too); the legacy flags stay hidden-but-
-    functional rather than removed. A scalar new flag wins if both are given
-    (an explicit override, same precedence style as CLI>config elsewhere in
-    this module); a legacy scalar's value is used with a stderr deprecation
-    note when only it is given. ``--compiler-option``/``--gcc-option`` are both
-    repeatable/additive by nature, so both lists are concatenated rather than
-    one overriding the other -- no combination of the two flags loses a token.
+    functional rather than removed. A new flag wins entirely if given (an
+    explicit override, same precedence style as CLI>config elsewhere in this
+    module); a legacy value is used, with a stderr deprecation note, only when
+    the new spelling wasn't given at all.
+
+    ``--compiler-option``/``--gcc-option`` deliberately do NOT concatenate
+    when both are given, even though each is independently repeatable: Click
+    hands back ``compiler_option_tokens``/``gcc_option_tokens`` as two
+    separately-collected tuples with no record of their original relative
+    argv order, so a naive concatenation can silently reorder flag/value
+    pairs across the two spellings -- e.g. ``--gcc-option=-include
+    --compiler-option='some header.h'`` naively concatenates to
+    ``('some header.h', '-include')``, separating ``-include`` from its own
+    operand (Codex review, PR #757: a real, silent header-parsing break, not
+    just a cosmetic ordering nit). Treating the pair with the same
+    new-wins-entirely-if-given precedence as the two scalars above avoids
+    ever interleaving tokens from both spellings.
     """
     deprecated_used: list[str] = []
     resolved_path: str | None
@@ -977,9 +988,19 @@ def _merge_compiler_aliases(
         resolved_prefix = gcc_prefix
         if gcc_prefix is not None:
             deprecated_used.append("--gcc-prefix (use --compiler-prefix)")
-    resolved_tokens = tuple(compiler_option_tokens) + tuple(gcc_option_tokens)
-    if gcc_option_tokens:
-        deprecated_used.append("--gcc-option (use --compiler-option)")
+    resolved_tokens: tuple[str, ...]
+    if compiler_option_tokens:
+        resolved_tokens = tuple(compiler_option_tokens)
+        if gcc_option_tokens:
+            deprecated_used.append(
+                "--gcc-option (ignored: --compiler-option was also given; "
+                "the two are not merged, to avoid silently reordering "
+                "flag/value pairs across spellings)"
+            )
+    else:
+        resolved_tokens = tuple(gcc_option_tokens)
+        if gcc_option_tokens:
+            deprecated_used.append("--gcc-option (use --compiler-option)")
     if deprecated_used:
         click.echo(
             "Note: deprecated compiler flag(s) still work but are superseded: "
