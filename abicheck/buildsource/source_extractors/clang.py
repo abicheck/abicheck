@@ -221,7 +221,6 @@ def _clang_compiler_family(clang_bin: str) -> str:
     except (OSError, subprocess.TimeoutExpired):
         pass
     return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
-    return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
 
 
 @functools.lru_cache(maxsize=8)

@@ -2753,6 +2753,39 @@ def test_clang_compiler_family_macro_probe_negative(monkeypatch) -> None:  # typ
     assert _clang_compiler_family("clang++") == "clang"
 
 
+def test_clang_compiler_family_falls_back_on_nonzero_returncode(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    # A probe that runs but exits non-zero (e.g. the binary doesn't accept
+    # -dM -E -x c++ - at all) must fall through to the name-based fallback,
+    # not trust r.stdout from a failed invocation.
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    _clang_compiler_family.cache_clear()
+    monkeypatch.setattr(
+        clang_mod.subprocess,
+        "run",
+        lambda cmd, **kw: _Result(1, "", "unrecognized option"),
+    )
+    assert _clang_compiler_family("icpx") == "intel-llvm"  # name-based fallback
+    _clang_compiler_family.cache_clear()
+    assert _clang_compiler_family("clang++") == "clang"  # name-based fallback
+
+
+def test_clang_compiler_family_falls_back_on_timeout(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import subprocess as sp
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    _clang_compiler_family.cache_clear()
+
+    def raise_timeout(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise sp.TimeoutExpired(cmd, 5)
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", raise_timeout)
+    assert _clang_compiler_family("icpx") == "intel-llvm"  # name-based fallback
+
+
 def test_clang_compiler_family_is_cached_per_binary(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from abicheck.buildsource.source_extractors import clang as clang_mod
 
