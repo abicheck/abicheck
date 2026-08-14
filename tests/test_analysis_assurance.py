@@ -1598,3 +1598,297 @@ class TestScopedExitFloorAppliedBeforeRendering:
         scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
         assert scoped_gate["gateExitCode"] == 0
         assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
+
+
+class TestExportAccountingBothSides:
+    """Round-7 review, Finding 1 (``discussion_r3787513758``): the previous
+    ``_export_accounting`` picked ONE side's accounting -- new first,
+    falling back to old only when new carried no L4 surface at all -- so a
+    comparison where BOTH sides link an L4 surface, but only the OLD side
+    has unmatched exports, silently returned the NEW side's clean
+    accounting and never examined the old side. ``export_accounting.
+    unaccounted`` therefore read 0 and, with no other partial signal
+    tripping, ``status`` could read ``"complete"`` under
+    ``--require-complete-analysis`` despite genuinely incomplete baseline
+    linking. Fixed by summing both sides' counts additively, mirroring
+    ``_translation_units()``'s own both-sides summation.
+    """
+
+    def _pack_with_surface(
+        self, tmp_path: Path, name: str, *, unaccounted: tuple[str, ...]
+    ):
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        surface = SourceAbiSurface(
+            roots={
+                "exported_symbols": ["a", "b", "c"],
+                "public_header_declarations": [],
+                "forced_public": [],
+            },
+            unmatched={
+                "symbols_without_decl": list(unaccounted),
+                "decls_without_symbol": [],
+            },
+            # Set so this fixture isolates the export-accounting rollup --
+            # without this, an empty ``coverage`` dict would also trip the
+            # separate ``l4_present_without_accounting`` signal, confounding
+            # what actually made ``status`` non-complete.
+            coverage={"compile_units_selected": 3, "compile_units_parsed": 3},
+        )
+        return BuildSourcePack(root=tmp_path / name, source_abi=surface)
+
+    def test_unaccounted_export_on_old_side_only_is_not_shadowed_by_new(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old_pack = self._pack_with_surface(tmp_path, "old_pack", unaccounted=("a",))
+        new_pack = self._pack_with_surface(tmp_path, "new_pack", unaccounted=())
+
+        result = checker.compare(old, new)
+        aa = compute_analysis_assurance(
+            result, old, new, old_pack=old_pack, new_pack=new_pack
+        )
+        # The old side's single unaccounted export must be visible in the
+        # combined rollup -- not silently dropped because the new side (read
+        # first in source order) happened to be clean.
+        assert aa.export_accounting.unaccounted == 1
+        assert aa.status != "complete"
+        assert any("unaccounted" in n for n in aa.notes), aa.notes
+
+    def test_both_sides_clean_stays_zero_unaccounted(self, tmp_path: Path) -> None:
+        old, new = _header_pair()
+        old_pack = self._pack_with_surface(tmp_path, "old_pack", unaccounted=())
+        new_pack = self._pack_with_surface(tmp_path, "new_pack", unaccounted=())
+
+        result = checker.compare(old, new)
+        aa = compute_analysis_assurance(
+            result, old, new, old_pack=old_pack, new_pack=new_pack
+        )
+        assert aa.export_accounting.unaccounted == 0
+        # Both sides contribute total exports (3 + 3 = 6), same additive
+        # rollup as translation-unit accounting.
+        assert aa.export_accounting.total == 6
+
+    def test_require_complete_analysis_exits_nonzero_for_old_side_unaccounted(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        old.build_source = BuildSourcePack(
+            root=tmp_path / "old_pack",
+            source_abi=SourceAbiSurface(
+                roots={
+                    "exported_symbols": ["a"],
+                    "public_header_declarations": [],
+                    "forced_public": [],
+                },
+                unmatched={
+                    "symbols_without_decl": ["a"],
+                    "decls_without_symbol": [],
+                },
+            ),
+        )
+        new.build_source = BuildSourcePack(
+            root=tmp_path / "new_pack",
+            source_abi=SourceAbiSurface(
+                roots={
+                    "exported_symbols": ["a"],
+                    "public_header_declarations": [],
+                    "forced_public": [],
+                },
+            ),
+        )
+        old_p, new_p = _write(tmp_path, old, new)
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code != 0, res.output
+
+
+class TestDwarfChannelAsymmetry:
+    """Round-7 review, Finding 2 (``discussion_r3787513766``): the previous
+    ``_dwarf_context_status`` OR'd ``dwarf.has_dwarf``/``dwarf_advanced.
+    has_dwarf`` into ONE combined per-side boolean before comparing the two
+    sides -- so an old snapshot with only basic ``dwarf`` and a new
+    snapshot with only ``dwarf_advanced`` both read as "this side has SOME
+    dwarf evidence", and the combined booleans compared equal (clean), even
+    though ``diff_platform.py``'s struct/enum layout diff (basic ``dwarf``
+    only) and ``dwarf_advanced.diff_advanced_dwarf`` (advanced only) each
+    independently skip their own comparison whenever EITHER side lacks
+    THEIR channel specifically. Fixed by checking each channel
+    independently.
+    """
+
+    def _cross_channel_pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=True),
+            dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=False),
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=False),
+            dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
+        )
+        return old, new
+
+    def test_cross_channel_dwarf_is_reported_as_asymmetric(self) -> None:
+        old, new = self._cross_channel_pair()
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.dwarf_context_status == "asymmetric"
+        assert aa.status != "complete"
+        # Both channels must be named -- the old side lacks basic dwarf, the
+        # new side lacks dwarf_advanced, and both are real, independent gaps.
+        assert any("basic dwarf channel" in n for n in aa.notes), aa.notes
+        assert any("dwarf_advanced channel" in n for n in aa.notes), aa.notes
+
+    def test_unit_level_both_channels_flagged_independently(self) -> None:
+        from abicheck.analysis_assurance import _dwarf_context_status
+
+        old, new = self._cross_channel_pair()
+        status, notes = _dwarf_context_status(old, new)
+        assert status == "asymmetric"
+        assert len(notes) == 2
+
+    def test_matching_single_channel_on_both_sides_is_clean(self) -> None:
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=False),
+            dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=False),
+            dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
+        )
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert aa.dwarf_context_status == "clean"
+
+    def test_require_complete_analysis_exits_nonzero_for_cross_channel_dwarf(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = self._cross_channel_pair()
+        res = _compare(
+            tmp_path,
+            (old, new),
+            "--no-scope-public-headers",
+            "--require-complete-analysis",
+        )
+        assert res.exit_code != 0, res.output
+
+
+class TestSourceTreeMismatchFailure:
+    """Round-7 review, Finding 3 (``discussion_r3787513768``): inline
+    collection records ``ExtractorRecord(name=
+    "build_info_source_tree_mismatch", status="failed", ...)``
+    (``inline._check_build_info_source_mismatch``) when most of a compile
+    database's own source files are absent from the ``--sources`` tree --
+    i.e. the build metadata and the checked-out sources may not even be the
+    same codebase. The previous ``_manifest_layer_incompleteness`` only
+    recognized a failed/partial extractor whose name started with
+    ``source_abi``/``compile_``/``source_graph`` -- this record's name
+    matches none of those, so it was silently ignored: if the resulting L4
+    surface still carried ordinary TU accounting and no other partial
+    signal tripped, ``status`` could read ``"complete"`` and
+    ``--require-complete-analysis`` could exit 0 even though the source
+    facts may come from a different checkout.
+    """
+
+    def _pack_with_mismatch(self, tmp_path: Path, name: str):
+        from abicheck.buildsource.model import BuildSourceManifest, ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        manifest = BuildSourceManifest(
+            extractors=[
+                ExtractorRecord(
+                    name="build_info_source_tree_mismatch",
+                    status="failed",
+                    detail=(
+                        "9/10 compile-DB source files are absent from the "
+                        "--sources tree; build metadata and sources may be "
+                        "different checkouts"
+                    ),
+                ),
+            ],
+        )
+        return BuildSourcePack(
+            root=tmp_path / name,
+            manifest=manifest,
+            source_abi=SourceAbiSurface(
+                coverage={
+                    "compile_units_selected": 10,
+                    "compile_units_parsed": 10,
+                },
+            ),
+        )
+
+    def test_source_tree_mismatch_is_not_complete(self, tmp_path: Path) -> None:
+        old, new = _header_pair()
+        old.build_source = self._pack_with_mismatch(tmp_path, "old_pack")
+        new.build_source = self._pack_with_mismatch(tmp_path, "new_pack")
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.status != "complete", aa
+        assert any(
+            "build_info_source_tree_mismatch" in n and "failed" in n for n in aa.notes
+        ), aa.notes
+
+    def test_unit_level_manifest_scan_flags_unprefixed_failed_record(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.analysis_assurance import _manifest_layer_incompleteness
+
+        pack = self._pack_with_mismatch(tmp_path, "pack")
+        incomplete, notes = _manifest_layer_incompleteness(pack, pack)
+        assert incomplete is True
+        assert any("build_info_source_tree_mismatch" in n for n in notes), notes
+
+    def test_require_complete_analysis_exits_nonzero_for_source_tree_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old.build_source = self._pack_with_mismatch(tmp_path, "old_pack")
+        new.build_source = self._pack_with_mismatch(tmp_path, "new_pack")
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code != 0, res.output

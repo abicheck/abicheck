@@ -166,4 +166,50 @@
   shape as the L1/L2/L3 checks. L5 (source-graph) presence asymmetry was
   already caught by the existing `graph_completeness="unknown"` check, so
   it needed no new field.
+- **`export_accounting` now rolls up BOTH sides, not just whichever side a
+  "new, falling back to old" selection happened to prefer** (P1 review,
+  round 7). When both sides carried an L4 surface but only the old side had
+  unmatched exports, the previous "new-first" loop returned the new side's
+  clean accounting and never examined the old side, so `status` could read
+  `"complete"` under `--require-complete-analysis` despite genuinely
+  incomplete baseline linking. `_export_accounting` now sums
+  total/source-linked/internal/unaccounted additively across both sides,
+  mirroring `_translation_units`'s own both-sides summation — a nonzero
+  `unaccounted` on either side is now always visible in the combined
+  `export_accounting`.
+- **`dwarf_context_status` now compares the basic `dwarf` and
+  `dwarf_advanced` evidence channels independently** (P1 review, round 7),
+  instead of OR-combining them into one per-side presence boolean before
+  comparing sides. An old snapshot with only basic `dwarf` and a new
+  snapshot with only `dwarf_advanced` previously both read as "this side
+  has SOME dwarf evidence", so the combined per-side booleans compared
+  equal and the status read `"clean"` — even though
+  `diff_platform.py`'s struct/enum layout diff (basic `dwarf` only) and
+  `dwarf_advanced.diff_advanced_dwarf` (advanced only) each independently
+  skip their own comparison whenever either side lacks their specific
+  channel, so both detector families silently skipped, on opposite sides.
+  `_dwarf_context_status` now checks `dwarf.has_dwarf` and
+  `dwarf_advanced.has_dwarf` as two independent per-channel asymmetry
+  checks, naming which channel(s) are asymmetric in the resulting note.
+- **`_manifest_layer_incompleteness` now recognizes ANY extractor record
+  with `status="failed"`, not just ones whose name starts with
+  `source_abi`/`compile_`/`source_graph`** (P1 review, round 7). Inline
+  collection's `_check_build_info_source_mismatch` records
+  `ExtractorRecord(name="build_info_source_tree_mismatch",
+  status="failed", ...)` when most of a compile database's own source
+  files are absent from the `--sources` tree — i.e. the build metadata and
+  the checked-out sources may not even be the same codebase — but that
+  name matched none of the old prefixes, so the record was silently
+  invisible to this rollup and `status` could read `"complete"` even
+  though the source facts may come from a different checkout. Fixed per
+  the root-cause principle: a `"failed"` record always invalidates the
+  layer it names regardless of which extractor family produced it, so the
+  prefix allowlist is dropped entirely for `"failed"` (this also closes
+  the identical gap for `build_query`/`build_query_auto`/`bazel` query
+  failures and `merge_layer_conflict` layer conflicts, none of which
+  matched the old prefixes either). `"partial"` deliberately keeps the
+  original, narrower prefix scope — a confirmed-complete, genuinely
+  edge-free L5 graph pass legitimately records its own `status="partial"`
+  (see `_graph_completeness`'s `confirmed` exemption), and only that
+  function has the context to tell the two apart.
 

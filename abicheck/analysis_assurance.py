@@ -243,6 +243,15 @@ class ExportAccounting:
     ELF/DWARF/header comparison) -- this is a rollup of the existing L4
     linker output, not a new detector, so it has nothing to report without
     one.
+
+    Finding (review, P1, round 7): :func:`_export_accounting` used to pick
+    ONE side's accounting (new first, old only as a fallback when new had no
+    L4 surface at all) rather than combining both -- see that function's own
+    docstring for the full history. The counts below are therefore an
+    additive rollup across BOTH sides (mirroring
+    :class:`TranslationUnitAccounting`'s own both-sides summation), not a
+    single side's snapshot -- a nonzero ``unaccounted`` on either side always
+    contributes to the combined total.
     """
 
     total: int | None = None
@@ -602,26 +611,59 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
     ``--require-complete-analysis`` still exited 0. Fixed by checking each
     side's own ``dwarf.has_dwarf``/``dwarf_advanced.has_dwarf`` directly,
     independent of the OR-combined aggregate tier.
+
+    Finding (review, P1, round 7): the fix above still folded
+    ``dwarf.has_dwarf`` and ``dwarf_advanced.has_dwarf`` into ONE combined
+    per-side boolean via ``or`` before comparing the two sides -- so an old
+    snapshot with only basic ``dwarf`` and a new snapshot with only
+    ``dwarf_advanced`` both read as "this side has SOME dwarf evidence", the
+    two combined per-side booleans compare equal (``True == True``), and the
+    status read ``"clean"``. But ``dwarf`` and ``dwarf_advanced`` are two
+    entirely independent evidence channels, each compared by its own,
+    separate detector family: ``diff_platform.py``'s struct/enum layout diff
+    reads only basic ``dwarf`` and ``dwarf_advanced.diff_advanced_dwarf``
+    reads only ``dwarf_advanced`` -- and each detector independently skips
+    ITS OWN comparison whenever EITHER side lacks ITS channel specifically,
+    regardless of what the other channel has. Old-basic-only +
+    new-advanced-only therefore means BOTH detector families silently
+    skipped their comparison, on opposite sides, with the OR-combined
+    boolean never noticing either gap. Fixed by checking ``dwarf.has_dwarf``
+    and ``dwarf_advanced.has_dwarf`` as two independent, per-channel
+    asymmetry checks rather than one combined presence check -- either
+    channel disagreeing between the two sides now reports ``"asymmetric"``,
+    with a note naming which channel(s) specifically.
     """
 
-    def _has_dwarf(snap: AbiSnapshot) -> bool:
-        dwarf = snap.dwarf
-        dwarf_advanced = snap.dwarf_advanced
-        return bool(dwarf is not None and dwarf.has_dwarf) or bool(
-            dwarf_advanced is not None and dwarf_advanced.has_dwarf
-        )
+    def _channel_present(meta: Any) -> bool:
+        return bool(meta is not None and meta.has_dwarf)
 
-    old_dwarf = _has_dwarf(old)
-    new_dwarf = _has_dwarf(new)
-    if not old_dwarf and not new_dwarf:
+    old_basic = _channel_present(old.dwarf)
+    new_basic = _channel_present(new.dwarf)
+    old_advanced = _channel_present(old.dwarf_advanced)
+    new_advanced = _channel_present(new.dwarf_advanced)
+
+    if not (old_basic or new_basic or old_advanced or new_advanced):
         return "not_evaluated", []
-    if old_dwarf != new_dwarf:
-        missing = "new" if old_dwarf else "old"
-        return "asymmetric", [
-            f"DWARF context asymmetric: the {missing} side carries no usable "
-            "DWARF (or DWARF-advanced) debug info -- DWARF-based struct/enum "
-            "layout comparison was skipped for that side entirely"
-        ]
+
+    notes: list[str] = []
+    if old_basic != new_basic:
+        missing = "new" if old_basic else "old"
+        notes.append(
+            f"DWARF context asymmetric (basic dwarf channel): the {missing} "
+            "side carries no usable basic DWARF debug info -- "
+            "diff_platform.py's DWARF-based struct/enum layout comparison "
+            "was skipped for that side entirely"
+        )
+    if old_advanced != new_advanced:
+        missing = "new" if old_advanced else "old"
+        notes.append(
+            f"DWARF context asymmetric (dwarf_advanced channel): the "
+            f"{missing} side carries no usable DWARF-advanced debug info -- "
+            "dwarf_advanced.diff_advanced_dwarf was skipped for that side "
+            "entirely"
+        )
+    if notes:
+        return "asymmetric", notes
     return "clean", []
 
 
@@ -790,6 +832,43 @@ def _manifest_layer_incompleteness(
     coverage()`` already built for this same pack correctly recorded that L4
     row as ``partial`` (see that function's own ``any_entities`` check).
     Reading the manifest here closes that gap without duplicating its logic.
+
+    Finding (review, P1, round 7): the extractor-status scan above only ever
+    recognized a ``failed``/``partial`` record whose ``name`` started with
+    one of a fixed ``source_abi``/``compile_``/``source_graph`` prefixes --
+    but real extractor records outside that allowlist can also record a hard
+    ``"failed"`` that invalidates the layer they cover, and this scan was
+    silently blind to every one of them. The concrete case that surfaced
+    this (Finding 3): ``inline._check_build_info_source_mismatch``
+    appends an ``ExtractorRecord(name="build_info_source_tree_mismatch",
+    status="failed", ...)`` when most of a compile database's own source
+    files are absent from the ``--sources`` tree -- i.e. the build metadata
+    and the source checkout may not even be the same codebase -- and that
+    name matches none of the three prefixes, so the record was invisible
+    here: if the resulting L4 surface still carried ordinary TU accounting
+    and no other partial signal tripped, ``analysis_assurance.status`` read
+    ``"complete"`` and ``--require-complete-analysis`` exited 0 despite the
+    source facts possibly coming from a different checkout entirely. The
+    same blind spot also silently missed every other non-prefixed extractor
+    family that can legitimately record a hard failure --
+    ``build_query``/``build_query_auto``/``bazel`` (a query subprocess
+    timing out or failing to run, ``build_query.py``) and
+    ``merge_layer_conflict`` (two inputs supplying irreconcilably different
+    facts for one layer, ``merge_support.py``) chief among them -- none of
+    which start with the old prefixes either. Fixed per the root-cause
+    principle (fix the class of failure, not the one instance): a
+    ``"failed"`` record ALWAYS invalidates the layer it names, regardless of
+    which family produced it, so the prefix allowlist is dropped entirely
+    for that status. ``"partial"`` keeps the original, narrower
+    ``source_abi``/``compile_``/``source_graph`` prefix scope deliberately
+    -- a real, confirmed-complete-but-edge-free L5 graph pass records its own
+    ``status="partial"`` for a fully legitimate, non-incomplete reason (see
+    :func:`_graph_completeness`'s own ``confirmed`` exemption for that exact
+    shape), and broadening ``"partial"`` the same way ``"failed"`` was
+    broadened would resurrect that already-fixed false positive here instead
+    of in :func:`_graph_completeness`, which is the one place with the
+    context (``extractor_passes``/``narrowed_passes``) to tell the two
+    apart.
     """
     notes: list[str] = []
     incomplete = False
@@ -809,14 +888,21 @@ def _manifest_layer_incompleteness(
                 f"{layer} coverage as 'partial'{detail}"
             )
         for rec in manifest.extractors:
-            if rec.status not in ("failed", "partial"):
+            if rec.status == "failed":
+                incomplete = True
+                detail = f": {rec.detail}" if rec.detail else ""
+                notes.append(
+                    f"{side} side's {rec.name!r} extractor status is 'failed'{detail}"
+                )
+                continue
+            if rec.status != "partial":
                 continue
             if not rec.name.startswith(("source_abi", "compile_", "source_graph")):
                 continue
             incomplete = True
             detail = f": {rec.detail}" if rec.detail else ""
             notes.append(
-                f"{side} side's {rec.name!r} extractor status is {rec.status!r}{detail}"
+                f"{side} side's {rec.name!r} extractor status is 'partial'{detail}"
             )
     return incomplete, notes
 
@@ -824,27 +910,48 @@ def _manifest_layer_incompleteness(
 def _export_accounting(
     old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
 ) -> ExportAccounting:
-    # The *new* side is the accounting subject -- mirrors every other
-    # "current state of the library" summary in this codebase
-    # (old_symbol_count is the one deliberate exception, kept for its own
-    # historical reason). Falls back to the old side only when new carries
-    # no L4 surface at all but old does (a comparison against a
-    # source-linked baseline where the new side wasn't re-linked).
-    for pack in (new_pack, old_pack):
+    """Roll up total/source-linked/internal/unaccounted export counts across
+    BOTH sides -- the export analogue of :func:`_translation_units`'s
+    additive TU rollup, not a pick-one-side snapshot.
+
+    Finding (review, P1, round 7): the previous implementation picked ONE
+    side's accounting -- new first, falling back to old only when new
+    carried no L4 surface at all -- so a comparison where BOTH sides link an
+    L4 surface, but only the OLD side has unmatched exports (e.g. a
+    baseline-only symbol-mapping gap that was fixed forward on the new
+    side), silently returned the new side's clean accounting and never
+    examined the old side at all: ``export_accounting.unaccounted`` read 0,
+    and with no other partial signal tripping, the overall ``status`` could
+    read ``"complete"`` under ``--require-complete-analysis`` despite
+    genuinely incomplete baseline linking. Fixed by summing both sides'
+    counts additively, mirroring :func:`_translation_units`'s own
+    both-sides summation for TU accounting -- a nonzero ``unaccounted`` on
+    EITHER side now always contributes to the combined ``export_accounting``
+    rather than being silently shadowed by whichever side the old
+    "new-first" selection happened to prefer.
+    """
+    total: int | None = None
+    unaccounted: int | None = None
+    internal: int | None = None
+    for pack in (old_pack, new_pack):
         sa = getattr(pack, "source_abi", None)
         if sa is None:
             continue
-        total = len(sa.roots.get("exported_symbols", []))
-        unaccounted = len(sa.unmatched.get("symbols_without_decl", []))
-        internal = len(sa.mappings.get("non_public_symbol_to_reason", {}))
-        source_linked = max(0, total - unaccounted)
-        return ExportAccounting(
-            total=total,
-            source_linked=source_linked,
-            internal=internal,
-            unaccounted=unaccounted,
-        )
-    return ExportAccounting()
+        side_total = len(sa.roots.get("exported_symbols", []))
+        side_unaccounted = len(sa.unmatched.get("symbols_without_decl", []))
+        side_internal = len(sa.mappings.get("non_public_symbol_to_reason", {}))
+        total = (total or 0) + side_total
+        unaccounted = (unaccounted or 0) + side_unaccounted
+        internal = (internal or 0) + side_internal
+    if total is None:
+        return ExportAccounting()
+    source_linked = max(0, total - (unaccounted or 0))
+    return ExportAccounting(
+        total=total,
+        source_linked=source_linked,
+        internal=internal,
+        unaccounted=unaccounted,
+    )
 
 
 def _graph_completeness(
