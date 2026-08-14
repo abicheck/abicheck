@@ -36,8 +36,6 @@ Covers, in order:
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -181,6 +179,23 @@ def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> No
     assert "-isystem" in tokens and sysinc_dir.as_posix() in tokens
     assert "-fPIC" in tokens
     assert "-fno-omit-frame-pointer" in tokens
+
+
+def test_resolve_derives_c_standard_not_only_cxx(tmp_path: Path) -> None:
+    # Regression: _context_flags previously only emitted -std= when
+    # "++" in cu.standard, silently omitting a plain C standard
+    # (-std=c17/-std=gnu11/...) even though the module claims to apply the
+    # standard generally, C and C++ alike.
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.context is not None
+    assert "-std=c17" in result.context.gcc_option_tokens
 
 
 def test_resolve_strips_dangling_target_operand_flag(tmp_path: Path) -> None:
@@ -908,84 +923,25 @@ def test_resolve_side_snapshot_propagates_ambiguous_error(
 # 4. End-to-end (real clang): macro-gated field, before/after, drift finding
 # ---------------------------------------------------------------------------
 
-_HEADER = """
-#pragma once
-struct Widget {
-    int x;
-#ifdef WIDGET_EXTRA
-    int y;
-#endif
-};
-int touch(Widget* w);
-"""
-
-_SOURCE = """
-#include "widget.h"
-int touch(Widget* w) { return w->x; }
-"""
+# ``widget_lib`` (the real g++-compiled shared library + compile_commands.json
+# fixture the suite below depends on) lives in ``tests/conftest.py`` -- shared,
+# real-compiler fixtures belong there rather than inline in a test file (see
+# AGENTS.md's test-quality conventions), and pytest auto-discovers it as a
+# regular fixture with no import needed here.
 
 
-def _have(tool: str) -> bool:
-    return shutil.which(tool) is not None
-
-
-@pytest.fixture
-def widget_lib(tmp_path: Path) -> tuple[Path, Path, Path]:
-    """Build a real .so (compiled *with* WIDGET_EXTRA, so its real ABI has the
-    extra field) plus its public header and a compile_commands.json recording
-    that same real -DWIDGET_EXTRA=1 (+ two ABI-relevant flags)."""
-    if not (_have("clang") and _have("g++")):
-        pytest.skip("clang and g++ are required for this P0.3 integration test")
-    header = tmp_path / "widget.h"
-    header.write_text(_HEADER, encoding="utf-8")
-    src = tmp_path / "widget.cpp"
-    src.write_text(_SOURCE, encoding="utf-8")
-    so = tmp_path / "libwidget.so"
-    subprocess.run(
-        [
-            "g++",
-            "-shared",
-            "-fPIC",
-            "-fno-omit-frame-pointer",
-            "-DWIDGET_EXTRA=1",
-            "-o",
-            str(so),
-            str(src),
-            f"-I{tmp_path}",
-        ],
-        check=True,
-        capture_output=True,
+def pytestmark_e2e(func: object) -> object:
+    """Composed marker for the real-clang/g++ end-to-end suite below: needs a
+    real toolchain (``@pytest.mark.integration`` -- excluded from the
+    default fast lane, which runs ``-m "not integration and ..."``, per
+    AGENTS.md) and is ELF/Linux-scoped.
+    """
+    skip = pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="P0.3 end-to-end test is ELF/Linux-scoped (mirrors "
+        "test_clang_header_backend_integration.py)",
     )
-    (tmp_path / "compile_commands.json").write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(tmp_path),
-                    "file": str(src),
-                    "arguments": [
-                        "g++",
-                        "-c",
-                        str(src),
-                        "-o",
-                        "widget.o",
-                        "-DWIDGET_EXTRA=1",
-                        "-fPIC",
-                        "-fno-omit-frame-pointer",
-                        "-std=c++17",
-                    ],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    return so, header, tmp_path
-
-
-pytestmark_e2e = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="P0.3 end-to-end test is ELF/Linux-scoped (mirrors "
-    "test_clang_header_backend_integration.py)",
-)
+    return pytest.mark.integration(skip(func))
 
 
 def _widget_fields(snap: object) -> list[str]:

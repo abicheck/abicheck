@@ -110,6 +110,59 @@ def _l2_seed_pack_inputs(
     return base_build, raw_build_info, raw_sources
 
 
+@dataclasses.dataclass(frozen=True)
+class _L2SeedPackArgs:
+    """Everything :func:`derive_l2_include_dirs` and :func:`derive_l2_compile_context`
+    need to make their own, independent ``collect_inline_pack(..., layers=("L3",))``
+    call, resolved identically for both.
+
+    Config resolution (:func:`_l2_seed_config`), the trust flags derived from
+    it, and the pack/build-info precedence (:func:`_l2_seed_pack_inputs`) were
+    previously duplicated verbatim between the two ``derive_l2_*`` functions;
+    this bundles that shared argument-*building* step into one helper both
+    consume. Deliberately does **not** call ``collect_inline_pack`` itself —
+    each ``derive_l2_*`` function keeps its own independent call (see
+    :func:`derive_l2_compile_context`'s own docstring for why: an accepted,
+    documented double-collection cost, not a duplication to also fold away
+    here), so this only removes the genuinely-identical setup work ahead of
+    that call.
+    """
+
+    sources: Path | None
+    build_info: Path | None
+    build_config: BuildConfig
+    build_config_trusted_for_query: bool
+    compile_db_explicit: bool
+    base_build: Any
+
+
+def _resolve_l2_seed_pack_args(
+    build_config: Path | None,
+    sources: Path | None,
+    build_info: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+) -> _L2SeedPackArgs | None:
+    """Resolve *build_config*/*sources*/*build_info* into ``collect_inline_pack``
+    call arguments, or ``None`` when there is no config to seed from (the
+    caller's existing "nothing to apply" degrade).
+    """
+    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
+    if cfg is None:
+        return None
+    base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(build_info, sources)
+    return _L2SeedPackArgs(
+        sources=raw_sources,
+        build_info=raw_build_info,
+        build_config=cfg,
+        build_config_trusted_for_query=(
+            build_config is not None or build_query is not None
+        ),
+        compile_db_explicit=build_compile_db is not None or build_config is not None,
+        base_build=base_build,
+    )
+
+
 def _unit_include_dirs(cu: Any) -> list[str]:
     """One compile unit's normal-priority include dirs, structured + argv.
 
@@ -197,16 +250,13 @@ def derive_l2_include_dirs(
     """
     if sources is None and build_info is None:
         return [], []
-    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
-    if cfg is None:
+    args = _resolve_l2_seed_pack_args(
+        build_config, sources, build_info, build_query, build_compile_db
+    )
+    if args is None:
         return [], []
-    cfg_trusted_for_query = build_config is not None or build_query is not None
-    compile_db_explicit = build_compile_db is not None or build_config is not None
     cleanups: list[Callable[[], None]] = []
     try:
-        base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(
-            build_info, sources
-        )
         # Reuse the same L3-collection path embed_build_source drives, restricted
         # to build context only (no L4/L5), so every supported build-info form —
         # a collected pack, a Bazel aquery/cquery, an explicit/auto-discovered/
@@ -215,13 +265,13 @@ def derive_l2_include_dirs(
         # this by hand kept missing input forms (packs, bazel); collect_inline_pack
         # owns them, plus the temp-build-dir cleanup lifecycle via defer_cleanup.
         pack = collect_inline_pack(
-            sources=raw_sources,
-            build_info=raw_build_info,
-            build_config=cfg,
-            build_config_trusted_for_query=cfg_trusted_for_query,
-            compile_db_explicit=compile_db_explicit,
+            sources=args.sources,
+            build_info=args.build_info,
+            build_config=args.build_config,
+            build_config_trusted_for_query=args.build_config_trusted_for_query,
+            compile_db_explicit=args.compile_db_explicit,
             allow_inferred_build_query=allow_inferred_build_query,
-            base_build=base_build,
+            base_build=args.base_build,
             layers=("L3",),
             defer_cleanup=cleanups,
         )
@@ -289,33 +339,32 @@ def derive_l2_compile_context(
     every other failure mode here (missing/malformed compile DB, no build
     system, ...), which stays best-effort and degrades silently, a genuine
     ABI-relevant disagreement across compile units must never be resolved by
-    silently guessing. The caller is responsible for running any accumulated
-    *cleanups* before letting the exception propagate further, since this
-    function's own ``except`` cannot both re-raise and return them.
+    silently guessing. This function drains any accumulated *cleanups* itself
+    before re-raising on that path (mirroring every other failure branch
+    here) — a function that both re-raises and returns a value has no channel
+    to hand the exception a value along with it, so the caller receives none
+    and has nothing left to run.
     """
     from ..errors import HeaderCompileContextAmbiguousError
     from .header_compile_context import resolve_header_compile_context
 
     if (sources is None and build_info is None) or not headers:
         return None, []
-    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
-    if cfg is None:
+    args = _resolve_l2_seed_pack_args(
+        build_config, sources, build_info, build_query, build_compile_db
+    )
+    if args is None:
         return None, []
-    cfg_trusted_for_query = build_config is not None or build_query is not None
-    compile_db_explicit = build_compile_db is not None or build_config is not None
     cleanups: list[Callable[[], None]] = []
     try:
-        base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(
-            build_info, sources
-        )
         pack = collect_inline_pack(
-            sources=raw_sources,
-            build_info=raw_build_info,
-            build_config=cfg,
-            build_config_trusted_for_query=cfg_trusted_for_query,
-            compile_db_explicit=compile_db_explicit,
+            sources=args.sources,
+            build_info=args.build_info,
+            build_config=args.build_config,
+            build_config_trusted_for_query=args.build_config_trusted_for_query,
+            compile_db_explicit=args.compile_db_explicit,
             allow_inferred_build_query=allow_inferred_build_query,
-            base_build=base_build,
+            base_build=args.base_build,
             layers=("L3",),
             defer_cleanup=cleanups,
         )

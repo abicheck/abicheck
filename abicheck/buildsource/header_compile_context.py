@@ -38,7 +38,7 @@ is no direct header→TU edge in the model. This mirrors the identical problem
 ``compile_commands.json``) already solved for a single header: a lightweight,
 best-effort scan of each candidate TU's own source text for an ``#include`` of
 the header (by path-suffix match, falling back to a bare filename match) —
-:func:`_compile_unit_references_header` below is that same heuristic, applied
+:func:`_cu_references_any_header` below is that same heuristic, applied
 to ``CompileUnit`` (redacted ``source``/``directory`` fields) rather than
 ``build_context.CompileEntry``.
 
@@ -73,6 +73,7 @@ import os
 import re
 import shlex
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -113,26 +114,41 @@ def _resolve_cu_relative_path(raw: str, directory: str) -> Path:
 #: full (resolved) path is a suffix of the matched include argument, the same
 #: two-stage match ``build_context._header_included_by_tu`` uses to cut down
 #: false positives from an unrelated header sharing a filename.
+#:
+#: Cached: the same header name (`Path.name`) recurs across every compile
+#: unit a multi-TU build's headers get matched against, and compiling the
+#: same pattern once per (unit, header) pair — the shape this was called in
+#: before the read/scan refactor below — was pure repeated overhead for an
+#: identical regex.
+@cache
 def _include_pattern(header_name: str) -> re.Pattern[str]:
     return re.compile(rf'#\s*include\s*[<"]([^>"]*{re.escape(header_name)})[>"]')
 
 
-def _compile_unit_references_header(cu: CompileUnit, header_resolved: Path) -> bool:
-    """Best-effort: does *cu*'s own source text ``#include`` *header_resolved*?"""
-    header_name = header_resolved.name
-    if not header_name:
-        return False
+def _cu_references_any_header(
+    cu: CompileUnit, headers_resolved: Sequence[Path]
+) -> bool:
+    """Best-effort: does *cu*'s own source text ``#include`` any of *headers_resolved*?
+
+    Reads *cu*'s source text exactly once and tests it against every
+    candidate header, rather than re-reading and re-scanning the same file
+    once per header (the shape :func:`_matching_compile_units` used to drive
+    this in, an O(units * headers) file-read cost for what is inherently one
+    read per unit).
+    """
     src_path = _resolve_cu_relative_path(cu.source, cu.directory)
     try:
         text = src_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    if header_name not in text:
-        return False
-    for m in _include_pattern(header_name).finditer(text):
-        include_arg = m.group(1)
-        if include_arg == header_name or str(header_resolved).endswith(include_arg):
-            return True
+    for header_resolved in headers_resolved:
+        header_name = header_resolved.name
+        if not header_name or header_name not in text:
+            continue
+        for m in _include_pattern(header_name).finditer(text):
+            include_arg = m.group(1)
+            if include_arg == header_name or str(header_resolved).endswith(include_arg):
+                return True
     return False
 
 
@@ -176,7 +192,7 @@ def _expand_header_directories(headers: Sequence[Path]) -> list[Path]:
         elif h.is_file():
             out.append(h)
         # Neither a file nor a directory (missing, broken symlink, ...): best
-        # effort, drop it -- matches `_compile_unit_references_header`'s own
+        # effort, drop it -- matches `_cu_references_any_header`'s own
         # silent-skip-on-unreadable-input contract for the source side.
     return out
 
@@ -191,7 +207,7 @@ def _matching_compile_units(
     for cu in compile_units:
         if cu.id in seen_ids:
             continue
-        if any(_compile_unit_references_header(cu, h) for h in resolved_headers):
+        if _cu_references_any_header(cu, resolved_headers):
             matched.append(cu)
             seen_ids.add(cu.id)
     return matched
@@ -452,7 +468,7 @@ def _context_flags(cu: CompileUnit) -> list[str]:
     its adapter) has no use for.
     """
     flags: list[str] = []
-    if cu.standard and "++" in cu.standard:
+    if cu.standard:
         flags.append(f"-std={cu.standard}")
     if cu.target_triple:
         flags.append(f"--target={cu.target_triple}")
