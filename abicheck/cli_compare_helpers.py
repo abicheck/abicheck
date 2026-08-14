@@ -1125,6 +1125,49 @@ def _report_compare_result(
         verify_runtime=verify_runtime, suppression=suppression,
     )
 
+    # P0.4 (P2 review): fold the orthogonal coverage/analysis-assurance
+    # floors into the scoped exit code *before* any report gets rendered
+    # below, and write the folded value back onto `result.scoped_exit_code`
+    # -- the exact field SARIF's `gateExitCode`/`scopedExitCode`, JUnit's
+    # `abicheck.gate_exit_code`/`abicheck.scoped_exit_code`, and HTML's gate
+    # banner all read directly (`getattr(result, "scoped_exit_code", ...)`,
+    # no folding of their own). Previously this fold ran only right before
+    # `sys.exit` below, *after* `_write_or_echo` had already serialized both
+    # the primary and secondary reports from the pre-floor value -- so an
+    # artifact could show a passing 0 gate while the process actually exited
+    # 1 under `--require-complete-analysis` (Codex review, reproduced).
+    # Folding here, and persisting the result back onto `result` rather than
+    # only a local variable, means every renderer downstream -- present or
+    # future -- reads the one authoritative, already-floored value with no
+    # render-order dependency, mirroring how `_exit_with_severity_or_verdict`
+    # (cli.py) applies both floors immediately after computing its own base
+    # exit code and before returning control to its caller.
+    if scoped_exit_code is not None:
+        from .analysis_assurance import (
+            assurance_floor_diagnostic,
+            fold_analysis_assurance_exit,
+        )
+
+        announce_coverage_floor(
+            result,
+            base_exit=scoped_exit_code,
+            fmt=fmt,
+            stat=stat,
+            secondary_fmt=secondary_fmt,
+        )
+        scoped_exit_code = fold_coverage_exit(scoped_exit_code, result)
+        diagnostic = assurance_floor_diagnostic(
+            result,
+            require_complete=require_complete_analysis,
+            base_exit=scoped_exit_code,
+        )
+        if diagnostic is not None:
+            click.echo(diagnostic, err=True)
+        scoped_exit_code = fold_analysis_assurance_exit(
+            scoped_exit_code, result, require_complete=require_complete_analysis
+        )
+        result.scoped_exit_code = scoped_exit_code  # type: ignore[attr-defined]
+
     if audit_suppressions:
         _attach_suppression_audit(result, suppression)
 
@@ -1191,14 +1234,11 @@ def _report_compare_result(
         # to the application/plugin-host contract, floored at the worst
         # scoped result -- the full library verdict stays informational only.
         # ADR-049 §7's coverage axis and P0.4's analysis-assurance axis are
-        # both orthogonal to that scoping.
-        from .analysis_assurance import fold_analysis_assurance_exit
-
-        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
-        scoped_exit_code = fold_coverage_exit(scoped_exit_code, result)
-        sys.exit(fold_analysis_assurance_exit(
-            scoped_exit_code, result, require_complete=require_complete_analysis
-        ))
+        # both orthogonal to that scoping. Both floors were already folded
+        # into `scoped_exit_code` (and persisted onto `result.scoped_exit_code`)
+        # above, before any report was rendered (P2 review) -- this is just
+        # the terminal exit, not a second fold.
+        sys.exit(scoped_exit_code)
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(

@@ -43,4 +43,28 @@
   unconditional fields, matching how it is actually always emitted (P2
   review) — a 2.37 report missing the key now fails schema validation
   instead of silently passing.
+- **`analysis_assurance` now reads a `BuildSourcePack`'s own manifest, not
+  just its model objects, and treats a present-but-empty L4 surface as
+  incomplete** (P1 review). `inline._run_inline_source_abi()` returns a bare
+  `SourceAbiSurface()` — present, but with no TU accounting at all — when
+  its extractor (clang/castxml) is unavailable, and the pack's manifest
+  correctly records that L4 layer as `partial`; the rollup previously never
+  consulted the manifest at all, so both sides read as fact-set
+  `comparable`, `translation_units.failed` stayed `None`, and `status`
+  silently fell through to `"complete"` — letting `--require-complete-analysis`
+  exit `0` after L4 extraction failed entirely on both sides. Two new
+  signals close this: a manifest-level check for a `partial`/`failed` L3/L4
+  layer or extractor row, and a TU-accounting check that flags an L4 surface
+  present with no `compile_units_selected`/`compile_units_parsed` keys at
+  all (as opposed to a real, populated `0`).
+- **The `--used-by`/`--required-symbol` scoped-exit path now folds the
+  orthogonal contract-coverage and analysis-assurance floors into
+  `result.scoped_exit_code` *before* rendering any report** (P2 review),
+  instead of only right before the terminal `sys.exit`. Previously a
+  SARIF/JUnit/JSON artifact could show a passing `gateExitCode`/
+  `scoped_exit_code` of `0` while the CLI process actually exited `1` under
+  `--require-complete-analysis`, because both the primary and secondary
+  reports were rendered from the pre-floor value. This path now also emits
+  `assurance_floor_diagnostic()`'s stderr explanation, which it previously
+  skipped entirely.
 

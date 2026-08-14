@@ -79,6 +79,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from .buildsource.model import CoverageStatus, DataLayer
 from .checker_policy import ChangeKind, EvidenceTier
 from .checker_types import DiffResult
 from .model import AbiSnapshot
@@ -355,9 +356,24 @@ def _header_context_status(
 
 def _translation_units(
     old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
-) -> TranslationUnitAccounting:
+) -> tuple[TranslationUnitAccounting, bool]:
+    """Roll up TU accounting, plus a second signal: whether a side carries an
+    L4 ``source_abi`` object at all (i.e. L4 replay was actually attempted)
+    while producing *no* TU accounting whatsoever (Finding, P1 review).
+
+    ``inline._run_inline_source_abi()`` returns a bare ``SourceAbiSurface()``
+    -- present, but with an empty ``coverage`` dict -- when its extractor
+    (clang/castxml) isn't available; ``compile_units_selected``/
+    ``compile_units_parsed`` are then both absent, not zero, so the old
+    ``failed = selected - parsed`` computation below silently stayed
+    ``None`` (nothing to subtract) instead of reading as a failure. The
+    returned bool lets the caller treat that shape -- a present-but-empty L4
+    surface -- as its own incompleteness signal, independent of whatever
+    ``selected``/``parsed`` end up being when they ARE populated.
+    """
     selected_total: int | None = None
     parsed_total: int | None = None
+    l4_present_without_accounting = False
     for pack in (old_pack, new_pack):
         sa = getattr(pack, "source_abi", None)
         if sa is None:
@@ -365,6 +381,8 @@ def _translation_units(
         cov = sa.coverage or {}
         selected = cov.get("compile_units_selected")
         parsed = cov.get("compile_units_parsed")
+        if selected is None and parsed is None:
+            l4_present_without_accounting = True
         if selected is not None:
             selected_total = (selected_total or 0) + int(selected)
         if parsed is not None:
@@ -372,9 +390,67 @@ def _translation_units(
     failed = None
     if selected_total is not None and parsed_total is not None:
         failed = max(0, selected_total - parsed_total)
-    return TranslationUnitAccounting(
-        selected=selected_total, parsed=parsed_total, failed=failed, skipped=None
+    return (
+        TranslationUnitAccounting(
+            selected=selected_total, parsed=parsed_total, failed=failed, skipped=None
+        ),
+        l4_present_without_accounting,
     )
+
+
+def _manifest_layer_incompleteness(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> tuple[bool, list[str]]:
+    """Whether either side's pack *manifest* itself records an L3/L4 layer as
+    incomplete -- ``partial`` coverage, or a ``failed``/``partial`` extractor
+    -- for a layer this run's rollup otherwise treats as present (Finding, P1
+    review). Deliberately does not flag a plain ``not_collected`` coverage
+    row: that's the ordinary "this layer was never attempted" state every
+    other helper in this module already handles correctly (``sa is None`` /
+    ``pack is None`` short-circuits) -- it is specifically a layer the model
+    objects say IS present that the manifest says is only ``partial`` that
+    every other check here was blind to.
+
+    This is the one place the manifest's own, authoritative D7/D8 vocabulary
+    (``BuildSourceManifest.coverage``'s ``LayerCoverage.status``,
+    ``BuildSourceManifest.extractors``'s ``ExtractorRecord.status``) is
+    consulted -- every other helper in this module reads the pack's *model*
+    objects (``source_abi``/``source_graph``/``build_evidence``) directly,
+    which is exactly what missed the ``inline._run_inline_source_abi()``
+    clang-unavailable case: a bare ``SourceAbiSurface()`` reads as "L4
+    present" to every model-level check, while the manifest ``build_inline_
+    coverage()`` already built for this same pack correctly recorded that L4
+    row as ``partial`` (see that function's own ``any_entities`` check).
+    Reading the manifest here closes that gap without duplicating its logic.
+    """
+    notes: list[str] = []
+    incomplete = False
+    watched_layers = (DataLayer.L3_BUILD.value, DataLayer.L4_SOURCE_ABI.value)
+    for side, pack in (("old", old_pack), ("new", new_pack)):
+        manifest = getattr(pack, "manifest", None)
+        if manifest is None:
+            continue
+        for layer in watched_layers:
+            row = manifest.coverage_for(layer)
+            if row is None or row.status != CoverageStatus.PARTIAL:
+                continue
+            incomplete = True
+            detail = f": {row.detail}" if row.detail else ""
+            notes.append(
+                f"{side} side's build-source pack manifest records "
+                f"{layer} coverage as 'partial'{detail}"
+            )
+        for rec in manifest.extractors:
+            if rec.status not in ("failed", "partial"):
+                continue
+            if not rec.name.startswith(("source_abi", "compile_", "source_graph")):
+                continue
+            incomplete = True
+            detail = f": {rec.detail}" if rec.detail else ""
+            notes.append(
+                f"{side} side's {rec.name!r} extractor status is {rec.status!r}{detail}"
+            )
+    return incomplete, notes
 
 
 def _export_accounting(
@@ -545,12 +621,31 @@ def compute_analysis_assurance(
     notes.extend(hc_notes)
 
     # -- TU / export accounting ----------------------------------------------
-    tu_accounting = _translation_units(old_pack, new_pack)
+    tu_accounting, l4_present_without_accounting = _translation_units(
+        old_pack, new_pack
+    )
     export_accounting = _export_accounting(old_pack, new_pack)
+    if l4_present_without_accounting:
+        notes.append(
+            "an L4 source-ABI surface is present on at least one side but "
+            "carries no translation-unit accounting at all (selected/parsed "
+            "both unset) -- consistent with L4 extraction failing before it "
+            "produced any real facts (e.g. clang/castxml unavailable)"
+        )
 
     # -- graph completeness ---------------------------------------------------
     graph_completeness, graph_notes = _graph_completeness(old_pack, new_pack)
     notes.extend(graph_notes)
+
+    # -- manifest-level layer incompleteness ----------------------------------
+    # The one check below that reads the pack MANIFEST directly (D7/D8's own
+    # status vocabulary) rather than the pack's model objects -- see
+    # _manifest_layer_incompleteness's own docstring for why the two can
+    # disagree (Finding, P1 review).
+    manifest_layer_incomplete, manifest_notes = _manifest_layer_incompleteness(
+        old_pack, new_pack
+    )
+    notes.extend(manifest_notes)
 
     if not result.scope_resolved:
         notes.append(
@@ -583,6 +678,8 @@ def compute_analysis_assurance(
         or not result.scope_resolved
         or result.contract_coverage == "partial"
         or fact_set_comparability == "unknown"
+        or l4_present_without_accounting
+        or manifest_layer_incomplete
     ):
         status = "partial"
     elif nothing_requested:

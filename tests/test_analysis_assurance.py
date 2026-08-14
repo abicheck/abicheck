@@ -656,3 +656,215 @@ class TestAnalysisAssuranceOutOfBandPack:
         aa = compute_analysis_assurance(result, old, new, old_pack=pack)
         assert aa.status != "complete"
         assert aa.translation_units.failed == 7
+
+
+class TestAnalysisAssurancePartialManifestLayer:
+    """New review finding (P1): both sides carry an L4 pack whose extraction
+    failed before producing any TU counts -- e.g.
+    ``inline._run_inline_source_abi()``'s clang-unavailable path, which
+    returns a bare ``SourceAbiSurface()`` (present, but with an empty
+    ``coverage`` dict) and records the pack's own manifest L4 coverage row as
+    ``partial`` (``build_inline_coverage``'s ``any_entities`` check). Before
+    this fix, ``compute_analysis_assurance`` never looked at the manifest at
+    all: both sides read as fact-set ``comparable`` (no
+    ``fact_set_inconsistent`` flag -- there's no coverage dict to carry one),
+    ``translation_units.failed`` stayed ``None`` (nothing to subtract, since
+    ``selected``/``parsed`` were never set rather than zero), and status fell
+    through to ``"complete"`` -- letting ``--require-complete-analysis`` exit
+    0 even though L4 extraction failed entirely on both sides.
+    """
+
+    def _failed_l4_pack(self, tmp_path: Path, name: str):
+        from abicheck.buildsource.model import (
+            BuildSourceManifest,
+            CoverageStatus,
+            DataLayer,
+            LayerCoverage,
+        )
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        manifest = BuildSourceManifest(
+            coverage=[
+                LayerCoverage(
+                    layer=DataLayer.L4_SOURCE_ABI.value,
+                    status=CoverageStatus.PARTIAL,
+                    detail="clang not found in PATH; source-only checks disabled",
+                ),
+            ],
+        )
+        return BuildSourcePack(
+            root=tmp_path / name,
+            manifest=manifest,
+            # Mirrors inline._run_inline_source_abi()'s own clang-unavailable
+            # return value verbatim: present, but with no real facts and no
+            # TU accounting at all.
+            source_abi=SourceAbiSurface(),
+        )
+
+    def test_both_sides_partial_l4_manifest_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old.build_source = self._failed_l4_pack(tmp_path, "old_pack")
+        new.build_source = self._failed_l4_pack(tmp_path, "new_pack")
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        # The manifest's own partial L4 row must be visible in the rollup...
+        assert aa.status != "complete", aa
+        assert any("partial" in n for n in aa.notes), aa.notes
+
+    def test_require_complete_analysis_exits_nonzero_for_partial_l4_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old.build_source = self._failed_l4_pack(tmp_path, "old_pack")
+        new.build_source = self._failed_l4_pack(tmp_path, "new_pack")
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code != 0, res.output
+
+    def test_l4_present_without_any_tu_accounting_is_flagged_directly(self) -> None:
+        """Unit-level check of the second, independent signal this fix adds:
+        an L4 surface present on a side with no compile_units_selected/
+        compile_units_parsed keys at all (not zero -- simply absent), even
+        with no manifest attached, must not read as complete."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        pack = BuildSourcePack(
+            root=Path("/tmp/nonexistent-empty-l4-pack"),
+            source_abi=SourceAbiSurface(),
+        )
+        result = checker.compare(old, new)
+        aa = compute_analysis_assurance(result, old, new, old_pack=pack, new_pack=pack)
+        assert aa.status != "complete"
+        assert any("no translation-unit accounting" in n for n in aa.notes), aa.notes
+
+
+class TestScopedExitFloorAppliedBeforeRendering:
+    """New review finding (P2): the ``--used-by``/``--required-symbol`` scoped-
+    exit path used to render both the primary and secondary reports from the
+    *pre-floor* ``result.scoped_exit_code`` and only fold the coverage/
+    analysis-assurance floors into a local variable afterward, right before
+    ``sys.exit`` -- so a rendered SARIF/JUnit/JSON artifact could show a
+    passing ``gateExitCode``/``scoped_exit_code`` of 0 while the CLI process
+    itself exited 1 under ``--require-complete-analysis``. The fix folds both
+    floors into ``result.scoped_exit_code`` itself, before any report is
+    rendered, so every renderer -- present or future -- reads the one
+    authoritative, already-floored value.
+    """
+
+    @staticmethod
+    def _pair(tmp_path: Path) -> tuple[Path, Path]:
+        old, new = _elf_only_pair()
+        return _write(tmp_path, old, new)
+
+    def test_sarif_gate_exit_code_matches_process_exit_code(
+        self, tmp_path: Path
+    ) -> None:
+        old_p, new_p = self._pair(tmp_path)
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "--format",
+                "sarif",
+                "--require-complete-analysis",
+            ],
+        )
+        # This is the crux of the finding: the flag must be able to fail the
+        # process even though the *scoped* verdict itself is compatible (the
+        # ELF-only fixture's incompleteness is what --require-complete-analysis
+        # is catching, not a real ABI break).
+        assert res.exit_code == 1, res.output
+        out = res.output
+        doc = json.loads(out[out.index("{") :])
+        props = doc["runs"][0]["properties"]
+        scoped_gate = props["scopedGate"]
+        # The rendered artifact's own exit-code fields must agree with the
+        # real process exit code -- not the pre-floor value.
+        assert scoped_gate["gateExitCode"] == res.exit_code
+        assert scoped_gate["scopedExitCode"] == res.exit_code
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == res.exit_code
+
+    def test_junit_gate_exit_code_matches_process_exit_code(
+        self, tmp_path: Path
+    ) -> None:
+        old_p, new_p = self._pair(tmp_path)
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "--format",
+                "junit",
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code == 1, res.output
+        assert f'name="abicheck.gate_exit_code" value="{res.exit_code}"' in res.output
+        assert f'name="abicheck.scoped_exit_code" value="{res.exit_code}"' in res.output
+
+    def test_assurance_floor_diagnostic_is_emitted_on_the_scoped_path(
+        self, tmp_path: Path
+    ) -> None:
+        """Before the fix, this path skipped ``assurance_floor_diagnostic()``
+        entirely -- the stderr explanation of *why* the exit code was raised
+        never appeared for a scoped run."""
+        old_p, new_p = self._pair(tmp_path)
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code == 1, res.output
+        assert "Analysis assurance incomplete" in res.output
+
+    def test_flag_omitted_scoped_exit_code_still_zero(self, tmp_path: Path) -> None:
+        """Sanity: without the flag, the scoped gate stays purely additive --
+        same fixture, same scoping, no floor applied."""
+        old_p, new_p = self._pair(tmp_path)
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "--format",
+                "sarif",
+            ],
+        )
+        assert res.exit_code == 0, res.output
+        out = res.output
+        doc = json.loads(out[out.index("{") :])
+        scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
+        assert scoped_gate["gateExitCode"] == 0
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
