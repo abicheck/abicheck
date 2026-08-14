@@ -138,11 +138,15 @@ enough to treat as proof:
   [Product Contract §4](abi-series/00-product-contract.md#4-semantic-versioning-turning-the-promise-into-a-number)
   — not just a changelog note; only a change that keeps the promised
   contract intact can go out as a patch or minor release.
-- **For plugin/callback boundaries**, write the ownership contract into the
-  plugin manifest alongside the ABI contract — see
-  [Plugin Systems](../use/plugin-systems.md) — so it's checked as part of
-  the same review as everything else about that boundary, not left as an
-  unwritten assumption.
+- **For plugin/callback boundaries**, document the ownership contract
+  (who owns `user_data`, who frees it, and when) directly alongside the
+  entrypoint declarations `--required-symbol`/`--required-symbols` checks
+  — see [Plugin Systems](../use/plugin-systems.md). abicheck itself has no
+  ownership-aware check to run here (`--required-symbol` verifies only
+  entrypoint *availability*, not the contract around it, per "What abicheck
+  can and cannot see" above) — the point is to put the contract somewhere a
+  reviewer changing that boundary will actually see it, not to have it
+  automatically enforced.
 
 See also: [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
 for the broader category this belongs to, and
