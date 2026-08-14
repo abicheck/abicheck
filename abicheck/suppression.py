@@ -34,6 +34,7 @@ from .checker_policy import (
 )
 from .checker_types import Change
 from .elf_metadata import SymbolBinding
+from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
 # Valid values for Suppression.binding — the same value strings
 # Change.symbol_binding is stamped with (SymbolBinding.value). Imported from
@@ -1442,20 +1443,6 @@ def _parse_expires(expires_raw: object, entry_index: int) -> date | None:
         ) from e
 
 
-def _parse_finding_id(raw: object) -> str | None:
-    """Coerce a ``finding_id`` value to ``str`` (Codex review, PR #753):
-    a 16-hex-char canonical digest can land entirely within ``0``-``9``,
-    and PyYAML parses an unquoted all-decimal scalar as ``int`` -- which
-    would then never match ``report_canonical_finding_id``'s ``str``
-    return value in ``_matches_finding_id``, silently suppressing nothing.
-    ``str(int)`` round-trips exactly here: PyYAML's plain-integer resolver
-    only matches a digit sequence with no leading zero.
-    """
-    if raw is None:
-        return None
-    return str(raw)
-
-
 def _parse_allow_public_break(raw: object, entry_index: int) -> bool:
     """Parse and validate ``allow_public_break`` from a suppression entry.
 
@@ -1572,6 +1559,10 @@ class SuppressionList:
             data = yaml.safe_load(text)
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML in suppression file: {e}") from e
+        # Raw, unresolved finding_id scalar text per entry index -- see
+        # raw_finding_ids_by_index's own docstring for why this can't be
+        # recovered from `data` (the already-parsed structure) alone.
+        raw_finding_ids = raw_finding_ids_by_index(text)
 
         if not isinstance(data, dict):
             raise ValueError("Suppression file must be a YAML mapping")
@@ -1620,7 +1611,9 @@ class SuppressionList:
                     entity_namespace=item.get("entity_namespace"),
                     cause_namespace=item.get("cause_namespace"),
                     binding=item.get("binding"),
-                    finding_id=_parse_finding_id(item.get("finding_id")),
+                    finding_id=parse_finding_id(
+                        raw_finding_ids.get(i, item.get("finding_id"))
+                    ),
                     reachability=item.get("reachability"),
                     allow_public_break=allow_public_break,
                     allow_unknown_reachability=allow_unknown_reachability,

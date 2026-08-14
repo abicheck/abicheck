@@ -1085,16 +1085,59 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
         # diff_symbols._check_params_change: old/new are
         # _format_params()'s comma-joined `Param.type` spellings, one
         # function-wide finding (no per-parameter `detail`, so nothing is
-        # lost by canonicalizing the whole joined string). Only the
-        # pointer/reference-sigil normalization pass actually helps here
-        # (canonicalize_type_name's struct-prefix/const-reorder steps are
-        # anchored to the start of the string, so they only ever apply to
-        # the first parameter in the list) -- still enough to close the
-        # CastXML/Clang spacing mismatch at every position (Codex review,
-        # fresh evidence).
+        # lost by canonicalizing the whole joined string as a *set of
+        # parameters* -- see _canonicalize_params_list below, which splits
+        # and canonicalizes each parameter individually rather than the
+        # joined string as one type. A whole-string canonicalize_type_name
+        # call only reorders const/strips a struct-prefix on the FIRST
+        # parameter (both anchored to string start) -- a real change on
+        # parameter N plus an unrelated const-spelling difference on some
+        # OTHER parameter M would then still produce two different
+        # discriminators for the identical function-wide event across
+        # producers (Codex review, fresh evidence).
         "func_params_changed",
     }
 )
+
+
+def _split_top_level_commas(value: str) -> list[str]:
+    """Split *value* on ``,`` at nesting depth 0 only.
+
+    ``_format_params()`` comma-joins ``Param.type`` spellings, but a
+    parameter's own type can itself contain a comma inside template
+    arguments (``std::pair<int, int>``) or a function-pointer parameter
+    list (``void (*)(int, int)``) -- a naive ``str.split(",")`` would
+    wrongly split those apart. Tracks ``<>``/``()``/``[]`` nesting depth
+    and only treats a comma at depth 0 as a real parameter separator.
+    """
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(value):
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append(value[start:i])
+            start = i + 1
+    parts.append(value[start:])
+    return parts
+
+
+def _canonicalize_params_list(value: str) -> str:
+    """Canonicalize a ``_format_params()``-shaped comma-joined parameter
+    list one parameter at a time, rejoining with ``", "`` (matching
+    ``_format_params``'s own join).
+
+    Degrades to whole-string canonicalization for the sentinel ``"(none)"``
+    ``_format_params`` emits for a zero-parameter function -- splitting
+    that on commas would be a no-op anyway, but routing it through the
+    same call keeps this function's contract uniform.
+    """
+    return ", ".join(
+        canonicalize_type_name(part.strip()) for part in _split_top_level_commas(value)
+    )
 
 
 def _stringify_change_value(value: object) -> str:
@@ -1306,8 +1349,15 @@ def _change_discriminator(
     old_str = _stringify_change_value(change.old_value)
     new_str = _stringify_change_value(change.new_value)
     if canonicalize_this_kind:
-        old_str = canonicalize_type_name(old_str)
-        new_str = canonicalize_type_name(new_str)
+        if kind_value == "func_params_changed":
+            # See _TYPE_BEARING_DISCRIMINATOR_KINDS's own comment: a
+            # comma-joined parameter list needs per-parameter
+            # canonicalization, not one whole-string call.
+            old_str = _canonicalize_params_list(old_str)
+            new_str = _canonicalize_params_list(new_str)
+        else:
+            old_str = canonicalize_type_name(old_str)
+            new_str = canonicalize_type_name(new_str)
     parts = [kind_value, old_str, new_str]
     if include_description:
         desc = change.description or ""

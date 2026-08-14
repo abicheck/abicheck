@@ -256,6 +256,77 @@ class TestCanonicalFindingIdScopedCanonicalization:
         )
         assert report_canonical_finding_id(a) == report_canonical_finding_id(b)
 
+    def test_func_params_changed_canonicalizes_every_parameter_not_just_the_first(
+        self,
+    ):
+        # Regression (Codex review, PR #753, round 6): canonicalize_type_name's
+        # const-reorder/struct-prefix passes are anchored to the START of the
+        # string -- calling it on the whole comma-joined _format_params()
+        # list only ever fixes the FIRST parameter. A real change on
+        # parameter 2 plus an unrelated const-spelling difference on
+        # parameter 1 (unchanged) must still collapse to one canonical id
+        # across producers.
+        a = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3fooPKci",
+            name="foo",
+            old="char const*, int",
+            new="char const*, long",
+        )
+        b = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3fooPKci",
+            name="foo",
+            old="const char *, int",
+            new="const char *, long",
+        )
+        assert report_canonical_finding_id(a) == report_canonical_finding_id(b)
+        # A genuinely different second-parameter change must still differ.
+        c = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3fooPKci",
+            name="foo",
+            old="const char *, int",
+            new="const char *, double",
+        )
+        assert report_canonical_finding_id(a) != report_canonical_finding_id(c)
+
+    def test_func_params_changed_respects_template_argument_commas(self):
+        # A parameter's own type can contain a comma (template arguments) --
+        # splitting on every comma would misalign fields across the list,
+        # e.g. treating "std::pair<int" and " int>*" as two separate
+        # parameters instead of one. Uses only the sigil-spacing
+        # normalization (canonicalize_type_name declines to reorder const
+        # for a templated base at all, by design -- see its own docstring),
+        # which is global/unanchored and so applies at any split position
+        # as long as the split itself stayed aligned with the real
+        # parameter boundaries.
+        a = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3foo",
+            name="foo",
+            old="std::pair<int, int>*, int",
+            new="std::pair<int, int>*, long",
+        )
+        b = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3foo",
+            name="foo",
+            old="std::pair<int, int> *, int",
+            new="std::pair<int, int> *, long",
+        )
+        assert report_canonical_finding_id(a) == report_canonical_finding_id(b)
+        # A genuinely different second-parameter change must still differ,
+        # confirming the split didn't collapse the two parameters together.
+        c = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3foo",
+            name="foo",
+            old="std::pair<int, int> *, int",
+            new="std::pair<int, int> *, double",
+        )
+        assert report_canonical_finding_id(a) != report_canonical_finding_id(c)
+
     def test_equivalent_category_kinds_still_distinguish_old_new(self):
         # Regression (Codex review, PR #753, fourth round): a bare
         # "category:type_size_change" discriminator (used to collapse
@@ -512,3 +583,41 @@ class TestFindingIdSuppressionSelector:
         rule = suppressions._suppressions[0]
         assert rule.finding_id == all_decimal_id
         assert isinstance(rule.finding_id, str)
+
+    def test_loads_from_yaml_when_the_digest_looks_octal(self, tmp_path):
+        # Regression (Codex review, PR #753, round 2): an unquoted,
+        # leading-zero, all-octal-digit (0-7) scalar is read by PyYAML's
+        # YAML 1.1 resolver as an OCTAL literal, not decimal --
+        # "0123456701234567" resolves to a completely different int
+        # (5744368105847), which str()-coercing the already-parsed value
+        # can never recover the original digest from. Also covers a
+        # zero-padded digest reducing to a single digit.
+        octal_looking_id = "0123456701234567"
+        zero_padded_id = "0000000000000001"
+        assert int(octal_looking_id, 8) != int(octal_looking_id)  # sanity
+        yaml_path = tmp_path / "suppress.yaml"
+        yaml_path.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            f"  - finding_id: {octal_looking_id}\n"
+            "    reason: octal-looking digest\n"
+            f"  - finding_id: {zero_padded_id}\n"
+            "    reason: zero-padded digest\n"
+        )
+        suppressions = SuppressionList.load(yaml_path)
+        assert len(suppressions) == 2
+        rule_a, rule_b = suppressions._suppressions
+        assert rule_a.finding_id == octal_looking_id
+        assert rule_b.finding_id == zero_padded_id
+        assert isinstance(rule_a.finding_id, str)
+        assert isinstance(rule_b.finding_id, str)
+
+    def test_version_key_still_parses_as_a_real_int(self, tmp_path):
+        # Guard against the alternative fix (disabling YAML int resolution
+        # loader-wide) reappearing: this file's own `version: 1` key must
+        # stay a real int, since a resolver has no way to selectively
+        # spare only the finding_id key.
+        yaml_path = tmp_path / "suppress.yaml"
+        yaml_path.write_text("version: 1\nsuppressions: []\n")
+        suppressions = SuppressionList.load(yaml_path)
+        assert len(suppressions) == 0  # would raise on a bad 'version' first
