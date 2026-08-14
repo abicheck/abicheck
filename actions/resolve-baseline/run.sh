@@ -285,7 +285,14 @@ fi
 
 echo "::group::Resolve baseline ($CHANNEL / $KIND / $PROFILE)"
 set +e
-RESOLVE_STDOUT=$(python3 "$ACTION_PATH/resolve_baseline.py" "${RESOLVE_ARGS[@]}")
+# -I: resolve_baseline.py imports abicheck.buildsource.baseline_set -- same
+# workspace-shadowing risk as the extraction snippets above (a caller-set
+# PYTHONPATH could otherwise substitute a shadow abicheck/buildsource/
+# baseline_set.py during every resolution, not just during extraction).
+# resolve_baseline.py itself does no sys.path manipulation, so isolating it
+# is safe: Python still adds $ACTION_PATH (this Action's own, trusted
+# directory) as sys.path[0] for a script invocation regardless of -I.
+RESOLVE_STDOUT=$(python3 -I "$ACTION_PATH/resolve_baseline.py" "${RESOLVE_ARGS[@]}")
 RESOLVE_EXIT=$?
 set -e
 echo "$RESOLVE_STDOUT"
