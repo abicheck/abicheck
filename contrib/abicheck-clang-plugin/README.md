@@ -515,6 +515,22 @@ rather than a genuine, unrecoverable ABI drift. It is not:
   the Clang/LLVM source commit — is the thing that would need to match
   exactly; matching source alone (as this pass did) is demonstrably
   insufficient on its own.
+- **Confirmed, not just hypothesized: building the plugin *with `icpx`
+  itself* does not fix this either.** `CMAKE_CXX_COMPILER=icpx` builds the
+  plugin cleanly (`__INTEL_LLVM_COMPILER` correctly baked into its emitted
+  `compiler_family: "intel-llvm"`, confirmed via `strings` on the built
+  `.so`), and it still crashes with the same signal loading into real
+  `icpx`. `ldd` on that icpx-built `.so` shows why: it *still* dynamically
+  links `/lib/x86_64-linux-gnu/libc++.so.1` — the same apt-provided
+  library — because `icpx`'s own install ships **no** `libc++.so` at all
+  (only the static copy baked into its 168MB `clang-22` binary; confirmed
+  by directory listing under `$CMPLR_ROOT`). There is no *other* `libc++`
+  shared object on the system for even an `icpx`-compiled `-stdlib=libc++`
+  link step to resolve against. This rules out "which compiler builds the
+  plugin" as a variable entirely — the mismatch is specifically that
+  `icpx`'s statically-embedded runtime and the system's only available
+  `libc++.so.1` are two independent builds with no shared-object form of
+  the vendor's own copy to link against instead.
 
 This does not change the section's conclusion (no certified path exists
 without Intel's own internal build), but it does close off the "maybe the

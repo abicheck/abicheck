@@ -191,6 +191,14 @@ def _compare_read_files(plugin_tus: list, wrapper_tus: list) -> list[str]:
     return errors
 
 
+#: The only compiler_family values either producer may legitimately emit
+#: (abicheck.buildsource.source_extractors.clang._clang_compiler_family and
+#: AbicheckFactsPlugin.cpp's kCompilerFamily agree on this same two-value
+#: set, keyed on __INTEL_LLVM_COMPILER). Anything else is a real conformance
+#: failure, not a third valid family this check doesn't know about yet.
+_VALID_COMPILER_FAMILIES = frozenset({"clang", "intel-llvm"})
+
+
 def _compare_fact_set(plugin_tus: list, wrapper_tus: list) -> list[str]:
     from abicheck.buildsource.source_abi import (
         SOURCE_ABI_FACT_SET_NAME,
@@ -198,6 +206,7 @@ def _compare_fact_set(plugin_tus: list, wrapper_tus: list) -> list[str]:
     )
 
     errors: list[str] = []
+    families: dict[str, str | None] = {}
     for label, tus in (("plugin", plugin_tus), ("clang backend", wrapper_tus)):
         for tu in tus:
             if not tu.fact_set:
@@ -215,12 +224,45 @@ def _compare_fact_set(plugin_tus: list, wrapper_tus: list) -> list[str]:
                     f"{label} TU {tu.tu_id} fact_set.version={version!r}, expected "
                     f"{SOURCE_ABI_FACT_SET_VERSION!r}"
                 )
+            # compiler_family is NOT hardcoded to "clang" here (Codex review,
+            # PR #756): both producers correctly report "intel-llvm" when
+            # built/loaded under Intel's oneAPI fork (__INTEL_LLVM_COMPILER),
+            # matching abicheck.buildsource.source_extractors.clang's own
+            # detection for the wrapper path -- a fixed-string check would
+            # itself have flagged that correct behavior as a conformance
+            # failure. Instead: each side's own family must be one of the
+            # two known-valid values, and the two producers compiling the
+            # identical fixture in one conformance run must AGREE with each
+            # other (the actual "same fact-set semantic recipe" contract
+            # this module's own header comment documents) -- catches either
+            # side silently drifting from the other, which a hardcoded
+            # literal could never catch for a value other than "clang".
             family = tu.fact_set.get("compiler_family")
-            if family != "clang":
+            if family not in _VALID_COMPILER_FAMILIES:
                 errors.append(
                     f"{label} TU {tu.tu_id} fact_set.compiler_family={family!r}, "
-                    "expected 'clang'"
+                    f"expected one of {sorted(_VALID_COMPILER_FAMILIES)!r}"
                 )
+            elif label not in families:
+                families[label] = family
+            elif families[label] != family:
+                errors.append(
+                    f"{label} TU {tu.tu_id} fact_set.compiler_family={family!r} "
+                    f"disagrees with an earlier {label} TU's {families[label]!r} "
+                    "in the same conformance run"
+                )
+    plugin_family = families.get("plugin")
+    wrapper_family = families.get("clang backend")
+    if (
+        plugin_family is not None
+        and wrapper_family is not None
+        and plugin_family != wrapper_family
+    ):
+        errors.append(
+            f"plugin fact_set.compiler_family={plugin_family!r} disagrees with "
+            f"clang backend fact_set.compiler_family={wrapper_family!r} for the "
+            "same compile in the same conformance run"
+        )
     return errors
 
 

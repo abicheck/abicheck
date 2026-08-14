@@ -116,6 +116,30 @@ constexpr const char *kPluginVersion = "0.5";
 constexpr const char *kFactSetName = "abicheck-clang-canonical";
 constexpr int kFactSetVersion = 1;
 
+// compiler_family for the fact-set block below (ADR-038 C.8). __INTEL_LLVM_
+// COMPILER is the same predefined macro actions/collect-facts/run.sh's
+// _is_intel_llvm_compiler and abicheck.buildsource.source_extractors.clang.
+// _clang_compiler_family both key on to recognize Intel's oneAPI DPC++/C++
+// Compiler fork -- but here it's read at THIS PLUGIN'S OWN COMPILE TIME
+// (whichever compiler built AbicheckFactsPlugin.cpp itself defines it or
+// doesn't), not the runtime host process's. This is deliberately correct
+// for how this plugin is built and loaded: contrib/abicheck-clang-plugin/
+// AGENTS.md's "LLVM-major sensitivity" section documents that a build of
+// this plugin only ever loads into the exact matching compiler/fork it was
+// built against (a shared-library ABI constraint, not just an API one) --
+// so the compiler that built this plugin IS the compiler that will load it,
+// making this the identical macro-presence test run.sh performs on the
+// resolved host compiler before building against it. Before this fix the
+// literal `"clang"` below was correct only by coincidence (this plugin's
+// own conformance suite has never exercised a real icpx build until PR
+// #756's manual re-verification) -- it never actually recognized the one
+// fork this codebase already has real, documented ABI findings for.
+#if defined(__INTEL_LLVM_COMPILER)
+constexpr const char *kCompilerFamily = "intel-llvm";
+#else
+constexpr const char *kCompilerFamily = "clang";
+#endif
+
 // ---------------------------------------------------------------------------
 // Optional profiling (ABICHECK_PLUGIN_PROFILE=1): attribute subtree-hash cost
 // to its phases (clang JSON dump / json::parse / canonicalize) so the hot loop
@@ -3100,8 +3124,8 @@ private:
         ",\"version\":" + std::to_string(kFactSetVersion) +
         ",\"producer\":\"abicheck-clang-plugin\",\"producer_version\":" +
         jsonStr(kPluginVersion) +
-        ",\"compiler_family\":\"clang\",\"compiler_version\":" +
-        jsonStr(CLANG_VERSION_STRING) + "}";
+        ",\"compiler_family\":" + jsonStr(kCompilerFamily) +
+        ",\"compiler_version\":" + jsonStr(CLANG_VERSION_STRING) + "}";
 
     std::map<std::string, std::string> coverageMap = {
         // Class-template member patterns (emitClassTemplateMemberPatterns)
@@ -3330,8 +3354,8 @@ private:
         ",\"version\":" + std::to_string(kFactSetVersion) +
         ",\"producer\":\"abicheck-clang-plugin\",\"producer_version\":" +
         jsonStr(kPluginVersion) +
-        ",\"compiler_family\":\"clang\",\"compiler_version\":" +
-        jsonStr(CLANG_VERSION_STRING) + "}";
+        ",\"compiler_family\":" + jsonStr(kCompilerFamily) +
+        ",\"compiler_version\":" + jsonStr(CLANG_VERSION_STRING) + "}";
     std::string manifest =
         "{\n  \"abicheck_inputs_version\": 1,\n  \"binary\": \"\",\n"
         "  \"compile_db\": \"\",\n  \"created_at\": " +
