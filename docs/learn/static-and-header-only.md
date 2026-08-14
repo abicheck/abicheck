@@ -98,23 +98,25 @@ public API, unconditionally**:
   library's versioning is effectively always at the granularity of "whatever
   headers were included at each consumer's most recent build."
 - Because there's no separate binary artifact, checking a header-only
-  library needs a source anchor rather than a binary one: `dump --sources
-  <dir> --depth source` (no binary operand) replays the library's own
-  translation units into a snapshot with no L0/L1/L2 layer underneath it,
-  and `compare` diffs two such snapshots the same way it diffs two
-  binaries. **This is not a bare, self-configuring command** — a
-  no-artifact source-only dump starts from an empty snapshot and only
-  populates public declarations if the public surface is actually
-  configured (public roots matching how the headers resolve, or an
-  equivalent fact pack); run without that setup, it can silently produce
-  few or no public facts, and a `compare` against it can then read
-  `NO_CHANGE` for a real public change rather than flagging the missing
-  evidence. See
-  [Producing Source Facts § the one trap](../use/producing-source-facts.md#the-one-trap-public-roots-must-match-how-headers-resolve)
-  before relying on this path — every mechanism in
-  [Evidence & Detectability](evidence-and-detectability.md) still applies to
-  what a *correctly configured* run can see, but correct configuration is
-  the load-bearing part here, not the bare command.
+  library needs source-level evidence rather than binary evidence: a real
+  translation unit (a test/example from the library itself, or a
+  purpose-written probe TU that instantiates the public API) built through
+  a real compile database or build integration, replayed via `dump
+  --sources`/`--build-info`, then compared the same way two binary
+  snapshots are compared. **This is deliberately not spelled out as a
+  single copy-pasteable command here** — getting every piece right (a real
+  TU to replay, a compile database or fact pack to replay it through,
+  public roots configured to match how the headers actually resolve) is
+  exactly the kind of setup [Producing Source Facts](../use/producing-source-facts.md)
+  and [Dump/Compare Flags](../use/dump-compare-flags.md) own and keep
+  current; a docs page maintained separately from those is the wrong place
+  for it to also live, per this whole site's own one-fact-one-place rule.
+  Skip that setup and the run can silently produce few or no public facts,
+  reading `NO_CHANGE` for a real change rather than flagging the missing
+  evidence — every mechanism in
+  [Evidence & Detectability](evidence-and-detectability.md) still applies
+  to what a *correctly configured* run can see; correct configuration is
+  the load-bearing part.
 - ODR (One Definition Rule) violations are a risk here too, as they are for
   any inline/template declaration in a *dynamic* library's public headers
   (the same declarations that make a dynamic library's own public inline

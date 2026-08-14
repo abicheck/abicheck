@@ -84,9 +84,15 @@ consequence applies, because it doesn't know the struct is used as a wire
 format at all.
 
 This means: **every data/wire-compatibility break that happens to also be an
-ABI-relevant change (layout, enum values) is still visible as an ordinary
-ABI finding** — you get the signal, just not the framing. What abicheck
-cannot see is a data-compatibility break with *no* ABI signature at all —
+ABI-relevant change (layout, enum values) surfaces as an ordinary ABI
+finding when the evidence for it was actually collected** — you get the
+signal, just not the framing, and only at the evidence depth that finding
+needs (see [Evidence & Detectability](evidence-and-detectability.md) for
+which `--depth`/evidence layer each kind requires; a stripped, headerless
+L0-only comparison sees neither layout nor enum-value facts at all, so a
+clean L0 result is not a wire-safety signal for either). What abicheck
+cannot see, at any evidence depth, is a data-compatibility break with *no*
+ABI signature at all —
 e.g. an application-level serialization routine that changes wire format
 independent of any C/C++ type it touches (a custom binary writer choosing a
 different byte order or field order, a protocol buffer schema evolved
