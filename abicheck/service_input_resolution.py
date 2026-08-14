@@ -42,6 +42,9 @@ function-local import also keeps this module out of ``service``'s import cycle
 
 from __future__ import annotations
 
+import dataclasses
+import os
+import shlex
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
@@ -51,6 +54,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .api_types import InputSpec
+    from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
 
@@ -142,6 +146,118 @@ def _seeded_includes(
     )
 
 
+def _merge_l3_compile_context(
+    explicit: CompileContext | None, derived: CompileContext | None
+) -> CompileContext | None:
+    """Fold *derived* (L3-derived, P0.3) ahead of *explicit* (user-supplied).
+
+    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``
+    (``cli_helpers_compare._merge_gcc_options``): the build-derived flags lead
+    and the caller's own explicit representation is appended after — so an
+    explicit, later token still wins any literal redefinition (e.g. a
+    caller's own ``-DFOO=2`` after a derived ``-DFOO=1`` — the compiler uses
+    the last ``-D`` for a given macro) without this function needing to know
+    which tokens actually conflict. ``derived`` with no tokens at all (a
+    matched compile unit with nothing ABI-relevant to forward — still real
+    evidence, see ``header_compile_context``'s own docstring) is a no-op here;
+    the caller still stamps ``parsed_with_build_context`` in that case since
+    context genuinely *was* resolved and applied (as the empty flag list).
+
+    Finding 2: "derived leads, explicit wins" only holds if *every*
+    representation of the explicit value actually lands after every derived
+    token in the rendered command — not just ``gcc_option_tokens`` entries.
+    Both header command builders (``dumper_ast_config._build_castxml_command``/
+    ``_build_clang_header_command``) render the structured ``sysroot`` field
+    and the free-form ``gcc_options`` string *before* ``gcc_option_tokens``,
+    so merely prepending ``derived.gcc_option_tokens`` to
+    ``explicit.gcc_option_tokens`` (as before) left ``explicit.sysroot``/
+    ``explicit.gcc_options`` — rendered earlier in the command — silently
+    overridden by a later, conflicting derived token instead of winning.
+    Folding both structured representations into trailing tokens (and
+    clearing the structured fields, so the command builders no longer also
+    emit them in their old, too-early position) puts every explicit
+    representation strictly after every derived one, regardless of which of
+    the three explicit channels (``sysroot``, ``gcc_options``,
+    ``gcc_option_tokens``) it came through.
+    """
+    if derived is None:
+        return explicit
+    if explicit is None:
+        return derived
+    explicit_tail: list[str] = []
+    if explicit.sysroot is not None:
+        explicit_tail.append(f"--sysroot={explicit.sysroot.as_posix()}")
+    if explicit.gcc_options:
+        try:
+            explicit_tail.extend(
+                shlex.split(explicit.gcc_options, posix=os.name != "nt")
+            )
+        except ValueError:
+            # Malformed --gcc-options must not abort the merge (mirrors
+            # _compiler_options.explicit_language_standard's own handling of
+            # the identical failure mode) -- fall back to forwarding it
+            # verbatim as one token so it is at least still present, rather
+            # than silently dropped.
+            explicit_tail.append(explicit.gcc_options)
+    return dataclasses.replace(
+        explicit,
+        sysroot=None,
+        gcc_options=None,
+        gcc_option_tokens=(
+            *derived.gcc_option_tokens,
+            *explicit_tail,
+            *explicit.gcc_option_tokens,
+        ),
+    )
+
+
+def _seeded_compile_context(
+    side: InputSpec, evidence: SideEvidence
+) -> tuple[CompileContext | None, bool, list[Callable[[], None]]]:
+    """Fold L3 ``CompileUnit``-derived ABI context onto this side (P0.3).
+
+    Genuinely applies the real build's compile context (standard, defines/
+    undefines, include search paths, sysroot, target triple, ABI-relevant
+    flags) to the L2 header-AST invocation when ``sources``/``build_info`` L3
+    evidence is available and a ``CompileUnit`` references one of this side's
+    headers — instead of only the advisory ``header_parse_context_drift``/
+    ``header_build_context_mismatch`` findings this repo already emitted for
+    the gap. See ``buildsource.header_compile_context`` for the header→
+    ``CompileUnit`` matching heuristic and the single-context/fail-closed-on-
+    ambiguity contract (``HeaderCompileContextAmbiguousError`` propagates
+    unchanged — a genuine ABI-relevant disagreement across compile units is
+    never silently resolved by picking one).
+
+    A no-op (``(evidence.compile, False, [])``) when there is no L3 evidence
+    or no headers to match, or when the matched evidence resolves to nothing
+    — the exact same behavior as before this function existed, so a caller
+    with no build evidence for this side sees no change (backward
+    compatible). Returns ``(context, applied, cleanups)`` — ``applied`` is
+    True only when a real L3 context was found and folded in, which is what
+    the caller uses to decide whether to stamp
+    ``AbiSnapshot.parsed_with_build_context``.
+    """
+    if not (side.sources or side.build_info) or not evidence.headers:
+        return evidence.compile, False, []
+    from .buildsource.l2_seed import derive_l2_compile_context
+
+    derived, cleanups = derive_l2_compile_context(
+        headers=list(evidence.headers),
+        build_info=side.build_info,
+        sources=side.sources,
+        build_config=None,
+        allow_inferred_build_query=False,
+        # Finding 3: fold the caller's own already-explicit context into
+        # ambiguity resolution so a field it already pins (e.g. an explicit
+        # -std=c++20) excuses a same-field-only disagreement across matched
+        # compile units instead of failing closed on it.
+        explicit=evidence.compile,
+    )
+    if derived is None:
+        return evidence.compile, False, cleanups
+    return _merge_l3_compile_context(evidence.compile, derived), True, cleanups
+
+
 def resolve_side_snapshot(
     side: InputSpec,
     evidence: SideEvidence,
@@ -174,8 +290,18 @@ def resolve_side_snapshot(
     """
     from . import service
 
-    includes, cleanups = _seeded_includes(side, evidence)
+    # Accumulated incrementally (not built from two independent calls before
+    # entering `try`) so a HeaderCompileContextAmbiguousError raised by
+    # _seeded_compile_context still drains whatever temp-build-dir cleanups
+    # _seeded_includes already created, instead of leaking them.
+    cleanups: list[Callable[[], None]] = []
     try:
+        includes, includes_cleanups = _seeded_includes(side, evidence)
+        cleanups.extend(includes_cleanups)
+        compile_ctx, context_applied, context_cleanups = _seeded_compile_context(
+            side, evidence
+        )
+        cleanups.extend(context_cleanups)
         snap = service.resolve_input(
             side.path,
             evidence.headers,
@@ -189,7 +315,7 @@ def resolve_side_snapshot(
             enable_debuginfod=enable_debuginfod,
             debuginfod_url=debuginfod_url,
             header_backend=header_backend,
-            compile=evidence.compile,
+            compile=compile_ctx,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             include_dependencies=side.include_dependencies,
@@ -200,6 +326,16 @@ def resolve_side_snapshot(
             include_labels=include_labels,
             notify=notify,
         )
+        # P0.3: a genuine L3 CompileUnit context was resolved and folded into
+        # this side's L2 header-AST invocation above -- record that so the
+        # existing header_parse_context_drift/header_build_context_mismatch
+        # advisory findings correctly stop firing for this snapshot (they key
+        # off this exact flag). Gated on snap.from_headers the same way every
+        # other parsed_with_build_context stamp site is (cli_dump_helpers.py):
+        # a snapshot that never actually parsed the headers (e.g. --dwarf-only
+        # ignored them) must not claim their parse used real build context.
+        if context_applied and snap.from_headers:
+            snap.parsed_with_build_context = True
         if side.sources or side.build_info:
             embed_side_build_source(
                 snap,

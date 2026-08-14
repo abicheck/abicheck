@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from ..compile_context import CompileContext
 from .inline import (
     BuildConfig,
     _run_cleanups,
@@ -240,6 +241,102 @@ def derive_l2_include_dirs(
         return [], []
 
 
+def derive_l2_compile_context(
+    headers: list[Path] | tuple[Path, ...],
+    build_info: Path | None,
+    sources: Path | None,
+    build_config: Path | None = None,
+    *,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    allow_inferred_build_query: bool = True,
+    explicit: CompileContext | None = None,
+) -> tuple[CompileContext | None, list[Callable[[], None]]]:
+    """Best-effort L2 :class:`CompileContext` derived from the build's L3
+    ``CompileUnit`` facts (P0.3).
+
+    *explicit* is the caller's own already-supplied L2 context (typically
+    ``evidence.compile``) — forwarded to :func:`~abicheck.buildsource.
+    header_compile_context.resolve_header_compile_context` unchanged, so a
+    field it already pins (e.g. an explicit ``-std=c++20``) excuses a
+    same-field-only disagreement across the matched compile units instead of
+    failing closed on it (Finding 3; see that function's own docstring).
+
+    Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
+    resolution precedence (explicit ``--build-info``/``--sources`` pack ->
+    trusted ``--config``/``--build-query`` -> ``build.compile_db`` ->
+    auto-discovered ``compile_commands.json`` -> the inferred build-system
+    query) via the same :func:`abicheck.buildsource.inline.collect_inline_pack`
+    call — kept as an independent call (rather than folded into
+    :func:`derive_l2_include_dirs`'s own single call) so this function's
+    return shape stays additive and every existing
+    ``derive_l2_include_dirs``/``seed_l2_includes`` caller and test is
+    unaffected; ``derive_l2_include_dirs`` already runs the identical
+    collection once per side for its own include-dir seeding, so a caller
+    using both pays for the L3 collection twice per side — an accepted,
+    documented cost (the collection itself is already re-run a third time by
+    ``embed_build_source`` later in the same pipeline for L3-L5 embedding, so
+    this is not a new class of repeated work).
+
+    Returns ``(context, cleanups)`` — ``context`` is ``None`` when there is
+    nothing to apply (mirrors :func:`derive_l2_include_dirs`'s ``[]``
+    degrade); the *cleanups* are the temp-build-dir thunks an inferred build
+    query may have appended, to be run only after the L2 parse has consumed
+    the derived context (same contract as ``derive_l2_include_dirs``).
+
+    Propagates :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
+    (P0.3's fail-closed multi-context case) rather than swallowing it — unlike
+    every other failure mode here (missing/malformed compile DB, no build
+    system, ...), which stays best-effort and degrades silently, a genuine
+    ABI-relevant disagreement across compile units must never be resolved by
+    silently guessing. The caller is responsible for running any accumulated
+    *cleanups* before letting the exception propagate further, since this
+    function's own ``except`` cannot both re-raise and return them.
+    """
+    from ..errors import HeaderCompileContextAmbiguousError
+    from .header_compile_context import resolve_header_compile_context
+
+    if (sources is None and build_info is None) or not headers:
+        return None, []
+    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
+    if cfg is None:
+        return None, []
+    cfg_trusted_for_query = build_config is not None or build_query is not None
+    compile_db_explicit = build_compile_db is not None or build_config is not None
+    cleanups: list[Callable[[], None]] = []
+    try:
+        base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(
+            build_info, sources
+        )
+        pack = collect_inline_pack(
+            sources=raw_sources,
+            build_info=raw_build_info,
+            build_config=cfg,
+            build_config_trusted_for_query=cfg_trusted_for_query,
+            compile_db_explicit=compile_db_explicit,
+            allow_inferred_build_query=allow_inferred_build_query,
+            base_build=base_build,
+            layers=("L3",),
+            defer_cleanup=cleanups,
+        )
+        build_evidence = pack.build_evidence if pack is not None else None
+        resolution = resolve_header_compile_context(
+            build_evidence, list(headers), explicit=explicit
+        )
+        if resolution.context is None:
+            _run_cleanups(cleanups)
+            return None, []
+        return resolution.context, cleanups
+    except HeaderCompileContextAmbiguousError:
+        # P0.3's fail-closed case: release any temp build dir this attempt
+        # created, then propagate — never resolved by silently guessing.
+        _run_cleanups(cleanups)
+        raise
+    except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
+        _run_cleanups(cleanups)
+        return None, []
+
+
 def seed_l2_includes(
     *,
     headers: list[Path] | tuple[Path, ...],
@@ -298,15 +395,19 @@ def seed_l2_includes(
     ):
         return incs, []
     derived, cleanups = derive_l2_include_dirs(
-        build_info, sources, build_config,
-        build_query=build_query, build_compile_db=build_compile_db,
+        build_info,
+        sources,
+        build_config,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
         allow_inferred_build_query=allow_inferred_build_query,
     )
     if not derived:
         return incs, []
     logger.info(
         "L2 header parse: seeded %d include dir(s) from the build's compile "
-        "database (no -I given).", len(derived),
+        "database (no -I given).",
+        len(derived),
     )
     seeded = [Path(d) for d in derived]
     if defer_cleanup is not None:
