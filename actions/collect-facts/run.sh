@@ -91,6 +91,8 @@ PUBLIC_ROOTS="${INPUT_PUBLIC_ROOTS:-}"
 LIBRARY="${INPUT_LIBRARY:-}"
 EXTRACTOR="${INPUT_EXTRACTOR:-auto}"
 COMPILER="${INPUT_COMPILER:-clang++}"
+PLUGIN_ARTIFACT="${INPUT_PLUGIN_ARTIFACT:-}"
+PLUGIN_ARTIFACT_SHA256="${INPUT_PLUGIN_ARTIFACT_SHA256:-}"
 INSTALL_DEPS="${INPUT_INSTALL_DEPS:-true}"
 LLVM_CMAKE_PREFIX="${INPUT_LLVM_CMAKE_PREFIX:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -203,6 +205,31 @@ _llvm_major_from_predefined_macros() {
   # incidentally, via a trailing `head -1` that always exits 0).
   printf '%s' "$defines" | grep -oE '#define __clang_major__ [0-9]+' | grep -oE '[0-9]+$'
   return 0
+}
+
+# Detect whether $COMPILER is Intel's oneAPI DPC++/C++ Compiler (icpx/icx) --
+# a downstream LLVM fork with its own patches and, per real testing (see
+# contrib/abicheck-clang-plugin/README.md's Intel oneAPI section), its own
+# C++-standard-library ABI choice on at least some builds -- not merely
+# "some Clang reporting the same __clang_major__". This is a strictly
+# narrower and separate question from LLVM major: two compilers can report
+# the identical major while being different, ABI-incompatible builds, which
+# is exactly why a same-major apt/distro Clang dev package is not a safe
+# substitute for this fork specifically (see _prepare_clang_plugin below).
+# __INTEL_LLVM_COMPILER is a predefined macro only Intel's fork defines,
+# so its mere presence is a reliable, vendor-scoped signal (unlike
+# __clang_major__, which every Clang-family compiler defines identically).
+# Always prints "true" or "false" (never empty) -- this has exactly two
+# answers, unlike the "empty means not found" contract the other detection
+# helpers above use for a value that can genuinely be unknown.
+_is_intel_llvm_compiler() {
+  local compiler="$1" defines
+  defines=$("$compiler" -dM -E -x c++ - < /dev/null 2>/dev/null) || true
+  if printf '%s' "$defines" | grep -q '#define __INTEL_LLVM_COMPILER'; then
+    echo "true"
+  else
+    echo "false"
+  fi
 }
 
 # Resolve a CMake prefix path for a vendor-bundled LLVM/Clang install, so
@@ -494,6 +521,82 @@ _prepare_wrapper() {
   _write_output "producer-version" ""
 }
 
+
+# Shared tail of the clang-plugin producer, once a plugin_so path is settled
+# (either freshly built, or handed in via plugin-artifact) -- smoke-test it
+# against the resolved $COMPILER, assemble the caller's compile flags, and
+# emit outputs/env. version_suffix is appended to producer-version verbatim
+# (e.g. "+experimental" for a still-uncertified vendor-fork build) so a
+# downstream consumer/CI receipt can tell an ordinary vanilla-Clang plugin
+# apart from one this Action itself does not consider certified.
+_finish_clang_plugin() {
+  local plugin_so="$1" major="$2" version_suffix="$3"
+  [[ -f "$plugin_so" ]] || _fail "plugin_so '$plugin_so' does not exist."
+
+  # Smoke-test: the plugin must at least load into the compiler without
+  # crashing, on a trivial translation unit, before we hand its path to the
+  # caller's real build. Writes its facts to an isolated scratch directory,
+  # NOT $OUTPUT -- that is the real pack the caller's build populates next,
+  # and phase: verify only checks "the pack has at least one file", so a
+  # smoke-test record left sitting in $OUTPUT would make a pack that never
+  # received real facts (build step skipped, wrong flags, wrong TU) look
+  # ready anyway.
+  local smoke_dir smoke_src smoke_out
+  smoke_dir=$(mktemp -d)
+  smoke_src="$smoke_dir/smoke.cpp"
+  smoke_out="$smoke_dir/out"
+  printf 'int abicheck_smoke_test() { return 0; }\n' > "$smoke_src"
+  mkdir -p "$smoke_out"
+  if ! "$COMPILER" -std=c++17 \
+      -fplugin="$plugin_so" \
+      -Xclang -plugin-arg-abicheck-facts -Xclang "out=$smoke_out" \
+      -fsyntax-only "$smoke_src" 2>"$smoke_dir/stderr.log"; then
+    cat "$smoke_dir/stderr.log" >&2
+    _fail "the Clang plugin at '$plugin_so' failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against (for plugin-artifact: the artifact does not match this job's resolved compiler, or was built for a different C++ standard-library ABI -- see contrib/abicheck-clang-plugin/README.md's Intel oneAPI section)."
+  fi
+  echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER)."
+  _reset_output_dir
+
+  # Assemble the exact flags the caller's build needs to add, one -Xclang
+  # pair per public root (public-roots= is repeatable per the plugin docs).
+  local plugin_flags="-fplugin=$plugin_so -Xclang -plugin-arg-abicheck-facts -Xclang out=$OUTPUT"
+  if [[ -n "$PUBLIC_ROOTS" ]]; then
+    local root resolved
+    while IFS= read -r root; do
+      if [[ -n "$root" ]]; then
+        resolved=$(_resolve_public_root "$root")
+        plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=$resolved"
+      fi
+    done <<< "$PUBLIC_ROOTS"
+  fi
+  [[ -n "$LIBRARY" ]] && plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang library=$LIBRARY"
+
+  # The plugin's identity is fully fixed the moment it's resolved here (built
+  # or handed in) -- the caller's later build populates the *pack*, it never
+  # changes the plugin binary itself -- so compute the complete documented
+  # identity (LLVM major + a content digest of the plugin) now rather than
+  # emitting a partial value at prepare and clearing it at verify (CodeRabbit
+  # review). Persisted via GITHUB_ENV so the separate phase: verify
+  # invocation of this script (a fresh process) can re-emit the same value
+  # instead of re-deriving or losing it.
+  local plugin_digest
+  plugin_digest=$(python3 -c '
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest()[:12])
+' "$plugin_so")
+  local producer_version="llvm-$major+plugin-sha256-$plugin_digest$version_suffix"
+
+  _write_env "ABICHECK_PLUGIN_SO" "$plugin_so"
+  _write_env "ABICHECK_PLUGIN_FLAGS" "$plugin_flags"
+  _write_env "ABICHECK_PRODUCER_VERSION" "$producer_version"
+  echo "::notice::producer: clang-plugin ready at $plugin_so. Add these flags to your compile command (also exported as \$ABICHECK_PLUGIN_FLAGS): $plugin_flags -- run your build next, then call this Action again with phase: verify to check the collected pack at '$OUTPUT'."
+  _write_output "producer" "clang-plugin"
+  _write_output "mode" "pack"
+  _write_output "pack-path" "$OUTPUT"
+  _write_output "ready" "false"
+  _write_output "producer-version" "$producer_version"
+}
+
 _prepare_clang_plugin() {
   command -v "$COMPILER" >/dev/null 2>&1 || _fail "compiler '$COMPILER' not found on PATH -- producer: clang-plugin needs the loading Clang available to detect and match its LLVM major."
   local version_output="" major
@@ -505,6 +608,31 @@ _prepare_clang_plugin() {
   [[ -n "$major" ]] || _fail "could not determine the Clang/LLVM major version '$COMPILER' is based on -- tried '__clang_major__' via '$COMPILER -dM -E -x c++ -' and parsing '$COMPILER --version':
 $version_output"
   echo "detected LLVM major $major from $COMPILER"
+
+  local is_intel_llvm
+  is_intel_llvm=$(_is_intel_llvm_compiler "$COMPILER")
+  [[ "$is_intel_llvm" == "true" ]] && echo "detected the Intel oneAPI DPC++/C++ Compiler fork (__INTEL_LLVM_COMPILER) -- see contrib/abicheck-clang-plugin/README.md's Intel oneAPI section for what this changes below."
+
+  # plugin-artifact: use an already-built, already-certified binary directly
+  # -- this is the recommended path for a vendor fork whose plugin-
+  # development SDK isn't available in this job (see action.yml's
+  # description). Skips the whole build step below; still goes through the
+  # identical smoke test every from-source build gets.
+  if [[ -n "$PLUGIN_ARTIFACT" ]]; then
+    [[ -f "$PLUGIN_ARTIFACT" ]] || _fail "plugin-artifact '$PLUGIN_ARTIFACT' does not exist -- expected a pre-built libabicheck-facts.* shared object."
+    if [[ -n "$PLUGIN_ARTIFACT_SHA256" ]]; then
+      local actual_sha256
+      actual_sha256=$(python3 -c '
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
+' "$PLUGIN_ARTIFACT")
+      [[ "$actual_sha256" == "$PLUGIN_ARTIFACT_SHA256" ]] \
+        || _fail "plugin-artifact-sha256 mismatch for '$PLUGIN_ARTIFACT': expected $PLUGIN_ARTIFACT_SHA256, got $actual_sha256 -- refusing to load an artifact whose digest does not match the pinned lock (see contrib/abicheck-clang-plugin/README.md's certified-artifact distribution model). A client repository should commit this digest, not the binary, and refresh it deliberately when the certified artifact changes."
+    fi
+    echo "using plugin-artifact '$PLUGIN_ARTIFACT' (skipping the CMake build)."
+    _finish_clang_plugin "$PLUGIN_ARTIFACT" "$major" ""
+    return
+  fi
 
   local bundled_cmake_prefix compiler_path
   compiler_path=$(command -v "$COMPILER" 2>/dev/null || true)
@@ -530,8 +658,27 @@ $version_output"
     # llvm-cmake-prefix doc previously asserted this auto-detects "true for
     # a sourced Intel oneAPI environment", which does not hold for the
     # actual package layout).
-    echo "::notice::\$CMPLR_ROOT is set ('$CMPLR_ROOT') but no LLVM/Clang CMake package was found at '$CMPLR_ROOT/lib/cmake/llvm' -- this is expected for a stock Intel oneAPI DPC++/C++ Compiler install, which ships IntelSYCL/IntelDPCPP CMake modules there instead, not an LLVM/Clang plugin-development SDK. Falling back to apt-get, which will likely fail for a vendor LLVM major. If you have a matching LLVM+Clang CMake package available (e.g. built separately to match '$COMPILER'), set the llvm-cmake-prefix input to it."
+    echo "::notice::\$CMPLR_ROOT is set ('$CMPLR_ROOT') but no LLVM/Clang CMake package was found at '$CMPLR_ROOT/lib/cmake/llvm' -- this is expected for a stock Intel oneAPI DPC++/C++ Compiler install, which ships IntelSYCL/IntelDPCPP CMake modules there instead, not an LLVM/Clang plugin-development SDK."
   fi
+
+  # Refuse the same-major apt/distro fallback for the Intel oneAPI fork
+  # specifically -- real testing (contrib/abicheck-clang-plugin/README.md's
+  # Intel oneAPI section) found the resulting plugin an ABI mismatch against
+  # the loading icpx/icx (RTTI typeinfo layout, and libstdc++-vs-libc++
+  # standard-library containers crossing the Clang plugin ABI boundary in
+  # ParseArgs) that crashes rather than merely fails to load -- a same-major
+  # __clang_major__ match does not mean a compatible build for this fork
+  # (contrib/abicheck-clang-plugin/AGENTS.md's "LLVM-major sensitivity"
+  # section already documents this for the matrix in general; this is the
+  # concrete, previously-silent case where the apt-get fallback below would
+  # otherwise have attempted it anyway). No such fallback exists to attempt
+  # for this fork here: only a genuine vendor-bundled SDK (bundled_cmake_
+  # prefix, e.g. llvm-cmake-prefix pointed at Intel's own LLVM/Clang CMake
+  # package) or a pre-certified plugin-artifact are accepted.
+  if [[ "$is_intel_llvm" == "true" && -z "$bundled_cmake_prefix" ]]; then
+    _fail "compiler '$COMPILER' is Intel's oneAPI DPC++/C++ Compiler (icpx/icx) -- a downstream LLVM fork, not vanilla Clang. Building the Clang facts plugin against a same-major distro/apt Clang development package (clang-$major/llvm-$major-dev/libclang-$major-dev) is refused here: real testing found the resulting plugin an ABI mismatch against Intel's driver (RTTI typeinfo, and libstdc++-vs-libc++ standard-library containers crossing the plugin ABI boundary) that crashes rather than merely fails to load -- see contrib/abicheck-clang-plugin/README.md's Intel oneAPI section. Supported paths: (1) set llvm-cmake-prefix to Intel's own matching LLVM/Clang CMake package if you have one, so the plugin builds against the exact fork; or (2) set plugin-artifact to a pre-built, pre-certified plugin .so for this exact icpx/icx build (recommended -- see the README section above for the certified-artifact distribution model). producer: replay or producer: wrapper (the portable, always-supported paths) remain the correct default for this compiler otherwise."
+  fi
+
   if [[ -z "$bundled_cmake_prefix" && "$INSTALL_DEPS" == "true" ]]; then
     if [[ "$(uname -s)" == "Linux" ]] && command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
       echo "::group::Install clang-$major dev packages for the plugin build"
@@ -565,8 +712,27 @@ $version_output"
   fi
   local cmake_hint
   cmake_hint=$(_cmake_configure_failure_hint "$bundled_cmake_prefix" "$llvm_cmake_dir" "$major")
+
+  # A vendor-bundled build against the Intel oneAPI fork specifically is
+  # still not a certified path (see README.md's Intel oneAPI section: only
+  # a minimal AST plugin has been verified end-to-end; the full plugin's
+  # own conformance/ingestion suite has not) -- pass the ABI knobs real
+  # testing found necessary (-fno-rtti, -stdlib=libc++) and mark the
+  # resulting producer-version as experimental so a downstream consumer/CI
+  # receipt can tell it apart from an ordinary certified vanilla-Clang
+  # build. Every other build path (vanilla apt.llvm.org/Apple/Debian Clang,
+  # or a non-Intel vendor toolchain) is completely unaffected -- both extra
+  # cmake defines and the version suffix are empty otherwise.
+  local extra_cmake_defines=() version_suffix=""
+  if [[ "$is_intel_llvm" == "true" ]]; then
+    extra_cmake_defines=(-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++)
+    version_suffix="+experimental-intel-llvm"
+    echo "::notice::Building against the vendor-bundled Intel oneAPI LLVM/Clang SDK -- passing -DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++ (the recipe real testing found necessary; see README.md). This build is NOT certified: only a minimal AST plugin has been verified end-to-end against icpx/icx, not this full plugin's own conformance suite. Prefer plugin-artifact with a build you have separately certified for production use."
+  fi
+
   cmake -S "$plugin_src" -B "$build_dir" \
     ${llvm_cmake_dir:+-DCMAKE_PREFIX_PATH="$llvm_cmake_dir/.."} \
+    "${extra_cmake_defines[@]}" \
     || _fail "cmake configure failed for the Clang plugin -- $cmake_hint"
   cmake --build "$build_dir" || _fail "cmake build failed for the Clang plugin."
   echo "::endgroup::"
@@ -575,68 +741,7 @@ $version_output"
   plugin_so=$(find "$build_dir" -maxdepth 2 -name 'libabicheck-facts.*' | head -1)
   [[ -n "$plugin_so" ]] || _fail "Clang plugin build did not produce libabicheck-facts.* under '$build_dir'."
 
-  # Smoke-test: the plugin must at least load into the compiler without
-  # crashing, on a trivial translation unit, before we hand its path to the
-  # caller's real build. Writes its facts to an isolated scratch directory,
-  # NOT $OUTPUT -- that is the real pack the caller's build populates next,
-  # and phase: verify only checks "the pack has at least one file", so a
-  # smoke-test record left sitting in $OUTPUT would make a pack that never
-  # received real facts (build step skipped, wrong flags, wrong TU) look
-  # ready anyway.
-  local smoke_dir smoke_src smoke_out
-  smoke_dir=$(mktemp -d)
-  smoke_src="$smoke_dir/smoke.cpp"
-  smoke_out="$smoke_dir/out"
-  printf 'int abicheck_smoke_test() { return 0; }\n' > "$smoke_src"
-  mkdir -p "$smoke_out"
-  if ! "$COMPILER" -std=c++17 \
-      -fplugin="$plugin_so" \
-      -Xclang -plugin-arg-abicheck-facts -Xclang "out=$smoke_out" \
-      -fsyntax-only "$smoke_src" 2>"$smoke_dir/stderr.log"; then
-    cat "$smoke_dir/stderr.log" >&2
-    _fail "the built Clang plugin failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against."
-  fi
-  echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER)."
-  _reset_output_dir
-
-  # Assemble the exact flags the caller's build needs to add, one -Xclang
-  # pair per public root (public-roots= is repeatable per the plugin docs).
-  local plugin_flags="-fplugin=$plugin_so -Xclang -plugin-arg-abicheck-facts -Xclang out=$OUTPUT"
-  if [[ -n "$PUBLIC_ROOTS" ]]; then
-    local root resolved
-    while IFS= read -r root; do
-      if [[ -n "$root" ]]; then
-        resolved=$(_resolve_public_root "$root")
-        plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=$resolved"
-      fi
-    done <<< "$PUBLIC_ROOTS"
-  fi
-  [[ -n "$LIBRARY" ]] && plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang library=$LIBRARY"
-
-  # The plugin's identity is fully fixed the moment it's built here -- the
-  # caller's later build populates the *pack*, it never changes the plugin
-  # binary itself -- so compute the complete documented identity (LLVM major
-  # + a content digest of the built plugin) now rather than emitting a
-  # partial value at prepare and clearing it at verify (CodeRabbit review).
-  # Persisted via GITHUB_ENV so the separate phase: verify invocation of
-  # this script (a fresh process) can re-emit the same value instead of
-  # re-deriving or losing it.
-  local plugin_digest
-  plugin_digest=$(python3 -c '
-import hashlib, sys
-print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest()[:12])
-' "$plugin_so")
-  local producer_version="llvm-$major+plugin-sha256-$plugin_digest"
-
-  _write_env "ABICHECK_PLUGIN_SO" "$plugin_so"
-  _write_env "ABICHECK_PLUGIN_FLAGS" "$plugin_flags"
-  _write_env "ABICHECK_PRODUCER_VERSION" "$producer_version"
-  echo "::notice::producer: clang-plugin ready at $plugin_so. Add these flags to your compile command (also exported as \$ABICHECK_PLUGIN_FLAGS): $plugin_flags -- run your build next, then call this Action again with phase: verify to check the collected pack at '$OUTPUT'."
-  _write_output "producer" "clang-plugin"
-  _write_output "mode" "pack"
-  _write_output "pack-path" "$OUTPUT"
-  _write_output "ready" "false"
-  _write_output "producer-version" "$producer_version"
+  _finish_clang_plugin "$plugin_so" "$major" "$version_suffix"
 }
 
 _verify_pack() {

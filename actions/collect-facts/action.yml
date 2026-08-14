@@ -81,14 +81,48 @@ inputs:
       Compiler used for the build (informational for replay/wrapper; for
       clang-plugin this selects which clang the plugin is built against and
       must match the clang that later loads it via -fplugin=). Vendor
-      compilers built on top of Clang are supported here too (e.g. Intel's
+      compilers built on top of Clang are recognized here too (e.g. Intel's
       icpx/icx) -- the real LLVM major is read from the compiler's own
       __clang_major__ macro, not parsed out of --version (which for icpx/icx
-      prints a vendor product version, not an LLVM number). See
-      llvm-cmake-prefix below for pointing the plugin build at that vendor's
-      bundled LLVM/Clang dev files.
+      prints a vendor product version, not an LLVM number), and the compiler
+      is separately probed for __INTEL_LLVM_COMPILER to detect the Intel
+      oneAPI DPC++/C++ Compiler fork specifically. See llvm-cmake-prefix and
+      plugin-artifact below -- for that fork, building against a same-major
+      apt/distro Clang development package is refused (real testing found
+      the result an ABI mismatch that crashes rather than merely fails to
+      load; see contrib/abicheck-clang-plugin/README.md's Intel oneAPI
+      section), so one of those two inputs is required instead.
     required: false
     default: 'clang++'
+  plugin-artifact:
+    description: >
+      clang-plugin only: path to an already-built, already-certified
+      libabicheck-facts.* shared object to use directly, skipping the CMake
+      build entirely. This is the recommended path for a vendor fork whose
+      plugin-development SDK isn't available in this job (Intel's icpx/icx
+      chief among them) -- build once against the exact toolchain image,
+      publish the artifact (a GitHub Release asset, an OCI artifact, or a
+      layer in the same pinned image as the compiler), and have the calling
+      workflow resolve/download it before this Action runs. The artifact is
+      still smoke-tested against the resolved `compiler` before use (same
+      check a from-source build gets), so a stale or mismatched artifact
+      fails loudly here rather than crashing or misbehaving inside your real
+      build. Pair with plugin-artifact-sha256 to pin the exact binary a
+      client repository's lock manifest names, rather than trusting whatever
+      the download step happened to fetch.
+    required: false
+    default: ''
+  plugin-artifact-sha256:
+    description: >
+      Expected sha256 digest of plugin-artifact. When set, the artifact's
+      digest is checked before it is smoke-tested or used, and a mismatch
+      fails the step -- this is the "lock manifest" half of the certified-
+      artifact distribution model (see contrib/abicheck-clang-plugin/
+      README.md): a client repository commits this digest (plus the
+      resolved compiler fingerprint), not the binary itself. Ignored when
+      plugin-artifact is not set.
+    required: false
+    default: ''
   install-deps:
     description: >
       Install system dependencies needed by the selected producer (clang/
@@ -201,6 +235,8 @@ runs:
         INPUT_LIBRARY: ${{ inputs.library }}
         INPUT_EXTRACTOR: ${{ inputs.extractor }}
         INPUT_COMPILER: ${{ inputs.compiler }}
+        INPUT_PLUGIN_ARTIFACT: ${{ inputs.plugin-artifact }}
+        INPUT_PLUGIN_ARTIFACT_SHA256: ${{ inputs.plugin-artifact-sha256 }}
         INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
         INPUT_LLVM_CMAKE_PREFIX: ${{ inputs.llvm-cmake-prefix }}
         ACTION_PATH: ${{ github.action_path }}

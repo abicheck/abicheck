@@ -423,6 +423,59 @@ class TestLlvmMajorFromPredefinedMacros:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestIsIntelLlvmCompiler:
+    """__INTEL_LLVM_COMPILER is a separate, narrower question than the LLVM
+    major above: two compilers can report the identical __clang_major__
+    while being different, ABI-incompatible builds (contrib/abicheck-clang-
+    plugin/README.md's Intel oneAPI section) -- this is the signal
+    _prepare_clang_plugin uses to refuse the same-major apt/distro fallback
+    for that specific fork."""
+
+    def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
+        script = tmp_path / "fake-compiler"
+        printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            f"{printf_lines}\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_true_for_intel_llvm_compiler(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(
+            tmp_path,
+            "#define __clang_major__ 22",
+            "#define __INTEL_LLVM_COMPILER 20260101",
+        )
+        result = _run_predicate(f'_is_intel_llvm_compiler "{compiler}"')
+        assert result.stdout.strip() == "true"
+
+    def test_false_for_vanilla_clang(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        result = _run_predicate(f'_is_intel_llvm_compiler "{compiler}"')
+        assert result.stdout.strip() == "false"
+
+    def test_false_when_compiler_does_not_support_dM(self, tmp_path: Path) -> None:
+        script = tmp_path / "fake-gcc"
+        script.write_text("#!/bin/sh\nexit 1\n")
+        script.chmod(0o755)
+        result = _run_predicate(f'_is_intel_llvm_compiler "{script}"')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "false"
+
+    def test_false_when_compiler_not_found(self) -> None:
+        result = _run_predicate('_is_intel_llvm_compiler "/no/such/compiler-xyz"')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "false"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestNormalizeWinPath:
     """Regression (Codex review): a native Windows env var like $CMPLR_ROOT
     (set by a vendor batch/setup step, e.g. "C:\\Program Files (x86)\\
@@ -895,6 +948,161 @@ class TestInvalidInputsRejected:
         )
         assert result.returncode == 1
         assert "producer: auto" in result.stdout
+
+
+def _fake_dm_compiler(
+    tmp_path: Path, *defines: str, name: str = "fake-compiler"
+) -> Path:
+    """A fake compiler that answers -dM -E with the given #define lines and
+    otherwise fails -- for tests that only exercise LLVM-major/vendor
+    detection, not an actual compile."""
+    script = tmp_path / name
+    printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+    script.write_text(
+        f'#!/bin/sh\nif [ "$1" = "-dM" ]; then\n{printf_lines}\n  exit 0\nfi\nexit 1\n'
+    )
+    script.chmod(0o755)
+    return script
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginIntelLlvmRefusal:
+    """P0 fix: producer: clang-plugin used to fall back to installing a
+    same-major apt/distro Clang dev package for ANY compiler, Intel's
+    icpx/icx oneAPI fork included -- real testing found the resulting
+    plugin an ABI mismatch (RTTI, libstdc++-vs-libc++) that crashes rather
+    than merely fails to load (contrib/abicheck-clang-plugin/README.md's
+    Intel oneAPI section). This fork must instead be refused outright
+    unless a genuine vendor-bundled SDK or a plugin-artifact was supplied."""
+
+    def test_refuses_apt_fallback_for_intel_llvm_without_vendor_sdk(
+        self, tmp_path: Path
+    ) -> None:
+        compiler = _fake_dm_compiler(
+            tmp_path,
+            "#define __clang_major__ 22",
+            "#define __INTEL_LLVM_COMPILER 20260101",
+        )
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_INSTALL_DEPS": "false",
+                "CMPLR_ROOT": "",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "Intel oneAPI DPC++/C++ Compiler" in result.stdout
+        assert "plugin-artifact" in result.stdout
+        assert "llvm-cmake-prefix" in result.stdout
+
+    def test_does_not_misfire_for_a_vanilla_same_major_clang(
+        self, tmp_path: Path
+    ) -> None:
+        # A vanilla Clang that merely shares an LLVM major with some real
+        # apt.llvm.org package must still be allowed to fall through to the
+        # ordinary apt-get path -- the refusal is scoped to the Intel
+        # oneAPI fork specifically, detected via __INTEL_LLVM_COMPILER, not
+        # to any particular major number.
+        compiler = _fake_dm_compiler(tmp_path, "#define __clang_major__ 18")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_INSTALL_DEPS": "false",
+                "CMPLR_ROOT": "",
+            },
+            tmp_path,
+        )
+        assert "Intel oneAPI DPC++/C++ Compiler" not in result.stdout
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginArtifactProducer:
+    """plugin-artifact: use an already-built, already-certified plugin
+    binary directly, skipping the CMake build entirely -- the recommended
+    path for a vendor fork whose plugin-development SDK isn't available in
+    this job (see action.yml's description and README.md's Intel oneAPI
+    section)."""
+
+    def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
+        # Unlike _fake_dm_compiler above, this one also succeeds a
+        # non--dM invocation (the smoke-test compile), since the artifact
+        # path must reach and pass that smoke test.
+        script = tmp_path / "fake-compiler"
+        printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            f"{printf_lines}\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_plugin_artifact_skips_build_and_succeeds(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"fake-plugin-binary")
+        output = tmp_path / "abicheck_inputs"
+        result, github_env, github_output = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+                "INPUT_OUTPUT": str(output),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs = _parse_kv_file(github_output)
+        assert outputs["producer"] == "clang-plugin"
+        assert outputs["mode"] == "pack"
+        assert outputs["ready"] == "false"
+        assert outputs["producer-version"].startswith("llvm-18+plugin-sha256-")
+        env = _parse_kv_file(github_env)
+        assert env["ABICHECK_PLUGIN_SO"] == str(artifact)
+
+    def test_plugin_artifact_sha256_mismatch_fails(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"fake-plugin-binary")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+                "INPUT_PLUGIN_ARTIFACT_SHA256": "0" * 64,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "sha256 mismatch" in result.stdout
+
+    def test_plugin_artifact_missing_file_fails(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": str(tmp_path / "does-not-exist.so"),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "does not exist" in result.stdout
 
 
 @pytest.mark.skipif(
@@ -1456,12 +1664,18 @@ class TestClangPluginSmokeTestIsolation:
         # toolchain to run at all, so assert the invariant statically
         # against the source instead (same technique as
         # test_smoke_compile_never_targets_output_dir above).
+        #
+        # _reset_output_dir now lives in the shared _finish_clang_plugin tail
+        # (both the from-source build and the plugin-artifact path route
+        # through it, so it's checked once rather than duplicated) -- widen
+        # the scanned region to start at _finish_clang_plugin, immediately
+        # before _prepare_clang_plugin, through _verify_pack.
         text = RUN_SH.read_text(encoding="utf-8")
-        start = text.index("_prepare_clang_plugin() {")
+        start = text.index("_finish_clang_plugin() {")
         end = text.index("\n_verify_pack() {", start)
         plugin_block = text[start:end]
         assert "_reset_output_dir\n" in plugin_block, (
-            "_prepare_clang_plugin must clear any stale pack at $OUTPUT "
+            "_finish_clang_plugin must clear any stale pack at $OUTPUT "
             "(via _reset_output_dir) before use, not a bare mkdir -p that "
             "leaves old source_facts/*.jsonl in place"
         )
