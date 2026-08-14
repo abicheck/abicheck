@@ -40,9 +40,12 @@ source recompiled against new headers (backward-compatible addition) —
 though not universally: it changes the function's *type*, so source taking
 its address for a function pointer (`void (*p)(int) = &f;` against
 `f(int, int = 0)`) stops compiling even in that same direction. In the
-*forward* direction the addition is a hard compile error outright, for any
-usage: new source built against *old* headers that don't declare the
-parameter (if that's a scenario your project supports at all). A newly
+*forward* direction the addition breaks only usages that actually depend on
+it — code that supplies the new argument (`f(1, 2)`), takes the function's
+address, or otherwise relies on the new type fails to compile against *old*
+headers that don't declare the parameter; an ordinary call in the old form
+(`f(1)`) still compiles fine either way, since the old headers never
+promised the parameter existed in the first place. A newly
 *added* exported symbol is invisible to an old, already-linked consumer
 (the backward direction is unaffected — nothing calls a symbol that didn't
 exist when it was built) but breaks the forward direction the moment a
@@ -69,10 +72,15 @@ It stops being enough the moment your deployment model allows any of these:
 - **You ship a plugin ecosystem** — third-party plugins are compiled at
   different times against different SDK versions, and both host-forward and
   host-backward compatibility matter depending on whether hosts or plugins
-  update first in practice. See
-  [Plugin Systems](../use/plugin-systems.md) for `compare --used-by`'s
-  consumer-scoped checking, which can validate one specific plugin/host pair
-  in either direction.
+  update first in practice. See [Plugin Systems](../use/plugin-systems.md)
+  for the two consumer-scoped checks that together cover one specific
+  plugin/host pair: `compare --used-by` scopes the comparison to a
+  consumer's actual, statically-linked imports, while `compare
+  --required-symbol` checks the host's own required entrypoints — the ones
+  it resolves dynamically via `dlopen`/`dlsym` rather than importing at link
+  time, which `--used-by` alone cannot see. A full plugin/host pair check
+  needs both; either one run alone only covers its own half of the
+  contract, in either direction.
 - **Header and binary versions can diverge** — a build system that
   vendors/pins headers separately from the binary it links (common in
   large, multi-team builds) needs both header→binary and binary→header
