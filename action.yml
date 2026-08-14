@@ -303,18 +303,21 @@ inputs:
     description: >
       Path to a trusted .abicheck.yml. Supplying this alone (not
       allow-build-query) is what permits its build.query (compile-DB
-      generation) command to run — see allow-build-query below. Used by scan
-      and dump modes, and by compare mode (--config).
+      generation) command to run for scan mode — see allow-build-query below.
+      Used by scan and dump modes, and by compare mode (--config).
     required: false
   allow-build-query:
     description: >
-      Deprecated no-op, kept only for backward compatibility — it neither
-      grants nor restricts running build-config's build.query command
-      (build-config alone does, per its own description above). abicheck also
-      always runs its own inferred, abicheck-authored cmake/bazel/make compile-DB
-      query whenever a sources input needs build context, independent of this
-      input: pointing abicheck at a source tree is itself the request to
-      analyse it. Used by scan and dump modes.
+      Dump-mode-only opt-in for the external extractor manifest
+      (--dump-manifest)'s own build-system query action; a real gate there,
+      not a no-op. For scan mode this input is ignored (CLI audit PR 5/5) —
+      scan's own build.query auto-runs whenever build-config is given
+      together with an explicitly pinned --depth, with no separate opt-in
+      needed. abicheck also always runs its own inferred,
+      abicheck-authored cmake/bazel/make compile-DB query whenever a sources
+      input needs build context, independent of this input: pointing
+      abicheck at a source tree is itself the request to analyse it. Used by
+      dump mode only.
     required: false
     default: 'false'
   depth:

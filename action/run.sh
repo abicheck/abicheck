@@ -1067,9 +1067,10 @@ elif [[ "$MODE" == "scan" ]]; then
     add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
   fi
 
-  if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
-    CMD+=(--allow-build-query)
-  fi
+  # --allow-build-query removed from `scan` (CLI audit PR 5/5): scan never
+  # reaches the ADR-032 QUERY_BUILD_SYSTEM gate dump's --allow-build-query
+  # still guards, so this input is silently ignored for scan mode now
+  # (dump mode above still honors it).
 
   # Format — scan only supports text and json. Normally caught early by
   # action/validate-inputs.sh; re-checked here (hard error, not a silent

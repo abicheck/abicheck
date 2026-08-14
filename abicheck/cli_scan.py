@@ -1181,11 +1181,12 @@ def _discover_scan_project_config(
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Trusted project .abicheck.yml (enables build.query with "
-    "--allow-build-query). Also supplies scope/suppression settings "
-    "(scope.public, scope.public_symbols, suppression.strict) the same way "
-    "`compare --config` does (CLI flags override); auto-discovered upward "
-    "from the current directory when omitted.",
+    help="Trusted project .abicheck.yml (enables build.query, auto-run when "
+    "an explicitly pinned deep level needs it). Also supplies scope/"
+    "suppression settings (scope.public, scope.public_symbols, "
+    "suppression.strict) the same way `compare --config` does (CLI flags "
+    "override); auto-discovered upward from the current directory when "
+    "omitted.",
 )
 @click.option(
     "--against",
@@ -1367,14 +1368,9 @@ def _discover_scan_project_config(
 )
 @pack_option  # ADR-049 D8: --pack (requires --against; see _COMPARISON_ONLY_FLAGS)
 @lang_option
-@click.option(
-    "--allow-build-query",
-    is_flag=True,
-    default=False,
-    hidden=True,  # deprecated no-op: build query runs automatically with --sources
-    help="Deprecated and ignored. With --sources, abicheck infers and runs the "
-    "build-system query (cmake/make/bazel) itself; no flag is needed.",
-)
+# --allow-build-query removed on `scan` (CLI audit PR 5/5): scan never reaches
+# the ADR-032 QUERY_BUILD_SYSTEM gate dump's --dump-manifest uses, so it only
+# suppressed one advisory note. `dump`'s own --allow-build-query is untouched.
 @click.option(
     "--format",
     "fmt",
@@ -1455,12 +1451,17 @@ def scan_cmd(
     contract_mode: str | None,
     pack_paths: tuple[Path, ...],
     lang: str,
-    allow_build_query: bool,
     fmt: str,
     output: Path | None,
     secondary_fmt: str | None,
     secondary_output: Path | None,
     verbose: bool,
+    # --allow-build-query no longer exists as a scan CLI option (CLI audit
+    # PR 5/5); this defaulted-False parameter stays only so
+    # resolve_effective_allow_query/_run_artifact_set's own signatures don't
+    # need to change (see cli_scan.py's --allow-build-query removal comment
+    # above scan_cmd's decorators for why removing the flag was safe here).
+    allow_build_query: bool = False,
     header_backend: str = "auto",
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,

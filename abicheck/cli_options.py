@@ -692,7 +692,8 @@ def compile_context_options(func: F) -> F:
         help="A single extra compiler flag passed to the header frontend verbatim "
         "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
         "e.g. --compiler-option=-include --compiler-option='some header.h'. "
-        "Merged with the deprecated --gcc-option if both are given.",
+        "Do not mix with the deprecated --gcc-option in the same invocation "
+        "(a usage error) -- pick one spelling.",
     )(func)
     func = click.option(
         "--gcc-option",
@@ -700,8 +701,8 @@ def compile_context_options(func: F) -> F:
         multiple=True,
         hidden=True,
         help="Deprecated alias for --compiler-option (kept functional; "
-        "superseded, not removed). Merged with --compiler-option if both "
-        "are given.",
+        "superseded, not removed). Do not mix with --compiler-option in the "
+        "same invocation (a usage error) -- pick one spelling.",
     )(func)
     func = click.option(
         "--gcc-options",
@@ -960,19 +961,37 @@ def _merge_compiler_aliases(
     module); a legacy value is used, with a stderr deprecation note, only when
     the new spelling wasn't given at all.
 
-    ``--compiler-option``/``--gcc-option`` deliberately do NOT concatenate
-    when both are given, even though each is independently repeatable: Click
-    hands back ``compiler_option_tokens``/``gcc_option_tokens`` as two
+    ``--compiler-option``/``--gcc-option`` deliberately do NOT merge when both
+    are given, even though each is independently repeatable and each is
+    individually documented as accumulating across its own repeated uses:
+    Click hands back ``compiler_option_tokens``/``gcc_option_tokens`` as two
     separately-collected tuples with no record of their original relative
-    argv order, so a naive concatenation can silently reorder flag/value
-    pairs across the two spellings -- e.g. ``--gcc-option=-include
-    --compiler-option='some header.h'`` naively concatenates to
-    ``('some header.h', '-include')``, separating ``-include`` from its own
-    operand (Codex review, PR #757: a real, silent header-parsing break, not
-    just a cosmetic ordering nit). Treating the pair with the same
-    new-wins-entirely-if-given precedence as the two scalars above avoids
-    ever interleaving tokens from both spellings.
+    argv order, so *any* fixed merge rule -- concatenation, or "one spelling
+    wins entirely" -- either reorders flag/value pairs across the two
+    spellings or silently drops real tokens the user asked for. Both were
+    tried and both are wrong (Codex review, PR #757, two rounds): naive
+    concatenation can separate ``-include`` from its own operand when the
+    pieces come from different spellings (e.g. ``--gcc-option=-include
+    --compiler-option='some header.h'`` -> ``('some header.h', '-include')``);
+    "new wins entirely" silently drops legitimate ``--gcc-option`` tokens the
+    moment even one ``--compiler-option`` is present, e.g. during an
+    incremental migration that adds new tokens via the new spelling while
+    older ones are still passed via the old one. Since neither a token-list
+    merge rule nor an order-recovery scheme can be correct without knowing
+    the real argv order Click doesn't expose across two options, mixing both
+    spellings is rejected outright instead of guessed at -- the user must use
+    exactly one spelling for this specific repeatable pair (unlike the two
+    scalars above, where "new wins" is unambiguous and safe).
     """
+    if compiler_option_tokens and gcc_option_tokens:
+        raise click.UsageError(
+            "--compiler-option and --gcc-option (its deprecated alias) "
+            "cannot both be given: each is independently repeatable, but "
+            "there's no way to recover their combined argv order from here, "
+            "and any fixed merge rule risks silently reordering a flag away "
+            "from its own operand or dropping real tokens. Use only "
+            "--compiler-option (preferred) or only --gcc-option, not both."
+        )
     deprecated_used: list[str] = []
     resolved_path: str | None
     if compiler_path is not None:
@@ -988,19 +1007,9 @@ def _merge_compiler_aliases(
         resolved_prefix = gcc_prefix
         if gcc_prefix is not None:
             deprecated_used.append("--gcc-prefix (use --compiler-prefix)")
-    resolved_tokens: tuple[str, ...]
-    if compiler_option_tokens:
-        resolved_tokens = tuple(compiler_option_tokens)
-        if gcc_option_tokens:
-            deprecated_used.append(
-                "--gcc-option (ignored: --compiler-option was also given; "
-                "the two are not merged, to avoid silently reordering "
-                "flag/value pairs across spellings)"
-            )
-    else:
-        resolved_tokens = tuple(gcc_option_tokens)
-        if gcc_option_tokens:
-            deprecated_used.append("--gcc-option (use --compiler-option)")
+    resolved_tokens = compiler_option_tokens or gcc_option_tokens
+    if gcc_option_tokens and not compiler_option_tokens:
+        deprecated_used.append("--gcc-option (use --compiler-option)")
     if deprecated_used:
         click.echo(
             "Note: deprecated compiler flag(s) still work but are superseded: "

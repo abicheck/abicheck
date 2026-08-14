@@ -1462,23 +1462,38 @@ def test_new_compiler_flag_wins_when_both_given(_compile_context_probe) -> None:
     assert "deprecated" not in result.output.lower()
 
 
-def test_compiler_option_tokens_new_wins_entirely_when_both_given(
+def test_compiler_option_tokens_alone_still_works(_compile_context_probe) -> None:
+    """--compiler-option alone (no --gcc-option) is unaffected by the mixing
+    rejection -- still fully functional, accumulates repeats normally."""
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--compiler-option", "-include", "--compiler-option", "some header.h"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "tokens=('-include', 'some header.h')" in result.output
+    assert "deprecated" not in result.output.lower()
+
+
+def test_compiler_option_tokens_mixing_both_spellings_is_rejected(
     _compile_context_probe,
 ) -> None:
-    """--compiler-option and --gcc-option deliberately do NOT concatenate when
-    both are given: Click hands back two independently-collected tuples with
-    no record of their original relative argv order, so naively concatenating
-    them can silently separate a flag from its own operand across spellings
-    (Codex review, PR #757 -- e.g. --gcc-option=-include plus a --compiler-option
-    value would land in the wrong position relative to each other). Whichever
-    spelling was given wins entirely, same precedence as the scalar flags."""
+    """--compiler-option and --gcc-option cannot both be given (a UsageError).
+
+    Two rounds of Codex review, two wrong fixes, both instructive: naive
+    concatenation could separate a flag from its own operand across
+    spellings (--gcc-option=-include + --compiler-option='some header.h' ->
+    ('some header.h', '-include')); "new spelling wins entirely" silently
+    dropped legitimate --gcc-option tokens the moment any --compiler-option
+    was present. Neither a merge rule nor an order-recovery scheme can be
+    correct without the real argv order Click doesn't expose across two
+    independently-collected tuples, so mixing is rejected outright instead
+    of guessed at (PR #757)."""
     result = CliRunner().invoke(
         _compile_context_probe,
         ["--compiler-option", "-DNEW", "--gcc-option", "-DOLD"],
     )
-    assert result.exit_code == 0, result.output
-    assert "tokens=('-DNEW',)" in result.output
-    assert "--gcc-option (ignored: --compiler-option was also given" in result.output
+    assert result.exit_code != 0
+    assert "cannot both be given" in result.output
 
 
 def test_compiler_option_tokens_legacy_alone_still_works(

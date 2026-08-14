@@ -283,10 +283,17 @@ def resolve_effective_allow_query(
     level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
     defines a build.query, together with an *explicitly pinned* deep level
     (--source-method/--depth, level_explicit), is itself consent to run that
-    query — making the user pass --allow-build-query as well for a level they
-    explicitly asked for is needless friction. Trusted = an explicit --config
-    path (build_config is not None here; an auto-discovered source-tree config
-    is resolved later in embed_build_source and never reaches this gate), so
+    query -- no separate opt-in needed for a level the user explicitly asked
+    for. ``allow_build_query`` stays a real parameter here (always ``False``
+    now that scan's own --allow-build-query CLI flag is gone, CLI audit
+    PR 5/5 -- confirmed via this function's own callers that nothing besides
+    the flag itself ever set it True, so the guard below is dead in the
+    ``True`` direction but harmless to leave for defensive clarity), guarding
+    a real effect: it auto-enables the query and returns an advisory
+    explaining why, rather than requiring an already-explicit level pin to
+    also carry a separate flag. Trusted = an explicit --config path
+    (build_config is not None here; an auto-discovered source-tree config is
+    resolved later in embed_build_source and never reaches this gate), so
     this never runs an attacker-controlled command. Crucially it does NOT fire
     for the default mode preset (a plain `scan`/`--audit` with `--sources` whose
     collect_mode is already non-off) — only an explicit deep level counts, so a
@@ -310,9 +317,7 @@ def resolve_effective_allow_query(
     if _cfg is not None and _cfg.query:
         advisory = (
             f"level {resolved.value} with a trusted --config defining "
-            "build.query: auto-enabled the query to collect L3+ evidence "
-            "(equivalent to --allow-build-query). Pass --allow-build-query "
-            "explicitly to silence this note."
+            "build.query: auto-enabled the query to collect L3+ evidence."
         )
         return True, advisory
     return allow_build_query, None

@@ -289,7 +289,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--compiler-option",
                 "--sysroot",
                 "--nostdinc",
-                "--allow-build-query",
             ],
         },
         {
