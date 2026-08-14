@@ -99,6 +99,7 @@ from .fact_provenance import (
 )
 from .finding_identity import SymbolIdentityIndex
 from .finding_identity_ctor_dtor import (
+    ctor_dtor_drift_old_by_new_key,
     iter_matched_function_pairs,
     reconcile_ctor_dtor_key_drift,
     synthetic_ctor_scope as _synthetic_ctor_scope,
@@ -850,9 +851,11 @@ def _detect_newly_deleted_functions(
 
     Only ABI-visible (PUBLIC / ELF_ONLY) functions are reported; hidden or
     internal functions are not part of the public ABI surface and must not
-    produce spurious BREAKING findings.
+    produce spurious BREAKING findings. ``drift_old_by_new_key`` covers a
+    reconciled ctor/dtor pair (PR #761 finding 2).
     """
     changes: list[Change] = []
+    drift_old_by_new_key = ctor_dtor_drift_old_by_new_key(old_all, new_all)
     new_elf = getattr(new_snapshot, "elf", None)
     exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
     old_exported = exported_symbol_names(
@@ -885,7 +888,7 @@ def _detect_newly_deleted_functions(
         # Skip functions that are not part of the public ABI surface.
         if f_new.visibility not in _PUBLIC_VIS:
             continue
-        f_old_any = old_all.get(mangled)
+        f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
         if f_old_any is not None and not f_old_any.is_deleted:
             kind = (
                 ChangeKind.FUNC_DELETED_DWARF
@@ -1295,10 +1298,12 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
+    def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
+        return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
+
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        key = func_fact_key(mangled, "param_defaults")
-        old_producer = fact_producer(old, key)
-        new_producer = fact_producer(new, key)
+        old_producer = _param_defaults_producer(old, f_old)
+        new_producer = _param_defaults_producer(new, f_new)
         if (
             old_producer is not None
             and new_producer is not None
@@ -1747,14 +1752,18 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     A per-pair check (rather than a whole-snapshot gate) also correctly
     handles a ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this
     fact's producer is recorded per *declaration*, not uniformly across the
-    whole snapshot.
+    whole snapshot. Looks each side up under ITS OWN ``mangled`` (PR #761
+    finding 3): a reconciled ctor/dtor pair's provenance lives under two
+    different keys.
     """
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if not both_known_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
+        if fact_producer(old, func_fact_key(f_old.mangled, "deprecated")) is None:
+            continue
+        if fact_producer(new, func_fact_key(f_new.mangled, "deprecated")) is None:
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
             changes.append(

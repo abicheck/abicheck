@@ -26,14 +26,23 @@ castxml needed, matching the style of ``test_explicit_ctor.py`` and
 
 from __future__ import annotations
 
+import dataclasses
 import string
 
 import pytest
 from hypothesis import given, strategies as st
 
+import abicheck.finding_identity_ctor_dtor as ctor_dtor_mod
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.diff_symbols import _diff_access_levels, _diff_functions
+from abicheck.diff_symbols import (
+    _detect_newly_deleted_functions,
+    _diff_access_levels,
+    _diff_func_deprecated,
+    _diff_functions,
+    _diff_param_defaults,
+)
+from abicheck.fact_provenance import func_fact_key
 from abicheck.finding_identity_ctor_dtor import (
     CtorDtorCanonicalKey,
     canonicalize_synthetic_ctor_dtor_key,
@@ -122,17 +131,19 @@ class TestCanonicalizeSyntheticCtorDtorKey:
 
 
 class TestFindCtorDtorKeyDriftMatches:
-    def test_unique_pair_matches(self) -> None:
+    def test_unique_bare_vs_qualified_pair_no_longer_matches(self) -> None:
+        """A unique canonical-form pair alone is not enough to merge --
+        PR #761 finding 1: a bare-old/qualified-new pair is indistinguishable
+        from a real global-to-namespace move, so the bare-vs-qualified
+        fallback is disabled regardless of uniqueness -- see the
+        bare-vs-qualified test group further down in this class."""
         old = {"__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "x")}
         new = {
             "__abicheck_ctor__abicheck_lab::Calculator()": _func(
                 "Calculator::Calculator", "y"
             )
         }
-        matches = find_ctor_dtor_key_drift_matches(old, new)
-        assert len(matches) == 1
-        assert matches[0].old_key == "__abicheck_ctor__Calculator()"
-        assert matches[0].new_key == "__abicheck_ctor__abicheck_lab::Calculator()"
+        assert find_ctor_dtor_key_drift_matches(old, new) == []
 
     def test_ambiguous_new_side_blocks_the_merge(self) -> None:
         """Two distinct classes sharing a bare name, each independently
@@ -166,7 +177,9 @@ class TestFindCtorDtorKeyDriftMatches:
         }
         assert find_ctor_dtor_key_drift_matches(old, new) == []
 
-    def test_default_and_copy_ctor_match_independently(self) -> None:
+    def test_default_and_copy_ctor_bare_vs_qualified_no_longer_match(self) -> None:
+        """Same shape as above, over two independent overloads at once --
+        neither merges now that the bare-vs-qualified fallback is disabled."""
         old = {
             "__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "d_old"),
             "__abicheck_ctor__Calculator(const Calculator&)": _func(
@@ -181,19 +194,7 @@ class TestFindCtorDtorKeyDriftMatches:
                 "Calculator::Calculator", "c_new"
             ),
         }
-        matches = find_ctor_dtor_key_drift_matches(old, new)
-        assert len(matches) == 2
-        pairs = {(m.old_key, m.new_key) for m in matches}
-        assert pairs == {
-            (
-                "__abicheck_ctor__Calculator()",
-                "__abicheck_ctor__abicheck_lab::Calculator()",
-            ),
-            (
-                "__abicheck_ctor__Calculator(const Calculator&)",
-                "__abicheck_ctor__abicheck_lab::Calculator(const Calculator&)",
-            ),
-        }
+        assert find_ctor_dtor_key_drift_matches(old, new) == []
 
     def test_never_applies_to_real_mangled_names(self) -> None:
         old = {"_ZN10CalculatorC1Ev": _func("Calculator::Calculator", "old")}
@@ -202,22 +203,27 @@ class TestFindCtorDtorKeyDriftMatches:
         }
         assert find_ctor_dtor_key_drift_matches(old, new) == []
 
-    # -- Codex review, PR #761 finding 1: restrict the fallback to a
-    # demonstrable legacy-bare/current-qualified pair -----------------------
+    # -- Codex review, PR #761 finding 1: the bare-vs-qualified fallback is
+    # permanently disabled -- investigated and found structurally unsound.
+    # A bare owner scope on a CURRENT-format snapshot means "no enclosing
+    # namespace at extraction time" just as validly as it means "predates
+    # PR #582" -- the two are indistinguishable from the keys alone, and no
+    # independent per-snapshot evidence exists to disambiguate them (see
+    # ``finding_identity_ctor_dtor.py``'s module docstring for the full
+    # investigation). So a bare/qualified pair -- in EITHER direction -- no
+    # longer merges, full stop: this is the safe "prefer under-merging"
+    # direction, not a regression in disguise. ------------------------------
 
-    def test_a_old_bare_new_qualified_still_merges(self) -> None:
-        """(a) Must not regress the original fix: legacy-bare old side,
-        current-qualified new side, same class -- still merges."""
+    def test_a_old_bare_new_qualified_no_longer_merges(self) -> None:
+        """(a) A bare-old/qualified-new pair -- indistinguishable from a
+        real global-to-namespace move -- must NOT merge."""
         old = {"__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "old")}
         new = {
             "__abicheck_ctor__abicheck_lab::Calculator()": _func(
                 "Calculator::Calculator", "new"
             )
         }
-        matches = find_ctor_dtor_key_drift_matches(old, new)
-        assert len(matches) == 1
-        assert matches[0].old_key == "__abicheck_ctor__Calculator()"
-        assert matches[0].new_key == "__abicheck_ctor__abicheck_lab::Calculator()"
+        assert find_ctor_dtor_key_drift_matches(old, new) == []
 
     def test_b_two_already_qualified_owners_do_not_merge(self) -> None:
         """(b) A genuine namespace move: both sides are already
@@ -227,19 +233,17 @@ class TestFindCtorDtorKeyDriftMatches:
         new = {"__abicheck_ctor__ns2::Foo()": _func("Foo::Foo", "new")}
         assert find_ctor_dtor_key_drift_matches(old, new) == []
 
-    def test_c_new_bare_old_qualified_still_merges(self) -> None:
-        """(c) Reverse direction: legacy-bare NEW side, current-qualified
-        OLD side (order must not matter) -- still merges."""
+    def test_c_new_bare_old_qualified_no_longer_merges(self) -> None:
+        """(c) Reverse direction: qualified-old/bare-new. Must also NOT
+        merge, for the identical reason as (a) -- direction doesn't matter,
+        the ambiguity is symmetric."""
         old = {
             "__abicheck_ctor__abicheck_lab::Calculator()": _func(
                 "Calculator::Calculator", "old"
             )
         }
         new = {"__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "new")}
-        matches = find_ctor_dtor_key_drift_matches(old, new)
-        assert len(matches) == 1
-        assert matches[0].old_key == "__abicheck_ctor__abicheck_lab::Calculator()"
-        assert matches[0].new_key == "__abicheck_ctor__Calculator()"
+        assert find_ctor_dtor_key_drift_matches(old, new) == []
 
     def test_d_two_identical_bare_keys_never_reach_this_module(self) -> None:
         """(d) Two identical bare keys on both sides join on the
@@ -271,7 +275,12 @@ class TestDiffFunctionsCtorDtorKeyDrift:
     through the public ``compare()`` entry point) -- the motivating
     napetrov/abicheck-bazel-lab ``Calculator`` scenario."""
 
-    def test_a_unchanged_ctor_across_key_format_drift_is_silent(self) -> None:
+    def test_a_bare_vs_qualified_ctor_drift_is_reported_not_merged(self) -> None:
+        """PR #761 finding 1: the bare-vs-qualified fallback is disabled, so
+        this now reports a removed+added pair rather than merging to
+        ``NO_CHANGE`` -- the safe "under-merge" direction, since abicheck
+        cannot tell this apart from a real global-to-namespace move (see
+        ``finding_identity_ctor_dtor.py``'s module docstring)."""
         old = _snap(
             "1.0", [_func("Calculator::Calculator", "__abicheck_ctor__Calculator()")]
         )
@@ -284,10 +293,12 @@ class TestDiffFunctionsCtorDtorKeyDrift:
                 )
             ],
         )
-        assert _diff_functions(old, new) == []
+        changes = _diff_functions(old, new)
+        kinds = [c.kind for c in changes]
+        assert kinds.count(ChangeKind.FUNC_REMOVED) == 1
+        assert kinds.count(ChangeKind.FUNC_ADDED) == 1
         result = compare(old, new)
-        assert result.verdict == Verdict.NO_CHANGE
-        assert result.changes == []
+        assert result.verdict != Verdict.NO_CHANGE
 
     def test_b_cross_namespace_collision_not_merged(self) -> None:
         old = _snap("1.0", [_func("Foo::Foo", "__abicheck_ctor__Foo(int)")])
@@ -322,7 +333,9 @@ class TestDiffFunctionsCtorDtorKeyDrift:
         assert ChangeKind.FUNC_REMOVED in kinds
         assert ChangeKind.FUNC_ADDED in kinds
 
-    def test_d_default_and_copy_ctor_each_merge_independently(self) -> None:
+    def test_d_default_and_copy_ctor_bare_vs_qualified_both_reported(self) -> None:
+        """Same shape as (a), for two independent overloads: neither
+        merges now that the fallback is disabled."""
         old = _snap(
             "1.0",
             [
@@ -348,14 +361,20 @@ class TestDiffFunctionsCtorDtorKeyDrift:
                 ),
             ],
         )
-        assert _diff_functions(old, new) == []
+        changes = _diff_functions(old, new)
+        kinds = [c.kind for c in changes]
+        assert kinds.count(ChangeKind.FUNC_REMOVED) == 2
+        assert kinds.count(ChangeKind.FUNC_ADDED) == 2
 
-    def test_e_destructor_key_drift_is_silent(self) -> None:
+    def test_e_destructor_bare_vs_qualified_drift_is_reported(self) -> None:
         old = _snap("1.0", [_func("Calculator::~Calculator", "~Calculator")])
         new = _snap(
             "2.0", [_func("Calculator::~Calculator", "~abicheck_lab::Calculator")]
         )
-        assert _diff_functions(old, new) == []
+        changes = _diff_functions(old, new)
+        kinds = [c.kind for c in changes]
+        assert kinds.count(ChangeKind.FUNC_REMOVED) == 1
+        assert kinds.count(ChangeKind.FUNC_ADDED) == 1
 
     def test_f_real_namespace_move_between_two_qualified_owners_reported(
         self,
@@ -375,7 +394,23 @@ class TestIterMatchedFunctionPairsExposesCtorDtorReconciliation:
     """Codex review, PR #761 finding 2: a reconciled ctor/dtor pair must
     also be visible to detectors OTHER than ``_check_function_signature`` --
     otherwise a real, non-key-format-drift property change on that same
-    pair (access narrowing, inline transition, ...) silently disappears."""
+    pair (access narrowing, inline transition, ...) silently disappears.
+
+    Finding 1 (above) permanently disables the bare-vs-qualified predicate
+    that used to be the only PRODUCER of such a reconciled pair, so these
+    tests force it back on via monkeypatch to exercise this ``iter_matched_
+    function_pairs`` WIRING itself, independent of that decision -- see
+    ``TestCtorDtorReconciliationConsumersWithForcedMatch``'s docstring for
+    the same reasoning applied to findings 2/3's other consumers.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _force_reconciliation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            ctor_dtor_mod,
+            "_is_legacy_qualification_drift_pair",
+            lambda old_key, new_key: True,
+        )
 
     def test_iter_matched_function_pairs_includes_reconciled_pair(self) -> None:
         old_map = {
@@ -471,6 +506,142 @@ class TestIterMatchedFunctionPairsExposesCtorDtorReconciliation:
         assert ChangeKind.FUNC_BECAME_INLINE in kinds
         assert ChangeKind.FUNC_REMOVED not in kinds
         assert ChangeKind.FUNC_ADDED not in kinds
+
+
+class TestCtorDtorReconciliationConsumersWithForcedMatch:
+    """Codex review, PR #761 findings 2 and 3: fix the WIRING that consumes
+    an already-resolved ctor/dtor synthetic-key drift match, independent of
+    whether the bare-vs-qualified predicate that used to PRODUCE such a
+    match is itself enabled. It no longer is (finding 1, permanently
+    disabled -- see ``TestFindCtorDtorKeyDriftMatches``'s
+    "finding 1" tests above and ``finding_identity_ctor_dtor.py``'s module
+    docstring), so these tests force
+    ``_is_legacy_qualification_drift_pair`` back on via monkeypatch purely
+    to exercise the two DOWNSTREAM consumers this fixes
+    (``_detect_newly_deleted_functions``, ``_diff_func_deprecated``,
+    ``_diff_param_defaults``) against a real reconciled pair -- the fix
+    itself lives entirely in how each consumer looks a reconciled pair up,
+    not in whether reconciliation currently fires in production.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _force_reconciliation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            ctor_dtor_mod,
+            "_is_legacy_qualification_drift_pair",
+            lambda old_key, new_key: True,
+        )
+
+    def test_finding_2_reconciled_pair_deletion_is_detected(self) -> None:
+        """A legacy-key constructor gains ``= delete`` while the new
+        snapshot already uses the qualified key. Before the fix,
+        ``_detect_newly_deleted_functions``'s ``old_all.get(mangled)`` used
+        the NEW key to probe the OLD function map and found nothing, so the
+        deletion silently read as ``NO_CHANGE``."""
+        old_ctor = _func("Calculator::Calculator", "__abicheck_ctor__Calculator()")
+        new_ctor = dataclasses.replace(
+            _func(
+                "Calculator::Calculator",
+                "__abicheck_ctor__abicheck_lab::Calculator()",
+            ),
+            is_deleted=True,
+        )
+        old_all = {old_ctor.mangled: old_ctor}
+        new_all = {new_ctor.mangled: new_ctor}
+        old_snap = _snap("1.0", [old_ctor])
+        new_snap = _snap("2.0", [new_ctor])
+
+        changes = _detect_newly_deleted_functions(old_all, new_all, old_snap, new_snap)
+        kinds = [c.kind for c in changes]
+        assert ChangeKind.FUNC_DELETED in kinds
+
+    def test_finding_2_end_to_end_through_diff_functions(self) -> None:
+        """Same scenario, through the full ``_diff_functions`` detector."""
+        old_ctor = _func("Calculator::Calculator", "__abicheck_ctor__Calculator()")
+        new_ctor = dataclasses.replace(
+            _func(
+                "Calculator::Calculator",
+                "__abicheck_ctor__abicheck_lab::Calculator()",
+            ),
+            is_deleted=True,
+        )
+        old = _snap("1.0", [old_ctor])
+        new = _snap("2.0", [new_ctor])
+        changes = _diff_functions(old, new)
+        kinds = [c.kind for c in changes]
+        assert ChangeKind.FUNC_DELETED in kinds
+
+    def _hybrid_snap(
+        self, version: str, functions: list[Function], provenance: dict[str, str]
+    ) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libtest.so.1",
+            version=version,
+            functions=functions,
+            variables=[],
+            types=[],
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance=provenance,
+        )
+
+    def test_finding_3_deprecated_transition_across_reconciled_pair_is_reported(
+        self,
+    ) -> None:
+        """A reconciled ctor/dtor pair whose new side gains
+        ``[[deprecated]]``, on a hybrid snapshot where provenance is
+        recorded separately under each side's own key. Before the fix,
+        looking both sides up under the single (new-side) ``mangled`` key
+        found the OLD snapshot's provenance entry missing, read the old
+        side as an unknown producer, and silently suppressed the
+        transition."""
+        old_key = "__abicheck_ctor__Calculator()"
+        new_key = "__abicheck_ctor__abicheck_lab::Calculator()"
+        old_ctor = _func("Calculator::Calculator", old_key)
+        new_ctor = dataclasses.replace(
+            _func("Calculator::Calculator", new_key), deprecated="use Bar instead"
+        )
+        old = self._hybrid_snap(
+            "1.0", [old_ctor], {func_fact_key(old_key, "deprecated"): "castxml"}
+        )
+        new = self._hybrid_snap(
+            "2.0", [new_ctor], {func_fact_key(new_key, "deprecated"): "castxml"}
+        )
+
+        changes = _diff_func_deprecated(old, new)
+        kinds = [c.kind for c in changes]
+        assert ChangeKind.FUNC_DEPRECATED_ADDED in kinds
+
+    def test_finding_3_param_defaults_provenance_looked_up_per_side(self) -> None:
+        """Sibling fix in ``_diff_param_defaults`` -- the identical
+        single-shared-key bug (``key = func_fact_key(mangled,
+        "param_defaults")`` probing both sides), caught while fixing
+        finding 3's own named site (root-cause fix, not a one-off patch,
+        per ``AGENTS.md``'s "Fix the cause, not the instance"). A removed
+        default value across a reconciled pair, on a hybrid snapshot, must
+        be reported."""
+        old_key = "__abicheck_ctor__Calculator()"
+        new_key = "__abicheck_ctor__abicheck_lab::Calculator()"
+        old_ctor = _func(
+            "Calculator::Calculator",
+            old_key,
+            params=[Param(name="x", type="int", default="0")],
+        )
+        new_ctor = _func(
+            "Calculator::Calculator",
+            new_key,
+            params=[Param(name="x", type="int", default=None)],
+        )
+        old = self._hybrid_snap(
+            "1.0", [old_ctor], {func_fact_key(old_key, "param_defaults"): "castxml"}
+        )
+        new = self._hybrid_snap(
+            "2.0", [new_ctor], {func_fact_key(new_key, "param_defaults"): "castxml"}
+        )
+
+        changes = _diff_param_defaults(old, new)
+        kinds = [c.kind for c in changes]
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in kinds
 
 
 # -- Property tests (AGENTS.md "Primitive-level property tests") -----------

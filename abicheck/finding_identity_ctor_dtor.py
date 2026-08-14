@@ -34,6 +34,19 @@ fallback (and the equivalent ``FUNC_ADDED`` on the new side), producing a
 spurious removed+added pair -- a false BREAKING finding on a class that
 never changed.
 
+**Current status: the bare-vs-qualified reconciliation this module was
+built to perform is disabled.** Investigation (PR #761 finding 1, detailed
+in the "Scope, deliberately narrow" section below) found the heuristic
+that decided "this is drift, not a real move" structurally unsound and
+found no independent evidence to replace it with, so
+:func:`find_ctor_dtor_key_drift_matches` currently never produces a match
+and the false-positive this module describes is, once again, reported
+rather than silently reconciled -- deliberately, since the alternative
+(occasionally hiding a real breaking namespace move) is worse. The
+canonicalization/uniqueness machinery and the ``iter_matched_function_pairs``
+wiring described below remain fully in place and exercised by tests; only
+the one predicate that used to gate a match on key shape is disabled.
+
 **Why this is NOT another attempt at the reverted namespace-alias-merging
 heuristics.** ``AGENTS.md``'s "Known gaps" section documents, at length,
 three reverted attempts to merge two *user source-level* declarations
@@ -80,26 +93,72 @@ is why this stays its own narrowly-scoped module rather than folding into
   independently gaining/losing an unrelated constructor, therefore never
   cross-merge: both sides would carry 2+ candidates for that bare name and
   the match is refused.
-- **Matches only a demonstrable legacy-bare/current-qualified pair --
-  never two already-qualified owners, and never two already-bare owners**
-  (Codex review, PR #761 follow-up). The legacy (pre-#582) key format
-  never carried a namespace qualifier at all, so an owner scope containing
-  no ``"::"`` is exactly the positive signal that side came from the old
-  format (or is a real, non-namespaced global class -- which coincides
-  harmlessly with an already-exact-key match and therefore never reaches
-  this fallback tier to begin with, since two identical bare keys join on
-  the exact-key tier before either candidate is ever considered
-  "unmatched"). Two owners that are BOTH already namespace-qualified
-  (``ns1::Foo`` vs ``ns2::Foo``) are two spellings that could only differ
-  by a REAL namespace move, not by key-format drift -- collapsing both to
-  the same bare canonical form and matching them anyway would silently
-  hide a genuine breaking namespace change as ``NO_CHANGE``. This module
-  therefore checks, in addition to canonical-form equality, that exactly
-  one of the two raw (pre-bare-strip) owner scopes contains ``"::"`` and
-  the other does not (:func:`_synthetic_key_raw_owner_scope`,
-  consulted directly on the *pair* of original owner strings, not only on
-  their post-strip canonical form) before treating a same-canonical-form
-  old/new pair as a reconciliation match.
+- **The bare-vs-qualified fallback is permanently disabled -- investigated
+  and found structurally unsound, not merely narrowed (Codex review, PR
+  #761 finding 1).** An earlier revision of this module matched a
+  canonical-form pair only when exactly one of the two raw (pre-bare-strip)
+  owner scopes contained ``"::"`` and the other did not, reasoning that a
+  bare owner scope is the positive signal that side predates PR #582. That
+  reasoning
+  does not hold: a *current*-format snapshot's non-namespaced (global)
+  class also always gets a bare key (``dumper_castxml.py``'s own comment:
+  "a non-namespaced class's qualified name is just its bare name, so this
+  is a no-op for the common case"). So a real, breaking move of a class
+  from the global namespace into a named one on two CURRENT-schema
+  snapshots produces the *identical* bare-old/qualified-new split as
+  genuine key-format drift, by construction -- there is no observation on
+  the pair of keys alone that tells the two apart. This is the same
+  category of unsound name-shape inference ``AGENTS.md``'s "Known gaps"
+  section already documents being tried and reverted three times for the
+  using-declaration/namespace-alias case, for the identical underlying
+  reason: no name-shape rule can tell which of two spellings is real and
+  which is drift, because both explanations produce the same string.
+
+  **Investigated whether any genuinely independent, per-snapshot evidence
+  exists to gate on instead -- none does.** ``AbiSnapshot`` (``model.py``)
+  carries no ``schema_version`` field at all: ``serialization.py``'s
+  ``schema_version`` is a value read from the JSON payload purely to
+  derive several ``*_facts_reliable`` booleans at load time (e.g.
+  ``clang_restrict_facts_reliable``), and every load re-stamps a
+  reserialized snapshot's ``schema_version`` to the current
+  ``SCHEMA_VERSION`` -- it is not a queryable fact on the in-memory object
+  a detector could branch on. Nor would a schema bump help here even if
+  one existed: cross-checking ``serialization.py``'s full v1-v25 history
+  comment against ``dumper_castxml.py``'s own "PR #582" commentary around
+  ``_function_mangled_name``'s ``qualified_scope`` parameter confirms the
+  ctor/dtor key-format change shipped WITHOUT any accompanying schema
+  bump -- so even a hypothetical "reject anything below schema version N"
+  rule could not distinguish a bare-format snapshot from a qualified-format
+  one, since both key formats can occur at the SAME schema version. The
+  only other candidate fields are ``git_commit``/``git_tag``/``created_at``
+  (schema v4 provenance) -- these record the *scanned library's* own build
+  provenance at dump time, not which version of abicheck's own
+  ``dumper_castxml.py`` produced the snapshot, so they carry no signal
+  about the key-format epoch either. There is, in short, no field on
+  ``AbiSnapshot`` today -- and none that could be retroactively added now,
+  since the ambiguity is already baked into already-serialized key
+  *strings* with no accompanying metadata -- that reliably answers "did
+  this snapshot's ctor/dtor keys use the old or new format".
+
+  **Decision: disable the fallback rather than ship a heuristic already
+  proven unsound by counterexample.** Per this file's own "known gaps
+  over risky reactive patches" convention and the "attempted twice,
+  reverted twice" discipline documented in ``AGENTS.md`` for the
+  structurally identical using-declaration case: prefer under-merging (the
+  pre-``ed6b1898`` behavior -- a spurious ``FUNC_REMOVED``/``FUNC_ADDED``
+  pair on an unchanged ctor/dtor moved across the PR #582 key-format
+  boundary, a visible, previously-accepted false positive) over
+  over-merging (silently collapsing a REAL, breaking global-to-namespace
+  move into ``NO_CHANGE``, which is strictly worse -- a hidden break is
+  worse than a noisy non-break). :func:`_is_legacy_qualification_drift_pair`
+  therefore now unconditionally returns ``False`` --
+  :func:`find_ctor_dtor_key_drift_matches` never produces a bare/qualified
+  match, regardless of uniqueness. The canonicalization and
+  one-to-one-uniqueness machinery is kept in place (not deleted) precisely
+  so a FUTURE fix has a real foundation to build on if abicheck ever grows
+  a genuine per-snapshot producer-version marker -- re-enabling the
+  fallback would then mean replacing only this one predicate's body, not
+  rebuilding the module.
 
 **Which detectors see a resolved match (Codex review, PR #761 finding 2).**
 A resolved ctor/dtor pair's old and new keys differ from each other by
@@ -313,42 +372,32 @@ def canonicalize_synthetic_ctor_dtor_key(key: str) -> CtorDtorCanonicalKey | Non
     return None
 
 
-def _synthetic_key_raw_owner_scope(key: str) -> str | None:
-    """Un-bare-stripped owner scope for a synthetic ctor/dtor key, or
-    ``None`` if *key* is not one.
-
-    Deliberately separate from :func:`canonicalize_synthetic_ctor_dtor_key`,
-    whose owner is always bare-stripped for grouping -- this is consulted
-    only by :func:`find_ctor_dtor_key_drift_matches`, to check the
-    legacy-bare-vs-current-qualified asymmetry a reconciliation match
-    requires (see this module's docstring). A raw owner scope that itself
-    contains ``"::"`` is namespace-qualified; one that doesn't is bare.
-    """
-    if is_synthetic_ctor_key(key):
-        body = key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
-        split = _split_synthetic_ctor_key_body(body)
-        if split is None or not split[0]:
-            return None
-        return split[0]
-    if is_synthetic_dtor_key(key):
-        scope = key[len(_SYNTHETIC_DTOR_KEY_PREFIX) :]
-        return scope or None
-    return None
-
-
 def _is_legacy_qualification_drift_pair(old_key: str, new_key: str) -> bool:
-    """True iff *old_key*/*new_key*'s raw owner scopes are a demonstrable
-    legacy-bare/current-qualified pair -- exactly one of the two is
-    namespace-qualified (contains ``"::"``), the other is bare. Both
-    qualified (a real cross-namespace move) or both bare (already handled,
-    harmlessly, by the exact-key tier before reaching this fallback) are
-    refused. See this module's docstring for the full reasoning.
+    """Always ``False`` (Codex review, PR #761 finding 1).
+
+    This predicate used to compare *old_key*/*new_key*'s raw (pre-bare-strip)
+    owner scopes and answer ``True`` when exactly one was namespace-qualified
+    (contained ``"::"``) and the other was bare, on the theory that a bare
+    owner scope is the positive signature of a pre-PR-#582 snapshot. That
+    theory is false: a CURRENT-format snapshot's non-namespaced (global)
+    class also always produces a bare owner scope (``dumper_castxml.py``'s
+    own comment: "a non-namespaced class's qualified name is just its bare
+    name, so this is a no-op for the common case"), so a real, breaking move
+    of a class from the global namespace into a named one between two
+    current-schema snapshots produces the *identical* bare-old/qualified-new
+    split as genuine key-format drift -- the two are indistinguishable from
+    the keys alone. Investigated whether any other per-snapshot evidence
+    (``AbiSnapshot.schema_version``, a producer/tool-version marker, ...)
+    could gate this instead -- none exists (see this module's docstring for
+    the full investigation) -- so this predicate is permanently disabled
+    rather than replaced with another name-shape heuristic. Kept as a named
+    function (returning a hardcoded ``False``), rather than deleted, so
+    :func:`find_ctor_dtor_key_drift_matches` reads as "this additional gate
+    never currently passes" and a future fix with a real evidence source has
+    exactly one function to replace.
     """
-    old_scope = _synthetic_key_raw_owner_scope(old_key)
-    new_scope = _synthetic_key_raw_owner_scope(new_key)
-    if old_scope is None or new_scope is None:
-        return False
-    return ("::" in old_scope) != ("::" in new_scope)
+    del old_key, new_key  # Unused -- see docstring: this gate is disabled.
+    return False
 
 
 @dataclass(frozen=True)
@@ -393,13 +442,17 @@ def find_ctor_dtor_key_drift_matches(
     uniqueness on BOTH sides at once (not just the side being looked up
     into), since here either side could independently be ambiguous.
 
-    A candidate pair unique on both sides is matched only when it is ALSO a
-    demonstrable legacy-bare/current-qualified pair
-    (:func:`_is_legacy_qualification_drift_pair`) -- two already-qualified
-    owners (``ns1::Foo`` vs ``ns2::Foo``) are refused even though they
-    canonicalize equal, since collapsing them would hide a real namespace
-    move as ``NO_CHANGE`` (Codex review, PR #761 follow-up; see this
-    module's docstring).
+    A candidate pair unique on both sides is additionally required to pass
+    :func:`_is_legacy_qualification_drift_pair`, which -- since PR #761
+    finding 1 -- always returns ``False``: the bare-vs-qualified owner-scope
+    heuristic that function used to implement was found structurally unsound
+    (a real global-to-namespace move produces the identical bare/qualified
+    split as genuine key-format drift, so the two cannot be told apart from
+    the keys alone) and no independent per-snapshot evidence exists to gate
+    on instead. This function therefore currently never produces a match;
+    see this module's docstring for the full investigation and the
+    "prefer under-merging" reasoning behind disabling rather than narrowing
+    the heuristic further.
     """
     old_groups: dict[CtorDtorCanonicalKey, list[str]] = {}
     for key in old_unmatched:
@@ -572,3 +625,39 @@ def iter_matched_function_pairs(
             yield key, f_old, f_new
     for m in _resolve_ctor_dtor_matches(old_map, new_map):
         yield m.new_key, old_map[m.old_key], new_map[m.new_key]
+
+
+def ctor_dtor_drift_old_by_new_key(
+    old_map: Mapping[str, Function], new_map: Mapping[str, Function]
+) -> dict[str, Function]:
+    """Map each NEW-side key reachable only via ctor/dtor synthetic-key
+    format-drift reconciliation (i.e. absent from *old_map* under its own
+    key) to the OLD-side :class:`~abicheck.model.Function` it resolves to.
+
+    For a caller that walks the *new* side keyed by mangled/synthetic name
+    and looks up its old peer with ``old_map.get(that_same_key)`` -- correct
+    for every ordinary function, but blind to a reconciled ctor/dtor pair,
+    whose old and new keys differ from each other by construction (Codex
+    review, ``diff_symbols.py:948``, PR #761 finding 2). Such a caller
+    should fall back to this mapping when the direct lookup misses, the
+    same way :func:`iter_matched_function_pairs` is the fallback for a
+    caller that walks BOTH sides together as pairs rather than looking one
+    side up from the other.
+
+    ``diff_symbols._detect_newly_deleted_functions`` is the motivating
+    caller: it walks ``new_all`` for a newly ``is_deleted`` function and
+    looks up ``old_all.get(mangled)`` using the NEW side's key to find the
+    (necessarily not-yet-deleted) old peer -- for a reconciled pair, that
+    lookup must use this mapping instead, or a legacy-key constructor that
+    gains ``= delete`` while the new snapshot already uses the qualified
+    key is read as having no old peer at all, and the deletion goes
+    unreported.
+
+    Read-only and independent per call, like :func:`iter_matched_function_pairs`
+    -- never mutates *old_map*/*new_map*, so a caller may build this once
+    per detector invocation against its own freshly-built maps.
+    """
+    return {
+        m.new_key: old_map[m.old_key]
+        for m in _resolve_ctor_dtor_matches(old_map, new_map)
+    }
