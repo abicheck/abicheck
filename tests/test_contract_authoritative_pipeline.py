@@ -734,6 +734,12 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             # The number that actually gated: this label is why the run
             # exited 4.
             assert entry["gate_contribution"] == result.exit_code
+            # Regression (Codex review, PR #753, fresh evidence): this
+            # synthetic entry bypasses _change_to_dict entirely, so it
+            # never picked up canonical_finding_id (schema 2.35) the way
+            # every other changes[] entry does -- exactly the entry most
+            # likely to be the response's only blocking finding.
+            assert entry["canonical_finding_id"]
 
 
 class TestEveryRendererTellsTheSameStory:

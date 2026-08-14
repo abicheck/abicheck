@@ -22,20 +22,29 @@ from __future__ import annotations
 import yaml
 
 _MERGE_TAG = "tag:yaml.org,2002:merge"
+_NULL_TAG = "tag:yaml.org,2002:null"
 
 
 def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
     """Raw scalar text of *key* in mapping *node*, resolving YAML merge
     keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself does:
-    a direct (non-merge) key always wins over a merged one, among multiple
-    merge sources the first-listed wins for a duplicate key, and among
-    multiple *direct* occurrences of the same key the LAST one wins --
-    mirroring ``yaml.safe_load()``'s own last-key-wins behavior for a
-    mapping with a duplicate key (Codex review, fresh evidence: an
-    earlier revision returned on the first direct match, so a duplicate
-    ``finding_id:`` entry resolved to a different value here than the
-    already-loaded, safe_load-produced mapping this result gets merged
-    into -- silently targeting the wrong finding).
+    a direct (non-merge) key always wins over a merged one (null included),
+    among multiple merge sources the first-listed wins for a duplicate
+    key, and among multiple *direct* occurrences of the same key the LAST
+    one wins -- mirroring ``yaml.safe_load()``'s own last-key-wins
+    behavior for a mapping with a duplicate key (Codex review, fresh
+    evidence: an earlier revision returned on the first direct match, so
+    a duplicate ``finding_id:`` entry resolved to a different value here
+    than the already-loaded, safe_load-produced mapping this result gets
+    merged into -- silently targeting the wrong finding).
+
+    A scalar resolving to YAML's null tag (``finding_id: null``/``~``/a
+    bare ``finding_id:``) returns ``None``, not the literal written text
+    (``"null"``/``"~"``/``""``) -- reading ``.value`` unconditionally
+    would otherwise turn an explicit null back into a non-empty string,
+    passing selector validation as a real, never-matching finding_id
+    instead of raising the intended missing-selector error (Codex review,
+    fresh evidence).
 
     (Also handles ``defaults: &d {finding_id: ...}`` followed by
     ``- <<: *d``, which bypasses a plain direct key/value scan entirely
@@ -44,6 +53,7 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
     """
     merged: str | None = None
     direct: str | None = None
+    direct_seen = False
     for k, v in node.value:
         if isinstance(k, yaml.ScalarNode) and k.tag == _MERGE_TAG:
             sources = v.value if isinstance(v, yaml.SequenceNode) else [v]
@@ -55,8 +65,10 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
             and k.value == key
             and isinstance(v, yaml.ScalarNode)
         ):
-            direct = str(v.value)  # Keep scanning -- a later dup key wins.
-    return direct if direct is not None else merged
+            # Keep scanning -- a later duplicate key wins.
+            direct_seen = True
+            direct = None if v.tag == _NULL_TAG else str(v.value)
+    return direct if direct_seen else merged
 
 
 def raw_finding_ids_by_index(text: str) -> dict[int, str]:
@@ -80,14 +92,16 @@ def raw_finding_ids_by_index(text: str) -> dict[int, str]:
         return {}
     if not isinstance(doc, yaml.MappingNode):
         return {}
-    seq = next(
-        (
-            v
-            for k, v in doc.value
-            if isinstance(k, yaml.ScalarNode) and k.value == "suppressions"
-        ),
-        None,
-    )
+    # Last occurrence wins for a duplicate top-level key too -- mirrors
+    # yaml.safe_load's own dict construction (Codex review, fresh
+    # evidence: an earlier revision picked the FIRST `suppressions:` via
+    # next(...), so a document with a duplicate top-level key could raw-
+    # extract from a different sequence than the one safe_load actually
+    # used, mismatching indices against the effective mapping).
+    seq: object = None
+    for k, v in doc.value:
+        if isinstance(k, yaml.ScalarNode) and k.value == "suppressions":
+            seq = v
     if not isinstance(seq, yaml.SequenceNode):
         return {}
     raw_ids: dict[int, str] = {}

@@ -70,3 +70,15 @@
   previously passed `Suppression.__post_init__`'s selector check as a
   real, standalone-sufficient selector that could never match any actual
   finding — a rule that loaded successfully but was permanently dead.
+- **Three more `suppression_yaml.py`/`cli_compare_fold.py` gaps of the
+  same shape** — a duplicate *top-level* `suppressions:` key now also
+  resolves to the last occurrence (mirroring `yaml.safe_load`'s own
+  dict-construction semantics, not just the earlier fix for a duplicate
+  key *within* one entry); `finding_id: null`/`~`/a bare `finding_id:`
+  now correctly resolve to `None` instead of the literal written text
+  (`"null"`/`"~"`/`""`), which previously passed selector validation as a
+  real, never-matching `finding_id`; and a missing-contract synthetic
+  `changes[]` entry (`--used-by`/`--required-symbol`, `cli_compare_fold.py`)
+  now also carries `canonical_finding_id`, closing the one entry that
+  bypasses `_change_to_dict` and is frequently the response's only
+  blocking finding.

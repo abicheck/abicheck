@@ -370,6 +370,7 @@ class _ScopedFold:
         for label in missing_labels:
             from .finding_identity import (
                 missing_contract_finding,
+                report_canonical_finding_id,
                 report_finding_id,
             )
 
@@ -385,6 +386,12 @@ class _ScopedFold:
                 # `decision_receipt`, which is keyed by exactly this id
                 # (Codex review, fresh evidence).
                 "finding_id": report_finding_id(identity),
+                # Same gap as finding_id above, for canonical_finding_id
+                # (schema 2.35): when a missing-contract label is the
+                # only blocking finding, it was the one entry in the
+                # whole response missing the field every other changes[]
+                # entry carries uniformly (Codex review, fresh evidence).
+                "canonical_finding_id": report_canonical_finding_id(identity),
                 "old_value": None,
                 "new_value": None,
                 "severity": "breaking" if blocks else "compatible",

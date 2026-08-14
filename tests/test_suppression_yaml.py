@@ -57,6 +57,46 @@ class TestRawFindingIdsByIndex:
         )
         assert raw_finding_ids_by_index(text) == {0: "111"}
 
+    def test_duplicate_top_level_suppressions_key_last_one_wins(self):
+        # Regression (Codex review, PR #753, round 8): yaml.safe_load()
+        # resolves a duplicate top-level key to the LAST value too -- an
+        # earlier revision picked the FIRST `suppressions:` sequence via
+        # next(...), which could raw-extract from a different sequence
+        # than the one safe_load actually used, mismatching indices.
+        text = (
+            "version: 1\nsuppressions:\n  - finding_id: '111'\n"
+            "suppressions:\n  - finding_id: '222'\n"
+        )
+        assert raw_finding_ids_by_index(text) == {0: "222"}
+
+    def test_explicit_null_finding_id_returns_none_not_the_literal_text(self):
+        # Regression (Codex review, PR #753, round 8): `finding_id: null`/
+        # `~`/a bare `finding_id:` all resolve to YAML's null tag, but the
+        # raw *written* text is "null"/"~"/"" respectively -- reading
+        # ScalarNode.value unconditionally would turn an explicit null
+        # back into a non-empty string, passing selector validation as a
+        # real finding_id that can never match anything.
+        text = (
+            "version: 1\nsuppressions:\n"
+            "  - finding_id: null\n    reason: a\n"
+            "  - finding_id: ~\n    reason: b\n"
+            "  - finding_id:\n    reason: c\n"
+        )
+        assert raw_finding_ids_by_index(text) == {}
+
+    def test_explicit_null_overrides_a_merged_value(self):
+        # A direct key -- even an explicit null -- always overrides a
+        # merged default, matching real yaml.safe_load dict construction
+        # (verified directly against PyYAML while designing this fix).
+        text = (
+            "d: &d {finding_id: '111'}\n"
+            "suppressions:\n"
+            "  - <<: *d\n"
+            "    finding_id: null\n"
+            "    reason: r\n"
+        )
+        assert raw_finding_ids_by_index(text) == {}
+
 
 class TestParseFindingId:
     def test_none_stays_none(self):
