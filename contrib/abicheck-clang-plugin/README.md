@@ -318,6 +318,91 @@ matrix version, so the plugin and the wrapper's extractor use the identical
 clang — the precondition for byte-for-byte parity). It is a standalone,
 non-blocking workflow, never a required abicheck-CI gate.
 
+## Intel oneAPI (icx/icpx) — experimental, not certified
+
+The plugin can load into Intel's oneAPI DPC++/C++ Compiler (`icpx`/`icx`), a
+downstream LLVM fork — but a same-major distro/apt Clang development package
+is **not** a safe substitute for building against it, and the
+`collect-facts` Action (`producer: clang-plugin`) refuses that fallback for
+this compiler specifically. This is a policy, not a hypothetical: a real,
+end-to-end evaluation against Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1
+(Clang 22 frontend, `__INTEL_LLVM_COMPILER`) found real ABI mismatches, not
+mere API differences:
+
+- **RTTI.** A plugin built with RTTI enabled fails to load into `icpx`
+  (`undefined symbol: _ZTIN5clang15PluginASTActionE`) — `icpx` itself is
+  built without RTTI, and this CMakeLists.txt's existing `LLVM_ENABLE_RTTI`
+  auto-detection has no way to see that unless a genuine Intel-provided LLVM
+  CMake package is on hand to report it. `-fno-rtti` is required
+  (`ABICHECK_PLUGIN_RTTI=off`, see below).
+- **C++ standard library.** `icpx`'s frontend stack uses libc++
+  (`std::__1::…`) even on Linux, while a plugin built against a stock
+  distro/apt Clang links libstdc++ (`std::__cxx11::…`). The Clang plugin
+  ABI crosses this boundary directly — `ParseArgs`'s own
+  `const std::vector<std::string> &args` parameter is exactly where this
+  was reproduced as a real crash (exit 139) the moment the plugin actually
+  reads the argument vector, which this plugin's `FactsAction::ParseArgs`
+  does immediately. `-stdlib=libc++` is required
+  (`ABICHECK_PLUGIN_STDLIB=libc++`, see below).
+- **Do not link `libclang-cpp`/`libLLVM` into the plugin as a workaround.**
+  That reproduces a *different* crash — duplicate LLVM command-line-option
+  registration between the plugin's bundled copy and the loading compiler's
+  own (`fatal error: inconsistency in registered CommandLine options`). The
+  plugin must stay an unlinked module whose Clang/LLVM symbols resolve from
+  the loading process, exactly as the existing "do not bundle LLVM" comment
+  in `CMakeLists.txt` already states for every other toolchain too.
+
+`CMakeLists.txt` exposes both knobs as explicit overrides
+(`-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++`) rather than
+guessing; every other toolchain's build is unaffected (`auto`, the default,
+changes nothing). `collect-facts` passes both automatically whenever it
+builds against a vendor-bundled Intel LLVM/Clang SDK (`llvm-cmake-prefix`
+resolves one) — see `run.sh`'s `_prepare_clang_plugin`.
+
+**What is verified, and what is not.** A minimal, argument-blind AST plugin
+built with this recipe loads and runs correctly under `icpx` — confirmed
+end to end. This plugin's own conformance suite
+(`tests/conformance.py`, differential parity against the wrapper) and
+`scan_flow.py` (pack → `abicheck dump --build-info` → binary matching) have
+**not** been run against `icpx` in this environment. Until they have, treat
+any from-source `icpx` build of this plugin as **experimental**, not a
+certified producer for a real release gate — `collect-facts` marks it as
+such in `producer-version` (an `+experimental-intel-llvm` suffix) precisely
+so a downstream consumer can tell it apart from an ordinary certified
+vanilla-Clang build. The default, always-supported paths for `icpx`/`icx`
+remain Full source scan (`dump --sources`) and the `abicheck-cc` wrapper
+(both exercise the real per-TU compiler context, including
+`icpx`'s SYCL host/device handling); the plugin is an optional, opt-in
+optimization on top of that, same as for every other toolchain.
+
+### Recommended distribution model: certified artifact, not same-major rebuild
+
+A vendor toolchain's own plugin-development SDK is rarely available as an
+apt/distro package (a *stock* `icpx`/`icx` install ships `IntelSYCL`/
+`IntelDPCPP` CMake modules, never `LLVMConfig.cmake`/`ClangConfig.cmake` —
+see `contrib/abicheck-clang-plugin/AGENTS.md`), and — per the ABI findings
+above — even when a matching upstream Clang *is* available, building
+against it instead of the vendor's own fork is not a safe substitute for
+this fork specifically. The one binary that is genuinely safe to load is one
+built against the *exact* toolchain image that will later load it, and
+that build is expensive and slow enough that it does not belong in every
+client repository's own CI run.
+
+The supported model is therefore: build the plugin **once** per exact
+toolchain fingerprint (compiler family + version + build date, the resolved
+frontend binary's own digest, target triple, RTTI/stdlib mode, this plugin's
+source commit), publish that binary as a versioned artifact (a GitHub
+Release asset, an OCI artifact, or a layer baked into the same pinned
+toolchain image that contains the compiler), and have each consuming
+workflow point `collect-facts`'s `plugin-artifact` input at it — optionally
+pinned with `plugin-artifact-sha256`. A client repository commits the lock
+(the fingerprint fields plus the artifact digest), not the binary itself;
+an air-gapped deployment that must vendor the `.so` alongside the lock is an
+explicit, opt-in exception to that, not the default. `collect-facts` still
+runs the same smoke test against a supplied `plugin-artifact` that a
+from-source build gets, so a stale or mismatched artifact fails loudly
+before it ever reaches your real build.
+
 ## Compiler fallbacks (documented, not required)
 
 A build that cannot load a Clang plugin can still feed the same

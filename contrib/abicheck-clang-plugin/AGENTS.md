@@ -49,6 +49,20 @@ A build of this plugin only loads into the exact clang it was built against
   `ClangConfig.cmake`). Building against that fork's *own* source at the
   matching release commit is the only reliable path if support is ever
   wanted; a green matrix leg here is not evidence toward that.
+  **Confirmed, not just theorized, for Intel's fork**: real testing against
+  a real `icpx` install found a same-major distro Clang build both (a)
+  fails to load outright with RTTI enabled and (b) crashes once it *does*
+  load, from a libstdc++-vs-libc++ standard-library ABI mismatch crossing
+  the Clang plugin interface — see README.md's "Intel oneAPI (icx/icpx) —
+  experimental, not certified" section for the full findings and the
+  `ABICHECK_PLUGIN_RTTI`/`ABICHECK_PLUGIN_STDLIB` CMake overrides this
+  produced. `actions/collect-facts/run.sh`'s `_prepare_clang_plugin`
+  refuses the same-major apt fallback for this specific fork (detected via
+  the `__INTEL_LLVM_COMPILER` predefined macro) rather than silently
+  attempting a build known to produce a broken artifact — don't revert that
+  refusal to "fix" a user's build failure; point them at `llvm-cmake-prefix`
+  (a genuine vendor SDK) or `plugin-artifact` (a pre-certified binary)
+  instead, per the README's recommended distribution model.
 - This asymmetry is *why* the plugin is optional infrastructure: Full source
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing

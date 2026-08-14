@@ -423,6 +423,93 @@ class TestLlvmMajorFromPredefinedMacros:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestIsIntelLlvmCompiler:
+    """__INTEL_LLVM_COMPILER is a separate, narrower question than the LLVM
+    major above: two compilers can report the identical __clang_major__
+    while being different, ABI-incompatible builds (contrib/abicheck-clang-
+    plugin/README.md's Intel oneAPI section) -- this is the signal
+    _prepare_clang_plugin uses to refuse the same-major apt/distro fallback
+    for that specific fork."""
+
+    def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
+        script = tmp_path / "fake-compiler"
+        printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            f"{printf_lines}\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_true_for_intel_llvm_compiler(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(
+            tmp_path,
+            "#define __clang_major__ 22",
+            "#define __INTEL_LLVM_COMPILER 20260101",
+        )
+        result = _run_predicate(f'_is_intel_llvm_compiler "{compiler}"')
+        assert result.stdout.strip() == "true"
+
+    def test_false_for_vanilla_clang(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        result = _run_predicate(f'_is_intel_llvm_compiler "{compiler}"')
+        assert result.stdout.strip() == "false"
+
+    def test_false_when_compiler_does_not_support_dM(self, tmp_path: Path) -> None:
+        script = tmp_path / "fake-gcc"
+        script.write_text("#!/bin/sh\nexit 1\n")
+        script.chmod(0o755)
+        result = _run_predicate(f'_is_intel_llvm_compiler "{script}"')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "false"
+
+    def test_true_for_large_macro_dump_with_match_near_the_start(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): the previous implementation piped the
+        # captured macro dump through `printf ... | grep -q ...` under this
+        # script's global `set -o pipefail` -- `grep -q` exits as soon as it
+        # finds a match. If the match comes early, relative to a large
+        # remaining dump (icpx's own -dM -E output runs to hundreds/
+        # thousands of lines), grep can close the pipe's read end while
+        # `printf` (writing from a real subprocess, since it's piped) is
+        # still blocked writing the rest into a full pipe buffer -- SIGPIPE
+        # kills that printf, and under pipefail the pipeline's exit status
+        # reflects the killed writer, not the real match, silently taking
+        # the "false" branch below. Put the real match FIRST, then pad well
+        # past a typical 64KB pipe buffer, so grep can exit long before
+        # printf finishes writing.
+        script = tmp_path / "fake-compiler-large-dump"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            "  printf '#define __INTEL_LLVM_COMPILER 20260101\\n'\n"
+            "  i=0\n"
+            "  while [ $i -lt 20000 ]; do\n"
+            "    printf '#define ABICHECK_PADDING_DEFINE_%d 1\\n' \"$i\"\n"
+            "    i=$((i + 1))\n"
+            "  done\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        result = _run_predicate(f'_is_intel_llvm_compiler "{script}"')
+        assert result.stdout.strip() == "true"
+
+    def test_false_when_compiler_not_found(self) -> None:
+        result = _run_predicate('_is_intel_llvm_compiler "/no/such/compiler-xyz"')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "false"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestNormalizeWinPath:
     """Regression (Codex review): a native Windows env var like $CMPLR_ROOT
     (set by a vendor batch/setup step, e.g. "C:\\Program Files (x86)\\
@@ -895,6 +982,323 @@ class TestInvalidInputsRejected:
         )
         assert result.returncode == 1
         assert "producer: auto" in result.stdout
+
+
+def _fake_dm_compiler(
+    tmp_path: Path, *defines: str, name: str = "fake-compiler"
+) -> Path:
+    """A fake compiler that answers -dM -E with the given #define lines and
+    otherwise fails -- for tests that only exercise LLVM-major/vendor
+    detection, not an actual compile."""
+    script = tmp_path / name
+    printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+    script.write_text(
+        f'#!/bin/sh\nif [ "$1" = "-dM" ]; then\n{printf_lines}\n  exit 0\nfi\nexit 1\n'
+    )
+    script.chmod(0o755)
+    return script
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginIntelLlvmRefusal:
+    """P0 fix: producer: clang-plugin used to fall back to installing a
+    same-major apt/distro Clang dev package for ANY compiler, Intel's
+    icpx/icx oneAPI fork included -- real testing found the resulting
+    plugin an ABI mismatch (RTTI, libstdc++-vs-libc++) that crashes rather
+    than merely fails to load (contrib/abicheck-clang-plugin/README.md's
+    Intel oneAPI section). This fork must instead be refused outright
+    unless a genuine vendor-bundled SDK or a plugin-artifact was supplied."""
+
+    def test_refuses_apt_fallback_for_intel_llvm_without_vendor_sdk(
+        self, tmp_path: Path
+    ) -> None:
+        compiler = _fake_dm_compiler(
+            tmp_path,
+            "#define __clang_major__ 22",
+            "#define __INTEL_LLVM_COMPILER 20260101",
+        )
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_INSTALL_DEPS": "false",
+                "CMPLR_ROOT": "",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "Intel oneAPI DPC++/C++ Compiler" in result.stdout
+        assert "plugin-artifact" in result.stdout
+        assert "llvm-cmake-prefix" in result.stdout
+
+    def test_does_not_misfire_for_a_vanilla_same_major_clang(
+        self, tmp_path: Path
+    ) -> None:
+        # A vanilla Clang that merely shares an LLVM major with some real
+        # apt.llvm.org package must still be allowed to fall through to the
+        # ordinary apt-get path -- the refusal is scoped to the Intel
+        # oneAPI fork specifically, detected via __INTEL_LLVM_COMPILER, not
+        # to any particular major number.
+        compiler = _fake_dm_compiler(tmp_path, "#define __clang_major__ 18")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_INSTALL_DEPS": "false",
+                "CMPLR_ROOT": "",
+            },
+            tmp_path,
+        )
+        assert "Intel oneAPI DPC++/C++ Compiler" not in result.stdout
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginArtifactProducer:
+    """plugin-artifact: use an already-built, already-certified plugin
+    binary directly, skipping the CMake build entirely -- the recommended
+    path for a vendor fork whose plugin-development SDK isn't available in
+    this job (see action.yml's description and README.md's Intel oneAPI
+    section)."""
+
+    def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
+        # Unlike _fake_dm_compiler above, this one also succeeds a
+        # non--dM invocation (the smoke-test compile), since the artifact
+        # path must reach and pass that smoke test. It also has to write a
+        # real, minimal abicheck_inputs pack into the out= directory the
+        # smoke test passes, since _finish_clang_plugin now requires a real
+        # TU record there (Codex review: a wrong/stale artifact could
+        # otherwise dlopen cleanly, register no "abicheck-facts" action,
+        # and exit 0 without ever emitting facts) -- a fake compiler that
+        # only exits 0 no longer models a genuine plugin load.
+        script = tmp_path / "fake-compiler"
+        printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            f"{printf_lines}\n"
+            "  exit 0\n"
+            "fi\n"
+            'outdir=""\n'
+            'for arg in "$@"; do\n'
+            '  case "$arg" in\n'
+            '    out=*) outdir="${arg#out=}" ;;\n'
+            "  esac\n"
+            "done\n"
+            'if [ -n "$outdir" ]; then\n'
+            '  python3 -c "\n'
+            "import sys\n"
+            "from abicheck.buildsource.inputs_emit import init_inputs_pack, append_source_facts\n"
+            "from abicheck.buildsource.source_abi import SourceAbiTu\n"
+            "init_inputs_pack(sys.argv[1], library='fake')\n"
+            "append_source_facts(sys.argv[1], [SourceAbiTu(tu_id='cu://smoke', target_id='target://fake', source='smoke.cpp')])\n"
+            '" "$outdir" || exit 1\n'
+            "fi\n"
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_plugin_artifact_skips_build_and_succeeds(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"fake-plugin-binary")
+        output = tmp_path / "abicheck_inputs"
+        result, github_env, github_output = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+                "INPUT_OUTPUT": str(output),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs = _parse_kv_file(github_output)
+        assert outputs["producer"] == "clang-plugin"
+        assert outputs["mode"] == "pack"
+        assert outputs["ready"] == "false"
+        assert outputs["producer-version"].startswith("llvm-18+plugin-sha256-")
+        env = _parse_kv_file(github_env)
+        assert env["ABICHECK_PLUGIN_SO"] == str(artifact)
+
+    def test_plugin_artifact_sha256_mismatch_fails(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"fake-plugin-binary")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+                "INPUT_PLUGIN_ARTIFACT_SHA256": "0" * 64,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "sha256 mismatch" in result.stdout
+
+    def test_plugin_artifact_missing_file_fails(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": str(tmp_path / "does-not-exist.so"),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "does not exist" in result.stdout
+
+    def test_plugin_artifact_that_emits_no_facts_fails(self, tmp_path: Path) -> None:
+        # Regression (Codex review): a loadable-but-wrong .so (dlopen
+        # succeeds, but it never registers the "abicheck-facts" action)
+        # would previously pass the smoke test on exit code alone. A
+        # compiler that exits 0 without ever writing a real pack into out=
+        # must now fail the smoke test instead of being accepted.
+        script = tmp_path / "fake-compiler-no-facts"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            "  printf '#define __clang_major__ 18\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"loadable-but-not-really-the-plugin")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(script),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "emitted no valid facts" in result.stdout
+
+    def test_plugin_artifact_with_invalid_pack_contents_fails(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): validate_inputs_pack() can return a
+        # positive tu_count *and* report.errors at once (e.g. duplicate
+        # tu_ids) -- a stale/incompatible artifact that emits at least one
+        # readable-but-invalid TU record must still fail the smoke test,
+        # not just a zero-TU pack.
+        script = tmp_path / "fake-compiler-duplicate-tu"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            "  printf '#define __clang_major__ 18\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            'outdir=""\n'
+            'for arg in "$@"; do\n'
+            '  case "$arg" in\n'
+            '    out=*) outdir="${arg#out=}" ;;\n'
+            "  esac\n"
+            "done\n"
+            'if [ -n "$outdir" ]; then\n'
+            '  python3 -c "\n'
+            "import sys\n"
+            "from abicheck.buildsource.inputs_emit import init_inputs_pack, append_source_facts\n"
+            "from abicheck.buildsource.source_abi import SourceAbiTu\n"
+            "init_inputs_pack(sys.argv[1], library='fake')\n"
+            "append_source_facts(sys.argv[1], [\n"
+            "    SourceAbiTu(tu_id='cu://smoke', target_id='target://fake', source='smoke.cpp'),\n"
+            "    SourceAbiTu(tu_id='cu://smoke', target_id='target://fake', source='smoke.cpp'),\n"
+            "])\n"
+            '" "$outdir" || exit 1\n'
+            "fi\n"
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"loadable-but-emits-an-invalid-pack")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(script),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "emitted no valid facts" in result.stdout
+        assert "duplicate tu_id" in result.stdout
+
+    def test_relative_plugin_artifact_is_resolved_to_absolute(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a relative plugin-artifact must be
+        # resolved against this prepare step's own cwd before being
+        # exported into ABICHECK_PLUGIN_SO/ABICHECK_PLUGIN_FLAGS -- the
+        # caller's real build (a different process, run from its own build
+        # directory per the documented CMake compiler-launcher recipe)
+        # would otherwise resolve the same relative path against the wrong
+        # directory and fail to find the validated artifact.
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        (tmp_path / "libabicheck-facts.so").write_bytes(b"fake-plugin-binary")
+        result, github_env, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": "libabicheck-facts.so",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        env = _parse_kv_file(github_env)
+        # run.sh resolves the relative path via _native_pwd (forward-slash/
+        # cygpath -m form on Windows Git Bash), not Python's str(Path) --
+        # same reasoning as _native_abspath's own docstring above (Codex
+        # review: this assertion originally compared against str(Path),
+        # which is backslash-separated on native Windows Python and never
+        # matches what run.sh actually exports there).
+        expected = _native_abspath(tmp_path / "libabicheck-facts.so")
+        assert env["ABICHECK_PLUGIN_SO"] == expected
+        assert f"-fplugin={expected}" in env["ABICHECK_PLUGIN_FLAGS"]
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginCmakeCompilerSelection:
+    """Regression (CodeRabbit review): the CMake configure invocation used
+    to omit -DCMAKE_CXX_COMPILER, so CMake could silently select a
+    different C++ compiler than the one this script resolved (e.g. the
+    runner's default g++) -- for a vendor-SDK build that also passes
+    -stdlib=libc++ (see TestClangPluginIntelLlvmRefusal), that produces a
+    hard configure failure against a non-Clang compiler instead of a
+    plugin that actually matches $COMPILER. Can't exercise the real cmake
+    configure without a matching libclang-<N>-dev toolchain, so assert the
+    invariant statically against the source, the same technique
+    TestClangPluginSmokeTestIsolation uses."""
+
+    def test_cmake_configure_pins_the_resolved_compiler(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index('cmake -S "$plugin_src" -B "$build_dir"')
+        end = text.index("cmake configure failed", start)
+        configure_block = text[start:end]
+        assert '-DCMAKE_CXX_COMPILER="$compiler_path"' in configure_block, (
+            "the plugin's cmake configure must pin CMAKE_CXX_COMPILER to "
+            "the resolved compiler_path, not rely on CMake's own default "
+            "or an ambient $CXX"
+        )
 
 
 @pytest.mark.skipif(
@@ -1456,12 +1860,18 @@ class TestClangPluginSmokeTestIsolation:
         # toolchain to run at all, so assert the invariant statically
         # against the source instead (same technique as
         # test_smoke_compile_never_targets_output_dir above).
+        #
+        # _reset_output_dir now lives in the shared _finish_clang_plugin tail
+        # (both the from-source build and the plugin-artifact path route
+        # through it, so it's checked once rather than duplicated) -- widen
+        # the scanned region to start at _finish_clang_plugin, immediately
+        # before _prepare_clang_plugin, through _verify_pack.
         text = RUN_SH.read_text(encoding="utf-8")
-        start = text.index("_prepare_clang_plugin() {")
+        start = text.index("_finish_clang_plugin() {")
         end = text.index("\n_verify_pack() {", start)
         plugin_block = text[start:end]
         assert "_reset_output_dir\n" in plugin_block, (
-            "_prepare_clang_plugin must clear any stale pack at $OUTPUT "
+            "_finish_clang_plugin must clear any stale pack at $OUTPUT "
             "(via _reset_output_dir) before use, not a bare mkdir -p that "
             "leaves old source_facts/*.jsonl in place"
         )

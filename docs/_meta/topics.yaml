@@ -140,6 +140,7 @@ topics:
     fact_sources:
       - abicheck/buildsource
       - contrib/abicheck-clang-plugin
+      - actions/collect-facts/action.yml
     reference_page: use/build-evidence-setup.md
 
   baseline-storage-backends:

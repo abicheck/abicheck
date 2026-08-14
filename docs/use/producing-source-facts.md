@@ -170,6 +170,22 @@ plugin-development SDK. For a stock Intel install, expect to set
 `llvm-cmake-prefix` explicitly, pointing at a separately obtained or built
 LLVM+Clang CMake package matching the compiler's exact LLVM major.
 
+!!! warning "Intel's `icpx`/`icx` fork: no same-major apt fallback, experimental status"
+    Unlike vanilla Clang, `collect-facts` **refuses** to fall back to
+    installing a same-major `clang-N`/`llvm-N-dev`/`libclang-N-dev` package
+    when it detects Intel's oneAPI fork specifically (via the
+    `__INTEL_LLVM_COMPILER` predefined macro) — that build is a real ABI
+    mismatch against the loading `icpx`/`icx`, not a merely-degraded result.
+    Use `llvm-cmake-prefix` pointed at Intel's own matching LLVM/Clang CMake
+    package if you have one, or (recommended) the `plugin-artifact` input
+    pointed at an already-built, already-certified plugin binary. `dump
+    --sources` (Full source scan) and the `abicheck-cc` wrapper remain the
+    portable, always-supported paths for this compiler otherwise. See
+    `contrib/abicheck-clang-plugin/README.md`'s "Intel oneAPI (icx/icpx) —
+    experimental, not certified" section (the canonical source) for the
+    full findings, the ABI knobs a from-source build needs, and the
+    certified-artifact distribution model.
+
 ## The one trap: public-roots must match how headers *resolve*
 
 !!! warning "Point the public-header root at the resolved path, not the install dir"
