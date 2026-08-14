@@ -99,18 +99,22 @@ public API, unconditionally**:
   headers were included at each consumer's most recent build."
 - Because there's no separate binary artifact, checking a header-only
   library needs a source anchor rather than a binary one: `dump --sources
-  <dir> --depth source` (no binary operand, and — in this no-artifact
-  path specifically — no separate `-H`; the CLI's own source-only dump
-  reads declarations from the replayed translation units themselves, not
-  from a header-scoping flag) replays the library's own translation units
-  (its test/example sources, or a minimal TU written specifically to
-  instantiate the public API) into a snapshot, and `compare old.src.json
-  new.src.json` diffs two such snapshots the same way it diffs two
-  binaries. This is genuinely an **L3–L5 source-fact comparison**, not the
-  L2 header-AST comparison a binary+`-H` run produces — every mechanism in
-  [Evidence & Detectability](evidence-and-detectability.md) still applies,
-  just without an L0/L1/L2 layer to anchor it, since there's no binary or
-  header-scoping input to provide one.
+  <dir> --depth source` (no binary operand) replays the library's own
+  translation units into a snapshot with no L0/L1/L2 layer underneath it,
+  and `compare` diffs two such snapshots the same way it diffs two
+  binaries. **This is not a bare, self-configuring command** — a
+  no-artifact source-only dump starts from an empty snapshot and only
+  populates public declarations if the public surface is actually
+  configured (public roots matching how the headers resolve, or an
+  equivalent fact pack); run without that setup, it can silently produce
+  few or no public facts, and a `compare` against it can then read
+  `NO_CHANGE` for a real public change rather than flagging the missing
+  evidence. See
+  [Producing Source Facts § the one trap](../use/producing-source-facts.md#the-one-trap-public-roots-must-match-how-headers-resolve)
+  before relying on this path — every mechanism in
+  [Evidence & Detectability](evidence-and-detectability.md) still applies to
+  what a *correctly configured* run can see, but correct configuration is
+  the load-bearing part here, not the bare command.
 - ODR (One Definition Rule) violations are a risk here too, as they are for
   any inline/template declaration in a *dynamic* library's public headers
   (the same declarations that make a dynamic library's own public inline

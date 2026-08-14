@@ -347,6 +347,7 @@ topics:
     allowed_summaries:
       - use/github-action.md
       - use/dump-compare-flags.md
+      - use/tool-modes.md
 
   # Compatibility dimensions beyond source/binary ABI that a static checker
   # cannot decide directly -- named explicitly in Compatibility as a Product
@@ -384,4 +385,3 @@ topics:
     canonical_page: learn/concurrency-and-initialization.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
-      - use/tool-modes.md
