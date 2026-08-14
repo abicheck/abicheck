@@ -16,10 +16,16 @@
   `compare` (single-pair only) makes an incomplete status contribute exit
   `1`, folded with the same `max` discipline `--contract-evaluation`'s
   coverage axis already uses: it raises a clean `0` to `1` and never lowers a
-  `2`/`4`. Purely additive — every existing invocation's exit code and
-  report shape are unchanged unless the new flag is passed. See
-  `docs/reference/exit-codes.md`'s new "Analysis-assurance contribution"
-  section.
+  `2`/`4`. Additive on two different axes, and it matters which: the report
+  *shape* change is unconditional — every `--format json` comparison gains
+  the new `analysis_assurance` object regardless of whether the flag is
+  passed, since schema 2.38 lists it as `required` (see the schema-required
+  fix below) — while the *exit-code* change is opt-in, gated entirely behind
+  `--require-complete-analysis`. An existing invocation's exit code is
+  unchanged unless the flag is passed; its report gains the new top-level
+  key either way, which is backward compatible for any consumer that
+  doesn't reject an unrecognized key. See `docs/reference/exit-codes.md`'s
+  new "Analysis-assurance contribution" section.
 
 ### Fixed
 
@@ -212,4 +218,20 @@
   edge-free L5 graph pass legitimately records its own `status="partial"`
   (see `_graph_completeness`'s `confirmed` exemption), and only that
   function has the context to tell the two apart.
+- **`graph_completeness` now rejects asymmetric source-graph pass coverage**
+  (P1 review, round 8). Both sides could independently be "confirmed
+  complete" on a nonempty `extractor_passes` mapping while covering entirely
+  DIFFERENT pass families — an old header-only graph confirmed on
+  `header_call_graph`/`header_type_graph` against a new build-integrated
+  graph confirmed on `call_graph`/`type_graph` — and this check read
+  `"complete"` regardless, since it only ever checked per-side confirmation
+  in isolation. The actual cross-snapshot graph diff
+  (`post_processing_reachability._call_graph_fully_trusted` and its
+  `source_diff` siblings) only ever compares edges within one shared family
+  name, so a run with no overlapping confirmed family lets
+  `--require-complete-analysis` exit `0` despite every edge on both sides
+  going uncompared. Fixed by comparing the two sides' own confirmed-family
+  sets (from the same `extractor_passes`/`narrowed_passes` dicts already
+  read); a total mismatch now reads `graph_completeness="unknown"`, folding
+  into `status="partial"` the same way the other coverage gaps already do.
 

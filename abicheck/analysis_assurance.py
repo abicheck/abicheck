@@ -1094,8 +1094,55 @@ def _graph_completeness(
                 f"{record.status!r} on the {side} side{detail}"
             )
 
+    # Finding (review, P1, round 8): everything above checks per-side
+    # confirmation in isolation -- it never asks whether old and new agree on
+    # WHICH pass families they confirmed. A run comparing an old header-only
+    # graph (``header_call_graph``/``header_type_graph`` confirmed complete)
+    # against a new build-integrated graph (``call_graph``/``type_graph``
+    # confirmed complete) has both sides individually "confirmed complete"
+    # under every check above, so this function returned ``"complete"`` --
+    # but the two sides confirmed *entirely different* family names. The
+    # actual cross-snapshot graph diff only ever compares edges within a
+    # shared family (``post_processing_reachability._call_graph_fully_trusted``
+    # looks up the literal keys ``"call_graph"``/``"type_graph"`` on *each*
+    # side independently, and ``source_diff``'s own family-scoped comparisons
+    # are the same shape) -- when the confirmed family sets don't overlap at
+    # all, there is no family left for that diff to actually compare on both
+    # sides, so every edge on both sides goes unexamined against its
+    # counterpart despite each side individually looking complete. Detect
+    # this by comparing the two sides' own confirmed-family sets (the same
+    # ``extractor_passes``/``narrowed_passes`` dicts already read above) and
+    # report a total mismatch as ``"unknown"`` rather than ``"complete"`` --
+    # folding into ``status="partial"`` under
+    # ``--require-complete-analysis`` the same way the other coverage gaps in
+    # this function already do, since neither side's individually-confirmed
+    # coverage translates into anything the graph diff could actually use.
+    old_confirmed_families = {
+        name for name, ok in (old_graph.extractor_passes or {}).items() if ok
+    } | {name for name, ok in (old_graph.narrowed_passes or {}).items() if ok}
+    new_confirmed_families = {
+        name for name, ok in (new_graph.extractor_passes or {}).items() if ok
+    } | {name for name, ok in (new_graph.narrowed_passes or {}).items() if ok}
+    asymmetric_family_coverage = False
+    if (
+        old_confirmed_families
+        and new_confirmed_families
+        and old_confirmed_families.isdisjoint(new_confirmed_families)
+    ):
+        asymmetric_family_coverage = True
+        notes.append(
+            "graph completeness unknown: the old side confirmed coverage "
+            f"only for {sorted(old_confirmed_families)!r} while the new "
+            f"side confirmed coverage only for {sorted(new_confirmed_families)!r} "
+            "-- the two sides share no common source-graph pass family, so "
+            "the cross-snapshot graph diff has no family it can actually "
+            "compare on both sides"
+        )
+
     if degraded:
         return "degraded", notes
+    if asymmetric_family_coverage:
+        return "unknown", notes
     if narrowed:
         return "narrowed", notes
     if unknown_pass_coverage:

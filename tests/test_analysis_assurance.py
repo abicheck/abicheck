@@ -952,6 +952,73 @@ class TestGraphCompleteness:
         assert aa.graph_completeness == "complete"
         assert aa.status == "complete"
 
+    def test_asymmetric_confirmed_family_coverage_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 review, round 8: both sides can individually be "confirmed
+        complete" on a nonempty extractor_passes mapping while covering
+        DIFFERENT pass families entirely -- an old header-only graph
+        confirmed on header_call_graph/header_type_graph vs. a new
+        build-integrated graph confirmed on call_graph/type_graph. The
+        cross-snapshot graph diff only ever compares edges within a shared
+        family, so a comparison with no overlapping confirmed family must
+        not read as "complete"."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                extractor_passes={
+                    "header_call_graph": True,
+                    "header_type_graph": True,
+                }
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness != "complete"
+        assert aa.graph_completeness == "unknown"
+        assert aa.status == "partial"
+        assert any("share no common" in n for n in aa.notes)
+
+    def test_overlapping_confirmed_family_on_same_name_is_still_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion to the asymmetric-family test above: both sides
+        confirmed complete on the SAME family name must still read
+        "complete" -- the new overlap check must not regress the ordinary,
+        matching-family case."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "complete"
+        assert aa.status == "complete"
+
     def test_degraded_pass_still_reads_degraded_not_narrowed_or_unknown(
         self, tmp_path: Path
     ) -> None:
