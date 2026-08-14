@@ -334,14 +334,54 @@ class _ExplicitPin:
 #: *caller* explicitly pinned), this exclusion is unconditional -- it never
 #: depends on whether an ``explicit`` context was even given, since the raw
 #: flag is redundant with its structured field regardless.
+#: The bare, separate-operand switch spellings (whose own following argv
+#: token is the operand, captured structurally instead — see
+#: ``_DANGLING_OPERAND_FLAGS`` below for the identical set used the same way
+#: in ``_context_flags``). Matched by *exact* token equality, not by prefix:
+#: a real ``clang -cc1``/driver invocation has several distinct flags that
+#: merely start with the same characters and are NOT represented by any
+#: structured field here — ``-target-abi``, ``-target-cpu``,
+#: ``-target-feature``, ``-target-linker-version``,
+#: ``-target-sdk-version=<value>`` (confirmed via a real ``clang -cc1
+#: --help``) all begin with ``-target`` but carry independent ABI-relevant
+#: information ``CompileUnit.target_triple`` does not capture at all. A
+#: bare-prefix ``startswith("-target")`` match (the historical form of this
+#: check) silently masked those too, collapsing two compile units that
+#: genuinely disagree on e.g. ``-target-sdk-version=`` into one signature
+#: instead of raising ``HeaderCompileContextAmbiguousError`` (Codex review).
+_STRUCTURED_FIELD_EXACT_FLAGS = frozenset(
+    {
+        "-target",
+        "--target",
+        "--sysroot",
+        "-isysroot",
+    }
+)
+
+#: The complete, single-token combined-form spellings (operand attached via
+#: ``=``/``:``) — safe to match by prefix since each is already a fixed,
+#: literal lead-in with no sibling flag sharing it: no real clang/gcc/MSVC
+#: flag begins with ``--target=``, ``--sysroot=``, ``-std=``, or ``/std:``
+#: other than the flag itself (checked against a real ``clang --help``/
+#: ``clang -cc1 --help`` for the exact same reason as the exact-match set
+#: above — unlike the bare ``-target``/``--sysroot`` switches, none of these
+#: combined forms collide with an unrelated flag).
 _STRUCTURED_FIELD_FLAG_PREFIXES = (
-    "--sysroot",
-    "-isysroot",
-    "--target",
-    "-target",
+    "--target=",
+    "--sysroot=",
     "-std=",
     "/std:",
 )
+
+
+def _is_structured_field_flag(flag: str) -> bool:
+    """Whether *flag* is fully represented by a structured
+    ``target_triple``/``sysroot``/``standard`` field already, per the two
+    sets above.
+    """
+    return flag in _STRUCTURED_FIELD_EXACT_FLAGS or flag.startswith(
+        _STRUCTURED_FIELD_FLAG_PREFIXES
+    )
 
 
 @dataclass(frozen=True)
@@ -433,7 +473,7 @@ def _mask_pinned_abi_flags(flags: Sequence[str], pin: _ExplicitPin) -> list[str]
     per-pin conditioning rather than the unconditional rule; it plays no
     role in today's target/sysroot/standard exclusion.
     """
-    return [f for f in flags if not f.startswith(_STRUCTURED_FIELD_FLAG_PREFIXES)]
+    return [f for f in flags if not _is_structured_field_flag(f)]
 
 
 #: Bare switch spellings whose operand is a *separate*, following argv token

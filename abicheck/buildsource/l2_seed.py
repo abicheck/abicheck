@@ -250,13 +250,19 @@ def derive_l2_include_dirs(
     """
     if sources is None and build_info is None:
         return [], []
-    args = _resolve_l2_seed_pack_args(
-        build_config, sources, build_info, build_query, build_compile_db
-    )
-    if args is None:
-        return [], []
     cleanups: list[Callable[[], None]] = []
     try:
+        # Pack resolution (config load + any --sources/--build-info pack load)
+        # happens inside this same protected section: a corrupt/unreadable
+        # pack (bad manifest.json/build_evidence.json) must degrade to "no
+        # seeded dirs" like every other failure mode here, not raise through
+        # (Codex review — this call used to live inside this try before the
+        # shared-helper extraction, and moved ahead of it by mistake).
+        args = _resolve_l2_seed_pack_args(
+            build_config, sources, build_info, build_query, build_compile_db
+        )
+        if args is None:
+            return [], []
         # Reuse the same L3-collection path embed_build_source drives, restricted
         # to build context only (no L4/L5), so every supported build-info form —
         # a collected pack, a Bazel aquery/cquery, an explicit/auto-discovered/
@@ -350,13 +356,17 @@ def derive_l2_compile_context(
 
     if (sources is None and build_info is None) or not headers:
         return None, []
-    args = _resolve_l2_seed_pack_args(
-        build_config, sources, build_info, build_query, build_compile_db
-    )
-    if args is None:
-        return None, []
     cleanups: list[Callable[[], None]] = []
     try:
+        # Pack resolution stays inside this protected section for the same
+        # reason as derive_l2_include_dirs's own copy of this comment: a
+        # corrupt/unreadable pack must degrade best-effort, not raise
+        # (Codex review).
+        args = _resolve_l2_seed_pack_args(
+            build_config, sources, build_info, build_query, build_compile_db
+        )
+        if args is None:
+            return None, []
         pack = collect_inline_pack(
             sources=args.sources,
             build_info=args.build_info,

@@ -477,6 +477,65 @@ def test_resolve_agreeing_structured_fields_with_different_raw_flag_spellings_no
     assert result.context is not None
 
 
+def test_resolve_target_sdk_version_disagreement_still_raises(tmp_path: Path) -> None:
+    """A bare prefix match on ``-target`` would have masked
+    ``-target-sdk-version=<value>`` too -- a real ``clang -cc1`` flag that is
+    NOT represented by ``target_triple`` at all. Two units disagreeing only
+    on it must still raise, not silently collapse to one signature."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        abi_relevant_flags=["-target-sdk-version=13.0"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        abi_relevant_flags=["-target-sdk-version=14.0"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_exact_target_and_sysroot_spellings_still_masked(
+    tmp_path: Path,
+) -> None:
+    """The precision fix must not regress the exact structured spellings
+    (``-target``/``--target``/``--target=...``/``--sysroot``/
+    ``--sysroot=...``/``-isysroot``) themselves -- those still mask cleanly
+    when the structured field already agrees."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["--target=aarch64-linux-gnu", "--sysroot=/opt/sysroot"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["-target", "--sysroot", "-isysroot"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+
+
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
     h1 = tmp_path / "a.h"
     h1.write_text("struct A {};\n", encoding="utf-8")
@@ -675,6 +734,67 @@ def test_derive_l2_compile_context_swallows_non_ambiguous_errors(
     monkeypatch.setattr(l2_seed, "collect_inline_pack", _boom)
     ctx, cleanups = l2_seed.derive_l2_compile_context([Path("x.h")], None, tmp_path)
     assert (ctx, cleanups) == (None, [])
+
+
+def _write_corrupt_pack(pack_dir: Path) -> None:
+    """A directory ``is_pack_dir()`` recognizes as a (corrupt) pack: a
+    ``manifest.json`` present but unparseable, matching ``is_pack_dir``'s own
+    documented "present but unparseable: keep treating it as a (corrupt) pack"
+    contract -- ``BuildSourcePack.load()`` then raises decoding it."""
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "manifest.json").write_text("{not valid json", encoding="utf-8")
+
+
+def test_derive_l2_include_dirs_corrupt_sources_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    """P2 regression: a ``--sources`` pack recognized by ``is_pack_dir`` but
+    failing to load (corrupt ``manifest.json``) must degrade this best-effort
+    seeding to ``([], [])``, not raise -- ``BuildSourcePack.load()`` used to
+    run inside this function's own protected section pre-refactor; the shared
+    ``_resolve_l2_seed_pack_args`` extraction moved it ahead of the ``try``
+    by mistake (Codex review)."""
+    from abicheck.buildsource.l2_seed import derive_l2_include_dirs
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    assert derive_l2_include_dirs(None, pack_dir) == ([], [])
+
+
+def test_derive_l2_include_dirs_corrupt_build_info_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    """Same as above via ``--build-info`` naming the corrupt pack directly."""
+    from abicheck.buildsource.l2_seed import derive_l2_include_dirs
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    assert derive_l2_include_dirs(pack_dir, None) == ([], [])
+
+
+def test_derive_l2_compile_context_corrupt_sources_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    """Same P2 regression as above, for ``derive_l2_compile_context``."""
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    assert derive_l2_compile_context([header], None, pack_dir) == (None, [])
+
+
+def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    assert derive_l2_compile_context([header], pack_dir, None) == (None, [])
 
 
 # ---------------------------------------------------------------------------
