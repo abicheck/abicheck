@@ -77,9 +77,28 @@ the standard binary+headers comparison against *that binary*, the same way
 you would for a genuine dynamic library. Compare that built `.so` directly
 — never the static archive itself, and never two no-binary source-only
 snapshots against each other (see the header-only section below for why
-that path isn't fully supported). Validating the *compiled* archive's
-object-format/compiler-ABI compatibility from its `.a`/`.lib` file directly
-isn't something abicheck does today.
+that path isn't fully supported).
+
+**This is only a limited proxy, not equivalent to checking the archive
+itself, and the two builds' export visibility has to genuinely match for
+the comparison to mean anything.** A static archive's own linkable symbols
+follow the archive's own visibility rules at compile time (which, for
+common patterns like `-fvisibility=hidden` with no explicit DLL/export
+macro, may not match what a shared object built from identical sources
+ends up exporting in its *dynamic* symbol table). Verified directly: a
+minimal library built both ways, with `foo(int)` changed to `foo(long)` in
+the header, produced a real linkable symbol in `libfoo.a` but an *empty*
+export table in the purpose-built `.so` under `-fvisibility=hidden` with no
+export macro — `compare` reported `NO_CHANGE` even with both headers
+supplied, because there was nothing in either side's export table to
+diff. Build the surrogate `.so` with export visibility that matches how the
+archive's symbols are actually meant to be consumed (an explicit export
+macro, or `-fvisibility=default` for a library that doesn't use one), and
+keep a static consumer link/source test as a second, independent check
+for the archive itself — don't treat the `.so` surrogate's clean result
+alone as proof the archive is unchanged. Validating the *compiled*
+archive's object-format/compiler-ABI compatibility from its `.a`/`.lib`
+file directly isn't something abicheck does today.
 
 ## Header-only libraries: the whole surface is the inline-body concern
 
