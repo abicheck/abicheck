@@ -653,6 +653,13 @@ def _build_suppression_unknown_reachability_change(
         or rule.namespace
         or rule.entity_namespace
         or rule.cause_namespace
+        # Canonical (backend-independent) identity selector (Codex review,
+        # fresh evidence, PR #753): mirrors the identical fix in
+        # cli_compare_fold.py's _suppression_rule_label -- a finding_id-only
+        # rule with no other selector previously rendered as the bare
+        # fallback "?" here, indistinguishable from every other unlabeled
+        # rule's diagnostic.
+        or rule.finding_id
         or rule.source_location
         or "?"
     )

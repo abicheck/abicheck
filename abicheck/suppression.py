@@ -34,6 +34,7 @@ from .checker_policy import (
 )
 from .checker_types import Change
 from .elf_metadata import SymbolBinding
+from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
 # Valid values for Suppression.binding — the same value strings
 # Change.symbol_binding is stamped with (SymbolBinding.value). Imported from
@@ -45,12 +46,14 @@ _VALID_BINDING: frozenset[str] = frozenset(b.value for b in SymbolBinding)
 # Pre-build valid change_kind values for fast validation
 _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 
+
 # Keys allowed in a suppression entry — unknown keys are rejected
 _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
     "symbol", "symbol_pattern", "type_pattern", "member_name",
     "change_kind", "reason", "label", "source_location", "expires",
     "namespace", "entity_namespace", "cause_namespace", "binding",
     "reachability", "allow_public_break", "allow_unknown_reachability",
+    "finding_id",
 })
 
 # ADR-044 D2: valid values for Suppression.reachability.
@@ -795,14 +798,21 @@ def _validate_selectors(
     has_member_name: bool,
     has_source_location: bool,
     has_namespace: bool,
+    has_finding_id: bool = False,
 ) -> None:
     """Raise :class:`ValueError` if the selector combination is invalid."""
     selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
-    if selector_count == 0 and not has_source_location and not has_member_name and not has_namespace:
+    if (
+        selector_count == 0
+        and not has_source_location
+        and not has_member_name
+        and not has_namespace
+        and not has_finding_id
+    ):
         raise ValueError(
             "Suppression must have at least one of: "
             "'symbol', 'symbol_pattern', 'type_pattern', "
-            "'member_name', 'source_location', or 'namespace'"
+            "'member_name', 'source_location', 'namespace', or 'finding_id'"
         )
     if selector_count > 1:
         raise ValueError(
@@ -874,6 +884,22 @@ def _matches_binding(binding: str, change: Change) -> bool:
     ``Change.reachability_state``).
     """
     return change.symbol_binding == binding
+
+
+def _matches_finding_id(finding_id: str, change: Change) -> bool:
+    """Return True if *change*'s canonical (backend-independent) identity
+    equals *finding_id* — see :attr:`Suppression.finding_id`.
+
+    Uses the same resolver the report's own ``canonical_finding_id`` field
+    is computed from, so a value copied straight out of a report always
+    matches the change it came from. Never raises: a change this resolver
+    cannot compute an identity for (unreachable for a real ``Change`` —
+    ``resolve_change_identity`` degrades through CANONICAL/NORMALIZED/
+    REDUCED tiers rather than failing) simply fails to match.
+    """
+    from .finding_identity import report_canonical_finding_id
+
+    return report_canonical_finding_id(change) == finding_id
 
 
 def _matches_entity_namespace(compiled: _SegmentGlobMatcher, change: Change) -> bool:
@@ -1045,6 +1071,22 @@ class Suppression:
     before relying on this selector alone. A separate, binding-less rule
     still catches (does not suppress) a ``GLOBAL``/STRONG removal on the
     same symbol set."""
+    finding_id: str | None = field(default=None, kw_only=True)
+    """Exact-match a change's ``canonical_finding_id`` (schema 2.36) — the
+    producer-agnostic identity :func:`~abicheck.finding_identity.
+    report_canonical_finding_id` computes. Unlike :attr:`symbol`/
+    :attr:`type_pattern`/:attr:`member_name` (raw spellings that anonymous
+    struct/union/enum naming can differ on between CastXML and Clang), this
+    selector is stable across an ``--ast-frontend`` switch on the same
+    underlying change. Get the value from either report shape's
+    ``canonical_finding_id`` field.
+
+    A **primary, standalone-sufficient selector**: alone satisfies
+    :func:`_validate_selectors`'s "at least one selector" requirement, and
+    counts as narrow for :attr:`reachability`'s broad/narrow default and
+    :attr:`allow_public_break`'s gate, since it already names one specific
+    finding. Combinable with other selectors (AND semantics), though
+    redundant — the id already encodes kind and identity."""
     _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
@@ -1064,6 +1106,11 @@ class Suppression:
                 "Suppression fields 'namespace' and 'entity_namespace' are "
                 "aliases for the same selector — specify only one"
             )
+        # Normalize + validate here too, not just in SuppressionList.load's
+        # YAML path -- constructing Suppression(finding_id=...) directly
+        # bypassed this entirely, silently creating a rule that can never
+        # match anything real (Codex review).
+        self.finding_id = parse_finding_id(self.finding_id)
         effective_entity_ns = self.entity_namespace if self.entity_namespace is not None else self.namespace
         _validate_selectors(
             has_symbol=self.symbol is not None,
@@ -1072,6 +1119,7 @@ class Suppression:
             has_member_name=self.member_name is not None,
             has_source_location=self.source_location is not None,
             has_namespace=effective_entity_ns is not None or self.cause_namespace is not None,
+            has_finding_id=self.finding_id is not None,
         )
         # Compile regex eagerly — malformed patterns fail at load time, not match time.
         # Uses fullmatch semantics: the pattern must match the entire symbol name.
@@ -1157,6 +1205,7 @@ class Suppression:
             self.symbol is not None
             or self.symbol_pattern is not None
             or self.type_pattern is not None
+            or self.finding_id is not None
         )
         has_broad_shaped_selector = bool(
             effective_entity_ns is not None
@@ -1214,6 +1263,12 @@ class Suppression:
         # kinds, so it's a no-op there; kept general rather than special-cased).
         if self.binding is not None:
             if not _matches_binding(self.binding, change):
+                return False
+
+        # finding_id: canonical (backend-independent) identity, checked
+        # early alongside the other conjunctive selectors above.
+        if self.finding_id is not None:
+            if not _matches_finding_id(self.finding_id, change):
                 return False
 
         # entity_namespace / namespace: match the change's own identity only.
@@ -1510,6 +1565,10 @@ class SuppressionList:
             data = yaml.safe_load(text)
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML in suppression file: {e}") from e
+        # Raw, unresolved finding_id scalar text per entry index -- see
+        # raw_finding_ids_by_index's own docstring for why this can't be
+        # recovered from `data` (the already-parsed structure) alone.
+        raw_finding_ids = raw_finding_ids_by_index(text)
 
         if not isinstance(data, dict):
             raise ValueError("Suppression file must be a YAML mapping")
@@ -1558,6 +1617,9 @@ class SuppressionList:
                     entity_namespace=item.get("entity_namespace"),
                     cause_namespace=item.get("cause_namespace"),
                     binding=item.get("binding"),
+                    finding_id=parse_finding_id(
+                        raw_finding_ids.get(i, item.get("finding_id"))
+                    ),
                     reachability=item.get("reachability"),
                     allow_public_break=allow_public_break,
                     allow_unknown_reachability=allow_unknown_reachability,

@@ -1039,6 +1039,127 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_deleted_dwarf": "func_deletion",
 }
 
+# Kinds whose old_value/new_value (and, for a handful, description) genuinely
+# hold a C/C++ type spelling -- verified individually against each kind's
+# emission call site and change_registry.py description_template, not
+# guessed. Used only by _change_discriminator's canonicalize_values=True path
+# (report_canonical_finding_id) to decide which findings need
+# canonicalize_type_name normalization at all (Codex review, PR #753, two
+# follow-up rounds): applying it to every kind corrupted non-type old/new
+# text (e.g. PUBLIC_MACRO_VALUE_CHANGED's raw macro replacement text, where
+# whitespace is semantically meaningful), and unconditionally dropping
+# description to avoid that same corruption instead collided distinct
+# findings that share kind+symbol+old+new and differ only by a per-item
+# identity description embeds via change_registry's `{detail}` (e.g.
+# TYPE_FIELD_TYPE_CHANGED's own sibling struct_field_type_changed embeds a
+# field name this way). Deliberately not exhaustive -- every kind here was
+# checked against a real call site; a kind absent from this set still has
+# the pre-fix backend-spelling-mismatch gap on canonical_finding_id, and
+# adding it needs the same per-kind verification, not a blanket sweep.
+#
+# Known gap, accepted rather than chased further (Codex review, PR #753,
+# fifth round: ATOMIC_QUALIFIER_CHANGED is one more concrete instance,
+# `diff_atomic.py`'s old_value/new_value are the raw `iter_type_slot_changes`
+# type-slot spellings). A *derived* classification (e.g. every kind whose
+# emitter calls `iter_type_slot_changes`/passes a `RecordType`/`Param.type`-
+# sourced value as `old=`/`new=`) was considered instead of one more
+# reactive addition -- rejected for this pass: it needs the same per-kind
+# call-site verification this file's own docstring above already commits
+# to (a value's *source* doesn't by itself prove no `{detail}`-carried
+# per-item identity is also at stake, the exact trap the earlier
+# description-dropping attempt fell into), just automated instead of
+# explicit, which trades a visible, auditable list for an implicit one
+# that's harder to review. Matches this codebase's own "known gaps over
+# risky reactive patches" convention (AGENTS.md) rather than a sixth
+# same-session revision of this exact function.
+_TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
+    {
+        "func_return_changed",
+        "var_type_changed",
+        "type_field_type_changed",
+        "struct_field_type_changed",
+        "union_field_type_changed",
+        "typedef_base_changed",
+        "template_param_type_changed",
+        "template_return_type_changed",
+        # diff_symbols._check_params_change: old/new are
+        # _format_params()'s comma-joined `Param.type` spellings, one
+        # function-wide finding (no per-parameter `detail`, so nothing is
+        # lost by canonicalizing the whole joined string as a *set of
+        # parameters* -- see _canonicalize_params_list below, which splits
+        # and canonicalizes each parameter individually rather than the
+        # joined string as one type. A whole-string canonicalize_type_name
+        # call only reorders const/strips a struct-prefix on the FIRST
+        # parameter (both anchored to string start) -- a real change on
+        # parameter N plus an unrelated const-spelling difference on some
+        # OTHER parameter M would then still produce two different
+        # discriminators for the identical function-wide event across
+        # producers (Codex review, fresh evidence).
+        "func_params_changed",
+    }
+)
+
+#: Kinds whose ``change_registry`` ``description_template`` embeds the raw
+#: ``{old}``/``{new}`` type spelling verbatim, NOT at the start of the
+#: sentence (Codex review, fresh evidence): ``struct_field_type_changed``
+#: ("Field type changed: {name}::{detail} {old} → {new}"),
+#: ``template_param_type_changed``/``template_return_type_changed``
+#: ("... ({old} → {new})"). Canonicalizing the whole rendered sentence
+#: with :func:`canonicalize_type_name` doesn't fix these -- its
+#: struct-prefix-strip/const-reorder passes are anchored to string start,
+#: so they never reach text embedded mid-sentence, and the embedded
+#: spelling stays raw even after old_str/new_str themselves are correctly
+#: canonicalized. The other six allowlisted kinds' templates never embed
+#: {old}/{new} at all (`"Return type changed: {name}"` and siblings), so
+#: this set is deliberately narrower than _TYPE_BEARING_DISCRIMINATOR_KINDS.
+_DESCRIPTION_EMBEDS_VALUES_KINDS = frozenset(
+    {
+        "struct_field_type_changed",
+        "template_param_type_changed",
+        "template_return_type_changed",
+    }
+)
+
+
+def _split_top_level_commas(value: str) -> list[str]:
+    """Split *value* on ``,`` at nesting depth 0 only.
+
+    ``_format_params()`` comma-joins ``Param.type`` spellings, but a
+    parameter's own type can itself contain a comma inside template
+    arguments (``std::pair<int, int>``) or a function-pointer parameter
+    list (``void (*)(int, int)``) -- a naive ``str.split(",")`` would
+    wrongly split those apart. Tracks ``<>``/``()``/``[]`` nesting depth
+    and only treats a comma at depth 0 as a real parameter separator.
+    """
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(value):
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append(value[start:i])
+            start = i + 1
+    parts.append(value[start:])
+    return parts
+
+
+def _canonicalize_params_list(value: str) -> str:
+    """Canonicalize a ``_format_params()``-shaped comma-joined parameter
+    list one parameter at a time, rejoining with ``", "`` (matching
+    ``_format_params``'s own join).
+
+    Degrades to whole-string canonicalization for the sentinel ``"(none)"``
+    ``_format_params`` emits for a zero-parameter function -- splitting
+    that on commas would be a no-op anyway, but routing it through the
+    same call keeps this function's contract uniform.
+    """
+    return ", ".join(
+        canonicalize_type_name(part.strip()) for part in _split_top_level_commas(value)
+    )
+
 
 def _stringify_change_value(value: object) -> str:
     """Deterministic string form of a ``Change.old_value``/``new_value``.
@@ -1067,8 +1188,61 @@ def _stringify_change_value(value: object) -> str:
     return str(value)
 
 
+# Only the bit-valued half of each _EQUIVALENT_CHANGE_CATEGORIES size/
+# alignment pair needs converting -- diff_platform.py's byte-valued
+# STRUCT_SIZE_CHANGED/STRUCT_ALIGNMENT_CHANGED are already the target unit.
+# Used only by _change_discriminator's canonicalize_values=True path to
+# fold a category-collapsed kind's old/new into the discriminator in a
+# unit that agrees regardless of which detector supplied the finding
+# (Codex review, fresh evidence -- see that call site's own comment).
+_CATEGORY_VALUE_UNIT_DIVISOR = {
+    "type_size_changed": 8,
+    "type_alignment_changed": 8,
+}
+
+#: Categories where old_value/new_value must be dropped from the
+#: canonicalize_values discriminator entirely, rather than folded in
+#: (Codex review, fresh evidence, PR #753 round 5): unlike the size/
+#: alignment pair above -- where old/new differ only by *unit* across
+#: producers and normalizing fixes the fold -- a removed/added symbol can
+#: have at most one such event per (symbol, category) in a single
+#: comparison, so old/new carries no disambiguating power here at all,
+#: only producer-specific noise. Confirmed for "func_removal": the rich
+#: ELF detector (diff_symbols._check_removed_function) stamps
+#: old_value=f_old.name, while the PE/Mach-O export-table detectors
+#: (diff_platform._diff_pe/_diff_macho_exports) leave old_value/new_value
+#: unset entirely -- so the identical removed-function event folds to two
+#: different discriminators ("category:func_removal\x1f<name>\x1f" vs.
+#: "category:func_removal\x1f\x1f") depending purely on which detector's
+#: finding survived reconciliation, defeating this fold's whole purpose
+#: for the one pair it exists to reconcile. "func_addition" carries the
+#: identical asymmetry for the same two detector families. The remaining
+#: three categories ("var_removal"/"var_addition"/"version_def_removal")
+#: are not included here: each is populated by exactly one detector
+#: family with consistent old/new population (verified by reading every
+#: producer of each), so there is no cross-producer inconsistency to
+#: guard against for them, and dropping their values would only lose
+#: information for no benefit.
+_VALUE_INSENSITIVE_CATEGORIES = frozenset({"func_removal", "func_addition"})
+
+
+def _divide_numeric_string(value: str, divisor: int) -> str:
+    """Return ``str(int(value) // divisor)``, or *value* unchanged if it
+    isn't a base-10 integer (defensive -- every real producer of a
+    _CATEGORY_VALUE_UNIT_DIVISOR kind stamps a plain bit count, but this
+    must never raise on an unexpected input)."""
+    try:
+        return str(int(value) // divisor)
+    except ValueError:
+        return value
+
+
 def _change_discriminator(
-    change: Change, kind_value: str, *, include_description: bool = True
+    change: Change,
+    kind_value: str,
+    *,
+    include_description: bool = True,
+    canonicalize_values: bool = False,
 ) -> str:
     """The part of a finding's identity that tells it apart from another
     finding sharing the same symbol.
@@ -1095,10 +1269,79 @@ def _change_discriminator(
     though ``old_value``/``new_value`` do not (Codex review: verified
     changing only the sampled export still produced a different synthetic
     primary id).
+
+    ``canonicalize_values=True`` -- used only by
+    :func:`report_canonical_finding_id`'s call into
+    :func:`resolve_change_identity` -- runs ``old_value``/``new_value``,
+    and (for the same kinds) ``description``, through
+    :func:`~abicheck.name_classification.canonicalize_type_name` before
+    joining, but **only** for :data:`_TYPE_BEARING_DISCRIMINATOR_KINDS`.
+    Without it, a kind like ``FUNC_RETURN_CHANGED`` folds the *raw* type
+    spelling into every identity tier including CANONICAL -- CastXML's
+    ``"char const*"`` and Clang's ``"char const *"`` for the identical
+    change would then hash to two different canonical ids (Codex review).
+    Scoped to that allowlist rather than every kind (Codex review, follow-up
+    round): canonicalizing an arbitrary kind's ``old_value``/``new_value``
+    corrupts a non-type value where whitespace is semantically meaningful
+    (e.g. ``PUBLIC_MACRO_VALUE_CHANGED``'s raw macro replacement text).
+    ``description`` is **never dropped** for this reason too (an earlier
+    revision of this fix did, and review found real collisions: several
+    kinds -- e.g. ``struct_field_type_changed``'s own sibling
+    ``type_field_type_changed`` -- embed a per-item identity, such as a
+    field name, in ``description`` via ``change_registry``'s ``{detail}``
+    template placeholder, with no other structured field carrying it;
+    dropping description collapsed two distinct findings on the same
+    symbol/kind/old/new differing only by which field/parameter changed).
+    Canonicalizing the whole description sentence for an allowlisted kind
+    is safe rather than corrupting: :func:`canonicalize_type_name`'s
+    struct/const-prefix rewrites only ever match at the very start of the
+    string, and its pointer/reference-sigil spacing pass only touches
+    ``*``/``&`` characters -- neither construct appears in an ordinary
+    field/parameter name, so the identifying part of the sentence survives
+    untouched while any embedded raw type spelling (e.g.
+    ``struct_field_type_changed``'s own template embeds ``{old} → {new}``)
+    normalizes the same way ``old_value``/``new_value`` do.
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
-        return f"category:{category}"
+        if not canonicalize_values or category in _VALUE_INSENSITIVE_CATEGORIES:
+            # See _VALUE_INSENSITIVE_CATEGORIES: for these categories old/
+            # new is producer-inconsistent noise, not a disambiguator (at
+            # most one such event exists per symbol/category in a single
+            # comparison), so folding it in would defeat the fold instead
+            # of refining it -- same bare-category discriminator as the
+            # non-canonicalize_values path above.
+            return f"category:{category}"
+        # canonicalize_values (report_canonical_finding_id): a bare
+        # category discriminates the rich-vs-L0 *kind* pair away, which is
+        # exactly what the reconciliation use of this identity wants -- but
+        # a persistent suppression identity must still tell apart two
+        # structurally different transitions on the same symbol/category
+        # (e.g. TYPE_SIZE_CHANGED 8->16 vs. a later, unrelated 16->32 on
+        # the same type), or accepting a `finding_id:` rule for the first
+        # would silently suppress the second too (Codex review, fresh
+        # evidence). Folding in old_value/new_value is NOT unit-safe by
+        # itself: diff_types.py's TYPE_SIZE_CHANGED/TYPE_ALIGNMENT_CHANGED
+        # stamp RecordType.size_bits/alignment_bits (bits), while
+        # diff_platform.py's collapsed sibling STRUCT_SIZE_CHANGED/
+        # STRUCT_ALIGNMENT_CHANGED stamp StructLayout.byte_size/alignment
+        # (bytes) -- the identical 8-byte layout change reports as
+        # "64\x1f128" from one detector and "8\x1f16" from the other
+        # (Codex review, fresh evidence), which would make the canonical
+        # id depend on which detector happened to supply the *retained*
+        # finding after reconciliation, defeating this fold's own point.
+        # _CATEGORY_VALUE_UNIT_DIVISOR converts every such kind to bytes
+        # before folding, leaving every other collapsed kind's value
+        # (a removed symbol's own name, an enum value, ...) untouched.
+        old_val = _stringify_change_value(change.old_value)
+        new_val = _stringify_change_value(change.new_value)
+        divisor = _CATEGORY_VALUE_UNIT_DIVISOR.get(kind_value)
+        if divisor is not None:
+            old_val = _divide_numeric_string(old_val, divisor)
+            new_val = _divide_numeric_string(new_val, divisor)
+        old_str = canonicalize_type_name(old_val)
+        new_str = canonicalize_type_name(new_val)
+        return f"category:{category}\x1f{old_str}\x1f{new_str}"
     # header_binary_context_mismatch: change.affected_symbols carries this
     # finding's complete mismatched-record set as structured data (unlike
     # description's order-dependent five-name sample) -- sorting it makes
@@ -1121,17 +1364,47 @@ def _change_discriminator(
         side_match = _MISMATCH_SIDE_RE.match(change.description or "")
         side = side_match.group(1) if side_match else ""
         return f"evidence:{side}:{evidence}"
-    parts = [
-        kind_value,
-        _stringify_change_value(change.old_value),
-        _stringify_change_value(change.new_value),
-    ]
+    canonicalize_this_kind = (
+        canonicalize_values and kind_value in _TYPE_BEARING_DISCRIMINATOR_KINDS
+    )
+    raw_old_str = _stringify_change_value(change.old_value)
+    raw_new_str = _stringify_change_value(change.new_value)
+    old_str = raw_old_str
+    new_str = raw_new_str
+    if canonicalize_this_kind:
+        if kind_value == "func_params_changed":
+            # See _TYPE_BEARING_DISCRIMINATOR_KINDS's own comment: a
+            # comma-joined parameter list needs per-parameter
+            # canonicalization, not one whole-string call.
+            old_str = _canonicalize_params_list(old_str)
+            new_str = _canonicalize_params_list(new_str)
+        else:
+            old_str = canonicalize_type_name(old_str)
+            new_str = canonicalize_type_name(new_str)
+    parts = [kind_value, old_str, new_str]
     if include_description:
-        parts.append(change.description or "")
+        desc = change.description or ""
+        if canonicalize_this_kind:
+            if kind_value in _DESCRIPTION_EMBEDS_VALUES_KINDS:
+                # See _DESCRIPTION_EMBEDS_VALUES_KINDS's own comment:
+                # canonicalize_type_name's anchored passes can't reach an
+                # embedded type mid-sentence, so substitute the *known*
+                # raw old/new substrings with their already-canonicalized
+                # forms directly, rather than canonicalizing the sentence
+                # as one opaque blob.
+                if raw_old_str:
+                    desc = desc.replace(raw_old_str, old_str)
+                if raw_new_str:
+                    desc = desc.replace(raw_new_str, new_str)
+            else:
+                desc = canonicalize_type_name(desc)
+        parts.append(desc)
     return "\x1f".join(parts)
 
 
-def resolve_change_identity(change: Change) -> FindingIdentity:
+def resolve_change_identity(
+    change: Change, *, canonicalize_values: bool = False
+) -> FindingIdentity:
     """Tiered identity for an already-emitted flat finding
     (:class:`~abicheck.checker_types.Change`).
 
@@ -1151,6 +1424,15 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     symbol (Codex review: a bare ``mangled:<symbol>`` canonical id would
     collapse unrelated findings and violate this module's stated dedup-key
     contract).
+
+    ``canonicalize_values=False`` (the default) preserves this function's
+    pre-existing, exact-value discriminator for its established callers
+    (``diff_filtering.py``'s cross-detector dedup, ``aggregate_findings.py``,
+    ``contract_evaluation.py``) -- none of which need, or were verified
+    against, a type-spelling-insensitive comparison. Pass ``True`` only for
+    a genuinely cross-backend use (:func:`report_canonical_finding_id`),
+    where :func:`_change_discriminator`'s own docstring explains why the
+    raw value must not leak into a "backend-independent" identity.
     """
     kind_value = str(getattr(change.kind, "value", change.kind))
     is_batch = _is_batch_shaped_change(change, kind_value)
@@ -1204,7 +1486,10 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     # sample-independent, since `discriminator` (used in `sig`, every
     # alias, and the REDUCED-tier synthetic basis) would still vary.
     discriminator = _change_discriminator(
-        change, kind_value, include_description=not is_batch
+        change,
+        kind_value,
+        include_description=not is_batch,
+        canonicalize_values=canonicalize_values,
     )
     sig = f"sig:{qn}\x1f{discriminator}"
     rel = source_relative_identity(source_location or "", entity_symbol or "")
@@ -1429,6 +1714,92 @@ def report_finding_id(c: object) -> str:
         ]
     )
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def report_canonical_finding_id(c: object) -> str:
+    """Backend-independent finding identity for cross-producer suppression
+    (schema 2.36, additive; ``suppression.py``'s ``finding_id:`` selector).
+
+    Unlike :func:`report_finding_id` -- which folds in ``source_location``
+    and ``description`` specifically to disambiguate two same-kind,
+    same-symbol findings from each other -- this id is deliberately
+    **not** guaranteed unique per finding. It is :func:`resolve_change_identity`'s
+    ``primary_id`` (mangled-symbol CANONICAL tier when available, a
+    normalized qualified-name+kind+parameter-signature NORMALIZED tier
+    otherwise), called with ``canonicalize_values=True`` -- the one thing
+    that call has that ``diff_filtering.py``'s cross-detector dedup and
+    ``diff_symbols.py``'s old/new symbol matching's own (default,
+    uncanonicalized) calls don't need. Without it, a kind outside
+    ``_EQUIVALENT_CHANGE_CATEGORIES`` (most kinds -- e.g.
+    ``FUNC_RETURN_CHANGED``) folds ``change.old_value``/``new_value``
+    *verbatim* into every identity tier including CANONICAL, so CastXML's
+    ``"char const*"`` and Clang's ``"char const *"`` for the identical
+    return-type change would hash to two different canonical ids -- exactly
+    the discrepancy :func:`canonicalize_type_name` exists to normalize
+    (Codex review, fresh evidence: an earlier revision of this function
+    called :func:`resolve_change_identity` with the default, and the claim
+    in this docstring that the NORMALIZED tier was already canonicalized
+    was simply wrong for any non-equivalent-category kind).
+    ``canonicalize_values=True`` normalizes (never drops) ``description``
+    for the same reason it normalizes ``old_value``/``new_value``: for
+    :data:`_DESCRIPTION_EMBEDS_VALUES_KINDS`, it routinely embeds the same
+    raw type spelling those fields do, so the known raw substrings are
+    swapped for their already-canonicalized forms; for every other kind
+    ``description`` still folds in as-is. ``source_location`` is the one
+    field this identity never uses at all (Codex review, fresh evidence:
+    an earlier revision of this docstring claimed ``description`` was
+    dropped entirely, which stopped being true once description
+    normalization was added — this identity is not source-location/
+    description-*blind*, only *normalized* against them). Either way,
+    ``report_finding_id``'s raw ``source_location``/``description`` are
+    exactly the fields two header backends are *not* guaranteed to spell
+    identically (a raw file:line, or a description embedding a raw type
+    spelling) — which is why it is not itself usable as a suppression key
+    meant to survive a `--ast-frontend castxml` vs. `--ast-frontend clang`
+    switch, and why this sibling id exists instead of widening that one's
+    contract.
+
+    A batch-shaped finding (e.g. an allocator-replacement summary covering
+    many symbols) resolves through the same REDUCED-tier fallback
+    :func:`resolve_change_identity` already documents for that shape — this
+    function adds no special-casing of its own.
+
+    Unlike :func:`report_finding_id`, :func:`resolve_change_identity` reads
+    ``change.qualified_name``/``change.kind`` via plain attribute access
+    (not ``getattr`` with a default) -- a real :class:`~abicheck.checker_types.Change`
+    always has both, but a lightweight test double standing in for one (see
+    ``cli_scan_baseline._baseline_finding_dicts``'s own "safe to call against
+    fakes/stubs" contract, which this id is emitted alongside) may not. That
+    case degrades to :func:`report_finding_id` itself -- self-consistent and
+    still deterministic, just not guaranteed cross-backend-stable for the
+    one input this function couldn't resolve a real identity for.
+
+    **Never returns ``primary_id`` verbatim.** ``primary_id``'s own aliases
+    embed a literal ``\\x1f`` (ASCII unit separator) field delimiter (see
+    ``resolve_change_identity``'s ``sig``/``mangled:``/``qualified:``
+    construction) -- valid inside a Python string and inside a JSON string
+    (``json.dumps`` escapes control characters), but YAML's spec forbids an
+    unescaped C0 control character in a plain scalar, so a value copied
+    verbatim out of a JSON report into a ``--suppress`` YAML file's
+    ``finding_id:`` selector would fail to parse (confirmed empirically:
+    PyYAML's ``safe_load`` raises ``ReaderError: unacceptable character
+    #x001f``). Hashed into the same fixed-length hex-digest shape
+    :func:`report_finding_id` already uses instead, which is unconditionally
+    printable/YAML-safe/copy-pasteable, and preserves everything this
+    function's contract actually promises: two changes with the same
+    ``primary_id`` still hash identically, and different ``primary_id``s
+    practically never collide (SHA-256, birthday-bound truncated to 16 hex
+    chars -- the same collision risk this function's ``finding_id`` sibling
+    already accepts for the identical reason).
+    """
+    try:
+        primary_id = resolve_change_identity(
+            c,  # type: ignore[arg-type]
+            canonicalize_values=True,
+        ).primary_id
+    except AttributeError:
+        return report_finding_id(c)
+    return hashlib.sha256(primary_id.encode("utf-8")).hexdigest()[:16]
 
 
 def missing_contract_kind(gate_scope: object) -> str:

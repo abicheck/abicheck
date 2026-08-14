@@ -323,6 +323,48 @@ class TestStrictSuppressionsCliFlag:
         ])
         assert result.exit_code == 0
 
+    def test_strict_suppressions_renders_finding_id_not_bare_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review, PR #753, fresh evidence): a
+        # finding_id-only rule with no symbol/type_pattern/source_location
+        # rendered as the bare "?" fallback in this diagnostic's own
+        # selector chain, distinct from (and missed by) the identical fix
+        # already made to cli_compare_fold.py/post_processing.py.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        past = date.today() - timedelta(days=30)
+        digest = "abcd1234abcd1234"
+        sup_path = write_yaml(tmp_path, f"""
+            version: 1
+            suppressions:
+              - finding_id: "{digest}"
+                reason: "expired"
+                expires: "{past.isoformat()}"
+        """)
+
+        old_snap = tmp_path / "old.json"
+        new_snap = tmp_path / "new.json"
+        snap = json.dumps({
+            "library": "libtest.so", "version": "1.0",
+            "functions": [], "variables": [], "types": [],
+        })
+        old_snap.write_text(snap, encoding="utf-8")
+        new_snap.write_text(snap, encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_snap), str(new_snap),
+            "--suppress", str(sup_path),
+            "--strict-suppressions",
+        ])
+        assert result.exit_code != 0
+        output = result.output + str(result.exception or "")
+        assert digest in output
+        assert 'Rule 1: "?"' not in output
+
 
 class TestRequireJustificationCliFlag:
 

@@ -199,6 +199,7 @@ disable_error_code = ["no-any-return", "misc", "type-arg"]
 module = [
     "abicheck.policy_file",
     "abicheck.suppression",
+    "abicheck.suppression_yaml",
     "abicheck.environment_matrix",
     "abicheck.probe_harness",
     "abicheck.bundle",

@@ -1323,26 +1323,39 @@ def _add_contract_evaluation_fields(
     gate_contribution: int = 0,
 ) -> None:
     """Attach ADR-049's per-finding contract decision fields to *d*, if *c*
-    carries one.
+    carries one; always stamps ``finding_id``/``canonical_finding_id`` first.
 
-    Shared by :func:`_change_to_dict` (ordinary ``changes`` entries) and
-    :func:`_add_surface_scope` (``out_of_surface_changes`` entries) so a
-    demoted finding's decision is exposed in reports the same way a kept
-    finding's already is (Codex review, fresh evidence) -- before this,
-    only ``checker.py`` stamped ``out_of_surface`` findings at all, but no
-    report path serialized what it stamped there. ``None`` (the default, and
-    every existing caller that doesn't opt into ``contract_evaluation=True``)
-    emits nothing.
+    Shared by :func:`_change_to_dict` and :func:`_add_surface_scope` so a
+    demoted finding's decision is exposed the same way a kept finding's
+    already is. ``contract_relevance is None`` (the default) skips only
+    the contract-specific fields below.
 
     *gate_contribution* completes ADR-049 D1's canonical per-finding shape.
-    It defaults to ``0`` because that is the true answer for every audit
-    ledger this helper serializes -- an out-of-surface, suppressed,
-    reconciled or redundant finding is not in ``DiffResult.changes`` and so
-    reaches no gate. Only the ``changes`` path passes a computed value, from
-    :func:`~abicheck.severity.gate_contribution_for_change`, so the number a
-    consumer reads is the one the run's own gate folded rather than a
-    plausible re-derivation of it.
+    It defaults to ``0`` -- the true answer for every audit ledger this
+    helper serializes, since none of those findings reach a gate. Only the
+    ``changes`` path passes a computed value, from
+    :func:`~abicheck.severity.gate_contribution_for_change`.
     """
+    # The audit-ledger serializers (`_out_of_surface_entry`,
+    # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
+    # build compact dicts that never emit `finding_id` themselves, so a
+    # consumer can't join a demoted/suppressed/reconciled finding to its
+    # decision. Stamped here, only when absent -- and unconditionally,
+    # ahead of the contract_relevance early return below: an ordinary run
+    # without `--contract-evaluation` still calls this on every one of
+    # those entries and still needs a joinable id (Codex review: an
+    # earlier revision stamped this after the early return instead,
+    # silently skipping it on every default-run audit-ledger entry).
+    if "finding_id" not in d:
+        from .finding_identity import report_finding_id
+
+        d["finding_id"] = report_finding_id(c)
+    # Same reasoning, for finding_id's backend-independent sibling (2.36).
+    if "canonical_finding_id" not in d:
+        from .finding_identity import report_canonical_finding_id
+
+        d["canonical_finding_id"] = report_canonical_finding_id(c)
+
     contract_relevance = getattr(c, "contract_relevance", None)
     if contract_relevance is None:
         return
@@ -1364,29 +1377,12 @@ def _add_contract_evaluation_fields(
     decision = getattr(c, "compatibility_decision", None)
     d["compatibility_decision"] = getattr(decision, "value", None)
     d["gate_contribution"] = gate_contribution
-    # ADR-049 Phase 3's provider-evidence ledger: which `contract_evidence`
-    # provider records this decision rests on. Emitted even when empty --
-    # `[]` is the real answer for a non-entity finding (its relevance follows
-    # from the ChangeKind, consulting no provider), and omitting the key
-    # there would be indistinguishable from an unstamped finding.
+    # ADR-049 Phase 3's provider-evidence ledger. Emitted even when empty --
+    # `[]` is the real answer for a non-entity finding, and omitting the key
+    # would be indistinguishable from an unstamped finding.
     contract_evidence_refs = getattr(c, "contract_evidence_refs", None)
     if contract_evidence_refs is not None:
         d["contract_evidence_refs"] = list(contract_evidence_refs)
-    # The audit-ledger serializers (`_out_of_surface_entry`,
-    # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
-    # build their own compact dicts and never emitted `finding_id`, unlike an
-    # ordinary `changes` entry -- so a consumer could not join a demoted /
-    # suppressed / reconciled finding to its decision in `contract_context.
-    # decision_receipt`, which is keyed by exactly that id. Nor could it
-    # recompute one: those dicts also omit `old_value`/`new_value`, two of the
-    # id's own inputs (Codex review, fresh evidence). Emitted here rather than
-    # in each ledger so the key and the decision always travel together, and
-    # only when absent, so an ordinary entry keeps the id `_change_to_dict`
-    # already set.
-    if "finding_id" not in d:
-        from .finding_identity import report_finding_id
-
-        d["finding_id"] = report_finding_id(c)
 
 
 def _change_annotation_fields(c: Any) -> dict[str, Any]:
@@ -1568,6 +1564,10 @@ def _change_to_dict(
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)
+        # Backend-independent sibling of finding_id (schema 2.36).
+        from .finding_identity import report_canonical_finding_id
+
+        d["canonical_finding_id"] = report_canonical_finding_id(c)
         d["recommended_action"] = _recommended_action_for_change(
             c,
             policy=policy,
