@@ -1104,6 +1104,60 @@ class TestClangPluginArtifactProducer:
         assert result.returncode == 1
         assert "does not exist" in result.stdout
 
+    def test_relative_plugin_artifact_is_resolved_to_absolute(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a relative plugin-artifact must be
+        # resolved against this prepare step's own cwd before being
+        # exported into ABICHECK_PLUGIN_SO/ABICHECK_PLUGIN_FLAGS -- the
+        # caller's real build (a different process, run from its own build
+        # directory per the documented CMake compiler-launcher recipe)
+        # would otherwise resolve the same relative path against the wrong
+        # directory and fail to find the validated artifact.
+        compiler = self._fake_compiler(tmp_path, "#define __clang_major__ 18")
+        (tmp_path / "libabicheck-facts.so").write_bytes(b"fake-plugin-binary")
+        result, github_env, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(compiler),
+                "INPUT_PLUGIN_ARTIFACT": "libabicheck-facts.so",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        env = _parse_kv_file(github_env)
+        expected = str(tmp_path / "libabicheck-facts.so")
+        assert env["ABICHECK_PLUGIN_SO"] == expected
+        assert f"-fplugin={expected}" in env["ABICHECK_PLUGIN_FLAGS"]
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginCmakeCompilerSelection:
+    """Regression (CodeRabbit review): the CMake configure invocation used
+    to omit -DCMAKE_CXX_COMPILER, so CMake could silently select a
+    different C++ compiler than the one this script resolved (e.g. the
+    runner's default g++) -- for a vendor-SDK build that also passes
+    -stdlib=libc++ (see TestClangPluginIntelLlvmRefusal), that produces a
+    hard configure failure against a non-Clang compiler instead of a
+    plugin that actually matches $COMPILER. Can't exercise the real cmake
+    configure without a matching libclang-<N>-dev toolchain, so assert the
+    invariant statically against the source, the same technique
+    TestClangPluginSmokeTestIsolation uses."""
+
+    def test_cmake_configure_pins_the_resolved_compiler(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index('cmake -S "$plugin_src" -B "$build_dir"')
+        end = text.index("cmake configure failed", start)
+        configure_block = text[start:end]
+        assert '-DCMAKE_CXX_COMPILER="$compiler_path"' in configure_block, (
+            "the plugin's cmake configure must pin CMAKE_CXX_COMPILER to "
+            "the resolved compiler_path, not rely on CMake's own default "
+            "or an ambient $CXX"
+        )
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"

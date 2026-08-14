@@ -620,6 +620,17 @@ $version_output"
   # identical smoke test every from-source build gets.
   if [[ -n "$PLUGIN_ARTIFACT" ]]; then
     [[ -f "$PLUGIN_ARTIFACT" ]] || _fail "plugin-artifact '$PLUGIN_ARTIFACT' does not exist -- expected a pre-built libabicheck-facts.* shared object."
+    # Resolve to an absolute path up front, same rationale as $OUTPUT further
+    # up: the caller's real build (invoked from its own build directory, per
+    # the documented CMake compiler-launcher recipe) and this Action's own
+    # separate phase: verify invocation both run as different processes with
+    # a potentially different cwd than this prepare step -- a relative
+    # plugin-artifact would silently stop pointing at the validated file
+    # once exported into ABICHECK_PLUGIN_SO/ABICHECK_PLUGIN_FLAGS's
+    # -fplugin= (Codex review).
+    if ! _is_absolute_path "$PLUGIN_ARTIFACT"; then
+      PLUGIN_ARTIFACT="$(_native_pwd)/$PLUGIN_ARTIFACT"
+    fi
     if [[ -n "$PLUGIN_ARTIFACT_SHA256" ]]; then
       local actual_sha256
       actual_sha256=$(python3 -c '
@@ -730,7 +741,15 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
     echo "::notice::Building against the vendor-bundled Intel oneAPI LLVM/Clang SDK -- passing -DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++ (the recipe real testing found necessary; see README.md). This build is NOT certified: only a minimal AST plugin has been verified end-to-end against icpx/icx, not this full plugin's own conformance suite. Prefer plugin-artifact with a build you have separately certified for production use."
   fi
 
+  # Pin CMake to the exact resolved compiler binary rather than letting it
+  # fall back to its own default (or an ambient $CXX) discovery -- without
+  # this, a caller resolving a vendor toolchain via llvm-cmake-prefix could
+  # still have CMake silently configure against a *different*, PATH-default
+  # C++ compiler (e.g. the runner's g++), which the Intel ABI knobs above
+  # then fail loudly against (g++ rejects -stdlib=) rather than silently
+  # producing a plugin that doesn't actually match $COMPILER (Codex review).
   cmake -S "$plugin_src" -B "$build_dir" \
+    -DCMAKE_CXX_COMPILER="$compiler_path" \
     ${llvm_cmake_dir:+-DCMAKE_PREFIX_PATH="$llvm_cmake_dir/.."} \
     "${extra_cmake_defines[@]}" \
     || _fail "cmake configure failed for the Clang plugin -- $cmake_hint"

@@ -174,26 +174,17 @@ LLVM+Clang CMake package matching the compiler's exact LLVM major.
     Unlike vanilla Clang, `collect-facts` **refuses** to fall back to
     installing a same-major `clang-N`/`llvm-N-dev`/`libclang-N-dev` package
     when it detects Intel's oneAPI fork specifically (via the
-    `__INTEL_LLVM_COMPILER` predefined macro). Real end-to-end testing found
-    that build an ABI mismatch against the loading `icpx`/`icx` — an RTTI
-    typeinfo load failure, and a libstdc++-vs-libc++ standard-library crash
-    once the plugin actually reads its own arguments — not a merely-degraded
-    result. Two paths are supported instead: `llvm-cmake-prefix` pointed at
-    Intel's own matching LLVM/Clang CMake package (when you have one), or
-    the new `plugin-artifact` input pointed at an already-built,
-    already-certified plugin binary — the recommended path, since a real
-    ICX build is slow enough, and depends on a specific enough toolchain
-    image, that it belongs in a one-time build step rather than every
-    client repository's own CI run. See
-    `contrib/abicheck-clang-plugin/README.md`'s "Intel oneAPI (icx/icpx) —
-    experimental, not certified" section for the full findings and the
-    recommended certified-artifact distribution model. Even a successful
-    from-source build against a genuine vendor SDK is marked
-    `+experimental-intel-llvm` in the `producer-version` output — this
-    plugin's own conformance/ingestion test suite has not been run against
-    `icpx`/`icx` in the environment that produced this policy. `dump
+    `__INTEL_LLVM_COMPILER` predefined macro) — that build is a real ABI
+    mismatch against the loading `icpx`/`icx`, not a merely-degraded result.
+    Use `llvm-cmake-prefix` pointed at Intel's own matching LLVM/Clang CMake
+    package if you have one, or (recommended) the `plugin-artifact` input
+    pointed at an already-built, already-certified plugin binary. `dump
     --sources` (Full source scan) and the `abicheck-cc` wrapper remain the
-    portable, always-supported paths for this compiler.
+    portable, always-supported paths for this compiler otherwise. See
+    `contrib/abicheck-clang-plugin/README.md`'s "Intel oneAPI (icx/icpx) —
+    experimental, not certified" section (the canonical source) for the
+    full findings, the ABI knobs a from-source build needs, and the
+    certified-artifact distribution model.
 
 ## The one trap: public-roots must match how headers *resolve*
 
