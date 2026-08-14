@@ -1200,11 +1200,11 @@ _ATOMIC_SLOT_RE = re.compile(r"^_Atomic\b")
 
 def _canonicalize_atomic_slot(value: str) -> str:
     """Canonicalize one ``diff_atomic.py`` type-slot spelling for the
-    identity discriminator (Codex review, fresh evidence).
+    identity discriminator (Codex review, fresh evidence, two rounds).
 
     ``dumper_castxml.py`` cannot model C11 ``_Atomic`` at all -- it emits a
     bare ``Unimplemented`` node with no reference to the wrapped type, so
-    its own ``_type_name()`` spells the qualified side of the transition as
+    its own ``_type_name()`` spells the *inner content* of the qualifier as
     the literal, lossy sentinel ``"_Atomic"`` (see that function's own
     comment). The direct-clang backend, by contrast, retains the real
     wrapped spelling clang's own AST printer produces (e.g.
@@ -1217,24 +1217,72 @@ def _canonicalize_atomic_slot(value: str) -> str:
     adding ``atomic_qualifier_changed`` to
     :data:`_TYPE_BEARING_DISCRIMINATOR_KINDS`.
 
-    Safe to collapse the qualified side down to the bare ``"_Atomic"``
-    sentinel for identity purposes: ``diff_atomic.py``'s own detection
-    (``_has_atomic``) only ever tests *presence* of the qualifier via a
-    regex search, never compares the wrapped type across old/new -- two
-    genuinely different ``_Atomic``-wrapped inner types on the same slot
-    can never both reach this detector as two distinct findings (the
-    detector only fires on a presence transition, and continues past an
-    unchanged, still-``_Atomic`` slot entirely) -- so no real discriminating
-    information is lost. The *unqualified* side of the transition (the
-    plain, non-``_Atomic`` type both backends spell reliably) is left to
-    ordinary :func:`canonicalize_type_name` normalization, since that side's
-    exact spelling IS backend-comparable and still needs to distinguish,
-    e.g., an unrelated base-type change from a pure qualifier change.
+    Safe to collapse everything *inside* an ``_Atomic(...)`` wrapper (or a
+    bare ``"_Atomic"`` with nothing following) down to a fixed marker for
+    identity purposes: ``diff_atomic.py``'s own detection (``_has_atomic``)
+    only ever tests *presence* of the qualifier via a regex search, never
+    compares the wrapped type across old/new -- two genuinely different
+    ``_Atomic``-wrapped inner types on the same slot can never both reach
+    this detector as two distinct findings (it only fires on a presence
+    transition, and continues past an unchanged, still-``_Atomic`` slot
+    entirely) -- so no discriminating information about the wrapped
+    content is lost.
+
+    **Not** safe to collapse a declarator applied *outside* the wrapper
+    (Codex review, second round, fresh evidence): ``dumper_castxml.py``'s
+    ``PointerType``/``ReferenceType`` handling appends its own sigil as a
+    suffix onto whatever it wraps (``self._type_name(pointee) + "*"``), so
+    "pointer to atomic T" (``_Atomic(T) *`` on Clang) spells as
+    ``"_Atomic*"`` on CastXML -- distinguishably different from "atomic
+    pointer to T" (``_Atomic(T *)`` on Clang), which spells as the bare
+    ``"_Atomic"`` sentinel (the Atomic node itself is what's wrapped, so no
+    outer sigil is ever appended). These are two different qualified types
+    -- collapsing both down to one identical sentinel (an earlier revision
+    of this function did exactly that) would let an exact ``finding_id``
+    suppression accepted for one transition silently suppress the other,
+    unrelated one. Splitting on the ``_Atomic(...)`` wrapper's own matching
+    close paren (or the bare-sentinel case, with no parens at all) and
+    canonicalizing only what follows preserves this one signal CastXML
+    genuinely retains, while still discarding the wrapped inner type
+    CastXML cannot recover.
+
+    The *unqualified* side of the transition (the plain, non-``_Atomic``
+    type both backends spell reliably) is left to ordinary
+    :func:`canonicalize_type_name` normalization by this function's only
+    caller, since that side's exact spelling IS backend-comparable and
+    still needs to distinguish, e.g., an unrelated base-type change from a
+    pure qualifier change.
     """
     stripped = value.strip()
-    if _ATOMIC_SLOT_RE.match(stripped):
+    match = _ATOMIC_SLOT_RE.match(stripped)
+    if not match:
+        return canonicalize_type_name(stripped)
+    trailing = stripped[match.end() :]
+    if trailing.startswith("("):
+        # Find the close paren matching the one right after "_Atomic",
+        # tracking nesting depth so an inner type that itself contains
+        # parens (a function-pointer pointee, say) doesn't end the search
+        # early. Everything up to and including that close paren is the
+        # wrapped inner content being discarded; anything after it is an
+        # outer declarator that must survive.
+        depth = 0
+        close_idx = None
+        for i, ch in enumerate(trailing):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    close_idx = i
+                    break
+        # Unbalanced parens shouldn't occur for a real type-slot spelling,
+        # but degrade to "no trailing declarator" rather than raising or
+        # keeping unparsed text in the identity.
+        trailing = trailing[close_idx + 1 :] if close_idx is not None else ""
+    trailing = trailing.strip()
+    if not trailing:
         return "_Atomic"
-    return canonicalize_type_name(stripped)
+    return f"_Atomic {canonicalize_type_name(trailing)}"
 
 
 def _stringify_change_value(value: object) -> str:

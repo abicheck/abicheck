@@ -549,6 +549,65 @@ class TestCanonicalFindingIdScopedCanonicalization:
             clang
         )
 
+    def test_atomic_qualifier_changed_preserves_outer_declarator(self):
+        # Regression (Codex review, canonical-id-backend-gap, second P1
+        # finding): an earlier revision of _canonicalize_atomic_slot
+        # collapsed the ENTIRE qualified spelling to the bare "_Atomic"
+        # sentinel regardless of what followed it -- but "atomic pointer to
+        # T" (_Atomic(T *) on Clang, "_Atomic" on CastXML -- the Atomic node
+        # wraps the whole pointer, so CastXML's PointerType-appends-"*"
+        # logic never runs) and "pointer to atomic T" (_Atomic(T) * on
+        # Clang, "_Atomic*" on CastXML -- PointerType wraps the Atomic node
+        # and appends its own suffix) are two different qualified types.
+        # Collapsing both to the same sentinel would let a finding_id
+        # suppression accepted for one silently suppress the other.
+        atomic_pointer = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPi",
+            name="parameter 0 of '_Z3fooPi'",
+            detail="qualifier added",
+            old="int *",
+            new="_Atomic(int *)",
+        )
+        pointer_to_atomic = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPi",
+            name="parameter 0 of '_Z3fooPi'",
+            detail="qualifier added",
+            old="int *",
+            new="_Atomic(int) *",
+        )
+        assert report_canonical_finding_id(
+            atomic_pointer
+        ) != report_canonical_finding_id(pointer_to_atomic)
+
+        # And each still matches its own CastXML-spelled equivalent.
+        atomic_pointer_castxml = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPi",
+            name="parameter 0 of '_Z3fooPi'",
+            detail="qualifier added",
+            old="int*",
+            new="_Atomic",
+        )
+        pointer_to_atomic_castxml = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPi",
+            name="parameter 0 of '_Z3fooPi'",
+            detail="qualifier added",
+            old="int*",
+            new="_Atomic*",
+        )
+        assert report_canonical_finding_id(
+            atomic_pointer
+        ) == report_canonical_finding_id(atomic_pointer_castxml)
+        assert report_canonical_finding_id(
+            pointer_to_atomic
+        ) == report_canonical_finding_id(pointer_to_atomic_castxml)
+        assert report_canonical_finding_id(
+            atomic_pointer_castxml
+        ) != report_canonical_finding_id(pointer_to_atomic_castxml)
+
     def test_atomic_qualifier_changed_description_substitution_handles_containment(
         self,
     ):
