@@ -151,8 +151,19 @@ from .clang_source_edges import build_source_edges
 #: layered build config can legitimately record the same toggle-style flag
 #: more than once (e.g. ``-fno-sycl -fsycl -fno-sycl``), and the old dedup
 #: silently dropped every repeat, corrupting last-flag-wins state for any
-#: such pair, not just SYCL (Codex review).
-CLANG_EXTRACTOR_VERSION = "0.12"
+#: such pair, not just SYCL (Codex review). 0.13: ``_stamp_fact_set_and_
+#: coverage`` now stamps a real ``compiler_family`` (``"intel-llvm"`` for
+#: Intel's oneAPI fork, ``"clang"`` unchanged otherwise) instead of always
+#: the ``default_fact_set`` default -- a cache entry produced under 0.12 or
+#: earlier carries the stale ``"clang"`` label baked into its persisted
+#: ``fact_set`` and, on a cache HIT, is returned as-is by
+#: ``source_replay._replay_cache_lookup`` without ever re-running
+#: ``_stamp_fact_set_and_coverage`` (Codex review, PR #756: a persistent
+#: ``--source-abi-cache-dir``/``ABICHECK_L4_CACHE_DIR`` reused across an
+#: abicheck upgrade would otherwise silently keep serving the old label
+#: forever, since ``compute_tu_cache_key`` doesn't fold ``compiler_family``
+#: in on its own -- only the extractor version invalidates it).
+CLANG_EXTRACTOR_VERSION = "0.13"
 
 
 def _clang_compiler_family(clang_bin: str) -> str:

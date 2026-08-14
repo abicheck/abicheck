@@ -30,7 +30,10 @@ from abicheck import deadline
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.source_abi import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
-from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
+from abicheck.buildsource.source_extractors.clang import (
+    CLANG_EXTRACTOR_VERSION,
+    ClangSourceExtractor,
+)
 from abicheck.buildsource.source_replay import (
     CI_MODE_TO_SCOPE,
     REPLAY_SCOPES,
@@ -623,6 +626,56 @@ def test_cache_key_changes_with_extractor_and_flags(tmp_path: Path) -> None:
         public_header_roots=[],
     )
     assert base != other_tool != flagged != base
+
+
+def test_stale_extractor_version_cache_entry_is_not_reused(tmp_path: Path) -> None:
+    """Regression (Codex review, PR #756): a persistent --source-abi-cache-dir/
+    ABICHECK_L4_CACHE_DIR reused across an abicheck upgrade must miss a cache
+    entry written under an older CLANG_EXTRACTOR_VERSION -- a cache HIT returns
+    the persisted SourceAbiTu as-is (see source_replay._replay_cache_lookup),
+    never re-running _stamp_fact_set_and_coverage, so a stale entry's fact_set
+    (e.g. the pre-0.13 compiler_family: "clang" default that never recognized
+    Intel's oneAPI fork) would otherwise be served forever. compute_tu_cache_key
+    already folds extractor_version into the key; this pins that the currently
+    shipped CLANG_EXTRACTOR_VERSION actually differs from the pre-fix "0.12" a
+    real stale cache directory would carry, so a future accidental revert of
+    the version bump is caught here rather than silently reintroducing the
+    stale-cache gap.
+    """
+    assert CLANG_EXTRACTOR_VERSION != "0.12"
+
+    src = tmp_path / "foo.cpp"
+    src.write_text("int a;\n")
+    cu = _cu("cu://x", str(src), standard="c++17")
+    stale_key = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version="0.12",
+        compile_unit=cu,
+        public_header_roots=[],
+    )
+    current_key = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version=CLANG_EXTRACTOR_VERSION,
+        compile_unit=cu,
+        public_header_roots=[],
+    )
+    assert stale_key != current_key
+
+    cache = SourceAbiCache(tmp_path / "cache")
+    stale_tu = SourceAbiTu(
+        tu_id="cu://x",
+        fact_set={
+            "name": "abicheck-clang-canonical",
+            "version": 1,
+            "producer": "abicheck-cc-clang-extractor",
+            "producer_version": "0.12",
+            "compiler_family": "clang",
+            "compiler_version": "22.1.0",
+        },
+    )
+    cache.put(stale_key, stale_tu)
+    assert cache.get(stale_key) is not None  # the old entry is still readable...
+    assert cache.get(current_key) is None  # ...but never served under the new key
 
 
 def test_extractor_version_folds_in_cache_identity_extra_hook() -> None:
