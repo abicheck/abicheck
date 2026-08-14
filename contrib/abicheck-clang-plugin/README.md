@@ -414,6 +414,35 @@ work as designed and narrows what "experimental" means in practice:
   plugin remains an optional optimization with no certified path yet, not a
   regression from the state described above.
 
+**Independently re-verified** (a later pass, real Intel(R) oneAPI DPC++/C++
+Compiler 2026.1.1, build 20260724, installed from `apt.repos.intel.com`, and
+a real upstream `apt.llvm.org` LLVM 22 dev package, both in a from-scratch
+environment): every finding above reproduces exactly. The same-major
+apt-fallback refusal fires with `producer: clang-plugin`'s real guardrail
+code, unmodified, against real `icpx`. A full plugin built with
+`-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++` against upstream
+LLVM 22.1.8 crashes with the identical stack (`deriveRootsFromIncludes` under
+`FactsAction::CreateASTConsumer`, SIGSEGV/exit 139) the moment it is loaded
+into real `icpx` on even a trivial smoke-test translation unit. The
+`abicheck-cc` wrapper path (`abicheck-cc icpx` → `abicheck dump --build-info`
+→ `abicheck scan --build-info --depth source`) completes end-to-end against
+the same real `icpx`, with L4 source-ABI replay matching 2/2 symbols and a
+present L5 source graph. This pass also fixed two things this
+re-verification surfaced directly in `collect-facts`'s own guardrail code
+(not the plugin itself): the smoke-test failure message previously read
+unconditionally as "not the same LLVM major," which is actively misleading
+for this exact crash (major, RTTI, and stdlib all matched) — it now names
+the downstream-fork/frontend-object-layout-drift possibility whenever the
+resolved compiler is Intel's fork; and the "vendor-bundled LLVM/Clang CMake
+package" log line no longer claims the same confidence for an auto-detected
+`$CMPLR_ROOT` prefix (confirmed to live under the resolved compiler's own
+install root) as for an explicit, unverified `llvm-cmake-prefix` override
+(which can point at an ordinary same-major upstream package, as this
+re-verification's own upstream-LLVM-22 build demonstrates). See
+`actions/collect-facts/run.sh`'s `_finish_clang_plugin`/`_prepare_clang_plugin`
+and `tests/test_action_collect_facts.py`'s
+`TestClangPluginSmokeFailureMessage`/`TestClangPluginBundledPrefixProvenanceMessage`.
+
 None of this changes the section's guidance: the plugin is not a certified
 producer for `icx`/`icpx` today, and the only path to one is building against
 the exact toolchain image that will load it (see "Recommended distribution

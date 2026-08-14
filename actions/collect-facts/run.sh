@@ -541,7 +541,7 @@ _prepare_wrapper() {
 # downstream consumer/CI receipt can tell an ordinary vanilla-Clang plugin
 # apart from one this Action itself does not consider certified.
 _finish_clang_plugin() {
-  local plugin_so="$1" major="$2" version_suffix="$3"
+  local plugin_so="$1" major="$2" version_suffix="$3" is_intel_llvm="${4:-false}"
   [[ -f "$plugin_so" ]] || _fail "plugin_so '$plugin_so' does not exist."
 
   # Smoke-test: the plugin must at least load into the compiler without
@@ -563,7 +563,20 @@ _finish_clang_plugin() {
       -Xclang -plugin-arg-abicheck-facts -Xclang "out=$smoke_out" \
       -fsyntax-only "$smoke_src" 2>"$smoke_dir/stderr.log"; then
     cat "$smoke_dir/stderr.log" >&2
-    _fail "the Clang plugin at '$plugin_so' failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against (for plugin-artifact: the artifact does not match this job's resolved compiler, or was built for a different C++ standard-library ABI -- see contrib/abicheck-clang-plugin/README.md's Intel oneAPI section)."
+    # This message used to unconditionally read as "LLVM major mismatch" --
+    # wrong and actively misleading for a downstream fork like Intel's icx/
+    # icpx, where a real re-run reproduced this exact smoke failure with the
+    # major *already matching* on both sides (see contrib/abicheck-clang-
+    # plugin/README.md's Intel oneAPI "Status update" section): the plugin
+    # and $COMPILER agreed on LLVM major, RTTI, and standard-library ABI,
+    # and it still crashed, from frontend object-layout drift a fork's own
+    # patches can introduce independently of any of those three. Don't
+    # re-check the major in response to a report of this failure without
+    # first checking whether $COMPILER is such a fork.
+    if [[ "$is_intel_llvm" == "true" ]]; then
+      _fail "the Clang plugin at '$plugin_so' failed to load on a smoke-test translation unit -- see the compiler output above. '$COMPILER' is Intel's oneAPI DPC++/C++ Compiler (icpx/icx), a downstream LLVM fork: this can fail even when the plugin was built against the *same* LLVM major ($major) with the correct RTTI/standard-library ABI settings (ABICHECK_PLUGIN_RTTI/ABICHECK_PLUGIN_STDLIB) -- LLVM-major/RTTI/stdlib parity is not frontend object-layout parity for this fork. See contrib/abicheck-clang-plugin/README.md's Intel oneAPI section (including its 'Status update' subsection) for confirmed findings and the recommended certified-artifact/plugin-artifact distribution model; producer: replay or producer: wrapper remain the portable, always-supported paths for this compiler."
+    fi
+    _fail "the Clang plugin at '$plugin_so' failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against (for plugin-artifact: the artifact does not match this job's resolved compiler, or was built for a different C++ standard-library ABI)."
   fi
   # A successful exit code alone doesn't prove $plugin_so is genuinely the
   # abicheck-facts plugin -- clang's own -fplugin= just dlopen()s the named
@@ -693,7 +706,7 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
         || _fail "plugin-artifact-sha256 mismatch for '$PLUGIN_ARTIFACT': expected $PLUGIN_ARTIFACT_SHA256, got $actual_sha256 -- refusing to load an artifact whose digest does not match the pinned lock (see contrib/abicheck-clang-plugin/README.md's certified-artifact distribution model). A client repository should commit this digest, not the binary, and refresh it deliberately when the certified artifact changes."
     fi
     echo "using plugin-artifact '$PLUGIN_ARTIFACT' (skipping the CMake build)."
-    _finish_clang_plugin "$PLUGIN_ARTIFACT" "$major" ""
+    _finish_clang_plugin "$PLUGIN_ARTIFACT" "$major" "" "$is_intel_llvm"
     return
   fi
 
@@ -707,7 +720,30 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
     # apt-get, which either doesn't carry that major at all or would build
     # against a *different* LLVM than the one $COMPILER actually loads
     # (Codex review).
-    echo "using vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' -- skipping apt-get install-deps."
+    #
+    # Distinguish HOW this prefix was resolved in the log line itself: an
+    # auto-detected $CMPLR_ROOT-derived prefix was confirmed to live under
+    # the same root as the resolved $COMPILER binary (see
+    # _bundled_llvm_cmake_prefix's own comment), which is real, if
+    # incomplete, evidence it is that compiler's own SDK. An *explicit*
+    # llvm-cmake-prefix override has no such check -- it is caller-supplied
+    # and unverified, and can just as easily point at an ordinary same-major
+    # upstream/apt LLVM package as at the vendor's genuine SDK. The original
+    # unconditional "vendor-bundled" wording made both cases read as
+    # equally trustworthy, which is exactly the gap a same-major-but-wrong
+    # upstream LLVM prefix exploited in practice (a real re-run pointed
+    # llvm-cmake-prefix at a plain apt.llvm.org LLVM 22 and got this same
+    # "vendor-bundled" line, though the resulting plugin still crashed
+    # inside real icx -- see contrib/abicheck-clang-plugin/README.md's
+    # Intel oneAPI "Status update" section). Neither wording claims the
+    # prefix is *compatible* -- that is still only established by the smoke
+    # test below, or by a real compatibility manifest this Action does not
+    # yet have (see contrib/abicheck-clang-plugin/AGENTS.md).
+    if [[ -n "$LLVM_CMAKE_PREFIX" ]]; then
+      echo "using explicitly-supplied llvm-cmake-prefix at '$bundled_cmake_prefix' -- skipping apt-get install-deps. This path is NOT verified to be '$COMPILER''s own vendor SDK (it is not checked against \$CMPLR_ROOT or the compiler's install location); if it is actually an ordinary same-major upstream/apt LLVM package rather than the vendor's genuine SDK, the build below may still succeed while the resulting plugin remains ABI-incompatible with a downstream fork like Intel's icx/icpx -- the smoke test below is the only thing that catches that, not this message."
+    else
+      echo "auto-detected the vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' under \$CMPLR_ROOT (confirmed to live under '$COMPILER''s own install root) -- skipping apt-get install-deps."
+    fi
   elif [[ -z "$LLVM_CMAKE_PREFIX" && -n "${CMPLR_ROOT:-}" ]]; then
     # $CMPLR_ROOT is set (a vendor environment, e.g. Intel oneAPI's
     # setvars.sh, was sourced) but auto-detection found no lib/cmake/llvm
@@ -812,7 +848,7 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
   plugin_so=$(find "$build_dir" -maxdepth 2 -name 'libabicheck-facts.*' | head -1)
   [[ -n "$plugin_so" ]] || _fail "Clang plugin build did not produce libabicheck-facts.* under '$build_dir'."
 
-  _finish_clang_plugin "$plugin_so" "$major" "$version_suffix"
+  _finish_clang_plugin "$plugin_so" "$major" "$version_suffix" "$is_intel_llvm"
 }
 
 _verify_pack() {

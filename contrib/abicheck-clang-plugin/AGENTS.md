@@ -63,22 +63,44 @@ A build of this plugin only loads into the exact clang it was built against
   refusal to "fix" a user's build failure; point them at `llvm-cmake-prefix`
   (a genuine vendor SDK) or `plugin-artifact` (a pre-certified binary)
   instead, per the README's recommended distribution model.
-  **Confirmed necessary-but-not-sufficient in a later re-run**: with both
-  fixes applied, a *full* plugin build against upstream LLVM 22 still
-  crashes inside real `icx` past `FactsAction::CreateASTConsumer`, in
-  `deriveRootsFromIncludes` — same LLVM major, RTTI, and stdlib all
-  matched, still incompatible frontend object layout. See README.md's
-  "Status update" subsection under the Intel section for the full finding.
-  Two follow-ups this surfaced, still open: (1) the SHA-256 pin on
-  `plugin-artifact` verifies file integrity, not compiler compatibility —
-  there is no machine-checked manifest tying an artifact to the exact
-  compiler build/target/RTTI/stdlib it was built for, so a mismatched
-  artifact is only caught by the runtime smoke test, not rejected upfront;
-  (2) the smoke-test failure message reads as an LLVM-major mismatch, which
-  is misleading when the major already matches and the real cause is
-  fork-internal ABI drift — don't "fix" a report of this failure by
-  re-checking the major, and don't reword the message without keeping both
-  causes distinguishable.
+  **Confirmed necessary-but-not-sufficient, and independently re-verified
+  twice** (a real end-to-end re-run, then a from-scratch reproduction in a
+  fresh environment against a real installed Intel oneAPI 2026.1.1 and a
+  real upstream `apt.llvm.org` LLVM 22): with both fixes applied, a *full*
+  plugin build against upstream LLVM 22 still crashes inside real `icx`
+  past `FactsAction::CreateASTConsumer`, in `deriveRootsFromIncludes` —
+  same LLVM major, RTTI, and stdlib all matched, still incompatible
+  frontend object layout (identical stack both times: SIGSEGV/exit 139 on
+  a trivial smoke-test TU). See README.md's "Status update" subsection
+  under the Intel section for the full finding. Two follow-ups this
+  surfaced: (1) the SHA-256 pin on `plugin-artifact` verifies file
+  integrity, not compiler compatibility — there is no machine-checked
+  manifest tying an artifact to the exact compiler build/target/RTTI/stdlib
+  it was built for, so a mismatched artifact is only caught by the runtime
+  smoke test, not rejected upfront — **still open**, a real compatibility
+  manifest (schema + pre-load comparison against the resolved compiler) is
+  a separate, larger design, not attempted here; (2) the smoke-test failure
+  message used to read unconditionally as an LLVM-major mismatch, which was
+  actively misleading for this exact crash (major/RTTI/stdlib all already
+  matched) — **fixed**: `_finish_clang_plugin` (`actions/collect-facts/
+  run.sh`) now takes the resolved `is_intel_llvm` flag and names the
+  downstream-fork/frontend-object-layout-drift possibility specifically
+  when the loading compiler is Intel's fork, instead of steering a reader
+  back to re-checking the major. The "using vendor-bundled LLVM/Clang CMake
+  package" log line in `_prepare_clang_plugin` had the same shape of gap —
+  it read identically whether the prefix was auto-detected under the
+  resolved compiler's own `$CMPLR_ROOT` (real, if incomplete, evidence) or
+  supplied via an explicit, unverified `llvm-cmake-prefix` override (which
+  can point at an ordinary same-major upstream package, as this
+  re-verification's own upstream-LLVM-22 build demonstrates) — also fixed,
+  same pass. Regression coverage:
+  `tests/test_action_collect_facts.py`'s
+  `TestClangPluginSmokeFailureMessage`/
+  `TestClangPluginBundledPrefixProvenanceMessage`. Neither fix changes
+  guardrail *behavior* (the refusal still fires, the smoke test still
+  fails closed) — only which explanation a reader sees, so don't revert
+  either wording change to "simplify" the message without re-reading why
+  it was split in the first place.
 - This asymmetry is *why* the plugin is optional infrastructure: Full source
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing
