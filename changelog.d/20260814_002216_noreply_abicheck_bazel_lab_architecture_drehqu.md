@@ -19,3 +19,11 @@
   now drops old/new for these two categories entirely (there is at most one
   such event per symbol per comparison, so the value carried no
   disambiguating power, only producer-specific noise).
+- **A `finding_id:` suppression selector loaded from YAML no longer breaks
+  when its digest happens to be all-decimal** — `report_canonical_finding_id`
+  truncates a sha256 digest to 16 hex characters, which has a real chance of
+  landing entirely within `0`-`9`; an unquoted all-decimal scalar in YAML
+  (e.g. `finding_id: 3327221372985366`) parses as a Python `int`, not `str`,
+  which previously reached `Suppression.finding_id` unchanged and silently
+  matched nothing (`int != str`). `suppression.py`'s loader now coerces the
+  value to `str`.

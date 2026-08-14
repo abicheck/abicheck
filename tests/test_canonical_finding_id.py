@@ -490,3 +490,25 @@ class TestFindingIdSuppressionSelector:
         suppressions = SuppressionList.load(yaml_path)
         assert len(suppressions) == 1
         assert suppressions.is_suppressed(change)
+
+    def test_loads_from_yaml_when_the_digest_is_all_decimal(self, tmp_path):
+        # Regression (Codex review, PR #753, fresh evidence): a
+        # report_canonical_finding_id digest is 16 hex characters, so it
+        # has a real chance of landing entirely within 0-9. An unquoted
+        # all-decimal scalar in YAML parses as a Python int, not str --
+        # if that raw int reached Suppression.finding_id unchanged, the
+        # rule would silently match nothing (int != str comparison).
+        all_decimal_id = "3327221372985366"
+        assert all_decimal_id.isdigit()  # sanity: this scalar parses as int
+        yaml_path = tmp_path / "suppress.yaml"
+        yaml_path.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            f"  - finding_id: {all_decimal_id}\n"
+            "    reason: accepted via canonical id\n"
+        )
+        suppressions = SuppressionList.load(yaml_path)
+        assert len(suppressions) == 1
+        rule = suppressions._suppressions[0]
+        assert rule.finding_id == all_decimal_id
+        assert isinstance(rule.finding_id, str)
