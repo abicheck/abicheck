@@ -1056,6 +1056,22 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
 # checked against a real call site; a kind absent from this set still has
 # the pre-fix backend-spelling-mismatch gap on canonical_finding_id, and
 # adding it needs the same per-kind verification, not a blanket sweep.
+#
+# Known gap, accepted rather than chased further (Codex review, PR #753,
+# fifth round: ATOMIC_QUALIFIER_CHANGED is one more concrete instance,
+# `diff_atomic.py`'s old_value/new_value are the raw `iter_type_slot_changes`
+# type-slot spellings). A *derived* classification (e.g. every kind whose
+# emitter calls `iter_type_slot_changes`/passes a `RecordType`/`Param.type`-
+# sourced value as `old=`/`new=`) was considered instead of one more
+# reactive addition -- rejected for this pass: it needs the same per-kind
+# call-site verification this file's own docstring above already commits
+# to (a value's *source* doesn't by itself prove no `{detail}`-carried
+# per-item identity is also at stake, the exact trap the earlier
+# description-dropping attempt fell into), just automated instead of
+# explicit, which trades a visible, auditable list for an implicit one
+# that's harder to review. Matches this codebase's own "known gaps over
+# risky reactive patches" convention (AGENTS.md) rather than a sixth
+# same-session revision of this exact function.
 _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
     {
         "func_return_changed",
@@ -1106,6 +1122,30 @@ def _stringify_change_value(value: object) -> str:
     if isinstance(value, (list, tuple)):
         return ",".join(str(v) for v in value)
     return str(value)
+
+
+# Only the bit-valued half of each _EQUIVALENT_CHANGE_CATEGORIES size/
+# alignment pair needs converting -- diff_platform.py's byte-valued
+# STRUCT_SIZE_CHANGED/STRUCT_ALIGNMENT_CHANGED are already the target unit.
+# Used only by _change_discriminator's canonicalize_values=True path to
+# fold a category-collapsed kind's old/new into the discriminator in a
+# unit that agrees regardless of which detector supplied the finding
+# (Codex review, fresh evidence -- see that call site's own comment).
+_CATEGORY_VALUE_UNIT_DIVISOR = {
+    "type_size_changed": 8,
+    "type_alignment_changed": 8,
+}
+
+
+def _divide_numeric_string(value: str, divisor: int) -> str:
+    """Return ``str(int(value) // divisor)``, or *value* unchanged if it
+    isn't a base-10 integer (defensive -- every real producer of a
+    _CATEGORY_VALUE_UNIT_DIVISOR kind stamps a plain bit count, but this
+    must never raise on an unexpected input)."""
+    try:
+        return str(int(value) // divisor)
+    except ValueError:
+        return value
 
 
 def _change_discriminator(
@@ -1185,15 +1225,27 @@ def _change_discriminator(
         # (e.g. TYPE_SIZE_CHANGED 8->16 vs. a later, unrelated 16->32 on
         # the same type), or accepting a `finding_id:` rule for the first
         # would silently suppress the second too (Codex review, fresh
-        # evidence). Folding in old_value/new_value is safe here: every
-        # kind pair this map collapses reports the *same* underlying
-        # event's old/new from both detectors (a size/alignment byte
-        # count, a removed symbol's own name, an enum value) -- none of
-        # them are type-spelling text needing canonicalize_type_name, but
-        # it's applied anyway (harmless on non-type text, see
-        # _stringify_change_value's docstring) rather than special-casing.
-        old_str = canonicalize_type_name(_stringify_change_value(change.old_value))
-        new_str = canonicalize_type_name(_stringify_change_value(change.new_value))
+        # evidence). Folding in old_value/new_value is NOT unit-safe by
+        # itself: diff_types.py's TYPE_SIZE_CHANGED/TYPE_ALIGNMENT_CHANGED
+        # stamp RecordType.size_bits/alignment_bits (bits), while
+        # diff_platform.py's collapsed sibling STRUCT_SIZE_CHANGED/
+        # STRUCT_ALIGNMENT_CHANGED stamp StructLayout.byte_size/alignment
+        # (bytes) -- the identical 8-byte layout change reports as
+        # "64\x1f128" from one detector and "8\x1f16" from the other
+        # (Codex review, fresh evidence), which would make the canonical
+        # id depend on which detector happened to supply the *retained*
+        # finding after reconciliation, defeating this fold's own point.
+        # _CATEGORY_VALUE_UNIT_DIVISOR converts every such kind to bytes
+        # before folding, leaving every other collapsed kind's value
+        # (a removed symbol's own name, an enum value, ...) untouched.
+        old_val = _stringify_change_value(change.old_value)
+        new_val = _stringify_change_value(change.new_value)
+        divisor = _CATEGORY_VALUE_UNIT_DIVISOR.get(kind_value)
+        if divisor is not None:
+            old_val = _divide_numeric_string(old_val, divisor)
+            new_val = _divide_numeric_string(new_val, divisor)
+        old_str = canonicalize_type_name(old_val)
+        new_str = canonicalize_type_name(new_val)
         return f"category:{category}\x1f{old_str}\x1f{new_str}"
     # header_binary_context_mismatch: change.affected_symbols carries this
     # finding's complete mismatched-record set as structured data (unlike

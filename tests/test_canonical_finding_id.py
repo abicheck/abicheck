@@ -302,6 +302,43 @@ class TestCanonicalFindingIdScopedCanonicalization:
         )
         assert report_canonical_finding_id(rich) == report_canonical_finding_id(l0)
 
+    def test_equivalent_category_size_kinds_normalize_units_before_comparing(self):
+        # Regression (Codex review, PR #753, fifth round): diff_types.py's
+        # TYPE_SIZE_CHANGED/TYPE_ALIGNMENT_CHANGED stamp RecordType's *bit*
+        # counts, while their collapsed sibling STRUCT_SIZE_CHANGED/
+        # STRUCT_ALIGNMENT_CHANGED (diff_platform.py) stamp StructLayout's
+        # *byte* counts -- the identical 8-byte layout change must produce
+        # the same canonical id regardless of which detector supplied it.
+        type_kind = make_change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Widget",
+            name="Widget",
+            old="64",
+            new="128",
+        )
+        struct_kind = make_change(
+            ChangeKind.STRUCT_SIZE_CHANGED,
+            symbol="Widget",
+            name="Widget",
+            old="8",
+            new="16",
+        )
+        assert report_canonical_finding_id(type_kind) == report_canonical_finding_id(
+            struct_kind
+        )
+        # A genuinely different size transition on the same symbol must
+        # still differ, unit conversion included.
+        different = make_change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Widget",
+            name="Widget",
+            old="128",
+            new="256",
+        )
+        assert report_canonical_finding_id(type_kind) != report_canonical_finding_id(
+            different
+        )
+
 
 class TestReporterEmitsCanonicalFindingId:
     def test_change_to_dict_includes_canonical_finding_id(self):
