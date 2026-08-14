@@ -14,4 +14,16 @@
   drift (never a real mangled symbol) and merges such a pair only when
   exactly one unmatched candidate exists on each side with an identical
   canonicalized (namespace-stripped owner, ctor/dtor kind, parameter-type)
-  form.
+  form, AND the pair is a demonstrable legacy-bare/current-qualified
+  format drift — exactly one side's raw owner is namespace-unqualified,
+  the other qualified with a matching bare tail. Two already-qualified
+  owners (e.g. `ns1::Foo` vs `ns2::Foo`) are never merged, since that
+  would hide a genuine breaking namespace move as `NO_CHANGE`. The
+  resolved reconciliation is also now exposed
+  (`iter_matched_function_pairs`) to every other per-pair function
+  detector that does its own key join — inline transitions, method-access
+  narrowing, parameter default/rename/pointer-level changes,
+  `[[deprecated]]` transitions, and `restrict`/`va_list` qualifier
+  changes — so a genuine, unrelated property change on the same
+  reconciled ctor/dtor pair (e.g. going public to private) is still
+  correctly reported instead of silently disappearing.

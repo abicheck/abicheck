@@ -33,13 +33,14 @@ from hypothesis import given, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.diff_symbols import _diff_functions
+from abicheck.diff_symbols import _diff_access_levels, _diff_functions
 from abicheck.finding_identity_ctor_dtor import (
     CtorDtorCanonicalKey,
     canonicalize_synthetic_ctor_dtor_key,
     find_ctor_dtor_key_drift_matches,
+    iter_matched_function_pairs,
 )
-from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model import AbiSnapshot, AccessLevel, Function, Param, Visibility
 
 
 def _snap(version: str, functions: list[Function]) -> AbiSnapshot:
@@ -52,13 +53,22 @@ def _snap(version: str, functions: list[Function]) -> AbiSnapshot:
     )
 
 
-def _func(name: str, mangled: str, params: list[Param] | None = None) -> Function:
+def _func(
+    name: str,
+    mangled: str,
+    params: list[Param] | None = None,
+    *,
+    access: AccessLevel = AccessLevel.PUBLIC,
+    is_inline: bool = False,
+) -> Function:
     return Function(
         name=name,
         mangled=mangled,
         return_type="void",
         params=params or [],
         visibility=Visibility.PUBLIC,
+        access=access,
+        is_inline=is_inline,
     )
 
 
@@ -192,6 +202,69 @@ class TestFindCtorDtorKeyDriftMatches:
         }
         assert find_ctor_dtor_key_drift_matches(old, new) == []
 
+    # -- Codex review, PR #761 finding 1: restrict the fallback to a
+    # demonstrable legacy-bare/current-qualified pair -----------------------
+
+    def test_a_old_bare_new_qualified_still_merges(self) -> None:
+        """(a) Must not regress the original fix: legacy-bare old side,
+        current-qualified new side, same class -- still merges."""
+        old = {"__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "old")}
+        new = {
+            "__abicheck_ctor__abicheck_lab::Calculator()": _func(
+                "Calculator::Calculator", "new"
+            )
+        }
+        matches = find_ctor_dtor_key_drift_matches(old, new)
+        assert len(matches) == 1
+        assert matches[0].old_key == "__abicheck_ctor__Calculator()"
+        assert matches[0].new_key == "__abicheck_ctor__abicheck_lab::Calculator()"
+
+    def test_b_two_already_qualified_owners_do_not_merge(self) -> None:
+        """(b) A genuine namespace move: both sides are already
+        namespace-qualified (``ns1::Foo`` vs ``ns2::Foo``). Must NOT merge --
+        this is a real, breaking namespace change, not key-format drift."""
+        old = {"__abicheck_ctor__ns1::Foo()": _func("Foo::Foo", "old")}
+        new = {"__abicheck_ctor__ns2::Foo()": _func("Foo::Foo", "new")}
+        assert find_ctor_dtor_key_drift_matches(old, new) == []
+
+    def test_c_new_bare_old_qualified_still_merges(self) -> None:
+        """(c) Reverse direction: legacy-bare NEW side, current-qualified
+        OLD side (order must not matter) -- still merges."""
+        old = {
+            "__abicheck_ctor__abicheck_lab::Calculator()": _func(
+                "Calculator::Calculator", "old"
+            )
+        }
+        new = {"__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "new")}
+        matches = find_ctor_dtor_key_drift_matches(old, new)
+        assert len(matches) == 1
+        assert matches[0].old_key == "__abicheck_ctor__abicheck_lab::Calculator()"
+        assert matches[0].new_key == "__abicheck_ctor__Calculator()"
+
+    def test_d_two_identical_bare_keys_never_reach_this_module(self) -> None:
+        """(d) Two identical bare keys on both sides join on the
+        pre-existing exact-key path in ``diff_symbols._diff_functions`` --
+        confirmed end to end, since that path never routes a key present on
+        both sides through ``reconcile_ctor_dtor_key_drift``'s "unmatched"
+        narrowing at all, so it is silent (``NO_CHANGE``) without ever
+        exercising this module's own asymmetry check.
+
+        Separately (in case the two dicts were somehow both passed as
+        "unmatched" candidates anyway): two identical bare owners must
+        still be refused by :func:`find_ctor_dtor_key_drift_matches`
+        itself -- both are bare, not a legacy-bare/current-qualified pair
+        -- which is the same guard that makes (b) above refuse two
+        already-qualified owners."""
+        old = _snap(
+            "1.0", [_func("Calculator::Calculator", "__abicheck_ctor__Calculator()")]
+        )
+        new = _snap(
+            "2.0", [_func("Calculator::Calculator", "__abicheck_ctor__Calculator()")]
+        )
+        assert _diff_functions(old, new) == []
+        same = {"__abicheck_ctor__Calculator()": _func("Calculator::Calculator", "x")}
+        assert find_ctor_dtor_key_drift_matches(same, same) == []
+
 
 class TestDiffFunctionsCtorDtorKeyDrift:
     """End-to-end through ``diff_symbols._diff_functions`` (and, for (a),
@@ -283,6 +356,121 @@ class TestDiffFunctionsCtorDtorKeyDrift:
             "2.0", [_func("Calculator::~Calculator", "~abicheck_lab::Calculator")]
         )
         assert _diff_functions(old, new) == []
+
+    def test_f_real_namespace_move_between_two_qualified_owners_reported(
+        self,
+    ) -> None:
+        """Codex review, PR #761 finding 1: two already-qualified owners
+        (``ns1::Foo`` vs ``ns2::Foo``) must be reported as a real
+        removed+added, not silently merged into ``NO_CHANGE``."""
+        old = _snap("1.0", [_func("Foo::Foo", "__abicheck_ctor__ns1::Foo()")])
+        new = _snap("2.0", [_func("Foo::Foo", "__abicheck_ctor__ns2::Foo()")])
+        changes = _diff_functions(old, new)
+        kinds = [c.kind for c in changes]
+        assert kinds.count(ChangeKind.FUNC_REMOVED) == 1
+        assert kinds.count(ChangeKind.FUNC_ADDED) == 1
+
+
+class TestIterMatchedFunctionPairsExposesCtorDtorReconciliation:
+    """Codex review, PR #761 finding 2: a reconciled ctor/dtor pair must
+    also be visible to detectors OTHER than ``_check_function_signature`` --
+    otherwise a real, non-key-format-drift property change on that same
+    pair (access narrowing, inline transition, ...) silently disappears."""
+
+    def test_iter_matched_function_pairs_includes_reconciled_pair(self) -> None:
+        old_map = {
+            "__abicheck_ctor__Calculator()": _func(
+                "Calculator::Calculator", "__abicheck_ctor__Calculator()"
+            )
+        }
+        new_map = {
+            "__abicheck_ctor__abicheck_lab::Calculator()": _func(
+                "Calculator::Calculator",
+                "__abicheck_ctor__abicheck_lab::Calculator()",
+            )
+        }
+        pairs = list(iter_matched_function_pairs(old_map, new_map))
+        assert len(pairs) == 1
+        key, f_old, f_new = pairs[0]
+        assert key == "__abicheck_ctor__abicheck_lab::Calculator()"
+        assert f_old is old_map["__abicheck_ctor__Calculator()"]
+        assert f_new is new_map["__abicheck_ctor__abicheck_lab::Calculator()"]
+
+    def test_iter_matched_function_pairs_still_yields_exact_matches(self) -> None:
+        f_old = _func("plain", "_ZN5plainEv")
+        f_new = _func("plain", "_ZN5plainEv")
+        old_map = {"_ZN5plainEv": f_old}
+        new_map = {"_ZN5plainEv": f_new}
+        assert list(iter_matched_function_pairs(old_map, new_map)) == [
+            ("_ZN5plainEv", f_old, f_new)
+        ]
+
+    def test_ctor_going_public_to_private_across_key_drift_is_reported(
+        self,
+    ) -> None:
+        """The motivating case: an old-bare/new-qualified ctor pair whose
+        new side ALSO went public -> private. Must still report
+        ``METHOD_ACCESS_CHANGED`` -- this is exactly what silently
+        vanished before ``iter_matched_function_pairs`` existed, since
+        ``_diff_access_levels`` builds its own fresh exact-key join and
+        the reconciled pair's old/new keys never intersect it."""
+        old = _snap(
+            "1.0",
+            [
+                _func(
+                    "Calculator::Calculator",
+                    "__abicheck_ctor__Calculator()",
+                    access=AccessLevel.PUBLIC,
+                )
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                _func(
+                    "Calculator::Calculator",
+                    "__abicheck_ctor__abicheck_lab::Calculator()",
+                    access=AccessLevel.PRIVATE,
+                )
+            ],
+        )
+        changes = _diff_access_levels(old, new)
+        kinds = [c.kind for c in changes]
+        assert ChangeKind.METHOD_ACCESS_CHANGED in kinds
+
+    def test_ctor_inline_transition_across_key_drift_is_reported(self) -> None:
+        """Same shape, for ``FUNC_BECAME_INLINE`` via
+        ``_check_inline_transitions`` -- run from inside ``_diff_functions``
+        itself, over the SAME ``old_map``/``new_map``
+        ``reconcile_ctor_dtor_key_drift`` already consulted (this is the
+        specific case that regressed when reconciliation used to mutate
+        ``old_map`` in place -- see ``reconcile_ctor_dtor_key_drift``'s own
+        docstring)."""
+        old = _snap(
+            "1.0",
+            [
+                _func(
+                    "Calculator::Calculator",
+                    "__abicheck_ctor__Calculator()",
+                    is_inline=False,
+                )
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                _func(
+                    "Calculator::Calculator",
+                    "__abicheck_ctor__abicheck_lab::Calculator()",
+                    is_inline=True,
+                )
+            ],
+        )
+        changes = _diff_functions(old, new)
+        kinds = [c.kind for c in changes]
+        assert ChangeKind.FUNC_BECAME_INLINE in kinds
+        assert ChangeKind.FUNC_REMOVED not in kinds
+        assert ChangeKind.FUNC_ADDED not in kinds
 
 
 # -- Property tests (AGENTS.md "Primitive-level property tests") -----------

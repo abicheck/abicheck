@@ -39,8 +39,16 @@ stylistic:
   ``diff_symbols._public_functions`` itself. A back-import would be a real
   cycle once ``diff_symbols`` imports this module, and the AI-readiness
   import-cycle gate walks *every* AST import — a function-local one included
-  — so it would flag it. Taking ``dict[str, Function]`` keeps this module a
-  leaf, which is the other remedy the root ``AGENTS.md`` names.
+  — so it would flag it. Taking ``dict[str, Function]`` keeps this module
+  from depending on ``diff_symbols``, which is the other remedy the root
+  ``AGENTS.md`` names. It DOES import
+  :func:`~abicheck.finding_identity_ctor_dtor.iter_matched_function_pairs`
+  (PR #761 finding 2) — ``finding_identity_ctor_dtor`` is itself a leaf
+  (no import back to ``diff_symbols`` or this module), so that import adds
+  no cycle; it is what lets a ctor/dtor pair reconciled across a
+  synthetic-key format-drift also be visible to the ``restrict``/
+  ``va_list`` per-parameter joins below, not just to
+  ``diff_symbols._check_function_signature``.
 """
 
 from __future__ import annotations
@@ -48,6 +56,7 @@ from __future__ import annotations
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
+from .finding_identity_ctor_dtor import iter_matched_function_pairs
 from .model import Function
 
 
@@ -61,10 +70,7 @@ def param_restrict_changes(
     sides are known to be header-derived with reliable restrict facts.
     """
     changes: list[Change] = []
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if p_old.is_restrict != p_new.is_restrict:
                 direction = "added" if p_new.is_restrict else "removed"
@@ -120,10 +126,7 @@ def param_va_list_changes(
     attributes today.
     """
     changes: list[Change] = []
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if not p_old.is_va_list and p_new.is_va_list:
                 changes.append(

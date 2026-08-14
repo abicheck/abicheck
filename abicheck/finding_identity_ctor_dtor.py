@@ -80,12 +80,74 @@ is why this stays its own narrowly-scoped module rather than folding into
   independently gaining/losing an unrelated constructor, therefore never
   cross-merge: both sides would carry 2+ candidates for that bare name and
   the match is refused.
+- **Matches only a demonstrable legacy-bare/current-qualified pair --
+  never two already-qualified owners, and never two already-bare owners**
+  (Codex review, PR #761 follow-up). The legacy (pre-#582) key format
+  never carried a namespace qualifier at all, so an owner scope containing
+  no ``"::"`` is exactly the positive signal that side came from the old
+  format (or is a real, non-namespaced global class -- which coincides
+  harmlessly with an already-exact-key match and therefore never reaches
+  this fallback tier to begin with, since two identical bare keys join on
+  the exact-key tier before either candidate is ever considered
+  "unmatched"). Two owners that are BOTH already namespace-qualified
+  (``ns1::Foo`` vs ``ns2::Foo``) are two spellings that could only differ
+  by a REAL namespace move, not by key-format drift -- collapsing both to
+  the same bare canonical form and matching them anyway would silently
+  hide a genuine breaking namespace change as ``NO_CHANGE``. This module
+  therefore checks, in addition to canonical-form equality, that exactly
+  one of the two raw (pre-bare-strip) owner scopes contains ``"::"`` and
+  the other does not (:func:`_synthetic_key_raw_owner_scope`,
+  consulted directly on the *pair* of original owner strings, not only on
+  their post-strip canonical form) before treating a same-canonical-form
+  old/new pair as a reconciliation match.
+
+**Which detectors see a resolved match (Codex review, PR #761 finding 2).**
+A resolved ctor/dtor pair's old and new keys differ from each other by
+construction, so any OTHER ``diff_symbols.py``-family detector that joins
+old/new functions by exact key would never independently see the pair as
+matched -- it reads as a plain removal on one side and a plain addition on
+the other, both silently absorbed by ``reconcile_ctor_dtor_key_drift``
+before that detector ever runs, so a genuine non-key-format property
+change on the SAME pair went unreported entirely. :func:`iter_matched_function_pairs`
+closes this by exposing the resolved pairs as an additional explicit
+source every affected per-pair detector's own join consults, not by
+reinventing per-detector logic. Wired in
+(``diff_symbols.py``: ``_check_inline_transitions``,
+``_check_method_access_changes``, ``_diff_param_defaults``,
+``_diff_param_renames``, ``_diff_pointer_levels``, ``_diff_func_deprecated``;
+``diff_param_qualifiers.py``: ``param_restrict_changes``,
+``param_va_list_changes``) -- every per-pair ``Function`` detector in
+both modules that does its own map join, except two deliberately left
+out:
+
+- ``_diff_func_override_specifier`` -- not applicable. ``override`` can
+  only appear on a virtual member function, and a constructor/destructor
+  is never virtual, so a ctor/dtor pair can never carry this property to
+  begin with; wiring it in would add dead code, not coverage.
+- ``_diff_symbol_renames`` -- a batch-rename HEURISTIC (2+ independently
+  removed/added symbols whose names share a naming pattern), not a
+  per-pair join over a resolved match; it re-derives its own
+  removed/added sets from ``_public_functions`` directly rather than
+  consulting any resolved pairing. Threading ctor/dtor reconciliation
+  through a heuristic built for an unrelated problem (namespace-prefix
+  refactors across MANY symbols) risks changing its unrelated behavior
+  more than it closes a real gap here, so this is left as a documented
+  gap rather than a same-PR extension. In practice this detector requires
+  2+ removed symbols with no already-reconciled match consuming them
+  first, so a single reconciled ctor/dtor pair does not feed it spurious
+  input either way -- only an entirely separate, coincidental batch-rename
+  pattern elsewhere in the same comparison could interact with it, which
+  this module's reconciliation does not create.
+
+Variable-only detectors (``_diff_var_deprecated``, ``_diff_var_access``,
+``var_access_changes``) are out of scope by construction -- this module
+never reconciles a ``Variable``, only a ``Function``.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -251,6 +313,44 @@ def canonicalize_synthetic_ctor_dtor_key(key: str) -> CtorDtorCanonicalKey | Non
     return None
 
 
+def _synthetic_key_raw_owner_scope(key: str) -> str | None:
+    """Un-bare-stripped owner scope for a synthetic ctor/dtor key, or
+    ``None`` if *key* is not one.
+
+    Deliberately separate from :func:`canonicalize_synthetic_ctor_dtor_key`,
+    whose owner is always bare-stripped for grouping -- this is consulted
+    only by :func:`find_ctor_dtor_key_drift_matches`, to check the
+    legacy-bare-vs-current-qualified asymmetry a reconciliation match
+    requires (see this module's docstring). A raw owner scope that itself
+    contains ``"::"`` is namespace-qualified; one that doesn't is bare.
+    """
+    if is_synthetic_ctor_key(key):
+        body = key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
+        split = _split_synthetic_ctor_key_body(body)
+        if split is None or not split[0]:
+            return None
+        return split[0]
+    if is_synthetic_dtor_key(key):
+        scope = key[len(_SYNTHETIC_DTOR_KEY_PREFIX) :]
+        return scope or None
+    return None
+
+
+def _is_legacy_qualification_drift_pair(old_key: str, new_key: str) -> bool:
+    """True iff *old_key*/*new_key*'s raw owner scopes are a demonstrable
+    legacy-bare/current-qualified pair -- exactly one of the two is
+    namespace-qualified (contains ``"::"``), the other is bare. Both
+    qualified (a real cross-namespace move) or both bare (already handled,
+    harmlessly, by the exact-key tier before reaching this fallback) are
+    refused. See this module's docstring for the full reasoning.
+    """
+    old_scope = _synthetic_key_raw_owner_scope(old_key)
+    new_scope = _synthetic_key_raw_owner_scope(new_key)
+    if old_scope is None or new_scope is None:
+        return False
+    return ("::" in old_scope) != ("::" in new_scope)
+
+
 @dataclass(frozen=True)
 class CtorDtorKeyDriftMatch:
     """One resolved old/new pairing produced by
@@ -292,6 +392,14 @@ def find_ctor_dtor_key_drift_matches(
     same "zero or several answers None" rule, generalized to require
     uniqueness on BOTH sides at once (not just the side being looked up
     into), since here either side could independently be ambiguous.
+
+    A candidate pair unique on both sides is matched only when it is ALSO a
+    demonstrable legacy-bare/current-qualified pair
+    (:func:`_is_legacy_qualification_drift_pair`) -- two already-qualified
+    owners (``ns1::Foo`` vs ``ns2::Foo``) are refused even though they
+    canonicalize equal, since collapsing them would hide a real namespace
+    move as ``NO_CHANGE`` (Codex review, PR #761 follow-up; see this
+    module's docstring).
     """
     old_groups: dict[CtorDtorCanonicalKey, list[str]] = {}
     for key in old_unmatched:
@@ -312,6 +420,8 @@ def find_ctor_dtor_key_drift_matches(
         new_keys = new_groups.get(canonical)
         if new_keys is None or len(new_keys) != 1:
             continue
+        if not _is_legacy_qualification_drift_pair(old_keys[0], new_keys[0]):
+            continue
         match = CtorDtorKeyDriftMatch(
             old_key=old_keys[0], new_key=new_keys[0], canonical=canonical
         )
@@ -328,37 +438,19 @@ def find_ctor_dtor_key_drift_matches(
     return matches
 
 
-def reconcile_ctor_dtor_key_drift(
-    old_map: MutableMapping[str, Function],
-    new_map: Mapping[str, Function],
-    check_signature: Callable[..., list[Change]],
-    params_unconfirmed: bool,
-    is_llp64: bool,
-) -> tuple[set[str], list[Change]]:
-    """End-to-end entry point for ``diff_symbols._diff_functions``.
+def _resolve_ctor_dtor_matches(
+    old_map: Mapping[str, Function], new_map: Mapping[str, Function]
+) -> list[CtorDtorKeyDriftMatch]:
+    """Narrow *old_map*/*new_map* to their ctor/dtor synthetic-key entries
+    with no exact-key counterpart on the opposite side, and resolve
+    :func:`find_ctor_dtor_key_drift_matches` over that narrowed pair.
 
-    Narrows *old_map*/*new_map* to their ctor/dtor synthetic-key entries
-    with no exact-key counterpart on the opposite side (a synthetic key is
-    never a real mangled name, so it never wins the real-mangled-name join
-    either, and it is never extern "C", so it never competes with that
-    fallback -- this tier is a pure, order-independent addition), resolves
-    :func:`find_ctor_dtor_key_drift_matches` over that narrowed pair, and
-    for each resolved match: pops the matched entry out of *old_map* (so
-    the caller's own old/new matching loop, run afterward, never re-visits
-    it as a plain removal) and calls *check_signature* -- the caller's own
-    ``diff_symbols._check_function_signature``, passed by reference (its
-    ``mangled, f_old, f_new, *, params_unconfirmed, is_llp64`` signature
-    already matches what this function calls it with) -- the same way an
-    exact-key match would, so a genuine non-key-format difference is still
-    reported and a truly unchanged pair contributes zero findings.
-
-    Returns ``(consumed new_map keys, resolved Changes)``. The caller
-    should ``extend`` its own ``changes`` list with the second element, and
-    skip the first element's keys when it separately walks *new_map* for
-    additions (that walk cannot itself consult *old_map* for this, since a
-    matched new key was never a member of *old_map* to begin with -- it
-    only failed to independently surface as an addition because this
-    function already accounted for it here).
+    Shared by :func:`reconcile_ctor_dtor_key_drift` (which additionally
+    mutates *old_map* and runs the caller's signature check) and
+    :func:`iter_matched_function_pairs` (which only needs the resolved
+    ``(old_key, new_key)`` pairs, for a caller that does not itself go
+    through ``_diff_functions``'s own exact-key loop -- see that function's
+    docstring, ADR/Codex review PR #761 finding 2).
     """
     old_unmatched = {
         k: f
@@ -370,18 +462,113 @@ def reconcile_ctor_dtor_key_drift(
         for k, f in new_map.items()
         if k not in old_map and (is_synthetic_ctor_key(k) or is_synthetic_dtor_key(k))
     }
-    matches = find_ctor_dtor_key_drift_matches(old_unmatched, new_unmatched)
+    return find_ctor_dtor_key_drift_matches(old_unmatched, new_unmatched)
+
+
+def reconcile_ctor_dtor_key_drift(
+    old_map: Mapping[str, Function],
+    new_map: Mapping[str, Function],
+    check_signature: Callable[..., list[Change]],
+    params_unconfirmed: bool,
+    is_llp64: bool,
+) -> tuple[set[str], set[str], list[Change]]:
+    """End-to-end entry point for ``diff_symbols._diff_functions``.
+
+    Narrows *old_map*/*new_map* to their ctor/dtor synthetic-key entries
+    with no exact-key counterpart on the opposite side (a synthetic key is
+    never a real mangled name, so it never wins the real-mangled-name join
+    either, and it is never extern "C", so it never competes with that
+    fallback -- this tier is a pure, order-independent addition), resolves
+    :func:`find_ctor_dtor_key_drift_matches` over that narrowed pair (via
+    :func:`_resolve_ctor_dtor_matches`), and for each resolved match calls
+    *check_signature* -- the caller's own
+    ``diff_symbols._check_function_signature``, passed by reference (its
+    ``mangled, f_old, f_new, *, params_unconfirmed, is_llp64`` signature
+    already matches what this function calls it with) -- the same way an
+    exact-key match would, so a genuine non-key-format difference is still
+    reported and a truly unchanged pair contributes zero findings.
+
+    Returns ``(consumed old_map keys, consumed new_map keys, resolved
+    Changes)``. **Deliberately read-only -- *old_map* is never mutated**
+    (Codex review, PR #761 finding 2 follow-up: an earlier revision popped
+    the matched entry out of *old_map* in place, which left the caller's
+    OWN subsequent, differently-shaped calls -- e.g. re-passing the same
+    mutated *old_map* into ``_check_inline_transitions`` -- unable to
+    rediscover the identical match a second time, since the popped key was
+    simply gone). The caller should ``extend`` its own ``changes`` list
+    with the third element, skip the first element's keys when it walks
+    *old_map* for removals, and skip the second element's keys when it
+    walks *new_map* for additions (neither walk can otherwise recognize
+    these keys as matched, since a matched old/new key pair was never a
+    member of the *opposite* side's map to begin with).
+
+    **This only covers** ``_check_function_signature``'s own checks
+    (return type, params, ref-qualifier, linkage, noexcept, virtual,
+    hidden-friend, explicit, variadic, contract attributes, exception spec,
+    vtable index). A property compared by a DIFFERENT, independently
+    map-joining detector in ``diff_symbols.py``/``diff_param_qualifiers.py``
+    (inline transitions, method access narrowing, parameter
+    defaults/renames, pointer levels, deprecated, restrict/va_list) is
+    invisible to THIS reconciliation on its own --
+    :func:`iter_matched_function_pairs` is what independently exposes the
+    resolved pairs to those detectors too, see its docstring.
+    """
+    matches = _resolve_ctor_dtor_matches(old_map, new_map)
+    consumed_old: set[str] = set()
     consumed_new: set[str] = set()
     resolved_changes: list[Change] = []
     for m in matches:
         resolved_changes.extend(
             check_signature(
                 m.new_key,
-                old_map.pop(m.old_key),
+                old_map[m.old_key],
                 new_map[m.new_key],
                 params_unconfirmed=params_unconfirmed,
                 is_llp64=is_llp64,
             )
         )
+        consumed_old.add(m.old_key)
         consumed_new.add(m.new_key)
-    return consumed_new, resolved_changes
+    return consumed_old, consumed_new, resolved_changes
+
+
+def iter_matched_function_pairs(
+    old_map: Mapping[str, Function], new_map: Mapping[str, Function]
+) -> Iterator[tuple[str, Function, Function]]:
+    """Yield ``(key, f_old, f_new)`` for every old/new function pair that is
+    either an exact-key match OR a resolved ctor/dtor synthetic-key
+    format-drift match (:func:`find_ctor_dtor_key_drift_matches`).
+
+    This is the single join every per-pair function detector in
+    ``diff_symbols.py``/``diff_param_qualifiers.py`` that does its own
+    ``old_map``/``new_map`` join -- rather than going through
+    ``_diff_functions``'s own exact-key loop -- should use, so a ctor/dtor
+    pair reconciled by :func:`reconcile_ctor_dtor_key_drift` for
+    ``_check_function_signature`` is also visible to every OTHER per-pair
+    detector: inline transitions, method-access narrowing, parameter
+    default/rename/pointer-level changes, ``[[deprecated]]`` transitions,
+    ``restrict``/``va_list`` qualifier changes (Codex review,
+    ``diff_symbols.py:945``, PR #761 finding 2). Without this, a reconciled
+    pair's new key is popped out of the caller's own exact-key
+    intersection (its old key no longer exists in *old_map* by the time
+    these detectors run, and its keys differ from each other by
+    construction), so a genuine OTHER property change on the same
+    reconciled pair -- e.g. its constructor going public-to-private --
+    silently returned no finding at all before this existed.
+
+    For the ``key`` yielded on a reconciled pair, the NEW side's key is
+    used (matching what ``reconcile_ctor_dtor_key_drift`` already reports
+    findings under for the signature-check tier, so a symbol referenced in
+    one of these OTHER detectors' findings stays consistent with that).
+
+    The reconciliation performed here is read-only and independent per
+    call -- unlike ``reconcile_ctor_dtor_key_drift``, this never mutates
+    *old_map*/*new_map*, so it is safe for every detector to call
+    independently against its own freshly-built maps.
+    """
+    for key, f_old in old_map.items():
+        f_new = new_map.get(key)
+        if f_new is not None:
+            yield key, f_old, f_new
+    for m in _resolve_ctor_dtor_matches(old_map, new_map):
+        yield m.new_key, old_map[m.old_key], new_map[m.new_key]

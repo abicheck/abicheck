@@ -99,6 +99,7 @@ from .fact_provenance import (
 )
 from .finding_identity import SymbolIdentityIndex
 from .finding_identity_ctor_dtor import (
+    iter_matched_function_pairs,
     reconcile_ctor_dtor_key_drift,
     synthetic_ctor_scope as _synthetic_ctor_scope,
 )
@@ -717,11 +718,12 @@ def _check_inline_transitions(
     new_map: Mapping[str, Function],
     new_snapshot: AbiSnapshot,
 ) -> list[Change]:
-    """Detect inline/non-inline transitions for functions present in both snapshots."""
+    """Detect inline/non-inline transitions for functions present in both
+    snapshots -- including a ctor/dtor pair only visible via synthetic-key
+    format-drift reconciliation (``iter_matched_function_pairs``, PR #761
+    finding 2)."""
     changes: list[Change] = []
-    for mangled in set(old_map) & set(new_map):
-        f_old = old_map[mangled]
-        f_new = new_map[mangled]
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if not f_old.is_inline and f_new.is_inline:
             new_elf = new_snapshot.elf
             still_exported = new_elf is not None and any(
@@ -940,12 +942,16 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     matched_by_name: set[str] = set()
 
-    ctor_dtor_consumed_new, ctor_dtor_changes = reconcile_ctor_dtor_key_drift(
-        old_map, new_map, _check_function_signature, params_unconfirmed, is_llp64
+    ctor_dtor_consumed_old, ctor_dtor_consumed_new, ctor_dtor_changes = (
+        reconcile_ctor_dtor_key_drift(
+            old_map, new_map, _check_function_signature, params_unconfirmed, is_llp64
+        )
     )
     changes.extend(ctor_dtor_changes)
 
     for mangled, f_old in old_map.items():
+        if mangled in ctor_dtor_consumed_old:
+            continue
         changes.extend(
             _match_old_function(
                 mangled,
@@ -1289,10 +1295,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         key = func_fact_key(mangled, "param_defaults")
         old_producer = fact_producer(old, key)
         new_producer = fact_producer(new, key)
@@ -1353,10 +1356,7 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if (
                 p_old.type == p_new.type
@@ -1391,11 +1391,7 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new
     )
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
-
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         return_known = not (
             _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type)
         )
@@ -1445,12 +1441,11 @@ def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
 ) -> list[Change]:
-    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions."""
+    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions,
+    including a ctor/dtor pair only visible via synthetic-key format-drift
+    reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
     changes: list[Change] = []
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if f_old.access != f_new.access and _is_access_narrowing(
             f_old.access, f_new.access
         ):
@@ -1758,10 +1753,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if not both_known_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
