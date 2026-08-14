@@ -1338,15 +1338,13 @@ def app_usage_scope_options(func: F) -> F:
         "verify_runtime",
         is_flag=True,
         default=False,
-        help="With --used-by: actually run each consumer binary once against "
-        "the OLD library and once against the NEW one (LD_BIND_NOW=1), "
-        "recording a consumer_runtime_load_failed RISK finding when the "
-        "dynamic linker itself reports an undefined symbol against the "
-        "new library after loading cleanly against the old one (ADR-044 "
-        "P2 item 2). A dynamic corroborating signal alongside the static "
-        "scanner, never a replacement for it. Requires OLD/NEW to be real "
-        "library binaries (not JSON snapshots) and is Linux-only; a "
-        "no-op elsewhere. Ignored without --used-by.",
+        help="DEPRECATED, SAFETY NO-OP: this used to actually execute each "
+        "consumer binary against the OLD and NEW library, which meant "
+        "running load-time code from an analyzed artifact -- abicheck "
+        "never executes analyzed inputs, so this flag is now inert and "
+        "always attempted=False regardless of platform or --used-by. Use "
+        "the static --used-by scanner for undefined-symbol corroboration; "
+        "it never executes anything. Kept only for CLI/API compatibility.",
     )(func)
     func = click.option(
         "--used-by",

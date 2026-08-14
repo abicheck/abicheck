@@ -61,6 +61,13 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+_MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
+
+
+def _isolated_module_command(*mod_args: str) -> tuple[str, ...]:
+    return (sys.executable, "-I", str(_MODULE_RUNNER), *mod_args)
+
+
 FACTS_PATH = ROOT / "repo_facts.json"
 
 # Fields that are provenance stamps, not facts to diff in --check.
@@ -123,16 +130,14 @@ def _example_cases() -> int:
 
 def _fast_test_cases_collected() -> int:
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
+        _isolated_module_command(
             "pytest",
             "tests/",
             "-m",
             _FAST_MARKER,
             "--collect-only",
             "-q",
-        ],
+        ),
         cwd=ROOT,
         capture_output=True,
         text=True,

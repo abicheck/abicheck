@@ -65,6 +65,93 @@ def _pytest_marker_expr(step: Any) -> str:
     return str(step.cmd[marker_idx])
 
 
+# --- P0.3: isolated module lookup (no repository-root tool shadowing) ---
+
+
+def test_python_tool_steps_use_isolated_module_lookup() -> None:
+    """Tool steps must not let repository-root modules shadow installed tools."""
+    runner = str(ROOT / "scripts" / "run_isolated_module.py")
+    for step_name in {
+        "lint",
+        "fmt-check",
+        "typecheck",
+        "unit-fast",
+        "unit-pr",
+    }:
+        cmd = _step(step_name).cmd
+        assert cmd[:3] == (sys.executable, "-I", runner), step_name
+
+
+def test_isolated_module_runner_preserves_user_site_without_root_shadowing(
+    tmp_path: Path,
+) -> None:
+    """A user-site tool is usable, but a same-named cwd module cannot win."""
+    import os
+    import subprocess
+
+    user_base = tmp_path / "user-base"
+    env = {**os.environ, "PYTHONUSERBASE": str(user_base)}
+    user_site_proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import site; print(site.getusersitepackages())",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert user_site_proc.returncode == 0, user_site_proc.stderr
+    user_site = Path(user_site_proc.stdout.strip())
+    user_site.mkdir(parents=True)
+
+    # pytest is installed in the system site running this test. The user-site
+    # module must retain normal precedence over it, while the checkout cannot.
+    (user_site / "pytest.py").write_text(
+        "print('trusted-user-site')\n", encoding="utf-8"
+    )
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "pytest.py").write_text(
+        "print('untrusted-checkout')\n", encoding="utf-8"
+    )
+
+    cmd = verify._py("pytest")
+    proc = subprocess.run(
+        cmd,
+        cwd=checkout,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "trusted-user-site"
+
+
+def test_isolated_module_runner_enables_user_site_for_system_site_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Match normal user-site behavior of a --system-site-packages venv."""
+    import importlib.util
+
+    runner = ROOT / "scripts" / "run_isolated_module.py"
+    spec = importlib.util.spec_from_file_location("isolated_runner", runner)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text(
+        "include-system-site-packages = true\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(module.sys, "prefix", str(venv))
+    monkeypatch.setattr(module.sys, "base_prefix", str(tmp_path / "base"))
+    assert module._normally_enables_user_site()
+
+
 # --- profile shape -----------------------------------------------------
 
 

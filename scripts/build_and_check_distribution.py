@@ -16,14 +16,19 @@
 
 """Build the sdist/wheel, `twine check` them, and validate their metadata.
 
-Wraps the three steps the CI `fair-metadata` job runs separately (`python -m
-build`; `twine check dist/*`; `scripts/check_distribution_metadata.py`) into
-one command so `scripts/verify.py`'s `distribution-build` step is
+Wraps the three steps the CI `fair-metadata` job runs separately (`python -I
+-m build`; `twine check dist/*`; `scripts/check_distribution_metadata.py`)
+into one command so `scripts/verify.py`'s `distribution-build` step is
 self-contained — running it against a clean checkout (with `build`/`twine`
 installed) doesn't require a caller to have already populated `dist/`.
 
 `twine check` needs explicit file paths, not a shell glob (`dist/*`); this
 resolves them itself with `Path.glob` so no shell is involved.
+
+The `build`/`twine` module invocations route through
+``run_isolated_module.py`` (``-I``, P0.3 security hardening) so a
+repository-root `build.py`/`twine.py` planted by a PR cannot shadow the
+real, installed tool during CI's distribution-build step.
 
 Run locally:
 
@@ -39,6 +44,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
+
+
+def _py(*mod_args: str) -> tuple[str, ...]:
+    return (sys.executable, "-I", str(_MODULE_RUNNER), *mod_args)
+
+
 DIST = ROOT / "dist"
 
 
@@ -49,19 +61,20 @@ def main(argv: list[str] | None = None) -> int:
     if DIST.exists():
         shutil.rmtree(DIST)
 
-    build = subprocess.run([sys.executable, "-m", "build"], cwd=ROOT)
+    build = subprocess.run(_py("build"), cwd=ROOT)
     if build.returncode != 0:
         return 1
 
     artifacts = sorted(DIST.glob("*.tar.gz")) + sorted(DIST.glob("*.whl"))
     if not artifacts:
         print(
-            "ERROR: `python -m build` produced no artifacts in dist/", file=sys.stderr
+            "ERROR: isolated Python build module produced no artifacts in dist/",
+            file=sys.stderr,
         )
         return 1
 
     twine = subprocess.run(
-        [sys.executable, "-m", "twine", "check", *(str(p) for p in artifacts)],
+        _py("twine", "check", *(str(p) for p in artifacts)),
         cwd=ROOT,
     )
     if twine.returncode != 0:

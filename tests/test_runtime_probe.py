@@ -12,15 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for abicheck.runtime_probe (ADR-044 P2 item 2)."""
-from __future__ import annotations
+"""Unit tests for abicheck.runtime_probe (P0.1: disabled, non-executing no-op).
 
-import subprocess
-import sys
+``run_runtime_probe`` used to actually execute a consumer binary against an
+analyzed OLD/NEW shared library. That was a trust-boundary violation
+(analyzed artifacts must be data, never executed) and has been disabled:
+the function is now a pure no-op that never spawns a subprocess and never
+loads a library into this process, regardless of platform, executability,
+or ELF layout. These tests pin exactly that: no marker file a real
+constructor would create is ever produced, and the result always reports
+``attempted=False``.
+"""
+
+from __future__ import annotations
 
 import pytest
 
-from abicheck import runtime_probe as rp
 from abicheck.runtime_probe import (
     RuntimeProbeOutcome,
     RuntimeProbeResult,
@@ -35,375 +42,102 @@ def _make_exec(tmp_path, name="app"):
     return p
 
 
+def _make_marker_lib(tmp_path, marker_path, name="lib.so"):
+    """A "library" that, if ever actually loaded/executed, writes *marker_path*.
+
+    Not a real ELF constructor (that needs a real compiler) -- but this
+    module never spawns a subprocess or reads the file at all, so the
+    content is irrelevant; what matters is that running these tests never
+    causes *marker_path* to be created.
+    """
+    p = tmp_path / name
+    p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    return p
+
+
 def _make_lib(tmp_path, name="lib.so"):
     p = tmp_path / name
     p.write_bytes(b"\x7fELF" + b"\x00" * 100)
     return p
 
 
-class TestRunRuntimeProbePlatformGuards:
-    def test_non_linux_platform_skips(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "darwin")
+class TestRunRuntimeProbeIsDisabled:
+    """run_runtime_probe never executes anything, on any platform or input."""
+
+    def test_never_attempts_regardless_of_real_platform(self, tmp_path):
+        """The module no longer branches on sys.platform at all -- there is
+        nothing left to monkeypatch; this just pins that the real,
+        currently-running platform still gets attempted=False."""
         app = _make_exec(tmp_path)
         old_lib = _make_lib(tmp_path, "old.so")
         new_lib = _make_lib(tmp_path, "new.so")
         result = run_runtime_probe(app, old_lib, new_lib)
         assert result.attempted is False
-        assert result.skipped_reason is not None
-        assert "linux" in result.skipped_reason.lower()
+        assert result.old is None
+        assert result.new is None
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "monkeypatch.setattr(rp.sys, 'platform', 'linux') fakes the "
-            "code's own platform check, but the guard being tested "
-            "(os.access(path, os.X_OK)) reads the real OS -- on native "
-            "Windows os.access(..., os.X_OK) does not model a real execute "
-            "bit and returns True for any existing file, so the guard never "
-            "trips and _run_once actually execs the non-PE fixture, failing "
-            "with WinError 193 instead of skipping."
-        ),
-    )
-    def test_non_executable_app_skips(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        app = tmp_path / "app"
-        app.write_text("not executable")
+    def test_skipped_reason_is_explicit_and_non_empty(self, tmp_path):
+        app = _make_exec(tmp_path)
         old_lib = _make_lib(tmp_path, "old.so")
         new_lib = _make_lib(tmp_path, "new.so")
         result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.attempted is False
-        assert "executable" in (result.skipped_reason or "")
+        assert result.skipped_reason
+        assert "disabled" in result.skipped_reason.lower()
 
-    def test_legacy_rpath_without_runpath_skips(self, tmp_path, monkeypatch):
-        """Codex review: ld.so(8) searches a legacy DT_RPATH (present with no
-        DT_RUNPATH) *before* LD_LIBRARY_PATH -- staging the intended library
-        first on LD_LIBRARY_PATH cannot force the loader's choice for such a
-        binary, so the probe must decline rather than silently report a
-        result it cannot actually attribute to old_lib/new_lib."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        fake_meta = type("_FakeElfMetadata", (), {"rpath": "/some/rpath", "runpath": ""})()
-        monkeypatch.setattr(
-            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
-        )
+    def test_regressed_symbol_never_fires(self, tmp_path):
+        app = _make_exec(tmp_path)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        result = run_runtime_probe(app, old_lib, new_lib)
+        assert result.regressed_symbol is None
+
+    def test_never_spawns_a_subprocess(self, tmp_path, monkeypatch):
+        """No module-level subprocess/os hooks exist to spawn a process from
+        -- calling the disabled function must not even attempt to import or
+        invoke subprocess.run."""
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("run_runtime_probe must never spawn a process")
+
+        monkeypatch.setattr("subprocess.run", _boom)
         app = _make_exec(tmp_path)
         old_lib = _make_lib(tmp_path, "old.so")
         new_lib = _make_lib(tmp_path, "new.so")
         result = run_runtime_probe(app, old_lib, new_lib)
         assert result.attempted is False
-        assert "DT_RPATH" in (result.skipped_reason or "")
 
-    def test_runpath_alongside_rpath_does_not_skip(self, tmp_path, monkeypatch):
-        """A DT_RUNPATH present alongside DT_RPATH makes ld.so ignore
-        DT_RPATH entirely (ld.so(8)) and search DT_RUNPATH *after*
-        LD_LIBRARY_PATH -- this shape is safe for the probe's staging."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        fake_meta = type(
-            "_FakeElfMetadata", (),
-            {"rpath": "/some/rpath", "runpath": "/some/runpath", "soname": ""},
-        )()
-        monkeypatch.setattr(
-            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
-        )
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+    def test_never_creates_a_marker_file_a_real_constructor_would(self, tmp_path):
+        """End-to-end regression for the vulnerability itself: even a
+        "library" this test treats as if it could run load-time code must
+        never actually be loaded, so no marker file appears."""
+        marker = tmp_path / "constructor-ran.marker"
         app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.attempted is True
-
-
-class TestRunOnce:
-    def test_symbol_lookup_error_detected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            assert env["LD_BIND_NOW"] == "1"
-            return subprocess.CompletedProcess(
-                argv, returncode=127, stdout="",
-                stderr="./app: symbol lookup error: ./app: undefined symbol: foo_bar\n",
-            )
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.attempted is True
-        assert result.old is not None and result.old.ok is False
-        assert result.old.missing_symbol == "foo_bar"
-        assert result.new is not None and result.new.ok is False
-        assert result.new.missing_symbol == "foo_bar"
-
-    def test_versioned_symbol_lookup_error_strips_version_suffix(
-        self, tmp_path, monkeypatch,
-    ):
-        """Codex review: glibc appends ", version X" after the bare symbol
-        name for a versioned undefined-symbol failure (e.g. "undefined
-        symbol: foo, version FOO_1.0") -- the old \\S+ capture included the
-        trailing comma ("foo,"), so the synthesized finding's symbol never
-        matched the real import/export name and an exact suppression for
-        "foo" could never apply."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            return subprocess.CompletedProcess(
-                argv, returncode=127, stdout="",
-                stderr=(
-                    "./app: symbol lookup error: ./app: undefined symbol: "
-                    "foo_bar, version FOO_1.0\n"
-                ),
-            )
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.old is not None
-        assert result.old.missing_symbol == "foo_bar"
-
-    def test_clean_run_is_ok(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.old is not None and result.old.ok is True
-        assert result.old.missing_symbol is None
-        assert result.new is not None and result.new.ok is True
-
-    def test_loader_failure_for_unrelated_reason_is_not_ok(self, tmp_path, monkeypatch):
-        """Codex review, fresh evidence: a dynamic-linker failure for a
-        reason *other* than an undefined symbol (e.g. a missing, unrelated
-        dependency: "error while loading shared libraries: ...") does not
-        match the symbol-lookup regex, so it must not silently fall through
-        to ok=True regardless of exit code -- that would let a probe run
-        that never actually loaded still count as a clean baseline for
-        regressed_symbol."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            return subprocess.CompletedProcess(
-                argv, returncode=127, stdout="",
-                stderr=(
-                    "./app: error while loading shared libraries: "
-                    "libbar.so.2: cannot open shared object file: "
-                    "No such file or directory\n"
-                ),
-            )
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.old is not None
-        assert result.old.ok is False
-        assert result.old.missing_symbol is None
-
-    def test_ld_library_path_prepended_not_overwritten(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        monkeypatch.setenv("LD_LIBRARY_PATH", "/existing/path")
-        captured_envs = []
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            captured_envs.append(env["LD_LIBRARY_PATH"])
-            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
+        old_lib = _make_marker_lib(tmp_path, marker, "old.so")
+        new_lib = _make_marker_lib(tmp_path, marker, "new.so")
         run_runtime_probe(app, old_lib, new_lib)
-        assert all(env.endswith("/existing/path") for env in captured_envs)
-        assert all(str(old_lib.parent) in env or str(new_lib.parent) in env for env in captured_envs)
+        assert not marker.exists()
 
-    def test_timeout_marks_timed_out(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout)
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        result = run_runtime_probe(app, old_lib, new_lib, timeout=0.01)
-        assert result.old is not None
-        assert result.old.ok is False
-        assert result.old.timed_out is True
-
-    def test_oserror_captured_not_raised(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            raise OSError("Exec format error")
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
+    def test_does_not_require_app_to_exist_or_be_executable(self, tmp_path):
+        """A disabled probe has no reason to even stat its inputs."""
+        app = tmp_path / "does-not-exist"
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
         result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.old is not None and result.old.ok is False
-        assert "Exec format error" in result.old.stderr_tail
+        assert result.attempted is False
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "This test execs a real '#!/bin/sh' shebang script -- there is "
-            "no POSIX shebang interpreter on native Windows, so the exec "
-            "itself fails with WinError 193 ('not a valid Win32 "
-            "application') before the intended UTF-8-decoding behavior is "
-            "even reached."
-        ),
-    )
-    def test_non_utf8_stderr_does_not_raise(self, tmp_path, monkeypatch):
-        """Codex review, fresh evidence: a real executable's stderr is
-        arbitrary bytes, not guaranteed valid UTF-8 -- subprocess.run(...,
-        text=True) with no errors= handling raises UnicodeDecodeError *after*
-        the child exits, which would escape this best-effort helper and
-        abort the whole compare instead of degrading to a RuntimeProbeOutcome.
-        Uses a real subprocess (not a mocked subprocess.run) since the
-        decoding itself is exactly what's under test."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        app = tmp_path / "app"
-        # A lone 0xFF byte is invalid in UTF-8 in any position -- write it
-        # via printf's octal escape (portable across /bin/sh implementations)
-        # sandwiched in valid ASCII so the symbol-lookup regex can still be
-        # checked not to false-positive on it.
-        app.write_text(
-            "#!/bin/sh\n"
-            "printf 'before \\377 after\\n' >&2\n"
-            "exit 127\n"
-        )
-        app.chmod(0o755)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        # The point under test is that this call returns at all (no
-        # UnicodeDecodeError escaping _run_once) -- no "symbol lookup
-        # error: ... undefined symbol: X" text is present, so per this
-        # probe's own deliberately-narrow design (only that exact glibc
-        # message is interpreted as a regression) ok stays True regardless
-        # of the script's exit code.
-        result = run_runtime_probe(app, old_lib, new_lib)
-        assert result.old is not None
-        assert result.old.ok is True
-        assert result.old.missing_symbol is None
-        assert "before" in result.old.stderr_tail
-        assert "after" in result.old.stderr_tail
-
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "_run_once() stages each candidate via staged.symlink_to(lib_path) "
-            "before the (here mocked) subprocess.run call, inside the same "
-            "try/except OSError block as the subprocess call itself -- on "
-            "native Windows, creating a symlink needs "
-            "SeCreateSymbolicLinkPrivilege/Developer Mode, so the symlink "
-            "call raises OSError, is silently caught, and the mocked "
-            "subprocess.run this test inspects is never reached."
-        ),
-    )
-    def test_same_directory_old_new_libraries_resolve_independently(
-        self, tmp_path, monkeypatch,
-    ):
-        """Codex review: old_lib and new_lib may be different files sitting in
-        the *same* directory (e.g. versioned build artifacts) -- pointing
-        LD_LIBRARY_PATH at that shared directory for both runs would let the
-        dynamic loader resolve to whichever candidate happens to match the
-        requested name first, silently ignoring which of old/new this run
-        was actually supposed to test. Each run must stage its own library
-        alone in an isolated directory listed first on LD_LIBRARY_PATH, so
-        the loader can only ever find the intended file."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        resolved_targets = []
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            staged_dir = rp.Path(env["LD_LIBRARY_PATH"].split(":")[0])
-            entries = list(staged_dir.iterdir())
-            assert len(entries) == 1
-            resolved_targets.append(entries[0].resolve())
-            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+    def test_timeout_argument_accepted_and_ignored(self, tmp_path):
         app = _make_exec(tmp_path)
-        # Both libraries deliberately share one directory (tmp_path).
         old_lib = _make_lib(tmp_path, "old.so")
         new_lib = _make_lib(tmp_path, "new.so")
-        run_runtime_probe(app, old_lib, new_lib)
-        assert resolved_targets == [old_lib.resolve(), new_lib.resolve()]
-
-    def test_relative_bare_name_resolved_before_exec(self, tmp_path, monkeypatch):
-        """A bare relative app name (no '/') must not be searched for on PATH
-        (Codex review): subprocess treats an argv[0] with no directory
-        component as a PATH lookup, not cwd-relative, so an unresolved
-        ``Path("app")`` would silently miss the app in its own directory
-        whenever '.' is not on PATH."""
-        monkeypatch.setattr(rp.sys, "platform", "linux")
-        monkeypatch.chdir(tmp_path)
-        captured_argv = []
-
-        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
-            captured_argv.append(argv)
-            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
-        app = _make_exec(tmp_path)
-        relative_app = rp.Path(app.name)
-        old_lib = _make_lib(tmp_path, "old.so")
-        new_lib = _make_lib(tmp_path, "new.so")
-        run_runtime_probe(relative_app, old_lib, new_lib)
-        assert all(argv[0] == str(app.resolve()) for argv in captured_argv)
-
-
-class TestLoadName:
-    def test_uses_soname_when_present(self, tmp_path, monkeypatch):
-        lib = _make_lib(tmp_path, "libfoo.so.1.2.3")
-        fake_meta = type("_FakeElfMetadata", (), {"soname": "libfoo.so.1"})()
-        monkeypatch.setattr(
-            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
-        )
-        assert rp._load_name(lib) == "libfoo.so.1"
-
-    def test_falls_back_to_basename_on_parse_failure(self, tmp_path):
-        # _make_lib's bytes are not a real parseable ELF; parse_elf_metadata
-        # degrades to an empty ElfMetadata (soname == "") rather than raising.
-        lib = _make_lib(tmp_path, "old.so")
-        assert rp._load_name(lib) == "old.so"
-
-    def test_falls_back_to_basename_for_empty_soname(self, tmp_path, monkeypatch):
-        lib = _make_lib(tmp_path, "old.so")
-        fake_meta = type("_FakeElfMetadata", (), {"soname": ""})()
-        monkeypatch.setattr(
-            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
-        )
-        assert rp._load_name(lib) == "old.so"
-
-    def test_falls_back_to_basename_for_path_shaped_soname(self, tmp_path, monkeypatch):
-        """A malformed/hostile SONAME containing a path separator must not be
-        used as-is -- staged.symlink_to would otherwise create the symlink
-        somewhere other than the intended isolated staging directory."""
-        lib = _make_lib(tmp_path, "old.so")
-        fake_meta = type("_FakeElfMetadata", (), {"soname": "../../etc/evil"})()
-        monkeypatch.setattr(
-            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
-        )
-        assert rp._load_name(lib) == "old.so"
+        result = run_runtime_probe(app, old_lib, new_lib, timeout=0.001)
+        assert result.attempted is False
 
 
 class TestRegressedSymbol:
     def test_regressed_when_old_ok_and_new_missing_symbol(self):
         result = RuntimeProbeResult(
-            app_path="app", attempted=True,
+            app_path="app",
+            attempted=True,
             old=RuntimeProbeOutcome(ok=True),
             new=RuntimeProbeOutcome(ok=False, missing_symbol="foo"),
         )
@@ -413,7 +147,8 @@ class TestRegressedSymbol:
         """If the app never worked against the OLD library either, the
         failure isn't attributable to this library change."""
         result = RuntimeProbeResult(
-            app_path="app", attempted=True,
+            app_path="app",
+            attempted=True,
             old=RuntimeProbeOutcome(ok=False, missing_symbol="foo"),
             new=RuntimeProbeOutcome(ok=False, missing_symbol="foo"),
         )
@@ -421,7 +156,8 @@ class TestRegressedSymbol:
 
     def test_no_regression_when_new_also_ok(self):
         result = RuntimeProbeResult(
-            app_path="app", attempted=True,
+            app_path="app",
+            attempted=True,
             old=RuntimeProbeOutcome(ok=True),
             new=RuntimeProbeOutcome(ok=True),
         )
@@ -437,7 +173,8 @@ class TestRegressedSymbol:
         misread as a regression (the whole point of scoping this probe to
         the dynamic linker's own explicit signal, not generic failure)."""
         result = RuntimeProbeResult(
-            app_path="app", attempted=True,
+            app_path="app",
+            attempted=True,
             old=RuntimeProbeOutcome(ok=True),
             new=RuntimeProbeOutcome(ok=False, timed_out=timeout),
         )
