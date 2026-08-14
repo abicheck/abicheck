@@ -81,6 +81,15 @@ finishes in ~45 seconds.
 - `canonical_identity_contract.py` — the exhaustive per-`ChangeKind` identity
   classification enforced by `test_canonical_finding_id_completeness.py`; a new
   `ChangeKind` fails CI until it is placed in a bucket.
+- `_workflow_exec.py` — executes a workflow's `run:` steps for real, in a
+  throwaway workspace with a real `$GITHUB_OUTPUT` and a sentinel tree *outside*
+  it. Use it whenever a security property of a workflow step matters: asserting
+  the step's *text* (which is what `test_reusable_workflows.py` does, and what
+  it should keep doing as a cheap guard) proves nothing about behaviour under a
+  hostile value — that is exactly how #705 shipped and #758 had to follow.
+  `StepResult.output_lines` exposes the raw records, so an *injected extra*
+  `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
+  `test_reusable_workflow_execution.py`.
 
 ## What NOT to do
 
