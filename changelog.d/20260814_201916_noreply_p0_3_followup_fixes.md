@@ -118,3 +118,46 @@
   in both the ambiguity signature and the rendered context whenever they
   disagree, matching what a real `clang-cl`/`cl.exe` invocation actually
   honors.
+- **A ninth review round found the eighth round's own value-agreement fix
+  still went too far for `clang-cl` specifically: agreeing values do not
+  make `-std=` and `/std:` interchangeable there.** `clang-cl -std=c++20
+  /std:c++20` has matching values on both spellings, but `clang-cl`
+  ignores a bare `-std=` entirely (warns "unknown argument ignored") and
+  relies on `/std:` alone to set the language dialect — confirmed via
+  `clang-cl /?`, which documents `/std:<value>` as "Set language version."
+  Dropping `/std:` because it happened to agree with the structurally
+  rendered `-std=` therefore still silently changed the dialect L2 replays
+  under. `_is_structured_field_flag()` now takes a `msvc: bool` computed
+  once per compile unit from its own `argv` via
+  `adapters.base._is_msvc_command()` (reusing the existing MSVC/clang-cl
+  driver-detection heuristic rather than inventing a new one): for a
+  compile unit detected as MSVC/clang-cl-dialect, `/std:` is never masked
+  — in either the ambiguity signature or the rendered command — regardless
+  of whether its value agrees with `cu.standard`. The eighth round's
+  value-comparison fallback (`_msvc_std_flag_matches_captured_standard()`)
+  is retained only for the conservative, unlikely case of a `/std:`-shaped
+  token surviving on a compile unit `_is_msvc_command()` doesn't recognize
+  as MSVC-dialect.
+- **A tenth review round found the ambiguity-detection/signature-grouping
+  step ran *before* an explicitly forced language was resolved, so an
+  explicit `--lang c++` could still raise `HeaderCompileContextAmbiguousError`
+  for a language disagreement the caller had already resolved.** Two
+  otherwise-identical compile units differing only in `cu.language` (one C,
+  one C++, neither carrying an explicit `-std=` for the standard-conflict
+  check introduced in the sixth round to compare against) grouped into two
+  distinct `_EffectiveContextSignature`s purely on their differing
+  `cu.language` field — before `forced_language` was ever computed — and
+  raised the ambiguity error even with `lang="c++"`/`lang_explicit=True`
+  passed in. `resolve_header_compile_context()` now resolves
+  `forced_language` first and narrows the matched-unit set (via a new
+  `_cu_language_family()` helper reading `cu.language`, independent of
+  whether `cu.standard` happens to be populated) to units whose own
+  language family agrees with it, before signature grouping runs — falling
+  back to the full, unfiltered matched set whenever no matched unit
+  actually has the forced family, so a genuine "the build evidence doesn't
+  cover this language" case degrades to the pre-existing behavior rather
+  than silently discarding real L3 evidence. A genuine disagreement
+  *within* the forced language (e.g. two C++ units still disagreeing on
+  `target_triple`) still raises exactly as before, and the companion
+  no-forced-language case (the same two-unit C/C++ setup with no explicit
+  `lang`) still correctly raises `HeaderCompileContextAmbiguousError`.

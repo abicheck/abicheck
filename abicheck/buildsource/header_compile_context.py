@@ -81,6 +81,7 @@ from .._compiler_options import explicit_language_standard
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import iter_directory_headers
+from .adapters.base import _is_msvc_command
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
 if TYPE_CHECKING:
@@ -365,7 +366,16 @@ class _ExplicitPin:
 #: :func:`_is_structured_field_flag`'s ``cu_standard`` parameter and
 #: :func:`_msvc_std_flag_matches_captured_standard`, which compares each
 #: ``/std:`` token's own value against ``cu_standard`` rather than trusting
-#: mere presence.
+#: mere presence. A third case (P2 review, ``discussion_r3787672845``) found
+#: that even *agreeing* values do not make ``-std=``/``/std:`` interchangeable
+#: on clang-cl: ``clang-cl`` ignores a bare ``-std=`` (warns "unknown argument
+#: ignored") and relies on ``/std:`` alone to set the dialect, so a unit like
+#: ``clang-cl -std=c++20 /std:c++20`` must still retain ``/std:`` in the
+#: rendered command even though both spellings agree. See
+#: :func:`_is_structured_field_flag`'s ``msvc`` parameter, which -- for a
+#: compile unit detected as MSVC/clang-cl-dialect
+#: (``adapters.base._is_msvc_command`` on ``cu.argv``) -- never masks
+#: ``/std:`` at all, regardless of value agreement.
 #: The bare, separate-operand switch spellings (whose own following argv
 #: token is the operand, captured structurally instead — this same set is
 #: reused verbatim by ``_context_flags``, via :func:`_is_structured_field_flag`,
@@ -430,25 +440,38 @@ def _msvc_std_flag_matches_captured_standard(
 
     P2 review finding (``discussion_r3787584574``): ``clang-cl`` accepts
     BOTH GCC/Clang's ``-std=`` and MSVC's ``/std:`` on one command line, and
-    per real ``clang-cl`` semantics the LATER, MSVC-style ``/std:`` wins —
+    per real ``clang-cl`` semantics the LATER, MSVC-style ``/std:`` wins --
     confirmed empirically (``clang-cl -std=c++17 /std:c++20`` compiles under
     C++20, ``-std=`` ignored). ``build_context.py``'s ``_consume_std_extra``/
     ``_STD_RE`` unconditionally captures any ``-std=...`` token into
     ``cu.standard`` with no notion of a later, overriding ``/std:`` on the
-    same argv — so ``bool(cu.standard)`` being true proves only that *some*
+    same argv -- so ``bool(cu.standard)`` being true proves only that *some*
     token populated the field, not that ``/std:`` itself is what did it, or
-    that the two agree. Comparing the ``/std:`` token's own value (case-
-    normalized) against ``cu_standard`` directly answers the right question:
-    when they genuinely match, ``cu.standard`` already carries exactly what
-    this ``/std:`` token says and the raw survivor really is redundant
-    (mirrors the already-established ``--target=``/``-target`` spelling-
-    divergence tolerance: a differently-spelled *equal* value is masked, but
-    a *disagreeing* value never is); when they don't match — whether because
-    ``cu.standard`` came from a different token entirely (this finding's
-    ``-std=c++17`` vs. ``/std:c++20`` repro) or because it's simply a real
-    disagreement — ``/std:`` must be retained, in both the ambiguity
-    signature and the rendered context, since it is what a real ``clang-cl``
-    (or MSVC ``cl.exe``) actually honors.
+    that the two agree.
+
+    **Superseded for an MSVC/clang-cl compile unit (P2 review,
+    ``discussion_r3787672845``, fresh evidence): this function's own
+    "values agree, so the raw ``/std:`` survivor is redundant" reasoning
+    does not hold there either.** ``clang-cl -std=c++20 /std:c++20`` has
+    *agreeing* values, but that does not make the two spellings
+    interchangeable -- confirmed empirically: ``clang-cl /?`` documents
+    ``/std:<value>`` as "Set language version," while compiling with a bare
+    ``-std=c++20`` and no ``/std:`` at all produces ``warning: unknown
+    argument ignored`` and remains at clang-cl's *default* dialect, not
+    C++20. So dropping ``/std:`` and keeping only the structurally-rendered
+    ``-std=`` (this function's caller, :func:`_is_structured_field_flag`,
+    always renders ``-std={cu.standard}`` from the structured field
+    regardless of what happens to the raw ``/std:`` survivor) silently
+    changes the dialect L2 actually replays under, even when the two
+    tokens' values happen to match. This function is therefore only
+    reached, via :func:`_is_structured_field_flag`, for a compile unit
+    *not* detected as MSVC/clang-cl-style (see that function's own ``msvc``
+    parameter) -- kept as a conservative fallback for the unusual case of a
+    ``/std:``-shaped token surviving ``extract_abi_relevant_flags`` on an
+    argv :func:`~abicheck.buildsource.adapters.base._is_msvc_command`
+    didn't recognize as MSVC-dialect, rather than deleted outright, since a
+    real MSVC/clang-cl unit never reaches this value-comparison path
+    anymore.
     """
     if not cu_standard:
         return False
@@ -456,24 +479,37 @@ def _msvc_std_flag_matches_captured_standard(
     return token_value.strip().casefold() == cu_standard.strip().casefold()
 
 
-def _is_structured_field_flag(flag: str, *, cu_standard: str) -> bool:
+def _is_structured_field_flag(flag: str, *, cu_standard: str, msvc: bool) -> bool:
     """Whether *flag* is fully represented by a structured
     ``target_triple``/``sysroot``/``standard`` field already, per the sets
     above.
 
     ``cu_standard`` must be ``cu.standard`` (the actual string, not merely
-    its truthiness) for the compile unit *flag* came from — it gates only
+    its truthiness) for the compile unit *flag* came from -- it gates only
     the conditional ``/std:`` prefix
-    (``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES``), via
-    :func:`_msvc_std_flag_matches_captured_standard`: a ``/std:`` token is
-    redundant with the structured ``standard`` field only when that field's
-    *value* genuinely came from (or agrees with) this exact ``/std:`` token
-    — not merely whenever the field happens to be non-empty, since a
-    co-present ``-std=`` on the same compile unit (``clang-cl``'s dual
-    ``-std=``/``/std:`` support) can populate ``cu.standard`` from a
-    *different* token entirely, one that a real ``clang-cl`` does not even
-    honor once ``/std:`` is also present. The other prefixes/exact flags are
-    unconditionally redundant and ignore this argument.
+    (``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES``) when *msvc* is
+    ``False``, via :func:`_msvc_std_flag_matches_captured_standard`: a
+    ``/std:`` token is redundant with the structured ``standard`` field
+    only when that field's *value* genuinely came from (or agrees with)
+    this exact ``/std:`` token -- not merely whenever the field happens to
+    be non-empty, since a co-present ``-std=`` on the same compile unit
+    (``clang-cl``'s dual ``-std=``/``/std:`` support) can populate
+    ``cu.standard`` from a *different* token entirely, one that a real
+    ``clang-cl`` doesn't even honor once ``/std:`` is also present.
+
+    ``msvc`` (P2 review, ``discussion_r3787672845``, fresh evidence): ``True``
+    when the compile unit *flag* came from was detected as an MSVC/clang-cl
+    dialect command (:func:`~abicheck.buildsource.adapters.base.
+    _is_msvc_command` on ``cu.argv``). For such a unit, ``/std:`` is
+    **never** masked, regardless of whether its own value agrees with
+    ``cu_standard`` -- see :func:`_msvc_std_flag_matches_captured_standard`'s
+    own updated docstring for why value-agreement does not make ``-std=``
+    and ``/std:`` interchangeable on clang-cl: clang-cl ignores a bare
+    ``-std=`` entirely and relies on ``/std:`` alone to set the dialect, so
+    dropping ``/std:`` breaks the real compile even when the two spellings
+    happen to agree. Only a compile unit *not* detected as MSVC-dialect
+    still uses the value-comparison fallback above. The other prefixes/
+    exact flags are unconditionally redundant and ignore both arguments.
     """
     if flag in _STRUCTURED_FIELD_EXACT_FLAGS or flag.startswith(
         _STRUCTURED_FIELD_FLAG_PREFIXES
@@ -481,6 +517,8 @@ def _is_structured_field_flag(flag: str, *, cu_standard: str) -> bool:
         return True
     for prefix in _STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES:
         if flag.startswith(prefix):
+            if msvc:
+                return False
             return _msvc_std_flag_matches_captured_standard(flag, prefix, cu_standard)
     return False
 
@@ -543,14 +581,17 @@ class _EffectiveContextSignature:
             system_include_paths=tuple(cu.system_include_paths),
             abi_relevant_flags=tuple(
                 _mask_pinned_abi_flags(
-                    cu.abi_relevant_flags, pin, cu_standard=cu.standard
+                    cu.abi_relevant_flags,
+                    pin,
+                    cu_standard=cu.standard,
+                    msvc=_is_msvc_command(cu.argv),
                 )
             ),
         )
 
 
 def _mask_pinned_abi_flags(
-    flags: Sequence[str], pin: _ExplicitPin, *, cu_standard: str
+    flags: Sequence[str], pin: _ExplicitPin, *, cu_standard: str, msvc: bool
 ) -> list[str]:
     """Drop ``cu.abi_relevant_flags`` entries a structured field already
     covers.
@@ -591,9 +632,17 @@ def _mask_pinned_abi_flags(
     populate ``cu.standard`` from a *different*, non-``/std:`` token that a
     real ``clang-cl`` doesn't even honor once ``/std:`` is also present, so
     a merely-non-empty ``cu.standard`` is not enough to mask ``/std:``).
+
+    ``msvc`` (P2 review, ``discussion_r3787672845``) is passed straight
+    through to ``_is_structured_field_flag`` too: for a compile unit
+    detected as MSVC/clang-cl-dialect, ``/std:`` is never masked here
+    either, regardless of whether its value agrees with ``cu_standard`` —
+    see that function's own updated docstring.
     """
     return [
-        f for f in flags if not _is_structured_field_flag(f, cu_standard=cu_standard)
+        f
+        for f in flags
+        if not _is_structured_field_flag(f, cu_standard=cu_standard, msvc=msvc)
     ]
 
 
@@ -620,6 +669,28 @@ def _derived_standard_language_family(standard: str) -> str | None:
     if not standard:
         return None
     return _LANG_FAMILY_CXX if "++" in standard else _LANG_FAMILY_C
+
+
+def _cu_language_family(language: str) -> str | None:
+    """Which language family (C vs. C++) a ``CompileUnit.language`` value
+    names, or ``None`` for an unrecognized/empty value.
+
+    ``CompileUnit.language`` is populated by ``adapters.base.detect_language``/
+    ``effective_language`` as one of ``"C"``/``"CXX"``/``"OBJC"``/
+    ``"OBJCXX"``/``"CUDA"``/``""`` -- a normalized token independent of
+    whether ``cu.standard`` happens to be populated at all (unlike
+    :func:`_derived_standard_language_family`, which reads the *standard*
+    string and returns ``None`` whenever it's empty, e.g. a compile unit
+    with no explicit ``-std=``). Only ``"C"``/``"CXX"`` map to a recognized
+    family here; every other value returns ``None``, the same
+    "no family, no opinion" contract the standard-derived sibling uses for
+    its own empty/unrecognized case.
+    """
+    if language == "C":
+        return _LANG_FAMILY_C
+    if language == "CXX":
+        return _LANG_FAMILY_CXX
+    return None
 
 
 def _forced_language_family(lang: str | None, *, lang_explicit: bool) -> str | None:
@@ -754,7 +825,9 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
     flags.extend(
         f
         for f in cu.abi_relevant_flags
-        if not _is_structured_field_flag(f, cu_standard=cu.standard)
+        if not _is_structured_field_flag(
+            f, cu_standard=cu.standard, msvc=_is_msvc_command(cu.argv)
+        )
     )
     return flags
 
@@ -814,6 +887,37 @@ def resolve_header_compile_context(
     rejects outright (see :func:`_context_flags`'s own docstring for the
     confirmed repro). Every other derived field is unaffected.
 
+    **Forced language is applied *before* ambiguity grouping, not only to
+    the single already-resolved unit's rendered flags (P2 review,
+    ``discussion_r3787672845``, fresh evidence).** When the same header is
+    referenced by otherwise-identical C and C++ compile units (e.g. neither
+    carries an explicit ``-std=``, so ``cu.standard`` is empty on both and
+    :func:`_standard_conflicts_with_forced_language`'s own std-conflict
+    check above has nothing to compare), an explicit ``--lang c++`` still
+    used to raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
+    even though the caller already resolved the ambiguity by naming the
+    language explicitly -- ``_EffectiveContextSignature`` groups on
+    ``cu.language`` (``"C"`` vs. ``"CXX"``, populated independently of
+    ``cu.standard``) before *forced_language* was ever computed, so the two
+    units' genuinely different ``language`` fields alone triggered the
+    ambiguity error before the caller's own explicit disambiguation could
+    apply. Fixed by resolving *forced_language* first and narrowing the
+    matched-unit set to units whose own language family
+    (:func:`_cu_language_family`) agrees with it *before* signature
+    grouping runs, whenever at least one matched unit actually has that
+    family -- a unit of the "wrong" family for an explicitly forced parse
+    is exactly the ambiguity-in-language case the caller's own explicit
+    request already resolved, so excluding it here can only ever turn a
+    would-be ambiguous case into a single-context one, never hide a
+    genuine disagreement *within* the forced language (two C++ units that
+    still disagree on, say, ``target_triple`` still group into two
+    signatures and still raise). If *no* matched unit has the forced
+    family (the explicit language names something the build evidence
+    simply doesn't cover for this header), the full matched set is used
+    unfiltered instead, exactly the pre-existing behavior -- narrowing to
+    an empty set would silently discard real L3 evidence for a language
+    mismatch this function has no way to resolve.
+
     *explicit* is the caller's own, already-supplied L2 context (``evidence.
     compile`` on the service_input_resolution path) — when given, any
     ABI-relevant dimension it already pins (an explicit ``-std=``/
@@ -837,6 +941,21 @@ def resolve_header_compile_context(
     if not matched:
         return _EMPTY_RESOLUTION
 
+    # Resolve the forced language *before* signature grouping (P2 review,
+    # discussion_r3787672845): narrow to units whose own language family
+    # agrees with an explicitly forced one, whenever at least one such unit
+    # exists, so the caller's own explicit disambiguation is applied before
+    # -- not after -- the ambiguity check runs. See this function's own
+    # docstring for the full reasoning and the fail-open-to-unfiltered
+    # fallback when no matched unit has the forced family.
+    forced_language = _forced_language_family(lang, lang_explicit=lang_explicit)
+    if forced_language is not None:
+        language_matched = [
+            cu for cu in matched if _cu_language_family(cu.language) == forced_language
+        ]
+        if language_matched:
+            matched = language_matched
+
     pin = _ExplicitPin.of(explicit)
     by_signature: dict[_EffectiveContextSignature, list[CompileUnit]] = {}
     for cu in matched:
@@ -848,7 +967,6 @@ def resolve_header_compile_context(
         )
 
     ((_sig, units),) = by_signature.items()
-    forced_language = _forced_language_family(lang, lang_explicit=lang_explicit)
     flags = _context_flags(units[0], forced_language=forced_language)
     context = CompileContext(gcc_option_tokens=tuple(flags))
     return HeaderCompileContextResolution(

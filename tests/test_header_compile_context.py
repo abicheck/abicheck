@@ -337,6 +337,111 @@ def test_standard_conflicts_with_forced_language() -> None:
     assert _standard_conflicts_with_forced_language("", "c++") is False
 
 
+def test_cu_language_family() -> None:
+    from abicheck.buildsource.header_compile_context import _cu_language_family
+
+    assert _cu_language_family("C") == "c"
+    assert _cu_language_family("CXX") == "c++"
+    assert _cu_language_family("OBJC") is None
+    assert _cu_language_family("") is None
+
+
+def test_resolve_forced_language_resolves_language_ambiguity_before_grouping(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787672845``): two otherwise-
+    identical compile units differing ONLY in ``cu.language`` (one C, one
+    C++, neither carrying an explicit ``-std=``, so
+    ``_standard_conflicts_with_forced_language`` has nothing to compare)
+    used to raise ``HeaderCompileContextAmbiguousError`` even when the
+    caller passed an explicit ``lang="c++"``/``lang_explicit=True`` --
+    because ``_EffectiveContextSignature`` grouped on ``cu.language`` before
+    ``forced_language`` was ever computed. With the fix, the forced
+    language is resolved *first* and narrows the matched-unit set to the
+    C++ unit before signature grouping runs, so no ambiguity error is
+    raised and the resolved context reflects the forced C++ unit."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_c = tmp_path / "a.c"
+    src_c.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_cxx = tmp_path / "b.cpp"
+    src_cxx.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_c = _cu(
+        source=str(src_c),
+        directory=str(tmp_path),
+        language="C",
+        standard="",
+        defines={"SHARED": "1"},
+    )
+    unit_cxx = _cu(
+        source=str(src_cxx),
+        directory=str(tmp_path),
+        language="CXX",
+        standard="",
+        defines={"SHARED": "1"},
+    )
+    ev = BuildEvidence(compile_units=[unit_c, unit_cxx])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.matched_unit_count == 1
+    assert result.context is not None
+    assert "-DSHARED=1" in result.context.gcc_option_tokens
+
+
+def test_resolve_mixed_language_units_without_forced_language_still_ambiguous(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above: WITHOUT an explicit forced language, the
+    identical two-unit (one C, one C++) setup must still correctly raise
+    ``HeaderCompileContextAmbiguousError`` -- the forced-language narrowing
+    must never kick in, and never mask, a genuine language disagreement the
+    caller hasn't resolved."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_c = tmp_path / "a.c"
+    src_c.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_cxx = tmp_path / "b.cpp"
+    src_cxx.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_c = _cu(source=str(src_c), directory=str(tmp_path), language="C", standard="")
+    unit_cxx = _cu(
+        source=str(src_cxx), directory=str(tmp_path), language="CXX", standard=""
+    )
+    ev = BuildEvidence(compile_units=[unit_c, unit_cxx])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_forced_language_falls_back_to_unfiltered_set_when_no_unit_matches(
+    tmp_path: Path,
+) -> None:
+    """When an explicit forced language names something no matched compile
+    unit actually is (here: forcing C++ while every matched unit is C), the
+    full, unfiltered matched set is used instead of narrowing to an empty
+    one -- narrowing to nothing would silently discard real L3 evidence
+    this function has no way to resolve a language mismatch for. A single
+    agreeing C unit still resolves to one context (not an ambiguity, and
+    not "no evidence")."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "a.c"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[unit])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.matched_unit_count == 1
+    assert result.context is not None
+    # The lone C unit's own -std=c17 conflicts with the forced C++ language
+    # (via _standard_conflicts_with_forced_language), so it's still omitted
+    # -- this is the pre-existing round-7 behavior, unaffected by the
+    # fallback-to-unfiltered path itself.
+    assert not any(t.startswith("-std=") for t in result.context.gcc_option_tokens)
+
+
 def test_explicit_pin_of_covers_bare_operand_and_malformed_options_branches() -> None:
     """Direct unit coverage for ``_ExplicitPin.of``'s less-common branches
     (bare-operand ``-target``/``-isysroot``/``-D``/``-U`` spellings, and a
@@ -904,6 +1009,77 @@ def test_resolve_msvc_std_colon_disagreement_raises_even_with_standard_field_pop
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     with pytest.raises(HeaderCompileContextAmbiguousError):
         resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_msvc_std_colon_retained_when_values_agree_on_clang_cl(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787672845``): even when the
+    ``/std:<value>`` token AGREES with the structured ``cu.standard`` field,
+    the two spellings are still NOT interchangeable on a clang-cl-dialect
+    compile unit. ``clang-cl /?`` documents ``/std:<value>`` as "Set
+    language version," while a bare ``-std=c++20`` with no ``/std:`` at all
+    produces "warning: unknown argument ignored" and compiles at clang-cl's
+    *default* dialect, not C++20 -- so dropping ``/std:c++20`` here (the
+    pre-fix behavior, since the two values genuinely agree) would silently
+    change the dialect L2 actually replays under. A unit detected as
+    MSVC/clang-cl-dialect (via its own ``argv``) must retain ``/std:c++20``
+    regardless of value agreement."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "a.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["-std=c++20", "/std:c++20"],
+        argv=["clang-cl", "-std=c++20", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[unit])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.context is not None
+    tokens = list(result.context.gcc_option_tokens)
+    assert "/std:c++20" in tokens
+    # The structurally-rendered -std=c++20 comes first; /std:c++20 -- what
+    # clang-cl actually honors -- must come after it (last-flag-wins).
+    assert tokens.index("-std=c++20") < tokens.index("/std:c++20")
+
+
+def test_resolve_msvc_std_colon_agreement_across_units_stays_unambiguous_and_retained(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above at multi-unit scope: two clang-cl units
+    that fully agree (including on ``/std:``) must still resolve to a
+    single, non-ambiguous context, and the retained ``/std:c++20`` survives
+    into the rendered command for that single context."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["-std=c++20", "/std:c++20"],
+        argv=["clang-cl", "-std=c++20", "/std:c++20", "-c", str(src_a)],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["-std=c++20", "/std:c++20"],
+        argv=["clang-cl", "-std=c++20", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+    assert result.context is not None
+    assert "/std:c++20" in list(result.context.gcc_option_tokens)
 
 
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
