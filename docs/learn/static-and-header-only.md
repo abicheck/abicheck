@@ -73,8 +73,11 @@ library's implementation is real, compilable `.cpp` code — so the practical
 way to validate it today is to build an ordinary shared object from those
 same sources (a purpose-built `.so` consumers never ship, existing purely
 to give the archive's own API a real binary to attach evidence to) and run
-the standard binary+headers comparison against *that*, the same way you
-would for a genuine dynamic library. Validating the *compiled* archive's
+the standard binary+headers comparison against *that binary*, the same way
+you would for a genuine dynamic library. Compare that built `.so` directly
+— never the static archive itself, and never two no-binary source-only
+snapshots against each other (see the header-only section below for why
+that path isn't fully supported). Validating the *compiled* archive's
 object-format/compiler-ABI compatibility from its `.a`/`.lib` file directly
 isn't something abicheck does today.
 
@@ -92,11 +95,16 @@ public API, unconditionally**:
 - Every function body is compiled fresh into every consumer at their build
   time, against their own compiler, flags, and standard-library
   implementation.
-- A change to a function body's *behavior* reaches every consumer the next
-  time they rebuild — there is no "old binary keeps working with old
-  behavior" grace period a dynamic library gives you; a header-only
-  library's versioning is effectively always at the granularity of "whatever
-  headers were included at each consumer's most recent build."
+- A change to a function body's *behavior* reaches a consumer only the next
+  time *that consumer* rebuilds — an existing, already-compiled consumer
+  binary keeps running the old inlined behavior indefinitely, with no
+  equivalent of a dynamic library's "drop in a new `.so`, every consumer
+  picks up the change immediately" propagation. A header-only library's
+  versioning is effectively always at the granularity of "whatever headers
+  were included at each consumer's most recent build" — which cuts both
+  ways: a fix doesn't reach anyone until they rebuild, and a *break* is
+  silently absent from every consumer that hasn't rebuilt either, right up
+  until the moment they do.
 - Because there's no separate binary artifact, checking a header-only
   library needs source-level evidence rather than binary evidence. **This is
   a genuine gap in today's tooling, not a solved problem with an
@@ -133,11 +141,12 @@ public API, unconditionally**:
 ## Practical guidance
 
 - For a static library, treat header/source compatibility with the same
-  rigor as a dynamic library's — check it with the same `dump --sources`
-  source-fact comparison described above — and
-  additionally pin/document the supported compiler and standard-library ABI
-  range explicitly, since there's no runtime check equivalent to a loader
-  refusing an incompatible SONAME.
+  rigor as a dynamic library's — build the purpose-built shared object
+  described above and run the standard binary+headers comparison against
+  *that artifact*, not against the `.a`/`.lib` archive or a pair of
+  source-only snapshots — and additionally pin/document the supported
+  compiler and standard-library ABI range explicitly, since there's no
+  runtime check equivalent to a loader refusing an incompatible SONAME.
 - For a header-only library, be explicit that *every* function is
   effectively "public inline" in the sense [the hub's dispatcher
   scenario](abi-api-handling.md#the-l5-graph-reachability-not-just-structure)

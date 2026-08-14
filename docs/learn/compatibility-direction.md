@@ -40,12 +40,19 @@ source recompiled against new headers (backward-compatible addition) —
 though not universally: it changes the function's *type*, so source taking
 its address for a function pointer (`void (*p)(int) = &f;` against
 `f(int, int = 0)`) stops compiling even in that same direction. In the
-*forward* direction the addition breaks only usages that actually depend on
-it — code that supplies the new argument (`f(1, 2)`), takes the function's
-address, or otherwise relies on the new type fails to compile against *old*
-headers that don't declare the parameter; an ordinary call in the old form
-(`f(1)`) still compiles fine either way, since the old headers never
-promised the parameter existed in the first place. A newly
+*forward* direction, the break isn't limited to source that names the new
+argument — it's a *link*-time failure, not just a compile-time one:
+`f(int, int = 0)` is a different function type from `f(int)`, so it
+normally mangles to a different symbol. New source compiled against the
+new declaration — even an ordinary, old-form call like `f(1)`, which the
+compiler silently expands with the default argument — compiles cleanly,
+but linking that new consumer against an *old* library that only exports
+the one-parameter symbol fails outright, because the two-parameter symbol
+the new consumer needs was never exported. Code that explicitly supplies
+the new argument or takes the function's address fails earlier still, at
+*compile* time, against genuinely *old headers* that never declared the
+parameter at all (a distinct scenario from linking against an old
+*library* with new *headers*, above). A newly
 *added* exported symbol is invisible to an old, already-linked consumer
 (the backward direction is unaffected — nothing calls a symbol that didn't
 exist when it was built) but breaks the forward direction the moment a
@@ -118,14 +125,14 @@ mechanics `compare --used-by`/`--required-symbol` build on.
 There is no single "check every direction" flag, because which directions
 matter is a property of your deployment model, not something abicheck can
 infer from two binaries — this is exactly the kind of contract-shape
-decision [Product Contract §4](abi-series/00-product-contract.md#5-name-your-contract-shape)
+decision [Product Contract §5](abi-series/00-product-contract.md#5-name-your-contract-shape)
 asks you to make explicit before reasoning about breaks at all. Naming which
 directions your project actually needs (usually: backward always, forward
 if rollback is supported, both host directions if you ship plugins) is the
 first step; running `compare` once per direction that matters is the
 mechanical follow-through.
 
-See also: [Product Contract §4/§5](abi-series/00-product-contract.md) for
+See also: [Product Contract §5](abi-series/00-product-contract.md#5-name-your-contract-shape) for
 naming your contract shape, and [Plugin Systems](../use/plugin-systems.md)
 for the consumer-scoped mechanics that make a specific direction checkable
 against a specific real consumer.

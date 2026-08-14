@@ -14,9 +14,15 @@ generated: false
 # Ownership & Lifetime Contracts
 
 A pointer, handle, or reference crossing an API boundary carries an implicit
-contract that no C or C++ type system enforces and no ABI/API checker can
-read off a signature: **who allocated it, who may free it, how long it stays
-valid, and who is responsible for its destruction.** This page names that
+contract — **who allocated it, who may free it, how long it stays valid,
+and who is responsible for its destruction.** A raw C pointer encodes none
+of it; a C++ smart pointer (`std::unique_ptr<T>`/`std::shared_ptr<T>`) can
+encode *part* of it — ownership transfer, in particular — in the type
+itself, as the "Designing for it" section below recommends, but even that
+only goes so far: an allocator/CRT mismatch across the boundary, or a
+lifetime shorter than the pointer's own scope suggests, is invisible to
+the type either way. No ABI/API checker can read the remainder off a
+signature. This page names that
 contract explicitly — it comes up constantly in
 [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md)'s
 pimpl and opaque-handle patterns and in
