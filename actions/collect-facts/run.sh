@@ -824,9 +824,18 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
   # cmake defines and the version suffix are empty otherwise.
   local extra_cmake_defines=() version_suffix=""
   if [[ "$is_intel_llvm" == "true" ]]; then
-    extra_cmake_defines=(-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++)
+    # ABICHECK_PLUGIN_COMPILER_FAMILY=intel-llvm alongside the two ABI knobs:
+    # this build always pins CMAKE_CXX_COMPILER to the exact resolved
+    # $COMPILER just below, so the plugin's own __INTEL_LLVM_COMPILER
+    # compile-time fallback would already get this right here -- but passing
+    # it explicitly removes the dependency on that host-compiler coincidence
+    # entirely, matching the two ABI knobs' own already-explicit style
+    # (Codex review: the plugin's own conformance/CI infrastructure varies
+    # host_cc independent of target LLVM major for the non-vendor case, so
+    # the compile-time fallback alone isn't a safe invariant to lean on).
+    extra_cmake_defines=(-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++ -DABICHECK_PLUGIN_COMPILER_FAMILY=intel-llvm)
     version_suffix="+experimental-intel-llvm"
-    echo "::notice::Building against the vendor-bundled Intel oneAPI LLVM/Clang SDK -- passing -DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++ (the recipe real testing found necessary; see README.md). This build is NOT certified: only a minimal AST plugin has been verified end-to-end against icpx/icx, not this full plugin's own conformance suite. Prefer plugin-artifact with a build you have separately certified for production use."
+    echo "::notice::Building against the vendor-bundled Intel oneAPI LLVM/Clang SDK -- passing -DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++ -DABICHECK_PLUGIN_COMPILER_FAMILY=intel-llvm (the recipe real testing found necessary; see README.md). This build is NOT certified: only a minimal AST plugin has been verified end-to-end against icpx/icx, not this full plugin's own conformance suite. Prefer plugin-artifact with a build you have separately certified for production use."
   fi
 
   # Pin CMake to the exact resolved compiler binary rather than letting it

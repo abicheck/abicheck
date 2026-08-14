@@ -131,6 +131,42 @@ A build of this plugin only loads into the exact clang it was built against
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing
   this constraint first.
+- **`fact_set.compiler_family` (ADR-038 C.8) reports `"intel-llvm"` for this
+  fork, both from the wrapper and the plugin — but the plugin's own
+  detection needs care.** `abicheck.buildsource.source_extractors.clang.
+  _clang_compiler_family` resolves it from the already-known compiler
+  binary name (reusing `dumper_clang._is_intel_sycl_driver`'s existing
+  icx/icpx/dpcpp/dpcpp-cl recognition). `AbicheckFactsPlugin.cpp`'s
+  `kCompilerFamily` cannot do the same lookup — it has no notion of "which
+  binary will load me" at compile time — so it defaults to reading
+  `__INTEL_LLVM_COMPILER` at **its own compile time** instead, correct
+  whenever build-compiler and load-compiler are the same (true for
+  `run.sh`'s own production path, which always pins `CMAKE_CXX_COMPILER`
+  to the exact resolved `$COMPILER`). That default is **not** safe to
+  assume in general: this file's own CI matrix
+  (`.github/workflows/clang-plugin.yml`) deliberately varies `host_cc`
+  (`gcc`/`clang`) independent of the target LLVM major to validate that
+  combination for the non-vendor case, so building against an Intel SDK
+  with a non-Intel host compiler would silently fall through to `"clang"`
+  (Codex review, PR #756, fresh finding on the same PR that added the
+  detection). Fixed with an explicit override, not a cleverer inference:
+  `CMakeLists.txt`'s `ABICHECK_PLUGIN_COMPILER_FAMILY` cache variable
+  (`auto`/`clang`/`intel-llvm`, same three-state shape as
+  `ABICHECK_PLUGIN_RTTI`/`ABICHECK_PLUGIN_STDLIB`) defines
+  `ABICHECK_COMPILER_FAMILY_OVERRIDE`, which `kCompilerFamily` checks
+  *before* the `__INTEL_LLVM_COMPILER` fallback. `run.sh`'s
+  `_prepare_clang_plugin` now passes `-DABICHECK_PLUGIN_COMPILER_FAMILY=
+  intel-llvm` alongside the existing RTTI/stdlib overrides whenever
+  `is_intel_llvm` is true, so its own production path no longer depends on
+  the host-compiler coincidence at all, even though that coincidence
+  happens to hold there today. Verified: built the plugin with a plain
+  `g++` host compiler (never defines `__INTEL_LLVM_COMPILER`) plus the
+  explicit override and confirmed `"intel-llvm"` still ends up in the
+  built `.so` via `strings`; the `auto` default (every existing caller)
+  is unaffected. `conformance.py`'s `_compare_fact_set` no longer
+  hard-codes `"clang"` either — see its own docstring/comments for the
+  "both sides must agree with each other, not with a fixed literal"
+  contract this now checks instead.
 
 ## The conformance gate is the actual spec
 

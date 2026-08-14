@@ -116,25 +116,36 @@ constexpr const char *kPluginVersion = "0.5";
 constexpr const char *kFactSetName = "abicheck-clang-canonical";
 constexpr int kFactSetVersion = 1;
 
-// compiler_family for the fact-set block below (ADR-038 C.8). __INTEL_LLVM_
-// COMPILER is the same predefined macro actions/collect-facts/run.sh's
-// _is_intel_llvm_compiler and abicheck.buildsource.source_extractors.clang.
-// _clang_compiler_family both key on to recognize Intel's oneAPI DPC++/C++
-// Compiler fork -- but here it's read at THIS PLUGIN'S OWN COMPILE TIME
-// (whichever compiler built AbicheckFactsPlugin.cpp itself defines it or
-// doesn't), not the runtime host process's. This is deliberately correct
-// for how this plugin is built and loaded: contrib/abicheck-clang-plugin/
-// AGENTS.md's "LLVM-major sensitivity" section documents that a build of
-// this plugin only ever loads into the exact matching compiler/fork it was
-// built against (a shared-library ABI constraint, not just an API one) --
-// so the compiler that built this plugin IS the compiler that will load it,
-// making this the identical macro-presence test run.sh performs on the
-// resolved host compiler before building against it. Before this fix the
-// literal `"clang"` below was correct only by coincidence (this plugin's
-// own conformance suite has never exercised a real icpx build until PR
-// #756's manual re-verification) -- it never actually recognized the one
-// fork this codebase already has real, documented ABI findings for.
-#if defined(__INTEL_LLVM_COMPILER)
+// compiler_family for the fact-set block below (ADR-038 C.8).
+//
+// ABICHECK_COMPILER_FAMILY_OVERRIDE (set via CMakeLists.txt's
+// ABICHECK_PLUGIN_COMPILER_FAMILY cache variable, "auto" by default) takes
+// priority when the caller supplies it explicitly. Absent that, fall back to
+// __INTEL_LLVM_COMPILER -- the same predefined macro actions/collect-facts/
+// run.sh's _is_intel_llvm_compiler and abicheck.buildsource.
+// source_extractors.clang._clang_compiler_family both key on to recognize
+// Intel's oneAPI DPC++/C++ Compiler fork -- but here read at THIS PLUGIN'S
+// OWN COMPILE TIME (whichever compiler built AbicheckFactsPlugin.cpp itself
+// defines it or doesn't), not the runtime host process's. That fallback is
+// correct whenever the compiler that builds this plugin is the same one
+// that will load it -- true for run.sh's own production path
+// (_prepare_clang_plugin always pins CMAKE_CXX_COMPILER to the exact
+// resolved $COMPILER) -- but NOT guaranteed in general: .github/workflows/
+// clang-plugin.yml's own CI matrix deliberately varies host_cc (g++ vs.
+// clang++) independent of the target LLVM major to prove that combination
+// works for the non-vendor case, and a caller could equally point
+// find_package(LLVM) at an Intel SDK via llvm-cmake-prefix while building
+// this plugin's own .cpp with a plain host g++/clang++ that never defines
+// __INTEL_LLVM_COMPILER (Codex review, PR #756) -- the explicit override
+// exists for exactly that case. Before the __INTEL_LLVM_COMPILER fallback
+// was added, the literal `"clang"` below was correct only by coincidence
+// (this plugin's own conformance suite had never exercised a real icpx
+// build until PR #756's manual re-verification) -- it never actually
+// recognized the one fork this codebase already has real, documented ABI
+// findings for.
+#if defined(ABICHECK_COMPILER_FAMILY_OVERRIDE)
+constexpr const char *kCompilerFamily = ABICHECK_COMPILER_FAMILY_OVERRIDE;
+#elif defined(__INTEL_LLVM_COMPILER)
 constexpr const char *kCompilerFamily = "intel-llvm";
 #else
 constexpr const char *kCompilerFamily = "clang";
