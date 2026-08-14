@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ops-icx-intel-llvm-sdk-probe-2026-08-14
+  cancel-in-progress: true
+
 jobs:
   probe:
     runs-on: ubuntu-24.04
@@ -47,7 +51,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: icx-intel-llvm-sdk-${{ github.sha }}
-          path: icx-intel-llvm-sdk-results/
+          path: |
+            icx-intel-llvm-sdk-results/
+            !icx-intel-llvm-sdk-results/sdk/**
+            !icx-intel-llvm-sdk-results/*.tar.gz
           if-no-files-found: error
           retention-days: 30
           compression-level: 1
