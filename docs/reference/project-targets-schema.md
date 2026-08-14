@@ -106,10 +106,10 @@ Common optional fields for `kind: library`:
 ### `checks:`
 
 Each `targets:<id>.checks[]` entry is a `{channel, depth, required,
-gate_mode, profiles}` tuple — the assignment ADR-047 §3 itself identifies as
-missing from the plain `targets:`/`baseline: channels:` excerpt: declaring
-which channels *exist* doesn't say which channel/depth/policy a given
-target actually runs.
+gate_mode, profiles, allow_new_target}` tuple — the assignment ADR-047 §3
+itself identifies as missing from the plain `targets:`/`baseline: channels:`
+excerpt: declaring which channels *exist* doesn't say which channel/depth/
+policy a given target actually runs.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
@@ -118,6 +118,7 @@ target actually runs.
 | `required` | boolean | `true` | Whether this check gates `aggregate`'s coverage requirement. |
 | `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (ADR-047 §8's S5 row: "Advisory by default"). Set `gate_mode` explicitly to override either default. |
 | `profiles` | list of string | *(unset)* | An **explicit** profile-id selector — see [Profile scoping](#profile-scoping-for-checks) below. A profile with `contract: false` may only be named here by a `channel: "none"` audit check — a real-channel check can never resolve a baseline on a lane that's documented to never get one (S17). |
+| `allow_new_target` | boolean | `false` | Forwarded as `check-target`'s `allow-new-target` input — `true` turns a target genuinely absent from this check's otherwise-resolved baseline-set into the advisory `new_target` outcome instead of `ambiguous` (e.g. a new library's first release). Pair with `required: false`, or a required-coverage gate would still block on the target's first appearance. Rejected at validation time for any [`bundles:` check](#bundles) — a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. See [Baseline Management → A new library's first release](../use/baseline-management.md#a-new-librarys-first-release). |
 
 ### Profile scoping for `checks:`
 
@@ -396,6 +397,10 @@ scope for P0/P1 and not a valid `source` value here.
    identifier charset.
 9. Rules 5-7 apply identically to a bundle's own `checks[]`, not just a
    target's.
+10. `checks[].allow_new_target: true` is rejected on any of a bundle's own
+    `checks[]` — a bundle comparison needs one coherent release where every
+    member already coexisted, so there is no well-defined old side for a
+    member that's new.
 
 Structural/type errors in the YAML itself (an unknown key at any level —
 including a misspelled top-level block like `tagrets:`, checked against the

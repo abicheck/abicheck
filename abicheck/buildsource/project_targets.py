@@ -243,6 +243,17 @@ class CheckSpec:
     #: ``contract: true`` profile, filtered against ``build-output.json`` by
     #: G30 P1.4's run-plan generator — not resolved here.
     profiles: list[str] = field(default_factory=list)
+    #: Forwarded to ``check-target``'s own ``allow-new-target`` input (and,
+    #: through it, ``resolve-baseline``'s) — ``False`` (default) means a
+    #: target absent from this check's otherwise-resolved baseline-set
+    #: always fails ``ambiguous``; ``True`` opts this specific check into
+    #: the ``new_target`` lifecycle state instead (a new library's first
+    #: release checked against a baseline-set that predates it). Rejected
+    #: outright on a bundle check by :func:`_check_issues` — a bundle
+    #: comparison needs one coherent release where every member already
+    #: coexisted, so "this member is new" has no well-defined old side (see
+    #: ``abicheck.buildsource.baseline_set.resolve_bundle``'s docstring).
+    allow_new_target: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -253,11 +264,20 @@ class CheckSpec:
         }
         if self.profiles:
             d["profiles"] = list(self.profiles)
+        if self.allow_new_target:
+            d["allow_new_target"] = True
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], *, where: str) -> CheckSpec:
-        known = {"channel", "depth", "required", "gate_mode", "profiles"}
+        known = {
+            "channel",
+            "depth",
+            "required",
+            "gate_mode",
+            "profiles",
+            "allow_new_target",
+        }
         unknown = _unknown_keys(d, known)
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
@@ -303,12 +323,19 @@ class CheckSpec:
                 "or list at least one profile id"
             )
         profiles = _require_str_list(d, "profiles", where=where)
+        allow_new_target = d.get("allow_new_target", False)
+        if not isinstance(allow_new_target, bool):
+            raise ValueError(
+                f"{where}.allow_new_target must be a boolean, got "
+                f"{type(allow_new_target).__name__}: {allow_new_target!r}"
+            )
         return cls(
             channel=channel,
             depth=depth,
             required=required,
             gate_mode=gate_mode,
             profiles=profiles,
+            allow_new_target=allow_new_target,
         )
 
 
@@ -1424,6 +1451,17 @@ def _check_issues(
                 "check to a linux profile, or drop it from profiles: and let "
                 "the implicit sweep skip non-ELF profiles automatically."
             )
+    if is_bundle and check.allow_new_target:
+        issues.append(
+            f"{where}: allow_new_target is not supported for a bundle check -- "
+            "a bundle comparison needs one coherent release where every "
+            "member already coexisted, so there is no well-defined old side "
+            "for a member that's new (abicheck.buildsource.baseline_set."
+            "resolve_bundle never returns new_target). Scope the new member "
+            "individually with a channel/allow_new_target library-kind "
+            "target check instead, and add it to this bundle once a real "
+            "release has published a baseline-set covering every member."
+        )
     return issues
 
 

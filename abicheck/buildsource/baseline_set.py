@@ -209,11 +209,28 @@ class ResolveOutcome:
     #: ``baseline_generation`` docstring and docs/use/baseline-management.md
     #: #scanner-upgrades-and-baseline-generations.
     STALE_GENERATION = "stale_generation"
+    #: ``kind: target`` only, and only when the caller opted in via
+    #: :func:`resolve_target`'s ``allow_new_target``. The staged baseline-set's
+    #: own ``manifest.json`` exists, is schema/profile/project_ref/generation
+    #: -compatible, and simply has no ``artifacts[]`` entry for this target --
+    #: distinct from :data:`AMBIGUOUS`, which is what the *same* condition
+    #: reports when the caller did not opt in. A first-release-of-a-new-
+    #: library check (the target genuinely never existed in any baseline-set
+    #: published so far) is a legitimate, expected lifecycle state, not a
+    #: staging/configuration error -- without this outcome, a caller had no
+    #: way to express "this target may be new" other than routing it through
+    #: ``baseline-channel: none`` (no resolution at all) or accepting the
+    #: ``ambiguous`` failure. Deliberately **never** returned by
+    #: :func:`resolve_bundle`: a bundle-scoped comparison reads real ELF
+    #: binaries for every member from one coherent baseline-set, and "some of
+    #: this bundle's members are new" has no single well-defined old side to
+    #: compare against -- see :func:`resolve_bundle`'s own docstring.
+    NEW_TARGET = "new_target"
 
 
 #: Every outcome value :func:`resolve_target`/:func:`resolve_bundle` can
-#: return — the eight branches of ADR-047 §6's table (seven failure rows plus
-#: the resolved/success case).
+#: return — the nine branches of ADR-047 §6's table (resolved, seven failure
+#: rows, plus the opt-in new_target lifecycle state).
 ALL_OUTCOMES = frozenset(
     {
         ResolveOutcome.RESOLVED,
@@ -224,6 +241,7 @@ ALL_OUTCOMES = frozenset(
         ResolveOutcome.INCOMPATIBLE_EVIDENCE,
         ResolveOutcome.WRONG_PROJECT_REF,
         ResolveOutcome.STALE_GENERATION,
+        ResolveOutcome.NEW_TARGET,
     }
 )
 
@@ -963,6 +981,7 @@ def resolve_target(
     candidate_evidence_producer: dict[str, Any] | None = None,
     expected_project_ref: str = "",
     expected_baseline_generation: int | None = None,
+    allow_new_target: bool = False,
 ) -> ResolveResult:
     """Resolve ``channel × target × profile`` (ADR-047 §6) to one snapshot.
 
@@ -976,6 +995,17 @@ def resolve_target(
     ``expected_baseline_generation``, when not ``None``, additionally
     requires the resolved baseline-set's own recorded ``baseline_generation``
     to match exactly -- see :data:`ResolveOutcome.STALE_GENERATION`.
+
+    ``allow_new_target``, when ``True``, turns a resolved, schema/profile/
+    project_ref/generation-compatible baseline-set simply not carrying an
+    ``artifacts[]`` entry for ``target`` into :data:`ResolveOutcome.NEW_TARGET`
+    instead of :data:`ResolveOutcome.AMBIGUOUS` -- a caller opts into this
+    only for a check it has explicitly designed to tolerate a target's first
+    appearance (e.g. a new library's first release), never by default: an
+    absent target in an otherwise-healthy baseline-set is far more often a
+    staging/configuration mistake (wrong channel, wrong baseline-path, a
+    typo'd target id) than a genuine new-library lifecycle event, so
+    ``ambiguous`` stays the default failure mode.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)
@@ -997,6 +1027,17 @@ def resolve_target(
     artifact = manifest.artifact_for(target)
     if artifact is None:
         known = sorted(a.library for a in manifest.artifacts if a.library)
+        if allow_new_target:
+            return ResolveResult(
+                outcome=ResolveOutcome.NEW_TARGET,
+                message=(
+                    f"target {target!r} is not in this baseline-set's "
+                    f"manifest (known targets: {known}) -- this check opted "
+                    "into allow_new_target, so treated as a target genuinely "
+                    "new to this baseline-set rather than a staging error."
+                ),
+                manifest_path=manifest_path,
+            )
         return ResolveResult(
             outcome=ResolveOutcome.AMBIGUOUS,
             message=(
@@ -1095,6 +1136,13 @@ def resolve_bundle(
     would otherwise silently produce a bundle report missing one member's
     old-side data. ``expected_project_ref``/``expected_baseline_generation``
     have the same meaning as :func:`resolve_target`'s.
+
+    Deliberately has no ``allow_new_target`` parameter: a bundle-scoped
+    comparison is only meaningful against one coherent, real release where
+    every member already coexisted (ADR-047 §8 S14) -- "some members of this
+    bundle are new" has no well-defined old side to build a cross-library
+    graph from, so a missing member always reports ``ambiguous``, regardless
+    of why it's missing.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)

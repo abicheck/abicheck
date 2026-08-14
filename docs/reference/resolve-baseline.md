@@ -63,12 +63,13 @@ storage-backend table) — `actions/cache`, `actions/download-artifact`, or
 | `candidate-build-output` | no | `''` | Path to the candidate build's `build-output.json`, read only for its `evidence_producer` block, feeding the `incompatible_evidence` check. Omit to skip that check. |
 | `expected-project-ref` | no | `''` | Require the resolved baseline-set's `manifest.json` `project_ref` to match this value exactly, or `wrong_project_ref` is returned instead of `resolved`. Pass e.g. `github.event.pull_request.base.sha` when staging `accepted-main` for a PR gate — see [Known gap: `accepted-main` restore-by-prefix](#known-gap-accepted-main-restore-by-prefix-can-resolve-the-wrong-commit) below. Omit to skip this check (appropriate for `release-contract`, resolved by tag/asset selection rather than a Git ref). |
 | `expected-baseline-generation` | no | `''` | Require the resolved baseline-set's `manifest.json` `baseline_generation` (a caller-assigned scanner-compatibility identity, `actions/baseline`'s own `baseline-generation` input — see [baseline-management.md](../use/baseline-management.md#scanner-upgrades-and-baseline-generations)) to match this value exactly, or `stale_generation` is returned instead of `resolved`. Unlike `expected-project-ref`, this check is not scoped to any one channel — a `release-contract` baseline can be just as stale a generation as an `accepted-main` one. Omit to skip this check. |
+| `allow-new-target` | no | `'false'` | `'false'` — a target absent from an otherwise-resolved baseline-set always fails `ambiguous` (almost always a staging mistake: wrong channel, wrong `baseline-path`, a typo'd target id). `'true'` — opt in to the `new_target` outcome instead, an advisory, non-fatal lifecycle state for a target this check has explicitly designed to tolerate the first appearance of (e.g. a new library's first release, checked against a baseline-set that predates it). Only meaningful for `kind: target` — ignored for `kind: bundle`, which never supports `new_target` (see [Bundle-scoped resolution](#bundle-scoped-resolution-s14) below). |
 
 ## Outputs
 
 | Output | Meaning |
 |--------|---------|
-| `outcome` | `resolved` \| `not_found` \| `ambiguous` \| `wrong_profile` \| `stale_schema` \| `incompatible_evidence` \| `wrong_project_ref` \| `stale_generation`. |
+| `outcome` | `resolved` \| `not_found` \| `ambiguous` \| `wrong_profile` \| `stale_schema` \| `incompatible_evidence` \| `wrong_project_ref` \| `stale_generation` \| `new_target`. |
 | `bootstrap` | `'true'` only when `outcome: not_found` and `required: 'false'`. |
 | `channel` | Echoes the `channel` input. |
 | `manifest-path` | Path to the resolved baseline-set's `manifest.json`, when one was found. |
@@ -87,12 +88,13 @@ caller explicitly opts in with `required: false`:
 |-----------|----------|------|
 | `not_found` (bootstrap) | `0` | `baseline-path` itself does not exist, and `required: false`. |
 | `not_found` (required) | `1` | `baseline-path` itself does not exist, and `required: true` (default) — a typo in the channel name, a missing release asset, or a cache-resolution bug must never produce a green branch-protection status with zero comparison performed. |
-| `ambiguous` | `1` | `baseline-path` exists but has no `manifest.json` (e.g. an empty/partial cache restore — a different, more concerning failure than "nothing published yet"); or the manifest exists but this target isn't in it; or, for `kind: bundle`, one or more declared members have no staged binary in `binaries/`. |
+| `ambiguous` | `1` | `baseline-path` exists but has no `manifest.json` (e.g. an empty/partial cache restore — a different, more concerning failure than "nothing published yet"); or the manifest exists but this target isn't in it (and `allow-new-target` was not set to `'true'`); or, for `kind: bundle`, one or more declared members have no staged binary in `binaries/`. |
 | `wrong_profile` | `1` | The baseline set was built for a different `profile.id`. |
 | `stale_schema` | `1` | `manifest.json`'s `manifest_version` is newer/older than this resolver understands. |
 | `incompatible_evidence` | `1` | The baseline's recorded evidence producer (`wrapper`/`clang-plugin`/`replay`) disagrees with the candidate's, per `candidate-build-output`'s `evidence_producer` block — an infrastructure mismatch, not an ABI finding. |
 | `wrong_project_ref` | `1` | `expected-project-ref` was given and the baseline-set's `manifest.json` `project_ref` doesn't match it exactly — the staged `baseline-path` resolved to a baseline-set built from the wrong commit/tag. |
 | `stale_generation` | `1` | `expected-baseline-generation` was given and the baseline-set's `manifest.json` `baseline_generation` doesn't match it exactly — this baseline-set was produced by a different scanner-compatibility generation, even though its `snapshot_schema`/`profile`/`project_ref` may be unchanged. |
+| `new_target` (`kind: target` only) | `0` | `allow-new-target: 'true'` was given, the baseline-set itself resolved cleanly (schema/profile/`project_ref`/generation all matched), and this target simply has no `artifacts[]` entry in it — an advisory, non-fatal "target new to this baseline-set" pass, distinct from `ambiguous`'s otherwise-identical condition. Never returned for `kind: bundle`. |
 | `resolved` | `0` | Success. |
 
 ## Bundle-scoped resolution (S14)

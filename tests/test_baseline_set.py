@@ -628,6 +628,67 @@ def test_resolve_target_ambiguous_target_missing_from_set(tmp_path: Path) -> Non
     assert "libpvxsIoc" in result.message
 
 
+def test_resolve_target_allow_new_target_missing_from_set_is_new_target(
+    tmp_path: Path,
+) -> None:
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxsIoc")])
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        allow_new_target=True,
+    )
+    assert result.outcome == ResolveOutcome.NEW_TARGET
+    assert not result.bootstrap
+    assert "libpvxsIoc" in result.message
+    assert result.manifest_path is not None
+
+
+def test_resolve_target_allow_new_target_present_still_resolves(
+    tmp_path: Path,
+) -> None:
+    # allow_new_target only changes the outcome for a target genuinely
+    # absent from the manifest -- an ordinary resolvable target is
+    # unaffected.
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        allow_new_target=True,
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_allow_new_target_still_checks_schema_and_profile_first(
+    tmp_path: Path,
+) -> None:
+    # A profile mismatch on an otherwise-healthy baseline-set must still
+    # report wrong_profile, not new_target, even with allow_new_target set --
+    # the target-absence check only runs once schema/profile/project_ref/
+    # generation have already passed.
+    _write_manifest(
+        tmp_path, profile="windows-x86_64-msvc", artifacts=[_target_artifact("libpvxs")]
+    )
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        allow_new_target=True,
+    )
+    assert result.outcome == ResolveOutcome.WRONG_PROFILE
+
+
+def test_resolve_target_allow_new_target_false_by_default(tmp_path: Path) -> None:
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxsIoc")])
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+
+
 def test_resolve_target_ambiguous_snapshot_file_missing_on_disk(tmp_path: Path) -> None:
     _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
     # No libpvxs.abicheck.json actually written to disk.

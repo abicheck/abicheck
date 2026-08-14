@@ -863,6 +863,7 @@ jobs:
           candidate-build-output: ${{ steps.candidate.outputs.build-output }}
           expected-project-ref: ${{ matrix.baseline_channel == 'accepted-main' && inputs.expected-project-ref || '' }}
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
+          allow-new-target: ${{ matrix.allow_new_target || 'false' }}
           requested-depth: ${{ matrix.requested_depth }}
           gate-mode: ${{ matrix.gate_mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}

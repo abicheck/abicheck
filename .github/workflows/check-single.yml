@@ -61,6 +61,10 @@ on:
         description: 'Forwarded to check-target''s expected-baseline-generation input -- require the resolved baseline-set''s manifest.json baseline_generation to match this value exactly, failing closed with stale_generation otherwise. Omit to skip the check.'
         type: string
         default: ''
+      allow-new-target:
+        description: 'Forwarded to check-target''s allow-new-target input -- false (default) means a target absent from an otherwise-resolved baseline-set always fails ambiguous; true opts this check into the new_target lifecycle state instead (e.g. a new library''s first release, checked against a baseline-set that predates it). Only meaningful for kind: target. Pair with baseline-required: false, or a required-coverage gate would still block on the target''s first appearance.'
+        type: boolean
+        default: false
 
       # ── Optional artifact staging ───────────────────────────────────────
       # Unlike actions/check-target itself (a composite Action a caller can
@@ -461,6 +465,7 @@ jobs:
           candidate-build-output: ${{ inputs.candidate-build-output }}
           expected-project-ref: ${{ inputs.expected-project-ref }}
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
+          allow-new-target: ${{ inputs.allow-new-target }}
           requested-depth: ${{ inputs.requested-depth }}
           gate-mode: ${{ inputs.gate-mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}

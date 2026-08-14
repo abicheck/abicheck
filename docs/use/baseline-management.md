@@ -139,6 +139,73 @@ pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-wit
 for a concrete per-library baseline-set walkthrough (build once, one facts
 pack, one baseline file per library).
 
+### A new library's first release
+
+A multi-library baseline-set (the walkthrough referenced just above) has one
+`manifest.json` per published product ref, listing every library that
+existed *at that ref*. A library that ships for the first time in the
+release you're about to cut therefore has no entry in the previous
+generation's baseline-set — not because anything is broken, but because it
+genuinely did not exist yet.
+
+By default, `resolve-baseline`/`check-target` treat a target missing from an
+otherwise-healthy baseline-set as `ambiguous`, not as a special case —
+deliberately: far more often, a target absent from a real baseline-set is a
+staging/configuration mistake (the wrong channel, the wrong `baseline-path`,
+a typo'd target id) than a genuine new-library event, and silently passing
+that case would hide real misconfiguration. For a check you've explicitly
+designed to tolerate a target's first appearance, opt in per check with
+`allow-new-target: true` (`resolve-baseline`/`check-target`'s own input;
+`checks[].allow_new_target` in `.abicheck.yml`'s per-target config) —
+the outcome becomes `new_target`, an advisory, non-fatal lifecycle state
+distinct from both `resolved` (a real comparison ran) and `ambiguous` (a
+real problem). See the [resolve-baseline](../reference/resolve-baseline.md)
+and [check-target](../reference/check-target.md) references for the full
+outcome/report shape.
+
+```yaml
+targets:
+  libnew:
+    kind: library
+    binary_pattern: "lib/libnew.so"
+    checks:
+      - channel: release-contract
+        depth: source
+        required: false        # pair with allow_new_target -- see below
+        allow_new_target: true
+```
+
+**Pair `allow_new_target: true` with `required: false`.** A `new_target`
+check never produces a compatibility verdict (the same reasoning as a
+bootstrap `not_found` pass — see [CI Gating](ci-gating.md) for how the
+run-plan's `required:` gates coverage), so a `required: true` check would
+still block the release on this target's own coverage gap even though the
+`new_target` outcome itself is advisory. `required: false` is what actually
+lets the release proceed.
+
+**Never set `allow_new_target: true` on a bundle check.** A bundle
+comparison needs one coherent release where every member already
+coexisted (`resolve_bundle()` builds a real cross-library dependency graph
+from staged ELF binaries, not independent per-member snapshots) — "one of
+this bundle's members is new" has no well-defined old side to compare
+against, so `allow_new_target` is rejected outright for `kind: bundle` at
+config-validation time. Scope the new library individually with a
+`kind: library` target check instead, and add it to the bundle once a real
+release has published a baseline-set covering every member together.
+
+**After the release publishes**, the new library is a normal artifact in
+every baseline-set from that point forward (`update-main-baseline.yml`'s
+freshness report reflects it under `libraries added`), and the
+`allow_new_target: true`/`required: false` pair on its checks can be
+dropped — an ordinary `required: true` check against `accepted-main`/
+`release-contract` resolves it the same as any other library from then on.
+
+A library that is *removed* from a release is the converse case, already
+covered on the compatibility-evaluation side by `compare`/`scan`'s
+`--fail-on-removed-library` (see the [exit-codes
+reference](../reference/exit-codes.md)) rather than by the
+baseline-resolution layer this section covers.
+
 ### Scanner upgrades and baseline generations
 
 Upgrading the abicheck version your CI pins is a separate axis from your

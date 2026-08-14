@@ -150,6 +150,84 @@ class TestImplicitSweep:
         }
 
 
+class TestAllowNewTargetProjection:
+    _RAW = {
+        "targets": {
+            "libnew": {
+                "kind": "library",
+                "binary_pattern": "build/libnew*.so",
+                "checks": [
+                    {
+                        "channel": "release",
+                        "depth": "headers",
+                        "required": False,
+                        "allow_new_target": True,
+                    },
+                ],
+            },
+        },
+        "profiles": {"linux": {"contract": True}},
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libnew-*"},
+            },
+        },
+    }
+
+    def test_target_check_projects_allow_new_target(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(config, {"linux": _bo("libnew")})
+        assert report.ok, report.errors
+        [check] = plan.checks
+        assert check.allow_new_target is True
+        assert check.to_dict()["allow_new_target"] is True
+
+    def test_default_check_does_not_project_allow_new_target(self) -> None:
+        config = _parsed(_SINGLE_PROFILE_LIBRARY_RAW)
+        plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
+        assert report.ok, report.errors
+        [check] = plan.checks
+        assert check.allow_new_target is False
+        assert "allow_new_target" not in check.to_dict()
+
+    def test_bundle_checks_never_project_allow_new_target(self) -> None:
+        # project_targets.validate_project_targets already rejects
+        # allow_new_target: true on a bundle check's own CheckSpec, so
+        # generate_run_plan is never asked to project one for a bundle
+        # check -- this pins that _generate_bundle_checks itself has no
+        # code path that would set it either way.
+        config = _parsed(
+            {
+                "targets": {
+                    "a": {
+                        "kind": "library",
+                        "binary_pattern": "a.so",
+                        "bundle": "rel",
+                    },
+                    "b": {
+                        "kind": "library",
+                        "binary_pattern": "b.so",
+                        "bundle": "rel",
+                    },
+                },
+                "bundles": {
+                    "rel": {
+                        "targets": ["a", "b"],
+                        "checks": [{"channel": "release", "depth": "binary"}],
+                    }
+                },
+                "profiles": {"linux": {"contract": True}},
+                "baseline": {
+                    "channels": {"release": {"source": "github-release"}},
+                },
+            }
+        )
+        plan, report = generate_run_plan(config, {"linux": _bo("a", "b")})
+        assert report.ok, report.errors
+        [check] = plan.checks
+        assert check.allow_new_target is False
+
+
 class TestExplicitProfilesSelector:
     _RAW = {
         "targets": {
@@ -541,6 +619,30 @@ class TestRunPlanRoundTrip:
         plan = RunPlan()
         restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
         assert restored == plan
+
+    def test_allow_new_target_round_trips(self) -> None:
+        check = RunPlanCheck(
+            check_id="libnew@linux#release@headers",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="library",
+            name="libnew",
+            profile_id="linux",
+            baseline_channel="release",
+            requested_depth="headers",
+            required=False,
+            binary_pattern="build/libnew*.so",
+            allow_new_target=True,
+        )
+        assert check.to_dict()["allow_new_target"] is True
+        plan = RunPlan(checks=[check])
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_allow_new_target_false_is_omitted_from_dict(self) -> None:
+        check = RunPlanCheck(check_id="libfoo@linux#release@headers")
+        assert "allow_new_target" not in check.to_dict()
+        restored = RunPlanCheck.from_dict(json.loads(json.dumps(check.to_dict())))
+        assert restored == check
 
     def test_compile_overlay_fields_round_trip(self) -> None:
         """P1 toolchain-profile audit: compile_gcc_path/compile_gcc_options

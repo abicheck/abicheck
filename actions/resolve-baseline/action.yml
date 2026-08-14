@@ -3,8 +3,8 @@ description: >-
   Resolve one check's baseline: channel x target/bundle x profile against an
   already-staged baseline-set, returning one of ADR-047 Section 6's typed
   outcomes (resolved, not_found, ambiguous, wrong_profile, stale_schema,
-  incompatible_evidence, wrong_project_ref, stale_generation) -- never a
-  compatibility verdict, and never silently degraded to "no baseline =
+  incompatible_evidence, wrong_project_ref, stale_generation, new_target) --
+  never a compatibility verdict, and never silently degraded to "no baseline =
   compatible." Read-only: this Action never fetches, commits, or pushes.
 
 branding:
@@ -111,6 +111,22 @@ inputs:
       package version directly.
     required: false
     default: ''
+  allow-new-target:
+    description: >
+      'false' (default) -- a target absent from an otherwise-resolved
+      baseline-set's manifest is always the ambiguous outcome (almost
+      always a staging/configuration mistake: wrong channel, wrong
+      baseline-path, a typo'd target id). 'true' -- opt in to the
+      new_target outcome instead, an advisory, non-fatal lifecycle state
+      for a target this check has explicitly designed to tolerate the
+      first appearance of (e.g. a new library's first release, checked
+      against a baseline-set that predates it). Only meaningful for kind:
+      target -- ignored for kind: bundle, which never supports new_target
+      (a bundle-scoped comparison needs one coherent release where every
+      member already coexisted; see abicheck.buildsource.baseline_set.
+      resolve_bundle's own docstring).
+    required: false
+    default: 'false'
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -118,7 +134,7 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence | wrong_project_ref | stale_generation.'
+    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence | wrong_project_ref | stale_generation | new_target.'
     value: ${{ steps.resolve.outputs.outcome }}
   bootstrap:
     description: "'true' when outcome is not_found and required was 'false' (advisory, non-fatal). 'false' otherwise."
@@ -169,5 +185,6 @@ runs:
         INPUT_CANDIDATE_BUILD_OUTPUT: ${{ inputs.candidate-build-output }}
         INPUT_EXPECTED_PROJECT_REF: ${{ inputs.expected-project-ref }}
         INPUT_EXPECTED_BASELINE_GENERATION: ${{ inputs.expected-baseline-generation }}
+        INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"
