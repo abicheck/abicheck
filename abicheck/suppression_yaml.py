@@ -27,10 +27,10 @@ _MERGE_TAG = "tag:yaml.org,2002:merge"
 _NULL_TAG = "tag:yaml.org,2002:null"
 
 
-def _raw_scalar_lookup(
+def _raw_node_lookup(
     node: yaml.MappingNode, key: str, _visiting: frozenset[int] = frozenset()
-) -> tuple[bool, str | None]:
-    """``(found, raw_text)`` for *key* in mapping *node*, resolving YAML
+) -> tuple[bool, yaml.Node | None]:
+    """``(found, value_node)`` for *key* in mapping *node*, resolving YAML
     merge keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself
     does: a direct (non-merge) key always wins over a merged one (null
     included), among multiple merge sources the first-listed wins for a
@@ -42,9 +42,18 @@ def _raw_scalar_lookup(
     or treating only the first ``<<:``, both disagreed with the already-
     loaded, safe_load-produced mapping this result gets merged into).
 
-    ``found`` is the reason this returns a 2-tuple rather than just
-    ``str | None``: a scalar resolving to YAML's null tag (``finding_id:
-    null``/``~``/a bare ``finding_id:``) is ``(True, None)``, distinct
+    Returns the raw child ``Node`` itself rather than requiring (and
+    unwrapping) a scalar, so this one merge-resolution implementation
+    serves both a scalar lookup (:func:`_raw_scalar_lookup`, below) and a
+    lookup whose value is a sequence or mapping -- e.g. a top-level
+    ``suppressions:`` list reached only through a top-level ``<<:`` merge
+    (``defaults: &d {suppressions: [...]}`` / ``<<: *d`` at the document
+    root), which a plain, non-merge-aware key scan misses entirely (Codex
+    review, fresh evidence).
+
+    ``found`` is the reason this returns a 2-tuple rather than just the
+    node: a key resolving to YAML's null tag (``finding_id: null``/``~``/a
+    bare ``finding_id:``) is ``(True, <null-tagged ScalarNode>)``, distinct
     from the key being genuinely absent (``(False, None)``). Collapsing
     both to a bare ``None`` return breaks exactly one case: a LATER merge
     source explicitly nulling out a value an EARLIER source or merge
@@ -76,9 +85,9 @@ def _raw_scalar_lookup(
         return False, None
     visiting = _visiting | {id(node)}
     merged_found = False
-    merged_value: str | None = None
+    merged_node: yaml.Node | None = None
     direct_found = False
-    direct_value: str | None = None
+    direct_node: yaml.Node | None = None
     for k, v in node.value:
         if isinstance(k, yaml.ScalarNode) and k.tag == _MERGE_TAG:
             sources = v.value if isinstance(v, yaml.SequenceNode) else [v]
@@ -89,22 +98,35 @@ def _raw_scalar_lookup(
                 # still stops at the first hit while the outer loop keeps
                 # scanning across occurrences.
                 if isinstance(source, yaml.MappingNode):
-                    found, value = _raw_scalar_lookup(source, key, visiting)
+                    found, found_node = _raw_node_lookup(source, key, visiting)
                     if found:
                         merged_found = True
-                        merged_value = value
+                        merged_node = found_node
                         break
-        elif (
-            isinstance(k, yaml.ScalarNode)
-            and k.value == key
-            and isinstance(v, yaml.ScalarNode)
-        ):
+        elif isinstance(k, yaml.ScalarNode) and k.value == key:
             # Keep scanning -- a later duplicate key wins.
             direct_found = True
-            direct_value = None if v.tag == _NULL_TAG else str(v.value)
+            direct_node = v
     if direct_found:
-        return True, direct_value
-    return merged_found, merged_value
+        return True, direct_node
+    return merged_found, merged_node
+
+
+def _raw_scalar_lookup(
+    node: yaml.MappingNode, key: str, _visiting: frozenset[int] = frozenset()
+) -> tuple[bool, str | None]:
+    """``(found, raw_text)`` for *key* in mapping *node* -- the scalar-
+    unwrapping specialization of :func:`_raw_node_lookup`; see its
+    docstring for the full direct-vs-merged precedence rules, which apply
+    identically here. A resolved value that isn't a ``ScalarNode`` (a
+    caller asking for a scalar but finding a mapping/sequence -- malformed
+    input in every real caller of this function) is treated as not found,
+    matching this function's original, narrower contract.
+    """
+    found, value_node = _raw_node_lookup(node, key, _visiting)
+    if not found or not isinstance(value_node, yaml.ScalarNode):
+        return False, None
+    return True, None if value_node.tag == _NULL_TAG else str(value_node.value)
 
 
 def raw_finding_ids_by_index(text: str) -> dict[int, str]:
@@ -128,16 +150,18 @@ def raw_finding_ids_by_index(text: str) -> dict[int, str]:
         return {}
     if not isinstance(doc, yaml.MappingNode):
         return {}
-    # Last occurrence wins for a duplicate top-level key too -- mirrors
-    # yaml.safe_load's own dict construction (Codex review, fresh
-    # evidence: an earlier revision picked the FIRST `suppressions:` via
-    # next(...), so a document with a duplicate top-level key could raw-
-    # extract from a different sequence than the one safe_load actually
-    # used, mismatching indices against the effective mapping).
-    seq: object = None
-    for k, v in doc.value:
-        if isinstance(k, yaml.ScalarNode) and k.value == "suppressions":
-            seq = v
+    # Merge-aware lookup for the top-level `suppressions:` key itself, not
+    # just a duplicate-key scan -- mirrors yaml.safe_load's own dict
+    # construction (Codex review, fresh evidence, two rounds: an earlier
+    # revision picked the FIRST `suppressions:` via next(...), so a
+    # document with a duplicate top-level key could raw-extract from a
+    # different sequence than the one safe_load actually used, mismatching
+    # indices against the effective mapping; a later revision fixed that
+    # but still only scanned direct keys, so a `suppressions:` list
+    # introduced solely via a top-level `<<:` merge -- `defaults: &d
+    # {suppressions: [...]}` / `<<: *d` at the document root -- was never
+    # found at all, silently returning no raw ids for every entry).
+    _found, seq = _raw_node_lookup(doc, "suppressions")
     if not isinstance(seq, yaml.SequenceNode):
         return {}
     raw_ids: dict[int, str] = {}

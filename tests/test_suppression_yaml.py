@@ -146,6 +146,24 @@ class TestRawFindingIdsByIndex:
         )
         assert raw_finding_ids_by_index(text) == {}
 
+    def test_top_level_suppressions_key_reached_only_via_merge(self):
+        # Regression (Codex review, PR #753, round 9): the top-level
+        # `suppressions:` key itself can be introduced solely through a
+        # top-level `<<:` merge -- `defaults: &d {suppressions: [...]}`
+        # then `<<: *d` at the document root -- which yaml.safe_load()
+        # resolves normally, but the earlier direct-key-only scan never
+        # found (it looked only at literal `suppressions:` entries in
+        # doc.value, never at a merge key bringing one in), silently
+        # returning no raw ids for every entry in an otherwise valid file.
+        text = (
+            "defaults: &d\n"
+            "  suppressions:\n"
+            "    - finding_id: '0123456701234567'\n"
+            "      reason: r\n"
+            "<<: *d\n"
+        )
+        assert raw_finding_ids_by_index(text) == {0: "0123456701234567"}
+
 
 class TestParseFindingId:
     def test_none_stays_none(self):

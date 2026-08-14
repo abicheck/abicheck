@@ -10,7 +10,7 @@ it should read in CHANGELOG.md. Delete the other sections.
 
 - **Backend-independent `canonical_finding_id` for cross-backend suppressions** —
   every `compare`/`scan --against` finding now also carries a
-  `canonical_finding_id` (report_schema_version 2.35, scan_schema_version
+  `canonical_finding_id` (report_schema_version 2.36, scan_schema_version
   1.15), a stable identity that survives an `--ast-frontend castxml` vs.
   `--ast-frontend clang` switch on the same underlying change, unlike the
   existing `finding_id` (which folds in `source_location`/`description`,
