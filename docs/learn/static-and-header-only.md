@@ -85,9 +85,20 @@ isn't something abicheck does today.
 
 A header-only library has no separate compiled artifact at all — every
 declaration a consumer sees, they also compile *into their own binary*,
-every time. This removes source/binary compatibility as separate
-questions (there's no separately-shipped binary to diverge from the
-header) but makes the concern [Part 4](abi-series/04-cpp-abi.md) and
+every time. That removes source/binary compatibility as separate questions
+only for the library's own relationship to *a* consumer — there's no
+separately-shipped provider `.so` for a consumer's binary to diverge from.
+It does **not** mean a header-only type or function can't produce a real
+ABI break: when a header-only declaration is used across a boundary
+between two *independently compiled* components — a host and a plugin, two
+libraries in the same process, anything not rebuilt together from the same
+header at the same time — its layout, calling convention, and inline
+definitions are baked into each component's own binary, and a change to
+any of that is exactly the ordinary cross-boundary ABI question this whole
+site is about, just with the header-only library itself never being one of
+the compiled artifacts under comparison. The single-consumer,
+everything-rebuilt-together case is what makes the concern
+[Part 4](abi-series/04-cpp-abi.md) and
 [the hub's L5-graph section](abi-api-handling.md#the-l5-graph-reachability-not-just-structure)
 describe for a single *public inline function* apply to the **entire
 public API, unconditionally**:

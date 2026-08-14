@@ -75,10 +75,14 @@ its own recurring bug shapes, and its own design patterns.
   time, and who is responsible for freeing it when the callback is
   unregistered or the host shuts down, is a contract that exists nowhere in
   the function pointer's type. `compare --used-by`/`--required-symbol` (see
-  [plugin/callback contracts](../use/plugin-systems.md)) scopes an ABI/
-  symbol-availability comparison to one specific plugin/host pair's actual
-  imports — real and useful for that narrower question — but it does not
-  execute the registration/unregister/shutdown paths, so a clean
+  [plugin/callback contracts](../use/plugin-systems.md)) narrows an ABI/
+  symbol-availability comparison to one specific plugin/host pair — two
+  different ways: `--used-by` derives what's required from a supplied
+  consumer binary's *actual* imports, while `--required-symbol` checks an
+  explicit, hand-specified entrypoint list (the host's own `dlopen`/`dlsym`
+  contract, which no import table records). Either is real and useful for
+  that narrower question — but neither executes the registration/unregister/
+  shutdown paths, so a clean
   consumer-scoped result says nothing about *this* contract; only a runtime
   test that actually exercises those paths does — the same execution-based
   evidence [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
