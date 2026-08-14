@@ -202,6 +202,29 @@ class AstContextAmbiguousError(SnapshotError):
     """
 
 
+class HeaderCompileContextAmbiguousError(SnapshotError):
+    """Raised by :mod:`abicheck.buildsource.header_compile_context` (P0.3) when
+    two or more L3 ``CompileUnit``s that reference a public header disagree on
+    an ABI-relevant compile-context field (``-std=``, target triple, defines/
+    undefines, include search order, sysroot, or an ABI-relevant flag such as
+    ``-fPIC``/``-fno-omit-frame-pointer``).
+
+    Mirrors :class:`AstContextAmbiguousError`'s reasoning: there is no sound
+    "just pick one" tiebreaker for genuinely disagreeing evidence, so the
+    single-context L3→L2 threading fails closed instead of silently deriving
+    a header AST from one TU's context while another, differently-configured
+    TU also compiles the same header. The caller must narrow the input (e.g.
+    a ``compile_db_filter``, or an explicit ``--gcc-options``/``compile:``
+    block override that pins the ambiguous field) rather than have one
+    compile unit's context silently chosen for them.
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling around ``dump()``/``compare()`` (``cli_resolve.py``) already
+    converts it to a clean ``click.ClickException`` instead of a raw
+    traceback.
+    """
+
+
 class UnsupportedCastxmlVersionError(SnapshotError):
     """Raised when a CastXML build outside the supported version range would
     be used for an authoritative L2 scan, before any header is parsed.
