@@ -102,29 +102,37 @@ file directly isn't something abicheck does today.
 
 ## Header-only libraries: the whole surface is the inline-body concern
 
-A header-only library has no separate compiled artifact at all — every
-declaration a consumer sees, they also compile *into their own binary*,
-every time. That removes source/binary compatibility as separate questions
-only for the library's own relationship to *a* consumer — there's no
-separately-shipped provider `.so` for a consumer's binary to diverge from.
-It does **not** mean a header-only type or function can't produce a real
-ABI break: when a header-only declaration is used across a boundary
-between two *independently compiled* components — a host and a plugin, two
-libraries in the same process, anything not rebuilt together from the same
-header at the same time — its layout, calling convention, and inline
-definitions are baked into each component's own binary, and a change to
-any of that is exactly the ordinary cross-boundary ABI question this whole
-site is about, just with the header-only library itself never being one of
-the compiled artifacts under comparison. The single-consumer,
+A header-only library has no separate compiled artifact at all — a
+declaration a consumer *actually uses* is compiled *into their own binary*
+at their own build time, not shipped to them from a prebuilt library. That
+removes source/binary compatibility as separate questions only for the
+library's own relationship to *a* consumer — there's no separately-shipped
+provider `.so` for a consumer's binary to diverge from. It does **not**
+mean a header-only type or function can't produce a real ABI break: when a
+header-only declaration is used across a boundary between two
+*independently compiled* components — a host and a plugin, two libraries
+in the same process, anything not rebuilt together from the same header at
+the same time — its layout, calling convention, and inline definitions are
+baked into each component's own binary, and a change to any of that is
+exactly the ordinary cross-boundary ABI question this whole site is about,
+just with the header-only library itself never being one of the compiled
+artifacts under comparison. The single-consumer,
 everything-rebuilt-together case is what makes the concern
 [Part 4](abi-series/04-cpp-abi.md) and
 [the hub's L5-graph section](abi-api-handling.md#the-l5-graph-reachability-not-just-structure)
 describe for a single *public inline function* apply to the **entire
-public API, unconditionally**:
+public API a consumer actually reaches**, not unconditionally to every
+declaration the header happens to contain — an unused `inline` function
+ordinarily emits no code at all, and a class/function template is compiled
+only for the argument combinations a consumer actually instantiates
+(`std::vector<int>` vs. `std::vector<Widget>` are two independent
+instantiations, not "the template"). What follows applies to whatever
+subset of the header a given consumer's own code actually reaches:
 
-- Every function body is compiled fresh into every consumer at their build
-  time, against their own compiler, flags, and standard-library
-  implementation.
+- Every function body a consumer reaches is compiled fresh into their own
+  binary at their build time, against their own compiler, flags, and
+  standard-library implementation — not something the header-only library
+  ships them.
 - A change to a function body's *behavior* reaches a consumer only the next
   time *that consumer* rebuilds — an existing, already-compiled consumer
   binary keeps running the old inlined behavior indefinitely, with no
