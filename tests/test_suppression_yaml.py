@@ -86,6 +86,24 @@ class TestRawFindingIdsByIndex:
         )
         assert raw_finding_ids_by_index(text) == {0: "111"}
 
+    def test_second_merge_explicitly_nulling_the_key_clears_the_first(self):
+        # Regression (Codex review, PR #753, round 10): a LATER merge
+        # source that explicitly sets finding_id: null must clear an
+        # earlier merge's real value, matching real yaml.safe_load
+        # dict-update semantics (verified directly against PyYAML) -- an
+        # earlier revision couldn't tell "this source resolves to None
+        # because it explicitly nulls the key" apart from "this source
+        # doesn't mention the key at all", so it wrongly kept the earlier
+        # value in place instead of clearing it.
+        text = (
+            "version: 1\n"
+            "o: &o\n  finding_id: '123'\n"
+            "d: &d\n  finding_id: null\n"
+            "suppressions:\n"
+            "  - <<: *o\n    <<: *d\n    reason: r\n"
+        )
+        assert raw_finding_ids_by_index(text) == {}
+
     def test_duplicate_top_level_suppressions_key_last_one_wins(self):
         # Regression (Codex review, PR #753, round 8): yaml.safe_load()
         # resolves a duplicate top-level key to the LAST value too -- an

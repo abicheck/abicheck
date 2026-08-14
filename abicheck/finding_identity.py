@@ -1740,15 +1740,24 @@ def report_canonical_finding_id(c: object) -> str:
     called :func:`resolve_change_identity` with the default, and the claim
     in this docstring that the NORMALIZED tier was already canonicalized
     was simply wrong for any non-equivalent-category kind).
-    ``canonicalize_values=True`` also drops raw ``description`` from the
-    discriminator, for the same reason: it routinely embeds the same raw
-    type spelling ``old_value``/``new_value`` do. ``report_finding_id``'s
-    own ``source_location``/``description`` inputs are exactly the fields
-    two header backends are *not* guaranteed to spell identically (a raw
-    file:line, or a description embedding a raw type spelling) — which is
-    why it is not itself usable as a suppression key meant to survive a
-    `--ast-frontend castxml` vs. `--ast-frontend clang` switch, and why
-    this sibling id exists instead of widening that one's contract.
+    ``canonicalize_values=True`` normalizes (never drops) ``description``
+    for the same reason it normalizes ``old_value``/``new_value``: for
+    :data:`_DESCRIPTION_EMBEDS_VALUES_KINDS`, it routinely embeds the same
+    raw type spelling those fields do, so the known raw substrings are
+    swapped for their already-canonicalized forms; for every other kind
+    ``description`` still folds in as-is. ``source_location`` is the one
+    field this identity never uses at all (Codex review, fresh evidence:
+    an earlier revision of this docstring claimed ``description`` was
+    dropped entirely, which stopped being true once description
+    normalization was added — this identity is not source-location/
+    description-*blind*, only *normalized* against them). Either way,
+    ``report_finding_id``'s raw ``source_location``/``description`` are
+    exactly the fields two header backends are *not* guaranteed to spell
+    identically (a raw file:line, or a description embedding a raw type
+    spelling) — which is why it is not itself usable as a suppression key
+    meant to survive a `--ast-frontend castxml` vs. `--ast-frontend clang`
+    switch, and why this sibling id exists instead of widening that one's
+    contract.
 
     A batch-shaped finding (e.g. an allocator-replacement summary covering
     many symbols) resolves through the same REDUCED-tier fallback

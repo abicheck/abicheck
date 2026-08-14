@@ -90,3 +90,21 @@
   `abicheck/finding_identity.py`, and `abicheck/cli_compare_fold.py` as
   fact sources for the `suppressions`/`output-formats` doc topics
   (`docs/_meta/topics.yaml`).
+- **A merge source explicitly nulling `finding_id` now correctly clears an
+  earlier merge/direct value, instead of being indistinguishable from
+  "this source doesn't mention the key"** — `suppression_yaml.py`'s
+  merge-key resolution now returns `(found, value)` throughout its
+  recursion rather than a bare `value`, so `<<: *has_value` followed by
+  `<<: *explicitly_null` resolves to `None` (clearing it), matching real
+  `yaml.safe_load` dict-update semantics.
+- **`canonical_finding_id`'s docs/schema description corrected** — it
+  claimed the identity "deliberately excludes description", which stopped
+  being accurate once description-embedded type spellings started being
+  normalized (an earlier fix in this same PR) rather than dropped.
+  Corrected in the bundled schema (`abicheck/schemas/compare_report.schema.json`,
+  republished to its docs mirror via `scripts/publish_schemas.py`),
+  `docs/use/suppressions.md`, and `report_canonical_finding_id`'s own
+  docstring: `source_location` is the one field always excluded;
+  `description` is normalized (substituted with already-canonicalized
+  old/new text) for the three kinds that embed a type spelling in it, and
+  folded in as-is for every other kind.

@@ -25,46 +25,41 @@ _MERGE_TAG = "tag:yaml.org,2002:merge"
 _NULL_TAG = "tag:yaml.org,2002:null"
 
 
-def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
-    """Raw scalar text of *key* in mapping *node*, resolving YAML merge
-    keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself does:
-    a direct (non-merge) key always wins over a merged one (null included),
-    among multiple merge sources the first-listed wins for a duplicate
-    key, and among multiple *direct* occurrences of the same key the LAST
-    one wins -- mirroring ``yaml.safe_load()``'s own last-key-wins
-    behavior for a mapping with a duplicate key (Codex review, fresh
-    evidence: an earlier revision returned on the first direct match, so
-    a duplicate ``finding_id:`` entry resolved to a different value here
-    than the already-loaded, safe_load-produced mapping this result gets
-    merged into -- silently targeting the wrong finding).
+def _raw_scalar_lookup(node: yaml.MappingNode, key: str) -> tuple[bool, str | None]:
+    """``(found, raw_text)`` for *key* in mapping *node*, resolving YAML
+    merge keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself
+    does: a direct (non-merge) key always wins over a merged one (null
+    included), among multiple merge sources the first-listed wins for a
+    duplicate key, among multiple *direct* occurrences of the same key
+    the LAST one wins, and a later separate ``<<:`` occurrence overwrites
+    an earlier one for a key both define -- all mirroring
+    ``yaml.safe_load()``'s own dict-construction semantics (Codex review,
+    fresh evidence, several rounds: returning on the first direct match,
+    or treating only the first ``<<:``, both disagreed with the already-
+    loaded, safe_load-produced mapping this result gets merged into).
 
-    A scalar resolving to YAML's null tag (``finding_id: null``/``~``/a
-    bare ``finding_id:``) returns ``None``, not the literal written text
-    (``"null"``/``"~"``/``""``) -- reading ``.value`` unconditionally
-    would otherwise turn an explicit null back into a non-empty string,
-    passing selector validation as a real, never-matching finding_id
-    instead of raising the intended missing-selector error (Codex review,
-    fresh evidence).
-
-    Two separate ``<<:`` occurrences in the same mapping (``<<: *a`` then
-    ``<<: *b``, as opposed to one ``<<: [*a, *b]`` sequence) are also
-    handled: a later merge overwrites an earlier one for a key BOTH
-    define, matching real dict-update semantics (verified directly
-    against ``yaml.safe_load``) -- but a later merge whose own sources
-    never define this key at all leaves an earlier merge's value
-    untouched, since a real dict update only overwrites keys the update
-    actually contains (Codex review, fresh evidence: an earlier revision's
-    ``merged is None`` guard kept only the FIRST ``<<:`` occurrence's
-    resolution, silently ignoring a later one that should have won).
+    ``found`` is the reason this returns a 2-tuple rather than just
+    ``str | None``: a scalar resolving to YAML's null tag (``finding_id:
+    null``/``~``/a bare ``finding_id:``) is ``(True, None)``, distinct
+    from the key being genuinely absent (``(False, None)``). Collapsing
+    both to a bare ``None`` return breaks exactly one case: a LATER merge
+    source explicitly nulling out a value an EARLIER source or merge
+    provided (``<<: *has_value`` then ``<<: *explicitly_null`` -- real
+    ``yaml.safe_load`` resolves this to ``None``, clearing the earlier
+    value) previously left the earlier, now-stale value in place, since
+    "this source's resolution is None" was indistinguishable from "this
+    source doesn't define the key at all, move on" (Codex review, fresh
+    evidence).
 
     (Also handles ``defaults: &d {finding_id: ...}`` followed by
     ``- <<: *d``, which bypasses a plain direct key/value scan entirely
     since the merge key's own value is a mapping *node reference*, not a
     ``finding_id`` pair in *this* mapping's own ``.value`` list.)
     """
-    merged: str | None = None
-    direct: str | None = None
-    direct_seen = False
+    merged_found = False
+    merged_value: str | None = None
+    direct_found = False
+    direct_value: str | None = None
     for k, v in node.value:
         if isinstance(k, yaml.ScalarNode) and k.tag == _MERGE_TAG:
             sources = v.value if isinstance(v, yaml.SequenceNode) else [v]
@@ -75,9 +70,10 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
                 # still stops at the first hit while the outer loop keeps
                 # scanning across occurrences.
                 if isinstance(source, yaml.MappingNode):
-                    resolved = _raw_scalar_for_key(source, key)
-                    if resolved is not None:
-                        merged = resolved
+                    found, value = _raw_scalar_lookup(source, key)
+                    if found:
+                        merged_found = True
+                        merged_value = value
                         break
         elif (
             isinstance(k, yaml.ScalarNode)
@@ -85,9 +81,11 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
             and isinstance(v, yaml.ScalarNode)
         ):
             # Keep scanning -- a later duplicate key wins.
-            direct_seen = True
-            direct = None if v.tag == _NULL_TAG else str(v.value)
-    return direct if direct_seen else merged
+            direct_found = True
+            direct_value = None if v.tag == _NULL_TAG else str(v.value)
+    if direct_found:
+        return True, direct_value
+    return merged_found, merged_value
 
 
 def raw_finding_ids_by_index(text: str) -> dict[int, str]:
@@ -127,7 +125,7 @@ def raw_finding_ids_by_index(text: str) -> dict[int, str]:
     for index, item_node in enumerate(seq.value):
         if not isinstance(item_node, yaml.MappingNode):
             continue
-        raw = _raw_scalar_for_key(item_node, "finding_id")
+        _found, raw = _raw_scalar_lookup(item_node, "finding_id")
         if raw is not None:
             raw_ids[index] = raw
     return raw_ids
