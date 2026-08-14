@@ -246,11 +246,12 @@ ABI freezes as part of your binary contract. Two compiler-emitted tables
 destructors on the way to a matching handler; a caller compiled expecting a
 landing pad relies on them existing and being correct. Crossing a DSO
 boundary adds a second hazard: catch matching is RTTI-based, and a type
-thrown across a library boundary with **hidden visibility** on its
-`type_info` can make the `catch` silently fail to match, so the exception
-unwinds past the intended handler and `std::terminate()` fires. Toolchain
-flags (`-fno-exceptions` mixed with `-fexceptions` across a call chain,
-changing an exception specification) are the same class of hazard again.
+thrown across a library boundary can, on some runtime/toolchain
+configurations, make the `catch` fail to match — the exact conditions are
+narrower than "hidden visibility" alone (GNU libstdc++'s default string-name
+fallback usually still catches correctly even then). Toolchain flags
+(`-fno-exceptions` mixed with `-fexceptions` across a call chain, changing
+an exception specification) are the same class of hazard again.
 
 ➡️ **[Exception Unwinding: The Machinery Behind `noexcept`](../exception-unwinding-abi.md)**
 covers the full mechanics — the unwind tables, the personality routine, the

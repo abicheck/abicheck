@@ -41,11 +41,18 @@ vector-ABI flags, and CPU-dispatch/IFUNC selection
 ([case83](../reference/examples/case83_cpu_dispatch_isa_dropped.md),
 [case29](../reference/examples/case29_ifunc_transition.md)).
 
-!!! warning "Why these need debug info or headers"
-    Like the rest of [Part 4](abi-series/04-cpp-abi.md), every hazard above
-    is recoverable only when DWARF/PDB *or* headers are supplied — and the
-    dual-ABI and ABI-tag cases need the *mangled* symbol names, so a
-    stripped, name-demangled view can hide them.
+!!! warning "Which of these need debug info or headers"
+    Most hazards above are recoverable only when DWARF/PDB *or* headers are
+    supplied — they change layout, size, or a passing rule that doesn't show
+    up in the export table alone. Two are the exception: the `_GLIBCXX_USE_CXX11_ABI`
+    flip and an ABI-tag change are both mangled straight into the exported
+    symbol name (`glibcxx_dual_abi_flip_detected`/`abi_tag_changed`, both
+    `L0` per `scripts/evidence_tiers.py`), so they're visible from the
+    *mangled* export table alone — no DWARF/PDB/headers needed. A stripped
+    binary that has been additionally **demangled** (its export names
+    rewritten to human-readable form) can still hide them, since the
+    mangled encoding is what carries the signal; an ordinary stripped
+    binary's raw mangled export table does not.
 
 See also: [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) for the
 core, pre-C++11 mechanisms this page's hazards sit alongside, and
