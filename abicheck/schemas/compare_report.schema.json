@@ -1111,10 +1111,16 @@
         "export_accounting": {
           "type": "object"
         },
+        "l0_context_status": {
+          "type": "string"
+        },
         "header_context_status": {
           "type": "string"
         },
         "dwarf_context_status": {
+          "type": "string"
+        },
+        "l3_context_status": {
           "type": "string"
         },
         "fact_set_comparability": {

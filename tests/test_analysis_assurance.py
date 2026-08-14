@@ -242,6 +242,124 @@ class TestComputeAnalysisAssurance:
         assert aa.fact_set_comparability == "unknown"
         assert aa.status == "partial"
 
+    def test_mismatched_fact_set_identity_is_not_comparable(self) -> None:
+        """P1 review, Finding 1: two L4 surfaces that are each internally
+        consistent (no fact_set_inconsistent on either side) but carry
+        mutually DIFFERENT fact_set identities (name mismatch here) must not
+        report fact_set_comparability="comparable", and status must not
+        read "complete" -- mirroring diff_source_abi()'s own
+        SOURCE_FACT_COVERAGE_INCOMPLETE cross-side check."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        tu_coverage = {"compile_units_selected": 2, "compile_units_parsed": 2}
+        old.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-fs-old"),
+            source_abi=SourceAbiSurface(
+                coverage={
+                    **tu_coverage,
+                    "fact_set": {"name": "clang-facts", "version": 1},
+                }
+            ),
+        )
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-fs-new"),
+            source_abi=SourceAbiSurface(
+                coverage={
+                    **tu_coverage,
+                    "fact_set": {"name": "gcc-facts", "version": 1},
+                }
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.fact_set_comparability != "comparable"
+        assert aa.status != "complete"
+        assert any("fact_set_name_mismatch" in n for n in aa.notes)
+
+    def test_mismatched_fact_set_producer_is_not_fully_comparable(self) -> None:
+        """P1 review, Finding 1 (softer variant): a differing producer
+        between two otherwise-agreeing, internally-consistent fact_set
+        identities is a real cross-side mismatch too (opaque-hash/content
+        comparisons are not trustworthy across it) -- must not read
+        "comparable" either, even though it's not the hard name/version
+        mismatch that also fails the whole run."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        tu_coverage = {"compile_units_selected": 2, "compile_units_parsed": 2}
+        old.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-fs-prod-old"),
+            source_abi=SourceAbiSurface(
+                coverage={
+                    **tu_coverage,
+                    "fact_set": {
+                        "name": "clang-facts",
+                        "version": 1,
+                        "producer": "clang-plugin",
+                    },
+                }
+            ),
+        )
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-fs-prod-new"),
+            source_abi=SourceAbiSurface(
+                coverage={
+                    **tu_coverage,
+                    "fact_set": {
+                        "name": "clang-facts",
+                        "version": 1,
+                        "producer": "gcc-plugin",
+                    },
+                }
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.fact_set_comparability == "unknown"
+        assert aa.status != "complete"
+        assert any("producer_mismatch" in n for n in aa.notes)
+
+    def test_matching_fact_set_identity_stays_comparable(self) -> None:
+        """Sanity check for the Finding 1 fix's negative case: two sides
+        with the identical fact_set identity must still read
+        "comparable"/"complete" -- the fix must not over-trigger on a
+        genuinely matching pair."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        same_fact_set = {
+            "name": "clang-facts",
+            "version": 1,
+            "producer": "clang-plugin",
+            "producer_version": "1.0",
+            "compiler_version": "18.0",
+            "compiler_family": "clang",
+        }
+        tu_coverage = {"compile_units_selected": 2, "compile_units_parsed": 2}
+        old.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-fs-match-old"),
+            source_abi=SourceAbiSurface(
+                coverage={**tu_coverage, "fact_set": dict(same_fact_set)}
+            ),
+        )
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-fs-match-new"),
+            source_abi=SourceAbiSurface(
+                coverage={**tu_coverage, "fact_set": dict(same_fact_set)}
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.fact_set_comparability == "comparable"
+        assert aa.status == "complete"
+
     def test_header_parse_context_drift_is_surfaced_structurally(self) -> None:
         """Directly exercises the rollup over an already-built DiffResult
         carrying a header_parse_context_drift finding -- the structured
@@ -520,6 +638,227 @@ class TestDwarfContextAsymmetry:
             "--require-complete-analysis",
         )
         assert res.exit_code != 0, res.output
+
+
+class TestL0ContextAsymmetry:
+    """Self-audit finding (P0.4 review): the same one-sided-evidence pattern
+    already fixed for L1 (DWARF)/L2 (headers)/L3 (build evidence) also
+    applies to L0 -- a comparison where only one side carries a real binary
+    export table (the other a synthetic/snapshot-only input,
+    ``cli_scan_helpers._intrinsic_coverage``'s own documented "no binary
+    export table (snapshot-only input)" state) previously fell through to
+    ``status="complete"`` with nothing checking L0 presence by side."""
+
+    def _asymmetric_pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        from abicheck.elf_metadata import ElfMetadata
+
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=fns,
+            elf=ElfMetadata(soname="libfoo.so.1"),
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            elf=None,
+        )
+        return old, new
+
+    def test_one_sided_binary_evidence_is_reported_as_asymmetric(self) -> None:
+        old, new = self._asymmetric_pair()
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.l0_context_status == "asymmetric"
+        assert aa.status != "complete"
+        assert any("L0" in n and "asymmetric" in n for n in aa.notes)
+
+    def test_symmetric_binary_presence_on_both_sides_is_clean(self) -> None:
+        from abicheck.elf_metadata import ElfMetadata
+
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=fns,
+            elf=ElfMetadata(soname="libfoo.so.1"),
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            elf=ElfMetadata(soname="libfoo.so.1"),
+        )
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert aa.l0_context_status == "clean"
+
+    def test_symmetric_absence_is_not_evaluated_not_asymmetric(self) -> None:
+        """Neither side carrying a binary (a pure header/source-only
+        comparison) is a legitimate, symmetric shape, not an asymmetry."""
+        old, new = _header_pair()
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.l0_context_status == "not_evaluated"
+
+    def test_require_complete_analysis_exits_nonzero_for_one_sided_binary(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = self._asymmetric_pair()
+        res = _compare(
+            tmp_path,
+            (old, new),
+            "--no-scope-public-headers",
+            "--require-complete-analysis",
+        )
+        assert res.exit_code != 0, res.output
+
+
+class TestL3ContextAsymmetry:
+    """P1 review, Finding 3: when the baseline carries L3 ``BuildEvidence``
+    but the target has none, ``prepare_embedded_build_source()`` already
+    emits a prose-only ``layer_coverage_asymmetric`` finding -- but nothing
+    in this rollup's own predicates examined L3 presence by side, so an
+    otherwise-matching comparison fell through to ``status="complete"``."""
+
+    def _asymmetric_pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        from abicheck.buildsource.build_evidence import BuildEvidence
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        old, new = _header_pair()
+        old.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-l3-old"),
+            build_evidence=BuildEvidence(),
+        )
+        return old, new
+
+    def test_one_sided_l3_evidence_is_reported_as_asymmetric(self) -> None:
+        old, new = self._asymmetric_pair()
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.l3_context_status == "asymmetric"
+        assert aa.status != "complete"
+        assert any("L3" in n and "asymmetric" in n for n in aa.notes)
+
+    def test_symmetric_l3_evidence_on_both_sides_is_clean(self) -> None:
+        from abicheck.buildsource.build_evidence import BuildEvidence
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        old, new = _header_pair()
+        old.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-l3-both-old"),
+            build_evidence=BuildEvidence(),
+        )
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-l3-both-new"),
+            build_evidence=BuildEvidence(),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.l3_context_status == "clean"
+
+    def test_require_complete_analysis_exits_nonzero_for_one_sided_l3(
+        self,
+    ) -> None:
+        """Function-level check (mirrors this file's other
+        analysis_assurance_exit_contribution-level checks) rather than a
+        full CLI round-trip, since ``build_source`` is attached directly to
+        the in-memory snapshot here (not via a CLI flag)."""
+        old, new = self._asymmetric_pair()
+        result = checker.compare(old, new)
+        assert analysis_assurance_exit_contribution(result, require_complete=True) == 1
+        assert analysis_assurance_exit_contribution(result, require_complete=False) == 0
+
+
+class TestTargetAccounting:
+    """P1 review, Finding 2: P0.2's Bazel root-target resolution
+    (``BuildEvidence.target_scope``) has landed, but ``target_accounting``
+    was left permanently empty pending it -- hiding a genuine partial
+    resolution (e.g. two requested Bazel roots with only one resolved) with
+    no predicate downgrading the overall status for the gap."""
+
+    def test_fully_resolved_target_scope_is_populated_not_partial_for_it(
+        self,
+    ) -> None:
+        from abicheck.buildsource.build_evidence import BuildEvidence, TargetScope
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        old, new = _header_pair()
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-targets-full"),
+            build_evidence=BuildEvidence(
+                target_scope=TargetScope(
+                    requested=["//foo:bar", "//foo:baz"],
+                    resolved=["//foo:bar", "//foo:baz"],
+                    transitive_count=12,
+                )
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.target_accounting.requested == ("//foo:bar", "//foo:baz")
+        assert aa.target_accounting.resolved == ("//foo:bar", "//foo:baz")
+        assert aa.target_accounting.transitive_count == 12
+
+    def test_two_requested_one_resolved_is_partial_not_complete(self) -> None:
+        """The exact shape named in the review finding: two requested Bazel
+        roots, only one resolved (a typo'd target label, say)."""
+        from abicheck.buildsource.build_evidence import BuildEvidence, TargetScope
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        old, new = _header_pair()
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-targets-partial"),
+            build_evidence=BuildEvidence(
+                target_scope=TargetScope(
+                    requested=["//foo:bar", "//foo:typo"],
+                    resolved=["//foo:bar"],
+                )
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.target_accounting.requested == ("//foo:bar", "//foo:typo")
+        assert aa.target_accounting.resolved == ("//foo:bar",)
+        assert aa.status != "complete"
+        assert any("did not all resolve" in n for n in aa.notes)
+
+    def test_no_target_scope_requested_stays_none_not_empty(self) -> None:
+        """When neither side requested root-target scoping at all,
+        target_accounting must stay the documented "not requested" None
+        state, not an empty tuple."""
+        old, new = _header_pair()
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.target_accounting.requested is None
+        assert aa.target_accounting.resolved is None
+
+    def test_require_complete_analysis_exits_nonzero_for_partial_targets(
+        self,
+    ) -> None:
+        from abicheck.buildsource.build_evidence import BuildEvidence, TargetScope
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        old, new = _header_pair()
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-targets-cli"),
+            build_evidence=BuildEvidence(
+                target_scope=TargetScope(
+                    requested=["//foo:bar", "//foo:typo"],
+                    resolved=["//foo:bar"],
+                )
+            ),
+        )
+        result = checker.compare(old, new)
+        assert analysis_assurance_exit_contribution(result, require_complete=True) == 1
+        assert analysis_assurance_exit_contribution(result, require_complete=False) == 0
 
 
 class TestGraphCompleteness:

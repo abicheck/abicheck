@@ -109,4 +109,61 @@
   complete or confirmed narrowed on the same side; a record with neither
   confirmation (a genuine shortfall — crash, missing tool, timeout) still
   folds into `degraded`, unchanged.
+- **`fact_set_comparability` now actually compares the two sides' `fact_set`
+  identities against each other** (P1 review), instead of only checking
+  each side's own `fact_set_inconsistent` flag independently. Two
+  internally-consistent L4 surfaces carrying mutually *different* fact-set
+  identities (a producer/version mismatch between old and new) previously
+  read as `"comparable"`, letting `status="complete"` and
+  `--require-complete-analysis` exit `0`, even though
+  `buildsource.source_diff.diff_source_abi()`'s own
+  `SOURCE_FACT_COVERAGE_INCOMPLETE` check already identifies the identical
+  mismatch and suppresses source comparisons that rest on it. Fixed by
+  calling the same `buildsource.fact_set.check_fact_compatibility()` both
+  sides' rolled-up `fact_set` dicts, rather than a second, independent
+  comparison: a hard name/version mismatch now reads `"inconsistent"`
+  (folding into `status="failed"`, same as the pre-existing per-side
+  inconsistency case), and a softer producer/producer_version/
+  compiler_version/compiler_family mismatch now reads `"unknown"` (folding
+  into `status="partial"`). A symmetric, genuinely empty fact-set on both
+  sides (a pre-C.8 producer) still reads `"comparable"`, preserving the
+  same forward-compat treatment `check_fact_compatibility` already
+  documents for that shape.
+- **`target_accounting` now rolls up P0.2's Bazel root-target scoping**
+  (P1 review) instead of staying a permanent, always-empty placeholder.
+  `BuildEvidence.target_scope` (P0.2) has since landed and records
+  requested/resolved/transitive root targets per side, including partial
+  resolution — but this block was left empty pending it, hiding a case
+  like two requested Bazel roots with only one actually resolved (a
+  typo'd target label, say) with no predicate downgrading the overall
+  status for it. `target_accounting.requested`/`.resolved` now roll up
+  both sides' `TargetScope` (union of labels, summed transitive count),
+  staying `None` only when neither side requested root-target scoping at
+  all; a requested root absent from `resolved` on either side now folds
+  into `status="partial"`.
+- **New `l3_context_status` field detects one-sided L3 build evidence**
+  (P1 review) — the same asymmetry pattern already closed for L1
+  (`dwarf_context_status`) and L2 (`header_context_status`), now closed for
+  L3. When the baseline carries L3 `BuildEvidence` but the target has none,
+  `cli_buildsource_helpers.prepare_embedded_build_source()` already emits a
+  prose-only `layer_coverage_asymmetric` finding explaining that build-only
+  changes were not checked for the missing side, but nothing in this
+  rollup's own predicates examined L3 presence by side — an otherwise
+  clean comparison fell through to `status="complete"` regardless, even
+  while the report itself carried that incomplete-coverage finding.
+  `l3_context_status="asymmetric"` now folds into `status="partial"`,
+  mirroring `_header_context_status`'s/`_dwarf_context_status`'s
+  presence-then-asymmetry shape exactly.
+- **New `l0_context_status` field detects one-sided binary/export-table
+  evidence** (self-audit, following the L1/L2/L3 asymmetry fixes above —
+  the identical pattern applies one layer lower). A comparison where only
+  one side carries a real binary export table (the other a synthetic or
+  snapshot-only input — `cli_scan_helpers._intrinsic_coverage`'s own
+  documented "no binary export table (snapshot-only input)" state) means
+  every L0-derived signal (exported-symbol presence/removal, SONAME,
+  binding/visibility) was never even examined for the binary-lacking side.
+  `l0_context_status="asymmetric"` now folds into `status="partial"`, same
+  shape as the L1/L2/L3 checks. L5 (source-graph) presence asymmetry was
+  already caught by the existing `graph_completeness="unknown"` check, so
+  it needed no new field.
 

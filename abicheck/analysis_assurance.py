@@ -58,19 +58,22 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   logic, reimplemented locally rather than imported -- importing a CLI-layer
   module from here would reach back through ``cli.py`` into ``checker.py``
   and grow the CLI-registration import cycle the AI-readiness gate rejects).
-- ``target_accounting`` (expected vs. resolved Bazel targets) is P0.2's
-  root-target resolution, which does not exist yet. Modeled as a field that
-  is always present but empty (``requested``/``resolved`` both ``None``)
-  until P0.2 lands -- never silently omitted, so a consumer can tell "not
-  yet supported" from "supported and empty".
+- ``target_accounting`` (expected vs. resolved Bazel targets) rolls up P0.2's
+  root-target resolution (``BuildEvidence.target_scope``) now that it has
+  landed -- ``requested``/``resolved`` stay ``None`` only when neither side
+  requested root-target scoping at all, never silently omitted, so a
+  consumer can tell "not requested" from "requested and empty".
 - Translation-unit and export accounting are rollups of the L3/L4
   ``BuildSourcePack`` coverage a snapshot already carries (when one was
   embedded); both are ``None``-filled when no such pack is present, which is
   the ordinary case for a plain ELF/DWARF/header comparison.
-- ``fact_set_comparability``/``header_context_status``/``dwarf_context_status``/
-  ``graph_completeness`` surface existing signals (``fact_set_inconsistent``,
-  the ``header_parse_context_drift`` finding, each side's own
-  ``dwarf.has_dwarf``/``dwarf_advanced.has_dwarf``, ``SourceGraphSummary.
+- ``fact_set_comparability``/``l0_context_status``/``header_context_status``/
+  ``dwarf_context_status``/``l3_context_status``/``graph_completeness``
+  surface existing signals (``fact_set_inconsistent`` plus a cross-side
+  ``fact_set`` name/version comparison, each side's own binary export-table
+  presence, the ``header_parse_context_drift`` finding, each side's own
+  ``dwarf.has_dwarf``/``dwarf_advanced.has_dwarf``, each side's own
+  ``BuildSourcePack.build_evidence`` presence, ``SourceGraphSummary.
   degraded_passes``) as structured status fields rather than leaving them as
   prose-only findings/coverage keys.
 """
@@ -80,6 +83,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
 from .checker_policy import ChangeKind, EvidenceTier
 from .checker_types import DiffResult
@@ -156,15 +160,30 @@ def _is_l5_graph_extractor_record(name: str) -> bool:
 
 @dataclass
 class TargetAccounting:
-    """Expected vs. resolved build-system targets (P0.2, not yet built).
+    """Expected vs. resolved build-system targets (P0.2's root-target scoping).
 
-    Always present on :class:`AnalysisAssurance`, always empty in this slice
-    -- ``requested``/``resolved`` stay ``None`` until P0.2's Bazel
-    root-target resolution (``requested_roots``/``resolved_roots``/
-    ``transitive_targets``) lands and populates them. Kept as a real,
-    documented placeholder rather than omitted so a consumer parsing this
-    block today already has the field name to look for once it starts
-    carrying data.
+    Finding (review, P1): this block was originally left permanently empty
+    pending P0.2's Bazel root-target resolution
+    (``BuildEvidence.target_scope`` -- ``TargetScope.requested``/
+    ``.resolved``/``.transitive_count``), with a comment noting P0.2 would
+    populate it. P0.2 has since landed (``buildsource/adapters/bazel.py``),
+    so keeping this block empty hid a genuine partial-resolution case (two
+    requested Bazel roots with only one actually resolved -- a typo'd
+    target label, say) with no predicate anywhere downgrading the overall
+    ``status`` for it. Now wired: :func:`_target_accounting` rolls up both
+    sides' ``BuildEvidence.target_scope`` (union of ``requested``/
+    ``resolved`` labels, summed ``transitive_count``), and a requested root
+    absent from ``resolved`` on either side folds into
+    ``AnalysisAssurance.status = "partial"`` in the overall computation,
+    same as every other incompleteness signal in this module.
+
+    ``requested``/``resolved`` stay ``None`` only when NEITHER side ever
+    requested root-target scoping at all (``BuildEvidence.target_scope`` is
+    ``None``, or carries an empty ``requested`` list, on both sides) -- kept
+    as a real, documented "not requested" state rather than an empty tuple,
+    so a consumer can still tell "root-target scoping wasn't used for this
+    run" from "it was used and resolved everything" (``requested ==
+    resolved``, both non-empty).
     """
 
     requested: tuple[str, ...] | None = None
@@ -263,6 +282,12 @@ class AnalysisAssurance:
         default_factory=TranslationUnitAccounting
     )
     export_accounting: ExportAccounting = field(default_factory=ExportAccounting)
+    #: ``"clean"`` (both sides carry a binary export table),
+    #: ``"asymmetric"`` (only one side does -- symbol-table-level evidence
+    #: was never examined for the binary-lacking, snapshot-only side), or
+    #: ``"not_evaluated"`` (neither side carries a binary -- a pure
+    #: header/source-only comparison, a legitimate symmetric shape).
+    l0_context_status: str = "not_evaluated"
     #: ``"clean"`` (header evidence present on both sides, no drift finding),
     #: ``"drift_detected"`` (a ``header_parse_context_drift`` finding was
     #: raised), ``"asymmetric"`` (only one side carries header/API-level
@@ -277,9 +302,23 @@ class AnalysisAssurance:
     #: missing side was never even attempted), or ``"not_evaluated"``
     #: (neither side has DWARF -- nothing to be asymmetric about).
     dwarf_context_status: str = "not_evaluated"
+    #: ``"clean"`` (both sides carry an L3 ``BuildEvidence`` payload),
+    #: ``"asymmetric"`` (only one side does -- the other's build-only
+    #: changes were never checked at all;
+    #: ``cli_buildsource_helpers.prepare_embedded_build_source`` already
+    #: emits a ``layer_coverage_asymmetric``/``EVIDENCE_COVERAGE_ASYMMETRIC``
+    #: finding naming this same gap), or ``"not_evaluated"`` (neither side
+    #: carries L3 build evidence -- nothing to be asymmetric about).
+    l3_context_status: str = "not_evaluated"
     #: ``"comparable"``, ``"inconsistent"`` (``fact_set_inconsistent`` on
-    #: either side's L4 surface), ``"unknown"`` (asymmetric -- only one side
-    #: carries an L4 surface), or ``"not_applicable"`` (neither side does).
+    #: either side's L4 surface, OR a hard ``fact_set`` name/version mismatch
+    #: BETWEEN the two sides -- the same cross-side check ``diff_source_abi``'s
+    #: ``SOURCE_FACT_COVERAGE_INCOMPLETE`` uses), ``"unknown"`` (asymmetric --
+    #: only one side carries an L4 surface at all, or the two sides carry a
+    #: softer fact-set mismatch: a differing producer/producer_version/
+    #: compiler_version/compiler_family, or one side stamped a ``fact_set``
+    #: and the other didn't), or ``"not_applicable"`` (neither side carries
+    #: an L4 surface).
     fact_set_comparability: str = "not_applicable"
     #: ``"complete"`` (both sides carry an L5 graph, every observed pass ran
     #: full-project and clean); ``"degraded"`` (``SourceGraphSummary.
@@ -308,8 +347,10 @@ class AnalysisAssurance:
             "target_accounting": self.target_accounting.to_dict(),
             "translation_units": self.translation_units.to_dict(),
             "export_accounting": self.export_accounting.to_dict(),
+            "l0_context_status": self.l0_context_status,
             "header_context_status": self.header_context_status,
             "dwarf_context_status": self.dwarf_context_status,
+            "l3_context_status": self.l3_context_status,
             "fact_set_comparability": self.fact_set_comparability,
             "graph_completeness": self.graph_completeness,
             "notes": list(self.notes),
@@ -348,9 +389,65 @@ def _weaker_depth(a: str, b: str) -> str:
     return a if _DEPTH_RANK.get(a, 0) <= _DEPTH_RANK.get(b, 0) else b
 
 
+def _surface_fact_set(sa: Any) -> dict[str, Any]:
+    """The rolled-up ``fact_set`` a ``SourceAbiSurface``'s ``coverage`` block
+    carries, or ``{}``. Mirrors ``buildsource.source_diff._surface_fact_set``
+    exactly (same dict-shaped ``coverage.fact_set`` field, same
+    ``isinstance`` guard) rather than importing that module's private
+    helper across a package boundary.
+    """
+    cov = sa.coverage if isinstance(sa.coverage, dict) else {}
+    raw = cov.get("fact_set")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _surface_fact_set_inconsistent(sa: Any) -> bool:
+    """Whether this surface's own TUs disagreed on ``fact_set``. Mirrors
+    ``buildsource.source_diff._surface_fact_set_inconsistent`` exactly,
+    including its ``is True`` strictness (a hand-edited/forward-produced
+    surface storing this flag as the JSON string ``"false"`` must not read
+    as truthy).
+    """
+    cov = sa.coverage if isinstance(sa.coverage, dict) else {}
+    return cov.get("fact_set_inconsistent") is True
+
+
 def _fact_set_comparability(
     old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
 ) -> tuple[str, list[str]]:
+    """Cross-side L4 fact-set comparability -- the ``analysis_assurance``
+    analogue of ``buildsource.source_diff.diff_source_abi``'s own
+    ``SOURCE_FACT_COVERAGE_INCOMPLETE`` gating.
+
+    Finding (review, P1): the previous implementation only ever checked each
+    SIDE's own ``fact_set_inconsistent`` flag independently -- it never
+    compared the two sides' ``fact_set`` identities AGAINST EACH OTHER, so
+    two internally-consistent but mutually-DIFFERENT fact-set identities
+    (a producer/version mismatch between old and new) fell through to
+    ``"comparable"`` even though ``diff_source_abi()``'s own
+    ``check_fact_compatibility()`` -- the real, already-correct cross-side
+    comparison this codebase already has -- identifies that exact same
+    mismatch as ``fact_set_name_mismatch``/``fact_set_version_mismatch`` and
+    suppresses source comparisons that cannot be trusted for it. Fixed by
+    calling the identical ``buildsource.fact_set.check_fact_compatibility``
+    both sides' rolled-up ``fact_set`` dicts, the same helper
+    ``diff_source_abi()`` uses, instead of re-implementing a second,
+    independent comparison here.
+
+    A hard mismatch (``compat.structured_facts_comparable is False`` -- a
+    ``fact_set`` name/version disagreement, or either side's own TUs
+    disagreeing on ``fact_set``) reads ``"inconsistent"``, same bucket as
+    the pre-existing per-side ``fact_set_inconsistent`` case. A softer
+    mismatch (``compat.issues`` non-empty but ``structured_facts_comparable``
+    still true -- a producer/producer_version/compiler_version/
+    compiler_family difference, or an asymmetric one-sided ``fact_set``
+    stamp) reads ``"unknown"``, since opaque-hash/content comparisons are
+    not guaranteed trustworthy even though existence/removal detection
+    still is. A symmetric, genuinely EMPTY ``fact_set`` on both sides (no
+    signal at all -- a pre-C.8 producer, or two hand-edited packs) keeps
+    reading ``"comparable"``, preserving the same forward-compat convention
+    ``check_fact_compatibility`` itself documents for that shape.
+    """
     notes: list[str] = []
     old_sa = getattr(old_pack, "source_abi", None)
     new_sa = getattr(new_pack, "source_abi", None)
@@ -362,16 +459,77 @@ def _fact_set_comparability(
             "L4 source-ABI surface"
         )
         return "unknown", notes
-    inconsistent = bool(old_sa.coverage.get("fact_set_inconsistent")) or bool(
-        new_sa.coverage.get("fact_set_inconsistent")
+
+    old_inconsistent = _surface_fact_set_inconsistent(old_sa)
+    new_inconsistent = _surface_fact_set_inconsistent(new_sa)
+    old_fact_set = _surface_fact_set(old_sa)
+    new_fact_set = _surface_fact_set(new_sa)
+    has_signal = bool(
+        old_fact_set or new_fact_set or old_inconsistent or new_inconsistent
     )
-    if inconsistent:
-        notes.append(
+    if not has_signal:
+        # Symmetric, genuinely empty on both sides -- nothing to compare,
+        # same forward-compat treatment check_fact_compatibility() itself
+        # gives this shape.
+        return "comparable", notes
+
+    compat = check_fact_compatibility(
+        old_fact_set,
+        new_fact_set,
+        old_inconsistent=old_inconsistent,
+        new_inconsistent=new_inconsistent,
+    )
+    if not compat.structured_facts_comparable:
+        issue_notes = [f"{i.rule}: {i.message}" for i in compat.issues] or [
             "fact_set_inconsistent on at least one side's L4 surface -- the "
             "compile units backing it disagreed on their own fact-set identity"
-        )
+        ]
+        notes.extend(issue_notes)
         return "inconsistent", notes
+    if compat.issues:
+        notes.extend(f"{i.rule}: {i.message}" for i in compat.issues)
+        return "unknown", notes
     return "comparable", notes
+
+
+def _l0_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str]]:
+    """Per-side L0 binary/export-table presence status -- the L0 analogue of
+    :func:`_header_context_status`'s/:func:`_dwarf_context_status`'s/
+    :func:`_l3_context_status`'s presence-then-asymmetry shape.
+
+    Self-audit finding (P0.4 review): a ``AbiSnapshot`` need not carry any
+    binary at all -- ``cli_scan_helpers._intrinsic_coverage`` already
+    documents and reports this exact state as ``"no binary export table
+    (snapshot-only input)"`` (``has_binary = bool(snap.elf or snap.pe or
+    snap.macho)``), the same predicate this helper uses. A comparison where
+    only one side carries a real binary (the other a synthetic/
+    snapshot-only, headers-or-hand-built-only input) means every L0-derived
+    signal -- exported-symbol presence/removal, SONAME, binding/visibility --
+    was never even attempted for the binary-lacking side, the identical
+    shape of gap already closed for L1 (DWARF)/L2 (headers)/L3 (build
+    evidence) above. Fixed the same way: check each side's own binary
+    presence directly and report the asymmetric case distinctly from "both
+    sides have a binary" and "neither does" (a pure header/source-only
+    comparison, which is a legitimate, supported, symmetric shape and not
+    itself an asymmetry).
+    """
+
+    def _has_binary(snap: AbiSnapshot) -> bool:
+        return bool(snap.elf or snap.pe or snap.macho)
+
+    old_binary = _has_binary(old)
+    new_binary = _has_binary(new)
+    if not old_binary and not new_binary:
+        return "not_evaluated", []
+    if old_binary != new_binary:
+        missing = "new" if old_binary else "old"
+        return "asymmetric", [
+            f"L0 binary context asymmetric: the {missing} side carries no "
+            "binary export table at all (snapshot-only input) -- symbol-table "
+            "-level evidence (exports, SONAME, binding/visibility) was never "
+            "examined for that side"
+        ]
+    return "clean", []
 
 
 def _header_context_status(
@@ -465,6 +623,103 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
             "layout comparison was skipped for that side entirely"
         ]
     return "clean", []
+
+
+def _l3_context_status(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> tuple[str, list[str]]:
+    """Per-side L3 ``BuildEvidence`` presence status -- the L3 analogue of
+    :func:`_header_context_status`'s/:func:`_dwarf_context_status`'s
+    presence-then-asymmetry shape.
+
+    Finding (review, P1): when the baseline carries L3 ``BuildEvidence`` but
+    the target has none (or vice versa), ``cli_buildsource_helpers.
+    prepare_embedded_build_source()`` already emits a prose-only
+    ``EVIDENCE_COVERAGE_ASYMMETRIC``/``layer_coverage_asymmetric`` finding
+    explaining that build-only changes were not checked for the side
+    lacking L3 evidence -- but nothing in this rollup's own predicates
+    examined L3 presence by side, so an otherwise-matching header-scoped
+    comparison fell through to ``status="complete"`` regardless, even while
+    the report itself carried that incomplete-coverage finding. Fixed by
+    checking each side's own ``BuildSourcePack.build_evidence is not None``
+    directly, mirroring the same presence-then-asymmetry check
+    ``cli_buildsource_helpers._layer_presence`` already uses for L3.
+    """
+    old_l3 = getattr(old_pack, "build_evidence", None) is not None
+    new_l3 = getattr(new_pack, "build_evidence", None) is not None
+    if not old_l3 and not new_l3:
+        return "not_evaluated", []
+    if old_l3 != new_l3:
+        missing = "new" if old_l3 else "old"
+        return "asymmetric", [
+            f"L3 build-evidence context asymmetric: the {missing} side "
+            "carries no BuildEvidence at all -- build-only changes were not "
+            "checked for that side (see the layer_coverage_asymmetric finding)"
+        ]
+    return "clean", []
+
+
+def _target_accounting(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> tuple[TargetAccounting, bool, list[str]]:
+    """Roll up P0.2's root-target scoping (``BuildEvidence.target_scope``)
+    across both sides, plus a second signal: whether either side requested a
+    root target that never resolved (Finding, P1 review -- see
+    :class:`TargetAccounting`'s own docstring for the full history).
+
+    ``requested``/``resolved`` are the union (order-preserving, deduplicated)
+    of both sides' ``TargetScope.requested``/``.resolved`` label lists --
+    mirroring the additive rollup :func:`_translation_units` already uses
+    for numeric L4 accounting, adapted for label sets since target names
+    (not counts) are what a consumer needs to see here. A side whose
+    ``TargetScope`` carries an empty ``requested`` list is treated the same
+    as ``target_scope is None`` -- ``BuildEvidence.target_scope``'s own
+    docstring documents this as "root-target scoping was not requested",
+    matching the convention ``buildsource.build_evidence.l3_coverage_fields``
+    already uses for the identical field.
+    """
+    requested: list[str] = []
+    resolved: list[str] = []
+    seen_requested: set[str] = set()
+    seen_resolved: set[str] = set()
+    transitive_total: int | None = None
+    any_unresolved = False
+    notes: list[str] = []
+    for side, pack in (("old", old_pack), ("new", new_pack)):
+        be = getattr(pack, "build_evidence", None)
+        ts = getattr(be, "target_scope", None) if be is not None else None
+        if ts is None or not ts.requested:
+            continue
+        for t in ts.requested:
+            if t not in seen_requested:
+                seen_requested.add(t)
+                requested.append(t)
+        for t in ts.resolved:
+            if t not in seen_resolved:
+                seen_resolved.add(t)
+                resolved.append(t)
+        if ts.transitive_count is not None:
+            transitive_total = (transitive_total or 0) + ts.transitive_count
+        unresolved = sorted(set(ts.requested) - set(ts.resolved))
+        if unresolved:
+            any_unresolved = True
+            notes.append(
+                f"{side} side's requested root target(s) did not all resolve: "
+                f"{', '.join(unresolved)}"
+            )
+
+    if not requested and not resolved and transitive_total is None:
+        return TargetAccounting(), False, notes
+
+    return (
+        TargetAccounting(
+            requested=tuple(requested),
+            resolved=tuple(resolved),
+            transitive_count=transitive_total,
+        ),
+        any_unresolved,
+        notes,
+    )
 
 
 def _translation_units(
@@ -810,6 +1065,10 @@ def compute_analysis_assurance(
     fact_set_comparability, fs_notes = _fact_set_comparability(old_pack, new_pack)
     notes.extend(fs_notes)
 
+    # -- L0 binary-context status -----------------------------------------------
+    l0_context_status, l0_notes = _l0_context_status(old, new)
+    notes.extend(l0_notes)
+
     # -- header-context status ------------------------------------------------
     header_context_status, hc_notes = _header_context_status(result, old, new)
     notes.extend(hc_notes)
@@ -817,6 +1076,16 @@ def compute_analysis_assurance(
     # -- DWARF-context status --------------------------------------------------
     dwarf_context_status, dw_notes = _dwarf_context_status(old, new)
     notes.extend(dw_notes)
+
+    # -- L3 build-evidence context status ---------------------------------------
+    l3_context_status, l3_notes = _l3_context_status(old_pack, new_pack)
+    notes.extend(l3_notes)
+
+    # -- target accounting (P0.2 root-target scoping rollup) --------------------
+    target_accounting, target_unresolved, target_notes = _target_accounting(
+        old_pack, new_pack
+    )
+    notes.extend(target_notes)
 
     # -- TU / export accounting ----------------------------------------------
     tu_accounting, l4_present_without_accounting = _translation_units(
@@ -876,8 +1145,10 @@ def compute_analysis_assurance(
     elif requested_depth is not None and depth_satisfied is False:
         status = "failed"
     elif (
-        header_context_status in ("drift_detected", "asymmetric")
+        l0_context_status == "asymmetric"
+        or header_context_status in ("drift_detected", "asymmetric")
         or dwarf_context_status == "asymmetric"
+        or l3_context_status == "asymmetric"
         or graph_completeness in ("degraded", "narrowed", "unknown")
         or (tu_accounting.failed or 0) > 0
         or not result.scope_resolved
@@ -886,6 +1157,7 @@ def compute_analysis_assurance(
         or l4_present_without_accounting
         or manifest_layer_incomplete
         or (export_accounting.unaccounted or 0) > 0
+        or target_unresolved
     ):
         status = "partial"
     elif nothing_requested:
@@ -898,10 +1170,13 @@ def compute_analysis_assurance(
         requested_depth=requested_depth,
         effective_depth=effective_depth,
         depth_satisfied=depth_satisfied,
+        target_accounting=target_accounting,
         translation_units=tu_accounting,
         export_accounting=export_accounting,
+        l0_context_status=l0_context_status,
         header_context_status=header_context_status,
         dwarf_context_status=dwarf_context_status,
+        l3_context_status=l3_context_status,
         fact_set_comparability=fact_set_comparability,
         graph_completeness=graph_completeness,
         notes=tuple(notes),
