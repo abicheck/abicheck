@@ -53,15 +53,17 @@ when it sees one.
 > [Part 0 §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
 > maps all eight compatibility dimensions and links each to its own deep
 > dive: [behavioral](behavioral-compatibility.md),
-> [data/wire](data-wire-compatibility.md), and
-> [ownership/lifetime](ownership-and-lifetime.md) and
+> [data/wire](data-wire-compatibility.md),
+> [ownership/lifetime](ownership-and-lifetime.md), and
 > [concurrency/initialization](concurrency-and-initialization.md) are
 > structurally outside what a static checker can decide the way it decides
 > source/binary compatibility (see each page for what execution-based
 > evidence covers instead); [compatibility direction](compatibility-direction.md)
-> and [static/header-only contracts](static-and-header-only.md) are
-> genuinely checkable with `compare`/`dump`, just via a workflow this hub's
-> default examples don't show.
+> is genuinely checkable with `compare` (just via a workflow this hub's
+> default examples don't show); [static/header-only contracts](static-and-header-only.md)
+> are a mixed case — a static library has a practical, if indirect, path to
+> a real comparison, while a genuinely binary-less header-only library hits
+> an actual gap in today's tooling, not just an undocumented workflow.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a

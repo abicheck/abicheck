@@ -115,10 +115,16 @@ enough to treat as proof:
   borrowed access, a library-provided RAII wrapper (a "handle" class) around
   an opaque C pointer for a stable ABI boundary that still encodes ownership
   in C++ consumer code.
-- **Never change an ownership contract without a version bump and explicit
-  changelog note**, even when the signature is unaffected — this is exactly
-  the class of change [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
-  says static analysis structurally cannot flag for you.
+- **Never change an ownership contract silently**, even when the signature
+  is unaffected — this is exactly the class of change
+  [Behavioral & Semantic Compatibility](behavioral-compatibility.md) says
+  static analysis structurally cannot flag for you. If the old contract was
+  promised, an *incompatible* change to it (a borrow becoming a take, a
+  return value's lifetime shrinking) needs the same major version bump any
+  other incompatible public change needs — see
+  [Product Contract §4](abi-series/00-product-contract.md#4-semantic-versioning-turning-the-promise-into-a-number)
+  — not just a changelog note; only a change that keeps the promised
+  contract intact can go out as a patch or minor release.
 - **For plugin/callback boundaries**, write the ownership contract into the
   plugin manifest alongside the ABI contract — see
   [Plugin Systems](../use/plugin-systems.md) — so it's checked as part of

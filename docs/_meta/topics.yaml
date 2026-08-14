@@ -358,30 +358,36 @@ topics:
     canonical_page: learn/behavioral-compatibility.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
 
   data-wire-compatibility:
     canonical_page: learn/data-wire-compatibility.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
 
   ownership-and-lifetime:
     canonical_page: learn/ownership-and-lifetime.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-series/07-designing-for-stability.md
+      - learn/abi-api-handling.md
 
   compatibility-direction:
     canonical_page: learn/compatibility-direction.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - use/plugin-systems.md
+      - learn/abi-api-handling.md
 
   static-and-header-only:
     canonical_page: learn/static-and-header-only.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
 
   concurrency-and-initialization:
     canonical_page: learn/concurrency-and-initialization.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
