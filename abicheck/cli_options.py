@@ -809,9 +809,15 @@ def merge_compile_config(
     ``defines`` synthesize literal ``-std=…``/``-D…`` argv entries only when
     ``cli_ctx.gcc_options`` is unset (the removed ``--gcc-options`` CLI flag
     is gone, CLI audit PR 5/5, so this is now always the case from the CLI —
-    the field stays as an internal-composition-only escape hatch);
-    ``include_dirs`` (resolved against the config's directory)
-    are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
+    the field stays as an internal-composition-only escape hatch); those
+    synthesized tokens are prepended *before* any CLI ``--compiler-option``/
+    ``--gcc-option`` tokens, not appended after, so an explicit CLI ``-std=``/
+    ``-D`` still wins the way a compiler resolves a repeated flag (Codex
+    review: appending after silently let config override an explicit CLI
+    token once ``--gcc-options`` -- the flag that used to suppress this
+    synthesis entirely -- was removed). ``include_dirs`` (resolved against
+    the config's directory) are appended *after* the CLI ``-I`` so explicit
+    roots keep search precedence.
     Returns the merged ``(CompileContext, includes)``.
 
     The config is the explicit ``--config`` when given, else the ``.abicheck.yml``
@@ -880,7 +886,15 @@ def merge_compile_config(
             config_tokens.append(f"-std={bc.compile_std}")
         config_tokens += [f"-D{d}" for d in bc.compile_defines]
         gcc_options = None
-        gcc_option_tokens = gcc_option_tokens + tuple(config_tokens)
+        # CLI > config (same precedence every other field in this function
+        # follows): config-synthesized tokens go *first* so an explicit CLI
+        # --compiler-option/--gcc-option token appended after it is the one a
+        # compiler actually honors for a repeated flag like -std= (Codex
+        # review: appending config tokens *after* CLI ones silently let
+        # `compile.std`/`compile.defines` override an explicit CLI
+        # --compiler-option=-std=... once the old --gcc-options scalar --
+        # which used to suppress this synthesis entirely -- was removed).
+        gcc_option_tokens = tuple(config_tokens) + gcc_option_tokens
     sysroot = (
         cli_ctx.sysroot
         if cli_ctx.sysroot is not None

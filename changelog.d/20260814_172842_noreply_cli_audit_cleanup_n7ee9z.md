@@ -14,14 +14,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--gcc-path`/`--gcc-prefix`/`--gcc-option` counterparts — previously they
   silently no-opped instead of raising a usage error, since the per-library
   fan-out doesn't thread an L2 compile context at all.
-- **`--compiler-option`/`--gcc-option` no longer silently reorder flag/value
-  pairs when both spellings are passed in the same invocation** (e.g.
-  `--gcc-option=-include --compiler-option='some header.h'` could separate
-  `-include` from its own operand). Whichever spelling is given now wins
-  entirely, matching the precedence already used for the scalar
-  `--compiler`/`--gcc-path` pair, instead of concatenating two
-  independently-collected token lists with no record of their original
-  relative order.
+- **`--compiler-option`/`--gcc-option` no longer silently reorder or drop
+  flag/value pairs when both spellings are passed in the same invocation**
+  (e.g. `--gcc-option=-include --compiler-option='some header.h'` could
+  separate `-include` from its own operand). Mixing the two spellings in
+  one invocation is now rejected outright with a usage error — no merge or
+  argv-order-recovery rule can be correct across two independently-collected
+  token tuples, so the fix is to require exactly one spelling, not to pick
+  a precedence between them.
 
 <!--
 ### Added

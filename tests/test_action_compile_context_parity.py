@@ -245,6 +245,16 @@ class TestCompileContextForwardingParity:
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
+        # Regression (Codex review, PR #757): scan's cross-compiler block used
+        # to appear twice in run.sh -- harmless duplication for the old
+        # scalar --gcc-options (last-of-two-identical-values wins), but
+        # --compiler-option is `multiple=True` and genuinely accumulates every
+        # occurrence, so the duplicate silently doubled every forwarded
+        # --gcc-path/--gcc-prefix/--compiler-option/--sysroot token.
+        assert cmd.count("--gcc-path") == 1
+        assert cmd.count("--gcc-prefix") == 1
+        assert cmd.count("--compiler-option") == 1
+        assert cmd.count("--sysroot") == 1
 
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(

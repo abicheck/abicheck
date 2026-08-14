@@ -13,5 +13,5 @@ it should read in CHANGELOG.md. Delete the other sections.
   (G21.8 M2): the everyday options lead, and the long tail (toolchain
   overrides, debug-info resolution, per-category severity overrides,
   release-only knobs, …) folds behind the new `dump --help-all` /
-  `scan --help-all`. Purely presentational — no option was added, removed,
-  or renamed; every option keeps working unqualified either way.
+  `scan --help-all`. No existing operational option was removed or renamed;
+  every one of them keeps working unqualified either way.

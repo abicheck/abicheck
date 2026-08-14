@@ -14,10 +14,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   binary too, despite the name). The old flags stay fully functional — just
   hidden from `--help`/`--help-all` since they're superseded, not removed —
   and print a one-line deprecation note to stderr when used; a new-spelling
-  value wins if both are given for the same setting, and
-  `--compiler-option`/`--gcc-option` (both repeatable) merge rather than one
-  overriding the other. `--gcc-options` (the whitespace-split string form)
-  is untouched.
+  scalar value wins if both `--compiler`/`--gcc-path` (or
+  `--compiler-prefix`/`--gcc-prefix`) are given for the same setting, while
+  `--compiler-option`/`--gcc-option` (both repeatable) cannot be mixed in
+  the same invocation — combining them is a usage error, since no merge or
+  argv-order-recovery rule can be correct across two independently-collected
+  option tuples (see the later `--gcc-options` removal fragment below for
+  the follow-up: that whitespace-split scalar flag is gone, not merely
+  deprecated, as of this release).
 
 <!--
 ### Changed

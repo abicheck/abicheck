@@ -509,8 +509,8 @@ def _make_help_callback(
             for p in original_params
             if isinstance(p, click.Argument) or p.name in common_names
         ]
-        # The footer promises "--help-all shows every option" -- true only for
-        # a folded option that --help-all can actually render. A Click-``hidden``
+        # The footer promises "--help-all shows those N options" -- true only
+        # for a folded option that --help-all can actually render. A Click-``hidden``
         # option renders there too *only* if some OPTION_GROUPS panel lists one
         # of its flag strings (same bypass noted above); one that is hidden and
         # unlisted (a deprecated no-op shim like --header-graph, or a superseded
@@ -536,7 +536,7 @@ def _make_help_callback(
         click.echo(help_text, color=ctx.color)
         click.echo(
             f"\n{hidden_count} advanced option(s) hidden. "
-            f"Run 'abicheck {command_label} --help-all' to see every option."
+            f"Run 'abicheck {command_label} --help-all' to see those options."
         )
         ctx.exit()
 
@@ -588,7 +588,8 @@ def curated_help_options(
             expose_value=False,
             is_eager=True,
             callback=_make_help_callback(command_label, common_names),
-            help="Show common options and exit. Use --help-all to see every option.",
+            help="Show common options and exit. Use --help-all to see the "
+            "remaining advanced options.",
         )(func)
         return func
 

@@ -885,7 +885,7 @@ def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
     assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
 
 
-def test_contract_alone_implies_contract_evaluation(tmp_path) -> None:
+def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
     """``--contract`` alone now implies ``--contract-evaluation`` (ADR-049
     Phase 6, CLI audit PR 3/5: abicheck.cli_options.resolve_contract_evaluation).
 

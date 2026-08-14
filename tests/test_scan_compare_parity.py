@@ -956,7 +956,8 @@ class TestFieldForFieldParity:
         assert contract_keys(scan["diff"]["findings"]) == expected
 
     def test_contract_alone_implies_contract_evaluation_in_both(
-        self, runner: CliRunner, old_snap: Path, new_snap_breaking: Path
+        self, runner: CliRunner, old_snap: Path, new_snap_breaking: Path,
+        tmp_path: Path,
     ) -> None:
         # CLI audit PR 3/5: `--contract` alone now *implies*
         # `--contract-evaluation` in both commands (the one place they must
@@ -964,28 +965,56 @@ class TestFieldForFieldParity:
         # the single shared resolver both route through), rather than the two
         # rejecting it identically as a UsageError. Each now behaves exactly
         # as if `--contract-evaluation` had also been passed explicitly.
+        #
+        # Exit-code parity alone doesn't prove the evaluator actually ran --
+        # a pre-existing ABI break can produce the same exit code whether or
+        # not --contract did anything (Codex review). Assert on the real
+        # contract_context receipt instead: it's present only when the
+        # evaluator ran, so implicit and explicit must both carry one, and
+        # the two must be byte-identical (same real assertion
+        # test_the_scan_context_is_byte_identical_to_compares makes for
+        # explicit-vs-explicit, extended to implicit-vs-explicit here).
+        import json
+
         implicit_args = ["--contract", "exports"]
         explicit_args = ["--contract-evaluation", "--contract", "exports"]
 
-        compare_implicit = runner.invoke(
-            main, ["compare", str(old_snap), str(new_snap_breaking), *implicit_args]
-        )
-        compare_explicit = runner.invoke(
-            main, ["compare", str(old_snap), str(new_snap_breaking), *explicit_args]
-        )
-        scan_implicit = runner.invoke(
-            main,
-            ["scan", str(new_snap_breaking), "--against", str(old_snap), *implicit_args],
-        )
-        scan_explicit = runner.invoke(
-            main,
-            ["scan", str(new_snap_breaking), "--against", str(old_snap), *explicit_args],
-        )
+        def _compare_json(args: list[str], name: str) -> dict:
+            out = tmp_path / f"{name}.json"
+            res = runner.invoke(
+                main,
+                [
+                    "compare", str(old_snap), str(new_snap_breaking),
+                    "--format", "json", "-o", str(out), *args,
+                ],
+            )
+            assert res.exit_code != 64, res.output
+            return json.loads(out.read_text(encoding="utf-8"))
 
-        assert compare_implicit.exit_code != 64, compare_implicit.output
-        assert scan_implicit.exit_code != 64, scan_implicit.output
-        assert compare_implicit.exit_code == compare_explicit.exit_code
-        assert scan_implicit.exit_code == scan_explicit.exit_code
+        def _scan_json(args: list[str], name: str) -> dict:
+            out = tmp_path / f"{name}.json"
+            res = runner.invoke(
+                main,
+                [
+                    "scan", str(new_snap_breaking), "--against", str(old_snap),
+                    "--format", "json", "-o", str(out), *args,
+                ],
+            )
+            assert res.exit_code != 64, res.output
+            return json.loads(out.read_text(encoding="utf-8"))
+
+        compare_implicit = _compare_json(implicit_args, "compare-implicit")
+        compare_explicit = _compare_json(explicit_args, "compare-explicit")
+        scan_implicit = _scan_json(implicit_args, "scan-implicit")
+        scan_explicit = _scan_json(explicit_args, "scan-explicit")
+
+        assert compare_implicit["contract_context"] is not None
+        assert compare_implicit["contract_context"] == compare_explicit["contract_context"]
+        assert scan_implicit["diff"]["contract_context"] is not None
+        assert (
+            scan_implicit["diff"]["contract_context"]
+            == scan_explicit["diff"]["contract_context"]
+        )
 
     def test_contract_flags_without_against_are_rejected(
         self, runner: CliRunner, new_snap_breaking: Path

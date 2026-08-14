@@ -1001,13 +1001,14 @@ elif [[ "$MODE" == "scan" ]]; then
   # so it's forwarded once regardless of which branch above ran.
   add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
 
-  # Cross-compiler flags -- documented root-Action inputs, but previously
-  # only wired to dump mode's branch (Codex review, same gap as compare
-  # mode above).
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_flag "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+  # Cross-compiler flags -- documented root-Action inputs. Forwarded once,
+  # below, grouped with --ast-frontend (matching compare mode's own single
+  # block). A second, identical block used to sit here too: harmless when
+  # --gcc-options was a Click scalar (last-of-two-identical-values wins), but
+  # --compiler-option is `multiple=True` and genuinely accumulates every
+  # occurrence, so the duplicate silently doubled each forwarded token once
+  # the mechanical --gcc-options -> --compiler-option migration landed
+  # (Codex review, PR #757) -- removed rather than kept.
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"

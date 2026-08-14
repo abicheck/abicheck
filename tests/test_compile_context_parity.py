@@ -263,6 +263,26 @@ def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
     assert includes == (tmp_path / "include",)
 
 
+def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> None:
+    """CLI --compiler-option/--gcc-option tokens must win over a config-
+    synthesized -std=/-D, the same way the now-removed --gcc-options scalar
+    used to (Codex review, PR #757): appending config tokens *after* the
+    CLI's own gcc_option_tokens silently let `compile.std` override an
+    explicit CLI -std= once --gcc-options (which used to suppress config
+    synthesis entirely) was removed. Config tokens must come first so a
+    compiler's own last-flag-wins semantics still resolve to the CLI value."""
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n  defines: [CFG=1]\n")
+    cli = CompileContext(gcc_option_tokens=("-std=c++17",))
+    merged, _ = _merge_compile_config(cli, (), cfg)
+    assert merged.gcc_options is None
+    # config tokens first, CLI token last -- a real compiler resolves the
+    # last -std= it sees, so this ordering is what makes the CLI value win.
+    assert merged.gcc_option_tokens == ("-std=c++20", "-DCFG=1", "-std=c++17")
+
+
 def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None:
     from abicheck.cli_scan import _merge_compile_config
 

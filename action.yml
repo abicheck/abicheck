@@ -305,10 +305,12 @@ inputs:
     required: false
   build-config:
     description: >
-      Path to a trusted .abicheck.yml. Supplying this alone (not
-      allow-build-query) is what permits its build.query (compile-DB
-      generation) command to run for scan mode — see allow-build-query below.
-      Used by scan and dump modes, and by compare mode (--config).
+      Path to a trusted .abicheck.yml. For scan mode, supplying this
+      together with an explicitly pinned depth (not allow-build-query) is
+      what permits its build.query (compile-DB generation) command to
+      run — see allow-build-query below; a plain scan with no depth pinned
+      does not auto-run it. Used by scan and dump modes, and by compare
+      mode (--config).
     required: false
   allow-build-query:
     description: >
