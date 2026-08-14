@@ -110,11 +110,18 @@ enough to treat as proof:
   function is far more likely to be kept in sync with the implementation and
   seen by the next person to touch it.
 - **Prefer types that make the contract part of the signature** where
-  possible: `std::unique_ptr<T>`/`std::shared_ptr<T>` for transferred
-  ownership, `T&`/`const T&`/a non-owning `std::span`/`std::string_view` for
+  possible: `T&`/`const T&`/a non-owning `std::span`/`std::string_view` for
   borrowed access, a library-provided RAII wrapper (a "handle" class) around
   an opaque C pointer for a stable ABI boundary that still encodes ownership
-  in C++ consumer code.
+  in C++ consumer code. For transferred ownership, `std::unique_ptr<T>`/
+  `std::shared_ptr<T>` with their *default* deleter are only safe when both
+  sides are guaranteed to share the same allocator, CRT, and standard-library
+  ABI — across the CRT/allocator-mismatch boundary this page opens with, a
+  default-deleted `unique_ptr<T>` returned from the library runs the
+  *consumer's* `delete` on memory the *library* allocated, which is exactly
+  the heap corruption described above. Across such a boundary, use a custom
+  deleter that calls an exported library-side destroy function, or the
+  opaque-handle RAII wrapper instead.
 - **Never change an ownership contract silently**, even when the signature
   is unaffected — this is exactly the class of change
   [Behavioral & Semantic Compatibility](behavioral-compatibility.md) says

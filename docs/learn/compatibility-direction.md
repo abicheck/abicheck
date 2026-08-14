@@ -103,8 +103,15 @@ Checking the forward direction for a given pair is the same command with
 the arguments reversed: `abicheck compare new.so old.so` asks "can callers
 compiled against the *new* contract be satisfied by the *old* library" —
 useful for validating a rollback path is safe *before* you need it, not
-after. For a `--used-by`/plugin scenario, the equivalent is running the
-consumer-scoped check with each side playing "host" — see
+after. For a `--used-by`/plugin scenario, reversing the two library
+arguments is *not* by itself enough to check the opposite direction:
+`--used-by` scopes the comparison to the *supplied consumer's own actual
+imports*, so a forward consumer-scoped check needs a consumer binary that
+was actually built against the *new* contract — reusing an old consumer
+binary alongside reversed library arguments still only exercises what that
+old consumer imports, never a symbol or version a new-SDK consumer would
+use. The same applies to `--required-symbol`: the required-entrypoint set
+must match the host contract for the direction under test. See
 [Plugin Systems](../use/plugin-systems.md) for the consumer-scoped
 mechanics `compare --used-by`/`--required-symbol` build on.
 
