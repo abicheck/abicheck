@@ -9,6 +9,8 @@ happy path.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
 
@@ -149,11 +151,12 @@ class TestParseFindingId:
     def test_none_stays_none(self):
         assert parse_finding_id(None) is None
 
-    def test_string_passes_through(self):
-        assert parse_finding_id("abc123") == "abc123"
+    def test_valid_digest_passes_through(self):
+        assert parse_finding_id("abcd1234abcd1234") == "abcd1234abcd1234"
 
     def test_non_string_is_coerced(self):
-        assert parse_finding_id(12345) == "12345"
+        # 16 decimal digits -- all valid hex chars, exactly 16 long.
+        assert parse_finding_id(1234567890123456) == "1234567890123456"
 
     def test_empty_string_normalizes_to_none(self):
         # Regression (Codex review, PR #753, round 7): an explicit
@@ -162,3 +165,17 @@ class TestParseFindingId:
         # selector that can never match any real finding -- a rule that
         # loads successfully but is permanently dead.
         assert parse_finding_id("") is None
+
+    def test_malformed_value_raises(self):
+        # Regression (Codex review, PR #753, round 10): a non-empty value
+        # that isn't 16 lowercase hex chars can never match a real
+        # canonical_finding_id either -- the identical dead-rule failure
+        # mode as the empty-string case, now caught with a clear error
+        # instead of silently accepted.
+        with pytest.raises(ValueError, match="not a valid canonical_finding_id"):
+            parse_finding_id("abc123")
+
+    def test_wrong_case_raises(self):
+        # canonical_finding_id is always lowercase (hashlib.hexdigest()).
+        with pytest.raises(ValueError, match="not a valid canonical_finding_id"):
+            parse_finding_id("ABCD1234ABCD1234")

@@ -108,3 +108,20 @@
   `description` is normalized (substituted with already-canonicalized
   old/new text) for the three kinds that embed a type spelling in it, and
   folded in as-is for every other kind.
+- **A self-referential YAML merge anchor (`defaults: &d {<<: *d, ...}`)
+  no longer crashes with `RecursionError`** — `yaml.safe_load` itself
+  resolves this legal (if pathological) construct without incident, but
+  the raw-scalar merge-key resolution walked the same `MappingNode`
+  forever since it operates on the uncollapsed Node tree, where the
+  identical construct is a real reference cycle. Fixed with a visited-set
+  guard threaded through the recursion.
+- **`finding_id` is now validated, not just normalized, in both the YAML
+  and direct-construction paths** — `parse_finding_id` now rejects (raises
+  `ValueError`) a non-empty value that isn't exactly 16 lowercase hex
+  characters, the only shape `report_canonical_finding_id` ever produces;
+  a malformed or wrong-case value previously loaded/constructed
+  successfully as a rule that could never match anything.
+  `Suppression.__post_init__` now also calls `parse_finding_id` directly
+  (it previously only ran for YAML-sourced entries), so a caller building
+  `Suppression(finding_id=...)` through the public Python API gets the
+  identical validation.

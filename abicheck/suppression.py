@@ -46,6 +46,7 @@ _VALID_BINDING: frozenset[str] = frozenset(b.value for b in SymbolBinding)
 # Pre-build valid change_kind values for fast validation
 _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 
+
 # Keys allowed in a suppression entry — unknown keys are rejected
 _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
     "symbol", "symbol_pattern", "type_pattern", "member_name",
@@ -1105,6 +1106,11 @@ class Suppression:
                 "Suppression fields 'namespace' and 'entity_namespace' are "
                 "aliases for the same selector — specify only one"
             )
+        # Normalize + validate here too, not just in SuppressionList.load's
+        # YAML path -- constructing Suppression(finding_id=...) directly
+        # bypassed this entirely, silently creating a rule that can never
+        # match anything real (Codex review).
+        self.finding_id = parse_finding_id(self.finding_id)
         effective_entity_ns = self.entity_namespace if self.entity_namespace is not None else self.namespace
         _validate_selectors(
             has_symbol=self.symbol is not None,

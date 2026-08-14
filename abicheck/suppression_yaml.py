@@ -19,13 +19,17 @@ so the import direction stays one-way.
 
 from __future__ import annotations
 
+import re
+
 import yaml
 
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 _NULL_TAG = "tag:yaml.org,2002:null"
 
 
-def _raw_scalar_lookup(node: yaml.MappingNode, key: str) -> tuple[bool, str | None]:
+def _raw_scalar_lookup(
+    node: yaml.MappingNode, key: str, _visiting: frozenset[int] = frozenset()
+) -> tuple[bool, str | None]:
     """``(found, raw_text)`` for *key* in mapping *node*, resolving YAML
     merge keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself
     does: a direct (non-merge) key always wins over a merged one (null
@@ -55,7 +59,22 @@ def _raw_scalar_lookup(node: yaml.MappingNode, key: str) -> tuple[bool, str | No
     ``- <<: *d``, which bypasses a plain direct key/value scan entirely
     since the merge key's own value is a mapping *node reference*, not a
     ``finding_id`` pair in *this* mapping's own ``.value`` list.)
+
+    ``_visiting`` guards a self-referential merge (``defaults: &d {<<:
+    *d, finding_id: ...}``) -- a legal YAML anchor graph
+    ``yaml.safe_load()`` itself resolves without incident (its own merge
+    constructor works off an already-partial dict, so merging a node into
+    itself is a no-op), but this function walks the raw, uncollapsed Node
+    tree, where the same construct is a real reference cycle: without a
+    visited-set, re-entering the same ``MappingNode`` recurses forever
+    (Codex review, fresh evidence: confirmed ``RecursionError`` on a real
+    self-referential anchor). Re-visiting an in-progress node returns
+    "not found" for that path -- matching what a partially-constructed
+    dict would contribute at that same point during real construction.
     """
+    if id(node) in _visiting:
+        return False, None
+    visiting = _visiting | {id(node)}
     merged_found = False
     merged_value: str | None = None
     direct_found = False
@@ -70,7 +89,7 @@ def _raw_scalar_lookup(node: yaml.MappingNode, key: str) -> tuple[bool, str | No
                 # still stops at the first hit while the outer loop keeps
                 # scanning across occurrences.
                 if isinstance(source, yaml.MappingNode):
-                    found, value = _raw_scalar_lookup(source, key)
+                    found, value = _raw_scalar_lookup(source, key, visiting)
                     if found:
                         merged_found = True
                         merged_value = value
@@ -131,20 +150,37 @@ def raw_finding_ids_by_index(text: str) -> dict[int, str]:
     return raw_ids
 
 
+#: report_canonical_finding_id() is always exactly 16 lowercase hex chars
+#: (a truncated sha256 hexdigest) -- anything else can never match, so
+#: parse_finding_id rejects it outright rather than silently accepting a
+#: rule that will never fire (Codex review, fresh evidence).
+_FINDING_ID_RE = re.compile(r"[0-9a-f]{16}")
+
+
 def parse_finding_id(raw: object) -> str | None:
     """Coerce a ``finding_id`` value to ``str``, normalizing an empty
-    string to ``None``.
+    string to ``None`` and validating the non-empty shape.
 
     An explicit ``finding_id: ""`` (or a blank ``finding_id:`` under a
     tag other than YAML's null resolver) would otherwise pass
     ``Suppression.__post_init__``'s ``is not None`` selector check as a
     real, standalone-sufficient selector that can never match any real
-    finding -- a rule that loads successfully but is permanently dead
-    (Codex review, fresh evidence). ``SuppressionList.load`` passes the
-    raw scalar text via :func:`raw_finding_ids_by_index`; this also
-    matters for a caller building ``Suppression`` directly with a
-    non-``str`` value.
+    finding -- a rule that loads successfully but is permanently dead.
+    A non-empty value that isn't a real digest shape (a typo, a copied
+    ``finding_id`` from the wrong field) is the identical failure mode,
+    caught here with a raised ``ValueError`` instead of silently
+    accepted. Both ``SuppressionList.load`` (via
+    :func:`raw_finding_ids_by_index`) and ``Suppression.__post_init__``
+    (for direct, non-YAML construction) call this, so neither path can
+    bypass it.
     """
     if raw is None:
         return None
-    return str(raw) or None
+    value = str(raw) or None
+    if value is not None and not _FINDING_ID_RE.fullmatch(value):
+        raise ValueError(
+            f"finding_id {value!r} is not a valid canonical_finding_id "
+            "(expected 16 lowercase hex characters, e.g. copied from a "
+            "report's canonical_finding_id field)"
+        )
+    return value
