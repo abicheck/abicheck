@@ -19,4 +19,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   `compare`'s implicit raw-`--old/new-sources` dump path. The `L3_build`
   evidence-coverage report row gains `requested_roots`/`resolved_roots`/
   `transitive_targets`/`compile_units`/`link_units` (report schema 2.37),
-  populated only for a scoped run.
+  populated only for a scoped run. A misspelled/nonexistent root target now
+  records the requested label with an empty `resolved` set instead of
+  omitting `requested_roots` entirely, and `BazelAdapter`'s plural
+  `targets=[...]` constructor argument reliably triggers the live
+  cquery/aquery path on its own, without also requiring the legacy
+  singular `target=`.
