@@ -151,8 +151,76 @@ from .clang_source_edges import build_source_edges
 #: layered build config can legitimately record the same toggle-style flag
 #: more than once (e.g. ``-fno-sycl -fsycl -fno-sycl``), and the old dedup
 #: silently dropped every repeat, corrupting last-flag-wins state for any
-#: such pair, not just SYCL (Codex review).
-CLANG_EXTRACTOR_VERSION = "0.12"
+#: such pair, not just SYCL (Codex review). 0.13: ``_stamp_fact_set_and_
+#: coverage`` now stamps a real ``compiler_family`` (``"intel-llvm"`` for
+#: Intel's oneAPI fork, ``"clang"`` unchanged otherwise) instead of always
+#: the ``default_fact_set`` default -- a cache entry produced under 0.12 or
+#: earlier carries the stale ``"clang"`` label baked into its persisted
+#: ``fact_set`` and, on a cache HIT, is returned as-is by
+#: ``source_replay._replay_cache_lookup`` without ever re-running
+#: ``_stamp_fact_set_and_coverage`` (Codex review, PR #756: a persistent
+#: ``--source-abi-cache-dir``/``ABICHECK_L4_CACHE_DIR`` reused across an
+#: abicheck upgrade would otherwise silently keep serving the old label
+#: forever, since ``compute_tu_cache_key`` doesn't fold ``compiler_family``
+#: in on its own -- only the extractor version invalidates it).
+CLANG_EXTRACTOR_VERSION = "0.13"
+
+
+@functools.lru_cache(maxsize=8)
+def _clang_compiler_family(clang_bin: str) -> str:
+    """The ``compiler_family`` label for *clang_bin* (ADR-038 C.8 fact_set).
+
+    Defaults to ``"clang"`` for an ordinary vanilla/Apple/Debian Clang, but
+    reports ``"intel-llvm"`` for Intel's oneAPI DPC++/C++ Compiler fork.
+    Primarily resolved the same way ``actions/collect-facts/run.sh``'s
+    ``_is_intel_llvm_compiler`` does: probing for the ``__INTEL_LLVM_COMPILER``
+    predefined macro (``clang_bin -dM -E -x c++ -``), a vendor-scoped signal
+    that recognizes the fork regardless of how the binary is named/invoked
+    (a conventional ``clang``/``clang++`` symlink or a custom-named toolchain
+    wrapper included) -- unlike a name-based check, which cannot. Cached per
+    binary path (``functools.lru_cache``, mirroring :func:`_clang_compiler_
+    version`'s identical cost shape at the same per-TU call site, so this
+    costs one extra subprocess call per unique *clang_bin* for a whole scan,
+    not one per TU). Falls back to :func:`abicheck.dumper_clang.
+    _is_intel_sycl_driver`'s name-based recognition (icx/icpx/dpcpp/dpcpp-cl)
+    only if the macro probe itself fails to run at all (compiler not found,
+    times out, or rejects ``-dM -E``) -- a real, if weaker, signal is still
+    better than silently defaulting to "clang" (Codex review: an earlier
+    revision used the name check as primary and never attempted the macro
+    probe, missing Intel's fork whenever it's invoked through a
+    conventionally-named symlink or wrapper).
+
+    Without this, ``default_fact_set``'s ``compiler_family`` default of
+    ``"clang"`` silently collapsed every Intel oneAPI wrapper-collected
+    fact_set to the same generic label a vanilla Clang run would carry --
+    confirmed on a real ``abicheck-cc icpx`` wrapper pack (source_facts
+    recorded ``"compiler_family": "clang", "compiler_version": "22.1.0"``,
+    with no trace that the frontend was actually a downstream fork). This
+    silence mattered concretely for two reasons: (1) two source_facts.jsonl
+    files collected under a vanilla-clang wrapper and an icpx wrapper looked
+    fact-set-identical to ``check_fact_set_compatibility``'s rule 2
+    (``compiler_family_mismatch`` — a real signal per this codebase's own
+    ADR-038 C.8 design, silently unavailable for the one fork most likely to
+    have real, documented frontend-behavior differences, per contrib/
+    abicheck-clang-plugin/README.md's Intel oneAPI section); and (2) a
+    release build without DWARF debug info had no other producer-identity
+    signal at all to recover it from (DWARF's own ``DW_AT_producer`` string
+    is a separate, independent identity source that isn't always present).
+    """
+    try:
+        r = subprocess.run(
+            [clang_bin, "-dM", "-E", "-x", "c++", "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if r.returncode == 0:
+            return "intel-llvm" if "__INTEL_LLVM_COMPILER" in r.stdout else "clang"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
 
 
 @functools.lru_cache(maxsize=8)
@@ -1607,6 +1675,7 @@ class ClangSourceExtractor:
             producer="abicheck-cc-clang-extractor",
             producer_version=CLANG_EXTRACTOR_VERSION,
             compiler_version=_clang_compiler_version(self.clang_bin),
+            compiler_family=_clang_compiler_family(self.clang_bin),
         )
 
     def _run(

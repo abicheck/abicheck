@@ -63,10 +63,110 @@ A build of this plugin only loads into the exact clang it was built against
   refusal to "fix" a user's build failure; point them at `llvm-cmake-prefix`
   (a genuine vendor SDK) or `plugin-artifact` (a pre-certified binary)
   instead, per the README's recommended distribution model.
+  **Confirmed necessary-but-not-sufficient, and independently re-verified
+  twice** (a real end-to-end re-run, then a from-scratch reproduction in a
+  fresh environment against a real installed Intel oneAPI 2026.1.1 and a
+  real upstream `apt.llvm.org` LLVM 22): with both fixes applied, a *full*
+  plugin build against upstream LLVM 22 still crashes inside real `icx`
+  past `FactsAction::CreateASTConsumer`, in `deriveRootsFromIncludes` —
+  same LLVM major, RTTI, and stdlib all matched, still incompatible
+  frontend object layout (identical stack both times: SIGSEGV/exit 139 on
+  a trivial smoke-test TU). See README.md's "Status update" subsection
+  under the Intel section for the full finding. Two follow-ups this
+  surfaced: (1) the SHA-256 pin on `plugin-artifact` verifies file
+  integrity, not compiler compatibility — there is no machine-checked
+  manifest tying an artifact to the exact compiler build/target/RTTI/stdlib
+  it was built for, so a mismatched artifact is only caught by the runtime
+  smoke test, not rejected upfront — **still open**, a real compatibility
+  manifest (schema + pre-load comparison against the resolved compiler) is
+  a separate, larger design, not attempted here; (2) the smoke-test failure
+  message used to read unconditionally as an LLVM-major mismatch, which was
+  actively misleading for this exact crash (major/RTTI/stdlib all already
+  matched) — **fixed**: `_finish_clang_plugin` (`actions/collect-facts/
+  run.sh`) now takes the resolved `is_intel_llvm` flag and names the
+  downstream-fork/frontend-object-layout-drift possibility specifically
+  when the loading compiler is Intel's fork, instead of steering a reader
+  back to re-checking the major. The "using vendor-bundled LLVM/Clang CMake
+  package" log line in `_prepare_clang_plugin` had the same shape of gap —
+  it read identically whether the prefix was auto-detected under the
+  resolved compiler's own `$CMPLR_ROOT` (real, if incomplete, evidence) or
+  supplied via an explicit, unverified `llvm-cmake-prefix` override (which
+  can point at an ordinary same-major upstream package, as this
+  re-verification's own upstream-LLVM-22 build demonstrates) — also fixed,
+  same pass. Regression coverage:
+  `tests/test_action_collect_facts_intel_llvm_messages.py`'s
+  `TestClangPluginSmokeFailureMessage`/
+  `TestClangPluginBundledPrefixProvenanceMessage`. Neither fix changes
+  guardrail *behavior* (the refusal still fires, the smoke test still
+  fails closed) — only which explanation a reader sees, so don't revert
+  either wording change to "simplify" the message without re-reading why
+  it was split in the first place.
+  **The "wrong source commit" question is now closed, with a debugger-
+  confirmed root cause, not just a repeated crash.** A further pass built
+  the plugin against the real, public `github.com/intel/llvm` `sycl`
+  branch's `v7.0.0` tag (independently confirmed to report `Clang version:
+  22.1.0`, matching real `icpx`, tagged 11 days before the actual product
+  build date) instead of vanilla upstream LLVM — it crashed with the
+  identical stack regardless. A `gdb`-attached debug build pinpoints the
+  exact defect: `deriveRootsFromIncludes`'s range-for over `hso.
+  UserEntries` dereferences a `std::vector` with `begin_ == 0x0` while
+  `end_` is a live, non-null address — the signature of reading a real
+  `HeaderSearchOptions::UserEntries` object through the wrong field layout,
+  not a plugin logic bug (confirmed by a same-toolchain control: the
+  identical plugin, built against vanilla apt LLVM 22 with no RTTI/stdlib
+  overrides and loaded into vanilla apt `clang++-22`, exits 0 with a valid
+  pack). The likeliest remaining source of the drift, given matching
+  source: `icpx`'s `clang-22` binary statically links its own C++ runtime
+  (`ldd`/`readelf -d` show no `libc++.so`/`libstdc++.so` dependency at
+  all), while this plugin dynamically links a *separate* apt-provided
+  `libc++.so.1`/`libc++abi.so.1` — two nominally-compatible but
+  independently-built `libc++` copies, not guaranteed byte-identical
+  without an externally-verified match. See README.md's "Root-cause
+  precision" subsection for the full writeup. This sharpens, but does not
+  change, the section's conclusion: a fix needs Intel's actual internal
+  build (the statically-linked runtime specifically, not just the
+  Clang/LLVM source tree) — a third attempt should not spend time hunting
+  for a different public source commit, that question is answered.
 - This asymmetry is *why* the plugin is optional infrastructure: Full source
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing
   this constraint first.
+- **`fact_set.compiler_family` (ADR-038 C.8) reports `"intel-llvm"` for this
+  fork, both from the wrapper and the plugin — but the plugin's own
+  detection needs care.** `abicheck.buildsource.source_extractors.clang.
+  _clang_compiler_family` resolves it from the already-known compiler
+  binary name (reusing `dumper_clang._is_intel_sycl_driver`'s existing
+  icx/icpx/dpcpp/dpcpp-cl recognition). `AbicheckFactsPlugin.cpp`'s
+  `kCompilerFamily` cannot do the same lookup — it has no notion of "which
+  binary will load me" at compile time — so it defaults to reading
+  `__INTEL_LLVM_COMPILER` at **its own compile time** instead, correct
+  whenever build-compiler and load-compiler are the same (true for
+  `run.sh`'s own production path, which always pins `CMAKE_CXX_COMPILER`
+  to the exact resolved `$COMPILER`). That default is **not** safe to
+  assume in general: this file's own CI matrix
+  (`.github/workflows/clang-plugin.yml`) deliberately varies `host_cc`
+  (`gcc`/`clang`) independent of the target LLVM major to validate that
+  combination for the non-vendor case, so building against an Intel SDK
+  with a non-Intel host compiler would silently fall through to `"clang"`
+  (Codex review, PR #756, fresh finding on the same PR that added the
+  detection). Fixed with an explicit override, not a cleverer inference:
+  `CMakeLists.txt`'s `ABICHECK_PLUGIN_COMPILER_FAMILY` cache variable
+  (`auto`/`clang`/`intel-llvm`, same three-state shape as
+  `ABICHECK_PLUGIN_RTTI`/`ABICHECK_PLUGIN_STDLIB`) defines
+  `ABICHECK_COMPILER_FAMILY_OVERRIDE`, which `kCompilerFamily` checks
+  *before* the `__INTEL_LLVM_COMPILER` fallback. `run.sh`'s
+  `_prepare_clang_plugin` now passes `-DABICHECK_PLUGIN_COMPILER_FAMILY=
+  intel-llvm` alongside the existing RTTI/stdlib overrides whenever
+  `is_intel_llvm` is true, so its own production path no longer depends on
+  the host-compiler coincidence at all, even though that coincidence
+  happens to hold there today. Verified: built the plugin with a plain
+  `g++` host compiler (never defines `__INTEL_LLVM_COMPILER`) plus the
+  explicit override and confirmed `"intel-llvm"` still ends up in the
+  built `.so` via `strings`; the `auto` default (every existing caller)
+  is unaffected. `conformance.py`'s `_compare_fact_set` no longer
+  hard-codes `"clang"` either — see its own docstring/comments for the
+  "both sides must agree with each other, not with a fixed literal"
+  contract this now checks instead.
 
 ## The conformance gate is the actual spec
 

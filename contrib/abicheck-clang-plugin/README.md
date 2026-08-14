@@ -375,6 +375,170 @@ remain Full source scan (`dump --sources`) and the `abicheck-cc` wrapper
 `icpx`'s SYCL host/device handling); the plugin is an optional, opt-in
 optimization on top of that, same as for every other toolchain.
 
+### Status update: guardrails hold, full plugin still fails inside real `icx`/`icpx`
+
+A follow-up end-to-end re-run (real Intel(R) oneAPI DPC++/C++ Compiler
+2026.1.1, build 20260724) against the guardrails this section already
+documents (`producer: clang-plugin`'s same-major-apt-fallback refusal,
+`ABICHECK_PLUGIN_RTTI=off`, `ABICHECK_PLUGIN_STDLIB=libc++`, and the
+`plugin-artifact`/`plugin-artifact-sha256` inputs) confirms the guardrails
+work as designed and narrows what "experimental" means in practice:
+
+- **The apt-fallback refusal fires correctly.** With no vendor SDK on hand,
+  `collect-facts` refuses to build against a same-major distro Clang for
+  this compiler and fails loudly before ever producing a broken artifact —
+  the failure mode this section exists to prevent.
+- **The RTTI/libc++ fixes are necessary but not sufficient for the *full*
+  plugin.** They resolve the load-time and `ParseArgs`-crossing crashes
+  documented above, but a full build (`AbicheckFactsPlugin.cpp`, not the
+  minimal argument-blind probe mentioned above) built against upstream LLVM
+  22 with both fixes applied still crashes inside real `icx` once it
+  actually walks the AST — reproduced past `FactsAction::CreateASTConsumer`,
+  down into `deriveRootsFromIncludes(const clang::HeaderSearchOptions &)`.
+  Same LLVM major, RTTI and standard-library ABI both matched, and it still
+  crashes: `__clang_major__`/`__INTEL_LLVM_COMPILER` parity is not frontend
+  object-layout parity (`CompilerInstance`/`HeaderSearchOptions`/
+  `Preprocessor`/`ASTContext`/`Decl` hierarchy) for this fork — confirming,
+  with a concrete stack rather than a hypothesis, this section's existing
+  "building against a matching upstream Clang is not a safe substitute for
+  this fork" statement. A **mismatched** `plugin-artifact` (this same
+  upstream-LLVM-22 build) is correctly caught by `collect-facts`'s runtime
+  smoke test before it reaches a real build, so the failure mode here is
+  "the certified-artifact path has no certified artifact yet to point at,"
+  not "an incompatible artifact silently ships."
+- **The `abicheck-cc` wrapper path is the one confirmed working end-to-end
+  against real `icpx`** in this same re-run: `abicheck-cc icpx` observing a
+  real compile, through `abicheck dump --build-info`, to a `scan
+  --build-info --depth source` producing L4 source-ABI replay and an L5
+  source graph. Prefer it (or full source scan) for `icpx`/`icx` today; the
+  plugin remains an optional optimization with no certified path yet, not a
+  regression from the state described above.
+
+**Independently re-verified** (a later pass, real Intel(R) oneAPI DPC++/C++
+Compiler 2026.1.1, build 20260724, installed from `apt.repos.intel.com`, and
+a real upstream `apt.llvm.org` LLVM 22 dev package, both in a from-scratch
+environment): every finding above reproduces exactly. The same-major
+apt-fallback refusal fires with `producer: clang-plugin`'s real guardrail
+code, unmodified, against real `icpx`. A full plugin built with
+`-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++` against upstream
+LLVM 22.1.8 crashes with the identical stack (`deriveRootsFromIncludes` under
+`FactsAction::CreateASTConsumer`, SIGSEGV/exit 139) the moment it is loaded
+into real `icpx` on even a trivial smoke-test translation unit. The
+`abicheck-cc` wrapper path (`abicheck-cc icpx` → `abicheck dump --build-info`
+→ `abicheck scan --build-info --depth source`) completes end-to-end against
+the same real `icpx`, with L4 source-ABI replay matching 2/2 symbols and a
+present L5 source graph. This pass also fixed two things this
+re-verification surfaced directly in `collect-facts`'s own guardrail code
+(not the plugin itself): the smoke-test failure message previously read
+unconditionally as "not the same LLVM major," which is actively misleading
+for this exact crash (major, RTTI, and stdlib all matched) — it now names
+the downstream-fork/frontend-object-layout-drift possibility whenever the
+resolved compiler is Intel's fork; and the "vendor-bundled LLVM/Clang CMake
+package" log line no longer claims the same confidence for an auto-detected
+`$CMPLR_ROOT` prefix (confirmed to live under the resolved compiler's own
+install root) as for an explicit, unverified `llvm-cmake-prefix` override
+(which can point at an ordinary same-major upstream package, as this
+re-verification's own upstream-LLVM-22 build demonstrates). See
+`actions/collect-facts/run.sh`'s `_finish_clang_plugin`/`_prepare_clang_plugin`
+and `tests/test_action_collect_facts_intel_llvm_messages.py`'s
+`TestClangPluginSmokeFailureMessage`/`TestClangPluginBundledPrefixProvenanceMessage`.
+
+None of this changes the section's guidance: the plugin is not a certified
+producer for `icx`/`icpx` today, and the only path to one is building against
+the exact toolchain image that will load it (see "Recommended distribution
+model" below) — this re-run is further evidence for that, not a new
+requirement. See `contrib/abicheck-clang-plugin/AGENTS.md`'s Intel paragraph
+for the agent-facing summary and the remaining open items (a machine-checked
+compiler/artifact compatibility manifest beyond the SHA-256 integrity check,
+and smoke-test wording that currently reads as an LLVM-major mismatch even
+when the major already matches).
+
+### Root-cause precision: a debugger-confirmed corrupted `std::vector`, not just "it crashes"
+
+A further pass built the plugin against the **real, public Intel LLVM fork
+source** (`github.com/intel/llvm`, the `sycl` branch's `v7.0.0` tag —
+independently confirmed by its own `cmake` configure step to report `Clang
+version: 22.1.0`, matching real `icpx` 2026.1.1's `__clang_major__`, and
+tagged 2026-07-13, eleven days before the 20260724 build date) instead of
+vanilla upstream LLVM, on the theory that the earlier findings above might
+be a *source-commit* mismatch (public upstream Clang vs. Intel's own fork)
+rather than a genuine, unrecoverable ABI drift. It is not:
+
+- The plugin (same `-DABICHECK_PLUGIN_RTTI=off -DABICHECK_PLUGIN_STDLIB=libc++`
+  recipe) built cleanly against this real fork source and crashed inside
+  real `icpx` with the **identical** stack and signal — same function,
+  same line, same SIGSEGV.
+- A debug build (`-DCMAKE_BUILD_TYPE=Debug`) of that same fork-sourced
+  plugin, inspected live under `gdb` attached to real `icpx`, pinpoints the
+  crash precisely: `deriveRootsFromIncludes`'s `for (const auto &e : hso.
+  UserEntries)` range-for loop dereferences a `std::vector` whose iterator
+  state is internally inconsistent — `__begin1.__i_ == 0x0` (a null begin
+  pointer) while `__end1.__i_` is a real, non-null heap address. A
+  genuinely empty `std::vector` has `begin() == end()`, both null or both
+  equal; `begin_` reading as null while `end_` reads as a live pointer is
+  the signature of reading a `std::vector<HeaderSearchOptions::Entry>`
+  object through the **wrong field layout** — bytes written by whatever
+  object model `icpx`'s own (differently-built) frontend code actually
+  used for `clang::HeaderSearchOptions`, reinterpreted through this
+  plugin's own compiled understanding of that same class. This is a
+  concrete confirmation of "frontend object-layout parity," not just a
+  restatement of it — the specific object crossing the ABI boundary badly
+  is `HeaderSearchOptions::UserEntries` (a `std::vector<Entry>`), not
+  something diffuse across "the frontend hierarchy" in general.
+- **Control case, same environment, ruling out a plain logic bug:** the
+  identical plugin source, built against vanilla apt LLVM/Clang 22
+  (`CMAKE_PREFIX_PATH=/usr/lib/llvm-22`, `CMAKE_CXX_COMPILER=clang++-22`,
+  **no** RTTI/stdlib overrides — a fully self-consistent, single-toolchain
+  pair) and loaded into vanilla apt `clang++-22` on the identical trivial
+  smoke-test translation unit, exits 0 and emits a real, valid
+  `abicheck_inputs/manifest.json`. The crash is not present when nothing
+  crosses a toolchain boundary at all — it requires the specific
+  icx-vs.-everything-else mismatch, however that mismatch actually arises.
+- **A further, narrower hypothesis for *why* the exact-matching-tag build
+  still failed, worth recording even though it could not be verified
+  further in this environment:** real `icpx`'s own `clang-22` binary (a
+  168MB static executable) has **no** `libc++.so`/`libstdc++.so` runtime
+  dependency at all (`ldd`/`readelf -d` show only `libc`/`libm`/`libgcc_s`/
+  `libpthread`/`librt`/`libz` — its C++ standard library is statically
+  linked in). This plugin's own build, by contrast, dynamically links
+  against `/lib/x86_64-linux-gnu/libc++.so.1`/`libc++abi.so.1` (whatever
+  `libc++-<major>-dev` apt package was installed) — a *different, separate*
+  copy of the C++ runtime from whatever `icpx` statically embedded. Two
+  `libc++` builds nominally targeting "the same" ABI version are not
+  guaranteed byte-identical in every internal representation absent an
+  externally-verified match (allocator internals, assertion/hardening
+  build flags, `_LIBCPP_ABI_VERSION`/`_LIBCPP_ABI_NAMESPACE`), and this is
+  exactly the class of drift a corrupted-but-not-obviously-wrong
+  `std::vector` layout would produce. If a future attempt has access to
+  Intel's actual internal build (not just the public source), the
+  `libc++`/`libc++abi` build Intel statically links into `icpx` — not just
+  the Clang/LLVM source commit — is the thing that would need to match
+  exactly; matching source alone (as this pass did) is demonstrably
+  insufficient on its own.
+- **Confirmed, not just hypothesized: building the plugin *with `icpx`
+  itself* does not fix this either.** `CMAKE_CXX_COMPILER=icpx` builds the
+  plugin cleanly (`__INTEL_LLVM_COMPILER` correctly baked into its emitted
+  `compiler_family: "intel-llvm"`, confirmed via `strings` on the built
+  `.so`), and it still crashes with the same signal loading into real
+  `icpx`. `ldd` on that icpx-built `.so` shows why: it *still* dynamically
+  links `/lib/x86_64-linux-gnu/libc++.so.1` — the same apt-provided
+  library — because `icpx`'s own install ships **no** `libc++.so` at all
+  (only the static copy baked into its 168MB `clang-22` binary; confirmed
+  by directory listing under `$CMPLR_ROOT`). There is no *other* `libc++`
+  shared object on the system for even an `icpx`-compiled `-stdlib=libc++`
+  link step to resolve against. This rules out "which compiler builds the
+  plugin" as a variable entirely — the mismatch is specifically that
+  `icpx`'s statically-embedded runtime and the system's only available
+  `libc++.so.1` are two independent builds with no shared-object form of
+  the vendor's own copy to link against instead.
+
+This does not change the section's conclusion (no certified path exists
+without Intel's own internal build), but it does close off the "maybe the
+public fork source was just the wrong commit" question this section
+previously left open, and gives a follow-up attempt a specific, falsifiable
+target (the statically-linked runtime, not the Clang/LLVM source tree)
+rather than another round of "try a slightly different commit."
+
 ### Recommended distribution model: certified artifact, not same-major rebuild
 
 A vendor toolchain's own plugin-development SDK is rarely available as an

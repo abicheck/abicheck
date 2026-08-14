@@ -13,7 +13,20 @@ find_package(Clang REQUIRED CONFIG)
 
 add_library(abicheck-facts MODULE AbicheckFactsPlugin.cpp)
 target_include_directories(abicheck-facts SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
-target_compile_definitions(abicheck-facts PRIVATE ${LLVM_DEFINITIONS})
+
+# LLVMConfig.cmake documents LLVM_DEFINITIONS as "a list of definitions to
+# pass to add_definitions", but in practice it populates a single
+# space-separated string (e.g. "-D_GLIBCXX_USE_CXX11_ABI=1
+# -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS"),
+# not a proper CMake ;-separated list. Passing that string to
+# target_compile_definitions() unsplit collapses the whole thing into ONE
+# malformed definition
+# (-D_GLIBCXX_USE_CXX11_ABI="1 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS
+# -D__STDC_LIMIT_MACROS") instead of four independent flags -- confirmed
+# against a real build against a vendor-bundled LLVM/Clang CMake package.
+# Split on whitespace first so each flag reaches the compiler independently.
+separate_arguments(_abicheck_llvm_definitions UNIX_COMMAND "${LLVM_DEFINITIONS}")
+target_compile_definitions(abicheck-facts PRIVATE ${_abicheck_llvm_definitions})
 target_compile_features(abicheck-facts PRIVATE cxx_std_17)
 
 # Explicit overrides for the two ABI knobs a downstream LLVM fork can get
@@ -31,6 +44,28 @@ set(ABICHECK_PLUGIN_STDLIB "auto" CACHE STRING
   "C++ standard library ABI to build the plugin against: auto (toolchain default), libc++, or libstdc++.")
 set_property(CACHE ABICHECK_PLUGIN_STDLIB PROPERTY STRINGS auto libc++ libstdc++)
 
+# A third override, alongside the two ABI knobs above: which compiler_family
+# (ADR-038 C.8 fact_set) this build should stamp into its emitted JSON. "auto"
+# (the default) has the plugin's own source detect this at ITS OWN compile
+# time via the __INTEL_LLVM_COMPILER predefined macro (the same macro
+# actions/collect-facts/run.sh and abicheck.buildsource.source_extractors.
+# clang._clang_compiler_family key on) -- correct whenever the compiler that
+# builds this plugin is the same one that will load it, which is true for
+# every existing caller today (run.sh's _prepare_clang_plugin always pins
+# CMAKE_CXX_COMPILER to the exact resolved $COMPILER; every clang-plugin.yml
+# matrix leg that varies host_cc independent of the target LLVM major never
+# targets a vendor fork). It stops being correct the moment those two ever
+# diverge for a vendor fork specifically -- e.g. building this plugin's own
+# .cpp with a plain host g++/clang++ while find_package(LLVM) resolves an
+# Intel oneAPI SDK via llvm-cmake-prefix, a combination clang-plugin.yml's
+# own host_cc-independent-of-target-major matrix design explicitly treats as
+# a supported shape for the non-vendor case (Codex review). This override
+# makes the signal explicit instead of inferred from host-compiler
+# coincidence, matching how ABICHECK_PLUGIN_RTTI/STDLIB already work.
+set(ABICHECK_PLUGIN_COMPILER_FAMILY "auto" CACHE STRING
+  "compiler_family to stamp in the emitted fact_set: auto (detect via __INTEL_LLVM_COMPILER at this plugin's own compile time), clang, or intel-llvm.")
+set_property(CACHE ABICHECK_PLUGIN_COMPILER_FAMILY PROPERTY STRINGS auto clang intel-llvm)
+
 # The cache STRINGS property above is GUI-only (a CMake ComboBox hint) --
 # CMake does not enforce it on a value supplied via -D, so a case mismatch
 # or typo (e.g. -DABICHECK_PLUGIN_RTTI=OFF, the CMake ON/OFF convention)
@@ -47,6 +82,11 @@ endif()
 string(TOLOWER "${ABICHECK_PLUGIN_STDLIB}" _abicheck_plugin_stdlib)
 if(NOT _abicheck_plugin_stdlib MATCHES "^(auto|libc\\+\\+|libstdc\\+\\+)$")
   message(FATAL_ERROR "ABICHECK_PLUGIN_STDLIB must be one of auto, libc++, libstdc++ (got: '${ABICHECK_PLUGIN_STDLIB}')")
+endif()
+
+string(TOLOWER "${ABICHECK_PLUGIN_COMPILER_FAMILY}" _abicheck_plugin_compiler_family)
+if(NOT _abicheck_plugin_compiler_family MATCHES "^(auto|clang|intel-llvm)$")
+  message(FATAL_ERROR "ABICHECK_PLUGIN_COMPILER_FAMILY must be one of auto, clang, intel-llvm (got: '${ABICHECK_PLUGIN_COMPILER_FAMILY}')")
 endif()
 
 # LLVM/Clang are conventionally built without RTTI; a plugin that links their
@@ -74,6 +114,16 @@ if(_abicheck_plugin_stdlib STREQUAL "libc++")
 elseif(_abicheck_plugin_stdlib STREQUAL "libstdc++")
   target_compile_options(abicheck-facts PRIVATE -stdlib=libstdc++)
   target_link_options(abicheck-facts PRIVATE -stdlib=libstdc++)
+endif()
+
+# "auto" leaves this undefined -- AbicheckFactsPlugin.cpp's own kCompilerFamily
+# falls back to its __INTEL_LLVM_COMPILER compile-time check unchanged. An
+# explicit clang/intel-llvm value takes priority over that host-compiler
+# inference (see the ABICHECK_PLUGIN_COMPILER_FAMILY cache variable comment
+# above for why "auto" alone isn't always sufficient).
+if(NOT _abicheck_plugin_compiler_family STREQUAL "auto")
+  target_compile_definitions(abicheck-facts PRIVATE
+    ABICHECK_COMPILER_FAMILY_OVERRIDE="${_abicheck_plugin_compiler_family}")
 endif()
 
 # Clang plugins link against the loading clang's symbols; do not bundle LLVM.
