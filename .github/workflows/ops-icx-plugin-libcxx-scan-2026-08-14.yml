@@ -1,0 +1,190 @@
+name: Ops ICX plugin libc++ scan 2026-08-14
+
+on:
+  push:
+    branches: [ops/icx-plugin-libcxx-probe-2026-08-14]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install ICX, LLVM 22 development files, and libc++
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates wget gpg-agent cmake ninja-build build-essential \
+            file binutils jq
+
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp
+
+          key=/tmp/llvm-snapshot.gpg.key
+          wget -q -O "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
+          got=$(gpg --show-keys --with-colons --with-fingerprint "$key" \
+                | awk -F: '/^fpr:/ {print $10; exit}')
+          test "$got" = "6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+          sudo install -m 0644 "$key" /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          echo "deb http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang-22 llvm-22-dev libclang-22-dev libc++-22-dev libc++abi-22-dev
+
+          python -m pip install -e ".[dev]"
+
+      - name: Build the full plugin and run ICX scans
+        shell: bash
+        run: |
+          set -uo pipefail
+          ROOT=$(pwd)
+          OUT="$ROOT/icx-plugin-libcxx-results"
+          mkdir -p "$OUT"
+          exec > >(tee "$OUT/probe.log") 2>&1
+
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          ICPX=$(command -v icpx)
+          ICX=$(command -v icx)
+          FRONTEND=/opt/intel/oneapi/compiler/latest/bin/compiler/clang
+          LLVM_PREFIX=/usr/lib/llvm-22
+          BUILD="$OUT/build-plugin"
+
+          "$ICPX" --version | tee "$OUT/icpx-version.txt"
+          clang++-22 --version | tee "$OUT/upstream-clang-version.txt"
+          echo | "$ICPX" -dM -E -x c++ - \
+            | grep -E '__clang_(major|minor|patchlevel|version)__|__INTEL_(LLVM|CLANG)_COMPILER|_LIBCPP_ABI_VERSION|__GLIBCXX__' \
+            | sort | tee "$OUT/icpx-selected-macros.txt"
+          sha256sum "$ICPX" "$FRONTEND" | tee "$OUT/compiler-sha256.txt"
+          "$ICPX" -### -stdlib=libc++ -x c++ -c /dev/null 2>&1 \
+            | tee "$OUT/icpx-libcxx-driver.txt"
+
+          cmake -S contrib/abicheck-clang-plugin -B "$BUILD" -G Ninja \
+            -DCMAKE_C_COMPILER="$ICX" \
+            -DCMAKE_CXX_COMPILER="$ICPX" \
+            -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
+            -DCMAKE_CXX_FLAGS="-fno-rtti -stdlib=libc++" \
+            -DCMAKE_MODULE_LINKER_FLAGS="-stdlib=libc++" \
+            >"$OUT/cmake.stdout" 2>"$OUT/cmake.stderr"
+          CMAKE_RC=$?
+          echo "$CMAKE_RC" > "$OUT/cmake.rc"
+
+          cmake --build "$BUILD" -v >"$OUT/build.stdout" 2>"$OUT/build.stderr"
+          BUILD_RC=$?
+          echo "$BUILD_RC" > "$OUT/build.rc"
+
+          PLUGIN="$BUILD/libabicheck-facts.so"
+          if [[ -f "$PLUGIN" ]]; then
+            PLUGIN=$(realpath "$PLUGIN")
+            printf '%s\n' "$PLUGIN" | tee "$OUT/plugin-path.txt"
+            sha256sum "$PLUGIN" | tee "$OUT/plugin-sha256.txt"
+            file "$PLUGIN" | tee "$OUT/plugin-file.txt"
+            ldd "$PLUGIN" | tee "$OUT/plugin-ldd.txt"
+            nm -D --undefined-only "$PLUGIN" | c++filt \
+              | grep -E 'std::|clang::|llvm::' \
+              | head -200 | tee "$OUT/plugin-undefined-demangled.txt"
+          fi
+
+          SMOKE_RC=127
+          SCAN_FLOW_RC=127
+          CONFORMANCE_RC=127
+          SCAN_CLI_RC=127
+
+          if [[ -f "$PLUGIN" ]]; then
+            SMOKE="$OUT/smoke"
+            mkdir -p "$SMOKE/include" "$SMOKE/facts"
+            cat > "$SMOKE/include/widget.hpp" <<'CPP'
+          #pragma once
+          namespace demo {
+          struct widget { int value; };
+          int answer(widget);
+          }
+          CPP
+            cat > "$SMOKE/widget.cpp" <<'CPP'
+          #include "widget.hpp"
+          int demo::answer(widget w) { return w.value + 42; }
+          CPP
+            "$ICPX" -std=c++17 -fPIC -shared -I"$SMOKE/include" \
+              -fplugin="$PLUGIN" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "out=$SMOKE/facts" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "public-roots=$SMOKE/include" \
+              -Xclang -plugin-arg-abicheck-facts -Xclang "library=icx_widget" \
+              "$SMOKE/widget.cpp" -o "$SMOKE/libwidget.so" \
+              >"$OUT/smoke.stdout" 2>"$OUT/smoke.stderr"
+            SMOKE_RC=$?
+            echo "$SMOKE_RC" > "$OUT/smoke.rc"
+            find "$SMOKE/facts" -maxdepth 3 -type f -print -exec wc -c {} \; \
+              | tee "$OUT/smoke-facts-files.txt"
+
+            python contrib/abicheck-clang-plugin/tests/scan_flow.py \
+              --plugin "$PLUGIN" --clangxx "$ICPX" \
+              --work "$OUT/scan-flow" --keep \
+              >"$OUT/scan-flow.stdout" 2>"$OUT/scan-flow.stderr"
+            SCAN_FLOW_RC=$?
+            echo "$SCAN_FLOW_RC" > "$OUT/scan-flow.rc"
+
+            python contrib/abicheck-clang-plugin/tests/conformance.py \
+              --plugin "$PLUGIN" --clangxx "$ICPX" \
+              --work "$OUT/conformance" --keep \
+              >"$OUT/conformance.stdout" 2>"$OUT/conformance.stderr"
+            CONFORMANCE_RC=$?
+            echo "$CONFORMANCE_RC" > "$OUT/conformance.rc"
+
+            abicheck scan --help >"$OUT/scan-help.txt" 2>&1
+            if [[ -f "$OUT/scan-flow/libwidget.so" \
+                  && -f "$OUT/scan-flow/fx/widget.baseline.json" \
+                  && -d "$OUT/scan-flow/fx/abicheck_inputs" ]]; then
+              abicheck scan "$OUT/scan-flow/libwidget.so" \
+                --against "$OUT/scan-flow/fx/widget.baseline.json" \
+                --build-info "$OUT/scan-flow/fx/abicheck_inputs" \
+                --depth source --format json \
+                >"$OUT/scan-cli.stdout" 2>"$OUT/scan-cli.stderr"
+              SCAN_CLI_RC=$?
+            fi
+            echo "$SCAN_CLI_RC" > "$OUT/scan-cli.rc"
+          fi
+
+          {
+            printf 'test\trc\n'
+            printf 'cmake\t%s\n' "$CMAKE_RC"
+            printf 'build\t%s\n' "$BUILD_RC"
+            printf 'smoke\t%s\n' "$SMOKE_RC"
+            printf 'scan_flow\t%s\n' "$SCAN_FLOW_RC"
+            printf 'conformance\t%s\n' "$CONFORMANCE_RC"
+            printf 'scan_cli\t%s\n' "$SCAN_CLI_RC"
+          } | tee "$OUT/result-matrix.tsv"
+
+          for f in "$OUT"/*.stderr; do
+            echo "===== $f ====="
+            tail -120 "$f"
+          done
+
+          exit 0
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: icx-plugin-libcxx-scan-${{ github.sha }}
+          path: icx-plugin-libcxx-results/
+          if-no-files-found: error
+          retention-days: 30
