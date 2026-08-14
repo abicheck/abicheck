@@ -135,6 +135,18 @@ topics:
     allowed_summaries:
       - learn/architecture.md
 
+  # Split out of Limitations & Known Boundaries (docs/AGENTS.md criterion 5:
+  # the page had grown to answer more than one primary question). The ELF-only
+  # symbol filter is a genuinely separate, self-contained mechanism (heuristic
+  # prefix filtering of `.dynsym`) distinct from the rest of the page's
+  # practical boundary list.
+  elf-symbol-filtering:
+    canonical_page: learn/elf-symbol-filtering.md
+    fact_sources:
+      - abicheck/dumper_elf_symbols.py
+    allowed_summaries:
+      - learn/limitations.md
+
   source-evidence-producers:
     canonical_page: use/producing-source-facts.md
     fact_sources:
@@ -385,6 +397,7 @@ topics:
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
+      - learn/limitations.md
 
   concurrency-and-initialization:
     canonical_page: learn/concurrency-and-initialization.md
