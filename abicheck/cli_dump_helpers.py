@@ -1493,6 +1493,9 @@ def resolve_dump_compile_context(
     build_config: Path | None,
     sources: Path | None,
     frontend_context: str = "host",
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Resolve the L2 compile context for a dump, folding the config compile: block.
 
@@ -1523,6 +1526,9 @@ def resolve_dump_compile_context(
         build_config=build_config,
         sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
 
 

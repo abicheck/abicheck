@@ -821,6 +821,9 @@ def _run_artifact_set(
     sysroot: Path | None,
     nostdinc: bool,
     frontend_context: str,
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
 ) -> None:
     """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
 
@@ -875,6 +878,9 @@ def _run_artifact_set(
         build_config=build_config,
         sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
 
     changed, changed_src, seeded = _resolve_changed_seed(
@@ -1451,6 +1457,9 @@ def scan_cmd(
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
     gcc_option_tokens: tuple[str, ...] = (),
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     frontend_context: str = "host",
@@ -1549,6 +1558,9 @@ def scan_cmd(
             gcc_prefix=gcc_prefix,
             gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
+            compiler_path=compiler_path,
+            compiler_prefix=compiler_prefix,
+            compiler_option_tokens=compiler_option_tokens,
             sysroot=sysroot,
             nostdinc=nostdinc,
             frontend_context=frontend_context,
@@ -1628,6 +1640,9 @@ def scan_cmd(
         build_config=cfg_path,
         sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
     includes = includes_tuple
     binary = artifact

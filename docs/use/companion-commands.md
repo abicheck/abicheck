@@ -164,7 +164,7 @@ config `true`: `--no-dwarf-only` (restore header parsing), `--no-debuginfod`,
 
 **Not demoted (still visible flags):** `--debug-root` (the coarse per-run
 debug-tree override, now side-aware, see the table above); the toolchain
-family (`--gcc-path` / `--gcc-prefix` / `--gcc-options` / `--gcc-option` /
+family (`--compiler` / `--compiler-prefix` / `--gcc-options` / `--compiler-option` /
 `--sysroot` / `--nostdinc`, shared with `dump`/`scan`); and
 `--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
 switch for public-surface scoping).

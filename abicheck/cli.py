@@ -478,6 +478,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              snapshot_compression: str,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              gcc_option_tokens: tuple[str, ...],
+             compiler_path: str | None, compiler_prefix: str | None,
+             compiler_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, dry_run: bool,
@@ -595,6 +597,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path, compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc

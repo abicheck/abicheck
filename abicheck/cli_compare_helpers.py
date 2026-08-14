@@ -1192,6 +1192,8 @@ def run_compare(
     header_backend: str,
     gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
+    compiler_path: str | None = None, compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
     old_header_backend: str | None, new_header_backend: str | None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
@@ -1475,6 +1477,8 @@ def run_compare(
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
         frontend_context=frontend_context,
+        compiler_path=compiler_path, compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include

@@ -90,7 +90,7 @@ bundled Clang frontend.
 
 abicheck detects this case and appends your detected `castxml --version` plus the
 recommended floor to the error. As an alternative, point abicheck at a
-clang-parsable toolchain/sysroot with `--gcc-path` / `--sysroot`. A
+clang-parsable toolchain/sysroot with `--compiler` / `--sysroot`. A
 `#ifdef __cplusplus extern "C"` C header that fails only under `--lang c` should
 be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
 
