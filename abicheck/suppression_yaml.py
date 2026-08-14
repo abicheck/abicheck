@@ -27,14 +27,23 @@ _MERGE_TAG = "tag:yaml.org,2002:merge"
 def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
     """Raw scalar text of *key* in mapping *node*, resolving YAML merge
     keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself does:
-    a direct (non-merge) key always wins over a merged one, and among
-    multiple merge sources, the first-listed wins for a duplicate key
-    (Codex review, fresh evidence: ``defaults: &d {finding_id: ...}``
-    followed by ``- <<: *d`` bypassed the direct key/value scan entirely,
+    a direct (non-merge) key always wins over a merged one, among multiple
+    merge sources the first-listed wins for a duplicate key, and among
+    multiple *direct* occurrences of the same key the LAST one wins --
+    mirroring ``yaml.safe_load()``'s own last-key-wins behavior for a
+    mapping with a duplicate key (Codex review, fresh evidence: an
+    earlier revision returned on the first direct match, so a duplicate
+    ``finding_id:`` entry resolved to a different value here than the
+    already-loaded, safe_load-produced mapping this result gets merged
+    into -- silently targeting the wrong finding).
+
+    (Also handles ``defaults: &d {finding_id: ...}`` followed by
+    ``- <<: *d``, which bypasses a plain direct key/value scan entirely
     since the merge key's own value is a mapping *node reference*, not a
-    ``finding_id`` pair in *this* mapping's own ``.value`` list).
+    ``finding_id`` pair in *this* mapping's own ``.value`` list.)
     """
     merged: str | None = None
+    direct: str | None = None
     for k, v in node.value:
         if isinstance(k, yaml.ScalarNode) and k.tag == _MERGE_TAG:
             sources = v.value if isinstance(v, yaml.SequenceNode) else [v]
@@ -46,8 +55,8 @@ def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
             and k.value == key
             and isinstance(v, yaml.ScalarNode)
         ):
-            return str(v.value)  # Direct key always wins -- return immediately.
-    return merged
+            direct = str(v.value)  # Keep scanning -- a later dup key wins.
+    return direct if direct is not None else merged
 
 
 def raw_finding_ids_by_index(text: str) -> dict[int, str]:
@@ -92,11 +101,19 @@ def raw_finding_ids_by_index(text: str) -> dict[int, str]:
 
 
 def parse_finding_id(raw: object) -> str | None:
-    """Coerce a ``finding_id`` value to ``str``. ``SuppressionList.load``
-    passes the raw scalar text via :func:`raw_finding_ids_by_index`, so
-    this only matters for a caller building ``Suppression`` directly with
-    a non-``str`` value.
+    """Coerce a ``finding_id`` value to ``str``, normalizing an empty
+    string to ``None``.
+
+    An explicit ``finding_id: ""`` (or a blank ``finding_id:`` under a
+    tag other than YAML's null resolver) would otherwise pass
+    ``Suppression.__post_init__``'s ``is not None`` selector check as a
+    real, standalone-sufficient selector that can never match any real
+    finding -- a rule that loads successfully but is permanently dead
+    (Codex review, fresh evidence). ``SuppressionList.load`` passes the
+    raw scalar text via :func:`raw_finding_ids_by_index`; this also
+    matters for a caller building ``Suppression`` directly with a
+    non-``str`` value.
     """
     if raw is None:
         return None
-    return str(raw)
+    return str(raw) or None

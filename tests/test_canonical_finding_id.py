@@ -327,6 +327,43 @@ class TestCanonicalFindingIdScopedCanonicalization:
         )
         assert report_canonical_finding_id(a) != report_canonical_finding_id(c)
 
+    def test_struct_field_type_changed_canonicalizes_embedded_description_spelling(
+        self,
+    ):
+        # Regression (Codex review, PR #753, round 7): struct_field_type_changed's
+        # description_template embeds "{old} -> {new}" mid-sentence, not at
+        # the start -- canonicalize_type_name's anchored struct-prefix/
+        # const-reorder passes never reach it, so the OLD fix (canonicalizing
+        # the whole description sentence) left the embedded spelling raw
+        # even though old_value/new_value themselves were already fixed.
+        a = make_change(
+            ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+            symbol="Foo",
+            name="Foo",
+            detail="x",
+            old="struct Bar*",
+            new="struct Bar*",
+        )
+        b = make_change(
+            ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+            symbol="Foo",
+            name="Foo",
+            detail="x",
+            old="Bar *",
+            new="Bar *",
+        )
+        assert report_canonical_finding_id(a) == report_canonical_finding_id(b)
+        # A genuinely different field type must still differ.
+        c = make_change(
+            ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+            symbol="Foo",
+            name="Foo",
+            detail="x",
+            old="Bar *",
+            new="Baz *",
+        )
+        assert report_canonical_finding_id(a) != report_canonical_finding_id(c)
+
     def test_equivalent_category_kinds_still_distinguish_old_new(self):
         # Regression (Codex review, PR #753, fourth round): a bare
         # "category:type_size_change" discriminator (used to collapse
@@ -545,6 +582,17 @@ class TestFindingIdSuppressionSelector:
     def test_no_selector_at_all_still_rejected(self):
         with pytest.raises(ValueError, match="finding_id"):
             Suppression(reason="no selector given")
+
+    def test_empty_finding_id_loaded_from_yaml_still_rejected(self, tmp_path):
+        # Regression (Codex review, PR #753, round 7): an explicit
+        # `finding_id: ""` must not be accepted as a real, standalone
+        # selector -- it can never match any actual finding.
+        yaml_path = tmp_path / "suppress.yaml"
+        yaml_path.write_text(
+            "version: 1\nsuppressions:\n  - finding_id: \"\"\n    reason: r\n"
+        )
+        with pytest.raises(ValueError, match="finding_id"):
+            SuppressionList.load(yaml_path)
 
     def test_loads_from_yaml(self, tmp_path):
         change = _func_removed(

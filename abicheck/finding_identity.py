@@ -1099,6 +1099,27 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
     }
 )
 
+#: Kinds whose ``change_registry`` ``description_template`` embeds the raw
+#: ``{old}``/``{new}`` type spelling verbatim, NOT at the start of the
+#: sentence (Codex review, fresh evidence): ``struct_field_type_changed``
+#: ("Field type changed: {name}::{detail} {old} → {new}"),
+#: ``template_param_type_changed``/``template_return_type_changed``
+#: ("... ({old} → {new})"). Canonicalizing the whole rendered sentence
+#: with :func:`canonicalize_type_name` doesn't fix these -- its
+#: struct-prefix-strip/const-reorder passes are anchored to string start,
+#: so they never reach text embedded mid-sentence, and the embedded
+#: spelling stays raw even after old_str/new_str themselves are correctly
+#: canonicalized. The other six allowlisted kinds' templates never embed
+#: {old}/{new} at all (`"Return type changed: {name}"` and siblings), so
+#: this set is deliberately narrower than _TYPE_BEARING_DISCRIMINATOR_KINDS.
+_DESCRIPTION_EMBEDS_VALUES_KINDS = frozenset(
+    {
+        "struct_field_type_changed",
+        "template_param_type_changed",
+        "template_return_type_changed",
+    }
+)
+
 
 def _split_top_level_commas(value: str) -> list[str]:
     """Split *value* on ``,`` at nesting depth 0 only.
@@ -1346,8 +1367,10 @@ def _change_discriminator(
     canonicalize_this_kind = (
         canonicalize_values and kind_value in _TYPE_BEARING_DISCRIMINATOR_KINDS
     )
-    old_str = _stringify_change_value(change.old_value)
-    new_str = _stringify_change_value(change.new_value)
+    raw_old_str = _stringify_change_value(change.old_value)
+    raw_new_str = _stringify_change_value(change.new_value)
+    old_str = raw_old_str
+    new_str = raw_new_str
     if canonicalize_this_kind:
         if kind_value == "func_params_changed":
             # See _TYPE_BEARING_DISCRIMINATOR_KINDS's own comment: a
@@ -1362,7 +1385,19 @@ def _change_discriminator(
     if include_description:
         desc = change.description or ""
         if canonicalize_this_kind:
-            desc = canonicalize_type_name(desc)
+            if kind_value in _DESCRIPTION_EMBEDS_VALUES_KINDS:
+                # See _DESCRIPTION_EMBEDS_VALUES_KINDS's own comment:
+                # canonicalize_type_name's anchored passes can't reach an
+                # embedded type mid-sentence, so substitute the *known*
+                # raw old/new substrings with their already-canonicalized
+                # forms directly, rather than canonicalizing the sentence
+                # as one opaque blob.
+                if raw_old_str:
+                    desc = desc.replace(raw_old_str, old_str)
+                if raw_new_str:
+                    desc = desc.replace(raw_new_str, new_str)
+            else:
+                desc = canonicalize_type_name(desc)
         parts.append(desc)
     return "\x1f".join(parts)
 

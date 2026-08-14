@@ -49,3 +49,24 @@
   top-level commas (respecting `<>`/`()`/`[]` nesting, so a template
   argument's own comma doesn't misalign the split) and canonicalizes each
   parameter before rejoining.
+- **`canonical_finding_id` now canonicalizes a type spelling embedded
+  mid-sentence in a finding's description** — `struct_field_type_changed`/
+  `template_param_type_changed`/`template_return_type_changed` embed
+  `{old}`/`{new}` after other text, where `canonicalize_type_name`'s
+  anchored struct-prefix/const-reorder passes never reach them; the raw
+  spelling stayed uncanonicalized in `description` even after `old_value`/
+  `new_value` themselves were fixed, still breaking the fold across
+  producers for these three kinds. `finding_identity.py` now substitutes
+  the already-canonicalized `old_value`/`new_value` text for their known
+  raw substrings within the description, rather than canonicalizing the
+  sentence as one opaque blob.
+- **`suppression_yaml.py`'s raw `finding_id` scalar lookup now matches
+  `yaml.safe_load`'s own duplicate-key semantics, and rejects an empty
+  digest** — an earlier revision returned on the first direct
+  `finding_id:` match, disagreeing with `yaml.safe_load`'s own
+  last-key-wins behavior for a duplicate mapping key (now fixed: the last
+  direct occurrence wins, matching PyYAML). Separately, `parse_finding_id`
+  now normalizes an empty string to `None`: an explicit `finding_id: ""`
+  previously passed `Suppression.__post_init__`'s selector check as a
+  real, standalone-sufficient selector that could never match any actual
+  finding — a rule that loaded successfully but was permanently dead.

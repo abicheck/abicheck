@@ -33,6 +33,18 @@ class TestRawFindingIdsByIndex:
         text = "version: 1\nsuppressions:\n  - symbol: foo\n    reason: r\n"
         assert raw_finding_ids_by_index(text) == {}
 
+    def test_duplicate_direct_key_last_one_wins(self):
+        # Regression (Codex review, PR #753, round 7): yaml.safe_load()
+        # itself resolves a duplicate mapping key to the LAST value --
+        # returning on the first direct match here would silently disagree
+        # with the already-loaded, safe_load-produced mapping this result
+        # gets merged into in SuppressionList.load.
+        text = (
+            "version: 1\nsuppressions:\n"
+            "  - finding_id: '111'\n    finding_id: '222'\n    reason: dup\n"
+        )
+        assert raw_finding_ids_by_index(text) == {0: "222"}
+
     def test_sequence_merge_first_source_wins(self):
         # YAML merge spec: for `<<: [*a, *b]`, an earlier source in the
         # sequence takes precedence over a later one for a duplicate key.
@@ -55,3 +67,11 @@ class TestParseFindingId:
 
     def test_non_string_is_coerced(self):
         assert parse_finding_id(12345) == "12345"
+
+    def test_empty_string_normalizes_to_none(self):
+        # Regression (Codex review, PR #753, round 7): an explicit
+        # finding_id: "" would otherwise pass Suppression.__post_init__'s
+        # `is not None` selector check as a real, standalone-sufficient
+        # selector that can never match any real finding -- a rule that
+        # loads successfully but is permanently dead.
+        assert parse_finding_id("") is None
