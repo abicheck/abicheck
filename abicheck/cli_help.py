@@ -595,6 +595,11 @@ SCAN_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Policy & contract
         "policy",
         "suppress",
+        # `--contract` is inert without `--contract-evaluation` (scan hard-errors
+        # "--contract requires --contract-evaluation" otherwise) -- both must be
+        # disclosed together or the curated view advertises an option that
+        # can't actually be used on its own (Codex review, PR #757).
+        "contract_evaluation",
         "contract_mode",
         # Output
         "fmt",
