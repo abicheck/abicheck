@@ -85,6 +85,7 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_options import _cli_flag, _warn_force_public_ignored
+from .cli_help import scan_help_options
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -94,6 +95,7 @@ from .cli_options import (
     pack_option,
     policy_options,
     resolve_compile_context,
+    resolve_contract_evaluation,
     scope_options,
     secondary_output_options,
     severity_options,
@@ -815,11 +817,14 @@ def _run_artifact_set(
     header_backend: str,
     gcc_path: str | None,
     gcc_prefix: str | None,
-    gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     frontend_context: str,
+    gcc_options: str | None = None,  # removed as a CLI flag, PR 5/5; internal-only
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
 ) -> None:
     """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
 
@@ -874,6 +879,9 @@ def _run_artifact_set(
         build_config=build_config,
         sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
 
     changed, changed_src, seeded = _resolve_changed_seed(
@@ -1112,6 +1120,7 @@ def _discover_scan_project_config(
 
 
 @main.command("scan")
+@scan_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument(
     "artifact", type=click.Path(exists=True, path_type=Path), required=False
 )
@@ -1172,11 +1181,12 @@ def _discover_scan_project_config(
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Trusted project .abicheck.yml (enables build.query with "
-    "--allow-build-query). Also supplies scope/suppression settings "
-    "(scope.public, scope.public_symbols, suppression.strict) the same way "
-    "`compare --config` does (CLI flags override); auto-discovered upward "
-    "from the current directory when omitted.",
+    help="Trusted project .abicheck.yml (enables build.query, auto-run when "
+    "an explicitly pinned deep level needs it). Also supplies scope/"
+    "suppression settings (scope.public, scope.public_symbols, "
+    "suppression.strict) the same way `compare --config` does (CLI flags "
+    "override); auto-discovered upward from the current directory when "
+    "omitted.",
 )
 @click.option(
     "--against",
@@ -1279,32 +1289,39 @@ def _discover_scan_project_config(
     help="With --against: exit-code scheme (mirrors `compare --exit-code-scheme`): "
     "'legacy' (0/2/4 verdict), 'severity' (per-category error levels), or 'auto' "
     "(severity when a severity setting is in effect, else legacy). Default: "
-    "config's exit_code_scheme, else auto.",
+    "config's exit_code_scheme, else auto. Not demoted to hidden, mirroring "
+    "`compare`'s own visible coarse override (ADR-040 D4).",
 )
 @click.option(
     "--strict-suppressions",
     is_flag=True,
     default=False,
+    hidden=True,
     help="With --against: fail with exit code 1 if any --suppress rule has "
-    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4).",
+    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4). "
+    "Demoted to config (suppression.strict, ADR-037 D4) like `compare`'s flag.",
 )
 @click.option(
     "--public-symbol",
     "public_symbols",
     multiple=True,
+    hidden=True,
     help="With --against: force a symbol (mangled or demangled name) into the "
     "public surface even when header provenance can't see it (mirrors "
     "`compare --public-symbol`). Repeatable. Only meaningful with "
-    "--scope-public-headers.",
+    "--scope-public-headers. Demoted to config (scope.public_symbols, "
+    "ADR-037 D4) like `compare`'s flag.",
 )
 @click.option(
     "--public-symbols-list",
     "public_symbols_list",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
+    hidden=True,
     help="With --against: file of symbols to force public (one per line; '#' "
     "comments and blank lines ignored), merged with --public-symbol (mirrors "
-    "`compare --public-symbols-list`).",
+    "`compare --public-symbols-list`). Demoted to config, mirroring "
+    "`compare`'s already-demoted flag (CLI audit PR 4/5).",
 )
 @click.option(
     "--pattern-verdicts/--no-pattern-verdicts",
@@ -1343,21 +1360,17 @@ def _discover_scan_project_config(
     "against ('public' header-derived surface, 'exports' the binary's own "
     "export table plus its type closure, 'all' every entity). Omitted, the "
     "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Requires --contract-evaluation. The domain decides which findings "
+    "Implies --contract-evaluation if it isn't already given (CLI audit "
+    "PR 3/5). The domain decides which findings "
     "compatibility policy scores, so it can change the verdict and the exit "
     "code, and it is also what the orthogonal contract-coverage axis is "
     "answered against (mirrors `compare --contract`).",
 )
 @pack_option  # ADR-049 D8: --pack (requires --against; see _COMPARISON_ONLY_FLAGS)
 @lang_option
-@click.option(
-    "--allow-build-query",
-    is_flag=True,
-    default=False,
-    hidden=True,  # deprecated no-op: build query runs automatically with --sources
-    help="Deprecated and ignored. With --sources, abicheck infers and runs the "
-    "build-system query (cmake/make/bazel) itself; no flag is needed.",
-)
+# --allow-build-query removed on `scan` (CLI audit PR 5/5): scan never reaches
+# the ADR-032 QUERY_BUILD_SYSTEM gate dump's --dump-manifest uses, so it only
+# suppressed one advisory note. `dump`'s own --allow-build-query is untouched.
 @click.option(
     "--format",
     "fmt",
@@ -1438,17 +1451,25 @@ def scan_cmd(
     contract_mode: str | None,
     pack_paths: tuple[Path, ...],
     lang: str,
-    allow_build_query: bool,
     fmt: str,
     output: Path | None,
     secondary_fmt: str | None,
     secondary_output: Path | None,
     verbose: bool,
+    # --allow-build-query no longer exists as a scan CLI option (CLI audit
+    # PR 5/5); this defaulted-False parameter stays only so
+    # resolve_effective_allow_query/_run_artifact_set's own signatures don't
+    # need to change (see cli_scan.py's --allow-build-query removal comment
+    # above scan_cmd's decorators for why removing the flag was safe here).
+    allow_build_query: bool = False,
     header_backend: str = "auto",
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
     gcc_option_tokens: tuple[str, ...] = (),
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     frontend_context: str = "host",
@@ -1547,6 +1568,9 @@ def scan_cmd(
             gcc_prefix=gcc_prefix,
             gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
+            compiler_path=compiler_path,
+            compiler_prefix=compiler_prefix,
+            compiler_option_tokens=compiler_option_tokens,
             sysroot=sysroot,
             nostdinc=nostdinc,
             frontend_context=frontend_context,
@@ -1626,6 +1650,9 @@ def scan_cmd(
         build_config=cfg_path,
         sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
     includes = includes_tuple
     binary = artifact
@@ -1753,19 +1780,14 @@ def scan_cmd(
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
 
-    if contract_mode is not None and not contract_evaluation:
-        # Same rule, same wording as `compare`'s own check
-        # (`cli_compare_helpers.run_compare`) and the Tier-2 entry's
-        # (`service._validate_contract_mode`): --contract on its own would
-        # silently do nothing, since no finding carries a contract decision
-        # unless --contract-evaluation asked for one. Checked here rather
-        # than left to `compare_snapshots` so it is a clean usage error
-        # (exit 64) raised before any scanning work, matching `compare`.
-        raise click.UsageError(
-            "--contract requires --contract-evaluation: it selects which "
-            "evidence domain the shadow contract evaluator judges against, "
-            "and without that flag no contract decision is computed at all."
-        )
+    # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+    # (abicheck.cli_options.resolve_contract_evaluation), mirroring
+    # `compare`'s own resolution in `cli_compare_helpers.run_compare` --
+    # resolved here, before contract_evaluation is used for anything else
+    # in this function, same as the Tier-2 entry's (`service.
+    # _validate_contract_mode`) explicit-only contract stays untouched for
+    # direct Python API callers.
+    contract_evaluation = resolve_contract_evaluation(contract_mode, contract_evaluation)
 
     from .errors import AbicheckError
     from .service import load_env_matrix

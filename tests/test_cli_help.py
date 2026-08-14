@@ -138,7 +138,9 @@ class TestCompareHelpAllDisclosure:
         (it would just vanish from ``--help`` instead of erroring loudly).
         """
         real_names = {
-            p.name for p in main.commands["compare"].params if isinstance(p, click.Option)
+            p.name
+            for p in main.commands["compare"].params
+            if isinstance(p, click.Option)
         }
         assert cli_help.COMPARE_COMMON_OPTION_NAMES <= real_names
 
@@ -153,7 +155,9 @@ class TestCompareHelpAllDisclosure:
             "--report-mode",
             "--pdb-path",
         ):
-            assert advanced_flag not in out, f"{advanced_flag} leaked into curated --help"
+            assert advanced_flag not in out, (
+                f"{advanced_flag} leaked into curated --help"
+            )
 
     def test_curated_help_keeps_common_options(self) -> None:
         out = CliRunner().invoke(main, ["compare", "--help"]).output
@@ -183,10 +187,55 @@ class TestCompareHelpAllDisclosure:
         assert "advanced option(s) hidden" in result.output
         assert "compare --help-all" in result.output
 
+    def test_hidden_count_never_overcounts_permanently_invisible_options(self) -> None:
+        """The footer promises '--help-all shows every option' -- only true for
+        an option --help-all can actually render. A few options are Click-
+        ``hidden`` AND not listed in any OPTION_GROUPS panel (deprecated no-op
+        shims like --header-graph, superseded aliases like --gcc-path): those
+        never render even in --help-all, so counting them would overstate what
+        running it actually recovers (Codex review, PR #757). Verified by
+        computing the same 'recoverable' set independently of
+        cli_help._make_help_callback's own implementation, so this fails if the
+        production logic regresses to double-counting again."""
+        import re
+
+        for command, common_names in (
+            ("compare", cli_help.COMPARE_COMMON_OPTION_NAMES),
+            ("dump", cli_help.DUMP_COMMON_OPTION_NAMES),
+            ("scan", cli_help.SCAN_COMMON_OPTION_NAMES),
+        ):
+            cmd = main.commands[command]
+            panel_flags: set[str] = set()
+            for panel in cli_help.OPTION_GROUPS.get(f"* {command}", []):
+                panel_flags.update(panel["options"])  # type: ignore[arg-type]
+            common_params = [
+                p
+                for p in cmd.params
+                if isinstance(p, click.Argument) or p.name in common_names
+            ]
+            expected_recoverable = sum(
+                1
+                for p in cmd.params
+                if p not in common_params
+                and (not getattr(p, "hidden", False) or set(p.opts) & panel_flags)
+            )
+            output = CliRunner().invoke(main, [command, "--help"]).output
+            m = re.search(r"(\d+) advanced option\(s\) hidden", output)
+            assert m, f"{command}: footer missing entirely"
+            assert int(m.group(1)) == expected_recoverable, command
+
     def test_help_all_shows_everything_curated_hides(self) -> None:
+        # --gcc-path is deliberately NOT one of these examples: it is now a
+        # fully hidden, superseded alias for --compiler (CLI audit PR 2/5) and
+        # never renders as a real option row even in --help-all -- see
+        # test_cli_contract.py::test_gcc_flags_are_hidden_but_still_parse for
+        # that exact contract. A prior version of this test used --gcc-path
+        # here and passed for the wrong reason: plain substring matching
+        # against --compiler's own help text mentioning "the deprecated
+        # --gcc-path", not a real rendered row (Codex review, PR #757).
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--gcc-path",
+            "--sysroot",
             "--ast-frontend",
             "--jobs",
             "--severity-abi-breaking",
@@ -226,3 +275,184 @@ class TestCompareHelpAllDisclosure:
             main, ["compare", str(old), str(new), "--gcc-path", "/usr/bin/gcc"]
         )
         assert result.exit_code == 0, result.output
+
+
+# ── `dump --help-all` / `scan --help-all` (G21.8 M2 follow-on) ───────────────
+#
+# Same disclosure as `compare` above, generalized via `cli_help.curated_help_options`.
+# One parametrized class covers the presentational assertions shared by both
+# commands; each command additionally gets its own advanced-option-still-works
+# check, since the functional flag/args differ per command.
+
+_HELP_ALL_COMMANDS: list[
+    tuple[str, frozenset[str], tuple[str, ...], tuple[str, ...]]
+] = [
+    (
+        "dump",
+        cli_help.DUMP_COMMON_OPTION_NAMES,
+        # --gcc-path is deliberately excluded here: it's now a fully hidden,
+        # superseded alias for --compiler (CLI audit PR 2/5) that never
+        # renders even in --help-all, unlike these five genuinely-advanced-
+        # but-still-rendered examples (see test_help_all_shows_everything_curated_hides's
+        # own comment on why a hidden alias would be a false-positive-prone
+        # example for this shared tuple's "shows in --help-all" reuse).
+        ("--sysroot", "--ast-frontend", "--follow-deps", "--debug-root", "--pdb-path"),
+        (
+            "--header",
+            "--include",
+            "--depth",
+            "--sources",
+            "--build-info",
+            "--output",
+            "--verbose",
+        ),
+    ),
+    (
+        "scan",
+        cli_help.SCAN_COMMON_OPTION_NAMES,
+        # --gcc-path excluded here for the same reason as dump's tuple above.
+        # --strict-suppressions/--public-symbol are hidden too (CLI audit
+        # PR 4/5) but genuinely render in --help-all via their new "Policy &
+        # severity"/"Public-surface scoping" panel membership (cli_help.py),
+        # so they stay valid examples here.
+        (
+            "--sysroot",
+            "--ast-frontend",
+            "--strict-suppressions",
+            "--pattern-verdicts",
+            "--public-symbol",
+        ),
+        (
+            "--header",
+            "--against",
+            "--depth",
+            "--sources",
+            "--policy",
+            "--contract",
+            "--format",
+            "--output",
+        ),
+    ),
+]
+
+
+class TestDumpAndScanHelpAllDisclosure:
+    @pytest.mark.parametrize(
+        "command,common_names,_advanced,_common", _HELP_ALL_COMMANDS
+    )
+    def test_common_option_names_are_real_params(
+        self,
+        command: str,
+        common_names: frozenset[str],
+        _advanced: tuple[str, ...],
+        _common: tuple[str, ...],
+    ) -> None:
+        real_names = {
+            p.name for p in main.commands[command].params if isinstance(p, click.Option)
+        }
+        assert common_names <= real_names
+
+    @pytest.mark.parametrize("command,_names,advanced,_common", _HELP_ALL_COMMANDS)
+    def test_curated_help_hides_advanced_options(
+        self,
+        command: str,
+        _names: frozenset[str],
+        advanced: tuple[str, ...],
+        _common: tuple[str, ...],
+    ) -> None:
+        out = CliRunner().invoke(main, [command, "--help"]).output
+        for advanced_flag in advanced:
+            assert advanced_flag not in out, (
+                f"{advanced_flag} leaked into curated {command} --help"
+            )
+
+    @pytest.mark.parametrize("command,_names,_advanced,common", _HELP_ALL_COMMANDS)
+    def test_curated_help_keeps_common_options(
+        self,
+        command: str,
+        _names: frozenset[str],
+        _advanced: tuple[str, ...],
+        common: tuple[str, ...],
+    ) -> None:
+        out = CliRunner().invoke(main, [command, "--help"]).output
+        for common_flag in common:
+            assert common_flag in out, (
+                f"{common_flag} missing from curated {command} --help"
+            )
+
+    @pytest.mark.parametrize("command,_names,_advanced,_common", _HELP_ALL_COMMANDS)
+    def test_curated_help_reports_hidden_count_and_points_to_help_all(
+        self,
+        command: str,
+        _names: frozenset[str],
+        _advanced: tuple[str, ...],
+        _common: tuple[str, ...],
+    ) -> None:
+        result = CliRunner().invoke(main, [command, "--help"])
+        assert result.exit_code == 0
+        assert "advanced option(s) hidden" in result.output
+        assert f"{command} --help-all" in result.output
+
+    @pytest.mark.parametrize("command,_names,advanced,_common", _HELP_ALL_COMMANDS)
+    def test_help_all_shows_everything_curated_hides(
+        self,
+        command: str,
+        _names: frozenset[str],
+        advanced: tuple[str, ...],
+        _common: tuple[str, ...],
+    ) -> None:
+        out = CliRunner().invoke(main, [command, "--help-all"]).output
+        for advanced_flag in advanced:
+            assert advanced_flag in out
+
+    @pytest.mark.parametrize("command,_names,_advanced,_common", _HELP_ALL_COMMANDS)
+    def test_help_all_has_no_hidden_count_footer(
+        self,
+        command: str,
+        _names: frozenset[str],
+        _advanced: tuple[str, ...],
+        _common: tuple[str, ...],
+    ) -> None:
+        result = CliRunner().invoke(main, [command, "--help-all"])
+        assert result.exit_code == 0
+        assert "advanced option(s) hidden" not in result.output
+
+    @pytest.mark.parametrize("command,_names,_advanced,_common", _HELP_ALL_COMMANDS)
+    def test_params_restored_after_curated_help(
+        self,
+        command: str,
+        _names: frozenset[str],
+        _advanced: tuple[str, ...],
+        _common: tuple[str, ...],
+    ) -> None:
+        cmd = main.commands[command]
+        before = list(cmd.params)
+        CliRunner().invoke(main, [command, "--help"])
+        assert cmd.params == before
+
+    def test_dump_advanced_option_still_functional_after_curated_help_render(
+        self, tmp_path
+    ) -> None:
+        """--gcc-path is hidden from curated `dump --help` but must still work."""
+        CliRunner().invoke(main, ["dump", "--help"])
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        result = CliRunner().invoke(
+            main, ["dump", str(so_path), "--gcc-path", "/usr/bin/gcc"]
+        )
+        # Not a valid ELF, so this is expected to fail downstream -- the point
+        # is that Click accepts the (curated-hidden) --gcc-path flag at all,
+        # rather than rejecting it as "no such option".
+        assert "no such option" not in result.output.lower()
+
+    def test_scan_advanced_option_still_functional_after_curated_help_render(
+        self, tmp_path
+    ) -> None:
+        """--severity-preset is hidden from curated `scan --help` but must still work."""
+        CliRunner().invoke(main, ["scan", "--help"])
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        result = CliRunner().invoke(
+            main, ["scan", str(so_path), "--severity-preset", "strict"]
+        )
+        assert "no such option" not in result.output.lower()

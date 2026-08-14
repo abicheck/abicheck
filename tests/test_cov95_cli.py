@@ -266,7 +266,9 @@ class TestSmallHelpers:
         compare_help = runner.invoke(main, ["compare", "--help"]).output
         assert "Per-side overrides" in compare_help
         assert "Build & source evidence" in compare_help
-        dump_help = runner.invoke(main, ["dump", "--help"]).output
+        # `dump`'s curated --help (G21.8 M2) folds the Toolchain/Provenance
+        # panels' options behind --help-all; check the panels there.
+        dump_help = runner.invoke(main, ["dump", "--help-all"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
 
     def test_missing_requested_evidence_layers(self) -> None:
@@ -426,8 +428,10 @@ class TestSmallHelpers:
         assert "-DFOO=1" in gcc_options
 
     def test_dump_gcc_option_help(self) -> None:
-        # G21.5: the repeatable --gcc-option is documented on dump.
-        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        # G21.5: the repeatable --gcc-option is documented on dump. It's a
+        # toolchain-tier flag, folded behind --help-all by dump's curated
+        # --help (G21.8 M2).
+        out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
         assert "--gcc-option" in norm
 

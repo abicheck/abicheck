@@ -162,7 +162,10 @@ class TestDebugFormatSelector:
         assert "--debug-root" in out  # the coarse per-run override stays visible
 
     def test_dump_exposes_debug_format(self):
-        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        # --debug-format is a debug-info-tier flag, folded behind --help-all
+        # by dump's curated --help (G21.8 M2) -- still visible there, unlike
+        # the legacy --btf/--ctf/--dwarf flags (still hidden).
+        out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         assert "--debug-format" in out
         # The dump selector still shows the [auto|dwarf|btf|ctf] choices; the
         # legacy --btf/--ctf/--dwarf flags remain hidden.
@@ -177,7 +180,9 @@ class TestDebugFormatSelector:
         assert result.exit_code == 0
 
     def test_dump_compile_db_hidden(self):
-        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        # --compile-db-filter is a build-evidence-tier flag, folded behind
+        # --help-all by dump's curated --help (G21.8 M2).
+        out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         assert "--compile-db " not in out
         assert "--compile-db-filter" in out  # the filter alias stays visible
 

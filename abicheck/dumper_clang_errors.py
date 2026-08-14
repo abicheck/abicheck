@@ -144,7 +144,7 @@ _MISSING_INCLUDE_RE = re.compile(
 #: must be defined``). The graceful-exclusion path
 #: (:func:`retry_excluding_error_headers`) only drops *direct-inclusion guards*;
 #: a config ``#error`` like this surfaces as a hard failure, so a hint pointing
-#: at ``--gcc-options -D…`` is what unblocks it. ``#error`` is a literal C
+#: at ``--compiler-option -D…`` is what unblocks it. ``#error`` is a literal C
 #: preprocessor directive (always lowercase), so this is *not* IGNORECASE.
 _ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
 #: A "must be defined / set" requirement phrased in the ``#error`` text. The
@@ -294,7 +294,7 @@ def diagnose_header_compile_failure(stderr: str) -> str | None:
     if name:
         return (
             f"\n\nHint: a header requires the macro '{name}' to be defined before "
-            f"inclusion. Pass it via --gcc-options (e.g. --gcc-options "
+            f"inclusion. Pass it via --compiler-option (e.g. --compiler-option "
             f'"-D{name}=...", such as -DPCRE2_CODE_UNIT_WIDTH=8 for pcre2), or point '
             "-H at the library's umbrella header that defines it rather than an "
             "individual sub-header."
@@ -537,7 +537,7 @@ def _parse_clang_ast_result(
         raise SnapshotError(
             f"clang failed to parse the header(s) (exit {result.returncode}). The "
             "header may be malformed or need build flags it was not given (try "
-            f"--gcc-options / -p, or --ast-frontend castxml):\n"
+            f"--compiler-option / -p, or --ast-frontend castxml):\n"
             f"{result.stderr[:1000].strip()}"
             f"{diagnose_header_compile_failure(result.stderr) or ''}"
         )

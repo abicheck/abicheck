@@ -41,12 +41,15 @@ from abicheck.model import AbiSnapshot
 from abicheck.service_scan import CompileContext, ScanRequest
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
+#: --gcc-options is deliberately absent (CLI audit PR 5/5: removed as a CLI
+#: flag -- see cli_options.py's compile_context_options docstring); the
+#: internal CompileContext.gcc_options field survives, but no Click option
+#: registers that dest anymore, so it's not a *CLI-exposed* dest to check here.
 _COMPILE_CONTEXT_DESTS = frozenset(
     {
         "header_backend",
         "gcc_path",
         "gcc_prefix",
-        "gcc_options",
         "gcc_option_tokens",
         "sysroot",
         "nostdinc",
@@ -258,6 +261,26 @@ def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
     # Config sysroot fills the unset CLI field; include_dirs resolve under cfg dir.
     assert merged.sysroot == Path("/cfg/sysroot")
     assert includes == (tmp_path / "include",)
+
+
+def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> None:
+    """CLI --compiler-option/--gcc-option tokens must win over a config-
+    synthesized -std=/-D, the same way the now-removed --gcc-options scalar
+    used to (Codex review, PR #757): appending config tokens *after* the
+    CLI's own gcc_option_tokens silently let `compile.std` override an
+    explicit CLI -std= once --gcc-options (which used to suppress config
+    synthesis entirely) was removed. Config tokens must come first so a
+    compiler's own last-flag-wins semantics still resolve to the CLI value."""
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n  defines: [CFG=1]\n")
+    cli = CompileContext(gcc_option_tokens=("-std=c++17",))
+    merged, _ = _merge_compile_config(cli, (), cfg)
+    assert merged.gcc_options is None
+    # config tokens first, CLI token last -- a real compiler resolves the
+    # last -std= it sees, so this ordering is what makes the CLI value win.
+    assert merged.gcc_option_tokens == ("-std=c++20", "-DCFG=1", "-std=c++17")
 
 
 def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None:
@@ -1047,7 +1070,7 @@ def test_compare_threads_compile_context_to_both_sides(
             "/opt/g++",
             "--gcc-prefix",
             "aarch64-linux-gnu-",
-            "--gcc-options",
+            "--compiler-option",
             "-DFOO=1",
             "--sysroot",
             str(sysroot),
@@ -1057,7 +1080,7 @@ def test_compare_threads_compile_context_to_both_sides(
     for c in calls:  # both old and new
         assert c["gcc_path"] == "/opt/g++"
         assert c["gcc_prefix"] == "aarch64-linux-gnu-"
-        assert c["gcc_options"] == "-DFOO=1"
+        assert c["gcc_option_tokens"] == ("-DFOO=1",)
         assert c["sysroot"] == sysroot
         assert c["nostdinc"] is True
 
@@ -1072,7 +1095,7 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
         monkeypatch,
         tmp_path,
         [
-            "--gcc-options",
+            "--compiler-option",
             "-DBAR=2",
             "--ast-frontend",
             "castxml",
@@ -1081,7 +1104,7 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
         ],
     )
     # gcc context on both sides...
-    assert all(c["gcc_options"] == "-DBAR=2" for c in calls)
+    assert all(c["gcc_option_tokens"] == ("-DBAR=2",) for c in calls)
     # ...while the per-side frontend override still wins.
     assert calls[0]["header_backend"] == "castxml"
     assert calls[1]["header_backend"] == "clang"
@@ -1141,10 +1164,39 @@ def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
     new_dir.mkdir()
     result = CliRunner().invoke(
         main,
-        ["compare", str(old_dir), str(new_dir), "--gcc-options", "-DX=1"],
+        ["compare", str(old_dir), str(new_dir), "--compiler-option", "-DX=1"],
     )
     assert result.exit_code != 0
-    assert "--gcc-options" in result.output
+    assert "--compiler-option" in result.output
+    assert "directory/package" in result.output
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("--compiler", "/custom/clang"),
+        ("--compiler-prefix", "aarch64-linux-gnu-"),
+        ("--compiler-option", "-DX=1"),
+    ],
+)
+def test_compare_rejects_compiler_aliases_for_set_inputs(
+    tmp_path: Path, flag: str, value: str
+) -> None:
+    """The --compiler*/--gcc-* aliases (CLI audit PR 2/5) must be rejected for
+    directory/package operands exactly like their legacy gcc_* counterparts
+    (test_compare_rejects_compile_context_for_set_inputs above) -- without
+    this, --compiler would silently no-op instead of raising, unlike
+    --gcc-path (Codex review, PR #757)."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_dir), str(new_dir), flag, value],
+    )
+    assert result.exit_code != 0
+    assert flag in result.output
     assert "directory/package" in result.output
 
 
@@ -1304,11 +1356,11 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
         cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
     )
     result = CliRunner().invoke(
-        main, ["dump", str(pe), "-H", str(header), "--gcc-options", "-DPE=1"]
+        main, ["dump", str(pe), "-H", str(header), "--compiler-option", "-DPE=1"]
     )
     assert result.exit_code == 0, result.output
     assert "will be ignored" not in result.output
-    assert getattr(captured["compile_context"], "gcc_options") == "-DPE=1"
+    assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DPE=1",)
 
 
 def test_fallback_flag_is_scoped_to_one_cli_invocation(
@@ -1355,3 +1407,133 @@ def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
     assert disabled.exit_code == 0
     assert disabled.output.strip() == "unset"
     assert "ABICHECK_ALLOW_UNSUPPORTED_CASTXML" not in os.environ
+
+
+# ── --compiler/--compiler-prefix/--compiler-option aliases (CLI audit PR 2/5) ─
+#
+# Neutral aliases for the deprecated --gcc-path/--gcc-prefix/--gcc-option,
+# folded together by cli_options._merge_compiler_aliases inside
+# resolve_compile_context (the one choke point compare/dump/scan all share --
+# see the module docstring above). This probe command exercises the merge
+# function through the real Click parsing path, mirroring the two tests above.
+
+
+@pytest.fixture
+def _compile_context_probe():
+    from abicheck.cli_options import resolve_compile_context
+
+    @click.command()
+    @compile_context_options
+    @click.pass_context
+    def probe(ctx: click.Context, **kwargs: object) -> None:
+        cc, _includes = resolve_compile_context(
+            ctx,
+            gcc_path=kwargs["gcc_path"],  # type: ignore[arg-type]
+            gcc_prefix=kwargs["gcc_prefix"],  # type: ignore[arg-type]
+            gcc_option_tokens=kwargs["gcc_option_tokens"],  # type: ignore[arg-type]
+            sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
+            nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]
+            header_backend=kwargs["header_backend"],  # type: ignore[arg-type]
+            includes=(),
+            build_config=None,
+            compiler_path=kwargs["compiler_path"],  # type: ignore[arg-type]
+            compiler_prefix=kwargs["compiler_prefix"],  # type: ignore[arg-type]
+            compiler_option_tokens=kwargs["compiler_option_tokens"],  # type: ignore[arg-type]
+        )
+        click.echo(
+            f"path={cc.gcc_path} prefix={cc.gcc_prefix} tokens={cc.gcc_option_tokens}"
+        )
+
+    return probe
+
+
+def test_compiler_alias_used_alone_no_deprecation_note(_compile_context_probe) -> None:
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--compiler", "/usr/bin/clang", "--compiler-prefix", "arm-"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "path=/usr/bin/clang prefix=arm-" in result.output
+    assert "deprecated" not in result.output.lower()
+
+
+def test_legacy_gcc_flag_still_works_with_deprecation_note(
+    _compile_context_probe,
+) -> None:
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--gcc-path", "/usr/bin/gcc", "--gcc-prefix", "aarch64-linux-gnu-"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "path=/usr/bin/gcc prefix=aarch64-linux-gnu-" in result.output
+    assert "deprecated compiler flag(s)" in result.output
+    assert "--gcc-path (use --compiler)" in result.output
+    assert "--gcc-prefix (use --compiler-prefix)" in result.output
+
+
+def test_new_compiler_flag_wins_when_both_given(_compile_context_probe) -> None:
+    """The new spelling is an explicit override, same precedence style as
+    CLI-beats-config elsewhere in this module -- and since the new value won,
+    no deprecation note fires (the legacy value was never actually used)."""
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--gcc-path", "/bin/old-gcc", "--compiler", "/bin/new-gcc"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "path=/bin/new-gcc" in result.output
+    assert "deprecated" not in result.output.lower()
+
+
+def test_compiler_option_tokens_alone_still_works(_compile_context_probe) -> None:
+    """--compiler-option alone (no --gcc-option) is unaffected by the mixing
+    rejection -- still fully functional, accumulates repeats normally."""
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--compiler-option", "-include", "--compiler-option", "some header.h"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "tokens=('-include', 'some header.h')" in result.output
+    assert "deprecated" not in result.output.lower()
+
+
+def test_compiler_option_tokens_mixing_both_spellings_is_rejected(
+    _compile_context_probe,
+) -> None:
+    """--compiler-option and --gcc-option cannot both be given (a UsageError).
+
+    Two rounds of Codex review, two wrong fixes, both instructive: naive
+    concatenation could separate a flag from its own operand across
+    spellings (--gcc-option=-include + --compiler-option='some header.h' ->
+    ('some header.h', '-include')); "new spelling wins entirely" silently
+    dropped legitimate --gcc-option tokens the moment any --compiler-option
+    was present. Neither a merge rule nor an order-recovery scheme can be
+    correct without the real argv order Click doesn't expose across two
+    independently-collected tuples, so mixing is rejected outright instead
+    of guessed at (PR #757)."""
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--compiler-option", "-DNEW", "--gcc-option", "-DOLD"],
+    )
+    assert result.exit_code != 0
+    assert "cannot both be given" in result.output
+
+
+def test_compiler_option_tokens_legacy_alone_still_works(
+    _compile_context_probe,
+) -> None:
+    """--gcc-option alone (no --compiler-option) is unaffected -- still fully
+    functional, still deprecation-noted, same as before this fix."""
+    result = CliRunner().invoke(
+        _compile_context_probe,
+        ["--gcc-option", "-include", "--gcc-option", "some header.h"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "tokens=('-include', 'some header.h')" in result.output
+    assert "--gcc-option (use --compiler-option)" in result.output
+
+
+def test_neither_compiler_flag_given_no_note_no_crash(_compile_context_probe) -> None:
+    result = CliRunner().invoke(_compile_context_probe, [])
+    assert result.exit_code == 0, result.output
+    assert "path=None prefix=None tokens=()" in result.output
+    assert "deprecated" not in result.output.lower()

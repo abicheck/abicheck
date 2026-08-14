@@ -353,6 +353,27 @@ class TestFlagBudget:
         ):
             assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
 
+    def test_scan_demoted_families_are_hidden(self) -> None:
+        """CLI audit PR 4/5: scan's own --strict-suppressions/--public-symbol/
+        --public-symbols-list mirror compare's already-demoted flags above
+        (same config keys, same CLI-beats-config precedence -- see
+        cli_scan.py's own `.abicheck.yml` compile:/scope:/suppression: comment)
+        but were never actually hidden until now. --exit-code-scheme is
+        deliberately excluded here -- see test_coarse_overrides_stay_visible,
+        which pins it staying visible on both commands."""
+        cmd = main.commands["scan"]
+        hidden = {
+            opt
+            for p in cmd.params
+            if getattr(p, "param_type_name", None) == "option" and getattr(p, "hidden", False)
+            for opt in p.opts
+        }
+        for flag in (
+            "--severity-abi-breaking", "--severity-quality-issues",
+            "--strict-suppressions", "--public-symbol", "--public-symbols-list",
+        ):
+            assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
+
     def test_demoted_booleans_have_negative_override_forms(self) -> None:
         """The demoted boolean toggles are two-way flags, so a one-off run can
         force ``false`` over a config ``true`` (ADR-040 L2; Codex P2). Both the
@@ -388,7 +409,10 @@ class TestFlagBudget:
                      "--exit-code-scheme", "--scope-public-headers",
                      # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
                      # the toolchain family (shared with dump/scan) stay visible.
-                     "--debug-root", "--gcc-path", "--sysroot"):
+                     # --gcc-path itself is now a hidden, deprecated alias for
+                     # --compiler (CLI audit PR 2/5) -- --compiler is its
+                     # visible successor.
+                     "--debug-root", "--compiler", "--sysroot"):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
 
 

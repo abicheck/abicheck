@@ -655,16 +655,17 @@ def _cli_help():
     interpreter startup + cli import); three of them ran the identical
     `dump --help`. Run each help command once per module and share the output.
     """
-    cache: dict[str, str] = {}
+    cache: dict[tuple[str, str], str] = {}
 
-    def _get(command: str) -> str:
-        if command not in cache:
+    def _get(command: str, help_flag: str = "--help") -> str:
+        key = (command, help_flag)
+        if key not in cache:
             result = subprocess.run(
-                [sys.executable, "-c", "from abicheck.cli import main; main()", command, "--help"],
+                [sys.executable, "-c", "from abicheck.cli import main; main()", command, help_flag],
                 capture_output=True, text=True, encoding="utf-8", timeout=10,
             )
-            cache[command] = result.stdout
-        return cache[command]
+            cache[key] = result.stdout
+        return cache[key]
 
     return _get
 
@@ -673,8 +674,12 @@ class TestCLIDwarfFlags:
     """Test CLI --dwarf-only and --show-data-sources flags exist and are accepted."""
 
     def test_dump_help_shows_dwarf_only(self, _cli_help) -> None:
-        """dump --help should mention --dwarf-only."""
-        assert "--dwarf-only" in _cli_help("dump")
+        """dump --help-all should mention --dwarf-only.
+
+        --dwarf-only is an advanced/toolchain-tier flag, folded behind
+        --help-all by dump's curated --help (G21.8 M2).
+        """
+        assert "--dwarf-only" in _cli_help("dump", "--help-all")
 
     def test_dump_help_shows_dry_run(self, _cli_help) -> None:
         """dump --help should mention --dry-run (the --show-data-sources successor)."""

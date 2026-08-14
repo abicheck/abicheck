@@ -793,17 +793,18 @@ def _check_scan_evidence_contract(
             f"pinned depth '{eff_depth_enum.value}' (source-method {resolved.value}) "
             "needs source evidence, but no --sources/--build-info was given — there "
             "is nothing to collect L3/L4/L5 from. Pass --sources <tree> or "
-            "--build-info <dir|compile_commands.json> (or a trusted --config plus "
-            "--allow-build-query), or drop the pin / use the default 'auto' for a "
-            "best-effort binary scan. (Pinned depths are a contract.)"
+            "--build-info <dir|compile_commands.json> (or a trusted --config whose "
+            "build.query this pinned depth auto-enables), or drop the pin / use the "
+            "default 'auto' for a best-effort binary scan. (Pinned depths are a "
+            "contract.)"
         )
     if gave_source_input and not l3:
         advisories.append(
             f"requested depth '{eff_depth_enum.value}' (source-method "
             f"{resolved.value}) needs an L3 compile database, but none was found — "
             "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
-            "compile_commands.json or build dir), or a trusted --config plus "
-            "--allow-build-query to generate it."
+            "compile_commands.json or build dir), or a trusted --config whose "
+            "build.query this pinned depth auto-enables."
         )
 
 

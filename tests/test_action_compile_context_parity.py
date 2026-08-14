@@ -80,6 +80,30 @@ def _is_release_style_operand_source() -> str:
     return text[start:end]
 
 
+# add_flag() (unlike add_single_flag, stubbed inline in each harness below) is
+# extracted verbatim -- --compiler-option (CLI audit PR 5/5's --gcc-options
+# migration) now goes through its real whitespace/newline-splitting logic,
+# not a one-line stub, so a harness exercising it needs the real definition.
+# add_flag_shlex_split() -- the --compiler-option-only sibling that
+# shlex-splits a single-line value (Codex review: add_flag()'s own plain
+# bash word-splitting broke a quoted gcc-options value into malformed
+# tokens) -- is defined immediately after add_flag() and is extracted in
+# the same slice, since it falls back to calling add_flag() itself.
+_ADD_FLAG_START = "add_flag() {"
+_ADD_FLAG_SHLEX_SPLIT_END = "\nadd_flag_shlex_split() {"
+_ADD_FLAG_END = "\n}\n"
+
+
+def _add_flag_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_ADD_FLAG_START)
+    # First closing brace is add_flag()'s own end; the second (searched from
+    # just past add_flag_shlex_split's own opening) is that function's end.
+    shlex_start = text.index(_ADD_FLAG_SHLEX_SPLIT_END, start)
+    end = text.index(_ADD_FLAG_END, shlex_start) + len(_ADD_FLAG_END)
+    return text[start:end]
+
+
 def _compile_context_region(
     mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
 ) -> str:
@@ -138,6 +162,12 @@ def _run_region(
     # harmless for dump/scan).
     harness = (
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        # add_flag_shlex_split() (extracted as part of _add_flag_source())
+        # needs _PY_BIN resolved, same as the real script does near its own
+        # top -- otherwise the harness silently falls back to add_flag()'s
+        # own naive splitting and a quoting regression would go undetected.
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
     )
@@ -167,6 +197,12 @@ def _run_region_raw(
     ``check=True`` would raise before the caller could inspect anything."""
     harness = (
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        # add_flag_shlex_split() (extracted as part of _add_flag_source())
+        # needs _PY_BIN resolved, same as the real script does near its own
+        # top -- otherwise the harness silently falls back to add_flag()'s
+        # own naive splitting and a quoting regression would go undetected.
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
     )
@@ -193,7 +229,7 @@ class TestCompileContextForwardingParity:
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--gcc-options" in cmd and "-DFOO=1" in cmd
+        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
 
@@ -213,7 +249,7 @@ class TestCompileContextForwardingParity:
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--gcc-options" in cmd and "-DFOO=1" in cmd
+        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
 
@@ -225,9 +261,37 @@ class TestCompileContextForwardingParity:
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--gcc-options" in cmd and "-DFOO=1" in cmd
+        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
+        # Regression (Codex review, PR #757): scan's cross-compiler block used
+        # to appear twice in run.sh -- harmless duplication for the old
+        # scalar --gcc-options (last-of-two-identical-values wins), but
+        # --compiler-option is `multiple=True` and genuinely accumulates every
+        # occurrence, so the duplicate silently doubled every forwarded
+        # --gcc-path/--gcc-prefix/--compiler-option/--sysroot token.
+        assert cmd.count("--gcc-path") == 1
+        assert cmd.count("--gcc-prefix") == 1
+        assert cmd.count("--compiler-option") == 1
+        assert cmd.count("--sysroot") == 1
+
+    def test_gcc_options_quoted_value_stays_one_token(self) -> None:
+        """Regression (Codex review, PR #757): routing gcc-options through
+        add_flag()'s plain bash word-splitting broke a shell-quoted value
+        into malformed tokens -- `-DMSG="hello world" -DOK=1` word-split to
+        `-DMSG="hello`, `world"`, `-DOK=1` instead of the two real tokens
+        abicheck's own server-side shlex.split() used to produce for the old
+        --gcc-options flag. add_flag_shlex_split() must reproduce that
+        shlex-aware splitting, not add_flag()'s own naive one."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1'}
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 2
+        assert "-DMSG=hello world" in cmd
+        assert "-DOK=1" in cmd
+        # The malformed tokens a naive word-split would produce must be
+        # absent.
+        assert '-DMSG="hello' not in cmd
+        assert 'world"' not in cmd
 
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(

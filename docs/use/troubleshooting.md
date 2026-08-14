@@ -54,7 +54,7 @@ If castxml runs but reports parse errors or an empty surface, the inputs usually
 don't match the build environment of the analyzed `.so`:
 
 - Pass the same include dirs the library was built with: `-I include/ -I deps/include/`.
-- Pass the same preprocessor macros: `--gcc-options "-DFEATURE_X=1 -DNDEBUG"`.
+- Pass the same preprocessor macros: `--compiler-option -DFEATURE_X=1 --compiler-option -DNDEBUG`.
 - Best option: feed the real build flags from `compile_commands.json` with `-p build/`
   (see [CLI Usage → Build-context capture](cli-usage.md)).
 - For pure C libraries, add `--lang c` (the default is `c++`).
@@ -90,7 +90,7 @@ bundled Clang frontend.
 
 abicheck detects this case and appends your detected `castxml --version` plus the
 recommended floor to the error. As an alternative, point abicheck at a
-clang-parsable toolchain/sysroot with `--gcc-path` / `--sysroot`. A
+clang-parsable toolchain/sysroot with `--compiler` / `--sysroot`. A
 `#ifdef __cplusplus extern "C"` C header that fails only under `--lang c` should
 be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
 

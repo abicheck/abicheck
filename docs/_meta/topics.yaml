@@ -164,6 +164,9 @@ topics:
       - abicheck/cli.py
       - abicheck/cli_scan.py
       - abicheck/cli_secondary_output.py
+      - abicheck/cli_options.py
+      - abicheck/cli_help.py
+      - abicheck/cli_contract_options.py
     reference_page: reference/cli-reference.md
     task_pages:
       - use/dump-compare-flags.md

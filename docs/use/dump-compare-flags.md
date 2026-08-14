@@ -57,31 +57,37 @@ and `scan` (one decorator, so the three never drift), so it works the same on ea
 ```bash
 # dump (single artifact)
 abicheck dump libfoo.so -H include/foo.h \
-  --gcc-prefix aarch64-linux-gnu- \
+  --compiler-prefix aarch64-linux-gnu- \
   --sysroot /opt/sysroots/aarch64 \
-  --gcc-options "-march=armv8-a" \
+  --compiler-option -march=armv8-a \
   -o snap.json
 
 # Or specify the cross-compiler binary directly:
 abicheck dump libfoo.so -H include/foo.h \
-  --gcc-path /usr/bin/aarch64-linux-gnu-g++ \
+  --compiler /usr/bin/aarch64-linux-gnu-g++ \
   -o snap.json
 
 # compare (two artifacts) — the family applies to BOTH sides
 abicheck compare libv1.so libv2.so -H include/foo.h \
-  --gcc-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
+  --compiler-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
 ```
 
-Available compile-context flags (on `dump`, `compare`, and `scan`):
-- `--gcc-path` — path to the cross-compiler binary. For the `clang`
+Available compile-context flags (on `dump`, `compare`, and `scan`; each also
+has a hidden, still-functional `--gcc-*` alias kept for backward
+compatibility — `--gcc-path`/`--gcc-prefix`/`--gcc-option` — not shown in
+`--help`/`--help-all` since `--compiler`/`--compiler-prefix`/
+`--compiler-option` supersede them):
+- `--compiler` — path to the cross-compiler binary. For the `clang`
   `--ast-frontend`, this is honored only when the binary is clang-family
   (basename contains `clang`, or is a known non-`clang`-named clang-based
   fork — currently Intel's `icx`/`icpx`/`dpcpp`/`dpcpp-cl`); a path to a real
   GCC binary is ignored here and the frontend falls back to plain `clang` on
   `PATH` instead (castxml can't take clang-only flags, so this guards against
   a GCC path being misread as a clang toolchain)
-- `--gcc-prefix` — toolchain prefix (e.g. `aarch64-linux-gnu-`)
-- `--gcc-options` — extra compiler flags passed to the header frontend
+- `--compiler-prefix` — toolchain prefix (e.g. `aarch64-linux-gnu-`)
+- `--compiler-option` — a single extra compiler flag passed to the header
+  frontend verbatim (repeatable; not whitespace-split — use two for a flag +
+  spaced value)
 - `--sysroot` — alternative system root directory
 - `--nostdinc` / `--no-nostdinc` — do not search standard system include paths
 - `--ast-frontend {auto,castxml,clang,hybrid}` — which C/C++ AST frontend parses
@@ -142,13 +148,13 @@ target triple, sysroot, and ABI-affecting options like `-fvisibility=hidden`.
 | `--compile-db <file>` | Explicit path to `compile_commands.json` (alias for `-p`) |
 | `--compile-db-filter <glob>` | Filter entries by source file pattern (e.g., `src/libfoo/**`) |
 
-When both `-p` and explicit flags (`--gcc-options`, `--sysroot`) are specified,
-explicit flags take precedence.
+When both `-p` and explicit flags (`--compiler-option`, `--sysroot`) are
+specified, explicit flags take precedence.
 
 ```bash
 # Override a single flag while inheriting the rest from compile_commands.json
 abicheck dump libfoo.so -H include/ -p build/ \
-    --gcc-options "-DEXTRA_DEFINE=1"
+    --compiler-option -DEXTRA_DEFINE=1
 ```
 
 ## Evidence packs — build & source context (L3 / L4)

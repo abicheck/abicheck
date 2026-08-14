@@ -187,10 +187,14 @@ inputs:
     required: false
   gcc-options:
     description: >
-      Extra compiler flags passed through to the header frontend. Applies to
-      dump, scan, and compare mode with a single-pair (non-directory,
-      non-package) operand — a directory/package compare rejects it with an
-      error (same restriction as ast-frontend above).
+      Extra compiler flags passed through to the header frontend (maps to
+      the CLI's --compiler-option, CLI audit PR 5/5). A single-line value is
+      split on whitespace into separate flags, same as before; a multi-line
+      (YAML block scalar) value keeps each line as one flag verbatim,
+      spaces included — use that form for a flag whose value contains a
+      space. Applies to dump, scan, and compare mode with a single-pair
+      (non-directory, non-package) operand — a directory/package compare
+      rejects it with an error (same restriction as ast-frontend above).
     required: false
   sysroot:
     description: 'Alternative system root directory for cross-compilation. Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
@@ -301,20 +305,25 @@ inputs:
     required: false
   build-config:
     description: >
-      Path to a trusted .abicheck.yml. Supplying this alone (not
-      allow-build-query) is what permits its build.query (compile-DB
-      generation) command to run — see allow-build-query below. Used by scan
-      and dump modes, and by compare mode (--config).
+      Path to a trusted .abicheck.yml. For scan mode, supplying this
+      together with an explicitly pinned depth (not allow-build-query) is
+      what permits its build.query (compile-DB generation) command to
+      run — see allow-build-query below; a plain scan with no depth pinned
+      does not auto-run it. Used by scan and dump modes, and by compare
+      mode (--config).
     required: false
   allow-build-query:
     description: >
-      Deprecated no-op, kept only for backward compatibility — it neither
-      grants nor restricts running build-config's build.query command
-      (build-config alone does, per its own description above). abicheck also
-      always runs its own inferred, abicheck-authored cmake/bazel/make compile-DB
-      query whenever a sources input needs build context, independent of this
-      input: pointing abicheck at a source tree is itself the request to
-      analyse it. Used by scan and dump modes.
+      Dump-mode-only opt-in for the external extractor manifest
+      (--dump-manifest)'s own build-system query action; a real gate there,
+      not a no-op. For scan mode this input is ignored (CLI audit PR 5/5) —
+      scan's own build.query auto-runs whenever build-config is given
+      together with an explicitly pinned --depth, with no separate opt-in
+      needed. abicheck also always runs its own inferred,
+      abicheck-authored cmake/bazel/make compile-DB query whenever a sources
+      input needs build context, independent of this input: pointing
+      abicheck at a source tree is itself the request to analyse it. Used by
+      dump mode only.
     required: false
     default: 'false'
   depth:

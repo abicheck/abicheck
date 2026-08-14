@@ -3,6 +3,7 @@ compat group structure, and dataclasses.replace() paths.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -348,11 +349,17 @@ class TestDumpLang:
         assert str(root) not in list(captured.get("gcc_option_tokens", ()))
 
     def test_implicit_root_defers_to_build_context(self, tmp_path, monkeypatch):
-        # Codex review: a build-context include (here via --gcc-options) must
-        # keep priority over the inferred -H root. The build-context flag rides
-        # in gcc_options; the inferred root rides in gcc_option_tokens as an
-        # -isystem entry — searched after the build-context -I/-isystem dirs but
-        # above the standard system dirs — so the build context always wins.
+        # Codex review: a build-context include must keep priority over the
+        # inferred -H root. The build-context flag rides in (effective_)
+        # gcc_options (emitted first by dumper._castxml_cmd); the inferred
+        # root rides in gcc_option_tokens as an -isystem entry — searched
+        # after the build-context -I/-isystem dirs but above the standard
+        # system dirs — so the build context always wins. Build context now
+        # arrives only via -p/--compile-db (CLI audit PR 5/5 removed the
+        # --gcc-options flag this test previously drove it through directly;
+        # a real compile_commands.json is the one remaining CLI-reachable
+        # way to populate the scalar gcc_options field the ordering guard
+        # actually cares about).
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -361,6 +368,21 @@ class TestDumpLang:
         header.write_text("int foo();\n", encoding="utf-8")
         buildctx = tmp_path / "buildctx"
         buildctx.mkdir()
+        src = tmp_path / "unrelated.c"
+        src.write_text("int x;\n", encoding="utf-8")
+        compile_db = tmp_path / "compile_commands.json"
+        compile_db.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": str(src),
+                        "arguments": ["cc", f"-I{buildctx}", "-c", str(src)],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
 
         captured = {}
 
@@ -372,12 +394,12 @@ class TestDumpLang:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header),
-            "--gcc-options", f"-I {buildctx}",
+            "dump", str(so_path), "-H", str(header), "-p", str(compile_db),
         ])
         assert result.exit_code == 0, result.output
-        # build context stays in gcc_options (emitted first); inferred root is an
-        # -isystem token — searched below it — so build context keeps priority.
+        # build context stays in effective_gcc_options (emitted first);
+        # inferred root is an -isystem token — searched below it — so build
+        # context keeps priority.
         assert f"-I {buildctx}" in (captured.get("gcc_options") or "")
         tokens = list(captured.get("gcc_option_tokens", ()))
         assert str(root) in tokens
@@ -480,10 +502,10 @@ class TestDumpCrossCompilation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
-            "--gcc-options", "-march=armv8-a",
+            "--compiler-option", "-march=armv8-a",
         ])
         assert result.exit_code == 0
-        assert captured.get("gcc_options") == "-march=armv8-a"
+        assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)
 
     def test_sysroot_forwarded(self, tmp_path, monkeypatch):
         so_path = tmp_path / "libfoo.so"
@@ -545,12 +567,12 @@ class TestDumpCrossCompilation:
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
             "--gcc-prefix", "aarch64-linux-gnu-",
-            "--gcc-options", "-march=armv8-a",
+            "--compiler-option", "-march=armv8-a",
             "--nostdinc",
         ])
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"
-        assert captured.get("gcc_options") == "-march=armv8-a"
+        assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)
         assert captured.get("nostdinc") is True
 
 

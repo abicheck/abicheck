@@ -90,7 +90,7 @@ from .cli_helpers_compare import (
     load_required_symbols,
     resolve_force_public_scope,
 )
-from .cli_options import resolve_compile_context
+from .cli_options import resolve_compile_context, resolve_contract_evaluation
 from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
     _reject_compile_context_for_set_inputs,
@@ -533,32 +533,26 @@ def _reject_incoherent_compare_flags(
     output: Path | None,
     secondary_output: Path | None,
     secondary_fmt: str | None,
-    contract_mode: str | None,
-    contract_evaluation: bool,
 ) -> None:
     """Reject flag combinations that cannot mean anything, before any work.
 
     Every one of these would otherwise either do nothing silently or
     destroy its own output: a ``--secondary-*`` half-pair, two reports
-    aimed at one file, a ``--contract`` domain with no evaluator to select
-    for, a dry run asked to write a report. Raised as ``UsageError`` (exit
-    64) up front, so none of them is discovered after an expensive compare.
+    aimed at one file, a dry run asked to write a report. Raised as
+    ``UsageError`` (exit 64) up front, so none of them is discovered after
+    an expensive compare.
 
     The four ``--secondary-*`` coherence checks are shared with ``scan``
     (Codex review) -- see ``cli_options.reject_incoherent_secondary_output``,
     which this delegates to rather than duplicating them here.
-    """
-    if contract_mode is not None and not contract_evaluation:
-        # `--contract` selects the domain the shadow evaluator judges
-        # against, so on its own it would silently do nothing: no finding
-        # carries a contract decision unless `--contract-evaluation` asked
-        # for one. Rejecting is better than accepting a flag with no effect.
-        raise click.UsageError(
-            "--contract requires --contract-evaluation: it selects which "
-            "evidence domain the shadow contract evaluator judges against, "
-            "and without that flag no contract decision is computed at all."
-        )
 
+    A ``--contract`` domain given without ``--contract-evaluation`` used to
+    be rejected here too (it would otherwise silently do nothing); CLI audit
+    PR 3/5 loosens that into an implication instead -- see
+    :func:`abicheck.cli_options.resolve_contract_evaluation`, called by this
+    function's caller before ``contract_evaluation`` is used for anything
+    else, so there is no longer an incoherent state to reject here.
+    """
     reject_incoherent_secondary_output(
         dry_run=dry_run,
         output=output,
@@ -1190,8 +1184,14 @@ def run_compare(
     bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
-    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+    gcc_path: str | None, gcc_prefix: str | None,
     gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
+    # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
+    # internal-only, defaulted-None parameter -- see cli.py's dump_cmd for
+    # why (never populated from the CLI anymore, only ever None here).
+    gcc_options: str | None = None,
+    compiler_path: str | None = None, compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
     old_header_backend: str | None, new_header_backend: str | None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
@@ -1262,9 +1262,14 @@ def run_compare(
         output=output,
         secondary_output=secondary_output,
         secondary_fmt=secondary_fmt,
-        contract_mode=contract_mode,
-        contract_evaluation=contract_evaluation,
     )
+    # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+    # (abicheck.cli_options.resolve_contract_evaluation) -- resolved here,
+    # before contract_evaluation is used for anything else in this function,
+    # so every downstream use (the typed CompareRequest included) sees the
+    # already-resolved value and behaves exactly as if the user had typed
+    # both flags explicitly.
+    contract_evaluation = resolve_contract_evaluation(contract_mode, contract_evaluation)
     _setup_verbosity(verbose)
 
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
@@ -1475,6 +1480,8 @@ def run_compare(
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
         frontend_context=frontend_context,
+        compiler_path=compiler_path, compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include

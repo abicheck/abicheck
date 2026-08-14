@@ -125,7 +125,14 @@ compared directly with no `-H`; see
 ### Related flags and pages
 
 For the exhaustive, generated list of every command/subcommand/option (the
-same `help=` text `--help` shows), see the [CLI Reference](../reference/cli-reference.md).
+same `help=` text `--help-all` shows), see the [CLI Reference](../reference/cli-reference.md).
+
+`compare`, `dump`, and `scan` each show only a curated, everyday subset by
+default (`-H`, `--depth`, `--output`, and the like); the long tail —
+toolchain overrides, debug-info resolution, per-category severity, release-
+only knobs — folds behind `--help-all` on each command. Nothing is removed,
+only hidden from the default view; every folded option still works exactly
+as documented when passed explicitly.
 
 Beyond the core `compare`/`dump` flow:
 

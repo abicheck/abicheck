@@ -24,6 +24,7 @@ a given pair identically (no ``scope_public`` default drift).
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -457,6 +458,9 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--bundle-cohort",
         "--bundle-system-providers",
         "--collapse-versioned-symbols",
+        "--compiler",
+        "--compiler-option",
+        "--compiler-prefix",
         "--config",
         "--contract",
         "--contract-evaluation",
@@ -484,7 +488,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--format",
         "--frontend-context",
         "--gcc-option",
-        "--gcc-options",
         "--gcc-path",
         "--gcc-prefix",
         "--header",
@@ -604,6 +607,47 @@ def test_header_graph_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
     assert hidden_flags == {"--header-graph", "--header-graph-includes"}
 
 
+@pytest.mark.parametrize("cmd_name", ["compare", "dump", "scan"])
+def test_gcc_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
+    """CLI audit PR 2/5: --gcc-path/--gcc-prefix/--gcc-option are deprecated,
+    hidden aliases for --compiler/--compiler-prefix/--compiler-option —
+    absent from both --help and --help-all (unlike the curated/full M2 split,
+    this is a straight hide: the legacy spelling is superseded, not merely
+    advanced), but still accepted and still functional (see
+    abicheck.cli_options._merge_compiler_aliases and
+    test_compile_context_parity.py for the merge/precedence/deprecation-note
+    coverage), so an existing script/CI invocation that still passes them
+    doesn't hard-break."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    # Match the option's own rendered row (flag name padded, then its TEXT/
+    # metavar column) rather than a bare substring: --compiler-prefix's own
+    # help text legitimately *mentions* "--gcc-path"/"--gcc-prefix" in prose
+    # ("wins over the deprecated --gcc-path if both are given"), which a
+    # plain substring check would misread as the option itself leaking.
+    option_row = re.compile(r"(--gcc-path|--gcc-prefix|--gcc-option)\s+TEXT")
+    for help_flag in ("--help", "--help-all"):
+        result = CliRunner().invoke(main, [cmd_name, help_flag])
+        assert not option_row.search(result.output), (cmd_name, help_flag)
+    # --compiler is itself an advanced/toolchain-tier flag (same disclosure
+    # tier the old --gcc-path occupied), so it's only guaranteed visible on
+    # --help-all -- curated --help folds it away too, same as before.
+    help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
+    assert "--compiler" in help_all_output, cmd_name
+
+    commands = _registered_commands()
+    cmd = commands[cmd_name]
+    hidden_flags = {
+        p.opts[0]
+        for p in cmd.params  # type: ignore[attr-defined]
+        if getattr(p, "hidden", False)
+        and p.opts[0] in ("--gcc-path", "--gcc-prefix", "--gcc-option")
+    }
+    assert hidden_flags == {"--gcc-path", "--gcc-prefix", "--gcc-option"}
+
+
 def _all_leaf_commands() -> list[tuple[str, object]]:
     """Every leaf command in the live tree, as (dotted-path, command)."""
     import click
@@ -703,7 +747,9 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
     old_p = _make_snap_file(tmp_path, "libfoo", "1.0", [_func("foo"), _func("bar")])
     new_p = _make_snap_file(tmp_path, "libfoo", "2.0", [_func("foo")])
 
-    svc_result, _, _ = service.run_compare(old_p, new_p, scope_to_public_surface=True).as_tuple()
+    svc_result, _, _ = service.run_compare(
+        old_p, new_p, scope_to_public_surface=True
+    ).as_tuple()
     rel_result, _, _ = _run_compare_pair(
         old_p,
         new_p,
@@ -839,29 +885,59 @@ def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
     assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
 
 
-def test_contract_requires_contract_evaluation(tmp_path) -> None:
-    """``--contract`` alone would silently do nothing (ADR-049 Phase 6).
+def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
+    """``--contract`` alone now implies ``--contract-evaluation`` (ADR-049
+    Phase 6, CLI audit PR 3/5: abicheck.cli_options.resolve_contract_evaluation).
 
-    It selects the domain the shadow evaluator judges against; with no
-    ``--contract-evaluation`` no decision is computed at all, so accepting
-    the flag would accept a no-op. Rejected before any input is parsed, so
-    the two paths only have to exist.
+    It selects the domain the shadow evaluator judges against, and naming a
+    domain is by itself enough to ask for a decision against it -- this used
+    to be a `UsageError` (a no-op flag rejected before any input was parsed);
+    it now runs the real evaluator, identically to passing both flags
+    explicitly. The typed Python API (`api_types.CompareRequest.
+    validation_errors`, `service._validate_contract_mode`) is unaffected and
+    still requires both explicitly -- see test_compatibility_evaluation_frontend.py
+    / test_service_unit.py for that half of the contract.
     """
     from click.testing import CliRunner
 
     from abicheck.cli import main
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import snapshot_to_json
 
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
-    old_path.write_text("{}", encoding="utf-8")
-    new_path.write_text("{}", encoding="utf-8")
+    snap_json = snapshot_to_json(AbiSnapshot(library="x", version="1"))
+    old_path.write_text(snap_json, encoding="utf-8")
+    new_path.write_text(snap_json, encoding="utf-8")
 
-    result = CliRunner().invoke(
+    result_implicit = CliRunner().invoke(
         main,
-        ["compare", str(old_path), str(new_path), "--contract", "exports"],
+        [
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--contract",
+            "exports",
+            "--format",
+            "json",
+        ],
     )
-    assert result.exit_code != 0
-    assert "--contract requires --contract-evaluation" in result.output
+    result_explicit = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+            "--format",
+            "json",
+        ],
+    )
+    assert result_implicit.exit_code == result_explicit.exit_code
+    assert "Usage:" not in result_implicit.output
+    assert "contract_context" in result_implicit.output
 
 
 def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> None:

@@ -125,7 +125,7 @@ def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> dict[str, Any
             str(header),
             "--ast-frontend",
             "clang",
-            "--gcc-options",
+            "--compiler-option",
             "-DHAVE_BASE=1",
             "-o",
             str(out_json),
@@ -177,7 +177,7 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
             f"new={new_dir / 'pvxs.h'}",
             "--ast-frontend",
             "clang",
-            "--gcc-options",
+            "--compiler-option",
             "-DHAVE_BASE=1",
             "--format",
             "json",
@@ -221,7 +221,7 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
     silently-forced gnu++20, so a scanner that quietly ignored the profile's
     dialect and defaulted to some other standard entirely would pass that
     test too. This test closes that gap: both sides are dumped with an
-    *explicit* ``--gcc-options -std=gnu++11``, and the decisive assertion is
+    *explicit* ``--compiler-option -std=gnu++11``, and the decisive assertion is
     that both snapshots' own ``ast_resolved_standard`` provenance field
     reads back exactly ``"gnu++11"`` -- proving the requested dialect was
     the one actually used, not merely that C++20 wasn't force-applied."""
@@ -245,8 +245,10 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
                 str(header),
                 "--ast-frontend",
                 "clang",
-                "--gcc-options",
-                "-DHAVE_BASE=1 -std=gnu++11",
+                "--compiler-option",
+                "-DHAVE_BASE=1",
+                "--compiler-option",
+                "-std=gnu++11",
                 "-o",
                 str(out_json),
             ],
@@ -285,8 +287,10 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
             f"new={new_dir / 'pvxs.h'}",
             "--ast-frontend",
             "clang",
-            "--gcc-options",
-            "-DHAVE_BASE=1 -std=gnu++11",
+            "--compiler-option",
+            "-DHAVE_BASE=1",
+            "--compiler-option",
+            "-std=gnu++11",
             "--format",
             "json",
             "-o",

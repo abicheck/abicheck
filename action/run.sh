@@ -36,6 +36,57 @@ add_flag() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Helper: like add_flag(), but a single-line value is split the way
+# abicheck's own shlex.split() splits a compiler-flags string server-side
+# (quote-aware -- a value like -DMSG="hello world" stays one token), not
+# add_flag()'s plain bash word-splitting (Codex review, PR #757: routing
+# gcc-options through add_flag()'s unquoted `for item in $value` broke a
+# quoted value into malformed tokens, since bash word-splitting treats `"`
+# as a literal character once the string is already sitting in a variable,
+# unlike a real shell command line). Used only for the gcc-options ->
+# --compiler-option conversion, where the CLI flag it now maps to used to
+# be one scalar --gcc-options string abicheck itself shlex-split.
+#
+# Delegates to `python3`/`python` (`_PY_BIN`, resolved once above) rather
+# than `eval`: xargs-style or eval-based quote parsing would either use its
+# own, different quoting dialect or -- for eval -- actually execute a
+# `$(...)`/backtick command substitution embedded in untrusted Action input,
+# which this must not do. Falls back to add_flag()'s plain whitespace split
+# only if no Python interpreter is on PATH, which should not happen in this
+# Action's own runtime (it needs one to run abicheck itself).
+# ---------------------------------------------------------------------------
+add_flag_shlex_split() {
+  local flag="$1"
+  local value="$2"
+  local item split
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  if [[ "$value" == *$'\n'* ]]; then
+    # Multi-line (YAML block scalar): one line is already one full,
+    # space-safe token -- add_flag()'s own multi-line handling, no shlex
+    # parsing needed.
+    add_flag "$flag" "$value"
+    return
+  fi
+  if [[ -z "$_PY_BIN" ]]; then
+    add_flag "$flag" "$value"
+    return
+  fi
+  split="$("$_PY_BIN" -c '
+import os
+import shlex
+import sys
+
+for tok in shlex.split(sys.argv[1], posix=(os.name != "nt")):
+    print(tok)
+' "$value")"
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && CMD+=("$flag" "$item")
+  done <<< "$split"
+}
+
 # ADR-040 L1: the per-side header/include inputs map to the side-aware --header/
 # --include flags, prefixing each value with old=/new= (e.g. --header old=inc).
 add_sided_flag() {
@@ -618,7 +669,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
@@ -708,7 +759,7 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
     add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
     add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-    add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+    add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
     add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
     if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
@@ -1001,13 +1052,14 @@ elif [[ "$MODE" == "scan" ]]; then
   # so it's forwarded once regardless of which branch above ran.
   add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
 
-  # Cross-compiler flags -- documented root-Action inputs, but previously
-  # only wired to dump mode's branch (Codex review, same gap as compare
-  # mode above).
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+  # Cross-compiler flags -- documented root-Action inputs. Forwarded once,
+  # below, grouped with --ast-frontend (matching compare mode's own single
+  # block). A second, identical block used to sit here too: harmless when
+  # --gcc-options was a Click scalar (last-of-two-identical-values wins), but
+  # --compiler-option is `multiple=True` and genuinely accumulates every
+  # occurrence, so the duplicate silently doubled each forwarded token once
+  # the mechanical --gcc-options -> --compiler-option migration landed
+  # (Codex review, PR #757) -- removed rather than kept.
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
@@ -1031,7 +1083,7 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
@@ -1067,9 +1119,10 @@ elif [[ "$MODE" == "scan" ]]; then
     add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
   fi
 
-  if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
-    CMD+=(--allow-build-query)
-  fi
+  # --allow-build-query removed from `scan` (CLI audit PR 5/5): scan never
+  # reaches the ADR-032 QUERY_BUILD_SYSTEM gate dump's --allow-build-query
+  # still guards, so this input is silently ignored for scan mode now
+  # (dump mode above still honors it).
 
   # Format — scan only supports text and json. Normally caught early by
   # action/validate-inputs.sh; re-checked here (hard error, not a silent

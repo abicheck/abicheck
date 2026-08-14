@@ -256,9 +256,8 @@ definition, so they never drift):
 |---|---|
 | `--ast-frontend {auto,castxml,clang,hybrid}` | which frontend parses the headers (env `ABICHECK_AST_FRONTEND`); `hybrid` runs castxml and clang together |
 | `-I/--include DIR` | an include root your headers need (repeatable) |
-| `--gcc-options "…"` | extra compiler flags (whitespace-split), e.g. `--gcc-options "-std=c++20 -DFOO=1"` |
-| `--gcc-option TOK` | one flag verbatim (repeatable; for a flag + spaced value) |
-| `--gcc-path` / `--gcc-prefix` | a cross-compiler / cross-toolchain prefix |
+| `--compiler-option TOK` | one extra compiler flag verbatim (repeatable), e.g. `--compiler-option -std=c++20 --compiler-option -DFOO=1` |
+| `--compiler` / `--compiler-prefix` | a cross-compiler / cross-toolchain prefix |
 | `--sysroot DIR` | an alternate system root |
 | `--nostdinc` | do not search system includes (and disable the auto-probe below) |
 
@@ -266,7 +265,7 @@ definition, so they never drift):
 
 Four layers resolve the context, **highest precedence first**:
 
-1. **Explicit CLI flag** — a per-run override (`--gcc-options`, `--sysroot`, …).
+1. **Explicit CLI flag** — a per-run override (`--compiler-option`, `--sysroot`, …).
 2. **`.abicheck.yml` `compile:` block** — your project's stable contract,
    reviewed in PRs (see below). Put include roots, `std`, and `defines` here so
    every scan/CI run is reproducible without re-typing them.
@@ -307,7 +306,7 @@ a bare `scan -H include/` finds libstdc++ without extra flags. Disable it with
       (`_GLIBCXX_USE_CXX11_ABI`) — and produce exactly the "scope divergence"
       false BREAKINGs this feature exists to remove.
     - Auto-detection reads the **host** toolchain → it is wrong for
-      cross-compiles (use `--gcc-prefix`/`--sysroot` or the config block) and
+      cross-compiles (use `--compiler-prefix`/`--sysroot` or the config block) and
       makes results host-dependent (pin context in config for reproducible CI).
 
 ## Worked examples

@@ -50,7 +50,7 @@ from .cli_dump_helpers import (
     resolve_dump_compile_db,
     resolve_dump_debug_format,
 )
-from .cli_help import compare_help_options, configure_rich_help
+from .cli_help import compare_help_options, configure_rich_help, dump_help_options
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -374,6 +374,7 @@ def _resolve_and_check_dump_debug_format(
 
 
 @main.command("dump")
+@dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
               help="Public header file or directory (repeat for multiple).")
@@ -475,8 +476,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
              snapshot_compression: str,
-             gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+             gcc_path: str | None, gcc_prefix: str | None,
              gcc_option_tokens: tuple[str, ...],
+             compiler_path: str | None, compiler_prefix: str | None,
+             compiler_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, dry_run: bool,
@@ -497,6 +500,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              header_graph_deprecated: bool = False,
              header_graph_includes_deprecated: bool = False,
              frontend_context: str = "host",
+             # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
+             # defaulted-None parameter stays only so the internal composition
+             # below (_merge_gcc_options et al.) doesn't need to change --
+             # it's never populated from the CLI anymore, only ever None here.
+             gcc_options: str | None = None,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None,
              _resolved_include_labels: dict[Path, str] | None = None,
@@ -595,6 +603,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
         frontend_context=frontend_context,
+        compiler_path=compiler_path, compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
@@ -1591,7 +1601,10 @@ def _embed_inline_source_side(
                    "'severity' (per-category error levels), or 'auto' (severity "
                    "when a severity setting is in effect, else legacy). Declared "
                    "explicitly here so passing --severity-* no longer silently "
-                   "changes the scheme. Default: config's exit_code_scheme, else auto.")
+                   "changes the scheme. Default: config's exit_code_scheme, else auto. "
+                   "Deliberately NOT demoted to hidden (unlike --strict-suppressions/"
+                   "--public-symbol) -- ADR-040 D4 keeps it a visible coarse override; "
+                   "see test_config_rebalance.py's test_coarse_overrides_stay_visible.")
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")

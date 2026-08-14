@@ -37,11 +37,16 @@ abicheck compare old.so new.so -H include/ \
   --contract-evaluation --contract public   # or: exports | all
 ```
 
-`--contract` **requires** `--contract-evaluation` — passing it alone is a
-usage error (exit `64`), since without the flag nothing consumes the
-selected domain.
+`--contract public`/`exports`/`all` **implies** `--contract-evaluation` if it
+isn't already given — naming a domain is by itself enough to ask for a
+decision against it, so `--contract public` alone is equivalent to
+`--contract-evaluation --contract public`. (`--contract-evaluation` alone,
+with no `--contract`, still means the older domain-less behavior above —
+naming a domain is what turns the evaluator on when it wasn't already; it
+never turns it off.)
 
-`scan --against` accepts the identical pair of flags, for the same reason:
+`scan --against` accepts the identical pair of flags, with the same
+implication:
 
 ```bash
 abicheck scan build/libfoo.so --against baseline.json \

@@ -91,7 +91,7 @@ context:
 |---|---|---|
 | **castxml** (`--ast-frontend castxml`) | runs your real `g++`/MSVC, so system includes + predefined macros + the compiler's default dialect come for free | your project's own `-I` roots, `-D`, and the exact `-std` (still pass these) |
 | **clang** (`--ast-frontend clang`) | the alternative for clang-only hosts; now auto-probes the host GNU compiler for system includes so libstdc++ resolves like castxml | same as above — auto-detection is system-headers only |
-| **`-I` / `--gcc-options` (CLI)** | per-run include roots, `-std`, `-D` | reproducibility — a human/CI must retype them each run |
+| **`-I` / `--compiler-option` (CLI)** | per-run include roots, `-std`, `-D` | reproducibility — a human/CI must retype them each run |
 | **`.abicheck.yml` `compile:` block** | the project's stable, reviewed include roots / `std` / `defines` | per-invocation cross-compile specifics (those stay CLI) |
 | **compile database** (`compile_commands.json`) | the authoritative per-TU `-I`/`-std`/`-D` the library was actually built with | *(threading it into L2 is a planned step; today it feeds L3–L5)* |
 

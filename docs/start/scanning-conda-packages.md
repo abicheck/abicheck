@@ -66,7 +66,7 @@ which declarations are public).
     tree as one translation unit — which pulls in *optional backend* headers
     (OpenCL/SYCL: `dnnl_ocl.h` → `CL/cl.h`) and *preview* headers gated by
     `#error` macros (oneTBB's `blocked_rangeNd.h`). Those need their SDK or a
-    `--gcc-option=-DXXX_PREVIEW` to parse. The umbrella header includes only the
+    `--compiler-option=-DXXX_PREVIEW` to parse. The umbrella header includes only the
     library's curated, default-public surface, so it sidesteps both. Use the
     umbrella unless you specifically want a preview/backend header analysed.
 
