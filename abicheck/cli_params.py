@@ -351,6 +351,14 @@ def _load_suppression_and_policy(
                         rule.symbol_pattern and f'symbol_pattern="{rule.symbol_pattern}"'
                         or rule.symbol and f'symbol="{rule.symbol}"'
                         or rule.type_pattern and f'type_pattern="{rule.type_pattern}"'
+                        # Canonical (backend-independent) identity selector
+                        # (Codex review, fresh evidence, PR #753): a
+                        # finding_id-only rule with no other selector
+                        # previously rendered as the bare "?" fallback
+                        # here too, the same ambiguity already fixed in
+                        # cli_compare_fold.py/post_processing.py's own
+                        # selector-rendering chains.
+                        or rule.finding_id and f'finding_id="{rule.finding_id}"'
                         or rule.source_location and f'source_location="{rule.source_location}"'
                         or "?"
                     )

@@ -612,6 +612,30 @@ class TestFindingIdSuppressionSelector:
         assert isinstance(rule_a.finding_id, str)
         assert isinstance(rule_b.finding_id, str)
 
+    def test_loads_from_yaml_with_a_merge_key(self, tmp_path):
+        # Regression (Codex review, PR #753, round 3): a merge key
+        # (`<<: *anchor`) puts the referenced mapping's pairs one level of
+        # indirection away from the entry's own `.value` list -- the raw
+        # scan needs to resolve through it, not just scan direct pairs.
+        octal_looking_id = "0123456701234567"
+        yaml_path = tmp_path / "suppress.yaml"
+        yaml_path.write_text(
+            "version: 1\n"
+            "defaults: &d\n"
+            f"  finding_id: {octal_looking_id}\n"
+            "suppressions:\n"
+            "  - <<: *d\n"
+            "    reason: merged\n"
+            "  - <<: *d\n"
+            "    finding_id: '9999999999999999'\n"
+            "    reason: local override wins over the merged value\n"
+        )
+        suppressions = SuppressionList.load(yaml_path)
+        assert len(suppressions) == 2
+        merged_rule, overridden_rule = suppressions._suppressions
+        assert merged_rule.finding_id == octal_looking_id
+        assert overridden_rule.finding_id == "9999999999999999"
+
     def test_version_key_still_parses_as_a_real_int(self, tmp_path):
         # Guard against the alternative fix (disabling YAML int resolution
         # loader-wide) reappearing: this file's own `version: 1` key must

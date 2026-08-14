@@ -21,10 +21,38 @@ from __future__ import annotations
 
 import yaml
 
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+
+def _raw_scalar_for_key(node: yaml.MappingNode, key: str) -> str | None:
+    """Raw scalar text of *key* in mapping *node*, resolving YAML merge
+    keys (``<<: *anchor`` / ``<<: [*a, *b]``) the way PyYAML itself does:
+    a direct (non-merge) key always wins over a merged one, and among
+    multiple merge sources, the first-listed wins for a duplicate key
+    (Codex review, fresh evidence: ``defaults: &d {finding_id: ...}``
+    followed by ``- <<: *d`` bypassed the direct key/value scan entirely,
+    since the merge key's own value is a mapping *node reference*, not a
+    ``finding_id`` pair in *this* mapping's own ``.value`` list).
+    """
+    merged: str | None = None
+    for k, v in node.value:
+        if isinstance(k, yaml.ScalarNode) and k.tag == _MERGE_TAG:
+            sources = v.value if isinstance(v, yaml.SequenceNode) else [v]
+            for source in sources:
+                if isinstance(source, yaml.MappingNode) and merged is None:
+                    merged = _raw_scalar_for_key(source, key)
+        elif (
+            isinstance(k, yaml.ScalarNode)
+            and k.value == key
+            and isinstance(v, yaml.ScalarNode)
+        ):
+            return str(v.value)  # Direct key always wins -- return immediately.
+    return merged
+
 
 def raw_finding_ids_by_index(text: str) -> dict[int, str]:
     """``suppressions[]`` index -> raw, unresolved ``finding_id`` scalar
-    text, if present.
+    text, if present (merge keys resolved -- see :func:`_raw_scalar_for_key`).
 
     Codex review, PR #753 round 2: an unquoted all-octal-digit leading-zero
     scalar (``0123456701234567``) resolves to a *different* int
@@ -57,13 +85,9 @@ def raw_finding_ids_by_index(text: str) -> dict[int, str]:
     for index, item_node in enumerate(seq.value):
         if not isinstance(item_node, yaml.MappingNode):
             continue
-        for ik, iv in item_node.value:
-            if (
-                isinstance(ik, yaml.ScalarNode)
-                and ik.value == "finding_id"
-                and isinstance(iv, yaml.ScalarNode)
-            ):
-                raw_ids[index] = iv.value
+        raw = _raw_scalar_for_key(item_node, "finding_id")
+        if raw is not None:
+            raw_ids[index] = raw
     return raw_ids
 
 

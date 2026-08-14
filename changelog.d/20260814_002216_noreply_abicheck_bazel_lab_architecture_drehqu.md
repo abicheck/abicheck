@@ -30,7 +30,13 @@
   unresolved `finding_id` scalar text directly from the YAML node tree
   (`suppression_yaml.py`, a new leaf module split out to stay under the
   file-size cap) instead of trusting PyYAML's type resolution for this one
-  field, so the exact digest as written is always preserved.
+  field, so the exact digest as written is always preserved — including
+  through a YAML merge key (`<<: *anchor`), which is resolved the same way
+  PyYAML itself does (a direct key always wins over a merged one).
+- **`--strict-suppressions`'s expired-rule diagnostic renders a
+  `finding_id`-only rule's own identity too** — a third, independent
+  selector-rendering chain (`cli_params.py`) had the same bare `"?"`
+  fallback gap already fixed in `cli_compare_fold.py`/`post_processing.py`.
 - **`canonical_finding_id` now canonicalizes each `func_params_changed`
   parameter individually, not the whole comma-joined list as one type
   string** — `canonicalize_type_name`'s const-reorder/struct-prefix passes
