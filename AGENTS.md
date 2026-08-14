@@ -517,6 +517,22 @@ cover the surrounding first-party trees this file doesn't detail.
    `@registry.detector("...")` (`detector_registry.py`) the way the
    neighboring detectors in that file are.
 4. Add unit test.
+5. **Classify the kind for canonical identity** in
+   `tests/canonical_identity_contract.py` — put it in exactly one of
+   `TYPE_BEARING` (its `old_value`/`new_value` hold C/C++ type spellings, so
+   they must be canonicalized, which also means adding it to
+   `finding_identity._TYPE_BEARING_DISCRIMINATOR_KINDS`),
+   `VALUE_INSENSITIVE` (identity does not vary with value spelling because the
+   kind resolves through an `_EQUIVALENT_CHANGE_CATEGORIES` entry), or
+   `UNVERIFIED` (the call site has not been read yet — an explicit backlog
+   entry, not a verdict). `tests/test_canonical_finding_id_completeness.py`
+   fails until the kind is in a bucket. This step exists because PR #753
+   shipped `canonical_finding_id` with three type-slot kinds silently omitted
+   from that set and PR #759 had to add them hours later: a *missing* entry
+   produced no failure anywhere, so 12 targeted tests and a 26k-test suite all
+   passed against the gap. The judgement stays manual (an automatic
+   classification was proposed and rejected — see the set's own comment); only
+   the exhaustiveness is mechanical.
 
 ## Conventions
 
