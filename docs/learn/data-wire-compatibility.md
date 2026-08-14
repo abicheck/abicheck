@@ -57,8 +57,14 @@ perfectly fine for the first purpose can be a real break for the second:
   layout) is also potentially a data-format break for every file or message
   already written in the old layout.
 - **Bit-field and flag layout.** Persisted bitmask values assume specific
-  bit positions; a bit-field reordering is invisible to a source-level diff
-  (the field names are unchanged) but corrupts every stored value.
+  bit positions. With layout evidence available (debug info, or header AST
+  from a backend that computes bit offsets), abicheck does detect a moved
+  bit-field as an ordinary `type_field_offset_changed` ABI finding — the
+  data-compatibility risk here is the same "you get the signal, not the
+  framing" case as the struct-layout row above, not an invisible one; it
+  only becomes genuinely invisible on an evidence-poor input (a stripped
+  binary with no headers, or a header backend that can't compute bit
+  offsets) where the ABI signal itself is unavailable.
 - **Version tags and magic numbers.** Formats often self-describe via a
   leading version field — changing what a version number *means*, or
   reusing one, is a data-compatibility break with no ABI signature at all.

@@ -48,17 +48,20 @@ when it sees one.
 > macOS/Windows parallels, and the CPU-dispatch (oneDAL/OpenBLAS) scenario where
 > a new-hardware kernel moves the floor for every consumer.
 >
-> **Asking about behavior, data formats, ownership, or threading — not source/
-> binary shape?** [Part 0 §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
+> **Asking about behavior, data formats, ownership, threading, direction, or
+> library shape — not the ordinary source/binary comparison above?**
+> [Part 0 §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
 > maps all eight compatibility dimensions and links each to its own deep
 > dive: [behavioral](behavioral-compatibility.md),
-> [data/wire](data-wire-compatibility.md),
-> [ownership/lifetime](ownership-and-lifetime.md),
-> [compatibility direction](compatibility-direction.md),
-> [static/header-only](static-and-header-only.md), and
-> [concurrency/initialization](concurrency-and-initialization.md) — none of
-> which a static ABI/API checker can decide the way it decides source and
-> binary compatibility.
+> [data/wire](data-wire-compatibility.md), and
+> [ownership/lifetime](ownership-and-lifetime.md) and
+> [concurrency/initialization](concurrency-and-initialization.md) are
+> structurally outside what a static checker can decide the way it decides
+> source/binary compatibility (see each page for what execution-based
+> evidence covers instead); [compatibility direction](compatibility-direction.md)
+> and [static/header-only contracts](static-and-header-only.md) are
+> genuinely checkable with `compare`/`dump`, just via a workflow this hub's
+> default examples don't show.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
