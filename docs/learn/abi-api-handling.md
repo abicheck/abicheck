@@ -158,7 +158,7 @@ is the source of truth).
 | C++ qualifiers, mangling & ABI tags | [21](../reference/examples/case21_method_became_static.md), [22](../reference/examples/case22_method_const_changed.md), [30](../reference/examples/case30_field_qualifiers.md), [71](../reference/examples/case71_inline_namespace_moved.md), [86](../reference/examples/case86_tag_struct_renamed.md), [101](../reference/examples/case101_inline_namespace_version_bumped.md), [113](../reference/examples/case113_abi_tag_changed.md) | mixed — 🔴 BREAKING or 🟠 API_BREAK | [Part 4](abi-series/04-cpp-abi.md) |
 | Trivial → non-trivial (calling convention) | [64](../reference/examples/case64_calling_convention_changed.md), [69](../reference/examples/case69_trivial_to_nontrivial.md) | 🔴 BREAKING | [Part 4](abi-series/04-cpp-abi.md) |
 | Templates, inline & ODR | [16](../reference/examples/case16_inline_to_non_inline.md), [17](../reference/examples/case17_template_abi.md), [47](../reference/examples/case47_inline_to_outlined.md), [59](../reference/examples/case59_func_became_inline.md), [79](../reference/examples/case79_missing_template_instantiation.md), [85](../reference/examples/case85_internal_template_signature_changed.md), [87](../reference/examples/case87_default_template_arg_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 4](abi-series/04-cpp-abi.md) |
-| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | [105](../reference/examples/case105_concept_tightening.md), [114](../reference/examples/case114_char8t_migration.md), [115](../reference/examples/case115_bit_int_width_changed.md), [116](../reference/examples/case116_atomic_qualifier_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 4 §Modern](abi-series/04-cpp-abi.md#modern-cc-and-toolchain-abi-hazards) |
+| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | [105](../reference/examples/case105_concept_tightening.md), [114](../reference/examples/case114_char8t_migration.md), [115](../reference/examples/case115_bit_int_width_changed.md), [116](../reference/examples/case116_atomic_qualifier_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Modern C/C++ and Toolchain ABI Hazards](modern-cpp-toolchain-hazards.md) |
 | ELF/linker metadata (SONAME, visibility, versioning, RPATH, TLS) | [05](../reference/examples/case05_soname.md), [06](../reference/examples/case06_visibility.md), [13](../reference/examples/case13_symbol_versioning.md), [49](../reference/examples/case49_executable_stack.md), [51](../reference/examples/case51_protected_visibility.md), [52](../reference/examples/case52_rpath_leak.md), [65](../reference/examples/case65_symbol_version_removed.md), [67](../reference/examples/case67_tls_var_size_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 5](abi-series/05-linker-elf.md) |
 | Transitive/dependency & `detail::` leaks | [18](../reference/examples/case18_dependency_leak.md), [48](../reference/examples/case48_leaf_struct_through_pointer.md), [74](../reference/examples/case74_detail_base_class_changed.md), [75](../reference/examples/case75_detail_embedded_by_value.md), [76](../reference/examples/case76_detail_pimpl_vtable_changed.md), [77](../reference/examples/case77_detail_templated_base_changed.md), [80](../reference/examples/case80_pimpl_shared_to_unique.md), [97](../reference/examples/case97_api_depends_on_consumer_env.md), [104](../reference/examples/case104_glibcxx_dual_abi_flip.md), [112](../reference/examples/case112_lp64_ilp64.md) | 🔴 BREAKING | [Part 6](abi-series/06-transitive-breaks.md) |
 | Source-only / API-level (rename, access, explicit, default args, hidden friends) | [31](../reference/examples/case31_enum_rename.md), [34](../reference/examples/case34_access_level.md), [96](../reference/examples/case96_hidden_friend_removed.md), [106](../reference/examples/case106_ctor_became_explicit.md), [123](../reference/examples/case123_default_argument_removed.md), [124](../reference/examples/case124_header_constant_value_changed.md) | 🟠 API_BREAK | [Part 6 §Source-only API breaks](abi-series/06-transitive-breaks.md#source-only-api-breaks-binary-identical) |
@@ -327,17 +327,19 @@ label is a fiction and the change is exactly as breaking as if it were
 public. Telling these two cases apart requires *reachability*: a graph walk
 from the public surface, not a flat list of what's public and what isn't —
 including through the easy-to-miss case where a **public inline function's
-own body calls an "internal" helper**. The inline function's own body is
-what's compiled directly into every consumer's binary; whether a change to
-the "internal" helper it calls is consumer-breaking depends on what the
-compiler did with that call: if the helper stays a real out-of-line symbol
-the consumer links against, a breaking change to it is exactly as breaking
-as if the helper were public itself. If the compiler fully inlined the
-helper too, an *already-built* consumer has no runtime dependency on it at
-all — it keeps running the code that was generated at its own build time,
-unaffected by anything the library does afterward; the risk there is a
-*source/behavioral* one on the consumer's next rebuild, not a binary
-dependency.
+own body calls an "internal" helper**. For any consumer that actually calls
+or otherwise ODR-uses that inline function — a consumer that never does
+emits neither the body nor its reference to the helper, so it's simply
+unaffected — the inline function's own body is what's compiled directly
+into that consumer's binary; whether a change to the "internal" helper it
+calls is breaking for such a consumer depends on what the compiler did with
+that call: if the helper stays a real out-of-line symbol the consumer links
+against, a breaking change to it is exactly as breaking as if the helper
+were public itself. If the compiler fully inlined the helper too, an
+*already-built* consumer has no runtime dependency on it at all — it keeps
+running the code that was generated at its own build time, unaffected by
+anything the library does afterward; the risk there is a *source/behavioral*
+one on the consumer's next rebuild, not a binary dependency.
 
 That graph is **L5**, built from structural edges (a public type embedding,
 inheriting from, or holding a field/base of an internal one) and behavioral

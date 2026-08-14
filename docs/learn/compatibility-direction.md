@@ -7,6 +7,9 @@ canonical_for:
   - compatibility-direction
 depends_on:
   - abicheck/checker.py
+  - abicheck/cli_options.py
+  - abicheck/cli_compare_helpers.py
+  - abicheck/appcompat.py
 lifecycle: active
 generated: false
 ---

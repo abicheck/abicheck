@@ -1,0 +1,53 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+canonical_for:
+  - modern-cpp-toolchain-hazards
+depends_on:
+  - abicheck/diff_symbols.py
+lifecycle: active
+generated: false
+---
+
+# Modern C/C++ and Toolchain ABI Hazards
+
+The break families in [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md)
+predate C++11. Newer language features and toolchain *flags* introduce a
+second class of hazard: the **declaration looks unchanged in the header,
+but the bytes the compiler emits move** because a type's size, mangling, or
+passing rule shifted under it. These are the cases reviewers miss most
+often, because nothing in the diff "looks like" an ABI change.
+
+| Hazard | What silently changes | abicheck case |
+|--------|----------------------|---------------|
+| **`_GLIBCXX_USE_CXX11_ABI` flip** | libstdc++ ships *two* `std::string`/`std::list` ABIs in parallel behind the `__cxx11` inline namespace; flipping the macro re-mangles every symbol that touches those types. | [case104](../reference/examples/case104_glibcxx_dual_abi_flip.md) |
+| **ABI tags (`[[gnu::abi_tag]]`)** | A tag is mangled into the symbol name; adding/removing one renames the symbol with no source-visible signature change. | [case113](../reference/examples/case113_abi_tag_changed.md) |
+| **`char8_t` (C++20)** | `const char*` → `const char8_t*` is a *distinct type*: different mangling, and a new overload-resolution result. | [case114](../reference/examples/case114_char8t_migration.md) |
+| **`_BitInt(N)` width** | Changing `N` changes size/alignment and the register/stack class the value is passed in. | [case115](../reference/examples/case115_bit_int_width_changed.md) |
+| **`_Atomic` qualifier** | Adding/removing `_Atomic` can change size, alignment, and whether the object is passed by lock-free path. | [case116](../reference/examples/case116_atomic_qualifier_changed.md) |
+| **`[[no_unique_address]]`** | Lets an empty member overlap the next field; adding it shrinks the struct and shifts every following offset. | [case117](../reference/examples/case117_no_unique_address.md) |
+| **Concept tightening (C++20)** | Narrowing a constraint removes instantiations the consumer relied on — a *source* break with no symbol-table change for already-emitted instantiations. | [case105](../reference/examples/case105_concept_tightening.md) |
+| **LP64 → ILP64 / data-model drift** | `long`/pointer widths change out from under every struct and signature — a whole-ABI shift driven by the target, not the source. | [case112](../reference/examples/case112_lp64_ilp64.md) |
+
+Several more live only in the **build flags**, not the source, and abicheck
+surfaces them as toolchain/deployment risk when build context is captured:
+`-fno-exceptions` / `-fno-rtti` (drop EH/RTTI machinery callers may rely
+on — see [Exception Unwinding](exception-unwinding-abi.md) for what
+`-fno-rtti` actually strips), `-fshort-enums` (changes enum underlying size
+— see [Part 3](abi-series/03-type-layout.md)), packing/alignment flags,
+vector-ABI flags, and CPU-dispatch/IFUNC selection
+([case83](../reference/examples/case83_cpu_dispatch_isa_dropped.md),
+[case29](../reference/examples/case29_ifunc_transition.md)).
+
+!!! warning "Why these need debug info or headers"
+    Like the rest of [Part 4](abi-series/04-cpp-abi.md), every hazard above
+    is recoverable only when DWARF/PDB *or* headers are supplied — and the
+    dual-ABI and ABI-tag cases need the *mangled* symbol names, so a
+    stripped, name-demangled view can hide them.
+
+See also: [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) for the
+core, pre-C++11 mechanisms this page's hazards sit alongside, and
+[Exception Unwinding](exception-unwinding-abi.md) for the
+`-fno-exceptions`/`-fno-rtti` machinery in full.

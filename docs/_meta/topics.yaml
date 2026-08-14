@@ -391,3 +391,20 @@ topics:
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
+
+  # Split out of Part 4 — C++ ABI Specifics (docs/AGENTS.md criterion 5: the
+  # page had grown to answer more than one primary question). Part 4 keeps
+  # the core, first-read-through mechanisms and links out to these for the
+  # deep-dive material.
+  exception-unwinding-abi:
+    canonical_page: learn/exception-unwinding-abi.md
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/modern-cpp-toolchain-hazards.md
+
+  modern-cpp-toolchain-hazards:
+    canonical_page: learn/modern-cpp-toolchain-hazards.md
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/abi-api-handling.md
+      - learn/exception-unwinding-abi.md
