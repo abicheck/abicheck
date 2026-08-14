@@ -90,7 +90,7 @@ def _user_define_flags(
     """The user's *global* define-affecting flags for the ADR-039 collector.
 
     Combines the ``-D``/``-U`` in the ``--gcc-options`` string with the repeatable
-    ``--gcc-option`` tokens, **in the same order the real dump applies them** —
+    ``--compiler-option`` tokens, **in the same order the real dump applies them** —
     ``dumper._castxml_cmd`` appends ``gcc_options`` first, then
     ``gcc_option_tokens`` (see ``dumper.py``), so the collector must too (Codex
     review #498). Order is significant because ``defines_from_flags`` honours
@@ -1492,10 +1492,7 @@ def resolve_dump_collect_context(
 def resolve_dump_compile_context(
     resolved_compile_context: CompileContext | None,
     *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
     gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     header_backend: str,
@@ -1525,10 +1522,7 @@ def resolve_dump_compile_context(
 
     return resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         header_backend=header_backend,
@@ -1721,7 +1715,7 @@ def perform_elf_dump(
         defer_cleanup=None,
         build_query=build_query,
         build_compile_db=build_compile_db,
-        # Include dirs supplied via --gcc-options/--gcc-option are as explicit as
+        # Include dirs supplied via --compiler-option are as explicit as
         # -I and must suppress the seed so the user's search precedence is kept.
         gcc_options=effective_gcc_options,
         gcc_option_tokens=gcc_option_tokens,
@@ -1811,7 +1805,7 @@ def perform_elf_dump(
         # and additive: absent/empty on a plain context-free dump.
         if effective_compile_db and resolved_headers:
             # Augment the sound per-command compile-DB intersection with the user's
-            # *global* flags only: the repeatable ``--gcc-option`` tokens and the
+            # *global* flags only: the repeatable ``--compiler-option`` tokens and the
             # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
             # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
             # review #498). We deliberately do NOT feed ``effective_gcc_options``,

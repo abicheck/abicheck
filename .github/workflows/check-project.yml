@@ -922,7 +922,7 @@ jobs:
           # ast-frontend above is: a bundle cell's operand is the
           # bundle-staging *directory*, and cli_resolve.py's
           # `_reject_compile_context_for_set_inputs` hard-rejects
-          # --gcc-path/--gcc-options for a directory/package compare (the
+          # gcc-path/gcc-options for a directory/package compare (the
           # per-library release fan-out never threads a single-pair L2
           # compile context to each pair). Before this line, a profile that
           # set compile.binding for its target cells would have that same

@@ -118,7 +118,7 @@ def _compile_flags_from_ast_dump_command(cmd: list[str]) -> list[str]:
     Searches for the specific ADJACENT ``"-Xclang", "-ast-dump=json"`` pair
     — abicheck's own appended tail — rather than the first bare ``"-Xclang"``
     anywhere in the command: a user passing their own ``-Xclang <arg>``
-    through ``--gcc-options``/``--gcc-option`` places it earlier in the
+    through ``--compiler-option`` places it earlier in the
     command, and stopping at THAT one would drop the user's own flag plus
     everything genuinely shared after it (later pass-through options,
     system includes, language mode) instead of just abicheck's own dump-mode

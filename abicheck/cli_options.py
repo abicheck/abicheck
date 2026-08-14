@@ -634,16 +634,16 @@ def compile_context_options(func: F) -> F:
     The single source of truth for the flags that tell the header frontend how to
     parse the public headers: ``--ast-frontend`` (which frontend), the cross
     compiler (``--compiler``/``--compiler-prefix``, plus the deprecated-but-still
-    -functional ``--gcc-path``/``--gcc-prefix`` aliases), pass-through compiler
+    -functional ``--compiler``/``--compiler-prefix`` aliases), pass-through compiler
     flags (``--gcc-options``/``--compiler-option``, the latter superseding the
-    deprecated ``--gcc-option``), an alternate ``--sysroot``, and ``--nostdinc``.
+    deprecated ``--compiler-option``), an alternate ``--sysroot``, and ``--nostdinc``.
     Shared verbatim by ``dump``, ``scan``, **and** ``compare`` so the three never
     drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
     real L2). Decorators apply bottom-up, so the options are listed in reverse of
     their displayed order. Dest names match the ``dumper.dump`` /
     :class:`~abicheck.service_scan.CompileContext` kwargs exactly, except for the
-    new ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
-    :func:`resolve_compile_context` merges into the same ``gcc_*`` fields.
+    ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
+    :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
     """
     func = click.option(
         "--frontend-context",
@@ -674,69 +674,36 @@ def compile_context_options(func: F) -> F:
         default=None,
         help="Alternative system root directory for header resolution.",
     )(func)
-    # ── --compiler/--compiler-prefix/--compiler-option (CLI audit PR 2/5) ────
-    # Neutral aliases for --gcc-path/--gcc-prefix/--gcc-option: the "gcc"
-    # spelling was always misleading (these accept a Clang cross-compiler
-    # binary too, per the docstring on the legacy --gcc-path below). Additive
-    # and non-breaking: the legacy flags stay fully functional (just hidden
-    # from --help/--help-all, since they're superseded, not removed), merged
-    # in resolve_compile_context() with the new spelling winning when both are
-    # given and a one-line stderr note when only the legacy one is used.
-    # --gcc-options (the whitespace-split string form) is removed outright
-    # (CLI audit PR 5/5): --compiler-option is its safer repeatable verbatim
-    # replacement, and the Action's own run.sh migrated to it first (word-
-    # splitting its gcc-options input into --compiler-option tokens itself).
-    # `gcc_options`/`CompileContext.gcc_options` stay as an internal field
-    # (composed from build-context flags, castxml/clang command assembly,
-    # etc.) -- only the raw user-facing CLI flag is gone.
+    # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
+    # The one spelling for the cross-toolchain family. The former
+    # --compiler/--compiler-prefix/--gcc-option names were always misleading (each
+    # accepts a Clang cross-compiler binary just as well) and are removed
+    # outright rather than kept as aliases -- carrying two spellings meant a
+    # per-invocation conflict resolver whose only correct answer for the
+    # repeatable --*-option pair was to reject mixing them anyway.
+    # `gcc_path`/`gcc_prefix`/`gcc_option_tokens`/`gcc_options` stay as
+    # internal `CompileContext` field names (also composed from build-context
+    # flags and the castxml/clang command assembly, and serialized into the
+    # run-plan JSON) -- only the user-facing CLI flags are gone.
     func = click.option(
         "--compiler-option",
         "compiler_option_tokens",
         multiple=True,
         help="A single extra compiler flag passed to the header frontend verbatim "
         "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
-        "e.g. --compiler-option=-include --compiler-option='some header.h'. "
-        "Do not mix with the deprecated --gcc-option in the same invocation "
-        "(a usage error) -- pick one spelling.",
-    )(func)
-    func = click.option(
-        "--gcc-option",
-        "gcc_option_tokens",
-        multiple=True,
-        hidden=True,
-        help="Deprecated alias for --compiler-option (kept functional; "
-        "superseded, not removed). Do not mix with --compiler-option in the "
-        "same invocation (a usage error) -- pick one spelling.",
+        "e.g. --compiler-option=-include --compiler-option='some header.h'.",
     )(func)
     func = click.option(
         "--compiler-prefix",
         "compiler_prefix",
         default=None,
-        help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-). Wins over the "
-        "deprecated --gcc-prefix if both are given.",
-    )(func)
-    func = click.option(
-        "--gcc-prefix",
-        "gcc_prefix",
-        default=None,
-        hidden=True,
-        help="Deprecated alias for --compiler-prefix (kept functional; "
-        "superseded, not removed).",
+        help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
     )(func)
     func = click.option(
         "--compiler",
         "compiler_path",
         default=None,
-        help="Path to a GCC/G++ or Clang cross-compiler binary. Wins over the "
-        "deprecated --gcc-path if both are given.",
-    )(func)
-    func = click.option(
-        "--gcc-path",
-        "gcc_path",
-        default=None,
-        hidden=True,
-        help="Deprecated alias for --compiler (kept functional; superseded, "
-        "not removed). Always accepted a Clang binary too, despite the name.",
+        help="Path to a GCC/G++ or Clang cross-compiler binary.",
     )(func)
     func = click.option(
         "--allow-unsupported-castxml",
@@ -811,7 +778,7 @@ def merge_compile_config(
     is gone, CLI audit PR 5/5, so this is now always the case from the CLI —
     the field stays as an internal-composition-only escape hatch); those
     synthesized tokens are prepended *before* any CLI ``--compiler-option``/
-    ``--gcc-option`` tokens, not appended after, so an explicit CLI ``-std=``/
+    ``--compiler-option`` tokens, not appended after, so an explicit CLI ``-std=``/
     ``-D`` still wins the way a compiler resolves a repeated flag (Codex
     review: appending after silently let config override an explicit CLI
     token once ``--gcc-options`` -- the flag that used to suppress this
@@ -955,90 +922,9 @@ def resolve_contract_evaluation(
     return contract_evaluation or contract_mode is not None
 
 
-def _merge_compiler_aliases(
-    *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...],
-    compiler_path: str | None,
-    compiler_prefix: str | None,
-    compiler_option_tokens: tuple[str, ...],
-) -> tuple[str | None, str | None, tuple[str, ...]]:
-    """Fold the deprecated ``--gcc-*`` flags into their ``--compiler*`` aliases.
-
-    CLI audit PR 2/5: ``--compiler``/``--compiler-prefix``/``--compiler-option``
-    are the new, neutral spellings (the old ``gcc`` name was always misleading —
-    it always accepted a Clang binary too); the legacy flags stay hidden-but-
-    functional rather than removed. A new flag wins entirely if given (an
-    explicit override, same precedence style as CLI>config elsewhere in this
-    module); a legacy value is used, with a stderr deprecation note, only when
-    the new spelling wasn't given at all.
-
-    ``--compiler-option``/``--gcc-option`` deliberately do NOT merge when both
-    are given, even though each is independently repeatable and each is
-    individually documented as accumulating across its own repeated uses:
-    Click hands back ``compiler_option_tokens``/``gcc_option_tokens`` as two
-    separately-collected tuples with no record of their original relative
-    argv order, so *any* fixed merge rule -- concatenation, or "one spelling
-    wins entirely" -- either reorders flag/value pairs across the two
-    spellings or silently drops real tokens the user asked for. Both were
-    tried and both are wrong (Codex review, PR #757, two rounds): naive
-    concatenation can separate ``-include`` from its own operand when the
-    pieces come from different spellings (e.g. ``--gcc-option=-include
-    --compiler-option='some header.h'`` -> ``('some header.h', '-include')``);
-    "new wins entirely" silently drops legitimate ``--gcc-option`` tokens the
-    moment even one ``--compiler-option`` is present, e.g. during an
-    incremental migration that adds new tokens via the new spelling while
-    older ones are still passed via the old one. Since neither a token-list
-    merge rule nor an order-recovery scheme can be correct without knowing
-    the real argv order Click doesn't expose across two options, mixing both
-    spellings is rejected outright instead of guessed at -- the user must use
-    exactly one spelling for this specific repeatable pair (unlike the two
-    scalars above, where "new wins" is unambiguous and safe).
-    """
-    if compiler_option_tokens and gcc_option_tokens:
-        raise click.UsageError(
-            "--compiler-option and --gcc-option (its deprecated alias) "
-            "cannot both be given: each is independently repeatable, but "
-            "there's no way to recover their combined argv order from here, "
-            "and any fixed merge rule risks silently reordering a flag away "
-            "from its own operand or dropping real tokens. Use only "
-            "--compiler-option (preferred) or only --gcc-option, not both."
-        )
-    deprecated_used: list[str] = []
-    resolved_path: str | None
-    if compiler_path is not None:
-        resolved_path = compiler_path
-    else:
-        resolved_path = gcc_path
-        if gcc_path is not None:
-            deprecated_used.append("--gcc-path (use --compiler)")
-    resolved_prefix: str | None
-    if compiler_prefix is not None:
-        resolved_prefix = compiler_prefix
-    else:
-        resolved_prefix = gcc_prefix
-        if gcc_prefix is not None:
-            deprecated_used.append("--gcc-prefix (use --compiler-prefix)")
-    resolved_tokens = compiler_option_tokens or gcc_option_tokens
-    if gcc_option_tokens and not compiler_option_tokens:
-        deprecated_used.append("--gcc-option (use --compiler-option)")
-    if deprecated_used:
-        click.echo(
-            "Note: deprecated compiler flag(s) still work but are superseded: "
-            + ", ".join(deprecated_used)
-            + ". Planned removal: two minor releases out.",
-            err=True,
-        )
-    return resolved_path, resolved_prefix, resolved_tokens
-
-
 def resolve_compile_context(
     ctx: click.Context,
     *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     header_backend: str,
@@ -1065,12 +951,12 @@ def resolve_compile_context(
     a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
     L2 compile context cannot drift.
 
-    ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` (CLI audit
-    PR 2/5) are the ``--compiler``/``--compiler-prefix``/``--compiler-option``
-    values; :func:`_merge_compiler_aliases` folds them together with their
-    deprecated ``gcc_*`` counterparts into the single set of values the rest of
-    this function (and thus ``CompileContext``) has always used, so nothing
-    downstream needs to know the alias exists.
+    ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` are the
+    ``--compiler``/``--compiler-prefix``/``--compiler-option`` values; they map
+    straight onto ``CompileContext``'s long-standing ``gcc_path``/
+    ``gcc_prefix``/``gcc_option_tokens`` fields, which keep their internal
+    names (they are also composed from build-context flags and serialized into
+    the run-plan JSON), so nothing downstream sees the CLI rename.
 
     ``frontend_context`` (ADR-050 D3/D5) passes through unchanged here — Click's
     own ``type=click.Choice(["host", "device"])`` on ``--frontend-context``
@@ -1082,20 +968,11 @@ def resolve_compile_context(
     """
     from .service_scan import CompileContext
 
-    gcc_path, gcc_prefix, gcc_option_tokens = _merge_compiler_aliases(
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_option_tokens=tuple(gcc_option_tokens),
-        compiler_path=compiler_path,
-        compiler_prefix=compiler_prefix,
-        compiler_option_tokens=tuple(compiler_option_tokens),
-    )
-
     cli_ctx = CompileContext(
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
+        gcc_path=compiler_path,
+        gcc_prefix=compiler_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=tuple(gcc_option_tokens),
+        gcc_option_tokens=tuple(compiler_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=header_backend,

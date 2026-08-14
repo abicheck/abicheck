@@ -94,7 +94,7 @@ def _preprocessor_scan_clang_bin(compile_context: CompileContext | None) -> str:
     (the shared resolver also used for L4 source-ABI replay's ``clang_bin``,
     see ``embed_build_source``'s callers) — see that function's docstring for
     the override rules and rationale. ``compile_context is None`` (no
-    ``--gcc-path``/``--gcc-prefix`` given at all) short-circuits to the
+    ``--compiler``/``--compiler-prefix`` given at all) short-circuits to the
     ``clang++`` fallback directly, same as passing two ``None``s would.
     """
     from .dumper_clang import resolve_source_frontend_clang_bin
@@ -252,7 +252,7 @@ def _build_new_snapshot(
         build_info=build_info,
         build_config=build_config,
         defer_cleanup=None,
-        # -I dirs the user gave through --gcc-options/--gcc-option (carried on the
+        # -I dirs the user gave through --compiler-option (carried on the
         # CompileContext) are explicit too — pass them so the seed stays a no-op
         # and the user's include search precedence is preserved (Codex review).
         gcc_options=compile_context.gcc_options if compile_context else None,
@@ -315,11 +315,11 @@ def _build_new_snapshot(
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             # L4 source-ABI replay must invoke the same compiler the scan's own
-            # L2 header AST was pointed at (--gcc-path/--gcc-prefix), not the
+            # L2 header AST was pointed at (--compiler/--compiler-prefix), not the
             # embed_build_source default of a bare "clang" — mirrors
             # _preprocessor_scan_clang_bin's identical S2 fix above; without
             # this a scan compiled with a non-default toolchain (e.g.
-            # --gcc-path icpx) silently replayed L4 through a plain "clang"
+            # --compiler icpx) silently replayed L4 through a plain "clang"
             # that may not even understand the real build's flags.
             clang_bin=resolve_source_frontend_clang_bin(
                 compile_context.gcc_path if compile_context else None,

@@ -602,7 +602,7 @@ def _castxml_fallback_reason(
         return None
 
     # Probe the driver _run_clang() would actually invoke (honors
-    # --gcc-path/--gcc-prefix), not just a bare "clang" on PATH (Codex
+    # --compiler/--compiler-prefix), not just a bare "clang" on PATH (Codex
     # review).
     def _clang_fallback_ready() -> bool:
         try:

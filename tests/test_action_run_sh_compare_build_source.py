@@ -213,14 +213,14 @@ class TestScanModeForwardsCrossCompilerFlags:
             },
             tmp_path,
         )
-        assert "--gcc-path /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
-        assert "--gcc-prefix aarch64-linux-gnu-" in cmd
+        assert "--compiler /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
+        assert "--compiler-prefix aarch64-linux-gnu-" in cmd
         assert "--compiler-option -D__ARM_NEON" in cmd
         assert "--sysroot /opt/sysroots/aarch64" in cmd
 
 
 class TestCompareModeForwardsCrossCompilerFlags:
-    """--gcc-path/--gcc-prefix/--gcc-options/--sysroot are documented root-
+    """The gcc-path/gcc-prefix/gcc-options/sysroot inputs are documented root-
     Action inputs and both dump AND compare/scan support them at the CLI
     level, but were previously only wired into dump mode's branch --
     a cross-target compare/scan silently fell back to the host toolchain
@@ -237,15 +237,15 @@ class TestCompareModeForwardsCrossCompilerFlags:
             },
             tmp_path,
         )
-        assert "--gcc-path /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
-        assert "--gcc-prefix aarch64-linux-gnu-" in cmd
+        assert "--compiler /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
+        assert "--compiler-prefix aarch64-linux-gnu-" in cmd
         assert "--compiler-option -D__ARM_NEON" in cmd
         assert "--sysroot /opt/sysroots/aarch64" in cmd
 
     def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
         cmd = _run_compare({}, tmp_path)
-        assert "--gcc-path" not in cmd
-        assert "--gcc-prefix" not in cmd
+        assert "--compiler" not in cmd
+        assert "--compiler-prefix" not in cmd
         assert "--compiler-option" not in cmd
         assert "--sysroot" not in cmd
 

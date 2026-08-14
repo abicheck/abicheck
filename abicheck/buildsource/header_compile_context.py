@@ -241,7 +241,7 @@ class _ExplicitPin:
     already resolves (Finding 3).
 
     A caller who already pinned a field via ``--gcc-options``/
-    ``--gcc-option`` (or the structured ``sysroot`` field) does not need the
+    ``--compiler-option`` (or the structured ``sysroot`` field) does not need the
     L3 evidence to agree on that field too -- ``resolve_header_compile_
     context`` masks a pinned field out of the multi-unit ambiguity
     comparison below, so a genuine disagreement on a *different*,

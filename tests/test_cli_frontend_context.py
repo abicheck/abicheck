@@ -118,8 +118,7 @@ def test_resolve_compile_context_defaults_to_host():
     ctx = click.Context(click.Command("x"))
     cc, _ = resolve_compile_context(
         ctx,
-        gcc_path=None, gcc_prefix=None, gcc_options=None,
-        gcc_option_tokens=(), sysroot=None, nostdinc=False,
+        gcc_options=None, sysroot=None, nostdinc=False,
         header_backend="auto", includes=(), build_config=None,
     )
     assert cc.frontend_context == "host"
@@ -135,8 +134,7 @@ def test_resolve_compile_context_accepts_device():
     ctx = click.Context(click.Command("x"))
     cc, _ = resolve_compile_context(
         ctx,
-        gcc_path=None, gcc_prefix=None, gcc_options=None,
-        gcc_option_tokens=(), sysroot=None, nostdinc=False,
+        gcc_options=None, sysroot=None, nostdinc=False,
         header_backend="auto", includes=(), build_config=None,
         frontend_context="device",
     )
@@ -213,7 +211,7 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
                 "dump", str(so),
                 "-H", str(hdr),
                 "--frontend-context", "device",
-                "--gcc-path", "icpx",
+                "--compiler", "icpx",
             ],
         )
     assert result.exit_code == 0, result.output

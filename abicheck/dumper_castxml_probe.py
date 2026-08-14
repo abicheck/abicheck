@@ -179,7 +179,7 @@ def _castxml_failure_hint(
             "(_Float32/_Float64/_Float128) that this castxml/clang frontend "
             "cannot parse — the bundled clang is older than the host gcc/glibc. "
             "Install a newer castxml (newer bundled Clang), or point abicheck at "
-            f"a clang-parsable toolchain via --gcc-path / --sysroot.{version_note}"
+            f"a clang-parsable toolchain via --compiler / --sysroot.{version_note}"
         )
     # 2) GCC 13+ libstdc++ uses the [[__assume__]] / __attribute__((__assume__))
     #    spelling the bundled clang frontend doesn't know.
@@ -188,7 +188,7 @@ def _castxml_failure_hint(
             "\n\nHint: the host libstdc++ uses the GCC '__assume__' attribute "
             "that this castxml/clang frontend rejects. Install a newer castxml "
             "matching the host GCC, or scan against an older/clang-parsable "
-            f"libstdc++ via --gcc-path / --sysroot.{version_note}"
+            f"libstdc++ via --compiler / --sysroot.{version_note}"
         )
     # 3) Explicit --lang c on headers needing C++. _CPP_ONLY_PATTERNS (like the
     # retry gate below) excludes extern "C" so a valid guarded-C header's real

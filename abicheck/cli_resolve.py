@@ -657,13 +657,6 @@ def _resolve_compare_snapshots(
 
 #: Compile-context flag dest → spelling, for the set-input rejection guard.
 _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
-    "gcc_path": "--gcc-path",
-    "gcc_prefix": "--gcc-prefix",
-    "gcc_option_tokens": "--gcc-option",
-    # --compiler/--compiler-prefix/--compiler-option (CLI audit PR 2/5): the
-    # same guard as their legacy gcc_* counterparts above -- without this a
-    # set-input compare would silently accept and then ignore --compiler,
-    # unlike --gcc-path, which correctly raises (Codex review, PR #757).
     "compiler_path": "--compiler",
     "compiler_prefix": "--compiler-prefix",
     "compiler_option_tokens": "--compiler-option",

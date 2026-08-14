@@ -361,8 +361,8 @@ class TestSmallHelpers:
         result = CliRunner().invoke(main, ["dump", str(so)])
         assert "carry only L0-L2 data" not in result.output
 
-    def test_dump_gcc_option_threaded_to_non_elf(self, tmp_path, monkeypatch) -> None:
-        # ADR-037 D3 (Codex): --gcc-option(s) are now threaded into the native
+    def test_dump_compiler_option_threaded_to_non_elf(self, tmp_path, monkeypatch) -> None:
+        # ADR-037 D3 (Codex): --compiler-option is now threaded into the native
         # PE/Mach-O header-scoping path (resolved before format dispatch), so the
         # old "will be ignored" warning is gone and the context reaches the dump.
         import struct
@@ -375,7 +375,7 @@ class TestSmallHelpers:
         monkeypatch.setattr(
             cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
         )
-        result = CliRunner().invoke(main, ["dump", str(dylib), "--gcc-option=-DX"])
+        result = CliRunner().invoke(main, ["dump", str(dylib), "--compiler-option=-DX"])
         assert result.exit_code == 0, result.output
         assert "will be ignored" not in result.output
         assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
@@ -427,13 +427,13 @@ class TestSmallHelpers:
         assert "-std=c++17" in gcc_options
         assert "-DFOO=1" in gcc_options
 
-    def test_dump_gcc_option_help(self) -> None:
-        # G21.5: the repeatable --gcc-option is documented on dump. It's a
+    def test_dump_compiler_option_help(self) -> None:
+        # G21.5: the repeatable --compiler-option is documented on dump. It's a
         # toolchain-tier flag, folded behind --help-all by dump's curated
         # --help (G21.8 M2).
         out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
-        assert "--gcc-option" in norm
+        assert "--compiler-option" in norm
 
     def test_dump_depth_help_shows_four_rungs(self) -> None:
         runner = CliRunner()

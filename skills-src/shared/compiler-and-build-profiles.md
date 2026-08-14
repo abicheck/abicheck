@@ -32,7 +32,7 @@ directories, and translation units were in view.
 | Dial | Use |
 |---|---|
 | `--lang c\|c++` | language of the surface |
-| `--gcc-path`, `--gcc-prefix` | select the compiler driver used for header extraction |
+| `--compiler`, `--compiler-prefix` | select the compiler driver used for header extraction |
 | `--compiler-option` (repeatable) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
 | `--sysroot`, `--include` / `-I`, `--nostdinc` | header search context |
 | `--ast-frontend` | which header-AST backend parses the headers |

@@ -444,7 +444,7 @@ class TestDumpLang:
 # ── Cross-compilation flags on dump ──────────────────────────────────────
 
 class TestDumpCrossCompilation:
-    def test_gcc_path_forwarded(self, tmp_path, monkeypatch):
+    def test_compiler_path_forwarded(self, tmp_path, monkeypatch):
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -460,12 +460,12 @@ class TestDumpCrossCompilation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
-            "--gcc-path", "/usr/bin/aarch64-linux-gnu-g++",
+            "--compiler", "/usr/bin/aarch64-linux-gnu-g++",
         ])
         assert result.exit_code == 0
         assert captured.get("gcc_path") == "/usr/bin/aarch64-linux-gnu-g++"
 
-    def test_gcc_prefix_forwarded(self, tmp_path, monkeypatch):
+    def test_compiler_prefix_forwarded(self, tmp_path, monkeypatch):
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -481,7 +481,7 @@ class TestDumpCrossCompilation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
-            "--gcc-prefix", "aarch64-linux-gnu-",
+            "--compiler-prefix", "aarch64-linux-gnu-",
         ])
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"
@@ -566,7 +566,7 @@ class TestDumpCrossCompilation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
-            "--gcc-prefix", "aarch64-linux-gnu-",
+            "--compiler-prefix", "aarch64-linux-gnu-",
             "--compiler-option", "-march=armv8-a",
             "--nostdinc",
         ])

@@ -151,7 +151,7 @@ def pass_through_flags_from_tokens(flags: Iterable[str]) -> list[str | Path]:
     """Ordered ADR-050 ``pass_through_flags``
     (``abicheck.comparability.compute_extraction_contract``) from a compiler
     flag stream. Recognizes only ``-include <path>`` today (its
-    ``--gcc-option=-include --gcc-option=<path>`` CLI form already flattens
+    ``--compiler-option=-include --compiler-option=<path>`` CLI form already flattens
     to this same two-token shape) — the one currently-known must-handle
     repeatable, order-sensitive frontend flag (Codex review, PR #624); other
     flags are not yet classified and are simply omitted, not mis-hashed. The
@@ -829,7 +829,7 @@ def _compile_db_has_forced_include(path: str | Path, source_filter: str | None) 
     """Whether any (filtered) compile-DB command carries a forced-include flag.
 
     Mirrors :func:`defines_from_compile_db`'s read/filter so a ``-include`` in the
-    real build's command line — not just the user's ``--gcc-option`` — makes the
+    real build's command line — not just the user's ``--compiler-option`` — makes the
     scanned guards ``ambiguous`` (Codex review #498). Best-effort: any read/parse
     error is treated as *no* forced include (the collector never aborts a dump)."""
     p = Path(path)

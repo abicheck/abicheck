@@ -72,11 +72,9 @@ abicheck compare libv1.so libv2.so -H include/foo.h \
   --compiler-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
 ```
 
-Available compile-context flags (on `dump`, `compare`, and `scan`; each also
-has a hidden, still-functional `--gcc-*` alias kept for backward
-compatibility — `--gcc-path`/`--gcc-prefix`/`--gcc-option` — not shown in
-`--help`/`--help-all` since `--compiler`/`--compiler-prefix`/
-`--compiler-option` supersede them):
+Available compile-context flags (on `dump`, `compare`, and `scan`; the older
+`--gcc-path`/`--gcc-prefix`/`--gcc-option` spellings are removed, not
+aliased — use the `--compiler*` names below):
 - `--compiler` — path to the cross-compiler binary. For the `clang`
   `--ast-frontend`, this is honored only when the binary is clang-family
   (basename contains `clang`, or is a known non-`clang`-named clang-based

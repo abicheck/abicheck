@@ -916,8 +916,8 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -1006,8 +1006,8 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
   else
     add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-    add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-    add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+    add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+    add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
     add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
     add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -1327,8 +1327,8 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 

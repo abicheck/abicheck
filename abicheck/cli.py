@@ -398,7 +398,7 @@ def _resolve_and_check_dump_debug_format(
               help="Output JSON file. Defaults to stdout.")
 @snapshot_compression_option
 # ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
-# --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
+# --ast-frontend / --compiler / --compiler-prefix / --compiler-option /
 # --sysroot / --nostdinc are defined once in cli_options.compile_context_options
 # so `dump` and `scan` never drift; applied as a decorator below.
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
@@ -476,8 +476,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
              snapshot_compression: str,
-             gcc_path: str | None, gcc_prefix: str | None,
-             gcc_option_tokens: tuple[str, ...],
              compiler_path: str | None, compiler_prefix: str | None,
              compiler_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
@@ -598,8 +596,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # like it already does the binary-dump path, not just this validation check.
     _cc, includes = resolve_dump_compile_context(
         _resolved_compile_context,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        gcc_options=gcc_options, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
         frontend_context=frontend_context,

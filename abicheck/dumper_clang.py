@@ -135,7 +135,7 @@ def _clang_available(clang_bin: str = "clang") -> bool:
 #: (``icx``/``icpx``, and its older ``dpcpp``/``dpcpp-cl`` aliases — all four are
 #: the same clang-based binary under different names/symlinks in Intel's package,
 #: confirmed via ``__clang_major__``/``-Xclang -ast-dump=json`` against a real
-#: install). Without this, ``--gcc-path .../icpx`` is silently ignored (the
+#: install). Without this, ``--compiler .../icpx`` is silently ignored (the
 #: substring check below only matches "clang") and falls back to plain "clang" on
 #: PATH — a *different* compiler than the one the real build used, so the wrong
 #: toolchain's headers/predefined macros get parsed. This does not attempt
@@ -162,7 +162,7 @@ def _is_intel_sycl_driver(path: str) -> bool:
     :func:`_is_clang_family_binary` (which also matches plain
     "clang"/"clang++") — widening this to that check would make
     :func:`abicheck.dumper._needs_sycl_host_only` append a flag stock clang
-    cannot parse, breaking a ``--gcc-path clang`` + ``-fsycl`` combination
+    cannot parse, breaking a ``--compiler clang`` + ``-fsycl`` combination
     that previously worked.
     """
     return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
@@ -210,7 +210,7 @@ def _dpcpp_defaults_sycl_on(cc_bin: str) -> bool:
 
 
 def _user_explicitly_disabled_sycl(tokens: list[str]) -> bool:
-    """True if *tokens* (the caller's own ``--gcc-options``/``--gcc-option``
+    """True if *tokens* (the caller's own ``--compiler-option``
     tokens -- never anything abicheck itself appends) end with an explicit
     ``-fno-sycl`` with no later ``-fsycl`` to re-enable it: i.e. the caller
     explicitly asked for a non-SYCL compile (Codex review, P2: ADR-050 D5's
@@ -265,7 +265,7 @@ def _resolve_dpcpp_multi_context(
     if frontend_context != "host" and sycl_explicitly_off:
         raise AstContextMissingError(
             f"--frontend-context {frontend_context!r} requires SYCL to be "
-            "enabled, but the given --gcc-options/--gcc-option explicitly "
+            "enabled, but the given --compiler-option explicitly "
             "disable it (-fno-sycl) -- remove -fno-sycl or drop "
             "--frontend-context device."
         )
@@ -298,7 +298,7 @@ def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     does not split into two passes and hard-rejects both
     ``-fsycl-host-only``/``-fsycl-device-only`` as "unknown argument"
     (Codex review, PR #643) -- appending the flag unconditionally would
-    turn a working ``--gcc-path clang`` + ``-fsycl`` parse into a failure.
+    turn a working ``--compiler clang`` + ``-fsycl`` parse into a failure.
 
     A plain ``"-fsycl" in tokens`` membership check is not enough: the
     driver applies ``-fsycl``/``-fno-sycl`` last-flag-wins (confirmed with
@@ -341,7 +341,7 @@ def _is_cl_style_driver_name(path: str) -> bool:
     Strips a trailing numeric version suffix first (``clang-cl-20`` ->
     ``clang-cl``) -- LLVM/Debian packaging commonly ships a versioned
     executable alongside (or instead of) the unversioned name; without
-    stripping it a packaged ``--gcc-path clang-cl-20`` would not be
+    stripping it a packaged ``--compiler clang-cl-20`` would not be
     recognized as CL-style and would wrongly reach the GNU-only S2
     pre-scan, which silently ignores its unknown ``-dM``/``-M`` flags
     (Codex review) instead of being excluded and falling back to plain
@@ -360,14 +360,14 @@ def resolve_source_frontend_clang_bin(
 ) -> str:
     """Resolve the clang binary a build-context-aware source frontend (the S2
     preprocessor pre-scan, L4 source-ABI replay/``embed_build_source``)
-    should invoke, from the same ``--gcc-path``/``--gcc-prefix`` override a
+    should invoke, from the same ``--compiler``/``--compiler-prefix`` override a
     dump's ``CompileContext`` already carries for the L2 header AST —
     instead of hardcoding a generic ``clang``/``clang++`` regardless of what
     toolchain the caller actually pointed at.
 
-    Mirrors :func:`_resolve_clang_bin`'s two override cases (``--gcc-path``
+    Mirrors :func:`_resolve_clang_bin`'s two override cases (``--compiler``
     only when it is actually a GNU-mode clang-family binary — castxml/GCC
-    binaries can't take clang-only flags; ``--gcc-prefix`` maps to the
+    binaries can't take clang-only flags; ``--compiler-prefix`` maps to the
     prefixed clang driver, but only when that specific prefixed binary is
     actually on PATH — a documented GCC cross-toolchain prefix is not
     evidence a same-prefixed Clang exists, and guessing wrong would silently
@@ -389,7 +389,7 @@ def resolve_source_frontend_clang_bin(
     L4 callers pass ``exclude_cl_style=False``.
 
     Without this function, a dump/scan driven by a non-default toolchain
-    (e.g. ``--gcc-path icpx``, which accepts icx/icpx-only flags) always
+    (e.g. ``--compiler icpx``, which accepts icx/icpx-only flags) always
     shelled out to a plain ``clang``/``clang++`` for L4/S2 instead, failing
     every invocation and silently degrading source-ABI coverage even though
     the real build's own compiler was resolvable right here.
@@ -414,9 +414,9 @@ def _resolve_clang_bin(
 ) -> str:
     """Resolve the clang executable to run, raising if it is not on ``PATH``.
 
-    ``--gcc-path`` is honored only when it points at a clang(-family) binary
+    ``--compiler`` is honored only when it points at a clang(-family) binary
     (castxml emulates a GCC/G++ binary, which can't take clang-only flags);
-    ``--gcc-prefix`` maps to the prefixed clang driver.
+    ``--compiler-prefix`` maps to the prefixed clang driver.
     """
     clang_bin: str | None = None
     if gcc_path and _is_clang_family_binary(gcc_path):

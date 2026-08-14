@@ -1283,8 +1283,7 @@ def run_compare(
     bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
-    gcc_path: str | None, gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
+    sysroot: Path | None, nostdinc: bool,
     # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
     # internal-only, defaulted-None parameter -- see cli.py's dump_cmd for
     # why (never populated from the CLI anymore, only ever None here).
@@ -1576,8 +1575,7 @@ def run_compare(
 
     compile_context, merged_includes = resolve_compile_context(
         ctx,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        gcc_options=gcc_options, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
         frontend_context=frontend_context,
         compiler_path=compiler_path, compiler_prefix=compiler_prefix,

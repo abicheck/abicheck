@@ -649,7 +649,7 @@ class AbiSnapshot:
     # None when ast_resolved_standard is unset or not a recognized C++ edition.
     ast_cplusplus_macro: str | None = field(default=None, kw_only=True)
     # The ordered extra compiler arguments passed to the header frontend
-    # (--gcc-option tokens, then a shlex-split --gcc-options) — the exact
+    # (--compiler-option tokens, then a shlex-split composed-flags string) — the exact
     # argv tail, for reproducibility and fingerprinting.
     ast_compile_args: tuple[str, ...] = field(default_factory=tuple, kw_only=True)
     # The --sysroot passed to the header frontend, if any.

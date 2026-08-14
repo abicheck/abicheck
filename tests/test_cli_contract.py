@@ -24,7 +24,6 @@ a given pair identically (no ``scope_public`` default drift).
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -487,9 +486,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--follow-deps",
         "--format",
         "--frontend-context",
-        "--gcc-option",
-        "--gcc-path",
-        "--gcc-prefix",
         "--header",
         "--header-graph",
         "--header-graph-includes",
@@ -608,44 +604,36 @@ def test_header_graph_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
 
 
 @pytest.mark.parametrize("cmd_name", ["compare", "dump", "scan"])
-def test_gcc_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
-    """CLI audit PR 2/5: --gcc-path/--gcc-prefix/--gcc-option are deprecated,
-    hidden aliases for --compiler/--compiler-prefix/--compiler-option —
-    absent from both --help and --help-all (unlike the curated/full M2 split,
-    this is a straight hide: the legacy spelling is superseded, not merely
-    advanced), but still accepted and still functional (see
-    abicheck.cli_options._merge_compiler_aliases and
-    test_compile_context_parity.py for the merge/precedence/deprecation-note
-    coverage), so an existing script/CI invocation that still passes them
-    doesn't hard-break."""
+def test_removed_gcc_spellings_are_gone_entirely(cmd_name: str) -> None:
+    """--gcc-path/--gcc-prefix/--gcc-option are removed, not hidden.
+
+    They were briefly kept as hidden-but-functional aliases for
+    --compiler/--compiler-prefix/--compiler-option. Carrying two spellings
+    meant a per-invocation conflict resolver whose only correct answer for
+    the repeatable option pair was to reject mixing them, so the legacy
+    names were dropped outright (pre-1.0) rather than deprecated in place.
+    A caller still passing one now gets a hard usage error naming the flag,
+    which is strictly better than a silently-ignored value."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    # Match the option's own rendered row (flag name padded, then its TEXT/
-    # metavar column) rather than a bare substring: --compiler-prefix's own
-    # help text legitimately *mentions* "--gcc-path"/"--gcc-prefix" in prose
-    # ("wins over the deprecated --gcc-path if both are given"), which a
-    # plain substring check would misread as the option itself leaking.
-    option_row = re.compile(r"(--gcc-path|--gcc-prefix|--gcc-option)\s+TEXT")
-    for help_flag in ("--help", "--help-all"):
-        result = CliRunner().invoke(main, [cmd_name, help_flag])
-        assert not option_row.search(result.output), (cmd_name, help_flag)
-    # --compiler is itself an advanced/toolchain-tier flag (same disclosure
-    # tier the old --gcc-path occupied), so it's only guaranteed visible on
-    # --help-all -- curated --help folds it away too, same as before.
-    help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
-    assert "--compiler" in help_all_output, cmd_name
-
     commands = _registered_commands()
     cmd = commands[cmd_name]
-    hidden_flags = {
-        p.opts[0]
-        for p in cmd.params  # type: ignore[attr-defined]
-        if getattr(p, "hidden", False)
-        and p.opts[0] in ("--gcc-path", "--gcc-prefix", "--gcc-option")
-    }
-    assert hidden_flags == {"--gcc-path", "--gcc-prefix", "--gcc-option"}
+    dests = {p.name for p in cmd.params}  # type: ignore[attr-defined]
+    spellings = {opt for p in cmd.params for opt in p.opts}  # type: ignore[attr-defined]
+    assert not spellings & {"--gcc-path", "--gcc-prefix", "--gcc-option"}, cmd_name
+    assert not dests & {"gcc_path", "gcc_prefix", "gcc_option_tokens"}, cmd_name
+
+    for help_flag in ("--help", "--help-all"):
+        result = CliRunner().invoke(main, [cmd_name, help_flag])
+        assert "--gcc-path" not in result.output, (cmd_name, help_flag)
+        assert "--gcc-prefix" not in result.output, (cmd_name, help_flag)
+        assert "--gcc-option" not in result.output, (cmd_name, help_flag)
+    # --compiler is an advanced/toolchain-tier flag (the same disclosure tier
+    # the old --gcc-path occupied), so it's only guaranteed on --help-all.
+    help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
+    assert "--compiler" in help_all_output, cmd_name
 
 
 def _all_leaf_commands() -> list[tuple[str, object]]:

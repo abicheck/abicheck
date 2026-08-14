@@ -514,7 +514,7 @@ def _make_help_callback(
         # option renders there too *only* if some OPTION_GROUPS panel lists one
         # of its flag strings (same bypass noted above); one that is hidden and
         # unlisted (a deprecated no-op shim like --header-graph, or a superseded
-        # alias like --gcc-path) never appears even there (Codex review, PR #757).
+        # shim like --header-graph) never appears even there (Codex review, PR #757).
         # Counting those in "advanced option(s) hidden" would overstate what
         # --help-all actually recovers, so they're excluded from the count here
         # -- they were never part of this M2 disclosure axis to begin with.

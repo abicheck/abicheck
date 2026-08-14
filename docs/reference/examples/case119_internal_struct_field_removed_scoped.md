@@ -35,7 +35,7 @@ gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
 abicheck compare libfoo_v1.so libfoo_v2.so \
   --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --gcc-path "$(command -v clang)" \
+  --ast-frontend clang --compiler "$(command -v clang)" \
   --scope-public-headers --show-filtered
 ```
 

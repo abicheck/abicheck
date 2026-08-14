@@ -18,7 +18,7 @@
 parity").
 
 The three CLI subcommands all share ``compile_context_options``
-(``--ast-frontend``/``--gcc-path``/``--gcc-prefix``/``--gcc-options``/
+(the ``ast-frontend``/``gcc-path``/``gcc-prefix``/``gcc-options``/
 ``--sysroot``/``--nostdinc``, ADR-037 D3) — but ``action/run.sh`` used to
 forward all six only in ``dump`` mode, only ``--ast-frontend`` in ``compare``
 mode (behind a comment incorrectly claiming the rest were "dump-only flags...
@@ -309,8 +309,8 @@ class TestCompileContextForwardingParity:
     def test_dump_forwards_all_six_flags(self) -> None:
         cmd, _ = _run_region(_DUMP_MODE_MARKER, _FULL_ENV)
         assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
+        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
+        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
@@ -329,8 +329,8 @@ class TestCompileContextForwardingParity:
         }
         cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
         assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
+        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
+        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
@@ -341,8 +341,8 @@ class TestCompileContextForwardingParity:
         decorator with dump (ADR-037 D3 / ADR-035 amendment)."""
         cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV)
         assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
+        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
+        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
@@ -352,8 +352,8 @@ class TestCompileContextForwardingParity:
         # --compiler-option is `multiple=True` and genuinely accumulates every
         # occurrence, so the duplicate silently doubled every forwarded
         # --gcc-path/--gcc-prefix/--compiler-option/--sysroot token.
-        assert cmd.count("--gcc-path") == 1
-        assert cmd.count("--gcc-prefix") == 1
+        assert cmd.count("--compiler") == 1
+        assert cmd.count("--compiler-prefix") == 1
         assert cmd.count("--compiler-option") == 1
         assert cmd.count("--sysroot") == 1
 
@@ -626,13 +626,13 @@ class TestCompileContextForwardingParity:
             {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        assert "--gcc-path" not in cmd
+        assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 
     def test_scan_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(_SCAN_MODE_MARKER, {})
-        assert "--gcc-path" not in cmd
+        assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 

@@ -42,7 +42,7 @@ g++ -shared -fPIC -g v1.cpp -o libtpl_v1.so
 g++ -shared -fPIC -g v2.cpp -o libtpl_v2.so
 abicheck compare libtpl_v1.so libtpl_v2.so \
   --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --gcc-path "$(command -v clang)"
+  --ast-frontend clang --compiler "$(command -v clang)"
 # → NO_CHANGE (exit 0) — the documented L0-L2 gap, see "Minimum evidence"
 ```
 
@@ -75,14 +75,14 @@ for v in ("v1", "v2"):
 PYEOF
 
 abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json \
-  --build-info v1.evidence --ast-frontend clang --gcc-path "$(command -v clang)" -o v1.abi.json
+  --build-info v1.evidence --ast-frontend clang --compiler "$(command -v clang)" -o v1.abi.json
 abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json \
-  --build-info v2.evidence --ast-frontend clang --gcc-path "$(command -v clang)" -o v2.abi.json
+  --build-info v2.evidence --ast-frontend clang --compiler "$(command -v clang)" -o v2.abi.json
 
 abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
 ```
 
-(`--ast-frontend clang`/`--gcc-path` select the supported Clang AST frontend
+(`--ast-frontend clang`/`--compiler` select the supported Clang AST frontend
 because castxml isn't installed in this environment; drop them on a host
 with castxml. The standalone `collect` CLI command was removed in the
 ADR-043 CLI reset, so `collect_inline_pack()` is called directly here to

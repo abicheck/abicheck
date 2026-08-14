@@ -378,8 +378,8 @@ def dump_source_only(
     no-op on a snapshot with no header-derived declarations
     (``from_headers`` stays ``False``) either way.
 
-    ``gcc_path``/``gcc_prefix`` are the dump's own ``--gcc-path``/
-    ``--gcc-prefix`` (there is no header AST here to have already resolved a
+    ``gcc_path``/``gcc_prefix`` are the dump's own ``--compiler``/
+    ``--compiler-prefix`` (there is no header AST here to have already resolved a
     ``CompileContext`` from — a source-only dump has no ``-H`` headers
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.

@@ -89,7 +89,7 @@ The same applies when one side is a snapshot: it already carries its own
 header evidence, so scope the live side only — `abicheck compare
 baseline.abi.json build/libfoo.so --header new=include/foo/api.h`.
 
-`--include`/`-I`, `--sysroot`, and `--gcc-option` shape the parse the same way
+`--include`/`-I`, `--sysroot`, and `--compiler-option` shape the parse the same way
 they shape the real build. They must match the real build, or the extracted
 surface is not the shipped one.
 

@@ -815,9 +815,6 @@ def _run_artifact_set(
     fmt: str,
     output: Path | None,
     header_backend: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     frontend_context: str,
@@ -868,10 +865,7 @@ def _run_artifact_set(
     # caller explicitly selected a target sysroot/toolchain (Codex review).
     compile_context, includes_tuple = resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=tuple(gcc_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
         header_backend=header_backend,
@@ -1463,10 +1457,7 @@ def scan_cmd(
     # above scan_cmd's decorators for why removing the flag was safe here).
     allow_build_query: bool = False,
     header_backend: str = "auto",
-    gcc_path: str | None = None,
-    gcc_prefix: str | None = None,
     gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
@@ -1564,10 +1555,7 @@ def scan_cmd(
             fmt=fmt,
             output=output,
             header_backend=header_backend,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
             gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
             compiler_path=compiler_path,
             compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
@@ -1639,10 +1627,7 @@ def scan_cmd(
     # reads from, and is only ever `None` or already known to parse cleanly).
     compile_context, includes_tuple = resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=tuple(gcc_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
         header_backend=header_backend,

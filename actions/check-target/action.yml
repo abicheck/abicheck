@@ -203,13 +203,13 @@ inputs:
     description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid. Forwarded to the internal analysis step.'
     required: false
   gcc-path:
-    description: 'Path to GCC/G++ cross-compiler binary. Forwarded to the internal analysis step.'
+    description: 'Path to GCC/G++ cross-compiler binary (the CLI --compiler). Forwarded to the internal analysis step.'
     required: false
   gcc-prefix:
-    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Forwarded to the internal analysis step.'
+    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu- (the CLI --compiler-prefix). Forwarded to the internal analysis step.'
     required: false
   gcc-options:
-    description: 'Extra compiler flags passed through to castxml. Forwarded to the internal analysis step.'
+    description: 'Extra compiler flags passed through to the header frontend (the CLI --compiler-option). Forwarded to the internal analysis step.'
     required: false
   sysroot:
     description: 'Alternative system root directory for cross-compilation. Forwarded to the internal analysis step.'

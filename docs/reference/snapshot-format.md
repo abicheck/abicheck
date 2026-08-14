@@ -191,7 +191,7 @@ before persistence — see `abicheck/buildsource/redaction.py`).
 |-----|------|---------|---------|
 | `ast_resolved_standard` | string \| null | `null` | The C/C++ standard actually used for the header parse: an explicit `-std=`/`--std=`/`/std:` value verbatim, or `"gnu++20"` when the requires/concept heuristic forced it. `null` means the frontend's own unpinned default was used (never guessed at). |
 | `ast_cplusplus_macro` | string \| null | `null` | The standard-mandated `__cplusplus` literal for `ast_resolved_standard` (e.g. `"201703L"` for `"gnu++17"`), looked up from a static ISO-standard table. `null` when `ast_resolved_standard` is unset or not a recognized C++ edition. |
-| `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--gcc-option`/`--compiler-option` tokens, then a shlex-split composed-flags string derived from `-p`/`--compile-db`), redacted. |
+| `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--compiler-option` tokens, then a shlex-split composed-flags string derived from `-p`/`--compile-db`), redacted. |
 | `ast_sysroot` | string \| null | `null` | The `--sysroot` passed to the header frontend, if any, redacted. |
 
 `ast_toolchain` (`dict[str, str]`, populated since schema v9) carries the
@@ -202,7 +202,7 @@ stable and machine-checked by `tests/test_tool_identity.py`/
 
 | Key | Meaning |
 |-----|---------|
-| `selected` / `compiler_selected` | The exact frontend/host-compiler executable path selected from `PATH` (or an explicit `--gcc-path`). |
+| `selected` / `compiler_selected` | The exact frontend/host-compiler executable path selected from `PATH` (or an explicit `--compiler`). |
 | `realpath` / `compiler_realpath` | The same path with symlinks resolved. |
 | `sha256` / `compiler_sha256` | SHA-256 of the executable's file contents, so a same-version binary rebuild/repackage still changes provenance. |
 | `version` / `compiler_version` | The raw, bounded `--version` transcript for that exact executable revision. |

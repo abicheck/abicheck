@@ -1097,7 +1097,7 @@ def _attach_header_graph(
         # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
         #
         # Resolve the same clang driver `_clang_header_dump` above used
-        # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
+        # (honoring `--compiler`/`--compiler-prefix`) rather than defaulting to
         # the bare "clang++" — otherwise a hermetic/cross toolchain selected
         # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
         # edge (or resolves them against the host's clang instead) even

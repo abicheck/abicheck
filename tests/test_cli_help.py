@@ -148,7 +148,7 @@ class TestCompareHelpAllDisclosure:
         out = CliRunner().invoke(main, ["compare", "--help"]).output
         # A representative long-tail option from each folded panel.
         for advanced_flag in (
-            "--gcc-path",
+            "--compiler",
             "--ast-frontend",
             "--jobs",
             "--severity-abi-breaking",
@@ -191,7 +191,7 @@ class TestCompareHelpAllDisclosure:
         """The footer promises '--help-all shows every option' -- only true for
         an option --help-all can actually render. A few options are Click-
         ``hidden`` AND not listed in any OPTION_GROUPS panel (deprecated no-op
-        shims like --header-graph, superseded aliases like --gcc-path): those
+        shims like --header-graph): those
         never render even in --help-all, so counting them would overstate what
         running it actually recovers (Codex review, PR #757). Verified by
         computing the same 'recoverable' set independently of
@@ -225,14 +225,6 @@ class TestCompareHelpAllDisclosure:
             assert int(m.group(1)) == expected_recoverable, command
 
     def test_help_all_shows_everything_curated_hides(self) -> None:
-        # --gcc-path is deliberately NOT one of these examples: it is now a
-        # fully hidden, superseded alias for --compiler (CLI audit PR 2/5) and
-        # never renders as a real option row even in --help-all -- see
-        # test_cli_contract.py::test_gcc_flags_are_hidden_but_still_parse for
-        # that exact contract. A prior version of this test used --gcc-path
-        # here and passed for the wrong reason: plain substring matching
-        # against --compiler's own help text mentioning "the deprecated
-        # --gcc-path", not a real rendered row (Codex review, PR #757).
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
             "--sysroot",
@@ -272,7 +264,7 @@ class TestCompareHelpAllDisclosure:
         old.write_text(snap_json, encoding="utf-8")
         new.write_text(snap_json, encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--gcc-path", "/usr/bin/gcc"]
+            main, ["compare", str(old), str(new), "--compiler", "/usr/bin/gcc"]
         )
         assert result.exit_code == 0, result.output
 
@@ -290,12 +282,6 @@ _HELP_ALL_COMMANDS: list[
     (
         "dump",
         cli_help.DUMP_COMMON_OPTION_NAMES,
-        # --gcc-path is deliberately excluded here: it's now a fully hidden,
-        # superseded alias for --compiler (CLI audit PR 2/5) that never
-        # renders even in --help-all, unlike these five genuinely-advanced-
-        # but-still-rendered examples (see test_help_all_shows_everything_curated_hides's
-        # own comment on why a hidden alias would be a false-positive-prone
-        # example for this shared tuple's "shows in --help-all" reuse).
         ("--sysroot", "--ast-frontend", "--follow-deps", "--debug-root", "--pdb-path"),
         (
             "--header",
@@ -310,7 +296,6 @@ _HELP_ALL_COMMANDS: list[
     (
         "scan",
         cli_help.SCAN_COMMON_OPTION_NAMES,
-        # --gcc-path excluded here for the same reason as dump's tuple above.
         # --strict-suppressions/--public-symbol are hidden too (CLI audit
         # PR 4/5) but genuinely render in --help-all via their new "Policy &
         # severity"/"Public-surface scoping" panel membership (cli_help.py),
@@ -433,15 +418,15 @@ class TestDumpAndScanHelpAllDisclosure:
     def test_dump_advanced_option_still_functional_after_curated_help_render(
         self, tmp_path
     ) -> None:
-        """--gcc-path is hidden from curated `dump --help` but must still work."""
+        """--compiler is hidden from curated `dump --help` but must still work."""
         CliRunner().invoke(main, ["dump", "--help"])
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
         result = CliRunner().invoke(
-            main, ["dump", str(so_path), "--gcc-path", "/usr/bin/gcc"]
+            main, ["dump", str(so_path), "--compiler", "/usr/bin/gcc"]
         )
         # Not a valid ELF, so this is expected to fail downstream -- the point
-        # is that Click accepts the (curated-hidden) --gcc-path flag at all,
+        # is that Click accepts the (curated-hidden) --compiler flag at all,
         # rather than rejecting it as "no such option".
         assert "no such option" not in result.output.lower()
 

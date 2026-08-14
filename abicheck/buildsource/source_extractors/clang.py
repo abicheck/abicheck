@@ -339,7 +339,7 @@ def _clang_context_args(
     The host-only decision is gated on *clang_bin* — the binary this command
     will actually be run with — not on ``pick_compiler_binary``'s *emulated*
     compiler below (``cc_bin``, used only for flag-shape decisions like
-    ``msvc``/language-standard translation). Without ``--gcc-path``/an
+    ``msvc``/language-standard translation). Without ``--compiler``/an
     explicit ``compiler_binary`` override, ``cc_bin`` falls back to the real
     build's own recorded ``argv[0]`` (e.g. ``icpx``) purely to emulate its
     accepted flag shape, while *clang_bin* stays the generic default
@@ -421,7 +421,7 @@ def _clang_context_args(
                 "way to correctly represent that pass under a different "
                 "compiler, so this translation unit degrades to partial "
                 "coverage rather than being silently replayed under the "
-                "wrong compilation context -- pass --gcc-path pointing at "
+                "wrong compilation context -- pass --compiler pointing at "
                 "the real icx/icpx/dpcpp driver to extract it."
             )
     if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):

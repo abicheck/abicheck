@@ -70,7 +70,7 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     # different parse (implicit SYCL builtins/attributes, kernel-lambda
     # codegen), so its presence/absence is exactly the kind of parse-affecting
     # signal this list already tracks for -std=/-fvisibility/etc. Without
-    # this, a resolved --gcc-path override that now actually invokes icpx/
+    # this, a resolved --compiler override that now actually invokes icpx/
     # dpcpp for L4 replay (previously always a bare "clang") would replay a
     # SYCL TU as plain C++, silently missing built-in SYCL state (Codex
     # review). Only the flag's *presence*, carried via replay_extra_flags(),

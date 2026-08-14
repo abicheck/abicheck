@@ -37,8 +37,8 @@ class CompileContext:
     """L2 header-AST compile context — shared by ``dump`` and ``scan``.
 
     The cross-toolchain + frontend knobs the header frontend needs to parse the
-    public headers: the cross-compiler (``--gcc-path``/``--gcc-prefix``), extra
-    compiler flags (``--gcc-options``/``--gcc-option``), an alternate
+    public headers: the cross-compiler (``--compiler``/``--compiler-prefix``), extra
+    compiler flags (``--compiler-option``), an alternate
     ``--sysroot``, ``--nostdinc``, and which ``--ast-frontend`` to drive. ADR-037
     D3 (parity: ``dump`` and ``scan`` carry the *same* family via one decorator)
     and the ADR-035 amendment (``scan`` must be able to reach a real L2 — the

@@ -307,7 +307,7 @@ def _build_clang_header_command(
     :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang
     finds the same libstdc++/libc headers castxml gets via
     ``--castxml-cc-gnu``. Emitted **last** (after the user's ``-I`` and
-    pass-through ``--gcc-options``/``--gcc-option``) so a user-supplied
+    pass-through ``--compiler-option``) so a user-supplied
     ``-isystem`` for a cross/hermetic SDK wins. Skipped under ``-nostdinc``.
 
     On an Intel oneAPI driver, ``-fsycl-host-only`` is appended per

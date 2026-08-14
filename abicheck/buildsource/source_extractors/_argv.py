@@ -41,7 +41,7 @@ CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
 #: ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI DPC++/C++ CL-compatible
 #: driver (the same CL-mode convention as ``clang-cl``, just Intel-branded);
 #: without it here, ``dumper_clang.resolve_source_frontend_clang_bin``'s
-#: ``exclude_cl_style=False`` (L4 source-ABI replay) resolves ``--gcc-path
+#: ``exclude_cl_style=False`` (L4 source-ABI replay) resolves ``--compiler
 #: dpcpp-cl`` correctly, but this module still built a GNU-shaped command for
 #: it instead of adding ``--driver-mode=cl``, so the CL-mode override never
 #: actually reached the driver (Codex review).

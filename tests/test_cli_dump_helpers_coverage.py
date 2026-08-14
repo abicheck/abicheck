@@ -544,10 +544,7 @@ def test_compile_context_preresolved_returned_verbatim() -> None:
 
     ctx, out_includes = resolve_dump_compile_context(
         sentinel_ctx,  # type: ignore[arg-type]
-        gcc_path=None,
-        gcc_prefix=None,
         gcc_options=None,
-        gcc_option_tokens=(),
         sysroot=None,
         nostdinc=True,
         header_backend="auto",

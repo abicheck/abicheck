@@ -257,7 +257,7 @@ class TestArtifactSetCliValidation:
 
 
 class TestArtifactSetCompileContextForwarding:
-    """P1 regression (Codex review): --gcc-path/--sysroot/etc. must reach
+    """P1 regression (Codex review): --compiler/--sysroot/etc. must reach
     ScanRequest.compile for --artifact-set, not silently fall back to the
     host toolchain the way an un-forwarded CompileContext() default would.
     """
@@ -288,7 +288,7 @@ class TestArtifactSetCompileContextForwarding:
             [
                 "scan",
                 "--artifact-set", f"{p1},{p2}",
-                "--gcc-path", "/usr/bin/my-cross-gcc",
+                "--compiler", "/usr/bin/my-cross-gcc",
                 "--sysroot", str(sysroot_dir),
                 "--nostdinc",
             ],

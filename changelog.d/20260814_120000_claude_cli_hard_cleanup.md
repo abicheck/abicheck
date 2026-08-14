@@ -12,3 +12,13 @@
   binaries' own import/export tables and never executes an analyzed artifact.
   The `runtime_proven` evidence-level vocabulary stays in the report schema so
   an already-published report still reads back correctly.
+
+- **`--gcc-path` / `--gcc-prefix` / `--gcc-option` are removed** from
+  `compare`, `dump`, and `scan`. `--compiler` / `--compiler-prefix` /
+  `--compiler-option` are now the only spelling — the old names were always
+  misleading (each accepts a Clang cross-compiler just as well), and carrying
+  both meant a per-invocation conflict resolver whose only correct answer for
+  the repeatable option pair was to reject mixing them. `CompileContext`'s
+  internal `gcc_*` field names are unchanged, as are the Action's `gcc-path`/
+  `gcc-prefix`/`gcc-options` inputs (they now forward to the `--compiler*`
+  flags).

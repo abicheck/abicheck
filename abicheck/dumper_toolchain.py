@@ -417,7 +417,7 @@ def _ast_compile_provenance(
     :class:`~abicheck.buildsource.redaction.RedactionPolicy` every L3
     build-evidence adapter (``compile_db.py``, ``make.py``, ``bazel.py``,
     ``ninja.py``, ``cmake_file_api.py``) already applies before persisting a
-    command line or path — a raw ``--gcc-option``/``--gcc-options`` token can
+    command line or path — a raw ``--compiler-option`` token can
     carry a secret-looking ``-DTOKEN=...`` define or an absolute home-prefixed
     path, and this is the one place such tokens reach a persisted snapshot
     without going through that established convention.
