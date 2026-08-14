@@ -328,12 +328,16 @@ public. Telling these two cases apart requires *reachability*: a graph walk
 from the public surface, not a flat list of what's public and what isn't —
 including through the easy-to-miss case where a **public inline function's
 own body calls an "internal" helper**. The inline function's own body is
-what's compiled directly into every consumer's binary; the "internal"
-helper it calls becomes a consumer-visible dependency the moment that
-generated body references it (whether the helper itself ends up inlined
-away or stays a real out-of-line symbol the consumer links against), and a
-breaking change to it is exactly as breaking as if the helper were public
-itself.
+what's compiled directly into every consumer's binary; whether a change to
+the "internal" helper it calls is consumer-breaking depends on what the
+compiler did with that call: if the helper stays a real out-of-line symbol
+the consumer links against, a breaking change to it is exactly as breaking
+as if the helper were public itself. If the compiler fully inlined the
+helper too, an *already-built* consumer has no runtime dependency on it at
+all — it keeps running the code that was generated at its own build time,
+unaffected by anything the library does afterward; the risk there is a
+*source/behavioral* one on the consumer's next rebuild, not a binary
+dependency.
 
 That graph is **L5**, built from structural edges (a public type embedding,
 inheriting from, or holding a field/base of an internal one) and behavioral

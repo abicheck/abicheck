@@ -115,8 +115,13 @@ incomparable build profile is a hard failure
 with the explicit
 [`--diagnostic-comparison`](../../reference/cli-reference.md) opt-out that
 stamps the result untrustworthy), and a deployment/runtime-floor regression
-is its own detected finding, not a gap (see
-[Dependency & Runtime Floors](../dependency-floors.md)). What it genuinely
+*with observable evidence* — a versioned ELF dependency requirement, or
+captured platform metadata — is its own detected finding, not a gap (see
+[Dependency & Runtime Floors](../dependency-floors.md)). That evidence isn't
+universal, though: an unversioned import (the typical Windows case — a new
+function pulled in from an *existing* dependency, with no per-symbol version
+to compare) currently produces no finding at all, a blind spot that page
+documents and recommends covering with an oldest-target load test. What it genuinely
 cannot prove from artifacts alone, at any `--depth`, is behavioral and
 data/wire-format compatibility — don't read a clean binary-compatibility
 result as a behavioral or wire-format guarantee it never claimed to make.
