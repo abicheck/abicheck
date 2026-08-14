@@ -55,11 +55,16 @@ An exception thrown in `libfoo.so` and caught in the main program (or
 another `.so`) has to cross a module boundary — and catch matching is
 **RTTI-based**. `__cxa_throw` carries a pointer to the exception type's
 `std::type_info`, and the personality routine matches it against each
-`catch`'s `type_info`. This is the same RTTI/`type_info` object that backs
-the vtable in
-[Part 4 §1](abi-series/04-cpp-abi.md#1-vtables-and-virtual-methods) and
-that `-fno-rtti` strips (see the
-[modern hazards table](modern-cpp-toolchain-hazards.md)).
+`catch`'s `type_info`. This is the same kind of RTTI/`type_info` object that
+backs the vtable in
+[Part 4 §1](abi-series/04-cpp-abi.md#1-vtables-and-virtual-methods) — but not
+the same one `-fno-rtti` strips (see the
+[modern hazards table](modern-cpp-toolchain-hazards.md)): `-fno-rtti`
+disables `typeid`/`dynamic_cast` support, but GCC/Clang still emit the
+`type_info` a thrown/caught type needs regardless of that flag, since the
+exception-handling ABI requires it independently. A DSO compiled with
+`-fno-rtti` can still throw a type that an RTTI-enabled consumer catches
+correctly.
 
 Matching *ideally* compares `type_info` by pointer identity — but each DSO
 can emit its **own copy** of a type's `type_info`. On GCC/libstdc++'s default
@@ -76,9 +81,10 @@ real trap is narrower than "hidden visibility breaks the catch":
 > fall back to** — a runtime/toolchain configuration that compares
 > `type_info` by pointer identity alone (some non-GNU C++ runtimes, or a
 > GNU runtime built without the weak/COMDAT `type_info` merging this
-> fallback assumes), or when the thrown type's RTTI is unavailable on one
-> side at all (e.g. `-fno-rtti`, or the symbol was stripped rather than
-> merely hidden). In either case the exception unwinds past the intended
+> fallback assumes), or when the thrown type's RTTI symbol is genuinely
+> stripped from the binary entirely (not merely hidden, and not merely
+> `-fno-rtti` — see above, that flag alone doesn't remove exception
+> `type_info`). In either case the exception unwinds past the intended
 > handler and `std::terminate()` fires.
 
 **Default visibility on a thrown type's `type_info`** (in practice: a

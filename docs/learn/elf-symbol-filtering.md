@@ -6,6 +6,7 @@ level: intermediate
 canonical_for:
   - elf-symbol-filtering
 depends_on:
+  - abicheck/elf_symbol_filter.py
   - abicheck/dumper_elf_symbols.py
   - abicheck/dumper.py
 lifecycle: active

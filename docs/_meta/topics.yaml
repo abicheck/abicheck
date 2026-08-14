@@ -143,6 +143,7 @@ topics:
   elf-symbol-filtering:
     canonical_page: learn/elf-symbol-filtering.md
     fact_sources:
+      - abicheck/elf_symbol_filter.py
       - abicheck/dumper_elf_symbols.py
     allowed_summaries:
       - learn/limitations.md
