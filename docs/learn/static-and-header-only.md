@@ -7,6 +7,8 @@ canonical_for:
   - static-and-header-only
 depends_on:
   - abicheck/dumper_clang.py
+  - abicheck/cli.py
+  - abicheck/cli_buildsource.py
 lifecycle: active
 generated: false
 ---
