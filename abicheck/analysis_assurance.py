@@ -119,6 +119,39 @@ ASSURANCE_STATUS_VALUES: frozenset[str] = frozenset(
 # docstring (avoiding a CLI-layer import from this leaf-ish module).
 _DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
 
+#: The real ``ExtractorRecord.name`` families for L5 source-graph extractors,
+#: as actually constructed in ``buildsource/inline_graph_fold.py`` (grepped
+#: from the real call sites, not guessed): each record is named
+#: ``"<family>:<tool>"`` -- e.g. ``"call_graph:clang"``,
+#: ``"type_graph:clang"``, ``"include_graph:clang"``,
+#: ``"override_graph:clang"``, ``"template_graph:clang"``,
+#: ``"macro_graph:clang"``, ``"callback_graph:clang"``,
+#: ``"archive_graph:ar_index"``. Finding (review, P1): the previous version
+#: of ``_graph_completeness`` matched on a ``"source_graph"`` prefix, which
+#: is not how any real extractor is actually named, so a genuinely
+#: partial/failed L5 graph extractor status was never recognized and could
+#: read as ``"complete"``.
+_L5_GRAPH_EXTRACTOR_FAMILIES: frozenset[str] = frozenset(
+    {
+        "archive_graph",
+        "call_graph",
+        "callback_graph",
+        "include_graph",
+        "macro_graph",
+        "override_graph",
+        "template_graph",
+        "type_graph",
+    }
+)
+
+
+def _is_l5_graph_extractor_record(name: str) -> bool:
+    """Whether *name* (an ``ExtractorRecord.name``) belongs to one of the L5
+    source-graph extractor families above -- the part before the first
+    ``":"``."""
+    family = name.split(":", 1)[0]
+    return family in _L5_GRAPH_EXTRACTOR_FAMILIES
+
 
 @dataclass
 class TargetAccounting:
@@ -229,9 +262,11 @@ class AnalysisAssurance:
         default_factory=TranslationUnitAccounting
     )
     export_accounting: ExportAccounting = field(default_factory=ExportAccounting)
-    #: ``"clean"`` (header evidence present, no drift finding),
+    #: ``"clean"`` (header evidence present on both sides, no drift finding),
     #: ``"drift_detected"`` (a ``header_parse_context_drift`` finding was
-    #: raised), or ``"not_evaluated"`` (no header evidence to judge).
+    #: raised), ``"asymmetric"`` (only one side carries header/API-level
+    #: evidence -- the comparison never examined the other side's headers at
+    #: all), or ``"not_evaluated"`` (neither side has header evidence).
     header_context_status: str = "not_evaluated"
     #: ``"comparable"``, ``"inconsistent"`` (``fact_set_inconsistent`` on
     #: either side's L4 surface), ``"unknown"`` (asymmetric -- only one side
@@ -332,11 +367,32 @@ def _fact_set_comparability(
 def _header_context_status(
     result: DiffResult, old: AbiSnapshot, new: AbiSnapshot
 ) -> tuple[str, list[str]]:
-    has_headers = bool(getattr(old, "from_headers", False)) or bool(
-        getattr(new, "from_headers", False)
-    )
-    if not has_headers:
+    """Header/API-level evidence status for this comparison.
+
+    Finding (review, P1): the previous implementation used ``or`` to decide
+    whether header evidence was "present" -- so a genuinely asymmetric
+    comparison (one side header-derived, the other ELF-only/binary-only)
+    read as fully evaluated, since only *one* side needs ``from_headers`` for
+    the ``or`` to be true. That let a header-snapshot-vs-ELF-only comparison
+    report ``header_context_status="clean"`` (no drift finding to raise,
+    because the ELF-only side has no headers to drift against) even though
+    only half the comparison actually has header/API-level evidence backing
+    it. Fixed by checking ``old.from_headers != new.from_headers`` explicitly
+    first and reporting the asymmetric case on its own, distinct from both
+    "neither side has headers" (``not_evaluated``) and "both sides do, and
+    they agree" (``clean``/``drift_detected``).
+    """
+    old_headers = bool(getattr(old, "from_headers", False))
+    new_headers = bool(getattr(new, "from_headers", False))
+    if not old_headers and not new_headers:
         return "not_evaluated", []
+    if old_headers != new_headers:
+        missing = "new" if old_headers else "old"
+        return "asymmetric", [
+            f"header context asymmetric: the {missing} side carries no "
+            "header/API-level evidence (from_headers=False) -- only one "
+            "side of this comparison was extracted from headers"
+        ]
     drifted = any(
         c.kind == ChangeKind.HEADER_PARSE_CONTEXT_DRIFT
         for c in (
@@ -498,6 +554,26 @@ def _graph_completeness(
     - old/new graph asymmetry -- one side carries an L5 graph and the other
       does not, so whatever the present side's graph says, the comparison
       itself never examined the missing side's implementation at all.
+
+    Finding (review, P1): even after the fix above, this function only ever
+    consulted ``SourceGraphSummary.degraded_passes``/``narrowed_passes``/
+    ``extractor_passes`` -- boolean, per-pass-name coverage flags. It never
+    consulted ``BuildSourcePack.manifest.extractors``, the reproducibility
+    ledger where each real L5 graph extractor (``call_graph:clang``,
+    ``type_graph:clang``, ``include_graph:clang``, ...) records its own
+    ``status`` (``ok``/``partial``/``failed``/``skipped``). The two are not
+    redundant: ``fold_call_graph`` (``inline_graph_fold.py``) only sets
+    ``degraded_passes``/``narrowed_passes`` when the run was unnarrowed with
+    diagnostics, or confirmed narrowed -- a pass that ran unnarrowed, hit no
+    per-TU diagnostics, but still found zero edges records
+    ``status="partial"`` on its own ``ExtractorRecord`` without setting any
+    of those three booleans, so it was silently invisible here and could
+    read as ``"complete"``. Fixed by also scanning each side's
+    ``manifest.extractors`` for a record in one of the recognized L5 graph
+    families (see :data:`_L5_GRAPH_EXTRACTOR_FAMILIES`) whose own ``status``
+    is not ``"ok"``, folding it into the same ``degraded`` bucket used for
+    the pre-existing signals -- a partial/failed/skipped extractor is
+    exactly the kind of incomplete evidence ``degraded`` already means.
     """
     notes: list[str] = []
     old_graph = getattr(old_pack, "source_graph", None)
@@ -537,6 +613,20 @@ def _graph_completeness(
                 "extractor_passes/narrowed_passes -- which parts of the "
                 "project it actually examined is unknown"
             )
+
+    for side, pack in (("old", old_pack), ("new", new_pack)):
+        manifest = getattr(pack, "manifest", None)
+        records = getattr(manifest, "extractors", None) or []
+        for record in records:
+            if not _is_l5_graph_extractor_record(record.name):
+                continue
+            if record.status != "ok":
+                degraded = True
+                detail = f": {record.detail}" if record.detail else ""
+                notes.append(
+                    f"L5 graph extractor {record.name!r} recorded status "
+                    f"{record.status!r} on the {side} side{detail}"
+                )
 
     if degraded:
         return "degraded", notes
@@ -672,7 +762,7 @@ def compute_analysis_assurance(
     elif requested_depth is not None and depth_satisfied is False:
         status = "failed"
     elif (
-        header_context_status == "drift_detected"
+        header_context_status in ("drift_detected", "asymmetric")
         or graph_completeness in ("degraded", "narrowed", "unknown")
         or (tu_accounting.failed or 0) > 0
         or not result.scope_resolved

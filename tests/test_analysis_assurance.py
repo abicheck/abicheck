@@ -310,6 +310,50 @@ class TestComputeAnalysisAssurance:
         assert aa.status == "partial"
 
 
+class TestHeaderContextAsymmetry:
+    """P1 review (finding: one-sided header evidence): ``header_context_status``
+    previously used ``or`` to decide header evidence was "present" -- so a
+    header-snapshot-vs-ELF-only comparison read as fully evaluated (no drift
+    finding to raise, since the ELF-only side has no headers to drift
+    against), even though only half the comparison actually has header/API
+    evidence. Must report the asymmetry explicitly and never read
+    ``status="complete"`` for it."""
+
+    def _asymmetric_pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0", library="libfoo.so.1", functions=fns, from_headers=True
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            elf_only_mode=True,
+        )
+        return old, new
+
+    def test_one_sided_header_evidence_is_reported_as_asymmetric(self) -> None:
+        old, new = self._asymmetric_pair()
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.header_context_status == "asymmetric"
+        assert aa.status != "complete"
+        assert any("asymmetric" in n for n in aa.notes)
+
+    def test_require_complete_analysis_exits_nonzero_for_one_sided_headers(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = self._asymmetric_pair()
+        res = _compare(
+            tmp_path,
+            (old, new),
+            "--no-scope-public-headers",
+            "--require-complete-analysis",
+        )
+        assert res.exit_code != 0, res.output
+
+
 class TestGraphCompleteness:
     """P1 review (finding 2): ``graph_completeness`` previously only ever
     looked at ``degraded_passes`` and defaulted to ``"complete"`` for every
@@ -418,6 +462,66 @@ class TestGraphCompleteness:
             tmp_path,
             "new_pack",
             SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "degraded"
+        assert aa.status == "partial"
+
+    def test_partial_l5_extractor_record_is_not_complete(self, tmp_path: Path) -> None:
+        """P1 review (finding: include L5 extractor failures in assurance).
+        A manifest recording one successful L5 graph extractor
+        (``call_graph:clang``) alongside a sibling that is ``partial``
+        (``type_graph:clang``) must not read as complete just because every
+        boolean extractor_passes/narrowed_passes/degraded_passes flag on the
+        SourceGraphSummary itself happens to be clean."""
+        from abicheck.buildsource.model import ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = BuildSourcePack(
+            root=tmp_path / "old_pack",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        old.build_source.manifest.extractors = [
+            ExtractorRecord(name="call_graph:clang", status="ok"),
+            ExtractorRecord(
+                name="type_graph:clang", status="partial", detail="0 type edges"
+            ),
+        ]
+        new.build_source = BuildSourcePack(
+            root=tmp_path / "new_pack",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        new.build_source.manifest.extractors = [
+            ExtractorRecord(name="call_graph:clang", status="ok"),
+            ExtractorRecord(name="type_graph:clang", status="ok"),
+        ]
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "degraded"
+        assert aa.status == "partial"
+        assert any("type_graph:clang" in n and "partial" in n for n in aa.notes)
+
+    def test_failed_l5_extractor_record_is_not_complete(self, tmp_path: Path) -> None:
+        from abicheck.buildsource.model import ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = BuildSourcePack(
+            root=tmp_path / "old_pack2",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        old.build_source.manifest.extractors = [
+            ExtractorRecord(
+                name="include_graph:clang", status="failed", detail="clang++ not found"
+            ),
+        ]
+        new.build_source = BuildSourcePack(
+            root=tmp_path / "new_pack2",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
         )
         result = checker.compare(old, new)
         aa = result.analysis_assurance

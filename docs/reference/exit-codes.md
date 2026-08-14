@@ -4,6 +4,8 @@ audience:
   - library-maintainer
   - ci-owner
 level: intermediate
+canonical_for:
+  - analysis-assurance
 lifecycle: active
 generated: false
 ---

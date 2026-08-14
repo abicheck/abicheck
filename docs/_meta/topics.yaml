@@ -257,6 +257,21 @@ topics:
       - learn/verdicts.md
       - reference/exit-codes.md
 
+  # A third, orthogonal axis alongside `verdicts` (compatibility verdict) and
+  # `contract-relevance-and-coverage` (the ADR-049 coverage gate): "how
+  # complete and trustworthy was the evidence behind this comparison",
+  # independent of what the verdict itself says. Always computed and
+  # reported; `--require-complete-analysis` is the opt-in exit-code gate
+  # (P0.4).
+  analysis-assurance:
+    canonical_page: reference/exit-codes.md
+    fact_sources:
+      - abicheck/analysis_assurance.py
+      - abicheck/schemas/compare_report.schema.json
+    reference_page: use/output-formats.md
+    allowed_summaries:
+      - learn/verdicts.md
+
   # A CI matrix's per-target compare/scan JSON reports, folded into one
   # gate. Distinct from `verdicts`/`compatibility-evaluation-config` (which
   # own a single comparison's own result) -- this topic is about
