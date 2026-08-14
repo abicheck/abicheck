@@ -910,6 +910,37 @@ def merge_compile_config(
     return merged, includes
 
 
+def resolve_contract_evaluation(
+    contract_mode: str | None, contract_evaluation: bool
+) -> bool:
+    """CLI audit PR 3/5: ``--contract VALUE`` alone enables the evaluator.
+
+    Previously ``compare``/``scan`` hard-rejected ``--contract public`` given
+    without ``--contract-evaluation`` (a `UsageError`, exit 64) -- correct in
+    that the flag would otherwise silently do nothing, but an extra flag for
+    a choice that already only has one interpretation ("I named a domain, so
+    judge against it"). Since the Tier-1 core (`checker.compare`) already
+    documents *contract_mode* as inert-not-erroring when *contract_evaluation*
+    is unset, and the strict rejection was purely a CLI-level "did you
+    forget a flag" guard rather than a core invariant, this loosens that
+    guard into an implication instead: given a domain, evaluation turns on.
+
+    Deliberately CLI-only. The typed Python API (`api_types.CompareRequest.
+    validation_errors`) and the Tier-2 entry (`service._validate_contract_mode`)
+    keep rejecting a *contract_mode* given without an explicit
+    `contract_evaluation=True` -- both are documented public-API contracts
+    (CLAUDE.md: changing them is a breaking Python API change, coordinated
+    separately from a CLI ergonomics fix) and this resolver runs strictly
+    before either is ever constructed, so an implied `True` is indistinguishable
+    from an explicit one to them: no working invocation of either changes,
+    and no previously-erroring CLI invocation now behaves differently there.
+    Never lowers `contract_evaluation` -- an explicit `--contract-evaluation`
+    with no `--contract` is untouched (still legacy shadow-evaluator behavior,
+    domain-less).
+    """
+    return contract_evaluation or contract_mode is not None
+
+
 def _merge_compiler_aliases(
     *,
     gcc_path: str | None,

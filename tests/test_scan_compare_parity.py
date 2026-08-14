@@ -955,21 +955,37 @@ class TestFieldForFieldParity:
         assert contract_keys(gating) == expected
         assert contract_keys(scan["diff"]["findings"]) == expected
 
-    def test_contract_without_contract_evaluation_is_a_usage_error_in_both(
+    def test_contract_alone_implies_contract_evaluation_in_both(
         self, runner: CliRunner, old_snap: Path, new_snap_breaking: Path
     ) -> None:
-        # The one place the two commands must agree on *rejecting* an input:
-        # `--contract` alone would silently compute nothing.
-        args = ["--contract", "exports"]
-        compare_res = runner.invoke(
-            main, ["compare", str(old_snap), str(new_snap_breaking), *args]
+        # CLI audit PR 3/5: `--contract` alone now *implies*
+        # `--contract-evaluation` in both commands (the one place they must
+        # still agree -- abicheck.cli_options.resolve_contract_evaluation is
+        # the single shared resolver both route through), rather than the two
+        # rejecting it identically as a UsageError. Each now behaves exactly
+        # as if `--contract-evaluation` had also been passed explicitly.
+        implicit_args = ["--contract", "exports"]
+        explicit_args = ["--contract-evaluation", "--contract", "exports"]
+
+        compare_implicit = runner.invoke(
+            main, ["compare", str(old_snap), str(new_snap_breaking), *implicit_args]
         )
-        scan_res = runner.invoke(
-            main, ["scan", str(new_snap_breaking), "--against", str(old_snap), *args]
+        compare_explicit = runner.invoke(
+            main, ["compare", str(old_snap), str(new_snap_breaking), *explicit_args]
         )
-        assert compare_res.exit_code == 64, compare_res.output
-        assert scan_res.exit_code == 64, scan_res.output
-        assert "--contract requires --contract-evaluation" in scan_res.output
+        scan_implicit = runner.invoke(
+            main,
+            ["scan", str(new_snap_breaking), "--against", str(old_snap), *implicit_args],
+        )
+        scan_explicit = runner.invoke(
+            main,
+            ["scan", str(new_snap_breaking), "--against", str(old_snap), *explicit_args],
+        )
+
+        assert compare_implicit.exit_code != 64, compare_implicit.output
+        assert scan_implicit.exit_code != 64, scan_implicit.output
+        assert compare_implicit.exit_code == compare_explicit.exit_code
+        assert scan_implicit.exit_code == scan_explicit.exit_code
 
     def test_contract_flags_without_against_are_rejected(
         self, runner: CliRunner, new_snap_breaking: Path

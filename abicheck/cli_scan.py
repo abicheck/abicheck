@@ -95,6 +95,7 @@ from .cli_options import (
     pack_option,
     policy_options,
     resolve_compile_context,
+    resolve_contract_evaluation,
     scope_options,
     secondary_output_options,
     severity_options,
@@ -1351,7 +1352,8 @@ def _discover_scan_project_config(
     "against ('public' header-derived surface, 'exports' the binary's own "
     "export table plus its type closure, 'all' every entity). Omitted, the "
     "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Requires --contract-evaluation. The domain decides which findings "
+    "Implies --contract-evaluation if it isn't already given (CLI audit "
+    "PR 3/5). The domain decides which findings "
     "compatibility policy scores, so it can change the verdict and the exit "
     "code, and it is also what the orthogonal contract-coverage axis is "
     "answered against (mirrors `compare --contract`).",
@@ -1770,19 +1772,14 @@ def scan_cmd(
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
 
-    if contract_mode is not None and not contract_evaluation:
-        # Same rule, same wording as `compare`'s own check
-        # (`cli_compare_helpers.run_compare`) and the Tier-2 entry's
-        # (`service._validate_contract_mode`): --contract on its own would
-        # silently do nothing, since no finding carries a contract decision
-        # unless --contract-evaluation asked for one. Checked here rather
-        # than left to `compare_snapshots` so it is a clean usage error
-        # (exit 64) raised before any scanning work, matching `compare`.
-        raise click.UsageError(
-            "--contract requires --contract-evaluation: it selects which "
-            "evidence domain the shadow contract evaluator judges against, "
-            "and without that flag no contract decision is computed at all."
-        )
+    # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+    # (abicheck.cli_options.resolve_contract_evaluation), mirroring
+    # `compare`'s own resolution in `cli_compare_helpers.run_compare` --
+    # resolved here, before contract_evaluation is used for anything else
+    # in this function, same as the Tier-2 entry's (`service.
+    # _validate_contract_mode`) explicit-only contract stays untouched for
+    # direct Python API callers.
+    contract_evaluation = resolve_contract_evaluation(contract_mode, contract_evaluation)
 
     from .errors import AbicheckError
     from .service import load_env_matrix

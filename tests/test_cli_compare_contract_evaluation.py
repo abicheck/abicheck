@@ -607,12 +607,16 @@ class TestReleaseFanOutContractParity:
         lib_report = json.loads((out_dir / "libfoo.json").read_text())
         assert not any("contract_relevance" in c for c in lib_report["changes"])
 
-    def test_contract_requires_contract_evaluation_on_directory_inputs(self, tmp_path):
-        # The generic --contract-without--contract-evaluation UsageError
-        # (cli_compare_helpers._reject_incoherent_compare_flags) runs
-        # unconditionally ahead of the directory/package dispatch, so this
-        # still rejects -- unlike --contract-evaluation itself, --contract
-        # alone was never meaningfully "rejected only for directories".
+    def test_contract_alone_implies_contract_evaluation_on_directory_inputs(
+        self, tmp_path
+    ):
+        # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+        # (abicheck.cli_options.resolve_contract_evaluation), resolved
+        # unconditionally in run_compare ahead of the directory/package
+        # dispatch -- so this now behaves identically to explicitly passing
+        # both flags (test_contract_evaluation_applies_per_library above),
+        # not a UsageError. Directories were never special-cased for this
+        # rule, so this mirrors the single-pair behavior exactly.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -620,13 +624,28 @@ class TestReleaseFanOutContractParity:
         old, new = _breaking_pair()
         (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
         (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        out_dir = tmp_path / "reports"
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--contract", "public"],
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--contract",
+                "public",
+                "--format",
+                "json",
+                "--output-dir",
+                str(out_dir),
+            ],
         )
-        assert result.exit_code == 64, result.output
-        assert "--contract requires --contract-evaluation" in result.output
+        assert result.exit_code == 4, result.output
+        lib_report = json.loads((out_dir / "libfoo.json").read_text())
+        assert any("contract_relevance" in c for c in lib_report["changes"]), (
+            "--contract public alone must stamp contract_relevance, same as "
+            "--contract-evaluation --contract public would"
+        )
 
     def test_pack_still_rejected_on_directory_inputs(self, tmp_path):
         # --pack is deliberately NOT part of this parity slice: applying a

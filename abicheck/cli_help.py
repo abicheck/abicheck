@@ -423,6 +423,11 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "build_info",
         # Public-surface scoping
         "scope_public_headers",
+        # Contract domain (ADR-049 Phase 6/7) -- headline feature per the CLI
+        # audit's proposed clean `compare` surface; `contract_evaluation`
+        # itself stays advanced-tier since `--contract` alone now implies it
+        # (CLI audit PR 3/5, cli_options.resolve_contract_evaluation).
+        "contract_mode",
         # Debug info -- only the coarse per-run override stays visible; the
         # format/debuginfod/dwarf-only knobs are demoted to the `debug:`
         # config block (ADR-040 L2) and already hidden regardless of tier.
@@ -595,10 +600,11 @@ SCAN_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Policy & contract
         "policy",
         "suppress",
-        # `--contract` is inert without `--contract-evaluation` (scan hard-errors
-        # "--contract requires --contract-evaluation" otherwise) -- both must be
-        # disclosed together or the curated view advertises an option that
-        # can't actually be used on its own (Codex review, PR #757).
+        # `--contract` now implies `--contract-evaluation` when only the former
+        # is given (CLI audit PR 3/5, cli_options.resolve_contract_evaluation) --
+        # `--contract-evaluation` stays in the common set anyway since it is
+        # still meaningful on its own (domain-less, following
+        # --scope-public-headers) and the two are commonly paired.
         "contract_evaluation",
         "contract_mode",
         # Output
