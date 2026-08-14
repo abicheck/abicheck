@@ -325,7 +325,7 @@ outputs:
     description: "This check's full identity: target@profile#baseline_channel@requested_depth."
     value: ${{ steps.finalize.outputs.check-id }}
   verdict:
-    description: 'The legacy verdict field (a Verdict enum value, "ERROR" for an operational failure, or "NO_BASELINE" for a bootstrap pass).'
+    description: 'The legacy verdict field (a Verdict enum value, "ERROR" for an operational failure, "NO_BASELINE" for a bootstrap pass, or "NEW_TARGET" for an allow-new-target-opted-in pass).'
     value: ${{ steps.finalize.outputs.verdict }}
   compatibility-verdict:
     description: 'ADR-047 §7''s new compatibility_verdict field (empty when unavailable).'
