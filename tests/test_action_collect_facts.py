@@ -1035,7 +1035,13 @@ class TestClangPluginArtifactProducer:
     def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
         # Unlike _fake_dm_compiler above, this one also succeeds a
         # non--dM invocation (the smoke-test compile), since the artifact
-        # path must reach and pass that smoke test.
+        # path must reach and pass that smoke test. It also has to write a
+        # real, minimal abicheck_inputs pack into the out= directory the
+        # smoke test passes, since _finish_clang_plugin now requires a real
+        # TU record there (Codex review: a wrong/stale artifact could
+        # otherwise dlopen cleanly, register no "abicheck-facts" action,
+        # and exit 0 without ever emitting facts) -- a fake compiler that
+        # only exits 0 no longer models a genuine plugin load.
         script = tmp_path / "fake-compiler"
         printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
         script.write_text(
@@ -1043,6 +1049,21 @@ class TestClangPluginArtifactProducer:
             'if [ "$1" = "-dM" ]; then\n'
             f"{printf_lines}\n"
             "  exit 0\n"
+            "fi\n"
+            'outdir=""\n'
+            'for arg in "$@"; do\n'
+            '  case "$arg" in\n'
+            '    out=*) outdir="${arg#out=}" ;;\n'
+            "  esac\n"
+            "done\n"
+            'if [ -n "$outdir" ]; then\n'
+            '  python3 -c "\n'
+            "import sys\n"
+            "from abicheck.buildsource.inputs_emit import init_inputs_pack, append_source_facts\n"
+            "from abicheck.buildsource.source_abi import SourceAbiTu\n"
+            "init_inputs_pack(sys.argv[1], library='fake')\n"
+            "append_source_facts(sys.argv[1], [SourceAbiTu(tu_id='cu://smoke', target_id='target://fake', source='smoke.cpp')])\n"
+            '" "$outdir" || exit 1\n'
             "fi\n"
             "exit 0\n"
         )
@@ -1103,6 +1124,36 @@ class TestClangPluginArtifactProducer:
         )
         assert result.returncode == 1
         assert "does not exist" in result.stdout
+
+    def test_plugin_artifact_that_emits_no_facts_fails(self, tmp_path: Path) -> None:
+        # Regression (Codex review): a loadable-but-wrong .so (dlopen
+        # succeeds, but it never registers the "abicheck-facts" action)
+        # would previously pass the smoke test on exit code alone. A
+        # compiler that exits 0 without ever writing a real pack into out=
+        # must now fail the smoke test instead of being accepted.
+        script = tmp_path / "fake-compiler-no-facts"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            "  printf '#define __clang_major__ 18\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0\n"
+        )
+        script.chmod(0o755)
+        artifact = tmp_path / "libabicheck-facts.so"
+        artifact.write_bytes(b"loadable-but-not-really-the-plugin")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_COMPILER": str(script),
+                "INPUT_PLUGIN_ARTIFACT": str(artifact),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "emitted no facts" in result.stdout
 
     def test_relative_plugin_artifact_is_resolved_to_absolute(
         self, tmp_path: Path

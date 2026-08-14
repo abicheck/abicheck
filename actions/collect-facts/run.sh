@@ -554,7 +554,38 @@ _finish_clang_plugin() {
     cat "$smoke_dir/stderr.log" >&2
     _fail "the Clang plugin at '$plugin_so' failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against (for plugin-artifact: the artifact does not match this job's resolved compiler, or was built for a different C++ standard-library ABI -- see contrib/abicheck-clang-plugin/README.md's Intel oneAPI section)."
   fi
-  echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER)."
+  # A successful exit code alone doesn't prove $plugin_so is genuinely the
+  # abicheck-facts plugin -- clang's own -fplugin= just dlopen()s the named
+  # shared object; a wrong or stale artifact (a mismatched download, a build
+  # that produced a different plugin under the same filename) can load
+  # cleanly and still register no "abicheck-facts" action, silently no-op on
+  # -Xclang -plugin-arg-abicheck-facts, and exit 0 (Codex review). The real
+  # plugin's FactsConsumer::HandleTranslationUnit runs unconditionally per
+  # TU and writes a manifest.json + TU record even for a public-declaration-
+  # free smoke TU like this one (writeTu()/ensureManifest() have no
+  # publicCount gate -- confirmed by reading AbicheckFactsPlugin.cpp), so
+  # requiring a real TU record here is a genuine positive signal, not
+  # something the trivial smoke source could fail on legitimately. Catching
+  # this now, before the caller's real (potentially expensive) build runs,
+  # is strictly earlier than the identical tu_count==0 check phase: verify
+  # already performs on the real pack.
+  local smoke_validate
+  if ! smoke_validate=$(python3 -c '
+import sys
+from abicheck.buildsource.inputs_validate import validate_inputs_pack
+
+try:
+    report = validate_inputs_pack(sys.argv[1])
+except (FileNotFoundError, ValueError) as exc:
+    print(f"not a readable abicheck_inputs pack: {exc}")
+    sys.exit(1)
+if report.tu_count == 0:
+    print("zero TU records written")
+    sys.exit(1)
+' "$smoke_out"); then
+    _fail "the Clang plugin at '$plugin_so' loaded into '$COMPILER' and exited successfully, but the smoke-test compile emitted no facts ($smoke_validate) -- this usually means the loaded shared object is not actually the abicheck-facts plugin (a wrong or stale plugin-artifact, or a build that produced a different plugin under the same filename)."
+  fi
+  echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER, and emitted real TU facts)."
   _reset_output_dir
 
   # Assemble the exact flags the caller's build needs to add, one -Xclang
