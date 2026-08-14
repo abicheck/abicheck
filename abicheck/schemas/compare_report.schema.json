@@ -1114,6 +1114,9 @@
         "header_context_status": {
           "type": "string"
         },
+        "dwarf_context_status": {
+          "type": "string"
+        },
         "fact_set_comparability": {
           "type": "string"
         },

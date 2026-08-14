@@ -67,4 +67,46 @@
   reports were rendered from the pre-floor value. This path now also emits
   `assurance_floor_diagnostic()`'s stderr explanation, which it previously
   skipped entirely.
+- **New `dwarf_context_status` field detects one-sided DWARF evidence**
+  (P1 review). `confidence._detect_evidence_tiers()` combines both sides'
+  DWARF availability with OR semantics when promoting the aggregate
+  `evidence_tier` to `DWARF_AWARE`, so a comparison where only one side
+  actually carries usable DWARF/DWARF-advanced debug info still read as
+  DWARF-aware overall — with no per-side check anywhere in the rollup, that
+  silently made `nothing_requested` false without recording the asymmetry,
+  and the run fell through to `status="complete"` even though the real
+  DWARF-based struct/enum layout detectors (`diff_platform.py`,
+  `dwarf_advanced.diff_advanced_dwarf`) explicitly skip their own
+  comparison whenever either side lacks DWARF. `analysis_assurance` now
+  checks each side's own `dwarf.has_dwarf`/`dwarf_advanced.has_dwarf`
+  directly and reports `dwarf_context_status="asymmetric"` (folded into
+  `status="partial"`) when they disagree, mirroring
+  `header_context_status`'s existing asymmetry check.
+- **`export_accounting.unaccounted > 0` on either side now folds into
+  `status="partial"`** (P1 review), instead of only ever affecting the
+  `export_accounting` block's own numbers. An L4 manifest row stays
+  `PRESENT` even when some exported symbols couldn't be matched to a
+  source declaration (it is only downgraded when *no* exports match at
+  all), so a run with real, if partial, symbol matching previously fell
+  through to `status="complete"` under `--require-complete-analysis` even
+  though source-level analysis could not account for every exported entry
+  point.
+- **`graph_completeness`'s L5-extractor-status check no longer degrades a
+  confirmed, fully-executed, genuinely edge-free source-graph pass**
+  (P2 review — a regression in this session's own prior fix, above). A real
+  producer (`buildsource/inline_graph_fold.py`'s `fold_call_graph`/
+  `fold_type_graph`/... family) stamps its own `ExtractorRecord.status` as
+  `"ok" if added else "partial"` — keyed on whether the pass added any
+  edges, not on whether it examined everything requested — while
+  *unconditionally* also stamping `SourceGraphSummary.extractor_passes`
+  (confirmed full coverage) or `narrowed_passes` (confirmed narrowed
+  coverage) on success regardless of edge count. Folding every non-`"ok"`
+  record into `degraded` therefore overrode that stronger, independent
+  confirmed-coverage signal and could fail a simple project with no calls/
+  overrides/templates/etc. to discover under `--require-complete-analysis`,
+  despite every requested TU having been examined successfully. Fixed by
+  exempting a record whose own extractor family is separately confirmed
+  complete or confirmed narrowed on the same side; a record with neither
+  confirmation (a genuine shortfall — crash, missing tool, timeout) still
+  folds into `degraded`, unchanged.
 

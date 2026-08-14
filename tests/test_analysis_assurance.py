@@ -309,6 +309,101 @@ class TestComputeAnalysisAssurance:
         # from reading as unconditionally "complete".
         assert aa.status == "partial"
 
+    def test_unaccounted_exports_alone_are_partial_not_complete(self) -> None:
+        """P1 review, Finding 2: every TU parsed cleanly (selected == parsed,
+        so ``translation_units.failed`` is 0) but at least one exported
+        symbol could not be associated with a source declaration
+        (``export_accounting.unaccounted > 0``). None of the pre-existing
+        predicates noticed this on its own -- the L4 row stays ``PRESENT``
+        on the manifest (only downgraded when *no* exports match at all),
+        so this fell through to ``status="complete"`` even though source-
+        level analysis could not account for every exported entry point."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-unaccounted"),
+            source_abi=SourceAbiSurface(
+                coverage={
+                    "compile_units_selected": 5,
+                    "compile_units_parsed": 5,
+                },
+                roots={
+                    "exported_symbols": ["_Z5pub_av", "_Z5pub_bv"],
+                    "public_header_declarations": [],
+                    "forced_public": [],
+                },
+                unmatched={
+                    "symbols_without_decl": ["_Z5pub_bv"],
+                    "decls_without_symbol": [],
+                },
+                mappings={
+                    "source_decl_to_binary_symbol": {},
+                    "source_type_to_debug_type": {},
+                    "public_header_to_target": {},
+                    "synthesized_symbol_to_owner": {},
+                    "template_instantiation_symbol_to_decl": {},
+                    "allocator_interposer_symbol_to_owner": {},
+                    "non_public_symbol_to_reason": {},
+                },
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.translation_units.failed == 0
+        assert aa.export_accounting.unaccounted == 1
+        assert aa.status == "partial"
+        assert any("unaccounted" in n for n in aa.notes)
+
+    def test_require_complete_analysis_exits_nonzero_for_unaccounted_exports(
+        self,
+    ) -> None:
+        """Function-level check that the ``--require-complete-analysis``
+        exit floor actually reacts to this -- mirrors this file's other
+        ``analysis_assurance_exit_contribution``-level checks rather than a
+        full CLI round-trip, since ``build_source`` is attached directly to
+        the in-memory snapshot here (not via a CLI flag)."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        new.build_source = BuildSourcePack(
+            root=Path("/tmp/nonexistent-pack-unaccounted-2"),
+            source_abi=SourceAbiSurface(
+                coverage={"compile_units_selected": 3, "compile_units_parsed": 3},
+                roots={
+                    "exported_symbols": ["_Z5pub_av", "_Z5pub_bv"],
+                    "public_header_declarations": [],
+                    "forced_public": [],
+                },
+                unmatched={
+                    "symbols_without_decl": ["_Z5pub_bv"],
+                    "decls_without_symbol": [],
+                },
+                mappings={
+                    "source_decl_to_binary_symbol": {},
+                    "source_type_to_debug_type": {},
+                    "public_header_to_target": {},
+                    "synthesized_symbol_to_owner": {},
+                    "template_instantiation_symbol_to_decl": {},
+                    "allocator_interposer_symbol_to_owner": {},
+                    "non_public_symbol_to_reason": {},
+                },
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.status == "partial"
+        assert aa.export_accounting.unaccounted == 1
+        from abicheck.analysis_assurance import (
+            analysis_assurance_exit_contribution,
+        )
+
+        assert analysis_assurance_exit_contribution(result, require_complete=True) == 1
+        assert analysis_assurance_exit_contribution(result, require_complete=False) == 0
+
 
 class TestHeaderContextAsymmetry:
     """P1 review (finding: one-sided header evidence): ``header_context_status``
@@ -345,6 +440,79 @@ class TestHeaderContextAsymmetry:
         self, tmp_path: Path
     ) -> None:
         old, new = self._asymmetric_pair()
+        res = _compare(
+            tmp_path,
+            (old, new),
+            "--no-scope-public-headers",
+            "--require-complete-analysis",
+        )
+        assert res.exit_code != 0, res.output
+
+
+class TestDwarfContextAsymmetry:
+    """P1 review, Finding 1: ``confidence._detect_evidence_tiers()`` combines
+    both sides' DWARF availability with OR semantics when promoting the
+    aggregate ``result.evidence_tier`` to ``DWARF_AWARE``, so a comparison
+    where only one side carries usable DWARF still read as DWARF-aware
+    overall -- with no per-side check anywhere in this rollup, that silently
+    made ``nothing_requested`` false without any partial predicate tripping,
+    so the run fell through to ``status="complete"`` even though the real
+    DWARF-based layout detectors (``diff_platform.py``,
+    ``dwarf_advanced.diff_advanced_dwarf``) explicitly skip their own
+    comparison whenever either side lacks DWARF -- struct/enum layout
+    changes on the DWARF-lacking side could be silently missed."""
+
+    def _dwarf_asymmetric_pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=False),
+        )
+        return old, new
+
+    def test_one_sided_dwarf_is_reported_as_asymmetric(self) -> None:
+        old, new = self._dwarf_asymmetric_pair()
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.dwarf_context_status == "asymmetric"
+        assert aa.status != "complete"
+        assert any("DWARF" in n and "asymmetric" in n for n in aa.notes)
+
+    def test_symmetric_dwarf_on_both_sides_is_clean(self) -> None:
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=fns,
+            dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        result = checker.compare(old, new, scope_to_public_surface=False)
+        aa = result.analysis_assurance
+        assert aa.dwarf_context_status == "clean"
+
+    def test_require_complete_analysis_exits_nonzero_for_one_sided_dwarf(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = self._dwarf_asymmetric_pair()
         res = _compare(
             tmp_path,
             (old, new),
@@ -527,6 +695,125 @@ class TestGraphCompleteness:
         aa = result.analysis_assurance
         assert aa.graph_completeness == "degraded"
         assert aa.status == "partial"
+
+
+class TestConfirmedZeroEdgeGraphPassIsNotDegraded:
+    """P2 review, Finding 3: a real producer
+    (``buildsource/inline_graph_fold.py``'s ``fold_call_graph``/
+    ``fold_type_graph``/... family) stamps its own ``ExtractorRecord.status``
+    as ``"ok" if added else "partial"`` -- keyed on whether the pass found
+    any edges, not on whether it examined everything it was asked to. A
+    clean, full-project pass over a simple library with no calls/overrides/
+    templates/etc. to discover legitimately records ``status="partial"``
+    while *also* stamping ``SourceGraphSummary.extractor_passes[family] =
+    True`` (confirmed full coverage) unconditionally on success. Treating
+    every non-``"ok"`` record as a shortfall -- the fix this session
+    previously landed for a *different*, real gap (an L5 extractor whose
+    family the ``SourceGraphSummary`` booleans said nothing about at all) --
+    regressed this legitimate case into a false ``"degraded"``/``"partial"``
+    reading. Both directions are tested here so a future change cannot
+    silently re-break either one.
+    """
+
+    def test_confirmed_full_pass_with_zero_edges_reads_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """(b) A confirmed, zero-edge, fully-executed pass -- the exact
+        shape ``inline_graph_fold.py`` really produces for an edge-free
+        project -- must read as complete, not degraded."""
+        from abicheck.buildsource.model import ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        for side, root in (("old", "confirmed_old"), ("new", "confirmed_new")):
+            pack = BuildSourcePack(
+                root=tmp_path / root,
+                source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+            )
+            pack.manifest.extractors = [
+                ExtractorRecord(
+                    name="call_graph:clang",
+                    status="partial",
+                    detail="0 call edges from 3 compile units",
+                ),
+            ]
+            setattr(old if side == "old" else new, "build_source", pack)
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "complete", aa.notes
+        assert aa.status == "complete"
+        assert not any("call_graph:clang" in n for n in aa.notes)
+
+    def test_confirmed_narrowed_pass_with_partial_status_is_narrowed(
+        self, tmp_path: Path
+    ) -> None:
+        """A confirmed *narrowed* (not full-project) zero-edge pass must
+        still read as ``"narrowed"`` -- not silently promoted to
+        ``"complete"``, and not double-counted into ``"degraded"`` either."""
+        from abicheck.buildsource.model import ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        for side, root in (("old", "narrowed_old"), ("new", "narrowed_new")):
+            pack = BuildSourcePack(
+                root=tmp_path / root,
+                source_graph=SourceGraphSummary(narrowed_passes={"call_graph": True}),
+            )
+            pack.manifest.extractors = [
+                ExtractorRecord(
+                    name="call_graph:clang",
+                    status="partial",
+                    detail="0 call edges from 1 compile unit (narrowed)",
+                ),
+            ]
+            setattr(old if side == "old" else new, "build_source", pack)
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "narrowed"
+        assert aa.status == "partial"
+        assert not any("call_graph:clang" in n for n in aa.notes)
+
+    def test_unconfirmed_partial_record_still_reads_degraded(
+        self, tmp_path: Path
+    ) -> None:
+        """(a) The P1 finding this session's own prior fix addressed must
+        stay fixed: a partial/failed L5 extractor record whose family is
+        NOT separately confirmed by extractor_passes/narrowed_passes (a
+        genuine shortfall -- e.g. a per-TU crash that stopped short of
+        setting either) must still fold into degraded/partial, never
+        silently pass as complete."""
+        from abicheck.buildsource.model import ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = BuildSourcePack(
+            root=tmp_path / "shortfall_old",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        old.build_source.manifest.extractors = [
+            ExtractorRecord(name="call_graph:clang", status="ok"),
+            ExtractorRecord(
+                name="type_graph:clang",
+                status="partial",
+                detail="crashed on 2/10 TUs",
+            ),
+        ]
+        new.build_source = BuildSourcePack(
+            root=tmp_path / "shortfall_new",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        new.build_source.manifest.extractors = [
+            ExtractorRecord(name="call_graph:clang", status="ok"),
+            ExtractorRecord(name="type_graph:clang", status="ok"),
+        ]
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "degraded"
+        assert aa.status == "partial"
+        assert any("type_graph:clang" in n and "partial" in n for n in aa.notes)
 
 
 class TestAnalysisAssuranceExitFold:

@@ -67,9 +67,10 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   ``BuildSourcePack`` coverage a snapshot already carries (when one was
   embedded); both are ``None``-filled when no such pack is present, which is
   the ordinary case for a plain ELF/DWARF/header comparison.
-- ``fact_set_comparability``/``header_context_status``/``graph_completeness``
-  surface existing signals (``fact_set_inconsistent``, the
-  ``header_parse_context_drift`` finding, ``SourceGraphSummary.
+- ``fact_set_comparability``/``header_context_status``/``dwarf_context_status``/
+  ``graph_completeness`` surface existing signals (``fact_set_inconsistent``,
+  the ``header_parse_context_drift`` finding, each side's own
+  ``dwarf.has_dwarf``/``dwarf_advanced.has_dwarf``, ``SourceGraphSummary.
   degraded_passes``) as structured status fields rather than leaving them as
   prose-only findings/coverage keys.
 """
@@ -268,6 +269,14 @@ class AnalysisAssurance:
     #: evidence -- the comparison never examined the other side's headers at
     #: all), or ``"not_evaluated"`` (neither side has header evidence).
     header_context_status: str = "not_evaluated"
+    #: ``"clean"`` (both sides carry usable DWARF/DWARF-advanced debug info),
+    #: ``"asymmetric"`` (only one side does -- the DWARF-based struct/enum
+    #: layout detectors, e.g. ``diff_platform.py``'s ``_diff_dwarf_types``/
+    #: ``dwarf_advanced.diff_advanced_dwarf``, explicitly skip their own
+    #: comparison whenever either side lacks it, so layout evidence for the
+    #: missing side was never even attempted), or ``"not_evaluated"``
+    #: (neither side has DWARF -- nothing to be asymmetric about).
+    dwarf_context_status: str = "not_evaluated"
     #: ``"comparable"``, ``"inconsistent"`` (``fact_set_inconsistent`` on
     #: either side's L4 surface), ``"unknown"`` (asymmetric -- only one side
     #: carries an L4 surface), or ``"not_applicable"`` (neither side does).
@@ -300,6 +309,7 @@ class AnalysisAssurance:
             "translation_units": self.translation_units.to_dict(),
             "export_accounting": self.export_accounting.to_dict(),
             "header_context_status": self.header_context_status,
+            "dwarf_context_status": self.dwarf_context_status,
             "fact_set_comparability": self.fact_set_comparability,
             "graph_completeness": self.graph_completeness,
             "notes": list(self.notes),
@@ -406,6 +416,53 @@ def _header_context_status(
         return "drift_detected", [
             "header_parse_context_drift: at least one header was parsed "
             "under a different build context than the compiled binary"
+        ]
+    return "clean", []
+
+
+def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str]]:
+    """Per-side DWARF/DWARF-advanced evidence status -- the DWARF analogue of
+    :func:`_header_context_status`'s presence-then-asymmetry shape.
+
+    Finding (review, P1): ``confidence._detect_evidence_tiers()`` combines
+    both sides' DWARF availability with OR semantics
+    (``has_dwarf = (old.dwarf is not None and old.dwarf.has_dwarf) or
+    (new.dwarf is not None and new.dwarf.has_dwarf)``) when it promotes the
+    aggregate ``result.evidence_tier`` to ``DWARF_AWARE`` -- so a comparison
+    where only *one* side actually carries usable debug info still reads as
+    DWARF-aware overall. That made ``nothing_requested`` false (since
+    ``evidence_tier != EvidenceTier.ELF_ONLY``) without recording the
+    asymmetry anywhere else this rollup checked, and with no other partial
+    predicate tripping, the overall status fell through to ``"complete"`` --
+    even though the real DWARF-based detectors explicitly skip their own
+    comparison whenever either side lacks usable DWARF
+    (``diff_platform.py``'s struct/enum layout diff: "Neither side has
+    DWARF -> skip silently" / "Only new has DWARF -> can't compare without
+    old baseline -> skip"; ``dwarf_advanced.diff_advanced_dwarf``: "Returns
+    [] gracefully if either side has no DWARF"). Struct/enum layout changes
+    on the DWARF-lacking side could therefore be silently missed while
+    ``--require-complete-analysis`` still exited 0. Fixed by checking each
+    side's own ``dwarf.has_dwarf``/``dwarf_advanced.has_dwarf`` directly,
+    independent of the OR-combined aggregate tier.
+    """
+
+    def _has_dwarf(snap: AbiSnapshot) -> bool:
+        dwarf = snap.dwarf
+        dwarf_advanced = snap.dwarf_advanced
+        return bool(dwarf is not None and dwarf.has_dwarf) or bool(
+            dwarf_advanced is not None and dwarf_advanced.has_dwarf
+        )
+
+    old_dwarf = _has_dwarf(old)
+    new_dwarf = _has_dwarf(new)
+    if not old_dwarf and not new_dwarf:
+        return "not_evaluated", []
+    if old_dwarf != new_dwarf:
+        missing = "new" if old_dwarf else "old"
+        return "asymmetric", [
+            f"DWARF context asymmetric: the {missing} side carries no usable "
+            "DWARF (or DWARF-advanced) debug info -- DWARF-based struct/enum "
+            "layout comparison was skipped for that side entirely"
         ]
     return "clean", []
 
@@ -574,6 +631,23 @@ def _graph_completeness(
     is not ``"ok"``, folding it into the same ``degraded`` bucket used for
     the pre-existing signals -- a partial/failed/skipped extractor is
     exactly the kind of incomplete evidence ``degraded`` already means.
+
+    Finding (review, P2): that fix over-corrected. A confirmed, fully-run,
+    genuinely edge-free pass (e.g. a project with no call/override/template
+    edges to find) also records ``status="partial"`` on its own
+    ``ExtractorRecord`` -- the real producers key ``status`` off "did this
+    pass add any edges", not "did this pass examine everything it was asked
+    to". Folding *every* non-``"ok"`` record into ``degraded`` therefore
+    treated that legitimate, fully-covered zero-edge case identically to a
+    genuine shortfall (a crashed/unavailable extractor), which could fail
+    ``--require-complete-analysis`` on a simple, cleanly-examined project.
+    Fixed below by exempting a record whose own extractor family is
+    separately confirmed complete (``SourceGraphSummary.extractor_passes``)
+    or confirmed narrowed (``SourceGraphSummary.narrowed_passes``) on the
+    same side -- both are the pass's own stronger "this genuinely ran"
+    signal, set unconditionally on success regardless of edge count. A
+    record with neither confirmation (a real "failed"/crash, or any other
+    unconfirmed case) still folds into ``degraded``, unchanged.
     """
     notes: list[str] = []
     old_graph = getattr(old_pack, "source_graph", None)
@@ -614,19 +688,49 @@ def _graph_completeness(
                 "project it actually examined is unknown"
             )
 
-    for side, pack in (("old", old_pack), ("new", new_pack)):
+    for side, pack, sg in (
+        ("old", old_pack, old_graph),
+        ("new", new_pack, new_graph),
+    ):
         manifest = getattr(pack, "manifest", None)
         records = getattr(manifest, "extractors", None) or []
         for record in records:
             if not _is_l5_graph_extractor_record(record.name):
                 continue
-            if record.status != "ok":
-                degraded = True
-                detail = f": {record.detail}" if record.detail else ""
-                notes.append(
-                    f"L5 graph extractor {record.name!r} recorded status "
-                    f"{record.status!r} on the {side} side{detail}"
-                )
+            if record.status == "ok":
+                continue
+            family = record.name.split(":", 1)[0]
+            # Finding (review, P2): a real producer (``inline_graph_fold.py``'s
+            # ``fold_call_graph``/``fold_type_graph``/... family) stamps
+            # ``status="ok" if added else "partial"`` on its own
+            # ExtractorRecord -- so a pass that ran over the *whole* project,
+            # hit no per-TU diagnostics, and simply found zero edges to add
+            # (a legitimately edge-free project: no calls/overrides/templates/
+            # etc. to discover) still records "partial" here, even though the
+            # SAME call also set ``extractor_passes[family] = True``
+            # (confirmed full coverage) or, for a confirmed-narrowed run,
+            # ``narrowed_passes[family] = True`` -- both are the pass's own,
+            # stronger "this genuinely ran to completion" signal. Treating
+            # every non-"ok" record as a shortfall overrides that signal and
+            # would fail a simple, fully-examined project under
+            # --require-complete-analysis for finding nothing to report. A
+            # record whose family was NOT separately confirmed this way (a
+            # real crash/missing-tool "failed", or any other case the two
+            # confirmation dicts don't cover) still folds into ``degraded``
+            # below -- only the confirmed-complete-or-confirmed-narrowed,
+            # zero-edge shape is exempted.
+            confirmed = sg is not None and (
+                sg.extractor_passes.get(family) is True
+                or sg.narrowed_passes.get(family) is True
+            )
+            if confirmed:
+                continue
+            degraded = True
+            detail = f": {record.detail}" if record.detail else ""
+            notes.append(
+                f"L5 graph extractor {record.name!r} recorded status "
+                f"{record.status!r} on the {side} side{detail}"
+            )
 
     if degraded:
         return "degraded", notes
@@ -710,6 +814,10 @@ def compute_analysis_assurance(
     header_context_status, hc_notes = _header_context_status(result, old, new)
     notes.extend(hc_notes)
 
+    # -- DWARF-context status --------------------------------------------------
+    dwarf_context_status, dw_notes = _dwarf_context_status(old, new)
+    notes.extend(dw_notes)
+
     # -- TU / export accounting ----------------------------------------------
     tu_accounting, l4_present_without_accounting = _translation_units(
         old_pack, new_pack
@@ -737,6 +845,12 @@ def compute_analysis_assurance(
     )
     notes.extend(manifest_notes)
 
+    if (export_accounting.unaccounted or 0) > 0:
+        notes.append(
+            "export_accounting.unaccounted is nonzero: at least one exported "
+            "symbol could not be associated with a source declaration on the "
+            "side its L4 surface accounts for"
+        )
     if not result.scope_resolved:
         notes.append(
             "scope_resolved is False: --scope-public-headers was requested "
@@ -763,6 +877,7 @@ def compute_analysis_assurance(
         status = "failed"
     elif (
         header_context_status in ("drift_detected", "asymmetric")
+        or dwarf_context_status == "asymmetric"
         or graph_completeness in ("degraded", "narrowed", "unknown")
         or (tu_accounting.failed or 0) > 0
         or not result.scope_resolved
@@ -770,6 +885,7 @@ def compute_analysis_assurance(
         or fact_set_comparability == "unknown"
         or l4_present_without_accounting
         or manifest_layer_incomplete
+        or (export_accounting.unaccounted or 0) > 0
     ):
         status = "partial"
     elif nothing_requested:
@@ -785,6 +901,7 @@ def compute_analysis_assurance(
         translation_units=tu_accounting,
         export_accounting=export_accounting,
         header_context_status=header_context_status,
+        dwarf_context_status=dwarf_context_status,
         fact_set_comparability=fact_set_comparability,
         graph_completeness=graph_completeness,
         notes=tuple(notes),
