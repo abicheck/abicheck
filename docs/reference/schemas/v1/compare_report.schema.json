@@ -775,6 +775,32 @@
           },
           "detail": {
             "type": "string"
+          },
+          "requested_roots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "P0.2: root build-system target(s) requested for L3 scoping (L3_build row only). Empty when scoping was not requested."
+          },
+          "resolved_roots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "P0.2: the subset of requested_roots a query actually resolved to a real build-system target."
+          },
+          "transitive_targets": {
+            "type": ["integer", "null"],
+            "description": "P0.2: total target count reached transitively from resolved_roots, or null when unknown."
+          },
+          "compile_units": {
+            "type": ["integer", "null"],
+            "description": "P0.2: compile-unit count for this scoped run (L3_build row only), or null when scoping was not requested."
+          },
+          "link_units": {
+            "type": ["integer", "null"],
+            "description": "P0.2: link-unit count for this scoped run (L3_build row only), or null when scoping was not requested."
           }
         }
       }

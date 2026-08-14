@@ -13,6 +13,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `compile_db` | str |
 | `query` | str |
 | `system` | str |
+| `targets` | list[str] (or a single str) |
 
 ### `compile:`
 

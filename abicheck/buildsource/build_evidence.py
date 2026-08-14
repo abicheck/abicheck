@@ -355,6 +355,89 @@ def _resolved_object(cu: CompileUnit) -> Path | None:
 
 
 @dataclass
+class TargetScope:
+    """Root-target scoping request/resolution for this build evidence (P0.2).
+
+    A caller (``dump --build-target``, ``.abicheck.yml``'s ``build.targets``)
+    can declare which specific build-system target(s) are the library under
+    test instead of always collecting a workspace-wide query -- see
+    ``BazelAdapter``/``build_query.run_inferred_build_query``. ``None`` on
+    :attr:`BuildEvidence.target_scope` means no roots were requested (the
+    ordinary, unscoped collection); a real :class:`TargetScope` (even with
+    empty ``resolved``) means scoping was requested and this is what came of
+    it -- so a consumer can always tell "not supported/not requested" from
+    "requested but nothing resolved" (a typo'd target label, say).
+
+    Field names deliberately mirror ``analysis_assurance.TargetAccounting``
+    (P0.4, tracked separately) so that once that block's own root-target
+    fields are wired, populating them from here is a direct copy rather than
+    a translation.
+    """
+
+    #: The target labels the caller asked to scope collection to.
+    requested: list[str] = field(default_factory=list)
+    #: The subset of ``requested`` that a query actually resolved to a real
+    #: build-system target (catches a typo'd/nonexistent label).
+    resolved: list[str] = field(default_factory=list)
+    #: Total target count reached transitively from ``resolved`` (i.e. the
+    #: size of the scoped dependency closure), or ``None`` when unknown (no
+    #: cquery/target-graph evidence was collected for this run).
+    transitive_count: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requested": list(self.requested),
+            "resolved": list(self.resolved),
+            "transitive_count": self.transitive_count,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TargetScope:
+        return cls(
+            requested=list(d.get("requested", [])),
+            resolved=list(d.get("resolved", [])),
+            transitive_count=(
+                int(d["transitive_count"])
+                if d.get("transitive_count") is not None
+                else None
+            ),
+        )
+
+
+def l3_coverage_fields(merged: BuildEvidence) -> dict[str, Any]:
+    """The P0.2 root-target-scoping ``LayerCoverage`` kwargs for *merged*'s
+    L3_build row, plus a ``detail_suffix`` prose fragment -- one shared
+    implementation for the two call sites that build an L3_build row
+    (``cli_buildsource_helpers._build_coverage`` and ``inline.
+    build_inline_coverage``) so they cannot independently drift on this
+    P0.2 field set. All five fields default empty/``None`` (and
+    ``detail_suffix`` to ``""``) when *merged* carries no ``target_scope``
+    or an empty ``requested`` list -- the "no scoping requested" case.
+    """
+    ts = merged.target_scope
+    if ts is None or not ts.requested:
+        return {
+            "requested_roots": (),
+            "resolved_roots": (),
+            "transitive_targets": None,
+            "compile_units": None,
+            "link_units": None,
+            "detail_suffix": "",
+        }
+    return {
+        "requested_roots": tuple(ts.requested),
+        "resolved_roots": tuple(ts.resolved),
+        "transitive_targets": ts.transitive_count,
+        "compile_units": len(merged.compile_units),
+        "link_units": len(merged.link_units),
+        "detail_suffix": (
+            f"; scoped to {len(ts.requested)} root target(s) "
+            f"({len(ts.resolved)} resolved)"
+        ),
+    }
+
+
+@dataclass
 class BuildEvidence:
     """Top-level normalized build evidence (ADR-029 D1)."""
 
@@ -377,6 +460,10 @@ class BuildEvidence:
     #: compatible without a BUILD_EVIDENCE_VERSION bump, the same convention
     #: ``CompileUnit.directory`` above already documents.
     comdat: ComdatScan | None = None
+    #: P0.2 root-target scoping (see :class:`TargetScope`). ``None`` when no
+    #: roots were requested for this run -- additive, same forward/backward
+    #: compatibility convention as ``comdat`` above.
+    target_scope: TargetScope | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -395,6 +482,11 @@ class BuildEvidence:
             # Omitted entirely when no scan ran, so an older reader and a
             # newer one agree that absence means "not established".
             **({"comdat": self.comdat.to_dict()} if self.comdat is not None else {}),
+            **(
+                {"target_scope": self.target_scope.to_dict()}
+                if self.target_scope is not None
+                else {}
+            ),
         }
 
     @classmethod
@@ -419,6 +511,11 @@ class BuildEvidence:
             comdat=(
                 ComdatScan.from_dict(d["comdat"])
                 if isinstance(d.get("comdat"), dict)
+                else None
+            ),
+            target_scope=(
+                TargetScope.from_dict(d["target_scope"])
+                if isinstance(d.get("target_scope"), dict)
                 else None
             ),
         )
@@ -496,6 +593,13 @@ class BuildEvidence:
                     diagnostics=[*self.comdat.diagnostics, *other.comdat.diagnostics],
                 )
             )
+        # Last-one-wins, mirroring `comdat`'s "other replaces when self is
+        # unset" half: in practice only one adapter run ever carries a
+        # TargetScope (the Bazel root-target query), so there is nothing
+        # meaningful to union across adapters the way `comdat`'s symbol sets
+        # are; other's presence always means it is the more recent request.
+        if other.target_scope is not None:
+            self.target_scope = other.target_scope
 
 
 def _merge_by_id(dst: list[Any], src: list[Any]) -> None:

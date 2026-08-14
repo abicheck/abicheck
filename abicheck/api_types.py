@@ -136,6 +136,11 @@ class InputSpec:
     # behavior from before this field existed).
     sources: Path | None = None
     build_info: Path | None = None
+    # P0.2: explicit build-system root target(s) to scope this side's L3
+    # evidence collection to, instead of a workspace-wide query -- mirrors
+    # `dump --build-target`/`.abicheck.yml`'s `build.targets`. Bazel only so
+    # far. Empty (the default) reproduces the historical unscoped behavior.
+    build_targets: tuple[str, ...] = ()
     # ADR-055 D1 / ADR-050 D3: a parsed `--dump-manifest` document for this
     # side only, in place of a single header list -- forwarded directly to
     # `resolve_input`'s own `dump_manifest` parameter, which already supports
@@ -177,6 +182,7 @@ class InputSpec:
         include_dependencies: bool = True,
         sources: Path | str | None = None,
         build_info: Path | str | None = None,
+        build_targets: Iterable[str] | None = None,
         dump_manifest: DumpManifest | None = None,
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
@@ -193,6 +199,7 @@ class InputSpec:
             include_dependencies=include_dependencies,
             sources=Path(sources) if sources is not None else None,
             build_info=Path(build_info) if build_info is not None else None,
+            build_targets=tuple(build_targets) if build_targets is not None else (),
             dump_manifest=dump_manifest,
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),

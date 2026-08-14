@@ -1431,6 +1431,20 @@ def build_source_dump_options(func: F) -> F:
         "itself.",
     )(func)
     func = click.option(
+        "--build-target",
+        "build_targets",
+        multiple=True,
+        metavar="TARGET",
+        help="Explicit build-system root target(s) to scope L3 evidence "
+        "collection to, instead of a workspace-wide query (P0.2; Bazel "
+        "only so far, e.g. '//:math'). Repeatable — each root's transitive "
+        "dependency closure is unioned. CLI equivalent of `.abicheck.yml` "
+        "build.targets; overrides it when both are given. Without this, a "
+        "multi-package workspace with fixture/test targets alongside the "
+        "real library is collected in full, which can pollute L3 evidence "
+        "with unrelated compile units.",
+    )(func)
+    func = click.option(
         "--sources",
         "sources",
         type=click.Path(exists=True, path_type=Path),

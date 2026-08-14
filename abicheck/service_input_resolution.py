@@ -389,6 +389,7 @@ def embed_side_build_source(
             snap,
             build_info=side.build_info,
             sources=side.sources,
+            build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
             extractor=_sce.effective_frontend(evidence.compile, header_backend),
             # L4 source-ABI replay must invoke the compiler this input's own L2

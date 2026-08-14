@@ -34,11 +34,13 @@ depends on rule-specific conventions rather than an explicit visibility model.
 Only the textual ``jsonproto`` form is parsed; a binary proto blob is recorded
 as a diagnostic rather than mis-read (pass ``--output=jsonproto``).
 """
+
 from __future__ import annotations
 
 import json
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from ...build_context import _extract_flags
@@ -50,6 +52,7 @@ from ..build_evidence import (
     LinkUnit,
     Target,
     TargetKind,
+    TargetScope,
 )
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
 from .base import (
@@ -72,7 +75,14 @@ _KIND_BY_RULE: dict[str, TargetKind] = {
 
 #: aquery mnemonics that denote a compile action (one translation unit).
 _COMPILE_MNEMONICS = frozenset(
-    {"CppCompile", "CCompile", "CcCompile", "ObjcCompile", "ObjcppCompile", "CppModuleCompile"}
+    {
+        "CppCompile",
+        "CCompile",
+        "CcCompile",
+        "ObjcCompile",
+        "ObjcppCompile",
+        "CppModuleCompile",
+    }
 )
 #: aquery mnemonics that denote a link/archive action (one library/executable).
 _LINK_MNEMONICS = frozenset({"CppLink", "CppArchive", "CcLink"})
@@ -88,6 +98,7 @@ class BazelAdapter:
         workspace: Path | str | None = None,
         *,
         target: str | None = None,
+        targets: Sequence[str] | None = None,
         cquery: str | Path | None = None,
         aquery: str | Path | None = None,
         allow_query: bool = True,
@@ -95,6 +106,14 @@ class BazelAdapter:
         redaction: RedactionPolicy | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve() if workspace is not None else None
+        # `target` (singular) is kept for back-compat with existing callers;
+        # `targets` (P0.2, plural, root-target scoping — AGENTS.md "The
+        # problem") is the general form. Both feed one normalized tuple so
+        # every downstream use (query construction, TargetScope reporting)
+        # has a single list to read regardless of which the caller passed.
+        self.targets: tuple[str, ...] = (
+            tuple(targets) if targets else ((target,) if target else ())
+        )
         self.target = target
         self._cquery = cquery
         self._aquery = aquery
@@ -117,11 +136,29 @@ class BazelAdapter:
         # Project per-unit ABI flags into diffable build options, same as every
         # other adapter, so a Bazel-only pack still reports flag drift (D9).
         ev.build_options = derive_build_options(ev.compile_units)
+
+        if self.targets:
+            # `resolved` is the subset of the requested roots a cquery run
+            # actually turned into a real Target — catches a typo'd/nonexistent
+            # label rather than silently reporting 0 resolved with no signal
+            # why. `transitive_count` is the full scoped closure size; `None`
+            # (not 0) when no cquery evidence was collected at all (e.g. an
+            # aquery-only --build-info replay), so "nothing resolved" and
+            # "never checked" stay distinct (Codex review pattern, mirrors
+            # `comdat`'s "None means no scan ran").
+            ids = {t.id for t in ev.targets}
+            ev.target_scope = TargetScope(
+                requested=list(self.targets),
+                resolved=[t for t in self.targets if f"target://{t}" in ids],
+                transitive_count=len(ev.targets) if cq_text is not None else None,
+            )
         return ev
 
     # -- input resolution ---------------------------------------------------
 
-    def _resolve(self, kind: str, value: str | Path | None, ev: BuildEvidence) -> str | None:
+    def _resolve(
+        self, kind: str, value: str | Path | None, ev: BuildEvidence
+    ) -> str | None:
         text = _as_text(value)
         if text is not None:
             return text
@@ -139,10 +176,17 @@ class BazelAdapter:
 
     def _run_bazel(self, kind: str, ev: BuildEvidence) -> str | None:
         bazel = shutil.which("bazel") or shutil.which("bazelisk")
-        if bazel is None or self.workspace is None or self.target is None:
-            ev.diagnostics.append(f"bazel: executable not found on PATH; cannot run {kind}")
+        if bazel is None or self.workspace is None or not self.targets:
+            ev.diagnostics.append(
+                f"bazel: executable not found on PATH; cannot run {kind}"
+            )
             return None
-        cmd = [bazel, kind, f"deps({self.target})", "--output=jsonproto"]
+        cmd = [
+            bazel,
+            kind,
+            f"deps({bazel_deps_expression(self.targets)})",
+            "--output=jsonproto",
+        ]
         if kind == "aquery":
             # Without this, large C++ actions keep their argv in @...params files
             # and the source/ABI flags never reach the jsonproto (ADR-029 D6).
@@ -151,8 +195,12 @@ class BazelAdapter:
             # An analysis query of an existing workspace (ADR-028 D6 / D10) —
             # never a build action.
             proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-                cmd, cwd=str(self.workspace), capture_output=True, text=True,
-                timeout=300, check=False,
+                cmd,
+                cwd=str(self.workspace),
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             ev.diagnostics.append(f"bazel: {kind} failed: {exc}")
@@ -206,8 +254,14 @@ class BazelAdapter:
         if not name:
             return None
         attrs = _attr_map(rule.get("attribute", []))
-        srcs = [self.redaction.path(_label_to_workspace_path(s)) for s in attrs.get("srcs", [])]
-        hdrs = [self.redaction.path(_label_to_workspace_path(h)) for h in attrs.get("hdrs", [])]
+        srcs = [
+            self.redaction.path(_label_to_workspace_path(s))
+            for s in attrs.get("srcs", [])
+        ]
+        hdrs = [
+            self.redaction.path(_label_to_workspace_path(h))
+            for h in attrs.get("hdrs", [])
+        ]
         # ``deps`` are Bazel labels used as graph keys: they must stay in the
         # same (un-redacted) form as the ``target://<label>`` target ids so the
         # dependency edges resolve. Labels are not host paths, so there is
@@ -248,7 +302,9 @@ class BazelAdapter:
                 if lu is not None:
                     ev.link_units.append(lu)
 
-    def _compile_unit(self, action: dict[str, object], graph: _AqueryGraph) -> CompileUnit | None:
+    def _compile_unit(
+        self, action: dict[str, object], graph: _AqueryGraph
+    ) -> CompileUnit | None:
         argv = _action_argv(action)
         source = source_from_argv(argv)
         if not source:
@@ -259,7 +315,9 @@ class BazelAdapter:
         red_argv = self.redaction.argv(argv)
         red_source = self.redaction.path(source)
         red_output = self.redaction.path(output)
-        red_directory = self.redaction.path(str(directory)) if self.workspace is not None else ""
+        red_directory = (
+            self.redaction.path(str(directory)) if self.workspace is not None else ""
+        )
         return CompileUnit(
             # Derive the id from redacted values only so host-specific paths
             # never leak through the id (ADR-028 D4: normalized facts only).
@@ -271,10 +329,15 @@ class BazelAdapter:
             argv=red_argv,
             language=effective_language(argv, source),
             standard=ctx.language_standard or "",
-            defines={k: self.redaction.define_value(k, v or "") for k, v in ctx.defines.items()},
+            defines={
+                k: self.redaction.define_value(k, v or "")
+                for k, v in ctx.defines.items()
+            },
             undefines=sorted(ctx.undefines),
             include_paths=[self.redaction.path(str(p)) for p in ctx.include_paths],
-            system_include_paths=[self.redaction.path(str(p)) for p in ctx.system_includes],
+            system_include_paths=[
+                self.redaction.path(str(p)) for p in ctx.system_includes
+            ],
             input_files=(
                 [
                     self.redaction.path(p)
@@ -286,10 +349,14 @@ class BazelAdapter:
             ),
             sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
             target_triple=ctx.target_triple or "",
-            abi_relevant_flags=[self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)],
+            abi_relevant_flags=[
+                self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)
+            ],
         )
 
-    def _link_unit(self, action: dict[str, object], graph: _AqueryGraph) -> LinkUnit | None:
+    def _link_unit(
+        self, action: dict[str, object], graph: _AqueryGraph
+    ) -> LinkUnit | None:
         output = graph.path(action.get("primaryOutputId"))
         if not output:
             return None
@@ -306,7 +373,9 @@ class BazelAdapter:
             linker_argv=self.redaction.argv(argv),
             # Surface export-policy facts structurally so the build-evidence diff
             # can report LINK_EXPORT_POLICY_CHANGED (D9); empty when absent.
-            version_script=self.redaction.path(version_script) if version_script else "",
+            version_script=self.redaction.path(version_script)
+            if version_script
+            else "",
             soname=soname,
         )
 
@@ -332,10 +401,7 @@ class _AqueryGraph:
             str(t.get("id")): str(t.get("label", ""))
             for t in _dicts(data.get("targets"))
         }
-        self._depsets = {
-            str(d.get("id")): d
-            for d in _dicts(data.get("depSetOfFiles"))
-        }
+        self._depsets = {str(d.get("id")): d for d in _dicts(data.get("depSetOfFiles"))}
 
     def path(self, artifact_id: object) -> str:
         if artifact_id is None:
@@ -343,7 +409,11 @@ class _AqueryGraph:
         frag_id: object = self._artifact_frag.get(str(artifact_id))
         parts: list[str] = []
         seen: set[str] = set()
-        while frag_id is not None and str(frag_id) in self._frag and str(frag_id) not in seen:
+        while (
+            frag_id is not None
+            and str(frag_id) in self._frag
+            and str(frag_id) not in seen
+        ):
             seen.add(str(frag_id))
             label, parent = self._frag[str(frag_id)]
             if label:
@@ -380,6 +450,29 @@ class _AqueryGraph:
         return artifacts
 
 
+def bazel_deps_expression(targets: Sequence[str]) -> str:
+    """The Bazel query-language target-pattern expression for *targets* (P0.2).
+
+    ``()`` (no explicit root targets declared) resolves to the historical
+    workspace-wide ``//...`` — this is what makes root-target scoping purely
+    additive: a caller that never declares ``build_targets``/
+    ``--build-target`` gets byte-identical query behavior to before this
+    feature existed. A single target is used bare (``//:math``); several are
+    joined with Bazel's own ``set(...)`` target-pattern union (space-
+    separated per the query-language grammar) so ``deps(...)`` computes the
+    union of each root's own transitive closure rather than requiring the
+    caller to pre-union labels themselves. Shared by :class:`BazelAdapter`'s
+    own live-query path and ``build_query.py``'s zero-config inferred-query
+    path so the two can never independently drift on how multiple roots are
+    expressed.
+    """
+    if not targets:
+        return "//..."
+    if len(targets) == 1:
+        return targets[0]
+    return f"set({' '.join(targets)})"
+
+
 def _linker_tokens(argv: list[str]) -> list[str]:
     """Flatten linker sub-options into individual tokens.
 
@@ -391,7 +484,7 @@ def _linker_tokens(argv: list[str]) -> list[str]:
         if arg == "-Xlinker":
             continue
         if arg.startswith("-Wl,"):
-            tokens.extend(arg[len("-Wl,"):].split(","))
+            tokens.extend(arg[len("-Wl,") :].split(","))
         else:
             tokens.append(arg)
     return tokens
@@ -452,11 +545,26 @@ def _is_link_input(path: str) -> bool:
 
 def _is_compile_input(path: str) -> bool:
     low = path.lower()
-    if low.endswith((
-        ".c", ".cc", ".cpp", ".cxx", ".c++", ".cu",
-        ".h", ".hh", ".hpp", ".hxx", ".h++", ".cuh",
-        ".inc", ".inl", ".ipp", ".tcc",
-    )):
+    if low.endswith(
+        (
+            ".c",
+            ".cc",
+            ".cpp",
+            ".cxx",
+            ".c++",
+            ".cu",
+            ".h",
+            ".hh",
+            ".hpp",
+            ".hxx",
+            ".h++",
+            ".cuh",
+            ".inc",
+            ".inl",
+            ".ipp",
+            ".tcc",
+        )
+    ):
         return True
     name = low.rsplit("/", 1)[-1]
     return bool(name) and "." not in name
@@ -586,7 +694,9 @@ def _attr_map(attributes: object) -> dict[str, list[str]]:
     return out
 
 
-def _load_jsonproto(text: str, kind: str, ev: BuildEvidence) -> dict[str, object] | None:
+def _load_jsonproto(
+    text: str, kind: str, ev: BuildEvidence
+) -> dict[str, object] | None:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:

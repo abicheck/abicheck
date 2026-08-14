@@ -57,7 +57,7 @@ import stat as _stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -299,15 +299,24 @@ def inferred_query_command(
     build_dir: Path | None = None,
     *,
     make_launcher: str = "make",
+    bazel_targets: Sequence[str] = (),
 ) -> list[str] | None:
     """The fixed, abicheck-authored query command for *system* (no user input).
 
     Returns ``None`` for an unknown system. The argv is never shell-interpreted
-    and contains no value taken from the source tree beyond its path. *build_dir*
-    is the cmake configure output (``-B``); :func:`run_inferred_build_query`
-    passes an out-of-tree temp dir so nothing is written under *sources*. Falls
-    back to ``sources / ABICHECK_BUILD_DIR`` only when called standalone without
-    one.
+    and contains no value taken from the source tree beyond its path (and, for
+    Bazel, *bazel_targets* -- see below). *build_dir* is the cmake configure
+    output (``-B``); :func:`run_inferred_build_query` passes an out-of-tree
+    temp dir so nothing is written under *sources*. Falls back to
+    ``sources / ABICHECK_BUILD_DIR`` only when called standalone without one.
+
+    *bazel_targets* (P0.2 root-target scoping): when given, the Bazel query
+    scopes to ``deps(<these targets>)`` instead of the workspace-wide
+    ``deps(//...)`` -- so a caller with fixture/test targets alongside the
+    real library under test (the motivating report: a Bazel validation lab
+    whose workspace-wide query captured unrelated fixture targets too) can
+    declare only the real target(s) and get a narrower compile-unit/target
+    set. ``()`` (the default) is the historical unscoped behavior.
     """
     if system == "cmake":
         out = build_dir if build_dir is not None else sources / ABICHECK_BUILD_DIR
@@ -334,20 +343,25 @@ def inferred_query_command(
         # mnemonic is matched whole, not as a substring. --include_param_files
         # expands @...params so source paths and ABI flags Bazel spills to param
         # files are present (mirrors BazelAdapter).
-        from .adapters.bazel import _COMPILE_MNEMONICS, _LINK_MNEMONICS
+        from .adapters.bazel import (
+            _COMPILE_MNEMONICS,
+            _LINK_MNEMONICS,
+            bazel_deps_expression,
+        )
 
         mnemonics = "|".join(sorted(_COMPILE_MNEMONICS | _LINK_MNEMONICS))
+        scope = bazel_deps_expression(bazel_targets)
         return [
             "bazel",
             "aquery",
             "--output=jsonproto",
             "--include_param_files",
-            f"mnemonic('^({mnemonics})$', deps(//...))",
+            f"mnemonic('^({mnemonics})$', deps({scope}))",
         ]
     return None
 
 
-def inferred_bazel_cquery_command() -> list[str]:
+def inferred_bazel_cquery_command(bazel_targets: Sequence[str] = ()) -> list[str]:
     """The fixed, abicheck-authored ``bazel cquery`` companion to the aquery
     command above.
 
@@ -359,14 +373,18 @@ def inferred_bazel_cquery_command() -> list[str]:
     only ever populates ``compile_units``/``link_units``). This mirrors that
     gap the same way an explicit ``--build-info`` bazel-cquery/-aquery pair
     already can (see ``BazelAdapter.__init__``'s ``cquery=``/``aquery=``
-    parameters), scoped to the identical ``deps(//...)`` universe the aquery
-    command above resolves so the two stay consistent with each other. No
-    ``--include_param_files``: unlike aquery's action argv (which spills
-    long command lines to ``@params`` files that must be expanded to see
-    real source/flag content), cquery's jsonproto already carries each
-    target's fields inline.
+    parameters), scoped to the identical ``deps(...)`` universe the aquery
+    command above resolves (workspace-wide ``//...`` by default, or
+    *bazel_targets* — P0.2 — when root targets were declared) so the two
+    stay consistent with each other. No ``--include_param_files``: unlike
+    aquery's action argv (which spills long command lines to ``@params``
+    files that must be expanded to see real source/flag content), cquery's
+    jsonproto already carries each target's fields inline.
     """
-    return ["bazel", "cquery", "--output=jsonproto", "deps(//...)"]
+    from .adapters.bazel import bazel_deps_expression
+
+    scope = bazel_deps_expression(bazel_targets)
+    return ["bazel", "cquery", "--output=jsonproto", f"deps({scope})"]
 
 
 @dataclass(frozen=True)
@@ -634,6 +652,8 @@ def _run_bazel_cquery_supplement(
     timeout: float,
     which: Callable[[str], str | None],
     merged: BuildEvidence,
+    *,
+    bazel_targets: Sequence[str] = (),
 ) -> str | None:
     """Best-effort ``bazel cquery`` companion to the aquery query above.
 
@@ -646,7 +666,7 @@ def _run_bazel_cquery_supplement(
     ``ok``/``partial`` to ``failed``. Still recorded as a diagnostic so the
     miss is visible without changing the extractor's own status.
     """
-    cmd = inferred_bazel_cquery_command()
+    cmd = inferred_bazel_cquery_command(bazel_targets)
     if cmd[0] == "bazel" and which("bazel") is None and which("bazelisk") is not None:
         cmd[0] = "bazelisk"
     if not _query_tool_available(cmd[0], which):
@@ -697,6 +717,7 @@ def _merge_query_result(
     build_dir: Path | None,
     *,
     cquery_stdout: str | None = None,
+    bazel_targets: Sequence[str] = (),
 ) -> Path | None:
     """Merge a completed inferred query into *merged*, recording failures as diagnostics."""
     if proc.returncode != 0 and system == "make":
@@ -730,6 +751,7 @@ def _merge_query_result(
             extractors,
             build_dir=build_dir,
             cquery_stdout=cquery_stdout,
+            bazel_targets=bazel_targets,
         )
     except (OSError, ValueError, KeyError, TypeError) as exc:
         extractors.append(
@@ -770,6 +792,7 @@ def run_inferred_build_query(
     timeout: float = INFERRED_QUERY_TIMEOUT_S,
     which: Callable[[str], str | None] = shutil.which,
     cleanup: list[Callable[[], None]] | None = None,
+    bazel_targets: Sequence[str] = (),
 ) -> Path | None:
     """Detect the build system and run abicheck's own query to produce L3.
 
@@ -786,6 +809,12 @@ def run_inferred_build_query(
     only when *cleanup* is ``None`` (standalone/unit-test use) is the dir removed
     and its lock released immediately. The lock (see
     :func:`_claim_inferred_build_dir`) is held for that whole lifetime.
+
+    *bazel_targets* (P0.2): forwarded to :func:`inferred_query_command`/
+    :func:`inferred_bazel_cquery_command` so a caller that declared root
+    targets (``dump --build-target`` / ``.abicheck.yml``'s ``build.targets``)
+    gets a scoped Bazel query instead of the workspace-wide default; a no-op
+    for cmake/make.
     """
     system = detect_build_system(sources)
     if not system or sources is None:
@@ -810,7 +839,11 @@ def run_inferred_build_query(
         build_dir, release = claimed
     try:
         cmd = inferred_query_command(
-            system, sources, build_dir=build_dir, make_launcher=make_launcher
+            system,
+            sources,
+            build_dir=build_dir,
+            make_launcher=make_launcher,
+            bazel_targets=bazel_targets,
         )
         if (
             cmd is None
@@ -847,7 +880,11 @@ def run_inferred_build_query(
         if system == "bazel" and proc.returncode == 0:
             if cquery_remaining > 0:
                 cquery_stdout = _run_bazel_cquery_supplement(
-                    sources, cquery_remaining, which, merged
+                    sources,
+                    cquery_remaining,
+                    which,
+                    merged,
+                    bazel_targets=bazel_targets,
                 )
             else:
                 merged.diagnostics.append(
@@ -862,6 +899,7 @@ def run_inferred_build_query(
             extractors,
             build_dir,
             cquery_stdout=cquery_stdout,
+            bazel_targets=bazel_targets,
         )
     finally:
         _schedule_build_dir_release(build_dir, release, cleanup)
@@ -877,6 +915,7 @@ def _ingest_query_output(
     query_returncode: int = 0,
     *,
     cquery_stdout: str | None = None,
+    bazel_targets: Sequence[str] = (),
 ) -> Path | None:
     """Parse a successful query's output and merge it into *merged* (returns None).
 
@@ -936,8 +975,18 @@ def _ingest_query_output(
             # output (BazelAdapter treats a None cquery as simply "no
             # cquery evidence", same as an explicit --build-info aquery-only
             # pack) — ev.targets then stays empty, same as before this fix.
+            # targets=bazel_targets (P0.2): the query text itself is already
+            # scoped (inferred_query_command/inferred_bazel_cquery_command
+            # above), but the adapter also needs the requested roots
+            # verbatim so it can stamp BuildEvidence.target_scope --
+            # otherwise a scoped query's own requested/resolved accounting
+            # would be lost even though the collection itself was scoped.
             ev = BazelAdapter(
-                aquery=aq, cquery=cq, workspace=sources, allow_query=False
+                aquery=aq,
+                cquery=cq,
+                workspace=sources,
+                allow_query=False,
+                targets=bazel_targets,
             ).collect()
         finally:
             aq.unlink(missing_ok=True)

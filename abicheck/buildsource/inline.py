@@ -58,7 +58,14 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .. import deadline
-from .build_evidence import BuildEvidence, comdat_scan_requested
+from .build_config_schema import (
+    BOOL_SUBKEYS as _BOOL_SUBKEYS,
+    LIST_SUBKEYS as _LIST_SUBKEYS,
+    STR_SUBKEYS as _STR_SUBKEYS,
+    TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
+    TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
+)
+from .build_evidence import BuildEvidence, comdat_scan_requested, l3_coverage_fields
 from .model import (
     CoverageStatus,
     DataLayer,
@@ -108,41 +115,10 @@ _EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
 # ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
 # command — every real ingestion path enforces this) ─────────────────────────
 #
-# Block subkeys BuildConfig.from_dict() parses with `_opt_bool`/`_opt_str`/
-# `_str`/`_strs` — a value of the wrong type there (e.g. the YAML string
-# "false" for a boolean, or a bare number for a string/list field) must be
-# rejected outright rather than silently dropped/coerced. Keep these three
-# maps in sync with `BuildConfig.from_dict`'s helper calls when a new subkey
-# is added — nothing enforces that automatically.
-_BOOL_SUBKEYS: dict[str, frozenset[str]] = {
-    "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
-    "suppression": frozenset({"strict", "require_justification"}),
-    "compile": frozenset({"nostdinc"}),
-    "debug": frozenset({"dwarf_only", "debuginfod"}),
-}
-_STR_SUBKEYS: dict[str, frozenset[str]] = {
-    "build": frozenset({"system", "query", "compile_db"}),
-    "sources": frozenset({"graph"}),
-    "severity": frozenset(
-        {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
-    ),
-    "source": frozenset({"method"}),
-    "compile": frozenset({"frontend", "std", "sysroot"}),
-    "debug": frozenset({"format", "debuginfod_url"}),
-}
-# `_strs()` accepts either a list of strings or a single bare string (folded
-# to a 1-element list), so both shapes are valid here — anything else isn't.
-_LIST_SUBKEYS: dict[str, frozenset[str]] = {
-    "sources": frozenset({"public_headers", "exclude"}),
-    "scope": frozenset({"public_symbols"}),
-    "compile": frozenset({"include_dirs", "defines"}),
-}
-# Recognized top-level keys that are scalars, not blocks (i.e. absent from
-# _KNOWN_BLOCK_KEYS) — the same wrong-type gap as the block subkeys above, one
-# level up.
-_TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset({"exit_code_scheme"})
-_TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})
-
+# The subkey-type tables (_BOOL_SUBKEYS/_STR_SUBKEYS/_LIST_SUBKEYS/
+# _TOP_LEVEL_STR_KEYS/_TOP_LEVEL_INT_KEYS) are imported at module top from
+# `build_config_schema.py` (split out purely to stay under the AI-readiness
+# 2000-line hard cap).
 
 
 def _block(data: dict[str, object], key: str) -> dict[str, object]:
@@ -234,6 +210,9 @@ class BuildConfig:
     system: str = "auto"
     query: str = ""
     compile_db: str = ""
+    targets: list[str] = field(
+        default_factory=list
+    )  # build.targets (P0.2): root target(s) scoping L3 collection (Bazel only). Empty = unscoped.
     public_headers: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
     #: L5 source-graph detail cap (ADR-037 D6): ``summary`` (default — changed
@@ -316,7 +295,7 @@ class BuildConfig:
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
-        "build": frozenset({"system", "query", "compile_db"}),
+        "build": frozenset({"system", "query", "compile_db", "targets"}),
         "sources": frozenset({"public_headers", "exclude", "graph"}),
         "severity": frozenset(
             {
@@ -386,7 +365,11 @@ class BuildConfig:
             ]
         # `_strs()` accepts a list container but a non-string element must be
         # rejected outright, not coerced via `str(x)`.
-        bad = [x for x in sub_value if not isinstance(x, str)] if isinstance(sub_value, list) else []
+        bad = (
+            [x for x in sub_value if not isinstance(x, str)]
+            if isinstance(sub_value, list)
+            else []
+        )
         if bad:
             return [
                 f"{key}.{sub} must be a list of strings, got "
@@ -434,6 +417,7 @@ class BuildConfig:
                 findings += cls._block_findings(key, value, known_block)
         if findings:
             raise ValueError("; ".join(findings))
+
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
         if isinstance(data, dict):
@@ -459,6 +443,7 @@ class BuildConfig:
             system=_str(build, "system", "auto") or "auto",
             query=_str(build, "query"),
             compile_db=_str(build, "compile_db"),
+            targets=_strs(build, "targets"),
             public_headers=_strs(sources, "public_headers"),
             exclude=_strs(sources, "exclude"),
             graph_detail=_one_of(
@@ -529,6 +514,8 @@ class BuildConfig:
             build["query"] = self.query
         if self.compile_db:
             build["compile_db"] = self.compile_db
+        if self.targets:
+            build["targets"] = list(self.targets)
         return build
 
     def _sources_block(self) -> dict[str, Any]:
@@ -1079,7 +1066,9 @@ def _resolve_compile_db(
     # .abicheck.yml `build.query` string is never auto-executed.
     from .build_query import run_inferred_build_query
 
-    return run_inferred_build_query(sources, merged, extractors, cleanup=cleanup)
+    return run_inferred_build_query(
+        sources, merged, extractors, cleanup=cleanup, bazel_targets=tuple(cfg.targets)
+    )
 
 
 def _compile_db_at(path: Path) -> Path | None:
@@ -1886,16 +1875,19 @@ def build_inline_coverage(
     """Build L3/L4/L5 coverage rows for an inline-collected pack (ADR-028 D7)."""
     if has_build:
         systems = sorted({g.kind for g in merged.generators}) or ["generic"]
+        p02 = l3_coverage_fields(merged)  # P0.2 root-target-scoping fields
+        detail = (
+            f"{'+'.join(systems)}, {len(merged.compile_units)} compile units, "
+            f"{len(merged.targets)} targets" + p02.pop("detail_suffix")
+        )
         l3 = LayerCoverage(
             layer=DataLayer.L3_BUILD.value,
             status=CoverageStatus.PRESENT,
             confidence=LayerConfidence.HIGH
             if merged.targets
             else LayerConfidence.REDUCED,
-            detail=(
-                f"{'+'.join(systems)}, {len(merged.compile_units)} compile units, "
-                f"{len(merged.targets)} targets"
-            ),
+            detail=detail,
+            **p02,
         )
     else:
         # A3: a build query that was attempted but failed (or was blocked because

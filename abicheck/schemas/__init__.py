@@ -444,7 +444,18 @@ from typing import Any
 #:       a conflicting 2.35 when the PR #755 rebase claimed that version
 #:       first (same "renumber, don't reuse" convention as the 2.32 entry
 #:       above).
-REPORT_SCHEMA_VERSION = "2.36"
+#: 2.37 — each ``layer_coverage[]`` row (the L3_build row in particular)
+#:       gains five optional keys: ``requested_roots``/``resolved_roots``
+#:       (the P0.2 Bazel root-target(s) declared via ``dump --build-target``/
+#:       ``.abicheck.yml``'s ``build.targets``, and the subset a query
+#:       actually resolved), ``transitive_targets`` (the scoped dependency
+#:       closure size), and ``compile_units``/``link_units`` (machine-
+#:       readable counterparts to what ``detail`` already states in prose).
+#:       All five are present-but-empty/``null`` on every row unaffected by
+#:       root-target scoping (every report before this feature, and every
+#:       non-L3_build row), so no pre-existing consumer's parsing breaks.
+#:       Additive optional keys.
+REPORT_SCHEMA_VERSION = "2.37"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
