@@ -461,7 +461,7 @@ def test_derive_l2_include_dirs_runs_inferred_query_when_allowed(tmp_path, monke
 
     called = {"n": 0}
 
-    def stub(sources, merged, extractors, cleanup=None):
+    def stub(sources, merged, extractors, cleanup=None, **kwargs):
         called["n"] += 1
         return None  # pretend the query produced no DB
 

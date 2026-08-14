@@ -90,6 +90,7 @@ def embed_build_source(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     changed_paths: tuple[str, ...] = (),
     extractor: str = "auto",
     public_headers: tuple[str, ...] = (),
@@ -186,9 +187,13 @@ def embed_build_source(
             # A bad .abicheck.yml is a usage error (exit 64), not an operational
             # failure of this run (ADR-043 CLI reset: config errors use exit 64).
             raise click.UsageError(str(exc)) from exc
-        # CLI overrides (no config file needed): --build-query / --build-compile-db
-        # win over the .abicheck.yml values when supplied.
-        if build_query is not None or build_compile_db is not None:
+        # CLI overrides (no config file needed): --build-query / --build-compile-db /
+        # --build-target win over the .abicheck.yml values when supplied.
+        if (
+            build_query is not None
+            or build_compile_db is not None
+            or build_targets
+        ):
             import dataclasses
 
             from .buildsource.inline import BuildConfig
@@ -200,6 +205,7 @@ def embed_build_source(
                 compile_db=build_compile_db
                 if build_compile_db is not None
                 else cfg.compile_db,
+                targets=list(build_targets) if build_targets else cfg.targets,
             )
         # A1: plumb the binary's L0 exports (already computed above) into the
         # inline replay, so the linked source surface knows which decls map to
@@ -350,6 +356,7 @@ def dump_source_only(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     extractor: str = "auto",
     depth: str | None = None,
     include_dependencies: bool = False,
@@ -402,6 +409,7 @@ def dump_source_only(
         collect_mode,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        build_targets=build_targets,
         extractor=extractor,
         depth=depth,
         include_dependencies=include_dependencies,
@@ -526,6 +534,7 @@ def _write_snapshot_output(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     extractor: str = "auto",
     inputs_pack: Path | None = None,
     depth: str | None = None,
@@ -542,8 +551,11 @@ def _write_snapshot_output(
     ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
-    *build_query* / *build_compile_db* are the CLI equivalents of the ``.abicheck.yml``
-    ``build.query`` / ``build.compile_db`` keys. *extractor* is the L4 source-ABI
+    *build_query* / *build_compile_db* / *build_targets* are the CLI equivalents of
+    the ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` / ``build.targets``
+    keys — *build_targets* (P0.2) scopes Bazel evidence collection to the given
+    root target(s) and their transitive deps instead of a workspace-wide query.
+    *extractor* is the L4 source-ABI
     frontend — the same ``--ast-frontend`` knob that drives the L2 header AST
     (ADR-037 D8): one frontend choice across both pipeline stages. *clang_bin* is
     the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).
@@ -573,6 +585,7 @@ def _write_snapshot_output(
             build_config=build_config, allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             build_query=build_query, build_compile_db=build_compile_db,
+            build_targets=build_targets,
             extractor=extractor, clang_bin=clang_bin,
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so

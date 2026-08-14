@@ -139,6 +139,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `include_dependencies` | `bool` | `True` |
 | `sources` | `Path \| None` | `None` |
 | `build_info` | `Path \| None` | `None` |
+| `build_targets` | `tuple[str, ...]` | `()` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `compile` | `CompileContext \| None` | `None` |
 | `public_header_dirs` | `tuple[Path, ...]` | `()` |

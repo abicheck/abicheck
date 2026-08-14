@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 import click
 
+from .buildsource.build_evidence import l3_coverage_fields
 from .buildsource.evidence_policy import (
     apply_evidence_policy,
     echo_evidence_metrics,
@@ -654,16 +655,19 @@ def _build_coverage(
     """Build the L3/L4/L5 coverage rows for the pack manifest (ADR-028 D7)."""
     if has_build:
         systems = sorted({g.kind for g in merged.generators}) or ["generic"]
+        p02 = l3_coverage_fields(merged)  # P0.2 root-target-scoping fields
+        detail = (
+            f"{'+'.join(systems)}, {len(merged.compile_units)} compile units, "
+            f"{len(merged.targets)} targets" + p02.pop("detail_suffix")
+        )
         l3 = LayerCoverage(
             layer=DataLayer.L3_BUILD.value,
             status=CoverageStatus.PRESENT,
             confidence=LayerConfidence.HIGH
             if merged.targets
             else LayerConfidence.REDUCED,
-            detail=(
-                f"{'+'.join(systems)}, {len(merged.compile_units)} compile units, "
-                f"{len(merged.targets)} targets"
-            ),
+            detail=detail,
+            **p02,
         )
     else:
         l3 = LayerCoverage(

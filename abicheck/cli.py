@@ -492,6 +492,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
+             build_targets: tuple[str, ...] = (),
              depth: str | None = None,
              header_graph_deprecated: bool = False,
              header_graph_includes_deprecated: bool = False,
@@ -722,7 +723,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
@@ -785,6 +786,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             _dump_native_binary, _stamp_provenance, _write_snapshot_output_fn,
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
+            build_targets=build_targets,
             header_backend=header_backend, compile_context=native_cc,
             depth=depth, compile_db_context_matched=compile_db_matched,
             include_dependencies=include_dependencies,
@@ -847,6 +849,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output_fn,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        build_targets=build_targets,
         compile_context=_cc,
         depth=depth,
         compile_db_context_matched=compile_db_matched,

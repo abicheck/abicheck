@@ -21,6 +21,7 @@ heavyweight source graphs and raw build dumps never bloat ordinary ABI dumps.
 
 Nothing here parses binaries or runs external tools — the model is pure data.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -41,7 +42,7 @@ class DataLayer(str, Enum):
     from the snapshot. These three are the *optional* augmentation layers.
     """
 
-    L3_BUILD = "L3_build"           # build context: compile DB, CMake, Ninja, Bazel, Make
+    L3_BUILD = "L3_build"  # build context: compile DB, CMake, Ninja, Bazel, Make
     L4_SOURCE_ABI = "L4_source_abi"  # per-TU source ABI replay (ADR-030)
     L5_SOURCE_GRAPH = "L5_source_graph"  # include/type/call/build graph (ADR-031)
 
@@ -63,8 +64,8 @@ class LayerConfidence(str, Enum):
 class CoverageStatus(str, Enum):
     """Collection status for an evidence layer in the coverage table (D7)."""
 
-    PRESENT = "present"            # collected in full
-    PARTIAL = "partial"           # collected for a subset (e.g. changed headers only)
+    PRESENT = "present"  # collected in full
+    PARTIAL = "partial"  # collected for a subset (e.g. changed headers only)
     NOT_COLLECTED = "not_collected"  # extractor not run / unavailable
 
 
@@ -76,24 +77,48 @@ class LayerCoverage:
     artifact-proven vs. build-context-only vs. source/graph-assisted.
     """
 
-    layer: str                      # DataLayer value OR "L0"/"L1"/"L2" for intrinsic layers
+    layer: str  # DataLayer value OR "L0"/"L1"/"L2" for intrinsic layers
     status: CoverageStatus = CoverageStatus.NOT_COLLECTED
     confidence: LayerConfidence = LayerConfidence.UNKNOWN
-    detail: str = ""                # human-readable note, e.g. "CMake+Ninja, 142 compile units"
+    detail: str = ""  # human-readable note, e.g. "CMake+Ninja, 142 compile units"
     elapsed_s: float = 0.0
+    #: P0.2 root-target scoping (populated on the L3_build row only, from
+    #: ``BuildEvidence.target_scope`` — see that class for field meaning).
+    #: Empty/``None`` (the defaults) when no root targets were declared for
+    #: this run, so an unscoped collection's coverage row is byte-identical
+    #: to before this feature existed.
+    requested_roots: tuple[str, ...] = ()
+    resolved_roots: tuple[str, ...] = ()
+    transitive_targets: int | None = None
+    #: Raw compile/link unit counts collected for this row (L3_build only) —
+    #: the same counts already folded into ``detail``'s prose, exposed as
+    #: machine-readable fields too so a consumer doesn't have to parse text.
+    compile_units: int | None = None
+    link_units: int | None = None
 
     @property
     def present(self) -> bool:
         return self.status in (CoverageStatus.PRESENT, CoverageStatus.PARTIAL)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "layer": self.layer,
             "status": self.status.value,
             "confidence": self.confidence.value,
             "detail": self.detail,
             "elapsed_s": round(self.elapsed_s, 3),
         }
+        # Additive, present-but-empty by default (mirrors
+        # `analysis_assurance.TargetAccounting`'s own convention): included
+        # unconditionally rather than omitted when unpopulated, so a
+        # consumer parsing this row always has the keys to look for, whether
+        # or not root-target scoping was ever used on this run.
+        d["requested_roots"] = list(self.requested_roots)
+        d["resolved_roots"] = list(self.resolved_roots)
+        d["transitive_targets"] = self.transitive_targets
+        d["compile_units"] = self.compile_units
+        d["link_units"] = self.link_units
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LayerCoverage:
@@ -103,6 +128,19 @@ class LayerCoverage:
             confidence=_confidence(d.get("confidence")),
             detail=str(d.get("detail", "")),
             elapsed_s=float(d.get("elapsed_s", 0.0) or 0.0),
+            requested_roots=tuple(d.get("requested_roots", []) or ()),
+            resolved_roots=tuple(d.get("resolved_roots", []) or ()),
+            transitive_targets=(
+                int(d["transitive_targets"])
+                if d.get("transitive_targets") is not None
+                else None
+            ),
+            compile_units=(
+                int(d["compile_units"]) if d.get("compile_units") is not None else None
+            ),
+            link_units=(
+                int(d["link_units"]) if d.get("link_units") is not None else None
+            ),
         )
 
 
@@ -115,12 +153,18 @@ class BuildSourceEntity:
     (ADR-028 D5). Phase 0 defines the model; extractors populate it.
     """
 
-    entity_id: str                  # "sha256:..."
-    kind: str                       # function|variable|record|enum|typedef|macro|file|target|compile_unit|binary_symbol|build_option
-    names: dict[str, str] = field(default_factory=dict)  # source_qualified, mangled, demangled, usr
-    locations: list[dict[str, Any]] = field(default_factory=list)  # {path, line, column, origin}
+    entity_id: str  # "sha256:..."
+    kind: str  # function|variable|record|enum|typedef|macro|file|target|compile_unit|binary_symbol|build_option
+    names: dict[str, str] = field(
+        default_factory=dict
+    )  # source_qualified, mangled, demangled, usr
+    locations: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # {path, line, column, origin}
     binary_refs: list[str] = field(default_factory=list)  # "elf:symbol:_ZN..."
-    build_refs: list[str] = field(default_factory=list)   # "target://libfoo", "compile-unit://src/bar.cpp"
+    build_refs: list[str] = field(
+        default_factory=list
+    )  # "target://libfoo", "compile-unit://src/bar.cpp"
     confidence: LayerConfidence = LayerConfidence.UNKNOWN
 
     def to_dict(self) -> dict[str, Any]:
@@ -160,18 +204,20 @@ class ExtractorRecord:
     working). This ledger is carried into JSON/SARIF output (ADR-014).
     """
 
-    name: str                       # e.g. "compile_commands", "cmake_file_api", "ninja"
-    version: str = ""               # extractor/tool version
-    status: str = "ok"             # ok | partial | failed | skipped
-    inputs: list[str] = field(default_factory=list)   # redacted input descriptors
-    artifacts: list[str] = field(default_factory=list)  # content-addressed paths under raw/ or normalized/
+    name: str  # e.g. "compile_commands", "cmake_file_api", "ninja"
+    version: str = ""  # extractor/tool version
+    status: str = "ok"  # ok | partial | failed | skipped
+    inputs: list[str] = field(default_factory=list)  # redacted input descriptors
+    artifacts: list[str] = field(
+        default_factory=list
+    )  # content-addressed paths under raw/ or normalized/
     detail: str = ""
     # ADR-032 D10 reproducibility ledger (optional; emitted only when populated).
-    command: str = ""               # redacted command line of an external extractor
-    command_hash: str = ""          # "sha256:..." over the command + inputs + versions
+    command: str = ""  # redacted command line of an external extractor
+    command_hash: str = ""  # "sha256:..." over the command + inputs + versions
     capabilities: list[str] = field(default_factory=list)  # declared capability tokens
-    started_at: str = ""            # ISO 8601
-    finished_at: str = ""           # ISO 8601
+    started_at: str = ""  # ISO 8601
+    finished_at: str = ""  # ISO 8601
     diagnostics: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -229,13 +275,15 @@ class BuildSourceManifest:
 
     build_source_pack_version: int = BUILD_SOURCE_PACK_VERSION
     abicheck_version: str = ""
-    created_at: str = ""            # ISO 8601
+    created_at: str = ""  # ISO 8601
     source_root: dict[str, Any] = field(
         default_factory=lambda: {"path_redacted": True, "repo_hash": ""}
     )
     inputs: dict[str, Any] = field(default_factory=dict)
     extractors: list[ExtractorRecord] = field(default_factory=list)
-    artifacts: list[str] = field(default_factory=list)  # content-addressed artifact digests
+    artifacts: list[str] = field(
+        default_factory=list
+    )  # content-addressed artifact digests
     coverage: list[LayerCoverage] = field(default_factory=list)
     redaction: dict[str, Any] = field(default_factory=dict)
 
@@ -271,7 +319,9 @@ class BuildSourceManifest:
             build_source_pack_version=ver,
             abicheck_version=str(d.get("abicheck_version", "")),
             created_at=str(d.get("created_at", "")),
-            source_root=dict(d.get("source_root", {"path_redacted": True, "repo_hash": ""})),
+            source_root=dict(
+                d.get("source_root", {"path_redacted": True, "repo_hash": ""})
+            ),
             inputs=dict(d.get("inputs", {})),
             extractors=[ExtractorRecord.from_dict(e) for e in d.get("extractors", [])],
             artifacts=list(d.get("artifacts", [])),
@@ -290,8 +340,8 @@ class BuildSourceRef:
     """
 
     schema_version: int = BUILD_SOURCE_PACK_VERSION
-    content_hash: str = ""          # "sha256:..." of the pack manifest+artifacts
-    path_hint: str = ""             # e.g. "libfoo.evidence/" — advisory only
+    content_hash: str = ""  # "sha256:..." of the pack manifest+artifacts
+    path_hint: str = ""  # e.g. "libfoo.evidence/" — advisory only
     coverage_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

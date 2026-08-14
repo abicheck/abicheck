@@ -484,6 +484,31 @@ sources:
   can still execute recursive/`+` recipes on some Makefiles; this is now part of
   the default source-query trust boundary.
 
+### Scoping a Bazel query to specific root targets
+
+The zero-config inferred Bazel query above (`query_build_system`) collects the
+**whole workspace** (`deps(//...)`) by default — everything reachable from
+every package, not just the library under test. In a multi-package workspace
+with fixture/test targets alongside the real library, that captures unrelated
+compile units too, polluting L3 evidence. `build.targets` declares the actual
+root target(s) instead, scoping the inferred `aquery`/`cquery` to just those
+targets' transitive dependency closure:
+
+```yaml
+build:
+  system: bazel
+  targets:
+    - //:math
+```
+
+`dump --build-target TARGET` (repeatable) is the CLI equivalent (e.g. `dump
+--sources <tree> --build-target //:math`) and overrides `build.targets` when
+both are given; several roots are unioned (`--build-target //:math
+--build-target //:util`). The resulting scope is reported machine-readably on
+the `L3_build` evidence-coverage row (`requested_roots`/`resolved_roots`/
+`transitive_targets`), so a consumer can confirm the collection actually
+stayed scoped rather than silently falling back to a workspace-wide query.
+
 For setting up build/source evidence collection — the `.abicheck.yml` project-contract block, out-of-band packs, a full worked CMake example, and external CLI extractors — see [Build Evidence Setup](../use/build-evidence-setup.md).
 
 ## Build-evidence findings (L3)
