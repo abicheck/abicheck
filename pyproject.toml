@@ -275,9 +275,17 @@ version = "literal: pyproject.toml: project.version"
 #   mutmut results                   # view surviving mutants
 #   mutmut show <id>                 # show a specific mutant
 #
+# NOTE on key names: mutmut 3.x renamed these. The v2 spellings this file used
+# to carry (`paths_to_mutate`, `tests_dir`, `runner`) are not merely deprecated
+# — `tests_dir = "tests/"` (a string, where 3.x wants a list) makes `mutmut run`
+# abort with a TypeError before generating a single mutant, and `runner` is not
+# a recognised key at all in 3.x, so the marker exclusion below was being
+# silently dropped and every mutant would have re-run the integration and slow
+# lanes. Both confirmed against mutmut 3.7.0. Keep these 3.x spellings.
+#
 # Focus on the core detection modules where surviving mutants indicate
 # test gaps that could allow regressions:
-paths_to_mutate = [
+source_paths = [
     "abicheck/diff_symbols.py",      # function/variable/parameter detectors
     "abicheck/diff_types.py",        # type/enum/union/typedef detectors
     "abicheck/diff_platform.py",     # ELF/DWARF/PE/Mach-O detectors
@@ -287,9 +295,24 @@ paths_to_mutate = [
     "abicheck/idioms.py",            # ADR-027 idiom & anti-pattern recognisers
     "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
     "abicheck/surface_graph.py",     # ADR-027 declaration-graph substrate
+    # Added after the #753 -> #759 canonical-finding-id escape: identity,
+    # suppression and the snapshot storage boundary are all places where a
+    # test can execute a line without checking the value it produced, which
+    # is exactly what mutation testing measures.
+    "abicheck/finding_identity.py",  # canonical/normalized finding identity
+    "abicheck/name_classification.py",  # internal/public name classification
+    "abicheck/suppression.py",       # suppression rule matching
+    "abicheck/snapshot_io.py",       # ADR-059 storage envelope (gzip/zstd)
+    "abicheck/serialization.py",     # snapshot (de)serialization
 ]
-tests_dir = "tests/"
-runner = "python -m pytest -x -q --tb=no -m 'not integration and not libabigail and not abicc and not slow'"
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = [
+    "-x",
+    "-q",
+    "--tb=no",
+    "-m",
+    "not integration and not libabigail and not abicc and not slow",
+]
 
 # ---------------------------------------------------------------------------
 # pixi (https://pixi.sh) — conda-forge-based dev environments.

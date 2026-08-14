@@ -2,16 +2,53 @@ name: Mutation testing
 
 # Mutation testing is the direct measure of test *quality* (vs. coverage, which
 # measures only test *reach*): a surviving mutant is a line that runs but is not
-# verified by any assertion. A full mutmut pass over the detector core is slow,
-# so this runs on a schedule and on demand — not on every PR. Add the
-# ``mutation`` label to a PR to run it against that branch.
+# verified by any assertion.
+#
+# Three lanes, because one lane cannot serve both purposes:
+#
+#   pull_request (paths-filtered) -> `--diff-scoped`
+#     Gates only the functions the branch changed. Absolute: no baseline to be
+#     under. This is what makes mutation testing actionable on a PR, and it
+#     fires automatically on the mutated modules instead of waiting for someone
+#     to remember the `mutation` label.
+#
+#   schedule -> per-module baseline drift
+#     Full run, compared against the committed `mutation-baseline.json`. Per
+#     module, so a regression in one module cannot be paid for by an unrelated
+#     module's improvement.
+#
+#   workflow_dispatch (write_baseline: true) -> record the baseline
+#     Deliberately manual: refreshing the baseline accepts the current survivor
+#     set, which is a review decision, not something a cron should do silently.
 on:
   workflow_dispatch:
+    inputs:
+      write_baseline:
+        description: 'Rewrite mutation-baseline.json from this run'
+        type: boolean
+        default: false
   schedule:
     # Weekly, Monday 06:11 UTC (offset from other crons to avoid contention).
     - cron: "11 6 * * 1"
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, labeled]
+    # Keep in sync with [tool.mutmut] source_paths in pyproject.toml —
+    # tests/test_mutation_workflow_contract.py asserts the two agree.
+    paths:
+      - 'abicheck/diff_symbols.py'
+      - 'abicheck/diff_types.py'
+      - 'abicheck/diff_platform.py'
+      - 'abicheck/diff_vtable_layout.py'
+      - 'abicheck/diff_filtering.py'
+      - 'abicheck/checker_policy.py'
+      - 'abicheck/idioms.py'
+      - 'abicheck/pattern_verdicts.py'
+      - 'abicheck/surface_graph.py'
+      - 'abicheck/finding_identity.py'
+      - 'abicheck/name_classification.py'
+      - 'abicheck/suppression.py'
+      - 'abicheck/snapshot_io.py'
+      - 'abicheck/serialization.py'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -23,26 +60,56 @@ permissions:
 jobs:
   mutmut:
     name: mutmut (detector core)
-    # On PRs, only run when explicitly opted in via the `mutation` label.
-    if: >-
-      github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'mutation')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          # --diff-scoped diffs against the base branch, so the merge-base has
+          # to be present; a shallow clone would report every function changed.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.14'
+          python-version: '3.13'
           cache: 'pip'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" mutmut
-      - name: Run mutation testing and check survivor baseline
-        # Report-only until SURVIVOR_BASELINE is set in the script (the first
-        # scheduled run records the number); after that it gates on drift.
-        run: python scripts/check_mutation_score.py --run
+          # Pinned: mutmut's config keys changed incompatibly between 2.x and
+          # 3.x (`tests_dir` as a string aborts the run outright, `runner` is
+          # silently ignored). An unpinned install is how this lane could go
+          # from "gating" to "crashing before the first mutant" without any
+          # change to this repository.
+          pip install -e ".[dev]" 'mutmut>=3.7,<4'
+      - name: Restore mutmut cache
+        uses: actions/cache@v4
+        with:
+          # mutmut skips a mutant whose function hash is unchanged, so a warm
+          # `mutants/` directory makes the PR lane incremental rather than a
+          # full re-run of the whole detector core.
+          path: mutants
+          key: mutmut-${{ runner.os }}-py3.13-${{ github.sha }}
+          restore-keys: |
+            mutmut-${{ runner.os }}-py3.13-
+      - name: Run mutation testing (diff-scoped)
+        if: github.event_name == 'pull_request'
+        run: |
+          python scripts/check_mutation_score.py --run --diff-scoped \
+            --base-ref origin/${{ github.base_ref }} \
+            --json mutation-receipt.json
+      - name: Run mutation testing (baseline drift)
+        if: github.event_name == 'schedule'
+        run: python scripts/check_mutation_score.py --run --json mutation-receipt.json
+      - name: Run mutation testing (record baseline)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ inputs.write_baseline }}" = "true" ]; then
+            python scripts/check_mutation_score.py --run --write-baseline
+            echo '--- mutation-baseline.json ---'
+            cat mutation-baseline.json
+          else
+            python scripts/check_mutation_score.py --run --json mutation-receipt.json
+          fi
       - name: Save mutmut results
         if: always()
         run: mutmut results > mutmut-results.txt 2>&1 || true
@@ -51,4 +118,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: mutmut-results
-          path: mutmut-results.txt
+          path: |
+            mutmut-results.txt
+            mutation-receipt.json
+            mutation-baseline.json
+          if-no-files-found: ignore
