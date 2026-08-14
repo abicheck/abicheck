@@ -56,7 +56,8 @@ jobs:
       - name: Build the full plugin and run ICX scans
         shell: bash
         run: |
-          set -uo pipefail
+          set +e
+          set -o pipefail
           ROOT=$(pwd)
           OUT="$ROOT/icx-plugin-libcxx-results"
           mkdir -p "$OUT"
