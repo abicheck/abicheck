@@ -1263,7 +1263,13 @@ class TestClangPluginArtifactProducer:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         env = _parse_kv_file(github_env)
-        expected = str(tmp_path / "libabicheck-facts.so")
+        # run.sh resolves the relative path via _native_pwd (forward-slash/
+        # cygpath -m form on Windows Git Bash), not Python's str(Path) --
+        # same reasoning as _native_abspath's own docstring above (Codex
+        # review: this assertion originally compared against str(Path),
+        # which is backslash-separated on native Windows Python and never
+        # matches what run.sh actually exports there).
+        expected = _native_abspath(tmp_path / "libabicheck-facts.so")
         assert env["ABICHECK_PLUGIN_SO"] == expected
         assert f"-fplugin={expected}" in env["ABICHECK_PLUGIN_FLAGS"]
 
