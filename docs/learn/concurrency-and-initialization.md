@@ -32,10 +32,14 @@ review just because no tool flags them.
   reverse) has changed a contract with zero signature-level signal —
   and the reverse direction (removing internal locking a consumer was
   silently relying on) is a classic, hard-to-diagnose regression.
-- **Atomics and memory ordering.** A change from a relaxed to a stricter (or
-  stricter to relaxed) memory-ordering guarantee on a documented lock-free
-  operation changes what a consumer may safely assume about visibility
-  across threads, with no change to any type or signature.
+- **Atomics and memory ordering.** A documented lock-free operation's
+  memory-ordering guarantee *weakening* (e.g. sequentially-consistent to
+  acquire/release, or acquire/release to relaxed) breaks a consumer relying
+  on the stronger visibility the old guarantee promised, with no change to
+  any type or signature. *Strengthening* it (relaxed to acquire/release, or
+  acquire/release to sequentially-consistent) is compatible — code correct
+  under the weaker guarantee stays correct under the stronger one — though
+  it can still be worth documenting as a performance-relevant change.
 - **TLS (thread-local storage) semantics.** Whether a piece of state is
   per-thread or process-global is a contract question independent of
   whatever the C++ `thread_local` keyword or ELF TLS model
