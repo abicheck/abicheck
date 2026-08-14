@@ -37,9 +37,13 @@ support extracts struct/class/union layouts, enum types, calling conventions, an
 toolchain info from PDB files produced by MSVC (`/Zi` flag). Use `--pdb-path` to
 specify the PDB file location if automatic discovery fails. **Mach-O has no
 debug-info cross-check**: `abicheck` has no Mach-O debug-map/DWARF reader
-today, so a headerless macOS scan is always L0 (exports + load-command
-metadata) regardless of whether the dylib carries DWARF/dSYM debug info —
-`-H`/castxml is the only way to get past exports-only on this platform. See
+today, so a headerless macOS `.dylib`'s own binary/debug-info evidence is
+always L0 (exports + load-command metadata) only, even when the binary
+carries debug info — this is about the L0/L1 binary-evidence layers
+specifically, not the whole scan. `-H` (via either header-AST frontend,
+castxml or `--ast-frontend clang`) is the way to get past exports-only
+binary evidence on this platform; `--sources`/`--build-info` can still
+attach L3–L5 build/source evidence independently of the platform. See
 [Architecture](architecture.md) and the
 [platform evidence table](../reference/platforms.md#what-no-headers-actually-means)
 for the full picture.
