@@ -92,12 +92,16 @@ about the C/C++ declarations themselves moved.
 - **Never persist a raw enum's underlying integer as the format** without an
   explicit, documented, append-only mapping — treat the mapping itself as
   the durable contract, not the enum declaration.
-- **Give a wire-format struct its own explicit layout contract** —
-  `#pragma pack`, explicit-width integer types, no compiler-dependent
-  padding assumptions — independent of whatever layout the compiler would
-  otherwise choose for an ordinary in-memory type. Many projects define a
-  *separate* wire-format type from the in-memory ABI type specifically so
-  the two can evolve independently.
+- **Don't treat a raw, memcpy'd struct as a portable wire format at all** —
+  `#pragma pack` is compiler-specific, not a wire-format standard, and even
+  with it pinned, byte order and object representation still aren't
+  guaranteed to match across platforms, architectures, or languages. If a
+  raw-layout format is genuinely unavoidable (a tightly-controlled,
+  single-platform IPC channel, say), define it field-by-field with explicit
+  offsets, explicit endianness, and validation on read — never "whatever the
+  compiler currently does with this struct." Otherwise, prefer explicit
+  field-wise (de)serialization or a schema-driven format, below, over any
+  form of raw struct layout.
 - **Version the format explicitly**, and never reuse a version number for an
   incompatible layout.
 - **Use a schema-driven serialization format** (protocol buffers, FlatBuffers,

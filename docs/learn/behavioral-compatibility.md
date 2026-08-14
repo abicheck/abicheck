@@ -100,11 +100,15 @@ the *behavior* behind that shape changed on purpose or by accident.
 
 When evaluating whether a release preserves behavioral compatibility, ask:
 
-1. **Did the changelog claim a behavior change?** An intentional bug fix or
-   documented improvement is not a "break" in the SemVer sense as long as
-   it's communicated — see
+1. **Did the changelog claim a behavior change, and does that change keep the
+   documented contract?** Merely *communicating* an incompatible behavior
+   change does not make it SemVer-compatible — if the old behavior was part
+   of the promised public contract, an incompatible change to it still needs
+   a major bump, documented or not; only a fix that *restores* documented
+   behavior (or a change that was never part of the promised contract to
+   begin with) can go out as a patch or minor release. See
    [Product Contract §4](abi-series/00-product-contract.md#4-semantic-versioning-turning-the-promise-into-a-number)
-   for how a documented behavior change should map to a version bump.
+   for the full versioning rule.
 2. **Did the regression suite catch it?** If the old test suite passes
    unchanged against the new build, that is real (if incomplete) evidence —
    treat a test-suite regression failure with the same seriousness as a

@@ -64,10 +64,18 @@ That does not mean nothing can go wrong. What remains:
 
 `abicheck` itself is built around comparing dynamic-loading artifacts
 (`.so`/`.dll`/`.dylib`) directly; a static library's `.a`/`.lib` archive
-isn't a first-class input the way a shared object is. The practical way to
-validate a static library's compatibility with abicheck today is to check
-the **headers** with `dump`/`compare -H`, which covers the source and
-public-surface-scoping concerns fully, independent of the archive format.
+isn't a first-class input the way a shared object is, and `compare`
+positionally requires two such artifacts (or JSON snapshots) — there's no
+`-H`-alone invocation with no operand at all. The practical way to validate
+a static library's source/API compatibility with abicheck today is the same
+source-snapshot path as the header-only case below: `dump --sources <dir>
+-H include/ --depth source` against the library's own sources (its
+implementation `.cpp` files, in this case — a static library, unlike a
+header-only one, actually has them to replay), then `compare` the two
+resulting JSON snapshots. This covers source and public-surface-scoping
+concerns fully, independent of the archive format; validating the
+*compiled* archive's object-format/compiler-ABI compatibility from its
+`.a`/`.lib` file directly isn't something abicheck does today.
 
 ## Header-only libraries: the whole surface is the inline-body concern
 

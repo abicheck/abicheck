@@ -39,10 +39,12 @@ parameter with a default is safe for old source recompiled against new
 headers (backward-compatible addition) but is a hard compile error for new
 source built against *old* headers that don't declare it (forward
 direction, if that's a scenario your project supports at all). A newly
-*required* dependency your new binary picks up is fine for a consumer built
-against the new binary, but breaks an old, already-linked consumer that
-never resolved that dependency (backward direction failure, forward
-direction non-issue).
+*added* exported symbol is invisible to an old, already-linked consumer
+(the backward direction is unaffected — nothing calls a symbol that didn't
+exist when it was built) but breaks the forward direction the moment a
+*new* consumer, compiled against headers that declare it, gets linked
+against an *older* library build that never exported it — exactly the
+scenario a downgrade or a rollback creates.
 
 ## Why the default direction is the right default, and when it isn't enough
 
