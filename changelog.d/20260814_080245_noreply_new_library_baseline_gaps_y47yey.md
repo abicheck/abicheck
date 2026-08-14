@@ -24,4 +24,8 @@
   schema `2.35`: `verdict` gains `"NEW_TARGET"`,
   `check_evidence_coverage.state` gains `"new_target"`, and a new
   optional `baseline_new_target` boolean mirrors the existing
-  `baseline_bootstrap`.
+  `baseline_bootstrap`. `abicheck aggregate` now gives a `NEW_TARGET`
+  (and the pre-existing `NO_BASELINE` bootstrap) report its own
+  human-readable `reason` in the aggregate JSON/text output instead of
+  the generic "report carried no ABI verdict" every other verdictless
+  report gets.

@@ -118,8 +118,12 @@ inputs:
       state for a target this check has explicitly designed to tolerate
       the first appearance of (e.g. a new library's first release, checked
       against a baseline-set that predates it -- see resolve-baseline's own
-      input for the full rationale). Only meaningful for kind: target --
-      ignored for kind: bundle and when baseline-channel is 'none'. A
+      input for the full rationale). Only meaningful for kind: target: a
+      'true' value is a hard usage error (validate-inputs.sh, exit 64) when
+      kind is bundle -- a bundle comparison needs one coherent release
+      where every member already coexisted, so there is no well-defined
+      old side for a member that's new -- and is a no-op (never even
+      reaches resolve-baseline) when baseline-channel is 'none'. A
       run-plan check that sets this should also set baseline-required:
       'false', or a required-coverage gate would still block on the
       target's first appearance (see check_report.NEW_TARGET_VERDICT's own

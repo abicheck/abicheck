@@ -403,6 +403,72 @@ class TestNotComparable:
         assert "reason" in target
 
 
+class TestCheckTargetAdvisorySentinelReasons:
+    """``NO_BASELINE``/``NEW_TARGET`` (``actions/check-target``'s bootstrap/
+    allow-new-target advisory sentinels, neither a real ``Verdict`` member)
+    both fall through to an unavailable, unanalyzed ``TargetReport`` -- same
+    as any other verdictless report -- but each gets its own human-readable
+    ``reason`` instead of the generic "report carried no ABI verdict", so a
+    reader of the aggregate JSON/text can tell an intentionally-tolerated
+    new-library first release (or a legitimate bootstrap pass) apart from a
+    malformed/corrupt report (Codex review)."""
+
+    def test_new_target_reason_is_distinct_from_generic(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "NEW_TARGET")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert not r.targets[0].analyzed
+        assert r.targets[0].reason is not None
+        assert "new_target" in r.targets[0].reason
+        assert r.targets[0].reason != "report carried no ABI verdict"
+
+    def test_bootstrap_reason_is_distinct_from_generic(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "NO_BASELINE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert not r.targets[0].analyzed
+        assert r.targets[0].reason is not None
+        assert "bootstrap" in r.targets[0].reason
+        assert r.targets[0].reason != "report carried no ABI verdict"
+
+    def test_malformed_verdictless_report_keeps_generic_reason(self, tmp_path: Path):
+        # Control case: an ordinary verdictless/malformed report (no
+        # verdict key at all) must still get the pre-existing generic
+        # reason -- this fix must not change that fallback.
+        _write_report(tmp_path, LINUX, None)
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert r.targets[0].reason == "report carried no ABI verdict"
+
+    def test_new_target_reason_reaches_render_text(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "NEW_TARGET")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert "new_target" in r.render_text()
+
+    def test_new_target_reason_reaches_to_dict(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "NEW_TARGET")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        target = r.to_dict()["targets"][0]
+        assert "new_target" in target["reason"]
+
+
 class TestCoveragePolicy:
     def test_missing_required_warn_lets_gate_decide(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
