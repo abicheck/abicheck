@@ -119,8 +119,8 @@ abicheck project plan --toolchain-bindings bindings.yml \
   profile's own `runs_on` (native `windows-latest` for the MSVC lane above),
   provisions dependencies via that profile's own `dependency_source`, and
   forwards the profile's own `compile_ast_frontend`/`compile_gcc_path`/
-  `compile_gcc_options` as that cell's `--ast-frontend`/`--gcc-path`/
-  `--gcc-options`.
+  `compile_gcc_options` as that cell's `ast-frontend`/`gcc-path`/
+  `gcc-options` Action inputs.
 - Each cell uploads its own report; [`aggregate`](../../use/aggregate-reports.md)
   folds them back into one gate — and, since report ids are
   `target@profile#channel@depth`-shaped, reconciles the same finding across

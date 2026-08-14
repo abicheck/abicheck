@@ -682,9 +682,13 @@ def compile_context_options(func: F) -> F:
     # from --help/--help-all, since they're superseded, not removed), merged
     # in resolve_compile_context() with the new spelling winning when both are
     # given and a one-line stderr note when only the legacy one is used.
-    # --gcc-options (the whitespace-split string form) has no --compiler-*
-    # equivalent by design -- --compiler-option is the safer repeatable
-    # verbatim replacement for it; --gcc-options itself is untouched here.
+    # --gcc-options (the whitespace-split string form) is removed outright
+    # (CLI audit PR 5/5): --compiler-option is its safer repeatable verbatim
+    # replacement, and the Action's own run.sh migrated to it first (word-
+    # splitting its gcc-options input into --compiler-option tokens itself).
+    # `gcc_options`/`CompileContext.gcc_options` stay as an internal field
+    # (composed from build-context flags, castxml/clang command assembly,
+    # etc.) -- only the raw user-facing CLI flag is gone.
     func = click.option(
         "--compiler-option",
         "compiler_option_tokens",
@@ -703,13 +707,6 @@ def compile_context_options(func: F) -> F:
         help="Deprecated alias for --compiler-option (kept functional; "
         "superseded, not removed). Do not mix with --compiler-option in the "
         "same invocation (a usage error) -- pick one spelling.",
-    )(func)
-    func = click.option(
-        "--gcc-options",
-        "gcc_options",
-        default=None,
-        help="Extra compiler flags passed through to the header frontend (split on "
-        "whitespace). For a flag whose value contains spaces use --compiler-option.",
     )(func)
     func = click.option(
         "--compiler-prefix",
@@ -809,9 +806,11 @@ def merge_compile_config(
     The single resolver shared by ``compare`` / ``dump`` / ``scan`` (ADR-037 D3):
     precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4) — a per-field CLI value
     overrides config, an unset CLI field inherits it. The config's ``std`` +
-    ``defines`` synthesize literal ``-std=…``/``-D…`` argv entries only when the
-    user did not pass ``--gcc-options``; ``include_dirs`` (resolved against the
-    config's directory)
+    ``defines`` synthesize literal ``-std=…``/``-D…`` argv entries only when
+    ``cli_ctx.gcc_options`` is unset (the removed ``--gcc-options`` CLI flag
+    is gone, CLI audit PR 5/5, so this is now always the case from the CLI —
+    the field stays as an internal-composition-only escape hatch);
+    ``include_dirs`` (resolved against the config's directory)
     are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
     Returns the merged ``(CompileContext, includes)``.
 
@@ -1025,7 +1024,6 @@ def resolve_compile_context(
     *,
     gcc_path: str | None,
     gcc_prefix: str | None,
-    gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
@@ -1037,6 +1035,11 @@ def resolve_compile_context(
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
+    # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
+    # internal-only, defaulted-None parameter so callers that still compose
+    # an effective_gcc_options string from other sources (build-context
+    # flags, etc.) can pass it through unchanged.
+    gcc_options: str | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 

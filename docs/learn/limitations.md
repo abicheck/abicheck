@@ -75,7 +75,7 @@ don't exactly match what was compiled, results will be unreliable.
 **Mitigation:**
 - Always use the exact same headers that were used to build the `.so`
 - Pass the build's include roots, dialect, and defines to the header frontend:
-  `abicheck dump libfoo.so -H foo.h -I include/ --gcc-options "-std=c++20 -DFEATURE_X"`
+  `abicheck dump libfoo.so -H foo.h -I include/ --compiler-option -std=c++20 --compiler-option -DFEATURE_X`
   (the same flags work on `abicheck scan`; persist them in a `.abicheck.yml`
   `compile:` block so every run is reproducible — see
   [Compile context for header parsing](../use/scan-levels.md#compile-context-for-header-parsing-l2))

@@ -69,9 +69,9 @@ abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
 - `--include old=`/`--include new=` (`-I` for both) are the include roots.
 - Add `--ast-frontend clang` on a clang-only host (`castxml` is the default);
   abicheck auto-detects the host libstdc++.
-- Need a specific `-std`/`-D` to parse the headers? Pass `--gcc-options
-  "-std=c++20 -DFOO=1"` (`compare`, `dump`, and `scan` all share the same
-  compile-context flags), or commit them once in a
+- Need a specific `-std`/`-D` to parse the headers? Pass `--compiler-option
+  -std=c++20 --compiler-option -DFOO=1` (`compare`, `dump`, and `scan` all
+  share the same compile-context flags), or commit them once in a
   [`.abicheck.yml` `compile:` block](#4-configure-once-abicheckyml) — every
   command folds it in via `--config`.
 
@@ -112,8 +112,8 @@ Auto-discovery differs by command: `compare` finds the nearest `.abicheck.yml`
 from the working directory upward, while `dump`/`scan` pick it up automatically
 only from the `--sources` tree root — so give a header-only `dump`/`scan` (no
 `--sources`) an explicit `--config`, or its `compile:` settings are silently
-skipped. CLI flags (`--gcc-options`/`-I`/`--ast-frontend`) always override the
-config per run.
+skipped. CLI flags (`--compiler-option`/`-I`/`--ast-frontend`) always override
+the config per run.
 
 ```yaml
 # .abicheck.yml
@@ -130,7 +130,8 @@ compile:
 #    different checkout than the new-tree .abicheck.yml (dump also reads a
 #    compile: block via --config; point it at the old tree's config to reuse one).
 abicheck dump libfoo-2.3.0/lib/libfoo.so -H libfoo-2.3.0/include \
-  -I libfoo-2.3.0/include --gcc-options "-std=c++20 -DFOO_ENABLE_FEATURE=1" \
+  -I libfoo-2.3.0/include --compiler-option=-std=c++20 \
+  --compiler-option=-DFOO_ENABLE_FEATURE=1 \
   -o baselines/libfoo-2.3.0.abi.json
 
 # 2) Run from the NEW source checkout (where .abicheck.yml lives, so its relative
@@ -145,7 +146,7 @@ own** headers — the baseline is a snapshot dumped from the old headers, not th
 raw old `.so` (a raw `--against` library would be re-parsed with the *new* `-H`,
 fine only when the headers didn't change). Give the baseline `dump` the same
 include roots, dialect, and macros as the scan side so the comparison isn't noisy
-— passed inline as `-I`/`--gcc-options` here because the baseline is dumped from
+— passed inline as `-I`/`--compiler-option` here because the baseline is dumped from
 the old checkout (or point `dump --config` at the old tree's `.abicheck.yml` to
 reuse a `compile:` block).
 

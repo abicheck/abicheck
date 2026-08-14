@@ -1283,6 +1283,13 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             {"use/build-evidence-setup.md", "reference/environment.md", "AGENTS.md"}
         ),
     ),
+    (
+        "--gcc-options (CLI flag removed, CLI audit PR 5/5 -- the Action's"
+        " own `gcc-options` input, without the leading dashes, is unaffected"
+        " and still valid)",
+        ("--gcc-options",),
+        frozenset({"AGENTS.md", "use/github-action.md"}),
+    ),
 )
 
 

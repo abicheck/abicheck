@@ -476,7 +476,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
              snapshot_compression: str,
-             gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+             gcc_path: str | None, gcc_prefix: str | None,
              gcc_option_tokens: tuple[str, ...],
              compiler_path: str | None, compiler_prefix: str | None,
              compiler_option_tokens: tuple[str, ...],
@@ -499,6 +499,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              header_graph_deprecated: bool = False,
              header_graph_includes_deprecated: bool = False,
              frontend_context: str = "host",
+             # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
+             # defaulted-None parameter stays only so the internal composition
+             # below (_merge_gcc_options et al.) doesn't need to change --
+             # it's never populated from the CLI anymore, only ever None here.
+             gcc_options: str | None = None,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None,
              _resolved_include_labels: dict[Path, str] | None = None,

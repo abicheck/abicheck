@@ -488,7 +488,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--format",
         "--frontend-context",
         "--gcc-option",
-        "--gcc-options",
         "--gcc-path",
         "--gcc-prefix",
         "--header",

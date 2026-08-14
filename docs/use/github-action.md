@@ -153,7 +153,7 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump/scan modes, and compare mode with a single-pair operand — shared `compile_context_options`, ADR-037 D3): `auto`, `castxml`, `clang`, or `hybrid`. Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context. Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
 | `gcc-path` | — | Path to cross-compiler binary (dump/scan modes, and compare mode with a single-pair operand) |
 | `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump/scan modes, and compare mode with a single-pair operand) |
-| `gcc-options` | — | Extra flags for the header frontend (dump/scan modes, and compare mode with a single-pair operand) |
+| `gcc-options` | — | Extra flags for the header frontend (dump/scan modes, and compare mode with a single-pair operand) — maps to the CLI's `--compiler-option` (CLI audit PR 5/5); the raw `--gcc-options` CLI flag itself is removed |
 | `sysroot` | — | Alternative system root (dump/scan/deps-tree modes, and compare mode with a single-pair operand) |
 | `nostdinc` | `false` | Skip standard include paths (dump/scan modes, and compare mode with a single-pair operand) |
 
@@ -189,7 +189,7 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 | `build-info` | scan, dump | Out-of-tree L3 context: a build dir, a `compile_commands.json`, or a collected evidence pack. |
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
-| `allow-build-query` | scan, dump | **Deprecated, ignored.** Build queries now run automatically when `sources` is given; kept as a no-op for backward compatibility. |
+| `allow-build-query` | dump only | Dump-mode-only opt-in for `--dump-manifest`'s external-extractor build-system query action — a real gate there. Ignored for scan mode (CLI audit PR 5/5): scan's own `build.query` already auto-runs whenever `build-config` is given together with an explicitly pinned `depth`, no separate opt-in needed. |
 | `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
 | `against` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). Maps to `--against`. Omit it (and `abi-baseline`) on a step to run a single-build hygiene lint instead — `scan` already runs audit-only whenever no baseline is given. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |

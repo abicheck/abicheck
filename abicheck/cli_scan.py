@@ -817,11 +817,11 @@ def _run_artifact_set(
     header_backend: str,
     gcc_path: str | None,
     gcc_prefix: str | None,
-    gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     frontend_context: str,
+    gcc_options: str | None = None,  # removed as a CLI flag, PR 5/5; internal-only
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),

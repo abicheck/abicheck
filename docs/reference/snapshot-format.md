@@ -191,7 +191,7 @@ before persistence — see `abicheck/buildsource/redaction.py`).
 |-----|------|---------|---------|
 | `ast_resolved_standard` | string \| null | `null` | The C/C++ standard actually used for the header parse: an explicit `-std=`/`--std=`/`/std:` value verbatim, or `"gnu++20"` when the requires/concept heuristic forced it. `null` means the frontend's own unpinned default was used (never guessed at). |
 | `ast_cplusplus_macro` | string \| null | `null` | The standard-mandated `__cplusplus` literal for `ast_resolved_standard` (e.g. `"201703L"` for `"gnu++17"`), looked up from a static ISO-standard table. `null` when `ast_resolved_standard` is unset or not a recognized C++ edition. |
-| `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--gcc-option` tokens, then a shlex-split `--gcc-options`), redacted. |
+| `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--gcc-option`/`--compiler-option` tokens, then a shlex-split composed-flags string derived from `-p`/`--compile-db`), redacted. |
 | `ast_sysroot` | string \| null | `null` | The `--sysroot` passed to the header frontend, if any, redacted. |
 
 `ast_toolchain` (`dict[str, str]`, populated since schema v9) carries the

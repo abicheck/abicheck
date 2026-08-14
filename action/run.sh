@@ -618,7 +618,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_flag "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
@@ -708,7 +708,7 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
     add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
     add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-    add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+    add_flag "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
     add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
     if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
@@ -1006,7 +1006,7 @@ elif [[ "$MODE" == "scan" ]]; then
   # mode above).
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_flag "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   # Build-source evidence inputs (L3/L4/L5)
@@ -1031,7 +1031,7 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_flag "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then

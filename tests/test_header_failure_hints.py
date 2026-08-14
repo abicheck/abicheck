@@ -83,7 +83,7 @@ def test_required_config_macro() -> None:
     hint = diagnose_header_compile_failure(stderr)
     assert hint is not None
     assert "PCRE2_CODE_UNIT_WIDTH" in hint
-    assert "--gcc-options" in hint
+    assert "--compiler-option" in hint
 
 
 def test_undeclared_type_needs_umbrella_size_t() -> None:

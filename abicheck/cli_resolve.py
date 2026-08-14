@@ -659,7 +659,6 @@ def _resolve_compare_snapshots(
 _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
     "gcc_path": "--gcc-path",
     "gcc_prefix": "--gcc-prefix",
-    "gcc_options": "--gcc-options",
     "gcc_option_tokens": "--gcc-option",
     # --compiler/--compiler-prefix/--compiler-option (CLI audit PR 2/5): the
     # same guard as their legacy gcc_* counterparts above -- without this a

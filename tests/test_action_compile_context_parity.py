@@ -80,6 +80,21 @@ def _is_release_style_operand_source() -> str:
     return text[start:end]
 
 
+# add_flag() (unlike add_single_flag, stubbed inline in each harness below) is
+# extracted verbatim -- --compiler-option (CLI audit PR 5/5's --gcc-options
+# migration) now goes through its real whitespace/newline-splitting logic,
+# not a one-line stub, so a harness exercising it needs the real definition.
+_ADD_FLAG_START = "add_flag() {"
+_ADD_FLAG_END = "\n}\n"
+
+
+def _add_flag_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_ADD_FLAG_START)
+    end = text.index(_ADD_FLAG_END, start) + len(_ADD_FLAG_END)
+    return text[start:end]
+
+
 def _compile_context_region(
     mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
 ) -> str:
@@ -138,6 +153,7 @@ def _run_region(
     # harmless for dump/scan).
     harness = (
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
     )
@@ -167,6 +183,7 @@ def _run_region_raw(
     ``check=True`` would raise before the caller could inspect anything."""
     harness = (
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
     )
@@ -193,7 +210,7 @@ class TestCompileContextForwardingParity:
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--gcc-options" in cmd and "-DFOO=1" in cmd
+        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
 
@@ -213,7 +230,7 @@ class TestCompileContextForwardingParity:
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--gcc-options" in cmd and "-DFOO=1" in cmd
+        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
 
@@ -225,7 +242,7 @@ class TestCompileContextForwardingParity:
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--gcc-options" in cmd and "-DFOO=1" in cmd
+        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
 

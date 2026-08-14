@@ -1184,8 +1184,12 @@ def run_compare(
     bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
-    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+    gcc_path: str | None, gcc_prefix: str | None,
     gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
+    # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
+    # internal-only, defaulted-None parameter -- see cli.py's dump_cmd for
+    # why (never populated from the CLI anymore, only ever None here).
+    gcc_options: str | None = None,
     compiler_path: str | None = None, compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
     old_header_backend: str | None, new_header_backend: str | None,

@@ -215,7 +215,7 @@ class TestScanModeForwardsCrossCompilerFlags:
         )
         assert "--gcc-path /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
         assert "--gcc-prefix aarch64-linux-gnu-" in cmd
-        assert "--gcc-options -D__ARM_NEON" in cmd
+        assert "--compiler-option -D__ARM_NEON" in cmd
         assert "--sysroot /opt/sysroots/aarch64" in cmd
 
 
@@ -239,14 +239,14 @@ class TestCompareModeForwardsCrossCompilerFlags:
         )
         assert "--gcc-path /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
         assert "--gcc-prefix aarch64-linux-gnu-" in cmd
-        assert "--gcc-options -D__ARM_NEON" in cmd
+        assert "--compiler-option -D__ARM_NEON" in cmd
         assert "--sysroot /opt/sysroots/aarch64" in cmd
 
     def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
         cmd = _run_compare({}, tmp_path)
         assert "--gcc-path" not in cmd
         assert "--gcc-prefix" not in cmd
-        assert "--gcc-options" not in cmd
+        assert "--compiler-option" not in cmd
         assert "--sysroot" not in cmd
 
 

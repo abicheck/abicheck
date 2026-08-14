@@ -41,12 +41,15 @@ from abicheck.model import AbiSnapshot
 from abicheck.service_scan import CompileContext, ScanRequest
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
+#: --gcc-options is deliberately absent (CLI audit PR 5/5: removed as a CLI
+#: flag -- see cli_options.py's compile_context_options docstring); the
+#: internal CompileContext.gcc_options field survives, but no Click option
+#: registers that dest anymore, so it's not a *CLI-exposed* dest to check here.
 _COMPILE_CONTEXT_DESTS = frozenset(
     {
         "header_backend",
         "gcc_path",
         "gcc_prefix",
-        "gcc_options",
         "gcc_option_tokens",
         "sysroot",
         "nostdinc",
@@ -1047,7 +1050,7 @@ def test_compare_threads_compile_context_to_both_sides(
             "/opt/g++",
             "--gcc-prefix",
             "aarch64-linux-gnu-",
-            "--gcc-options",
+            "--compiler-option",
             "-DFOO=1",
             "--sysroot",
             str(sysroot),
@@ -1057,7 +1060,7 @@ def test_compare_threads_compile_context_to_both_sides(
     for c in calls:  # both old and new
         assert c["gcc_path"] == "/opt/g++"
         assert c["gcc_prefix"] == "aarch64-linux-gnu-"
-        assert c["gcc_options"] == "-DFOO=1"
+        assert c["gcc_option_tokens"] == ("-DFOO=1",)
         assert c["sysroot"] == sysroot
         assert c["nostdinc"] is True
 
@@ -1072,7 +1075,7 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
         monkeypatch,
         tmp_path,
         [
-            "--gcc-options",
+            "--compiler-option",
             "-DBAR=2",
             "--ast-frontend",
             "castxml",
@@ -1081,7 +1084,7 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
         ],
     )
     # gcc context on both sides...
-    assert all(c["gcc_options"] == "-DBAR=2" for c in calls)
+    assert all(c["gcc_option_tokens"] == ("-DBAR=2",) for c in calls)
     # ...while the per-side frontend override still wins.
     assert calls[0]["header_backend"] == "castxml"
     assert calls[1]["header_backend"] == "clang"
@@ -1141,10 +1144,10 @@ def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
     new_dir.mkdir()
     result = CliRunner().invoke(
         main,
-        ["compare", str(old_dir), str(new_dir), "--gcc-options", "-DX=1"],
+        ["compare", str(old_dir), str(new_dir), "--compiler-option", "-DX=1"],
     )
     assert result.exit_code != 0
-    assert "--gcc-options" in result.output
+    assert "--compiler-option" in result.output
     assert "directory/package" in result.output
 
 
@@ -1333,11 +1336,11 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
         cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
     )
     result = CliRunner().invoke(
-        main, ["dump", str(pe), "-H", str(header), "--gcc-options", "-DPE=1"]
+        main, ["dump", str(pe), "-H", str(header), "--compiler-option", "-DPE=1"]
     )
     assert result.exit_code == 0, result.output
     assert "will be ignored" not in result.output
-    assert getattr(captured["compile_context"], "gcc_options") == "-DPE=1"
+    assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DPE=1",)
 
 
 def test_fallback_flag_is_scoped_to_one_cli_invocation(
@@ -1407,7 +1410,6 @@ def _compile_context_probe():
             ctx,
             gcc_path=kwargs["gcc_path"],  # type: ignore[arg-type]
             gcc_prefix=kwargs["gcc_prefix"],  # type: ignore[arg-type]
-            gcc_options=kwargs["gcc_options"],  # type: ignore[arg-type]
             gcc_option_tokens=kwargs["gcc_option_tokens"],  # type: ignore[arg-type]
             sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
             nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]

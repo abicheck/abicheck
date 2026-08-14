@@ -31,7 +31,7 @@ g++ -shared -fPIC -g -std=c++17 v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g -std=c++17 v2.cpp -o libfoo_v2.so
 abicheck compare libfoo_v1.so libfoo_v2.so \
   --header old=v1.hpp --header new=v2.hpp \
-  --ast-frontend clang --gcc-options "-std=c++17"
+  --ast-frontend clang --compiler-option -std=c++17
 ```
 
 ## Expected abicheck finding
