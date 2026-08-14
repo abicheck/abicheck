@@ -293,8 +293,42 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
+            # Mirrors `compare`'s own panel (CLI audit PR 4/5): these flags are
+            # demoted-to-config (hidden=True) the same way compare's already
+            # were, so listing them here is what keeps them visible in
+            # `scan --help-all` at all (rich-click's OPTION_GROUPS panels
+            # render a listed option regardless of `hidden` -- see
+            # cli_help.py's module docstring / _make_help_callback).
+            "name": "Policy & severity",
+            "options": [
+                "--policy",
+                "--policy-file",
+                "--suppress",
+                "--strict-suppressions",
+                "--severity-preset",
+                "--severity-abi-breaking",
+                "--severity-potential-breaking",
+                "--severity-quality-issues",
+                "--severity-addition",
+            ],
+        },
+        {
+            "name": "Public-surface scoping",
+            "options": [
+                "--scope-public-headers",
+                "--public-symbol",
+                "--public-symbols-list",
+            ],
+        },
+        {
             "name": "Output",
-            "options": ["--format", "--output", "--dry-run", "--verbose"],
+            "options": [
+                "--format",
+                "--output",
+                "--dry-run",
+                "--verbose",
+                "--exit-code-scheme",
+            ],
         },
     ],
     # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
@@ -479,7 +513,25 @@ def _make_help_callback(
             for p in original_params
             if isinstance(p, click.Argument) or p.name in common_names
         ]
-        hidden_count = len(original_params) - len(common)
+        # The footer promises "--help-all shows every option" -- true only for
+        # a folded option that --help-all can actually render. A Click-``hidden``
+        # option renders there too *only* if some OPTION_GROUPS panel lists one
+        # of its flag strings (same bypass noted above); one that is hidden and
+        # unlisted (a deprecated no-op shim like --header-graph, or a superseded
+        # alias like --gcc-path) never appears even there (Codex review, PR #757).
+        # Counting those in "advanced option(s) hidden" would overstate what
+        # --help-all actually recovers, so they're excluded from the count here
+        # -- they were never part of this M2 disclosure axis to begin with.
+        panel_flags: set[str] = set()
+        for panel in OPTION_GROUPS.get(f"* {command_label}", []):
+            panel_flags.update(panel.get("options", ()))  # type: ignore[arg-type]
+        recoverable_via_help_all = [
+            p
+            for p in original_params
+            if p not in common
+            and (not getattr(p, "hidden", False) or set(p.opts) & panel_flags)
+        ]
+        hidden_count = len(recoverable_via_help_all)
         cmd.params = common
         try:
             help_text = ctx.get_help()

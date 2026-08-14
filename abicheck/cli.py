@@ -1593,7 +1593,10 @@ def _embed_inline_source_side(
                    "'severity' (per-category error levels), or 'auto' (severity "
                    "when a severity setting is in effect, else legacy). Declared "
                    "explicitly here so passing --severity-* no longer silently "
-                   "changes the scheme. Default: config's exit_code_scheme, else auto.")
+                   "changes the scheme. Default: config's exit_code_scheme, else auto. "
+                   "Deliberately NOT demoted to hidden (unlike --strict-suppressions/"
+                   "--public-symbol) -- ADR-040 D4 keeps it a visible coarse override; "
+                   "see test_config_rebalance.py's test_coarse_overrides_stay_visible.")
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")

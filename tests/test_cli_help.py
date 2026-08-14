@@ -187,10 +187,55 @@ class TestCompareHelpAllDisclosure:
         assert "advanced option(s) hidden" in result.output
         assert "compare --help-all" in result.output
 
+    def test_hidden_count_never_overcounts_permanently_invisible_options(self) -> None:
+        """The footer promises '--help-all shows every option' -- only true for
+        an option --help-all can actually render. A few options are Click-
+        ``hidden`` AND not listed in any OPTION_GROUPS panel (deprecated no-op
+        shims like --header-graph, superseded aliases like --gcc-path): those
+        never render even in --help-all, so counting them would overstate what
+        running it actually recovers (Codex review, PR #757). Verified by
+        computing the same 'recoverable' set independently of
+        cli_help._make_help_callback's own implementation, so this fails if the
+        production logic regresses to double-counting again."""
+        import re
+
+        for command, common_names in (
+            ("compare", cli_help.COMPARE_COMMON_OPTION_NAMES),
+            ("dump", cli_help.DUMP_COMMON_OPTION_NAMES),
+            ("scan", cli_help.SCAN_COMMON_OPTION_NAMES),
+        ):
+            cmd = main.commands[command]
+            panel_flags: set[str] = set()
+            for panel in cli_help.OPTION_GROUPS.get(f"* {command}", []):
+                panel_flags.update(panel["options"])  # type: ignore[arg-type]
+            common_params = [
+                p
+                for p in cmd.params
+                if isinstance(p, click.Argument) or p.name in common_names
+            ]
+            expected_recoverable = sum(
+                1
+                for p in cmd.params
+                if p not in common_params
+                and (not getattr(p, "hidden", False) or set(p.opts) & panel_flags)
+            )
+            output = CliRunner().invoke(main, [command, "--help"]).output
+            m = re.search(r"(\d+) advanced option\(s\) hidden", output)
+            assert m, f"{command}: footer missing entirely"
+            assert int(m.group(1)) == expected_recoverable, command
+
     def test_help_all_shows_everything_curated_hides(self) -> None:
+        # --gcc-path is deliberately NOT one of these examples: it is now a
+        # fully hidden, superseded alias for --compiler (CLI audit PR 2/5) and
+        # never renders as a real option row even in --help-all -- see
+        # test_cli_contract.py::test_gcc_flags_are_hidden_but_still_parse for
+        # that exact contract. A prior version of this test used --gcc-path
+        # here and passed for the wrong reason: plain substring matching
+        # against --compiler's own help text mentioning "the deprecated
+        # --gcc-path", not a real rendered row (Codex review, PR #757).
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--gcc-path",
+            "--sysroot",
             "--ast-frontend",
             "--jobs",
             "--severity-abi-breaking",
@@ -245,7 +290,13 @@ _HELP_ALL_COMMANDS: list[
     (
         "dump",
         cli_help.DUMP_COMMON_OPTION_NAMES,
-        ("--gcc-path", "--ast-frontend", "--follow-deps", "--debug-root", "--pdb-path"),
+        # --gcc-path is deliberately excluded here: it's now a fully hidden,
+        # superseded alias for --compiler (CLI audit PR 2/5) that never
+        # renders even in --help-all, unlike these five genuinely-advanced-
+        # but-still-rendered examples (see test_help_all_shows_everything_curated_hides's
+        # own comment on why a hidden alias would be a false-positive-prone
+        # example for this shared tuple's "shows in --help-all" reuse).
+        ("--sysroot", "--ast-frontend", "--follow-deps", "--debug-root", "--pdb-path"),
         (
             "--header",
             "--include",
@@ -259,8 +310,13 @@ _HELP_ALL_COMMANDS: list[
     (
         "scan",
         cli_help.SCAN_COMMON_OPTION_NAMES,
+        # --gcc-path excluded here for the same reason as dump's tuple above.
+        # --strict-suppressions/--public-symbol are hidden too (CLI audit
+        # PR 4/5) but genuinely render in --help-all via their new "Policy &
+        # severity"/"Public-surface scoping" panel membership (cli_help.py),
+        # so they stay valid examples here.
         (
-            "--gcc-path",
+            "--sysroot",
             "--ast-frontend",
             "--strict-suppressions",
             "--pattern-verdicts",

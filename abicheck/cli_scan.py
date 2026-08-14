@@ -1288,32 +1288,39 @@ def _discover_scan_project_config(
     help="With --against: exit-code scheme (mirrors `compare --exit-code-scheme`): "
     "'legacy' (0/2/4 verdict), 'severity' (per-category error levels), or 'auto' "
     "(severity when a severity setting is in effect, else legacy). Default: "
-    "config's exit_code_scheme, else auto.",
+    "config's exit_code_scheme, else auto. Not demoted to hidden, mirroring "
+    "`compare`'s own visible coarse override (ADR-040 D4).",
 )
 @click.option(
     "--strict-suppressions",
     is_flag=True,
     default=False,
+    hidden=True,
     help="With --against: fail with exit code 1 if any --suppress rule has "
-    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4).",
+    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4). "
+    "Demoted to config (suppression.strict, ADR-037 D4) like `compare`'s flag.",
 )
 @click.option(
     "--public-symbol",
     "public_symbols",
     multiple=True,
+    hidden=True,
     help="With --against: force a symbol (mangled or demangled name) into the "
     "public surface even when header provenance can't see it (mirrors "
     "`compare --public-symbol`). Repeatable. Only meaningful with "
-    "--scope-public-headers.",
+    "--scope-public-headers. Demoted to config (scope.public_symbols, "
+    "ADR-037 D4) like `compare`'s flag.",
 )
 @click.option(
     "--public-symbols-list",
     "public_symbols_list",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
+    hidden=True,
     help="With --against: file of symbols to force public (one per line; '#' "
     "comments and blank lines ignored), merged with --public-symbol (mirrors "
-    "`compare --public-symbols-list`).",
+    "`compare --public-symbols-list`). Demoted to config, mirroring "
+    "`compare`'s already-demoted flag (CLI audit PR 4/5).",
 )
 @click.option(
     "--pattern-verdicts/--no-pattern-verdicts",
