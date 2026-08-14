@@ -20,4 +20,8 @@
   [Baseline Management → A new library's first
   release](docs/use/baseline-management.md#a-new-librarys-first-release)
   and the [resolve-baseline](docs/reference/resolve-baseline.md)/
-  [check-target](docs/reference/check-target.md) references.
+  [check-target](docs/reference/check-target.md) references. Report
+  schema `2.35`: `verdict` gains `"NEW_TARGET"`,
+  `check_evidence_coverage.state` gains `"new_target"`, and a new
+  optional `baseline_new_target` boolean mirrors the existing
+  `baseline_bootstrap`.
