@@ -225,7 +225,18 @@ _llvm_major_from_predefined_macros() {
 _is_intel_llvm_compiler() {
   local compiler="$1" defines
   defines=$("$compiler" -dM -E -x c++ - < /dev/null 2>/dev/null) || true
-  if printf '%s' "$defines" | grep -q '#define __INTEL_LLVM_COMPILER'; then
+  # Match directly against the already-fully-captured $defines string with a
+  # bash pattern, not `printf ... | grep -q` -- `-q` exits as soon as it
+  # finds a match, and under this script's global `set -o pipefail` that can
+  # SIGPIPE the upstream `printf` on a large macro dump (icpx's own -dM -E
+  # output runs to hundreds/thousands of lines) before it finishes writing,
+  # making the pipeline's exit status reflect the killed writer rather than
+  # the real match and silently taking the "false" branch below -- exactly
+  # defeating the Intel-fork detection this function exists to provide.
+  # $defines is already in memory from the command substitution above, so no
+  # pipe (and no such race) is needed at all (Codex review, reproduced with
+  # a large fake macro dump).
+  if [[ "$defines" == *"#define __INTEL_LLVM_COMPILER"* ]]; then
     echo "true"
   else
     echo "false"

@@ -467,6 +467,40 @@ class TestIsIntelLlvmCompiler:
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "false"
 
+    def test_true_for_large_macro_dump_with_match_near_the_start(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): the previous implementation piped the
+        # captured macro dump through `printf ... | grep -q ...` under this
+        # script's global `set -o pipefail` -- `grep -q` exits as soon as it
+        # finds a match. If the match comes early, relative to a large
+        # remaining dump (icpx's own -dM -E output runs to hundreds/
+        # thousands of lines), grep can close the pipe's read end while
+        # `printf` (writing from a real subprocess, since it's piped) is
+        # still blocked writing the rest into a full pipe buffer -- SIGPIPE
+        # kills that printf, and under pipefail the pipeline's exit status
+        # reflects the killed writer, not the real match, silently taking
+        # the "false" branch below. Put the real match FIRST, then pad well
+        # past a typical 64KB pipe buffer, so grep can exit long before
+        # printf finishes writing.
+        script = tmp_path / "fake-compiler-large-dump"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            "  printf '#define __INTEL_LLVM_COMPILER 20260101\\n'\n"
+            "  i=0\n"
+            "  while [ $i -lt 20000 ]; do\n"
+            "    printf '#define ABICHECK_PADDING_DEFINE_%d 1\\n' \"$i\"\n"
+            "    i=$((i + 1))\n"
+            "  done\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        result = _run_predicate(f'_is_intel_llvm_compiler "{script}"')
+        assert result.stdout.strip() == "true"
+
     def test_false_when_compiler_not_found(self) -> None:
         result = _run_predicate('_is_intel_llvm_compiler "/no/such/compiler-xyz"')
         assert result.returncode == 0, result.stderr
