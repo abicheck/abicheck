@@ -1,0 +1,68 @@
+name: Ops ICX post-754 probe v2 2026-08-14
+
+on:
+  push:
+    branches: [ops/icx-post-754-probe-v2-2026-08-14]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install ICX, upstream LLVM 22 SDK, and test tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates wget gpg-agent cmake ninja-build build-essential \
+            file binutils jq
+
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp
+
+          key=/tmp/llvm-snapshot.gpg.key
+          wget -q -O "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
+          got=$(gpg --show-keys --with-colons --with-fingerprint "$key" \
+                | awk -F: '/^fpr:/ {print $10; exit}')
+          test "$got" = "6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+          sudo install -m 0644 "$key" /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          echo "deb http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang-22 llvm-22-dev libclang-22-dev libc++-22-dev libc++abi-22-dev
+
+          python -m pip install -e .
+
+      - name: Exercise post-fix ICX paths
+        shell: bash
+        run: bash tools/ops/icx_post754_probe.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: icx-post-754-v2-${{ github.sha }}
+          path: post754-results/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
