@@ -285,6 +285,8 @@ Dump ABI snapshot of a shared library to JSON.
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
+| `--help` | no | `False` | Show common options and exit. Use --help-all to see every option. |
+| `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
 | `--header`, `-H` | no | — | Public header file or directory (repeat for multiple). |
 | `--include`, `-I` | no | — | Extra include directory for castxml. |
 | `--public-header` | no | — | Header treated as public for provenance classification (repeat for multiple). Declarations are tagged public/private/system in the snapshot. Opt-in: omitting this leaves every origin UNKNOWN. |
@@ -426,6 +428,8 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
+| `--help` | no | `False` | Show common options and exit. Use --help-all to see every option. |
+| `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
 | `--bundle-system-providers` | no | `` | Comma-separated extra sonames to treat as system-provided (extends the built-in libc/libstdc++/libgcc/libtbb allow-list). Only meaningful with --artifact-set. |
 | `--artifact-set` | no | — | Audit a *set* of libraries with no old side, as one artifact (ADR-056): a directory (every discoverable shared library in it) or an explicit comma-separated path list. Mutually exclusive with the positional ARTIFACT and with --against (audit-only — no old-side comparison for a set). |
 | `--header`, `-H` | no | — | Public header file or directory (repeatable). Applies to the current ARTIFACT by default; scope to the --against side with an 'old=' prefix (e.g. --header old=old/include, --header new=new/include). |

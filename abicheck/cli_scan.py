@@ -85,6 +85,7 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_options import _cli_flag, _warn_force_public_ignored
+from .cli_help import scan_help_options
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -1112,6 +1113,7 @@ def _discover_scan_project_config(
 
 
 @main.command("scan")
+@scan_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument(
     "artifact", type=click.Path(exists=True, path_type=Path), required=False
 )

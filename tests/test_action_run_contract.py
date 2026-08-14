@@ -94,11 +94,11 @@ def _valid_flags(subcommand: str) -> set[str]:
         "PYTHONIOENCODING": "utf-8",
         "COLUMNS": "300",
     }
-    # `compare --help` only shows its curated common subset (G21.8 collapse
-    # M2); `--help-all` is the full surface and is what this test needs to
-    # validate action/run.sh's flags against. Other subcommands don't have
-    # the curated/full split, so they keep plain --help.
-    help_flag = "--help-all" if subcommand == "compare" else "--help"
+    # `compare`/`dump`/`scan --help` only show a curated common subset (G21.8
+    # collapse M2); `--help-all` is the full surface and is what this test
+    # needs to validate action/run.sh's flags against. Other subcommands
+    # don't have the curated/full split, so they keep plain --help.
+    help_flag = "--help-all" if subcommand in ("compare", "dump", "scan") else "--help"
     out = subprocess.run(
         [sys.executable, "-m", "abicheck", *parts, help_flag],
         capture_output=True, text=True, check=True,

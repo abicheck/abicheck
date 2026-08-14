@@ -50,7 +50,7 @@ from .cli_dump_helpers import (
     resolve_dump_compile_db,
     resolve_dump_debug_format,
 )
-from .cli_help import compare_help_options, configure_rich_help
+from .cli_help import compare_help_options, configure_rich_help, dump_help_options
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -374,6 +374,7 @@ def _resolve_and_check_dump_debug_format(
 
 
 @main.command("dump")
+@dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
               help="Public header file or directory (repeat for multiple).")

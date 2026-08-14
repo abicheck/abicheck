@@ -28,10 +28,13 @@ abicheck compare``, or the ``main`` prog click uses under test. Unlisted options
 fall through to a default panel, and an unmatched command renders ungrouped — so
 this can never break a command, only prettify it.
 
-``compare`` additionally gets a second, orthogonal disclosure axis (M2): plain
-``compare --help`` shows only a curated common subset (see
-:data:`COMPARE_COMMON_OPTION_NAMES`), folding the long tail behind
-``compare --help-all``. See :func:`compare_help_options`.
+``compare``, ``dump``, and ``scan`` additionally get a second, orthogonal
+disclosure axis (M2): plain ``--help`` on each shows only a curated common
+subset (:data:`COMPARE_COMMON_OPTION_NAMES` / :data:`DUMP_COMMON_OPTION_NAMES`
+/ :data:`SCAN_COMMON_OPTION_NAMES`), folding the long tail behind
+``--help-all``. See :func:`curated_help_options` (the shared factory) and its
+three per-command instances, ``compare_help_options``/``dump_help_options``/
+``scan_help_options``.
 """
 
 from __future__ import annotations
@@ -437,42 +440,57 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
 )
 
 
-def _compare_help_callback(
-    ctx: click.Context, _param: click.Parameter, value: bool
-) -> None:
-    if not value or ctx.resilient_parsing:
-        return
-    cmd = ctx.command
-    original_params = cmd.params
-    # Filter the *params list* itself rather than flipping each Option's
-    # ``hidden`` flag: rich-click's OPTION_GROUPS panels (M1) resolve their
-    # members by name against ``command.get_params(ctx)`` at render time and
-    # include them regardless of ``hidden`` — that flag only affects options
-    # that fall through to the default catch-all panel, which is nearly none
-    # of compare's options once M1 grouped them all. Removing the advanced
-    # options from ``params`` for the duration of this render means the named
-    # panels simply can't find them, so they resolve to zero rows and rich-click
-    # drops the (now-empty) panel entirely. Arguments always stay.
-    common = [
-        p
-        for p in original_params
-        if isinstance(p, click.Argument) or p.name in COMPARE_COMMON_OPTION_NAMES
-    ]
-    hidden_count = len(original_params) - len(common)
-    cmd.params = common
-    try:
-        help_text = ctx.get_help()
-    finally:
-        cmd.params = original_params
-    click.echo(help_text, color=ctx.color)
-    click.echo(
-        f"\n{hidden_count} advanced option(s) hidden. "
-        "Run 'abicheck compare --help-all' to see every option."
-    )
-    ctx.exit()
+def _make_help_callback(
+    command_label: str, common_names: frozenset[str]
+) -> Callable[[click.Context, click.Parameter, bool], None]:
+    """Build the curated ``--help`` callback for one command.
+
+    Factored out of the original ``compare``-only implementation so ``dump``
+    and ``scan`` (G21.8 follow-on) get the identical curated/full split
+    without a copy-pasted callback per command — the closure just captures
+    which command's name to print in the pointer message and which dest-name
+    set counts as "common" for it.
+    """
+
+    def _help_callback(
+        ctx: click.Context, _param: click.Parameter, value: bool
+    ) -> None:
+        if not value or ctx.resilient_parsing:
+            return
+        cmd = ctx.command
+        original_params = cmd.params
+        # Filter the *params list* itself rather than flipping each Option's
+        # ``hidden`` flag: rich-click's OPTION_GROUPS panels (M1) resolve their
+        # members by name against ``command.get_params(ctx)`` at render time and
+        # include them regardless of ``hidden`` — that flag only affects options
+        # that fall through to the default catch-all panel, which is nearly none
+        # of this command's options once M1 grouped them all. Removing the
+        # advanced options from ``params`` for the duration of this render means
+        # the named panels simply can't find them, so they resolve to zero rows
+        # and rich-click drops the (now-empty) panel entirely. Arguments always
+        # stay.
+        common = [
+            p
+            for p in original_params
+            if isinstance(p, click.Argument) or p.name in common_names
+        ]
+        hidden_count = len(original_params) - len(common)
+        cmd.params = common
+        try:
+            help_text = ctx.get_help()
+        finally:
+            cmd.params = original_params
+        click.echo(help_text, color=ctx.color)
+        click.echo(
+            f"\n{hidden_count} advanced option(s) hidden. "
+            f"Run 'abicheck {command_label} --help-all' to see every option."
+        )
+        ctx.exit()
+
+    return _help_callback
 
 
-def _compare_help_all_callback(
+def _help_all_callback(
     ctx: click.Context, _param: click.Parameter, value: bool
 ) -> None:
     if not value or ctx.resilient_parsing:
@@ -481,8 +499,16 @@ def _compare_help_all_callback(
     ctx.exit()
 
 
-def compare_help_options(func: F) -> F:
-    """Replace ``compare``'s automatic ``--help`` with the curated/full pair.
+def curated_help_options(
+    command_label: str, common_names: frozenset[str]
+) -> Callable[[F], F]:
+    """Replace a command's automatic ``--help`` with a curated/full pair.
+
+    ``command_label`` is the command name as typed on the command line (used
+    only in the "advanced option(s) hidden" pointer message); ``common_names``
+    is the set of dest names (``click.Option.name``, not flag strings) that
+    stay visible on plain ``--help`` — everything else folds behind
+    ``--help-all``.
 
     Declaring our own ``--help`` here (rather than adding a *second* option)
     is deliberate: Click only auto-adds its default help option when no
@@ -491,22 +517,99 @@ def compare_help_options(func: F) -> F:
     ``--help-all`` (full) escape hatch, with no risk of two competing
     ``--help`` options.
     """
-    func = click.option(
-        "--help-all",
-        is_flag=True,
-        default=False,
-        expose_value=False,
-        is_eager=True,
-        callback=_compare_help_all_callback,
-        help="Show every option, including advanced/less-common ones.",
-    )(func)
-    func = click.option(
-        "--help",
-        is_flag=True,
-        default=False,
-        expose_value=False,
-        is_eager=True,
-        callback=_compare_help_callback,
-        help="Show common options and exit. Use --help-all to see every option.",
-    )(func)
-    return func
+
+    def _decorator(func: F) -> F:
+        func = click.option(
+            "--help-all",
+            is_flag=True,
+            default=False,
+            expose_value=False,
+            is_eager=True,
+            callback=_help_all_callback,
+            help="Show every option, including advanced/less-common ones.",
+        )(func)
+        func = click.option(
+            "--help",
+            is_flag=True,
+            default=False,
+            expose_value=False,
+            is_eager=True,
+            callback=_make_help_callback(command_label, common_names),
+            help="Show common options and exit. Use --help-all to see every option.",
+        )(func)
+        return func
+
+    return _decorator
+
+
+# ``compare``'s own curated/full pair (the original G21.8 M2 instance).
+compare_help_options: Callable[[F], F] = curated_help_options(
+    "compare", COMPARE_COMMON_OPTION_NAMES
+)
+
+
+# ── `dump --help-all` / `scan --help-all` (same disclosure, applied to the
+# other two big commands, G21.8 follow-on) ────────────────────────────────
+#
+# Dest names, mirroring COMPARE_COMMON_OPTION_NAMES above.
+DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
+    {
+        # Inputs
+        "headers",
+        "includes",
+        "version",
+        # Build & source evidence (--depth build/source)
+        "depth",
+        "sources",
+        "build_info",
+        "dump_manifest_path",
+        # Project config
+        "build_config",
+        # Output
+        "output",
+        "snapshot_compression",
+        "dry_run",
+        "verbose",
+        # The help options themselves always stay visible
+        "help",
+        "help_all",
+    }
+)
+
+SCAN_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
+    {
+        # Inputs
+        "header_pairs",
+        "include_pairs",
+        "sources",
+        "build_info",
+        "build_config",
+        # Baseline & scope
+        "against",
+        "depth",
+        "since",
+        "changed_paths_opt",
+        "budget",
+        # Modes
+        "crosschecks",
+        # Policy & contract
+        "policy",
+        "suppress",
+        "contract_mode",
+        # Output
+        "fmt",
+        "output",
+        "dry_run",
+        "verbose",
+        # The help options themselves always stay visible
+        "help",
+        "help_all",
+    }
+)
+
+dump_help_options: Callable[[F], F] = curated_help_options(
+    "dump", DUMP_COMMON_OPTION_NAMES
+)
+scan_help_options: Callable[[F], F] = curated_help_options(
+    "scan", SCAN_COMMON_OPTION_NAMES
+)
