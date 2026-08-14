@@ -42,7 +42,8 @@
           "detectors",
           "confidence",
           "evidence_tier",
-          "evidence_tiers"
+          "evidence_tiers",
+          "analysis_assurance"
         ]
       }
     },

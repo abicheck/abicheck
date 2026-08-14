@@ -21,3 +21,26 @@
   `docs/reference/exit-codes.md`'s new "Analysis-assurance contribution"
   section.
 
+### Fixed
+
+- **`analysis_assurance` now reflects an out-of-band `--old/new-build-info`/
+  `--old/new-sources` pack, not just each snapshot's own embedded evidence**
+  (P1 review). `compare` resolves such a pack separately from the snapshot
+  and uses it for the run's real findings/coverage without ever attaching it
+  back onto the snapshot; `analysis_assurance` previously never saw that
+  pack, so a genuinely partial or failed out-of-band pack could still read
+  `status="complete"` and let `--require-complete-analysis` exit `0` despite
+  the real evidence being incomplete. `analysis_assurance` is now recomputed
+  once the real pack is resolved, closing the gap `--require-complete-analysis`
+  exists to guard against.
+- **`graph_completeness` now accounts for a narrowed-scope source-graph
+  pass, absent pass-coverage bookkeeping, and old/new graph asymmetry**
+  (P1 review), instead of only checking `degraded_passes` and defaulting to
+  `"complete"` for every other state. Two new values, `"narrowed"` and
+  `"unknown"`, join the existing `"complete"`/`"degraded"`/`"not_collected"`.
+- **`compare_report.schema.json`'s `analysis_assurance` key is now
+  `required`** (schema 2.37, unchanged) alongside the report's other
+  unconditional fields, matching how it is actually always emitted (P2
+  review) — a 2.37 report missing the key now fails schema validation
+  instead of silently passing.
+

@@ -310,6 +310,121 @@ class TestComputeAnalysisAssurance:
         assert aa.status == "partial"
 
 
+class TestGraphCompleteness:
+    """P1 review (finding 2): ``graph_completeness`` previously only ever
+    looked at ``degraded_passes`` and defaulted to ``"complete"`` for every
+    other state -- silently treating a narrowed-scope pass, absent pass
+    coverage, and old/new graph asymmetry as full coverage."""
+
+    def _pack_with_graph(self, tmp_path: Path, name: str, graph) -> object:
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        return BuildSourcePack(root=tmp_path / name, source_graph=graph)
+
+    def test_narrowed_pass_is_not_complete(self, tmp_path: Path) -> None:
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        graph = SourceGraphSummary(narrowed_passes={"call_graph": True})
+        old.build_source = self._pack_with_graph(tmp_path, "old_pack", graph)
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(narrowed_passes={"call_graph": True}),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "narrowed"
+        assert aa.status == "partial"
+        assert any("narrowed" in n for n in aa.notes)
+
+    def test_missing_pass_coverage_is_unknown_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """A graph with no extractor_passes/narrowed_passes recorded at all
+        (e.g. a hand-built or pre-slice-2 graph) must not default to
+        "complete" -- which parts of the project it covers is unknown."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path, "old_pack", SourceGraphSummary()
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path, "new_pack", SourceGraphSummary()
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "unknown"
+        assert aa.status == "partial"
+
+    def test_asymmetric_graph_presence_is_unknown_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """Only one side carries an L5 graph -- the comparison never
+        examined the other side's implementation at all."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        assert new.build_source is None
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "unknown"
+        assert aa.status == "partial"
+        assert any("only" in n or "unknown" in n for n in aa.notes)
+
+    def test_full_confirmed_passes_on_both_sides_is_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """The positive case: both sides ran a confirmed full-project pass,
+        clean -- graph_completeness must still read complete."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "complete"
+        assert aa.status == "complete"
+
+    def test_degraded_pass_still_reads_degraded_not_narrowed_or_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression guard: degraded_passes must keep taking priority over
+        the new narrowed/unknown states, not be masked by them."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(degraded_passes={"call_graph": True}),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "degraded"
+        assert aa.status == "partial"
+
+
 class TestAnalysisAssuranceExitFold:
     """The ``max``-based orthogonal fold, at the function level -- mirrors
     ``TestTheCoverageExitIsApplied`` in test_contract_coverage_exit.py."""
@@ -424,3 +539,120 @@ class TestAnalysisAssuranceCliIntegration:
         )
         assert res.exit_code != 0
         assert "--require-complete-analysis" in res.output
+
+
+class TestAnalysisAssuranceOutOfBandPack:
+    """P1 review (finding 1): ``--build-info``/``--sources`` point ``compare``
+    at an out-of-band pack directory that ``_resolve_side_pack`` uses for the
+    run's real findings and coverage *without* ever attaching it back onto
+    ``old``/``new``. Before the fix, ``analysis_assurance`` was computed from
+    the bare snapshots alone (which carry no embedded ``build_source`` here),
+    so a genuinely partial/failed out-of-band pack was invisible to it --
+    ``status`` could read ``"complete"`` and ``--require-complete-analysis``
+    would exit 0 despite the real evidence being incomplete. Regression
+    coverage mirrors ``TestFoldEvidenceDepthOutOfBandPack`` in
+    ``tests/test_cov95_cli.py``, the existing test for the identical class of
+    gap on the ``old_evidence_depth``/``new_evidence_depth`` JSON fields.
+    """
+
+    def _write_partial_pack(self, tmp_path: Path, name: str) -> Path:
+        """A real, on-disk out-of-band pack whose L4 source-ABI surface is
+        genuinely partial: 10 compile units selected, only 3 parsed."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        pack_dir = tmp_path / name
+        pack = BuildSourcePack(
+            root=pack_dir,
+            source_abi=SourceAbiSurface(
+                coverage={
+                    "compile_units_selected": 10,
+                    "compile_units_parsed": 3,
+                },
+            ),
+        )
+        pack.write()
+        return pack_dir
+
+    def test_out_of_band_pack_partial_evidence_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        # Neither snapshot carries an embedded build_source -- the only
+        # evidence of incompleteness is the out-of-band pack directory.
+        assert old.build_source is None
+        assert new.build_source is None
+        old_p, new_p = _write(tmp_path, old, new)
+        pack_dir = self._write_partial_pack(tmp_path, "old_pack")
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--build-info",
+                "old=" + str(pack_dir),
+                "--format",
+                "json",
+            ],
+        )
+        assert res.exit_code in (0, 1, 2, 4), res.output
+        payload = json.loads(res.output[res.output.index("{") :])
+        aa = payload["analysis_assurance"]
+        # Finding 1's actual claim: the *out-of-band* pack's incompleteness
+        # (7 of 10 compile units never parsed) must be visible here, even
+        # though it was never attached to old.build_source/new.build_source.
+        assert aa["status"] != "complete", aa
+        assert aa["translation_units"]["failed"] == 7, aa
+        assert aa["translation_units"]["selected"] == 10, aa
+
+    def test_require_complete_analysis_exits_nonzero_for_out_of_band_partial_pack(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old_p, new_p = _write(tmp_path, old, new)
+        pack_dir = self._write_partial_pack(tmp_path, "old_pack")
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--build-info",
+                "old=" + str(pack_dir),
+                "--require-complete-analysis",
+            ],
+        )
+        # This is the whole point of --require-complete-analysis: a partial
+        # out-of-band pack must not be able to exit 0.
+        assert res.exit_code != 0, res.output
+
+    def test_out_of_band_pack_beats_absent_embedded_snapshot_directly(self) -> None:
+        """Direct unit-level check of the recomputation itself (bypassing the
+        CLI): compute_analysis_assurance must reflect the pack passed via
+        old_pack/new_pack, not whatever old.build_source/new.build_source
+        happen to carry (nothing, here)."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        assert old.build_source is None
+        assert new.build_source is None
+        result = checker.compare(old, new)
+        # Sanity: with no pack at all, the bare rollup reads complete.
+        assert result.analysis_assurance.status == "complete"
+
+        pack = BuildSourcePack(
+            root=Path("/tmp/nonexistent-out-of-band-pack"),
+            source_abi=SourceAbiSurface(
+                coverage={
+                    "compile_units_selected": 10,
+                    "compile_units_parsed": 3,
+                },
+            ),
+        )
+        aa = compute_analysis_assurance(result, old, new, old_pack=pack)
+        assert aa.status != "complete"
+        assert aa.translation_units.failed == 7

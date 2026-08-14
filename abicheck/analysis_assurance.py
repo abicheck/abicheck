@@ -77,11 +77,14 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .checker_policy import ChangeKind, EvidenceTier
 from .checker_types import DiffResult
 from .model import AbiSnapshot
+
+if TYPE_CHECKING:
+    from .buildsource.pack import BuildSourcePack
 
 __all__ = [
     "ANALYSIS_ASSURANCE_SCHEMA_VERSION",
@@ -233,9 +236,18 @@ class AnalysisAssurance:
     #: either side's L4 surface), ``"unknown"`` (asymmetric -- only one side
     #: carries an L4 surface), or ``"not_applicable"`` (neither side does).
     fact_set_comparability: str = "not_applicable"
-    #: ``"complete"``, ``"degraded"`` (``SourceGraphSummary.degraded_passes``
-    #: has a ``True`` entry on either side), or ``"not_collected"`` (no L5
-    #: graph on either side).
+    #: ``"complete"`` (both sides carry an L5 graph, every observed pass ran
+    #: full-project and clean); ``"degraded"`` (``SourceGraphSummary.
+    #: degraded_passes`` has a ``True`` entry on either side -- per-TU
+    #: diagnostics on some subset); ``"narrowed"`` (a pass ran but only over
+    #: ``narrowed_passes``/``narrowed_scope`` -- a real, distinct state from
+    #: ``degraded_passes``: the pass completed cleanly but never examined the
+    #: whole project, so it cannot vouch for full graph coverage);
+    #: ``"unknown"`` (either only one side carries an L5 graph at all --
+    #: asymmetric coverage -- or a side's graph records no
+    #: ``extractor_passes``/``narrowed_passes`` at all, so which parts of the
+    #: project the graph actually covers cannot be determined); or
+    #: ``"not_collected"`` (neither side carries an L5 graph).
     graph_completeness: str = "not_collected"
     #: Human-readable notes explaining any non-``complete`` status, folded
     #: from the same underlying signals rather than duplicating their wording.
@@ -258,13 +270,17 @@ class AnalysisAssurance:
         }
 
 
-def _effective_depth_label(snap: AbiSnapshot) -> str:
+def _effective_depth_label(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
     """One side's own effective depth -- mirrors
     ``cli_dump_helpers.evidence_depth_label`` without importing it (see the
     module docstring for why: that module reaches back into ``cli.py``,
     which imports ``checker.py``).
+
+    *pack* is the caller-resolved ``BuildSourcePack`` for this side (see
+    :func:`compute_analysis_assurance`'s own docstring for why this must not
+    default to ``snap.build_source`` internally) -- ``None`` when this side
+    carries no pack at all, out-of-band or embedded.
     """
-    pack = getattr(snap, "build_source", None)
     if pack is not None:
         sa = getattr(pack, "source_abi", None)
         sg = getattr(pack, "source_graph", None)
@@ -287,11 +303,11 @@ def _weaker_depth(a: str, b: str) -> str:
 
 
 def _fact_set_comparability(
-    old: AbiSnapshot, new: AbiSnapshot
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
 ) -> tuple[str, list[str]]:
     notes: list[str] = []
-    old_sa = getattr(getattr(old, "build_source", None), "source_abi", None)
-    new_sa = getattr(getattr(new, "build_source", None), "source_abi", None)
+    old_sa = getattr(old_pack, "source_abi", None)
+    new_sa = getattr(new_pack, "source_abi", None)
     if old_sa is None and new_sa is None:
         return "not_applicable", notes
     if old_sa is None or new_sa is None:
@@ -337,11 +353,13 @@ def _header_context_status(
     return "clean", []
 
 
-def _translation_units(old: AbiSnapshot, new: AbiSnapshot) -> TranslationUnitAccounting:
+def _translation_units(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> TranslationUnitAccounting:
     selected_total: int | None = None
     parsed_total: int | None = None
-    for snap in (old, new):
-        sa = getattr(getattr(snap, "build_source", None), "source_abi", None)
+    for pack in (old_pack, new_pack):
+        sa = getattr(pack, "source_abi", None)
         if sa is None:
             continue
         cov = sa.coverage or {}
@@ -359,15 +377,17 @@ def _translation_units(old: AbiSnapshot, new: AbiSnapshot) -> TranslationUnitAcc
     )
 
 
-def _export_accounting(old: AbiSnapshot, new: AbiSnapshot) -> ExportAccounting:
+def _export_accounting(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> ExportAccounting:
     # The *new* side is the accounting subject -- mirrors every other
     # "current state of the library" summary in this codebase
     # (old_symbol_count is the one deliberate exception, kept for its own
     # historical reason). Falls back to the old side only when new carries
     # no L4 surface at all but old does (a comparison against a
     # source-linked baseline where the new side wasn't re-linked).
-    for snap in (new, old):
-        sa = getattr(getattr(snap, "build_source", None), "source_abi", None)
+    for pack in (new_pack, old_pack):
+        sa = getattr(pack, "source_abi", None)
         if sa is None:
             continue
         total = len(sa.roots.get("exported_symbols", []))
@@ -383,29 +403,81 @@ def _export_accounting(old: AbiSnapshot, new: AbiSnapshot) -> ExportAccounting:
     return ExportAccounting()
 
 
-def _graph_completeness(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str]]:
+def _graph_completeness(
+    old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
+) -> tuple[str, list[str]]:
+    """Graph-completeness rollup over both sides' L5 ``SourceGraphSummary``.
+
+    Finding (review, P1): the previous implementation only ever looked at
+    ``degraded_passes`` and defaulted to ``"complete"`` for every other
+    state, silently treating three genuinely-incomplete states as complete:
+
+    - a pass that ran only over ``narrowed_passes``/``narrowed_scope`` -- a
+      real, distinct field from ``degraded_passes``: the pass completed
+      cleanly, but only over a subset of the project, so it does not
+      establish full-project coverage;
+    - a graph carrying no ``extractor_passes``/``narrowed_passes`` at all
+      (a hand-built graph, or one from before that bookkeeping existed) --
+      unknown pass coverage, not "everything ran";
+    - old/new graph asymmetry -- one side carries an L5 graph and the other
+      does not, so whatever the present side's graph says, the comparison
+      itself never examined the missing side's implementation at all.
+    """
     notes: list[str] = []
-    graphs = [
-        sg
-        for sg in (
-            getattr(getattr(old, "build_source", None), "source_graph", None),
-            getattr(getattr(new, "build_source", None), "source_graph", None),
-        )
-        if sg is not None
-    ]
-    if not graphs:
+    old_graph = getattr(old_pack, "source_graph", None)
+    new_graph = getattr(new_pack, "source_graph", None)
+    if old_graph is None and new_graph is None:
         return "not_collected", notes
+    if old_graph is None or new_graph is None:
+        missing = "old" if old_graph is None else "new"
+        notes.append(
+            f"graph completeness unknown: the {missing} side carries no L5 "
+            "source graph -- the comparison never examined that side's "
+            "implementation at all"
+        )
+        return "unknown", notes
+
     degraded = False
-    for sg in graphs:
+    narrowed = False
+    unknown_pass_coverage = False
+    for side, sg in (("old", old_graph), ("new", new_graph)):
         for pass_name, is_degraded in (sg.degraded_passes or {}).items():
             if is_degraded:
                 degraded = True
-                notes.append(f"source-graph pass {pass_name!r} ran degraded")
-    return ("degraded" if degraded else "complete"), notes
+                notes.append(
+                    f"source-graph pass {pass_name!r} ran degraded on the {side} side"
+                )
+        for pass_name, is_narrowed in (sg.narrowed_passes or {}).items():
+            if is_narrowed:
+                narrowed = True
+                notes.append(
+                    f"source-graph pass {pass_name!r} ran narrowed-scope on "
+                    f"the {side} side -- it did not examine the whole project"
+                )
+        if not sg.extractor_passes and not sg.narrowed_passes:
+            unknown_pass_coverage = True
+            notes.append(
+                f"the {side} side's source graph records no "
+                "extractor_passes/narrowed_passes -- which parts of the "
+                "project it actually examined is unknown"
+            )
+
+    if degraded:
+        return "degraded", notes
+    if narrowed:
+        return "narrowed", notes
+    if unknown_pass_coverage:
+        return "unknown", notes
+    return "complete", notes
 
 
 def compute_analysis_assurance(
-    result: DiffResult, old: AbiSnapshot, new: AbiSnapshot
+    result: DiffResult,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    old_pack: BuildSourcePack | None = None,
+    new_pack: BuildSourcePack | None = None,
 ) -> AnalysisAssurance:
     """Roll up existing pipeline signals into an :class:`AnalysisAssurance`.
 
@@ -415,6 +487,24 @@ def compute_analysis_assurance(
     *result* with data that only becomes available after ``compare()``
     returns (``layer_coverage`` in the native ``compare`` CLI path -- see
     ``cli_compare_helpers._report_compare_result``).
+
+    *old_pack*/*new_pack* are the ``BuildSourcePack`` that actually backed
+    this comparison's build/source findings -- **not** implicitly re-read
+    from ``old.build_source``/``new.build_source`` internally (finding, P1
+    review). ``checker.compare()`` only ever knows about each snapshot's own
+    *embedded* payload, so it passes exactly that
+    (``old.build_source``/``new.build_source``) explicitly. But an
+    out-of-band ``--old/new-build-info``/``--old/new-sources`` pack
+    directory the ``compare`` CLI resolves via ``_resolve_side_pack`` is
+    used for the run's real findings and coverage *without* ever being
+    attached back onto ``old``/``new`` -- so a caller that resolved such a
+    pack must pass it here explicitly (see
+    ``cli_compare_helpers._report_compare_result``'s recomputation) or this
+    function silently falls back to reading whatever the bare snapshots
+    happen to carry, which can read ``status="complete"`` even when the
+    pack actually used was partial or failed. Defaults to ``None`` (no
+    pack) rather than to ``old.build_source``/``new.build_source`` so this
+    function never has to guess which of the two a caller meant.
     """
     notes: list[str] = []
 
@@ -433,7 +523,7 @@ def compute_analysis_assurance(
     # -- depth --------------------------------------------------------------
     requested_depth = result.requested_depth
     effective_depth = result.effective_depth or _weaker_depth(
-        _effective_depth_label(old), _effective_depth_label(new)
+        _effective_depth_label(old, old_pack), _effective_depth_label(new, new_pack)
     )
     depth_satisfied: bool | None = None
     if requested_depth is not None:
@@ -447,7 +537,7 @@ def compute_analysis_assurance(
             )
 
     # -- fact-set comparability ---------------------------------------------
-    fact_set_comparability, fs_notes = _fact_set_comparability(old, new)
+    fact_set_comparability, fs_notes = _fact_set_comparability(old_pack, new_pack)
     notes.extend(fs_notes)
 
     # -- header-context status ------------------------------------------------
@@ -455,11 +545,11 @@ def compute_analysis_assurance(
     notes.extend(hc_notes)
 
     # -- TU / export accounting ----------------------------------------------
-    tu_accounting = _translation_units(old, new)
-    export_accounting = _export_accounting(old, new)
+    tu_accounting = _translation_units(old_pack, new_pack)
+    export_accounting = _export_accounting(old_pack, new_pack)
 
     # -- graph completeness ---------------------------------------------------
-    graph_completeness, graph_notes = _graph_completeness(old, new)
+    graph_completeness, graph_notes = _graph_completeness(old_pack, new_pack)
     notes.extend(graph_notes)
 
     if not result.scope_resolved:
@@ -477,8 +567,8 @@ def compute_analysis_assurance(
     # -- overall status -------------------------------------------------------
     nothing_requested = (
         requested_depth is None
-        and getattr(old, "build_source", None) is None
-        and getattr(new, "build_source", None) is None
+        and old_pack is None
+        and new_pack is None
         and result.contract_context is None
         and result.evidence_tier == EvidenceTier.ELF_ONLY
     )
@@ -488,7 +578,7 @@ def compute_analysis_assurance(
         status = "failed"
     elif (
         header_context_status == "drift_detected"
-        or graph_completeness == "degraded"
+        or graph_completeness in ("degraded", "narrowed", "unknown")
         or (tu_accounting.failed or 0) > 0
         or not result.scope_resolved
         or result.contract_coverage == "partial"

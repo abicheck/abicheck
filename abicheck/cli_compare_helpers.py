@@ -1082,6 +1082,30 @@ def _report_compare_result(
     # excludes them — none come from L0-L2 diffing.
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
 
+    # P0.4 (P1 review): recompute analysis_assurance now that the *real*
+    # evidence pack behind this comparison's findings is known.
+    # checker.compare() (inside compare_snapshots above) only ever saw each
+    # snapshot's own *embedded* BuildSourcePack -- an out-of-band
+    # --old/new-build-info / --old/new-sources pack directory is resolved
+    # separately via _resolve_side_pack and used to produce this run's real
+    # findings/coverage (prepare_embedded_build_source, before
+    # compare_snapshots was even called) without ever being attached back
+    # onto old/new. Without this, analysis_assurance would silently reflect
+    # whatever (possibly absent, possibly stale) payload the bare snapshots
+    # carry instead of the pack that actually backed this run -- defeating
+    # --require-complete-analysis's whole purpose. Re-resolving here is
+    # cheap (pure pack-directory metadata load, no diffing) and mirrors the
+    # identical, already-reviewed fix _fold_evidence_depth_into_json applies
+    # for the same class of gap on old_evidence_depth/new_evidence_depth.
+    from .analysis_assurance import compute_analysis_assurance
+    from .cli_buildsource_helpers import _resolve_side_pack
+
+    result.analysis_assurance = compute_analysis_assurance(
+        result, old, new,
+        old_pack=_resolve_side_pack(old_build_info, old_sources, old),
+        new_pack=_resolve_side_pack(new_build_info, new_sources, new),
+    )
+
     if explain_patterns:
         echo_pattern_modulations(result)
 
