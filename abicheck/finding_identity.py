@@ -1066,6 +1066,17 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
         "typedef_base_changed",
         "template_param_type_changed",
         "template_return_type_changed",
+        # diff_symbols._check_params_change: old/new are
+        # _format_params()'s comma-joined `Param.type` spellings, one
+        # function-wide finding (no per-parameter `detail`, so nothing is
+        # lost by canonicalizing the whole joined string). Only the
+        # pointer/reference-sigil normalization pass actually helps here
+        # (canonicalize_type_name's struct-prefix/const-reorder steps are
+        # anchored to the start of the string, so they only ever apply to
+        # the first parameter in the list) -- still enough to close the
+        # CastXML/Clang spacing mismatch at every position (Codex review,
+        # fresh evidence).
+        "func_params_changed",
     }
 )
 
@@ -1164,7 +1175,26 @@ def _change_discriminator(
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
-        return f"category:{category}"
+        if not canonicalize_values:
+            return f"category:{category}"
+        # canonicalize_values (report_canonical_finding_id): a bare
+        # category discriminates the rich-vs-L0 *kind* pair away, which is
+        # exactly what the reconciliation use of this identity wants -- but
+        # a persistent suppression identity must still tell apart two
+        # structurally different transitions on the same symbol/category
+        # (e.g. TYPE_SIZE_CHANGED 8->16 vs. a later, unrelated 16->32 on
+        # the same type), or accepting a `finding_id:` rule for the first
+        # would silently suppress the second too (Codex review, fresh
+        # evidence). Folding in old_value/new_value is safe here: every
+        # kind pair this map collapses reports the *same* underlying
+        # event's old/new from both detectors (a size/alignment byte
+        # count, a removed symbol's own name, an enum value) -- none of
+        # them are type-spelling text needing canonicalize_type_name, but
+        # it's applied anyway (harmless on non-type text, see
+        # _stringify_change_value's docstring) rather than special-casing.
+        old_str = canonicalize_type_name(_stringify_change_value(change.old_value))
+        new_str = canonicalize_type_name(_stringify_change_value(change.new_value))
+        return f"category:{category}\x1f{old_str}\x1f{new_str}"
     # header_binary_context_mismatch: change.affected_symbols carries this
     # finding's complete mismatched-record set as structured data (unlike
     # description's order-dependent five-name sample) -- sorting it makes

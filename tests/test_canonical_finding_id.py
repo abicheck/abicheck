@@ -236,6 +236,72 @@ class TestCanonicalFindingIdScopedCanonicalization:
             other_field
         )
 
+    def test_func_params_changed_matches_across_differing_pointer_spacing(self):
+        # Regression (Codex review, PR #753, fourth round): func_params_changed
+        # was missing from the allowlist despite old/new being
+        # _format_params()'s comma-joined type spellings.
+        a = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3fooPKc",
+            name="foo",
+            old="char const*",
+            new="int const*",
+        )
+        b = make_change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="_Z3fooPKc",
+            name="foo",
+            old="char const *",
+            new="int const *",
+        )
+        assert report_canonical_finding_id(a) == report_canonical_finding_id(b)
+
+    def test_equivalent_category_kinds_still_distinguish_old_new(self):
+        # Regression (Codex review, PR #753, fourth round): a bare
+        # "category:type_size_change" discriminator (used to collapse
+        # rich-vs-L0 sibling kinds for reconciliation) dropped old/new
+        # entirely, so a `finding_id:` suppression rule accepted for one
+        # TYPE_SIZE_CHANGED transition also silently suppressed a later,
+        # structurally different one on the same symbol.
+        first = make_change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Widget",
+            name="Widget",
+            old="8",
+            new="16",
+        )
+        second = make_change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Widget",
+            name="Widget",
+            old="16",
+            new="32",
+        )
+        assert report_canonical_finding_id(first) != report_canonical_finding_id(second)
+
+    def test_equivalent_category_kinds_still_collapse_rich_and_l0_siblings(self):
+        # The reconciliation use of _EQUIVALENT_CHANGE_CATEGORIES this fix
+        # must not break: the same removal reported as FUNC_REMOVED (rich)
+        # vs. FUNC_REMOVED_ELF_ONLY (L0) with the same old/new still
+        # collapses to one canonical id.
+        rich = make_change(
+            ChangeKind.FUNC_REMOVED,
+            symbol="_Z3fooi",
+            name="foo",
+            old="_Z3fooi",
+            new=None,
+            description="Function foo removed",
+        )
+        l0 = make_change(
+            ChangeKind.FUNC_REMOVED_ELF_ONLY,
+            symbol="_Z3fooi",
+            name="foo",
+            old="_Z3fooi",
+            new=None,
+            description="Function foo removed (ELF)",
+        )
+        assert report_canonical_finding_id(rich) == report_canonical_finding_id(l0)
+
 
 class TestReporterEmitsCanonicalFindingId:
     def test_change_to_dict_includes_canonical_finding_id(self):
