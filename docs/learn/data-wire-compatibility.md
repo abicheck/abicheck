@@ -43,12 +43,16 @@ perfectly fine for the first purpose can be a real break for the second:
 
 - **Enum values.** [Part 3 — Type Layout](abi-series/03-type-layout.md)
   covers `enum` as an ABI/layout concern (underlying type size, whether a
-  value fits). But if an enum's *numeric values* are persisted — written to
-  a file, sent over a socket, stored in a database column — then reassigning
-  which name maps to which number is a silent data-compatibility break even
-  when the ABI is completely unaffected (same underlying type, same size,
-  same declared names). A reader compiled against the old header sees a
-  different meaning for the same stored integer.
+  value fits) — reassigning which name maps to which number is itself an
+  ABI-relevant change abicheck detects as `enum_member_value_changed`
+  (`BREAKING`: a compiled consumer embeds the numeric constant directly, so
+  an old binary keeps calling the old number by the new name's meaning). If
+  an enum's numeric values are *also* persisted — written to a file, sent
+  over a socket, stored in a database column — the same reassignment is a
+  data-compatibility break too, for a reader that was never recompiled at
+  all: a file or message written under the old mapping is misread by any
+  consumer, old binary or freshly-rebuilt source, that only knows the new
+  one.
 - **Struct layout used as a wire format.** A struct passed by value across
   an API boundary is an ABI concern; the *same struct* memcpy'd into a file
   or a network buffer is now also a wire-format concern, and every ABI
