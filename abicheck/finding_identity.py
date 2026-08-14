@@ -1057,21 +1057,33 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
 # the pre-fix backend-spelling-mismatch gap on canonical_finding_id, and
 # adding it needs the same per-kind verification, not a blanket sweep.
 #
-# Known gap, accepted rather than chased further (Codex review, PR #753,
-# fifth round: ATOMIC_QUALIFIER_CHANGED is one more concrete instance,
-# `diff_atomic.py`'s old_value/new_value are the raw `iter_type_slot_changes`
-# type-slot spellings). A *derived* classification (e.g. every kind whose
-# emitter calls `iter_type_slot_changes`/passes a `RecordType`/`Param.type`-
-# sourced value as `old=`/`new=`) was considered instead of one more
-# reactive addition -- rejected for this pass: it needs the same per-kind
-# call-site verification this file's own docstring above already commits
-# to (a value's *source* doesn't by itself prove no `{detail}`-carried
-# per-item identity is also at stake, the exact trap the earlier
-# description-dropping attempt fell into), just automated instead of
-# explicit, which trades a visible, auditable list for an implicit one
-# that's harder to review. Matches this codebase's own "known gaps over
-# risky reactive patches" convention (AGENTS.md) rather than a sixth
-# same-session revision of this exact function.
+# Previously a known gap for ATOMIC_QUALIFIER_CHANGED, CHAR8T_MIGRATION, and
+# BIT_INT_WIDTH_CHANGED (Codex review, PR #753, fifth round): all three
+# detectors (`diff_atomic.py`, `diff_char8t.py`, `diff_bit_int.py`) pass
+# `iter_type_slot_changes`'s raw type-slot spellings straight through as
+# `old=`/`new=`, with no `{detail}`-carried per-item identity at stake --
+# `detail` there is a fixed direction string ("qualifier added"/"char-family
+# → char8_t"/"_BitInt width changed N1 → N2"), never a per-item identity like
+# a field/parameter name, so canonicalizing old/new can't collide two
+# distinct findings the way it would for e.g. TYPE_FIELD_TYPE_CHANGED.
+# Verified individually against each kind's emission call site, same bar
+# this set's own docstring above already commits to -- not the rejected
+# *derived* classification (every kind whose emitter calls
+# `iter_type_slot_changes`), added here as three more explicit, individually
+# checked entries instead.
+#
+# A *derived* classification (e.g. every kind whose emitter calls
+# `iter_type_slot_changes`/passes a `RecordType`/`Param.type`-sourced value
+# as `old=`/`new=`) was considered instead of one more reactive addition --
+# rejected: it needs the same per-kind call-site verification this file's
+# own docstring above already commits to (a value's *source* doesn't by
+# itself prove no `{detail}`-carried per-item identity is also at stake, the
+# exact trap the earlier description-dropping attempt fell into), just
+# automated instead of explicit, which trades a visible, auditable list for
+# an implicit one that's harder to review. Matches this codebase's own
+# "known gaps over risky reactive patches" convention (AGENTS.md) rather
+# than a same-session revision of this exact function with no per-kind
+# verification.
 _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
     {
         "func_return_changed",
@@ -1082,6 +1094,14 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
         "typedef_base_changed",
         "template_param_type_changed",
         "template_return_type_changed",
+        # diff_atomic.py/diff_char8t.py/diff_bit_int.py: old_value/new_value
+        # are iter_type_slot_changes()'s raw type-slot spellings, and
+        # `detail` (folded into `description` via change_registry's
+        # `{detail}` placeholder) is always a fixed direction string, never
+        # a per-item identity -- see this set's own comment above.
+        "atomic_qualifier_changed",
+        "char8t_migration",
+        "bit_int_width_changed",
         # diff_symbols._check_params_change: old/new are
         # _format_params()'s comma-joined `Param.type` spellings, one
         # function-wide finding (no per-parameter `detail`, so nothing is
@@ -1109,14 +1129,22 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
 #: struct-prefix-strip/const-reorder passes are anchored to string start,
 #: so they never reach text embedded mid-sentence, and the embedded
 #: spelling stays raw even after old_str/new_str themselves are correctly
-#: canonicalized. The other six allowlisted kinds' templates never embed
-#: {old}/{new} at all (`"Return type changed: {name}"` and siblings), so
-#: this set is deliberately narrower than _TYPE_BEARING_DISCRIMINATOR_KINDS.
+#: canonicalized. ``atomic_qualifier_changed``/``char8t_migration``/
+#: ``bit_int_width_changed`` have the identical shape --
+#: ``"_Atomic {detail} on {name}: {old} → {new}. ..."`` and siblings
+#: (``change_registry.py``) all embed ``{old} → {new}`` after a leading
+#: ``{detail}`` clause, never at sentence start. The remaining allowlisted
+#: kinds' templates never embed {old}/{new} at all (`"Return type changed:
+#: {name}"` and siblings), so this set is still narrower than
+#: _TYPE_BEARING_DISCRIMINATOR_KINDS.
 _DESCRIPTION_EMBEDS_VALUES_KINDS = frozenset(
     {
         "struct_field_type_changed",
         "template_param_type_changed",
         "template_return_type_changed",
+        "atomic_qualifier_changed",
+        "char8t_migration",
+        "bit_int_width_changed",
     }
 )
 

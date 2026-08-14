@@ -364,6 +364,147 @@ class TestCanonicalFindingIdScopedCanonicalization:
         )
         assert report_canonical_finding_id(a) != report_canonical_finding_id(c)
 
+    @pytest.mark.parametrize(
+        ("kind", "detail", "old_castxml", "new_castxml", "old_clang", "new_clang"),
+        [
+            # diff_atomic.py: `detail` is a fixed direction string
+            # ("qualifier added"/"qualifier removed"), never a per-item
+            # identity -- old/new are the raw iter_type_slot_changes()
+            # type-slot spellings.
+            (
+                ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+                "qualifier added",
+                "struct Foo*",
+                "_Atomic(struct Foo*)",
+                "struct Foo *",
+                "_Atomic(struct Foo *)",
+            ),
+            # diff_char8t.py: `detail` is "char-family → char8_t" or the
+            # reverse, again fixed rather than per-item.
+            (
+                ChangeKind.CHAR8T_MIGRATION,
+                "char-family → char8_t",
+                "char const*",
+                "char8_t const*",
+                "char const *",
+                "char8_t const *",
+            ),
+            # diff_bit_int.py: `detail` embeds the width transition itself
+            # (e.g. "_BitInt width changed 17 → 33"), not a field/parameter
+            # name, so it stays identical across backends for the identical
+            # transition.
+            (
+                ChangeKind.BIT_INT_WIDTH_CHANGED,
+                "_BitInt width changed 17 → 17",
+                "_BitInt(17)*",
+                "_BitInt(17) *",
+                "_BitInt(17) *",
+                "_BitInt(17)*",
+            ),
+        ],
+    )
+    def test_type_slot_kinds_are_backend_stable(
+        self, kind, detail, old_castxml, new_castxml, old_clang, new_clang
+    ):
+        # Regression (canonical-id-backend-gap): ATOMIC_QUALIFIER_CHANGED,
+        # CHAR8T_MIGRATION, and BIT_INT_WIDTH_CHANGED were all missing from
+        # _TYPE_BEARING_DISCRIMINATOR_KINDS/_DESCRIPTION_EMBEDS_VALUES_KINDS
+        # despite passing iter_type_slot_changes()'s raw type-slot spellings
+        # straight through as old_value/new_value, and description_template
+        # embedding "{old} → {new}" mid-sentence after a leading {detail}
+        # clause (same shape as struct_field_type_changed) -- so a CastXML
+        # report's canonical_finding_id never matched Clang's equivalent
+        # finding for these three kinds.
+        def slot_change(field: str, old: str, new: str) -> Change:
+            return make_change(
+                kind,
+                symbol="_Z3fooPKc",
+                name="parameter 0 of '_Z3fooPKc'",
+                detail=field,
+                old=old,
+                new=new,
+            )
+
+        castxml = slot_change(detail, old_castxml, new_castxml)
+        clang = slot_change(detail, old_clang, new_clang)
+        assert report_canonical_finding_id(castxml) == report_canonical_finding_id(
+            clang
+        )
+
+        # A suppression rule minted from one backend's report matches the
+        # equivalent finding reported by the other.
+        rule = Suppression(
+            finding_id=report_canonical_finding_id(castxml), reason="accepted"
+        )
+        assert rule.matches(clang)
+
+    def test_type_slot_kinds_still_distinguish_semantically_different_transitions(
+        self,
+    ):
+        # A genuinely different transition on the same symbol/kind must not
+        # collapse to the same canonical id -- verified across all three
+        # kinds' own distinguishing axis (direction for atomic/char8_t,
+        # width for _BitInt).
+        atomic_added = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="qualifier added",
+            old="struct Foo*",
+            new="_Atomic(struct Foo*)",
+        )
+        atomic_removed = make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="qualifier removed",
+            old="_Atomic(struct Foo*)",
+            new="struct Foo*",
+        )
+        assert report_canonical_finding_id(atomic_added) != report_canonical_finding_id(
+            atomic_removed
+        )
+
+        char8_to_char = make_change(
+            ChangeKind.CHAR8T_MIGRATION,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="char8_t → char-family",
+            old="char8_t const*",
+            new="char const*",
+        )
+        char_to_char8 = make_change(
+            ChangeKind.CHAR8T_MIGRATION,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="char-family → char8_t",
+            old="char const*",
+            new="char8_t const*",
+        )
+        assert report_canonical_finding_id(
+            char8_to_char
+        ) != report_canonical_finding_id(char_to_char8)
+
+        width_17_to_33 = make_change(
+            ChangeKind.BIT_INT_WIDTH_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="_BitInt width changed 17 → 33",
+            old="_BitInt(17)*",
+            new="_BitInt(33)*",
+        )
+        width_17_to_65 = make_change(
+            ChangeKind.BIT_INT_WIDTH_CHANGED,
+            symbol="_Z3fooPKc",
+            name="parameter 0 of '_Z3fooPKc'",
+            detail="_BitInt width changed 17 → 65",
+            old="_BitInt(17)*",
+            new="_BitInt(65)*",
+        )
+        assert report_canonical_finding_id(
+            width_17_to_33
+        ) != report_canonical_finding_id(width_17_to_65)
+
     def test_equivalent_category_kinds_still_distinguish_old_new(self):
         # Regression (Codex review, PR #753, fourth round): a bare
         # "category:type_size_change" discriminator (used to collapse
@@ -589,7 +730,7 @@ class TestFindingIdSuppressionSelector:
         # selector -- it can never match any actual finding.
         yaml_path = tmp_path / "suppress.yaml"
         yaml_path.write_text(
-            "version: 1\nsuppressions:\n  - finding_id: \"\"\n    reason: r\n"
+            'version: 1\nsuppressions:\n  - finding_id: ""\n    reason: r\n'
         )
         with pytest.raises(ValueError, match="finding_id"):
             SuppressionList.load(yaml_path)
