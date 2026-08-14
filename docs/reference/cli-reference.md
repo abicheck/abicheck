@@ -53,7 +53,7 @@ Compare two ABI surfaces and report changes.
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--help` | no | `False` | Show common options and exit. Use --help-all to see every option. |
+| `--help` | no | `False` | Show common options and exit. Use --help-all to see the remaining advanced options. |
 | `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
 | `--jobs`, `-j` | no | `0` | Parallel library comparisons for directory/package inputs (0 = auto-detect CPU count, the default). |
 | `--dso-only` | no | `False` | Only compare shared objects, skip executables (directory/package inputs only). |
@@ -284,7 +284,7 @@ Dump ABI snapshot of a shared library to JSON.
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--help` | no | `False` | Show common options and exit. Use --help-all to see every option. |
+| `--help` | no | `False` | Show common options and exit. Use --help-all to see the remaining advanced options. |
 | `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
 | `--header`, `-H` | no | — | Public header file or directory (repeat for multiple). |
 | `--include`, `-I` | no | — | Extra include directory for castxml. |
@@ -426,7 +426,7 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--help` | no | `False` | Show common options and exit. Use --help-all to see every option. |
+| `--help` | no | `False` | Show common options and exit. Use --help-all to see the remaining advanced options. |
 | `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
 | `--bundle-system-providers` | no | `` | Comma-separated extra sonames to treat as system-provided (extends the built-in libc/libstdc++/libgcc/libtbb allow-list). Only meaningful with --artifact-set. |
 | `--artifact-set` | no | — | Audit a *set* of libraries with no old side, as one artifact (ADR-056): a directory (every discoverable shared library in it) or an explicit comma-separated path list. Mutually exclusive with the positional ARTIFACT and with --against (audit-only — no old-side comparison for a set). |
