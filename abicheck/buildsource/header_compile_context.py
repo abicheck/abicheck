@@ -356,9 +356,11 @@ class _ExplicitPin:
 #: instead of raising ``HeaderCompileContextAmbiguousError``. See
 #: :func:`_is_structured_field_flag`'s ``standard_captured`` parameter.
 #: The bare, separate-operand switch spellings (whose own following argv
-#: token is the operand, captured structurally instead — see
-#: ``_DANGLING_OPERAND_FLAGS`` below for the identical set used the same way
-#: in ``_context_flags``). Matched by *exact* token equality, not by prefix:
+#: token is the operand, captured structurally instead — this same set is
+#: reused verbatim by ``_context_flags``, via :func:`_is_structured_field_flag`,
+#: to exclude the identical raw survivors from the final *rendered* command,
+#: not only from this ambiguity-signature comparison). Matched by *exact*
+#: token equality, not by prefix:
 #: a real ``clang -cc1``/driver invocation has several distinct flags that
 #: merely start with the same characters and are NOT represented by any
 #: structured field here — ``-target-abi``, ``-target-cpu``,
@@ -538,24 +540,6 @@ def _mask_pinned_abi_flags(
     ]
 
 
-#: Bare switch spellings whose operand is a *separate*, following argv token
-#: (``-target aarch64-linux-gnu``, ``--sysroot /sdk``, ``-isysroot /sdk``).
-#: ``extract_abi_relevant_flags`` (``buildsource/adapters/base.py``) captures
-#: only the switch itself for these — its match is a plain prefix check with
-#: no lookahead, unlike ``_extract_flags`` (``build_context.py``), which
-#: consumes the operand token too and stores the resolved value in
-#: ``CompileUnit.target_triple``/``.sysroot``. Forwarding one of these bare
-#: tokens verbatim from ``cu.abi_relevant_flags`` therefore never recovers a
-#: lost value (the operand was never captured there in the first place) — it
-#: only emits a dangling switch that a real compiler either rejects outright
-#: or, worse, silently pairs with whatever token happens to follow it in the
-#: constructed command. This function already renders the equivalent,
-#: complete ``--target=``/``--sysroot=`` combined form from the structured
-#: ``cu.target_triple``/``cu.sysroot`` fields a few lines above, so dropping
-#: the bare duplicate here loses nothing (finding 1).
-_DANGLING_OPERAND_FLAGS = frozenset({"-target", "--sysroot", "-isysroot"})
-
-
 def _context_flags(cu: CompileUnit) -> list[str]:
     """Render one ``CompileUnit``'s context as literal castxml/clang argv tokens.
 
@@ -568,6 +552,33 @@ def _context_flags(cu: CompileUnit) -> list[str]:
     top-level ``build_context`` module's larger response-file/redaction
     machinery, which a ``CompileUnit`` (already fully resolved + redacted by
     its adapter) has no use for.
+
+    The trailing ``cu.abi_relevant_flags`` pass-through excludes any flag
+    :func:`_is_structured_field_flag` already recognizes as fully represented
+    by the ``-std=``/``--target=``/``--sysroot=`` tokens this function just
+    rendered a few lines above from the structured ``cu.standard``/
+    ``cu.target_triple``/``cu.sysroot`` fields — the *same* predicate
+    :func:`_mask_pinned_abi_flags` already uses to keep the ambiguity-
+    signature *comparison* from seeing these as independent dimensions
+    (``_EffectiveContextSignature.of``). Sharing one predicate between "does
+    this raw flag disagree with another unit's" and "should this raw flag be
+    rendered at all" matters beyond staying DRY: a real compiler applies
+    last-flag-wins semantics to a repeated ``-target``/``--sysroot``/``-std``
+    family switch, so appending the *raw*, unmodified survivor after the
+    already-correct structured rendering doesn't just duplicate it, it
+    silently overrides it. Concretely, a ``CompileDbAdapter``-sourced unit
+    resolving its structured ``sysroot`` to an absolute path while a
+    differently-spelled raw survivor (``-isysroot sdk``, still relative to
+    the compile unit's own ``directory``, never abicheck's) remained in
+    ``cu.abi_relevant_flags`` used to render
+    ``--sysroot=<abs>`` ... ``-isysroot sdk`` in that order — the trailing,
+    uncorrected relative flag then won on last-flag-wins semantics, so the
+    header was parsed against a sysroot relative to abicheck's own current
+    directory rather than the compile unit's. Excluding every structured-
+    field-covered raw flag from the rendered tail closes that: only a flag
+    genuinely independent of every structured field this function already
+    renders (``-fPIC``, ``-fno-omit-frame-pointer``, ``-target-abi``, ...)
+    survives into the final command.
     """
     flags: list[str] = []
     if cu.standard:
@@ -596,7 +607,11 @@ def _context_flags(cu: CompileUnit) -> list[str]:
         flags.extend(
             ["-isystem", _resolve_cu_relative_path(inc, cu.directory).as_posix()]
         )
-    flags.extend(f for f in cu.abi_relevant_flags if f not in _DANGLING_OPERAND_FLAGS)
+    flags.extend(
+        f
+        for f in cu.abi_relevant_flags
+        if not _is_structured_field_flag(f, standard_captured=bool(cu.standard))
+    )
     return flags
 
 

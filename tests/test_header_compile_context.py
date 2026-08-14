@@ -254,6 +254,59 @@ def test_resolve_strips_dangling_sysroot_operand_flags(tmp_path: Path) -> None:
     assert "-isysroot" not in tokens
 
 
+def test_context_flags_excludes_relative_sysroot_duplicate_after_structured_field(
+    tmp_path: Path,
+) -> None:
+    """Reviewer finding: a raw combined-form sysroot survivor in
+    ``abi_relevant_flags`` (e.g. ``--sysroot=sdk``, still relative to the
+    compile unit's own ``directory``) must not be appended after the
+    already-rendered, absolute structured ``--sysroot=<abs>`` token --
+    last-flag-wins compiler semantics would otherwise let the later,
+    uncorrected relative flag silently override the correct one, so the
+    header gets parsed against a sysroot relative to abicheck's own current
+    directory instead of the compile unit's.
+
+    Reproduces the exact ``CompileDbAdapter`` shape from the finding: the
+    structured field resolves to an absolute path while a *differently
+    spelled*, still-relative raw duplicate
+    (``('--sysroot=/.../sdk', '--sysroot=sdk')``) survives independently in
+    ``abi_relevant_flags``, since the adapter's raw-flag extraction and its
+    structured-field derivation are two independent passes over the same
+    argv.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    sdk_dir = tmp_path / "sdk"
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        sysroot=str(sdk_dir),
+        # The raw, uncorrected combined-form survivor a real adapter can
+        # independently capture alongside the resolved, absolute structured
+        # `sysroot` field -- relative to `cu.directory`, not abicheck's cwd.
+        abi_relevant_flags=["--sysroot=sdk", "-fPIC"],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    expected = f"--sysroot={sdk_dir.as_posix()}"
+    # Only the correct, absolute structured rendering appears -- the raw
+    # relative duplicate is excluded entirely, not merely deduplicated
+    # against a differently-spelled copy of itself.
+    assert tokens.count(expected) == 1
+    assert "--sysroot=sdk" not in tokens
+    assert "-fPIC" in tokens
+    # And, precisely: the absolute sysroot flag is not immediately
+    # shadowed by anything else naming --sysroot/-isysroot afterward.
+    sysroot_idx = tokens.index(expected)
+    assert not any(
+        t.startswith(("--sysroot", "-isysroot")) for t in tokens[sysroot_idx + 1 :]
+    )
+
+
 def test_resolve_matches_by_bare_filename_include(tmp_path: Path) -> None:
     # The header path passed in need not lexically match the #include spelling
     # (e.g. a vendored copy elsewhere on disk) -- filename-suffix matching,
