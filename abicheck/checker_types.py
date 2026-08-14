@@ -65,11 +65,15 @@ EVIDENCE_DEPTH_VALUES = frozenset({"binary", "headers", "build", "source"})
 def validate_evidence_depth(field_name: str, value: str) -> None:
     """Reject a depth spelling outside EVIDENCE_DEPTH_VALUES (G30 P0.3).
 
-    Nothing populates ``requested_depth``/``effective_depth`` yet, but a
-    future caller (G30 P1.3) setting a typo'd value would otherwise only be
-    caught by the JSON Schema — which production code never runs against
-    (only opt-in tests do). Fail fast here instead, at the point the caller
-    actually sets the field, matching
+    ``cli_compare_helpers._report_compare_result`` is the first real caller
+    to populate ``requested_depth`` (P0.4 round 9, from the CLI's own
+    Click-validated ``--depth`` string, which is already restricted to this
+    exact set — see ``cli_params.DepthParam``), so a typo'd value reaching
+    this field is not expected in practice today; kept as a fail-fast check
+    for any future caller (G30 P1.3) that sets it from a less-validated
+    source, since a bad value would otherwise only be caught by the JSON
+    Schema — which production code never runs against (only opt-in tests
+    do). Matches
     ``mcp_server._validate_public_depth``'s same check on the same set.
     Shared by ``reporter._add_check_identity`` (compare) and
     ``ScanOutcome.to_dict`` (scan) so both validate identically.

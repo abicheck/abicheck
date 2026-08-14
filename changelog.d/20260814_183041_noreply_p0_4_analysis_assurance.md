@@ -234,4 +234,33 @@
   sets (from the same `extractor_passes`/`narrowed_passes` dicts already
   read); a total mismatch now reads `graph_completeness="unknown"`, folding
   into `status="partial"` the same way the other coverage gaps already do.
+- **`compare`'s own `--depth` flag now actually reaches
+  `analysis_assurance.requested_depth`** (P1 review, round 9). Nothing
+  populated `DiffResult.requested_depth` before this fix, so an explicit
+  `compare --depth source` that never actually reached source evidence
+  (both sides lacking a compile database, say — the effective depth stays
+  `headers`) silently read `requested_depth=None`/`depth_satisfied=None`
+  and could still report `status="complete"`, letting
+  `--require-complete-analysis` exit `0` despite the explicitly requested
+  depth never being reached. `cli_compare_helpers._report_compare_result`
+  now copies its own Click-validated `--depth` string onto
+  `DiffResult.requested_depth` before recomputing `analysis_assurance` —
+  only ever from an *explicit* flag, never an inferred depth from bare
+  `--sources`/`--build-info` or `.abicheck.yml`'s `source.method`.
+- **`graph_completeness`'s asymmetric-confirmed-family check now rejects a
+  PARTIALLY overlapping family-set pair, not only a fully disjoint one**
+  (P1 review, round 9 — fresh evidence after round 8's disjoint-family
+  fix). Old confirming `{call_graph, type_graph}` against new confirming
+  only `{call_graph}` is not disjoint (they share `call_graph`), so the
+  round-8 `isdisjoint()` check left `graph_completeness="complete"` even
+  though `buildsource/source_graph_findings.py` only trusts a family when
+  BOTH sides cover it — `type_graph`, confirmed on old and never even
+  attempted on new, was silently skipped for this comparison the same way
+  a fully disjoint pair already was, just for one family instead of all of
+  them. Fixed by comparing the two sides' confirmed-family sets for *any*
+  inequality (`!=`) rather than only total disjunction — a subset,
+  superset, or partial-overlap pair are all "the two sides disagree on
+  what they confirmed" just as much as a fully disjoint pair, and the
+  resulting note now names which family/families are confirmed on only
+  one side.
 

@@ -988,7 +988,7 @@ class TestGraphCompleteness:
         assert aa.graph_completeness != "complete"
         assert aa.graph_completeness == "unknown"
         assert aa.status == "partial"
-        assert any("share no common" in n for n in aa.notes)
+        assert any("confirmed on only one side" in n for n in aa.notes)
 
     def test_overlapping_confirmed_family_on_same_name_is_still_complete(
         self, tmp_path: Path
