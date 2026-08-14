@@ -88,14 +88,17 @@ public API, unconditionally**:
   behavior" grace period a dynamic library gives you; a header-only
   library's versioning is effectively always at the granularity of "whatever
   headers were included at each consumer's most recent build."
-- Because there's no separate binary snapshot, `abicheck dump`/`compare`
-  against a header-only library is inherently a **header-AST comparison**
-  (`-H`, no binary operand) — every finding is at the source/API level.
-  Structural body content (macro values, template internals) still needs
-  [source-level evidence (L4)](evidence-and-detectability.md) the same way
-  it does for any other library; a header-only shape doesn't change what
-  evidence layer is needed to see it, only that there's no L0/L1 binary
-  layer available at all to fall back on.
+- Because there's no separate binary artifact, checking a header-only
+  library needs a source or build anchor rather than a binary one: `dump
+  --sources <dir> -H include/ --depth source` replays the library's own
+  translation units (its test/example sources, or a minimal TU written
+  specifically to instantiate the public API) to produce a snapshot with no
+  binary operand at all, and `compare old.src.json new.src.json` diffs two
+  such snapshots the same way it diffs two binaries. Every finding from that
+  path is at the source/API level — every mechanism in
+  [Evidence & Detectability](evidence-and-detectability.md) still applies,
+  just anchored at L2–L5 instead of starting from L0/L1 binary evidence,
+  since there's no binary to provide it.
 - ODR (One Definition Rule) violations become a live risk the moment two
   translation units see *different* versions of the same header-only
   declaration (a partial update, a vendored copy alongside a system-installed

@@ -80,11 +80,12 @@ format at all.
 This means: **every data/wire-compatibility break that happens to also be an
 ABI-relevant change (layout, enum values) is still visible as an ordinary
 ABI finding** — you get the signal, just not the framing. What abicheck
-cannot see is a data-compatibility break with *no* ABI signature — e.g. an
-enum reassignment that keeps the same C++ type and size, or an
-application-level serialization routine that changes format independent of
-any C/C++ type at all (a custom binary writer, a protocol buffer schema, a
-JSON shape).
+cannot see is a data-compatibility break with *no* ABI signature at all —
+e.g. an application-level serialization routine that changes wire format
+independent of any C/C++ type it touches (a custom binary writer choosing a
+different byte order or field order, a protocol buffer schema evolved
+outside the C++ type that carries it, a JSON shape change), where nothing
+about the C/C++ declarations themselves moved.
 
 ## Designing for it
 

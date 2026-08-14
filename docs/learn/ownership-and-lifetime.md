@@ -68,11 +68,15 @@ its own recurring bug shapes, and its own design patterns.
   who owns the `void* user_data` (or equivalent) passed at registration
   time, and who is responsible for freeing it when the callback is
   unregistered or the host shuts down, is a contract that exists nowhere in
-  the function pointer's type. See
-  [plugin/callback contracts](../use/plugin-systems.md) for how abicheck's
-  consumer-scoped checking (`compare --used-by`) can validate a *specific*
-  plugin/host pair against this kind of contract when it's been made
-  concrete enough to test.
+  the function pointer's type. `compare --used-by`/`--required-symbol` (see
+  [plugin/callback contracts](../use/plugin-systems.md)) scopes an ABI/
+  symbol-availability comparison to one specific plugin/host pair's actual
+  imports — real and useful for that narrower question — but it does not
+  execute the registration/unregister/shutdown paths, so a clean
+  consumer-scoped result says nothing about *this* contract; only a runtime
+  test that actually exercises those paths does — the same execution-based
+  evidence [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
+  recommends for the wider category this belongs to.
 - **Reentrancy and self-deletion.** A callback that used to be safe to call
   from within another call to the same library now isn't (or the reverse) —
   a lifetime contract about the *call stack*, not just about pointers.
