@@ -299,6 +299,14 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "a routine CI gate), not a stable project default -- like "
         "--contract-evaluation above."
     ),
+    "--require-complete-analysis": (
+        "P0.4: opts one invocation into gating its exit code on "
+        "analysis_assurance.status being 'complete', orthogonal to the "
+        "compatibility verdict. Whether a given run needs that extra "
+        "assurance floor varies per invocation (e.g. a release gate vs. an "
+        "exploratory local diff), not a stable project default -- like "
+        "--contract-evaluation/--audit-suppressions above."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

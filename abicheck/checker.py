@@ -1138,7 +1138,7 @@ def compare(
             internal_namespaces=_internal_namespaces(policy_file),
         )
 
-    return DiffResult(
+    result = DiffResult(
         old_version=old.version,
         new_version=new.version,
         library=old.library,
@@ -1170,3 +1170,12 @@ def compare(
         assurance=assurance,
         contract_context=contract_context,
     )
+    # P0.4 — computed last, from data the pipeline above already produced
+    # (evidence tiers, comparability outcome, contract context, whatever
+    # BuildSourcePack either side already carries). A pure rollup over the
+    # just-built `result`, never a new probe; see analysis_assurance.py's
+    # own module docstring for the full rationale and what is deferred.
+    from .analysis_assurance import compute_analysis_assurance
+
+    result.analysis_assurance = compute_analysis_assurance(result, old, new)
+    return result
