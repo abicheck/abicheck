@@ -1074,86 +1074,6 @@ def _require_used_by_binary_evidence(
             )
 
 
-def _apply_runtime_probe(
-    scoped: Any,
-    app: Path,
-    old_lib: Path,
-    new_lib: Path,
-    suppression: Any,
-    policy: str,
-    policy_file: PolicyFile | None,
-) -> None:
-    """Run *app* against both libraries and fold a load regression into *scoped*.
-
-    ADR-044 P2 item 2. Mutates *scoped* in place: appends a
-    ``CONSUMER_RUNTIME_LOAD_FAILED`` finding (unless a suppression rule removes
-    it) and recomputes the app verdict, since ``scope_diff_to_app`` computed it
-    before this RISK-tier finding existed.
-    """
-    from .checker_policy import ChangeKind, ReachabilityState
-    from .diff_helpers import make_change
-    from .runtime_probe import run_runtime_probe
-
-    probe = run_runtime_probe(app, old_lib, new_lib)
-    regressed_symbol = probe.regressed_symbol
-    if not regressed_symbol:
-        return
-    # public_reachable=True (Codex review, fresh evidence, mirrors
-    # appcompat.scope_diff_to_app's identical fix for
-    # CONSUMER_REQUIRED_SYMBOL_REMOVED): this finding only exists
-    # because the dynamic linker itself failed to resolve a
-    # symbol for a real, executed --used-by consumer binary --
-    # left at the dataclass default (False), a broad
-    # namespace/source_location suppression rule's default
-    # "unreachable-only" reachability would read it as
-    # unreachable and silently suppress a runtime regression that
-    # is, by construction, always consumer-proven real.
-    runtime_change = make_change(
-        ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
-        symbol=regressed_symbol,
-        name=app.name,
-        public_reachable=True,
-        reachability_kind="consumer_proven",
-        reachability_state=ReachabilityState.PROVEN_REACHABLE,
-    )
-    add_finding = suppression is None
-    if suppression is not None:
-        outcome = suppression.evaluate(runtime_change)
-        add_finding = not outcome.suppressed
-        # outcome.withheld_unknown_rule is never set here:
-        # runtime_change is always constructed with
-        # reachability_state=PROVEN_REACHABLE above (it is by
-        # construction consumer-proven), and
-        # would_withhold_unknown_reachability only ever fires on
-        # UNKNOWN.
-        if add_finding and outcome.withheld_rule is not None:
-            from .post_processing import _build_suppression_overreach_change
-
-            scoped.breaking_for_app.append(
-                _build_suppression_overreach_change(
-                    runtime_change, outcome.withheld_rule
-                )
-            )
-    if not add_finding:
-        return
-    scoped.breaking_for_app.append(runtime_change)
-    # scope_diff_to_app already computed scoped.verdict before
-    # this RISK-tier finding existed -- recompute so a clean
-    # static scope plus a runtime regression reports
-    # COMPATIBLE_WITH_RISK instead of a stale COMPATIBLE
-    # (Codex review).
-    from .appcompat import _compute_appcompat_verdict
-
-    scoped.verdict = _compute_appcompat_verdict(
-        scoped.missing_symbols,
-        scoped.missing_versions,
-        scoped.breaking_for_app,
-        scoped.required_symbol_count,
-        policy,
-        policy_file,
-    )
-
-
 def _apply_used_by_scoping(
     result: Any,
     used_by_apps: tuple[Path, ...],
@@ -1165,7 +1085,6 @@ def _apply_used_by_scoping(
     policy_file: PolicyFile | None,
     exit_code_scheme: str = "legacy",
     sev_config: Any = None,
-    verify_runtime: bool = False,
     suppression: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
@@ -1181,19 +1100,11 @@ def _apply_used_by_scoping(
     *exit_code_scheme* (legacy verdict floor, or severity-aware over each
     app's relevant changes when the caller passed --severity-*).
 
-    *verify_runtime* (ADR-044 P2 item 2) additionally runs each app once
-    against the old library and once against the new one
-    (:func:`~abicheck.runtime_probe.run_runtime_probe`) when both are real
-    binaries — a JSON-snapshot side has no file to execute against, so the
-    probe is silently skipped for that app, same as the static check's own
-    snapshot fallback degrades gracefully.
-
     *suppression* (ADR-044 P2, Codex review) is forwarded to
-    :func:`~abicheck.appcompat.scope_diff_to_app` and also consulted here
-    directly for the ``CONSUMER_RUNTIME_LOAD_FAILED`` overlay: both findings
-    are synthesized *after* the pipeline's own suppression pass already ran
-    over ``result.changes``, so without this they would be unsuppressible
-    even by an exact rule.
+    :func:`~abicheck.appcompat.scope_diff_to_app`: its findings are
+    synthesized *after* the pipeline's own suppression pass already ran over
+    ``result.changes``, so without this they would be unsuppressible even by
+    an exact rule.
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
@@ -1253,16 +1164,6 @@ def _apply_used_by_scoping(
             # Graph lookup only; old_lib still owns every export/version read.
             old_snapshot=old_snapshot,
         )
-        if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
-            _apply_runtime_probe(
-                scoped,
-                app,
-                old_lib,
-                new_lib,
-                suppression,
-                policy,
-                policy_file,
-            )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
         relevant_changes_by_id.update(

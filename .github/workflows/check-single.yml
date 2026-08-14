@@ -224,10 +224,6 @@ on:
         description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison.'
         type: string
         default: ''
-      verify-runtime:
-        description: 'target-kind: app-consumer only.'
-        type: boolean
-        default: false
       contract-file:
         description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line).'
         type: string
@@ -491,7 +487,6 @@ jobs:
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           consumer-binary: ${{ inputs.consumer-binary }}
-          verify-runtime: ${{ inputs.verify-runtime }}
           contract-file: ${{ inputs.contract-file }}
           policy: ${{ inputs.policy }}
           policy-file: ${{ inputs.policy-file }}

@@ -1499,7 +1499,7 @@ def adr027_compare_options(func: F) -> F:
 def app_usage_scope_options(func: F) -> F:
     """Add the ADR-043 app-usage/required-symbol scoping options to ``compare``.
 
-    ``--used-by``/``--verify-runtime`` and ``--required-symbol``/
+    ``--used-by`` and ``--required-symbol``/
     ``--required-symbols`` are mutually exclusive scoping mechanisms folding
     the former standalone ``appcompat``/``plugin-check`` commands into
     ``compare``. Decorators apply bottom-up, so they are listed here in
@@ -1521,19 +1521,6 @@ def app_usage_scope_options(func: F) -> F:
         "and requires (repeatable; folds `plugin-check`). Scopes the "
         "comparison to this explicit entrypoint contract instead of the "
         "full diff. Mutually exclusive with --used-by.",
-    )(func)
-    func = click.option(
-        "--verify-runtime",
-        "verify_runtime",
-        is_flag=True,
-        default=False,
-        help="DEPRECATED, SAFETY NO-OP: this used to actually execute each "
-        "consumer binary against the OLD and NEW library, which meant "
-        "running load-time code from an analyzed artifact -- abicheck "
-        "never executes analyzed inputs, so this flag is now inert and "
-        "always attempted=False regardless of platform or --used-by. Use "
-        "the static --used-by scanner for undefined-symbol corroboration; "
-        "it never executes anything. Kept only for CLI/API compatibility.",
     )(func)
     func = click.option(
         "--used-by",

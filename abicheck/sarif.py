@@ -376,8 +376,8 @@ def _result_for(
     *evidence_status_override*, when given, wins over the kind-derived
     :func:`evidence_status_for_result` — mirrors ``reporter._change_to_dict``'s
     own override, for a scoped-only finding (``PE_ORDINAL_RETARGETED``,
-    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``, ``CONSUMER_RUNTIME_LOAD_FAILED``)
-    proven by the real consumer's own import table/execution, not by an
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``)
+    proven by the real consumer's own import table, not by an
     artifact-level library diff (Codex review).
     """
     library, old_version, new_version = (

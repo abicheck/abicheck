@@ -339,8 +339,8 @@ class _ScopedFold:
                 # gate, so this is not one of the always-0 ledger cases.
                 severity_config=severity_config,
                 # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
-                # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
-                # is proven by the real consumer's own import table/execution,
+                # CONSUMER_REQUIRED_SYMBOL_REMOVED) is proven by the real
+                # consumer's own import table,
                 # not by an artifact-level library diff -- evidence_status_for_change
                 # would otherwise report "artifact_proven" purely from the kind's
                 # BREAKING/RISK category, same as appcompat_to_json's own

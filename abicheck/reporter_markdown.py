@@ -815,9 +815,9 @@ def root_cause_evidence_lookup_for_changes(
     that function's ``root_cause_id``/``root_cause_display`` grouping covers
     *any* two findings sharing a ``caused_by_type``/``symbol``, for every
     ``ChangeKind``; :func:`~abicheck.impact.correlation.correlate_root_causes`
-    covers only the four load-failure kinds its own module docstring names
+    covers only the load-failure kinds its own module docstring names
     (``FUNC_REMOVED``/``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API``/
-    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``/``CONSUMER_RUNTIME_LOAD_FAILED``),
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``),
     ranked by evidence strength, and drops a symbol with only one correlated
     piece. Built directly from the actual ``Change`` objects the correlator
     grouped — not by matching root-cause ids after the fact — so this stays

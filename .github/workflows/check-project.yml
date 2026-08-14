@@ -196,9 +196,6 @@ on:
       build-config:
         type: string
         default: ''
-      verify-runtime:
-        type: boolean
-        default: false
       policy:
         type: string
         default: 'strict_abi'
@@ -962,7 +959,6 @@ jobs:
           build-info: ${{ inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
-          verify-runtime: ${{ inputs.verify-runtime }}
           policy: ${{ inputs.policy }}
           policy-file: ${{ inputs.policy-file }}
           suppress: ${{ inputs.suppress }}

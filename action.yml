@@ -277,15 +277,6 @@ inputs:
       with required-symbol/required-symbols (the CLI rejects both being
       set). compare mode only.
     required: false
-  verify-runtime:
-    description: >
-      With used-by: actually run each consumer binary once against the old
-      library and once against the new one (LD_BIND_NOW=1), recording a
-      runtime-load-failure finding when the dynamic linker reports an
-      undefined symbol against the new library after loading cleanly
-      against the old one. Linux-only; a no-op elsewhere. Ignored without
-      used-by. compare mode only.
-    required: false
     default: 'false'
   required-symbol:
     description: >
@@ -779,7 +770,6 @@ runs:
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_USED_BY: ${{ inputs.used-by }}
-        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
@@ -930,7 +920,6 @@ runs:
         INPUT_OLD_ROOT: ${{ inputs.old-root }}
         INPUT_NEW_ROOT: ${{ inputs.new-root }}
         INPUT_USED_BY: ${{ inputs.used-by }}
-        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_AGAINST: ${{ inputs.against }}

@@ -131,7 +131,6 @@ problem in CI.
 |--------|-------------|
 | `OLD_INPUT` / `NEW_INPUT` | Old and new library (`.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC dump) — same as plain `compare`. With `--used-by`, a JSON snapshot works only if it carries binary evidence (a `dump` of a real library, not headers-only) — its `elf`/`pe`/`macho` field is what the app's imports resolve against. |
 | `--used-by FILE` | Application binary whose imports/required symbol versions scope the comparison (repeatable). Mutually exclusive with `--required-symbol`/`--required-symbols`. |
-| `--verify-runtime` | **Deprecated, safety no-op** — see [Runtime verification](#runtime-verification-verify-runtime) below. |
 | `-H` / `--header` | Public header file or directory (repeatable, side-aware with `old=`/`new=`) |
 | `-I` / `--include` | Extra include directory for castxml (repeatable, side-aware) |
 | `--lang` | Language mode: `c++` (default) or `c` |
@@ -150,28 +149,6 @@ option among the full `compare` surface, not a separate command with its own
 flags.
 
 ---
-
-## Runtime verification (`--verify-runtime`)
-
-**Disabled (security hardening).** `--verify-runtime` used to add a
-**dynamic**, opt-in corroborating check on top of the static one described
-above: for each `--used-by` app, it actually ran the consumer binary twice
-— once with `LD_LIBRARY_PATH` pointed at the old library, once at the new
-one — so the dynamic linker's own eager-binding failure could catch a
-missing symbol the static import/export comparison alone might miss.
-
-That meant executing an *analyzed* artifact — the very shared library being
-compared — which lets its ELF constructors and other load-time
-initializers run with whatever privileges, environment, and credentials
-the `abicheck` process has. abicheck's central trust boundary is that
-analyzed inputs are treated as data, never executed, so this flag is now a
-**non-executing no-op**: passing `--verify-runtime` is accepted for
-backward compatibility, but it never spawns a process, never stages a
-library onto `LD_LIBRARY_PATH`, and never emits a
-`consumer_runtime_load_failed` finding. Use the static `--used-by` scanner
-above for undefined-symbol corroboration instead — it answers the same
-question from the binaries' own import/export tables, without running
-anything.
 
 ## Exit codes
 

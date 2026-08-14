@@ -89,8 +89,8 @@ def fold_evidence_summaries(
     correlator group can genuinely disagree on membership (a bare-symbol
     pair sharing no ``caused_by_type``: report grouping keeps each its own
     singleton, the correlator's ``caused_by_type or symbol`` key merges
-    them -- reproduced by ``--used-by --verify-runtime``'s
-    ``FUNC_REMOVED``/``CONSUMER_RUNTIME_LOAD_FAILED`` pair), so matching by
+    them -- reproduced by ``--used-by``'s
+    ``FUNC_REMOVED``/``CONSUMER_REQUIRED_SYMBOL_REMOVED`` pair), so matching by
     id silently misses group-level evidence for exactly that shape even
     though each finding's own per-finding evidence already shows it.
     Folding already-correct member evidence instead sidesteps that mismatch

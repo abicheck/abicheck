@@ -865,8 +865,8 @@ class TestImpactAssessmentRootCause:
         assert group["strongest_evidence_level"] == "consumer_proven"
 
     def test_root_cause_mode_group_evidence_for_bare_symbol_pair(self):
-        """Codex review: --used-by --verify-runtime's real shape -- a
-        FUNC_REMOVED and a CONSUMER_RUNTIME_LOAD_FAILED sharing a bare
+        """Codex review: --used-by's real shape -- a
+        FUNC_REMOVED and a CONSUMER_REQUIRED_SYMBOL_REMOVED sharing a bare
         symbol, neither carrying caused_by_type. RootCauseCorrelator merges
         them (its own key is `caused_by_type or symbol`), but
         _root_cause_key_and_display's "only caused_by_type correlates
@@ -881,13 +881,13 @@ class TestImpactAssessmentRootCause:
             "regressed_symbol",
             "symbol removed",
         )
-        runtime_failed = Change(
-            ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+        consumer_required = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
             "regressed_symbol",
-            "runtime load failed",
+            "consumer requires a removed symbol",
         )
         r = _result(Verdict.BREAKING, changes=[removed])
-        r.scoped_only_changes = (runtime_failed,)  # type: ignore[attr-defined]
+        r.scoped_only_changes = (consumer_required,)  # type: ignore[attr-defined]
         d = json.loads(to_json(r, report_mode="root-cause"))
         # Two singleton report groups (no caused_by_type link) -- the
         # deliberate "first-slice" report-grouping contract, unaffected by
@@ -895,15 +895,15 @@ class TestImpactAssessmentRootCause:
         assert d["root_cause_count"] == 1
         assert len(d["root_causes"][0]["findings"]) == 1
         group = d["root_causes"][0]
-        assert group["strongest_evidence_level"] == "runtime_proven"
-        assert group["evidence_levels"] == ["artifact_proven", "runtime_proven"]
+        assert group["strongest_evidence_level"] == "consumer_proven"
+        assert group["evidence_levels"] == ["artifact_proven", "consumer_proven"]
         # The finding's own nested evidence already showed this (unaffected
         # by the bug -- built directly from correlator membership).
         assert (
             d["changes"][0]["impact_assessment"]["root_cause_evidence"][
                 "strongest_evidence_level"
             ]
-            == "runtime_proven"
+            == "consumer_proven"
         )
 
     def test_matches_root_cause_mode_id(self):

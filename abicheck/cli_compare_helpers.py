@@ -75,7 +75,6 @@ from .cli_helpers_compare import (
     # keep resolving unchanged.
     _app_compat_summary as _app_compat_summary,
     _apply_required_symbol_scoping as _apply_required_symbol_scoping,
-    _apply_runtime_probe as _apply_runtime_probe,
     _apply_used_by_scoping as _apply_used_by_scoping,
     _pair_wide_dialect_override,
     _plugin_contract_summary as _plugin_contract_summary,
@@ -695,7 +694,7 @@ def _apply_scoped_gating(
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
     used_by_old_input: Path, used_by_new_input: Path,
     exit_code_scheme: str, sev_config: Any,
-    verify_runtime: bool, suppression: Any,
+    suppression: Any,
 ) -> int | None:
     """Apply whichever ADR-043 scoped gate this run selected, if any.
 
@@ -708,7 +707,7 @@ def _apply_scoped_gating(
             result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
             policy, pf,
             exit_code_scheme=exit_code_scheme, sev_config=sev_config,
-            verify_runtime=verify_runtime, suppression=suppression,
+            suppression=suppression,
         )
     if required_symbols:
         return _apply_required_symbol_scoping(
@@ -1057,7 +1056,7 @@ def _report_compare_result(
     policy: str, pf: PolicyFile | None,
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
     used_by_old_input: Path, used_by_new_input: Path,
-    verify_runtime: bool, suppression: Any, audit_suppressions: bool,
+    suppression: Any, audit_suppressions: bool,
     fmt: str, output: Path | None, show_only: str | None, report_mode: str,
     show_impact: bool, stat: bool, recommend: bool,
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
@@ -1146,7 +1145,7 @@ def _report_compare_result(
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         used_by_old_input=used_by_old_input, used_by_new_input=used_by_new_input,
         exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
-        verify_runtime=verify_runtime, suppression=suppression,
+        suppression=suppression,
     )
 
     # P0.4 (P2 review): fold the orthogonal coverage/analysis-assurance
@@ -1342,7 +1341,6 @@ def run_compare(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
-    verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
@@ -1818,7 +1816,7 @@ def run_compare(
         policy=policy, pf=pf,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         used_by_old_input=used_by_old_input, used_by_new_input=used_by_new_input,
-        verify_runtime=verify_runtime, suppression=suppression,
+        suppression=suppression,
         audit_suppressions=audit_suppressions,
         fmt=fmt, output=output, show_only=show_only, report_mode=report_mode,
         show_impact=show_impact, stat=stat, recommend=recommend,

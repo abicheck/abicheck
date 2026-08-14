@@ -15,7 +15,7 @@
 """``RootCauseCorrelator`` (G29 Phase 6) — a composer, not a detector.
 
 The plan's Phase 6 explicitly rejects a new ``ChangeKind`` per graph edge;
-instead the four existing kinds that each independently answer "does a load
+instead the three existing kinds that each independently answer "does a load
 against the new library fail because of *this* symbol" —
 :data:`~abicheck.checker_policy.ChangeKind.FUNC_REMOVED` (artifact-level: the
 symbol vanished from the export table), :data:`~abicheck.checker_policy.
@@ -23,10 +23,7 @@ ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API` (call-graph-level: an
 internal dependency of a public entry point changed/vanished — ``internal_
 leak.py``), :data:`~abicheck.checker_policy.ChangeKind.
 CONSUMER_REQUIRED_SYMBOL_REMOVED` (consumer-level: a real ``--used-by``
-binary's own undefined symbol no longer resolves — ``appcompat.py``), and
-:data:`~abicheck.checker_policy.ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED`
-(runtime-level: the same consumer binary was actually dynamically loaded
-against the new library and failed to resolve — ``cli_helpers_compare.py``)
+binary's own undefined symbol no longer resolves — ``appcompat.py``)
 — get folded into one :class:`RootCauseGroup` per underlying symbol, each
 member tagged with its own evidence level, rather than reported as four
 independent findings a reader has to manually notice share a cause.
@@ -37,7 +34,7 @@ This module is deliberately narrower than ``reporter_markdown``'s existing
 grouping buckets *every* finding by ``caused_by_type`` (any redundant-change
 family, not just this one), is report-mode-only, and keeps every group
 including size-1 singletons since its whole point is showing full report
-structure. ``correlate_root_causes`` only ever groups the four kinds above,
+structure. ``correlate_root_causes`` only ever groups the three kinds above,
 lives independently of any report renderer (so ``impact.engine`` can use it
 without a ``reporter_markdown`` import — the cross-package direction that
 kind of dependency would need to run and doesn't exist today), and drops a
@@ -106,7 +103,6 @@ EVIDENCE_LEVEL_BY_KIND: dict[ChangeKind, str] = {
     ChangeKind.FUNC_REMOVED: "artifact_proven",
     ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API: "call_graph_proven",
     ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED: "consumer_proven",
-    ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED: "runtime_proven",
 }
 
 #: Rank order for every evidence level this module can produce, weakest
@@ -122,11 +118,15 @@ EVIDENCE_LEVEL_BY_KIND: dict[ChangeKind, str] = {
 #: ``"call_graph_overapprox"`` is not one of
 #: :data:`EVIDENCE_LEVEL_BY_KIND`'s values — it's a per-``Change`` downgrade
 #: :func:`_evidence_level_for` applies, so it can't be derived from that
-#: dict's values the way the other four levels could; ranked below
+#: dict's values the way the other levels could; ranked below
 #: ``"call_graph_proven"`` (an approximate dispatch-target proof is weaker
 #: than an exact one) but above ``"artifact_proven"`` (it still proves *some*
 #: reachability path exists, which a bare export-table removal says nothing
-#: about).
+#: about). ``"runtime_proven"`` is likewise absent from
+#: :data:`EVIDENCE_LEVEL_BY_KIND`: it was the tier of the removed
+#: ``--verify-runtime`` execution probe, and nothing emits it anymore. The
+#: rank is kept so a report or consumer carrying the value from an older
+#: run still orders correctly against the live levels.
 EVIDENCE_RANK = {
     "artifact_proven": 0,
     "call_graph_overapprox": 1,
@@ -138,7 +138,7 @@ EVIDENCE_RANK = {
 
 @dataclass(frozen=True)
 class RootCauseGroup:
-    """One symbol's correlated evidence across the four load-failure kinds.
+    """One symbol's correlated evidence across the load-failure kinds.
 
     ``members`` is ``(change, evidence_level)`` pairs, in the order the
     members were encountered in the input list — never re-sorted by evidence
@@ -230,7 +230,7 @@ def _evidence_level_for(change: Change) -> str:
 
 def _correlation_key(change: Change) -> str | None:
     """The shared symbol identity *change*'s evidence is actually about, or
-    ``None`` when it carries neither — never reachable for the four kinds
+    ``None`` when it carries neither — never reachable for the kinds
     this module correlates in practice (each always sets at least one), but
     checked defensively since :class:`Change` itself allows both to be
     unset."""

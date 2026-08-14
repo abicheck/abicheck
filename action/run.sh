@@ -1133,9 +1133,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # mutual exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
-  if [[ "${INPUT_VERIFY_RUNTIME:-false}" == "true" ]]; then
-    CMD+=(--verify-runtime)
-  fi
   add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
   add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
 

@@ -1926,9 +1926,9 @@ class TestUsedByScoping:
     def test_json_root_cause_mode_scoped_only_bare_symbol_group_evidence(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Third Codex review finding: --used-by --verify-runtime's real
-        # shape -- a FUNC_REMOVED and a scoped-only CONSUMER_RUNTIME_LOAD_
-        # FAILED sharing a bare symbol, neither carrying caused_by_type.
+        # Third Codex review finding: --used-by's real shape -- a
+        # FUNC_REMOVED and a scoped-only CONSUMER_REQUIRED_SYMBOL_REMOVED
+        # sharing a bare symbol, neither carrying caused_by_type.
         # RootCauseCorrelator merges them, but _root_cause_key_and_display's
         # "only caused_by_type correlates findings" contract keeps each its
         # own singleton --report-mode root-cause group (one built by
@@ -1946,9 +1946,9 @@ class TestUsedByScoping:
         new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
         monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
         scoped_only = Change(
-            kind=ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
             symbol="_Z3barv",
-            description="runtime load failed",
+            description="consumer requires a removed symbol",
         )
         res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
         self._patch_scope(monkeypatch, res)
@@ -1962,11 +1962,11 @@ class TestUsedByScoping:
         groups = {
             group["findings"][0]["kind"]: group for group in data["root_causes"]
         }
-        assert set(groups) == {"func_removed", "consumer_runtime_load_failed"}
+        assert set(groups) == {"func_removed", "consumer_required_symbol_removed"}
         for group in groups.values():
             assert group["finding_count"] == 1
-            assert group["strongest_evidence_level"] == "runtime_proven"
-            assert group["evidence_levels"] == ["artifact_proven", "runtime_proven"]
+            assert group["strongest_evidence_level"] == "consumer_proven"
+            assert group["evidence_levels"] == ["artifact_proven", "consumer_proven"]
 
     def test_markdown_root_cause_mode_merges_scoped_only_into_existing_group(
         self, tmp_path, monkeypatch
@@ -2278,181 +2278,6 @@ class TestUsedByScoping:
         assert data["summary"]["total_changes"] == 1
         assert data["summary"]["breaking"] == 1
         assert data["full_summary"]["total_changes"] == 0
-
-
-class TestVerifyRuntimeFlag:
-    """``compare --used-by APP --verify-runtime`` (ADR-044 P2 item 2), via a
-    stubbed ``runtime_probe.run_runtime_probe`` so no real dynamic-linker
-    execution is needed for the CLI wiring itself. Reuses
-    ``TestUsedByScoping``'s fixture helpers (not inherited, to avoid
-    re-collecting that class's own tests under this one)."""
-
-    _setup = TestUsedByScoping._setup
-    _patch_scope = TestUsedByScoping._patch_scope
-    _result = TestUsedByScoping._result
-
-    def _patch_probe(self, monkeypatch, result):
-        import abicheck.runtime_probe as rp_mod
-
-        monkeypatch.setattr(rp_mod, "run_runtime_probe", lambda *a, **k: result)
-
-    def test_regression_adds_consumer_runtime_load_failed_finding(
-        self, tmp_path, monkeypatch,
-    ) -> None:
-        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
-
-        res = self._result(verdict=Verdict.COMPATIBLE)
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        self._patch_probe(
-            monkeypatch,
-            RuntimeProbeResult(
-                app_path=str(app), attempted=True,
-                old=RuntimeProbeOutcome(ok=True),
-                new=RuntimeProbeOutcome(ok=False, missing_symbol="foo_bar"),
-            ),
-        )
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--verify-runtime", "--format", "json",
-        )
-        data = json.loads(result.stdout)
-        assert data["used_by"][0]["relevant_change_count"] == 1
-
-    def test_no_regression_adds_no_finding(self, tmp_path, monkeypatch) -> None:
-        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
-
-        res = self._result(verdict=Verdict.COMPATIBLE)
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        self._patch_probe(
-            monkeypatch,
-            RuntimeProbeResult(
-                app_path=str(app), attempted=True,
-                old=RuntimeProbeOutcome(ok=True),
-                new=RuntimeProbeOutcome(ok=True),
-            ),
-        )
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--verify-runtime", "--format", "json",
-        )
-        data = json.loads(result.stdout)
-        assert data["used_by"][0]["relevant_change_count"] == 0
-
-    def test_regression_recomputes_stale_compatible_verdict(
-        self, tmp_path, monkeypatch,
-    ) -> None:
-        """Codex review: scope_diff_to_app already computed `verdict` before
-        this RISK-tier finding existed, so appending it without recomputing
-        would still report COMPATIBLE even though breaking_for_app now
-        carries a real (RISK) finding -- the reported verdict must become
-        COMPATIBLE_WITH_RISK instead of staying stale."""
-        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
-
-        res = self._result(verdict=Verdict.COMPATIBLE)
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        self._patch_probe(
-            monkeypatch,
-            RuntimeProbeResult(
-                app_path=str(app), attempted=True,
-                old=RuntimeProbeOutcome(ok=True),
-                new=RuntimeProbeOutcome(ok=False, missing_symbol="foo_bar"),
-            ),
-        )
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--verify-runtime", "--format", "json",
-        )
-        data = json.loads(result.stdout)
-        assert data["used_by"][0]["verdict"] == "COMPATIBLE_WITH_RISK"
-
-    def test_regression_suppressible_by_symbol(self, tmp_path, monkeypatch) -> None:
-        """Codex review: CONSUMER_RUNTIME_LOAD_FAILED is synthesized after the
-        pipeline's own suppression pass already ran, so an exact suppression
-        rule for the regressed symbol must still be able to hide it."""
-        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
-
-        res = self._result(verdict=Verdict.COMPATIBLE)
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        self._patch_probe(
-            monkeypatch,
-            RuntimeProbeResult(
-                app_path=str(app), attempted=True,
-                old=RuntimeProbeOutcome(ok=True),
-                new=RuntimeProbeOutcome(ok=False, missing_symbol="foo_bar"),
-            ),
-        )
-        sup = tmp_path / "sup.yaml"
-        sup.write_text(
-            "version: 1\nsuppressions:\n"
-            "  - symbol: foo_bar\n    reason: known, tracked elsewhere\n",
-        )
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--verify-runtime", "--suppress", str(sup), "--format", "json",
-        )
-        data = json.loads(result.stdout)
-        assert data["used_by"][0]["relevant_change_count"] == 0
-        assert data["used_by"][0]["verdict"] == "COMPATIBLE"
-
-    def test_regression_not_hidden_by_broad_namespace_rule(
-        self, tmp_path, monkeypatch,
-    ) -> None:
-        """Codex review, fresh evidence: CONSUMER_RUNTIME_LOAD_FAILED only
-        ever exists because the dynamic linker itself failed to resolve a
-        symbol for a real, executed consumer binary -- built with
-        public_reachable at its dataclass default (False) before this fix, a
-        broad namespace rule's default "unreachable-only" reachability read
-        it as unreachable and silently suppressed a runtime regression that
-        is, by construction, always consumer-proven real. public_reachable
-        =True must keep it visible under a broad rule (mirrors
-        appcompat.scope_diff_to_app's identical fix for
-        CONSUMER_REQUIRED_SYMBOL_REMOVED)."""
-        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
-
-        res = self._result(verdict=Verdict.COMPATIBLE)
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        self._patch_probe(
-            monkeypatch,
-            RuntimeProbeResult(
-                app_path=str(app), attempted=True,
-                old=RuntimeProbeOutcome(ok=True),
-                new=RuntimeProbeOutcome(ok=False, missing_symbol="ns::detail::foo_bar"),
-            ),
-        )
-        sup = tmp_path / "sup.yaml"
-        sup.write_text(
-            "version: 1\nsuppressions:\n"
-            "  - namespace: \"ns::detail::**\"\n    reason: detail churn\n",
-        )
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--verify-runtime", "--suppress", str(sup), "--format", "json",
-        )
-        data = json.loads(result.stdout)
-        assert data["used_by"][0]["relevant_change_count"] == 1
-        assert data["used_by"][0]["verdict"] == "COMPATIBLE_WITH_RISK"
-
-    def test_flag_ignored_without_used_by(self, tmp_path, monkeypatch) -> None:
-        """--verify-runtime alone (no --used-by) must not error or invoke
-        the probe at all -- it's documented as ignored without --used-by."""
-        from abicheck import dumper as dumper_mod
-
-        old = tmp_path / "old.so"
-        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        new = tmp_path / "new.so"
-        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        old_snap = _snap("1.0", library="libfoo.so")
-        new_snap = _snap("2.0", library="libfoo.so")
-        monkeypatch.setattr(
-            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
-        )
-        result = _invoke("compare", str(old), str(new), "--verify-runtime")
-        assert result.exit_code == 0
 
 
 class TestFoldEvidenceDepthOutOfBandPack:
