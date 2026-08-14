@@ -1,0 +1,110 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - compatibility-direction
+depends_on:
+  - abicheck/checker.py
+lifecycle: active
+generated: false
+---
+
+# Compatibility Direction
+
+Most of this documentation set — and most of what `abicheck compare` checks
+by default — assumes one specific scenario: an **old, already-compiled
+consumer** running against a **new version of the library**. That is the
+right default (it's the scenario every ordinary in-place upgrade creates),
+but it is one of several distinct directions a compatibility question can
+run in, and conflating them is a common source of a check passing when the
+real deployment scenario it needed to cover was a different one.
+
+## Naming the directions
+
+| Direction | The scenario | Typical trigger |
+|-----------|--------------|------------------|
+| **Backward (the default)** | Old consumer, new library | An in-place library upgrade; the consumer wasn't rebuilt |
+| **Forward** | New consumer, old library | A downgrade/rollback; or a consumer built against a newer SDK than what's deployed |
+| **Host-forward** | Old plugin, new host | A plugin ecosystem where hosts update faster than every plugin |
+| **Host-backward** | New plugin, old host | A plugin built against a newer SDK loaded into an older, still-deployed host |
+| **Header/binary skew** | Old headers, new binary (or the reverse) | A consumer's build system pins headers independently of the binary it links against |
+| **Coexistence** | Two versions loaded in one process, or in communicating processes | A plugin ecosystem, a monorepo with mixed build times, a rolling deployment |
+
+Each row is checking the same underlying contract from a different vantage
+point, and — this is the part worth internalizing — **a change can be safe
+in one direction and unsafe in another.** A newly *added* optional
+parameter with a default is safe for old source recompiled against new
+headers (backward-compatible addition) but is a hard compile error for new
+source built against *old* headers that don't declare it (forward
+direction, if that's a scenario your project supports at all). A newly
+*required* dependency your new binary picks up is fine for a consumer built
+against the new binary, but breaks an old, already-linked consumer that
+never resolved that dependency (backward direction failure, forward
+direction non-issue).
+
+## Why the default direction is the right default, and when it isn't enough
+
+Backward compatibility (old consumer, new library) is the right default
+because it's what an ordinary "ship a point release, users update the
+library" workflow needs, and it's the direction every ABI/API stability
+convention (SONAME bumps, symbol versioning) is built around — see
+[Part 5 — Linker & ELF](abi-series/05-linker-elf.md). `abicheck compare
+old.so new.so` checks exactly this direction: can the *old* binary's
+callers (whose expectations are frozen in the old snapshot) still be
+satisfied by the *new* library.
+
+It stops being enough the moment your deployment model allows any of these:
+
+- **Downgrades or rollbacks are a supported operation** — an incident
+  response that reverts a bad deploy needs the *forward* direction to also
+  hold, or the rollback itself becomes a second incident.
+- **You ship a plugin ecosystem** — third-party plugins are compiled at
+  different times against different SDK versions, and both host-forward and
+  host-backward compatibility matter depending on whether hosts or plugins
+  update first in practice. See
+  [Plugin Systems](../use/plugin-systems.md) for `compare --used-by`'s
+  consumer-scoped checking, which can validate one specific plugin/host pair
+  in either direction.
+- **Header and binary versions can diverge** — a build system that
+  vendors/pins headers separately from the binary it links (common in
+  large, multi-team builds) needs both header→binary and binary→header
+  checks, since a stale header can silently miscompile against a
+  newer binary and vice versa.
+- **Multiple versions coexist in one process or communicating processes** —
+  a rolling deployment where old and new service instances talk to each
+  other over a shared library's wire format needs *simultaneous* backward
+  and forward compatibility for the whole rollout window, not just a single
+  before/after comparison. (Where the shared contract is data crossing a
+  boundary rather than binary ABI, see
+  [Data & Wire Compatibility](data-wire-compatibility.md) — coexistence
+  often turns an ABI question into a data-format one.)
+
+## Checking more than one direction
+
+`abicheck compare` takes two snapshots positionally — which one is "old"
+and which is "new" is a labeling choice, not a constraint the tool imposes.
+Checking the forward direction for a given pair is the same command with
+the arguments reversed: `abicheck compare new.so old.so` asks "can callers
+compiled against the *new* contract be satisfied by the *old* library" —
+useful for validating a rollback path is safe *before* you need it, not
+after. For a `--used-by`/plugin scenario, the equivalent is running the
+consumer-scoped check with each side playing "host" — see
+[Plugin Systems](../use/plugin-systems.md) for the consumer-scoped
+mechanics `compare --used-by`/`--required-symbol` build on.
+
+There is no single "check every direction" flag, because which directions
+matter is a property of your deployment model, not something abicheck can
+infer from two binaries — this is exactly the kind of contract-shape
+decision [Product Contract §4](abi-series/00-product-contract.md#5-name-your-contract-shape)
+asks you to make explicit before reasoning about breaks at all. Naming which
+directions your project actually needs (usually: backward always, forward
+if rollback is supported, both host directions if you ship plugins) is the
+first step; running `compare` once per direction that matters is the
+mechanical follow-through.
+
+See also: [Product Contract §4/§5](abi-series/00-product-contract.md) for
+naming your contract shape, and [Plugin Systems](../use/plugin-systems.md)
+for the consumer-scoped mechanics that make a specific direction checkable
+against a specific real consumer.

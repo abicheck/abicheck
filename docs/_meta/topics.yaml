@@ -347,4 +347,41 @@ topics:
     allowed_summaries:
       - use/github-action.md
       - use/dump-compare-flags.md
+
+  # Compatibility dimensions beyond source/binary ABI that a static checker
+  # cannot decide directly -- named explicitly in Compatibility as a Product
+  # Contract §2 so a reader can tell which question they're actually asking.
+  # Each gets its own page rather than a subsection of an already-large page
+  # (topics.yaml's own "new fact needs a new page" criterion 4).
+  behavioral-compatibility:
+    canonical_page: learn/behavioral-compatibility.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+
+  data-wire-compatibility:
+    canonical_page: learn/data-wire-compatibility.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+
+  ownership-and-lifetime:
+    canonical_page: learn/ownership-and-lifetime.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-series/07-designing-for-stability.md
+
+  compatibility-direction:
+    canonical_page: learn/compatibility-direction.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - use/plugin-systems.md
+
+  static-and-header-only:
+    canonical_page: learn/static-and-header-only.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+
+  concurrency-and-initialization:
+    canonical_page: learn/concurrency-and-initialization.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
       - use/tool-modes.md

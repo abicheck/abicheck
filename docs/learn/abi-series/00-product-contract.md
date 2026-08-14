@@ -79,12 +79,23 @@ actually asking about:
 |-----------|--------------------------|-------------------------|
 | **Source / API compatibility** | Does existing source code still *compile* against the new headers? | A default argument was removed; a function became `explicit` |
 | **Binary / ABI compatibility** | Does an already-*built* consumer binary still link, load, and run correctly against the new library? | A symbol was removed; a struct's layout changed |
-| **Behavioral / semantic compatibility** | For the same inputs, does the operation still mean the same thing? | A function starts returning a different value, or changes its side effects, for inputs that used to behave one way |
-| **Data / wire / storage compatibility** | Are values that cross a boundary — serialized files, network messages, shared memory, on-disk records — still interpreted the same way? | An enum value's meaning was reassigned; a struct used as a wire format changed layout |
-| **Deployment / environment compatibility** | Will the binary still run on every platform/OS version it was promised to support? | A dependency's minimum runtime version (glibc floor, macOS deployment target) was silently raised by a rebuild |
-| **Ecosystem / consumer compatibility** | Does *this specific* application, plugin, or binding keep working? | A plugin's vtable/callback contract changed; a language binding's assumed struct layout moved |
-| **Operational compatibility** | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
+| [**Behavioral / semantic compatibility**](../behavioral-compatibility.md) | For the same inputs, does the operation still mean the same thing? | A function starts returning a different value, or changes its side effects, for inputs that used to behave one way |
+| [**Data / wire / storage compatibility**](../data-wire-compatibility.md) | Are values that cross a boundary — serialized files, network messages, shared memory, on-disk records — still interpreted the same way? | An enum value's meaning was reassigned; a struct used as a wire format changed layout |
+| [**Deployment / environment compatibility**](../dependency-floors.md) | Will the binary still run on every platform/OS version it was promised to support? | A dependency's minimum runtime version (glibc floor, macOS deployment target) was silently raised by a rebuild |
+| [**Ecosystem / consumer compatibility**](../../use/plugin-systems.md) | Does *this specific* application, plugin, or binding keep working? | A plugin's vtable/callback contract changed; a language binding's assumed struct layout moved |
+| [**Operational compatibility**](../compatibility-direction.md) | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
 | **Build-profile comparability** | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
+
+Three more contracts don't map to a single row above — each cuts across
+several rows at once, so each gets its own page rather than forcing a
+misleading ninth row:
+[**Ownership & lifetime contracts**](../ownership-and-lifetime.md) (who
+allocates, who frees, how long a pointer stays valid — invisible to any
+signature), [**concurrency & initialization contracts**](../concurrency-and-initialization.md)
+(thread-safety, init/destruction order, fork safety — the same
+signature-invisibility problem, concurrency-specific), and
+[**static & header-only library contracts**](../static-and-header-only.md)
+(what changes when there's no separate dynamic-loading boundary at all).
 
 Coverage varies by dimension rather than falling off in a straight line. A
 static ABI/API checker like abicheck reports source and binary
