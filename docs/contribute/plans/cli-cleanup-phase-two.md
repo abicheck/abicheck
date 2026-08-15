@@ -104,10 +104,28 @@ assumed.
 
 ### `--stat`
 
-`--stat` produces a compact one-line summary. `--format review` already exists
-for compact human output, and every machine consumer already has the full JSON
-`summary` block. So `--stat` is a third spelling of an answer the CLI gives
-twice already.
+`--stat` has **two** distinct existing uses, and they migrate to two different
+replacements — collapsing both onto `--format review` (an earlier draft of
+this plan did exactly that) would silently turn a machine-readable consumer's
+JSON into human text:
+
+- **Human summary use** (`--stat` alone, or with a human `--format`): a
+  compact one-line summary. `--format review` already exists for compact human
+  output. This use migrates to `--format review`.
+- **Machine `--stat --format json` use**: not the same output shape as plain
+  `--format json` — it is a documented, real combination
+  (`docs/use/output-formats.md`'s own `--stat` section shows it:
+  `{"library": ..., "verdict": ..., "summary": {...}}`, no `changes` array).
+  `action/run.sh` depends on exactly this distinction when stripping flags
+  before its internal PR-comment re-run: it explicitly drops `--stat` because
+  "it suppresses the `changes` array in JSON, which the comment parser needs."
+  This use does **not** migrate to `--format review` (a human/Markdown-shaped
+  format, not JSON) — it migrates to plain `--format json`, reading the
+  same nested `summary` block that `--stat --format json` already only
+  contains, now alongside (not instead of) the full `changes` array. Any
+  consumer that genuinely wants the `--stat`-shaped subset without `changes`
+  extracts `summary` from the full JSON client-side; the CLI does not need a
+  third flag to produce a strict subset of its own full output.
 
 - Remove `--stat` and every path its `stat=` flag threads through — it is not
   one chokepoint: `cli.py`'s `_render_output` → `service.render_output`;
@@ -120,9 +138,15 @@ twice already.
   suppression of human-readable extras is actually decided. Removing the flag
   without also collapsing that branch is how a structured or secondary-output
   path gets left half-wired.
-- Any profile or docs snippet using `--stat` moves to `--format review`.
-- `--show-only` interactions documented against `--stat` are re-stated against
-  `--format review`.
+- `action/run.sh`'s own `--stat`-stripping branch (its PR-comment re-run flag
+  filter) is deleted along with the flag, not left as dead code matching a
+  spelling that no longer exists.
+- Any human-output profile or docs snippet using bare `--stat` moves to
+  `--format review`; any `--stat --format json` snippet moves to
+  `--format json` and reads `.summary`.
+- `--show-only` interactions documented against `--stat` are re-stated
+  per-migration-path: against `--format review` for the human case, and
+  as "no effect on `.summary`, same as today" for the JSON case.
 
 ### `--recommend`
 
@@ -149,8 +173,12 @@ ground for renderer switches. A genuine `release` mode may be added later if it
 describes a whole coherent report shape — but not merely to justify deleting a
 boolean.
 
-**Tests.** `compare --stat` exits `64` with `No such option`; `--format review`
-output contains the recommendation.
+**Tests.** `compare --stat` (with or without `--format json`) exits `64` with
+`No such option`; `--format review` output contains the recommendation;
+`--format json` output still contains `.summary` with the same shape
+`--stat --format json` used to return on its own, alongside `changes`; the
+`action/run.sh` PR-comment re-run path is exercised end to end (its own
+`--stat`-stripping branch is gone, not merely unreachable).
 
 **Risk:** low — no analysis, verdict, or exit code changes.
 
