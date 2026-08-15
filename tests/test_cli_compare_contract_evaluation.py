@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049 Phase 3 — the native ``abicheck compare`` CLI's own ``--contract-
-evaluation`` flag.
+"""ADR-049 Phase 3 — the native ``abicheck compare`` CLI's own ``--contract``
+flag.
 
 ``service.compare_snapshots``/``run_compare_request``/``service.run_compare``
 already forward a ``contract_evaluation`` keyword (``tests/test_service_unit.
@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -622,7 +623,7 @@ class TestReleaseFanOutContractParity:
     def test_contract_alone_implies_contract_evaluation_on_directory_inputs(
         self, tmp_path
     ):
-        # CLI audit PR 3/5: --contract alone now implies --contract
+        # CLI audit PR 3/5: --contract alone is the whole request
         # (abicheck.cli_options.resolve_contract_evaluation), resolved
         # unconditionally in run_compare ahead of the directory/package
         # dispatch -- so this now behaves identically to explicitly passing
@@ -1070,3 +1071,76 @@ class TestUsedByScopingStampsExplicitEvidence:
         assert result.exit_code == 4, result.output
         assert "Root Causes" in result.output
         assert "[contract:" not in result.output
+
+
+class TestContractFlagResolvers:
+    """``resolve_contract_evaluation``/``resolve_contract_domain`` directly.
+
+    Both are exercised end to end by the CLI tests above and by
+    ``test_scan_compare_parity``'s compare/scan ``--contract auto`` pair, but
+    only ever on the branches a real command takes. The mapping is the whole
+    reason ``auto`` is safe to offer -- it is what keeps "the caller declined
+    to name a domain" spelled the way every D7 tier below ``explicit_cli``
+    reads it -- so it is pinned here as its own contract rather than left as
+    a by-product of two callers (AGENTS.md's primitive-level guidance).
+    """
+
+    def test_any_domain_asks_for_evaluation_and_absence_does_not(self) -> None:
+        from abicheck.cli_options import resolve_contract_evaluation
+
+        for mode in ("public", "exports", "all", "auto"):
+            assert resolve_contract_evaluation(mode) is True, mode
+        assert resolve_contract_evaluation(None) is False
+
+    def test_only_auto_is_mapped_away(self) -> None:
+        from abicheck.cli_options import resolve_contract_domain
+
+        for mode in ("public", "exports", "all", None):
+            assert resolve_contract_domain(mode) is mode, mode
+        assert resolve_contract_domain("auto") is None
+
+    @staticmethod
+    def _ctx(**params: object) -> click.Context:
+        ctx = click.Context(click.Command("probe"))
+        ctx.params = dict(params)
+        for name in params:
+            ctx.set_parameter_source(name, click.core.ParameterSource.COMMANDLINE)
+        return ctx
+
+    def test_auto_is_normalized_on_the_context_too(self) -> None:
+        """`scan` rebuilds its resolver inputs from ``ctx.params`` and its
+        typed set from ``ctx.get_parameter_source``, so normalizing only the
+        returned value left ``auto`` reaching ``coerce_contract_mode`` and
+        raising (Codex review). Both must be corrected together."""
+        from abicheck.cli_options import resolve_contract_domain
+
+        ctx = self._ctx(contract_mode="auto")
+        assert resolve_contract_domain("auto", ctx) is None
+        assert ctx.params["contract_mode"] is None
+        assert (
+            ctx.get_parameter_source("contract_mode")
+            is click.core.ParameterSource.DEFAULT
+        )
+
+    def test_a_named_domain_leaves_the_context_alone(self) -> None:
+        """The demotion is specific to ``auto``. A real domain *was* typed, so
+        its ``explicit_cli`` provenance must survive -- rewriting it here would
+        silently drop the top D7 tier for every ordinary invocation."""
+        from abicheck.cli_options import resolve_contract_domain
+
+        ctx = self._ctx(contract_mode="exports")
+        assert resolve_contract_domain("exports", ctx) == "exports"
+        assert ctx.params["contract_mode"] == "exports"
+        assert (
+            ctx.get_parameter_source("contract_mode")
+            is click.core.ParameterSource.COMMANDLINE
+        )
+
+    def test_a_context_without_the_parameter_is_not_an_error(self) -> None:
+        """Only `compare`/`scan` declare ``--contract``; the helper must not
+        assume its caller's context carries the parameter at all."""
+        from abicheck.cli_options import resolve_contract_domain
+
+        ctx = self._ctx()
+        assert resolve_contract_domain("auto", ctx) is None
+        assert "contract_mode" not in ctx.params
