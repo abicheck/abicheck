@@ -48,6 +48,7 @@ def render_output(
     show_recommendation: bool = False,
     demangle: bool = False,
     contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -76,6 +77,7 @@ def render_output(
             report_mode=report_mode,
             show_impact=show_impact,
             severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
         )
 
     if fmt == "sarif":
@@ -158,6 +160,7 @@ def _render_json_output(
     report_mode: str,
     show_impact: bool,
     severity_config: SeverityConfig | None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render comparison result as JSON, optionally including dependency info."""
     base = to_json(
@@ -166,6 +169,7 @@ def _render_json_output(
         report_mode=report_mode,
         show_impact=show_impact,
         severity_config=severity_config,
+        require_complete_analysis=require_complete_analysis,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         import json

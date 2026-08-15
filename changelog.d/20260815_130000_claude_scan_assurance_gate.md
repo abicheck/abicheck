@@ -111,3 +111,26 @@
   (both rungs normalize to `source`, per `EvidenceDepth`'s own docstring)
   applied before the stamp, plus a primitive-level property test covering
   every `EvidenceDepth` member.
+
+- **`compare`'s own JSON report now persists `analysis_assurance_exit_
+  contribution` too (report schema 2.40), closing the identical gap on
+  the other front end (Codex review).** The `aggregate` fix above closed
+  this for `scan --against`; `compare --require-complete-analysis` had
+  the same hole — it computed and folded its own exit-code floor but
+  never wrote the contribution into the report `reporter.py` builds,
+  since that report is generated before the CLI's own post-hoc exit-code
+  fold ever runs. A `compare` report whose severity gate read a clean `0`
+  while this axis independently floored the *real* exit to `1` fed
+  `abicheck aggregate` a green result the same way the scan gap did.
+  Fixed by threading `require_complete_analysis` down through
+  `reporter.to_json()`'s three JSON paths (full/leaf/root-cause) into
+  `reporter_contract_blocks.add_contract_context()`, which now persists
+  the contribution alongside `analysis_assurance` itself (present under
+  the identical condition — a real `AnalysisAssurance` object attached,
+  which every genuine `compare()` call provides; absent for a hand-built
+  `DiffResult`, preserving back-compat for a caller reading this report's
+  exact key set) — the same conditional shape the `scan`-side fix above
+  needed to adopt after an existing regression test caught the
+  unconditional version breaking it. `compare_report.schema.json` (and
+  its published mirror) documents the new key as the exact sibling of
+  `contract_coverage_exit_contribution`.

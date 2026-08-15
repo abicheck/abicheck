@@ -489,7 +489,18 @@ from typing import Any
 #:       ``--show-only`` the block is projected onto the displayed findings,
 #:       so it never names a change the report itself omits. Additive
 #:       optional top-level key.
-REPORT_SCHEMA_VERSION = "2.39"
+#: 2.40 -- new top-level ``analysis_assurance_exit_contribution`` (``0``/``1``),
+#:       the exact sibling of the pre-existing ``contract_coverage_exit_
+#:       contribution`` for P0.4's own orthogonal analysis-assurance axis.
+#:       Persisted alongside ``analysis_assurance`` (present whenever a real
+#:       ``AnalysisAssurance`` is attached to the result -- in practice every
+#:       real ``compare()`` call) rather than unconditionally: read directly
+#:       by ``aggregate.py``'s ``_analysis_assurance_exit`` the same way the
+#:       coverage sibling already is, since without it a report whose
+#:       severity/compatibility gate read a clean 0 while this axis
+#:       independently floored the *real* exit to 1 fed ``abicheck aggregate``
+#:       a green result for it (Codex review). Additive key.
+REPORT_SCHEMA_VERSION = "2.40"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

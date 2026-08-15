@@ -43,7 +43,8 @@
           "confidence",
           "evidence_tier",
           "evidence_tiers",
-          "analysis_assurance"
+          "analysis_assurance",
+          "analysis_assurance_exit_contribution"
         ]
       }
     },
@@ -1107,6 +1108,15 @@
           }
         }
       }
+    },
+    "analysis_assurance_exit_contribution": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ],
+      "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under --require-complete-analysis \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when the flag was given and analysis_assurance.status is not \"complete\", 0 otherwise (including when the flag was never given). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
+      "$comment": "aggregate.py's _analysis_assurance_exit reads this field directly rather than recomputing it."
     },
     "analysis_assurance": {
       "type": "object",

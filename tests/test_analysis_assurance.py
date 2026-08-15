@@ -1308,6 +1308,26 @@ class TestAnalysisAssuranceCliIntegration:
         # assertion (flag raises it to 1) is actually testing something.
         assert payload["analysis_assurance"]["status"] != "complete"
 
+    def test_json_report_persists_the_exit_contribution_for_aggregate(
+        self, tmp_path: Path
+    ) -> None:
+        """`abicheck aggregate` reads `analysis_assurance_exit_contribution`
+        directly rather than recomputing it (Codex review, PR #780) -- a
+        real `compare` invocation must actually write it, end to end."""
+        res = _compare(
+            tmp_path,
+            _elf_only_pair(),
+            "--require-complete-analysis",
+            "--format", "json",
+        )
+        assert res.exit_code == 1, res.output
+        # The floor diagnostic is echoed to stderr (see
+        # test_the_floor_diagnostic_is_echoed_to_stderr's sibling in
+        # test_scan_analysis_assurance.py) -- parse stdout alone so it
+        # doesn't corrupt the JSON payload.
+        payload = json.loads(res.stdout[res.stdout.index("{") :])
+        assert payload["analysis_assurance_exit_contribution"] == 1
+
     def test_flag_raises_a_clean_exit_to_one_on_incomplete_status(
         self, tmp_path: Path
     ) -> None:

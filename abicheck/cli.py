@@ -873,6 +873,7 @@ def _render_output(
     show_recommendation: bool = False,
     demangle: bool = False,
     contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render comparison result in the requested output format."""
     from .service import render_output
@@ -884,6 +885,7 @@ def _render_output(
         show_recommendation=show_recommendation,
         demangle=demangle,
         contract_evaluation=contract_evaluation,
+        require_complete_analysis=require_complete_analysis,
     )
 
 

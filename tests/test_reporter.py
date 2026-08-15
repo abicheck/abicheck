@@ -121,6 +121,69 @@ class TestJsonReporter:
         assert d["summary"]["breaking"] == 1
         assert d["changes"][0]["kind"] == "func_removed"
 
+
+class TestAnalysisAssuranceExitContributionPersistence:
+    """P0.4: ``compare``'s JSON report persists
+    ``analysis_assurance_exit_contribution`` alongside ``analysis_assurance``
+    -- read (not recomputed) by ``aggregate.py``'s ``_analysis_assurance_exit``
+    the same way ``contract_coverage_exit_contribution`` already is. Before
+    this, only ``scan --against``'s summary persisted it (`_baseline_summary`),
+    so a compare report whose severity/compatibility gate read a clean 0
+    while this axis independently floored the *real* exit to 1 fed
+    `abicheck aggregate` a green result for it (Codex review, PR #780)."""
+
+    def test_absent_without_a_real_analysis_assurance_object(self):
+        # No AnalysisAssurance attached (a hand-built DiffResult, same as
+        # every other test in this file) -- nothing to report a
+        # contribution for, mirroring `analysis_assurance` itself being
+        # absent. Preserves back-compat for any consumer reading this
+        # report's exact key set.
+        r = _result(Verdict.COMPATIBLE)
+        d = json.loads(to_json(r))
+        assert "analysis_assurance" not in d
+        assert "analysis_assurance_exit_contribution" not in d
+
+    def test_present_and_zero_without_the_flag(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_json(r))
+        assert d["analysis_assurance"]["status"] == "partial"
+        # The flag was never requested (require_complete_analysis defaults
+        # False) -- 0 regardless of the underlying status, purely additive.
+        assert d["analysis_assurance_exit_contribution"] == 0
+
+    def test_one_when_the_flag_is_set_and_status_is_partial(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_json(r, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 1
+
+    def test_zero_when_the_flag_is_set_and_status_is_complete(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="complete")
+        d = json.loads(to_json(r, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 0
+
+    def test_persisted_in_leaf_and_root_cause_modes_too(self):
+        # All three JSON paths call the shared add_contract_context -- a
+        # regression pinned to only one mode would miss the other two.
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        for mode in ("leaf", "root-cause"):
+            d = json.loads(
+                to_json(r, report_mode=mode, require_complete_analysis=True)
+            )
+            assert d["analysis_assurance_exit_contribution"] == 1, mode
+
     def test_stat_forwards_severity_config(self):
         """Codex review: to_json(stat=True, severity_config=...) returned
         before forwarding severity_config to to_stat_json, so a caller going

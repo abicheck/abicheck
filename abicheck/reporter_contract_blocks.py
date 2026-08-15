@@ -39,19 +39,42 @@ def add_contract_context(
     d: dict[str, Any],
     result: DiffResult,
     displayed: Sequence[Change] | None = None,
+    *,
+    require_complete_analysis: bool = False,
 ) -> None:
-    """ADR-049 Phase 4's persisted contract blocks, plus P0.4's unconditional
-    ``analysis_assurance`` (piggybacked here, unguarded below, to stay under
-    the file-size cap). ``contract_context`` itself stays opt-in
+    """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
+    ``analysis_assurance``/``analysis_assurance_exit_contribution``
+    (piggybacked here, unguarded below, to stay under the file-size cap).
+    ``contract_context`` itself stays opt-in
     (``compare(..., contract_evaluation=True)``), serialized via
     :mod:`abicheck.contract_context_io` to match
     :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
     all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
     """
-    from .analysis_assurance import analysis_assurance_report_dict
+    from .analysis_assurance import (
+        analysis_assurance_exit_contribution,
+        analysis_assurance_report_dict,
+    )
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
+        # Persisted alongside the block itself, not unconditionally: a
+        # `result` carrying no real `AnalysisAssurance` (a hand-built
+        # object, e.g. in a test) has nothing to report a contribution
+        # *for* either. Read by `aggregate.py`'s `_analysis_assurance_exit`
+        # via the same document-shape traversal `contract_coverage_exit_
+        # contribution` already uses -- without persisting this, a compare
+        # report whose severity/compatibility gate read a clean 0 while
+        # this axis independently floored the *real* exit to 1 fed
+        # `abicheck aggregate` a green result for that report, since
+        # neither `GateInfo.from_report_data` nor `from_scan_report` reads
+        # this orthogonal axis (Codex review, PR #780). `0` covers both
+        # "the flag was never given" and "given but already complete".
+        d["analysis_assurance_exit_contribution"] = (
+            analysis_assurance_exit_contribution(
+                result, require_complete=require_complete_analysis
+            )
+        )
     add_use_case_impact(d, result, displayed)
 
     ctx = result.contract_context

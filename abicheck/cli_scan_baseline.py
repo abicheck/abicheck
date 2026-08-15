@@ -947,15 +947,21 @@ def _baseline_summary(
 
     if (aa_block := analysis_assurance_report_dict(diff)) is not None:
         summary["analysis_assurance"] = aa_block
-    # The contribution is persisted unconditionally, mirroring
-    # `contract_coverage_exit_contribution`'s own always-present shape --
-    # `0` both when the flag was never given and when it was given but the
-    # status was already `complete`, so a reader's `_is_valid_contribution`
-    # check never has to distinguish "not requested" from "requested and
-    # satisfied" (neither should gate).
-    summary["analysis_assurance_exit_contribution"] = analysis_assurance_exit_contribution(
-        diff, require_complete=require_complete_analysis
-    )
+        # Persisted alongside the block itself, not unconditionally: a
+        # `diff` carrying no real `AnalysisAssurance` (a hand-built object,
+        # e.g. in a test, or an older in-memory result) has nothing to
+        # report a contribution *for* either, and several existing callers
+        # assert this summary's exact key set for the "nothing to report"
+        # shape (back-compat with a consumer reading only the four
+        # top-level counts) -- an unconditional key here would silently
+        # break that contract the same way an unconditional
+        # `analysis_assurance` block would. `0` covers both "the flag was
+        # never given" and "given but already complete" (Codex review).
+        summary["analysis_assurance_exit_contribution"] = (
+            analysis_assurance_exit_contribution(
+                diff, require_complete=require_complete_analysis
+            )
+        )
     return summary
 
 
