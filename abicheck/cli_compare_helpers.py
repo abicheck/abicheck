@@ -224,12 +224,12 @@ def _resolve_compare_collect_mode(
     if old_sources is not None or new_sources is not None:
         return (
             resolve_dump_depth("source", "off"),
-            "source (inferred: --old-sources/--new-sources given, no --depth)",
+            "source (inferred: --sources old=/new= given, no --depth)",
         )
     if old_build_info is not None or new_build_info is not None:
         return (
             resolve_dump_depth("build", "off"),
-            "build (inferred: --old-build-info/--new-build-info given, no --depth)",
+            "build (inferred: --build-info old=/new= given, no --depth)",
         )
     return "off", "off (no --depth, no --sources/--build-info, no source.method)"
 

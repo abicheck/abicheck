@@ -674,6 +674,47 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     assert called["n"] == 0  # rejected before the inline dump ever runs
 
 
+def test_the_hybrid_rejection_names_only_live_flags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A recovery hint that names a removed flag is worse than none.
+
+    The message told the user to pass ``--old-ast-frontend castxml`` /
+    ``--new-ast-frontend clang`` and described the operand as an
+    ``--old-sources`` tree. All three spellings are gone -- ``--ast-frontend``
+    and ``--sources`` are side-aware now -- so following the instruction
+    produced a second, unrelated unknown-option error (Codex review).
+    """
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("must not run the inline dump")
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    with pytest.raises(climod.click.UsageError) as excinfo:
+        climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="hybrid", compile_context=CompileContext(),
+            frontend_explicit=True, nostdinc_explicit=False, build_info=None,
+            follow_deps=False, search_paths=(),
+            ld_library_path="", dwarf_only=False, debug_format=None,
+            pdb_path=None, collect_mode="source-target", out_dir=tmp_path,
+            label="old", depth="source",
+        )
+    msg = str(excinfo.value)
+    for dead in ("--old-ast-frontend", "--new-ast-frontend", "--old-sources"):
+        assert dead not in msg, msg
+    # ...and it still names a real way out, so the fix is not just deletion.
+    assert "--ast-frontend old=castxml" in msg, msg
+    assert "--sources old=" in msg, msg
+
+
 def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
     tmp_path: Path, monkeypatch
 ) -> None:

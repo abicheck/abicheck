@@ -1373,9 +1373,9 @@ def _embed_inline_source_side(
     if fmt is None:
         ignored = []
         if sources_raw:
-            ignored.append(f"--{label}-sources source tree")
+            ignored.append(f"--sources {label}= source tree")
         if build_info_raw:
-            ignored.append(f"raw --{label}-build-info")
+            ignored.append(f"raw --build-info {label}=")
         click.echo(
             f"Warning: {label} input {input_path} is a snapshot, not a native "
             f"binary; the {' and '.join(ignored)} is ignored (dump the binary "
@@ -1390,7 +1390,7 @@ def _embed_inline_source_side(
     # auto-bumped the depth).
     if collect_mode == "off":
         click.echo(
-            f"Warning: --{label}-sources/--{label}-build-info was given but the "
+            f"Warning: --sources {label}=/--build-info {label}= was given but the "
             "selected --depth collects no evidence; ignoring it. Use --depth "
             "build or --depth source to collect from it.",
             err=True,
@@ -1431,10 +1431,10 @@ def _embed_inline_source_side(
     ):
         raise click.UsageError(
             f"--depth source is incompatible with --ast-frontend hybrid for "
-            f"the --{label}-sources tree: L4 source-ABI replay has no "
+            f"the --sources {label}= tree: L4 source-ABI replay has no "
             "dual-backend hybrid extractor (unlike the L2 header-AST "
-            f"snapshot). Pass --{label}-ast-frontend castxml or "
-            f"--{label}-ast-frontend clang (or the unscoped --ast-frontend) "
+            f"snapshot). Pass --ast-frontend {label}=castxml or "
+            f"--ast-frontend {label}=clang (or an unsided --ast-frontend) "
             "for a --depth source compare."
         )
     # CLI-audit P2 ("business logic depends on Click-to-Click orchestration"):

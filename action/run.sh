@@ -1108,9 +1108,18 @@ elif [[ "$MODE" == "compare" ]]; then
     # (directory/package operands) rejects --write, so it's
     # skipped there too, falling back to the rerun path in
     # _maybe_post_pr_comment (Codex review).
+    #
+    # Also skipped when the user's own `extra-args` already carries
+    # `--write`, the same guard the scan branch below applies (Codex review):
+    # extra-args is appended *after* this, and Click honors the last
+    # occurrence, so ours would lose and leave $PR_JSON empty -- at which
+    # point _maybe_post_pr_comment reruns the whole comparison just to obtain
+    # JSON, doubling a potentially expensive analysis to produce a file this
+    # very injection existed to avoid rerunning for.
     if [[ "$FORMAT" != "json" ]] \
        && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}" \
+       && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
