@@ -111,7 +111,21 @@ JSON into human text:
 
 - **Human summary use** (`--stat` alone, or with a human `--format`): a
   compact one-line summary. `--format review` already exists for compact human
-  output. This use migrates to `--format review`.
+  output. This use migrates to `--format review` — **except** the built-in
+  `quick` profile (`cli_profiles.py`'s `COMPARE_PROFILES["quick"]`, which sets
+  `"stat": True`), which needs its own explicit decision rather than a silent
+  substitution: `reporter_markdown.to_review_digest` is not a one-line
+  replacement for `--stat`'s one-line output — it's a multi-section Markdown
+  digest (verdict heading, a counts table, the release recommendation, a
+  manual-review banner, top impacted symbols). Reusing it for `quick` silently
+  breaks the profile's own documented and tested contract ("`quick`
+  (symbols-only, one-line summary)" in `--profile`'s help text). PR 1 must
+  make one of two explicit choices for `quick`, not inherit `--format review`
+  by default: (a) keep a real one-line renderer for this case (a small
+  formatter, not `to_review_digest`) so `quick`'s contract is unchanged, or
+  (b) deliberately redesign `quick` onto the multi-line digest, updating its
+  `--profile` help text and its profile-contract tests in the same PR so the
+  new behavior is documented rather than a silent regression.
 - **Machine `--stat --format json` use**: not the same output shape as plain
   `--format json` — it is a documented, real combination
   (`docs/use/output-formats.md`'s own `--stat` section shows it:
@@ -126,6 +140,21 @@ JSON into human text:
   consumer that genuinely wants the `--stat`-shaped subset without `changes`
   extracts `summary` from the full JSON client-side; the CLI does not need a
   third flag to produce a strict subset of its own full output.
+  **One real gap in that equivalence:** `reporter.to_json` short-circuits on
+  `stat=True` *before* checking `report_mode`, so `--stat --format json
+  --report-mode leaf` today silently ignores `--report-mode leaf` entirely and
+  returns the same stat summary either way — including
+  `binary_compatibility_pct`/`affected_pct`, which `to_stat_json` always
+  includes. Plain `--format json --report-mode leaf`'s summary
+  (`_to_json_leaf`) genuinely does **not** carry those two keys — leaf mode's
+  summary dict is `breaking`/`source_breaks`/`risk_changes`/
+  `compatible_additions`/`total_changes` only. So "reads the same nested
+  summary" is false specifically for a caller combining `--stat` with
+  `--report-mode leaf`. Document this explicitly rather than let it surface as
+  a migration surprise: that combination's migration is `--format json`
+  **without** `--report-mode leaf` (i.e. `--report-mode full`, the default) if
+  the two percentage fields are required; a caller that doesn't read those two
+  keys is unaffected either way.
 
 - Remove `--stat` and every path its `stat=` flag threads through — it is not
   one chokepoint: `cli.py`'s `_render_output` → `service.render_output`;
@@ -141,12 +170,15 @@ JSON into human text:
 - `action/run.sh`'s own `--stat`-stripping branch (its PR-comment re-run flag
   filter) is deleted along with the flag, not left as dead code matching a
   spelling that no longer exists.
-- Any human-output profile or docs snippet using bare `--stat` moves to
-  `--format review`; any `--stat --format json` snippet moves to
-  `--format json` and reads `.summary`.
+- Any human-output profile or docs snippet using bare `--stat`, other than
+  `quick`, moves to `--format review`; `quick` gets the explicit (a)/(b)
+  decision above instead of an implicit substitution. Any `--stat --format
+  json` snippet moves to `--format json` and reads `.summary`, dropping
+  `--report-mode leaf` first if it needs the two percentage fields.
 - `--show-only` interactions documented against `--stat` are re-stated
-  per-migration-path: against `--format review` for the human case, and
-  as "no effect on `.summary`, same as today" for the JSON case.
+  per-migration-path: against `--format review` for the human case (with
+  `quick` covered separately), and as "no effect on `.summary`, same as
+  today" for the JSON case.
 
 ### `--recommend`
 
@@ -175,10 +207,16 @@ boolean.
 
 **Tests.** `compare --stat` (with or without `--format json`) exits `64` with
 `No such option`; `--format review` output contains the recommendation;
-`--format json` output still contains `.summary` with the same shape
-`--stat --format json` used to return on its own, alongside `changes`; the
-`action/run.sh` PR-comment re-run path is exercised end to end (its own
-`--stat`-stripping branch is gone, not merely unreachable).
+`--format json --report-mode full` (the default) output contains `.summary`
+with the same shape `--stat --format json` used to return on its own,
+alongside `changes`; `--format json --report-mode leaf` output's `.summary`
+is asserted to **not** carry `binary_compatibility_pct`/`affected_pct` (the
+documented, intentional gap above — not a regression to "fix" by adding them
+back); `compare --profile quick` output matches whichever of the (a)/(b)
+choices above was made, with a contract test pinning that exact shape (not
+just "it exits 0"); the `action/run.sh` PR-comment re-run path is exercised
+end to end (its own `--stat`-stripping branch is gone, not merely
+unreachable).
 
 **Risk:** low — no analysis, verdict, or exit code changes.
 
