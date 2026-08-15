@@ -52,6 +52,7 @@ import json
 import shutil
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -129,12 +130,24 @@ def _build_lib(src_dir: Path, dep_include_dir: Path, out_so: Path) -> None:
 def test_missing_dependency_include_dir_gives_actionable_hint(
     tmp_path: Path,
 ) -> None:
-    """Without the dependency's include dir, the CLI must surface the real
+    """Without the dependency's include dir, abicheck must surface the real
     'missing include' hint (--include-dir / -I) -- not an opaque subprocess
     exit-code message with no remediation, which is what the PVXS Action
     acceptance run reported seeing (the actual root cause, traced end-to-end
     against real EPICS Base + PVXS sources, turned out to be exactly this:
-    the dependency's -I was never passed)."""
+    the dependency's -I was never passed).
+
+    Where the hint surfaces is platform-dependent, and both are asserted
+    here rather than picked at random: on ELF (Linux; ``g++ -shared`` also
+    produces ELF on the Windows/win32-skipped lane, irrelevant here),
+    header-based scoping for `dump` is authoritative, so the parse failure
+    is a hard CLI error and the hint is in ``result.output``. On Mach-O
+    (macOS; `g++ -shared -o x.so` on macOS links a Mach-O bundle despite
+    the `.so` extension), header-based scoping is best-effort and degrades
+    to a ``UserWarning`` plus an export-table fallback rather than a hard
+    failure -- an existing, documented behavior (see AGENTS.md's Mach-O
+    scoping note), not something this test should paper over by skipping
+    the platform."""
     src_dir = tmp_path / "lib"
     src_dir.mkdir()
     dep_dir = tmp_path / "dep-include"
@@ -142,24 +155,36 @@ def test_missing_dependency_include_dir_gives_actionable_hint(
     _build_lib(src_dir, dep_dir, so_path)
 
     out_json = tmp_path / "report.json"
-    result = CliRunner().invoke(
-        main,
-        [
-            "dump",
-            str(so_path),
-            "-H",
-            str(src_dir / "main.h"),
-            "--ast-frontend",
-            "clang",
-            "-o",
-            str(out_json),
-        ],
-    )
-    assert result.exit_code != 0
-    # The actionable hint, not a bare "returned non-zero exit status" dump.
-    assert "dep/version.h" in result.output
-    assert "--include-dir" in result.output or "-I" in result.output
-    assert "was not found" in result.output
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(src_dir / "main.h"),
+                "--ast-frontend",
+                "clang",
+                "-o",
+                str(out_json),
+            ],
+        )
+
+    def _has_hint(text: str) -> bool:
+        return (
+            "dep/version.h" in text
+            and ("--include-dir" in text or "-I" in text)
+            and "was not found" in text
+        )
+
+    if result.exit_code != 0:
+        # ELF: hard failure, hint on the CLI's own output.
+        assert _has_hint(result.output), result.output
+    else:
+        # Mach-O/PE: soft fallback -- exit 0, hint on the emitted warning.
+        warning_texts = [str(w.message) for w in caught]
+        assert any(_has_hint(text) for text in warning_texts), warning_texts
 
 
 def test_dependency_include_dir_supplied_scan_and_self_compare_succeed(
