@@ -19,13 +19,20 @@ polymorphic class, and both sizes encode layout facts that are otherwise only
 visible in DWARF debug info:
 
 * **vtable** (``_ZTV<type>``) — laid out as ``[offset-to-top, typeinfo*,
-  slot0, slot1, …]``.  Its ``st_size`` therefore grows or shrinks by one
-  pointer per virtual function *net* added or removed.
-  ``slots ≈ size/pointer_size − 2`` for the primary vtable.  Note what this
-  does *not* cover: a pure reorder of existing virtuals keeps the slot count
-  — and so the symbol size — identical, so it is invisible here even though
-  it is a hard break.  L0 answers "the emitted vtable group changed size",
-  not "which slot moved"; identity needs L1/L2 evidence.
+  slot0, slot1, …]`` in the simple single-inheritance case, so its ``st_size``
+  grows or shrinks by one pointer per virtual function net added or removed;
+  ``slots ≈ size/pointer_size − 2`` for the primary vtable.  Two caveats the
+  kind's name (``vtable_slot_count_changed``) does not carry:
+
+  * The symbol covers the whole vtable *group* — vcall/vbase offsets plus a
+    secondary table per polymorphic base beyond the primary — so an
+    inheritance-shape change alone can resize it with no virtual added or
+    removed (``struct D : A`` → ``struct D : virtual A``).  The detected fact
+    is "the emitted group changed size", not "the slot count changed".
+  * A pure reorder of existing virtuals keeps the size identical, so it is
+    invisible here even though it is a hard break.
+
+  Either way L0 never answers *which* slot moved; identity needs L1/L2.
 
 * **typeinfo** (``_ZTI<type>``) — its concrete runtime class encodes the
   inheritance shape:

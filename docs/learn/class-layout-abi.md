@@ -165,10 +165,14 @@ see the limits below. The Itanium ABI fixes
 the on-disk size of two emitted objects for every polymorphic class, and both
 encode layout facts otherwise visible only in DWARF:
 
-- **`_ZTV<type>`** (the vtable): laid out as
-  `[offset-to-top, typeinfo*, slot0, slot1, …]`. Its `st_size` changes by one
-  pointer per virtual function *net* added or removed ⇒
-  **`vtable_slot_count_changed`**.
+- **`_ZTV<type>`** (the vtable): for the simple single-inheritance case, laid
+  out as `[offset-to-top, typeinfo*, slot0, slot1, …]`, so its `st_size`
+  changes by one pointer per virtual function net added or removed. In general
+  the symbol covers the whole **vtable group** — vcall/vbase offsets, and a
+  secondary table per polymorphic base beyond the primary — so its size also
+  moves when the *inheritance shape* changes with no virtual added at all
+  (`struct D : A` → `struct D : virtual A` is enough). Either way the finding
+  is **`vtable_slot_count_changed`**.
 - **`_ZTI<type>`** (the typeinfo): its concrete runtime class
   (`__class_type_info` / `__si_class_type_info` / `__vmi_class_type_info`)
   encodes the inheritance shape, so a base-class change that moves the class
@@ -183,15 +187,21 @@ a stripped `.so`. Read the signal for what it is, and no further:
 
 | What L0 actually establishes | What it does **not** establish |
 |---|---|
-| The emitted vtable group changed size ⇒ virtuals were net added or removed | *Which* slot changed, or which method now occupies it |
-| The RTTI object changed size/shape ⇒ the inheritance shape changed | *Which* base changed, or how |
+| The emitted vtable group changed size | *Why* — added/removed virtuals and an inheritance-shape change both do this |
+| The emitted RTTI object changed size | *Which* base changed, or how |
 | A structural signal worth investigating | That nothing changed when the size held still |
 
-The last row is the important one. A **pure reorder** of virtual functions, and
-a base-class **replacement or reorder** that keeps the same runtime class and
-entry count, both leave the object size identical — and are therefore invisible
-at L0, even though both are hard ABI breaks. Establishing *identity* (which slot,
-which base) needs L1/L2 evidence. Because the slot count is *inferred* from size,
+Both columns matter. On the left, note that `vtable_slot_count_changed` is named
+for its commonest cause, not for something L0 can prove: a size delta on a class
+with virtual or multiple inheritance may be vcall/vbase offsets or a secondary
+table moving, not a slot count at all.
+
+On the right, the last row is the one that bites. A **pure reorder** of virtual
+functions, and a base-class **replacement or reorder** that keeps the same
+runtime class and entry count, both leave the object size identical — and are
+therefore invisible at L0, even though both are hard ABI breaks. Establishing
+*identity* (which slot, which base) needs L1/L2 evidence. Because the finding is
+*inferred* from size,
 these findings carry `MEDIUM` confidence; and as always, the finding is a
 detected fact, while the verdict it maps to is policy (an append-only virtual
 addition means something different for a closed hierarchy than for one consumers

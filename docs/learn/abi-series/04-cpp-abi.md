@@ -247,13 +247,19 @@ the kind of change that merits review rather than a silent pass.
 
 !!! note "The C++17 subtlety"
     C++17 made `noexcept` part of the function *type*, but under Itanium that
-    only changes mangling where the *full function-type* is encoded — function
-    pointers, references to functions, and templates parameterized by function
-    type — **not** the `<bare-function-type>` used for ordinary member/free
-    symbols. So toggling `noexcept` on a plain declaration leaves the direct
-    symbol unchanged (abicheck: 🟢 COMPATIBLE), but the **same change escalates
-    to 🔴 BREAKING** for callers that pass the function through a pointer or
-    template where the `E` tag now participates in the mangled name.
+    only changes mangling where the *full function-type* is encoded — **not**
+    the `<bare-function-type>` used for ordinary member/free symbols. So
+    toggling `noexcept` on a plain declaration leaves the direct symbol
+    unchanged (abicheck: 🟢 COMPATIBLE).
+
+    Be precise about what escalates. Simply *taking the address* of
+    `reset() noexcept` does not: the compiled pointer still targets the same
+    unchanged `_ZN6Buffer5resetEv`, so nothing breaks at link or load. The
+    **🔴 BREAKING** case is narrower — the function type has to be embedded in
+    some *other* ABI-visible mangled entity, so that entity's own name moves:
+    an exported function taking `void (*)() noexcept` as a parameter, or a
+    template specialization instantiated on the function type. There the `E`
+    tag participates in the mangled name and the old symbol disappears.
 
 ---
 
@@ -287,10 +293,13 @@ purposes of calls** directly in registers, but passes a **non-trivial** one *by
 invisible reference* — the caller materializes the object on the stack and hands
 the callee a pointer. The governing property is the Itanium ABI's
 [*non-trivial for the purposes of calls*](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#non-trivial-parameters)
-rule (a user-provided copy/move constructor or destructor, or a member/base that
-has one) — related to, but not identical with,
-`std::is_trivially_copyable`. **A single line flips the register/memory
-decision.**
+rule — related to, but not identical with, `std::is_trivially_copyable`. A type
+qualifies when it has a **non-trivial** copy constructor, move constructor, or
+destructor, *or* when all of its eligible copy and move constructors are
+**deleted**. Note that "non-trivial" is not the same as "user-provided": an
+*implicit* special member is non-trivial too if the class has virtual functions
+or virtual bases, or if a base or member's own corresponding member is
+non-trivial. **A single line flips the register/memory decision.**
 
 ```cpp
 /* v1 */ struct Point { double x, y; };                 // trivially copyable
