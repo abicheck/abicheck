@@ -239,6 +239,17 @@ def parse_removed_lines(diff_text: str) -> dict[str, set[int]]:
     return removed
 
 
+def pure_deletion_paths(diff_text: str) -> set[str]:
+    """Paths with at least one hunk that removes lines and adds none.
+
+    The narrower question behind "can an unresolvable base hide a failure".
+    A *modification* removes and adds in the same hunk, so its new side is
+    already attributed and the removed side adds nothing the gate needs. Only
+    a hunk with no new side at all has its evidence exclusively in the base.
+    """
+    return {path for path, old, new in _hunks(diff_text) if old[1] and not new[1]}
+
+
 def _hunks(diff_text: str) -> Iterator[tuple[str, tuple[int, int], tuple[int, int]]]:
     """`(path, (old_start, old_count), (new_start, new_count))` per hunk."""
     current: str | None = None
@@ -731,12 +742,34 @@ def main(argv: list[str] | None = None) -> int:
             # deleted guard has *all* of its evidence in the removed half, so
             # saying nothing here would let a gate that resolved none of it
             # print the same "OK" line as one that resolved all of it.
+            #
+            # Whether that is fatal depends on what the unresolved removals
+            # could have hidden. A removal in a module with no surviving
+            # mutant cannot hide a diff-scoped failure — there is no survivor
+            # to attribute — so warning is the honest answer. A removal in a
+            # module that *does* carry a survivor is a failed measurement:
+            # exiting 0 there is a pass the run never earned, whatever the
+            # warning says (Codex review).
+            at_risk = sorted(
+                {r.module_path for r in records if r.is_survivor}
+                & pure_deletion_paths(diff_text)
+            )
             print(
                 "mutation-score: WARNING — could not read the base revision "
                 f"({args.base_ref}), so lines this branch *removed* were not "
                 "attributed to any function. The diff-scoped result below "
                 "covers added and modified lines only."
             )
+            if at_risk:
+                print(
+                    "ERROR: those unattributed removals are in module(s) that "
+                    "carry surviving mutants, so a survivor in a function this "
+                    "branch gutted would go unreported: "
+                    + ", ".join(at_risk)
+                    + ". Fetch the base revision (the PR lane checks out with "
+                    "fetch-depth: 0) and re-run."
+                )
+                return 1
         n_funcs = sum(len(v) for v in touched.values())
         print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
         if n_funcs:

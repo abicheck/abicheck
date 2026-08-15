@@ -1099,12 +1099,18 @@ def test_removed_lines_are_read_from_the_merge_base_not_the_new_file(
     assert asked == ["abicheck/diff_types.py"]
 
 
-def test_an_unreadable_base_says_so_instead_of_guessing(
+def test_an_unreadable_base_fails_closed_when_a_survivor_could_be_hidden(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A branch whose only edit is a deletion has all of its evidence on the
     removed side, so an unresolvable base must not print the same OK line as a
-    fully resolved run."""
+    fully resolved run — and must not exit 0 either.
+
+    Warning and exiting 0 was the first version of this, and it was the same
+    can't-fail shape the whole gate exists to remove: the survivor in the
+    function the branch gutted goes unreported, and the run is green (Codex
+    review).
+    """
     (tmp_path / "abicheck").mkdir()
     (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
     monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
@@ -1117,7 +1123,7 @@ def test_an_unreadable_base_says_so_instead_of_guessing(
     results = _write(
         tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
     )
-    gate.main(
+    rc = gate.main(
         [
             "--results-file",
             results,
@@ -1128,7 +1134,91 @@ def test_an_unreadable_base_says_so_instead_of_guessing(
             deletion_diff,
         ]
     )
-    assert "WARNING" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert rc == 1, out
+    assert "WARNING" in out
+    assert "abicheck/diff_types.py" in out
+
+
+def test_an_unreadable_base_only_warns_when_nothing_could_be_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Negative control, and the reason the failure is conditional: an
+    unattributed removal in a module with no surviving mutant has nothing to
+    hide — there is no survivor to attribute — so failing there would block
+    branches on an absence of evidence that cannot matter."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_base_reader", lambda base_ref: None)
+    deletion_diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -2,1 +1,0 @@\n-    return 1\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_platform.x_other__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_platform.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            deletion_diff,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "WARNING" in out
+
+
+def test_a_modification_is_not_treated_as_an_unattributable_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Second negative control: every modified line is removed *and* added, so
+    keying the failure on removals alone would fail closed on an ordinary edit
+    whose new side is already attributed."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_base_reader", lambda base_ref: None)
+    edit_diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -2,1 +2,1 @@\n-    return 1\n+    return 2\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_untouched__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            edit_diff,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "unattributed removals" not in out
+
+
+def test_pure_deletion_paths_separates_deletions_from_edits() -> None:
+    """The predicate itself: only a hunk with no new side has its evidence
+    exclusively in the base."""
+    diff = (
+        "--- a/gone.py\n+++ b/gone.py\n@@ -5,4 +4,0 @@\n-a\n-b\n-c\n-d\n"
+        "--- a/edited.py\n+++ b/edited.py\n@@ -20,1 +20,1 @@\n-old\n+new\n"
+        "--- a/added.py\n+++ b/added.py\n@@ -3,0 +4,1 @@\n+x\n"
+    )
+    assert gate.pure_deletion_paths(diff) == {"gone.py"}
 
 
 def test_a_deleted_module_level_constant_keeps_module_scope(

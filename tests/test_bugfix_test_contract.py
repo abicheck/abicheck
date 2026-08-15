@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import tomllib
 
 _PATH = (
     Path(__file__).resolve().parent.parent / "scripts" / "check_bugfix_test_contract.py"
@@ -528,11 +529,40 @@ class TestContentEvidence:
             "tests/conftest.py",
             "tests/canonical_identity_contract.py",
             "contrib/abicheck-clang-plugin/tests/test_x.py",
-            "foo/bar_test.py",
         ],
     )
     def test_real_test_paths_are_recognised(self, path: str) -> None:
         assert gate.is_test_path(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # `testpaths = ["tests"]` and the canonical command is `pytest
+            # tests/`, so a test-shaped basename outside a `tests` tree is
+            # never collected by any lane — crediting it accepted a file
+            # nothing runs (Codex review).
+            "foo/bar_test.py",
+            "scripts/test_helper.py",
+            # The one real file the fallback matched, and the clearest case:
+            # an agent-eval fixture the suite deliberately does not execute.
+            "agent-evals/tasks/add-change-kind-small/hidden_tests/test_x.py",
+        ],
+    )
+    def test_a_test_basename_outside_a_test_tree_is_not_collected(
+        self, path: str
+    ) -> None:
+        assert not gate.is_test_path(path)
+
+    def test_the_uncollected_fixture_is_really_uncollected(self) -> None:
+        """The rule above rests on a claim about this repository's own
+        configuration, so read it rather than restate it: anything outside
+        `testpaths` is not collected by the canonical command."""
+        config = tomllib.loads(
+            (Path(gate.__file__).resolve().parent.parent / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert config["tool"]["pytest"]["ini_options"]["testpaths"] == ["tests"]
 
     @pytest.mark.parametrize(
         "path",

@@ -152,10 +152,7 @@ _TRUST_BOUNDARY_PREFIXES = (".github/workflows/", ".github/actions/")
 
 #: Directory component that marks a test tree.
 _TEST_DIR = "tests"
-#: Basename shapes that mark a test module.
-_TEST_BASENAME_PREFIX = "test_"
-_TEST_BASENAME_SUFFIX = "_test.py"
-_TEST_BASENAMES = frozenset({"conftest.py"})
+
 #: Prose suffixes. A file under `tests/` with one of these is documentation,
 #: not an executable test or a fixture — editing `tests/CLAUDE.md` alongside a
 #: shipped-code fix must not satisfy "you changed a test" (Codex review).
@@ -543,34 +540,34 @@ def touches_shipped_code(paths: list[str]) -> bool:
 def is_test_path(path: str) -> bool:
     """Is *path* a test file?
 
-    Deliberately structural — a `tests/` **directory component**, or a test
-    **basename** — rather than a substring search for `test_` anywhere in the
-    path. The substring form matched shipped sources whose names merely contain
-    it, including `scripts/summarize_test_durations.py` and this checker itself
+    Deliberately structural — a `tests/` **directory component** — rather than
+    a substring search for `test_` anywhere in the path. The substring form
+    matched shipped sources whose names merely contain it, including
+    `scripts/summarize_test_durations.py` and this checker itself
     (`check_bugfix_test_contract.py`), so a fix editing only those satisfied
     the structural requirement with no test at all — passing exactly the case
     it exists to reject (Codex review).
+
+    A test **basename** outside any such directory used to count too, and no
+    longer does. `testpaths = ["tests"]` and the canonical command is `pytest
+    tests/`, so a `test_*.py`/`*_test.py` file elsewhere is never collected by
+    any lane — accepting it credited a file nothing runs (Codex review). The
+    one real file it matched proves the point:
+    `agent-evals/tasks/*/hidden_tests/test_*.py`, an eval fixture that the
+    test suite deliberately does not execute. Every directory named `tests`
+    in this repository *is* run by some lane (the root suite, the clang
+    plugin's, the layout tool's), so the directory rule needs no allowlist.
     """
     parts = PurePosixPath(path).parts
     if not parts:
         return False
-    name = parts[-1]
-    if _TEST_DIR in parts[:-1]:
-        # Inside a test tree, any file type can be test *data* (fixtures,
-        # golden snapshots) — only prose is excluded, and not under golden/.
-        is_prose = name.endswith(_DOC_SUFFIXES)
-        return not is_prose or _TEST_DATA_DIR in parts[:-1]
-    # Outside a test tree, the basename forms must be actual Python test
-    # modules: `docs/test_plan.md` and `examples/test_notes.txt` start with
-    # `test_` and are prose, and counting them satisfied the structural
-    # requirement with no executable test changed (Codex review).
-    if not name.endswith(".py"):
+    if _TEST_DIR not in parts[:-1]:
         return False
-    return (
-        name.startswith(_TEST_BASENAME_PREFIX)
-        or name.endswith(_TEST_BASENAME_SUFFIX)
-        or name in _TEST_BASENAMES
-    )
+    # Inside a test tree, any file type can be test *data* (fixtures, golden
+    # snapshots) — only prose is excluded, and not under golden/.
+    name = parts[-1]
+    is_prose = name.endswith(_DOC_SUFFIXES)
+    return not is_prose or _TEST_DATA_DIR in parts[:-1]
 
 
 def touches_tests(paths: list[str]) -> bool:
