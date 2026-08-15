@@ -70,10 +70,15 @@ STATUS_TYPE_CHECKED = "caught by type check"
 #: killed by a test, deliberately excluded, or rejected by the type checker.
 RESOLVED_OK_STATUSES = frozenset({STATUS_KILLED, STATUS_SKIPPED, STATUS_TYPE_CHECKED})
 
-#: Statuses that mean the measurement did not resolve. Accepting any of these
-#: as "not a survivor" would let an under-resolved run pass a zero baseline —
-#: ``no tests`` in particular is a *real* gap (nothing covers the mutant), not
-#: a neutral outcome.
+#: The statuses mutmut 3.7.0 emits that mean the measurement did not resolve.
+#: Accepting any of these as "not a survivor" would let an under-resolved run
+#: pass a zero baseline — ``no tests`` in particular is a *real* gap (nothing
+#: covers the mutant), not a neutral outcome.
+#:
+#: This is documentation of the observed vocabulary, **not** the predicate:
+#: :attr:`MutantRecord.is_unresolved` is the complement of
+#: :data:`RESOLVED_OK_STATUSES` plus ``survived``, so a status this list does
+#: not name still counts as unresolved.
 UNRESOLVED_STATUSES = frozenset(
     {
         "no tests",
@@ -139,7 +144,18 @@ class MutantRecord:
 
     @property
     def is_unresolved(self) -> bool:
-        return self.status in UNRESOLVED_STATUSES
+        """Anything that is neither a survivor nor an *explicitly* good outcome.
+
+        Deliberately the complement of :data:`RESOLVED_OK_STATUSES` rather than
+        a membership test against :data:`UNRESOLVED_STATUSES`: the pin allows
+        any ``mutmut>=3.7,<4``, and a future 3.x that adds a status neither
+        frozenset names would otherwise be counted as neither a survivor nor
+        unresolved — vanishing from both halves of the gate and letting an
+        outcome this parser does not understand pass a zero baseline. Failing
+        closed makes an unrecognised status an unresolved measurement, which
+        the gate already refuses to score (Codex review).
+        """
+        return self.status not in RESOLVED_OK_STATUSES and not self.is_survivor
 
 
 def demangle_function(component: str) -> str:

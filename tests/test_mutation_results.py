@@ -136,6 +136,39 @@ class TestStatusVocabulary:
         assert rec.status == "caught by type check"
         assert not rec.is_survivor and not rec.is_unresolved
 
+    def test_an_unknown_status_fails_closed_as_unresolved(self) -> None:
+        """A status from a future `mutmut>=3.7,<4` must not vanish.
+
+        The pin admits any 3.x, so a new non-killed status is a real
+        possibility. Classified as neither a survivor nor unresolved it would
+        drop out of both halves of the gate, letting an outcome this parser
+        does not understand pass a zero baseline (Codex review).
+        """
+        text = "    pkg.a.x_f__mutmut_1: escaped via warp core\n"
+        (rec,) = mr.parse_mutant_records(text)
+        assert rec.status not in mr.RESOLVED_OK_STATUSES
+        assert rec.status not in mr.UNRESOLVED_STATUSES
+        assert not rec.is_survivor
+        assert rec.is_unresolved
+        assert mr.count_unresolved(text) == 1
+
+    @pytest.mark.parametrize("status", sorted(mr.RESOLVED_OK_STATUSES))
+    def test_only_the_named_good_statuses_are_accepted(self, status: str) -> None:
+        """Negative control for the fail-closed rule above.
+
+        Failing closed must not degrade into "everything is unresolved": each
+        status mutmut names as a resolved, acceptable outcome still resolves.
+        """
+        (rec,) = mr.parse_mutant_records(f"    pkg.a.x_f__mutmut_1: {status}\n")
+        assert not rec.is_unresolved and not rec.is_survivor
+
+    def test_every_documented_unresolved_status_is_still_unresolved(self) -> None:
+        """The observed 3.7.0 vocabulary keeps its meaning under the complement
+        rule — the frozenset stopped being the predicate, not the contract."""
+        for status in sorted(mr.UNRESOLVED_STATUSES):
+            (rec,) = mr.parse_mutant_records(f"    pkg.a.x_f__mutmut_1: {status}\n")
+            assert rec.is_unresolved, status
+
 
 class TestSurvivorCounting:
     def test_counts_real_results_listing(self) -> None:

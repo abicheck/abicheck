@@ -362,6 +362,29 @@ class TestConditionalRequirements:
         assert requirement.applies_to([path])
 
     @pytest.mark.parametrize(
+        "path",
+        [
+            ".github/actions/setup-castxml/action.yml",
+            ".github/actions/cache-ast-dumps/action.yml",
+        ],
+    )
+    def test_local_composite_actions_share_the_trust_boundary(self, path: str) -> None:
+        """A local composite action has no `on:` trigger, so neither the
+        shipped-code map nor the `.github/workflows/` prefix matched it — yet
+        its steps run inside every caller with that caller's permissions, and
+        `setup-castxml` alone is used by six workflows. Its blast radius is
+        wider than a single workflow file's, not narrower (Codex review)."""
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == "malicious-fixture")
+        assert requirement.applies_to([path])
+
+    def test_prose_under_a_trust_boundary_prefix_asks_nothing(self) -> None:
+        """Negative control: the prefixes are *directory* prefixes, so the
+        docs exclusion has to apply on the trust-boundary branch too, or a
+        composite action's README would be asked for hostile-input evidence."""
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == "malicious-fixture")
+        assert not requirement.applies_to([".github/actions/setup-castxml/README.md"])
+
+    @pytest.mark.parametrize(
         "path, key",
         [
             ("docs/reference/snapshot_io.md", "real-dependency-test"),

@@ -113,7 +113,19 @@ _SHIPPED_FILES = frozenset({"action.yml"})
 
 #: Not shipped code, but the surface the malicious-fixture requirement is
 #: about: a workflow runs with the repository's permissions.
-_TRUST_BOUNDARY_PREFIXES = (".github/workflows/",)
+#:
+#: `.github/actions/` is the same boundary reached one level down. A local
+#: composite action (`setup-castxml`, `cache-ast-dumps`) has no `on:` trigger
+#: of its own, so nothing here matched it — but its steps execute inside
+#: whichever caller invoked it, with that caller's token and permissions, and
+#: `setup-castxml` alone is invoked from `ci.yml`, `publish.yml`,
+#: `performance.yml`, `realworld-validation.yml` and both examples-validation
+#: workflows. Its blast radius is therefore *wider* than any single workflow
+#: file's, not narrower (Codex review). Deliberately trust-boundary rather
+#: than shipped code, matching `.github/workflows/`: these run only in this
+#: repository's CI and are not consumed by users, unlike the published
+#: `actions/` tree.
+_TRUST_BOUNDARY_PREFIXES = (".github/workflows/", ".github/actions/")
 
 #: Directory component that marks a test tree.
 _TEST_DIR = "tests"
@@ -134,11 +146,20 @@ _TEST_DATA_DIR = "golden"
 def _is_conditional_subject(path: str) -> bool:
     """Can this path carry the runtime behaviour a conditional asks about?
 
-    Shipped code, plus the workflow trust boundary — the latter is not
-    "shipped" by the map above but is exactly what the malicious-fixture
-    requirement exists for.
+    Shipped code, plus the workflow/composite-action trust boundary — the
+    latter is not "shipped" by the map above but is exactly what the
+    malicious-fixture requirement exists for.
+
+    Prose is excluded on *both* branches, not just the shipped one: the
+    trust-boundary prefixes are directory prefixes, so without this a
+    `.github/actions/<name>/README.md` would be asked for hostile-input
+    evidence for the same reason `docs/reference/snapshot_io.md` used to be
+    asked for real-dependency evidence — a conditional that fires on prose is
+    boilerplate, not a signal.
     """
     if is_test_path(path):
+        return False
+    if path.endswith(_DOC_SUFFIXES):
         return False
     if path.startswith(_TRUST_BOUNDARY_PREFIXES):
         return True
