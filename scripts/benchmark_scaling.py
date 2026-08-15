@@ -146,6 +146,7 @@ from perf_baseline import (  # noqa: E402
 )
 from perf_measurement import (  # noqa: E402
     SampleStats,
+    finite_nonnegative_float_arg,
     positive_int_arg,
     summarize_samples,
 )
@@ -1678,7 +1679,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--regress-tolerance",
-        type=float,
+        type=finite_nonnegative_float_arg,
         default=0.5,
         help="GATE (with --baseline): fail if a scenario is slower than its "
         "baseline by more than this fraction (default 0.5 = 50%%). The actual "
@@ -1687,7 +1688,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--regress-min-delta-seconds",
-        type=float,
+        type=finite_nonnegative_float_arg,
         default=0.0,
         help="GATE (with --baseline): absolute-seconds floor combined with "
         "--regress-tolerance via max() — protects a small baseline (a few ms) "

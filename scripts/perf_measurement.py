@@ -132,3 +132,34 @@ def positive_int_arg(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
     return parsed
+
+
+def finite_nonnegative_float_arg(value: str) -> float:
+    """``argparse`` ``type=`` for a ``--regress-tolerance``/``--regress-min-delta-*``
+    -shaped option: reject non-finite and negative values.
+
+    :func:`combined_regression_threshold` computes
+    ``max(tolerance * base, min_delta)`` and a caller then fails only when the
+    measured delta exceeds that allowed value. A ``nan`` tolerance/min-delta
+    makes every such comparison ``False`` (a ``float`` comparison against
+    ``nan`` is never true), and an ``inf`` value (accepted by plain
+    ``type=float``, including via a literal ``"inf"``/overflowing string like
+    ``"1e309"``) makes the allowed delta infinite -- both silently neuter the
+    regression gate into always reporting success regardless of how badly a
+    measurement regressed (Codex review, fresh evidence). A negative value is
+    also meaningless here (it would demand *faster* than baseline, or a
+    negative floor, just to pass). Rejecting all of these at parse time gives
+    a clear ``argparse`` usage error instead of a silently-neutered gate.
+    Generalizes ``check_header_graph_perf.py``'s own originally-local
+    ``_finite_nonnegative_float``, now shared here (mirroring
+    :func:`positive_int_arg` above) so the two scripts' validation can't
+    independently drift -- this bug's own shape (present in
+    ``benchmark_scaling.py`` but not its sibling) is exactly what a second,
+    independently-hand-rolled copy already caused once.
+    """
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite, non-negative number, got {value!r}"
+        )
+    return parsed

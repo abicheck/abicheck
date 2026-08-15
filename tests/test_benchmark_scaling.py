@@ -40,9 +40,12 @@ def test_baseline_points_tolerates_garbage() -> None:
     assert perf_baseline.baseline_points_from_report({}) == {}
     assert perf_baseline.baseline_points_from_report({"scenarios": "nope"}) == {}
     assert perf_baseline.baseline_points_from_report({"scenarios": {"x": "bad"}}) == {}
-    assert perf_baseline.baseline_points_from_report(
-        {"scenarios": {"x": {"points": "nope"}}}
-    ) == {}
+    assert (
+        perf_baseline.baseline_points_from_report(
+            {"scenarios": {"x": {"points": "nope"}}}
+        )
+        == {}
+    )
 
 
 def test_baseline_points_tolerates_non_dict_top_level() -> None:
@@ -271,7 +274,12 @@ def test_sizes_and_repeat_reject_non_positive_values() -> None:
     # ValueError from summarize_samples() instead of a clean argparse usage
     # error. --sizes shares the same positive_int_arg validator for the
     # identical reason check_header_graph_perf.py's own --sizes already had.
-    for bad_args in (["--sizes", "0"], ["--repeat", "0"], ["--sizes", "-5"], ["--repeat", "-1"]):
+    for bad_args in (
+        ["--sizes", "0"],
+        ["--repeat", "0"],
+        ["--sizes", "-5"],
+        ["--repeat", "-1"],
+    ):
         with pytest.raises(SystemExit):
             bench.parse_args(bad_args)
 
@@ -280,3 +288,26 @@ def test_sizes_and_repeat_accept_positive_values() -> None:
     args = bench.parse_args(["--sizes", "10", "20", "--repeat", "3"])
     assert args.sizes == [10, 20]
     assert args.repeat == 3
+
+
+def test_regress_flags_reject_non_finite_and_negative_values() -> None:
+    # Codex review, fresh evidence: a plain `type=float` let
+    # --regress-tolerance/--regress-min-delta-seconds through as nan/inf (or
+    # an overflowing literal like "1e309", which float() also parses as
+    # inf) -- combined_regression_threshold()'s allowed delta then becomes
+    # infinite (or the comparison against it always False), silently
+    # reporting every regression as a pass. Both flags now share
+    # check_header_graph_perf.py's own finite/non-negative validator via
+    # perf_measurement.finite_nonnegative_float_arg.
+    for flag in ("--regress-tolerance", "--regress-min-delta-seconds"):
+        for bad_value in ("nan", "inf", "-inf", "1e309", "-0.1"):
+            with pytest.raises(SystemExit):
+                bench.parse_args([flag, bad_value])
+
+
+def test_regress_flags_accept_finite_nonnegative_values() -> None:
+    args = bench.parse_args(
+        ["--regress-tolerance", "0.15", "--regress-min-delta-seconds", "0.1"]
+    )
+    assert args.regress_tolerance == pytest.approx(0.15)
+    assert args.regress_min_delta_seconds == pytest.approx(0.1)

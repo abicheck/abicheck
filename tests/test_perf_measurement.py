@@ -118,3 +118,31 @@ class TestPositiveIntArg:
 
         with pytest.raises(argparse.ArgumentTypeError):
             pm.positive_int_arg("-1")
+
+
+class TestFiniteNonnegativeFloatArg:
+    def test_accepts_finite_nonnegative_values(self) -> None:
+        assert pm.finite_nonnegative_float_arg("0.5") == 0.5
+        assert pm.finite_nonnegative_float_arg("0") == 0.0
+
+    @pytest.mark.parametrize("bad_value", ["nan", "inf", "-inf", "1e309"])
+    def test_rejects_non_finite(self, bad_value: str) -> None:
+        # A nan/inf --regress-tolerance or --regress-min-delta-* neuters the
+        # regression gate silently: float("nan") compares False against
+        # everything, and float("inf") (or an overflowing literal like
+        # "1e309", which Python's float() also accepts as inf) makes
+        # combined_regression_threshold()'s allowed delta infinite, so no
+        # measured slowdown can ever exceed it (Codex review, fresh
+        # evidence -- benchmark_scaling.py's own --regress-tolerance/
+        # --regress-min-delta-seconds accepted these via plain type=float
+        # until wired to this shared helper).
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            pm.finite_nonnegative_float_arg(bad_value)
+
+    def test_rejects_negative(self) -> None:
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            pm.finite_nonnegative_float_arg("-0.1")

@@ -120,7 +120,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import math
 import os
 import shutil
 import subprocess
@@ -152,6 +151,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from perf_measurement import (  # noqa: E402
     combined_regression_threshold,
+    finite_nonnegative_float_arg,
     positive_int_arg,
     summarize_samples,
 )
@@ -610,25 +610,13 @@ def _print_markdown(points: list[dict[str, Any]]) -> None:
 _positive_int = positive_int_arg
 
 
-def _finite_nonnegative_float(value: str) -> float:
-    """``argparse`` ``type=`` for ``--regress-tolerance``: reject non-finite/negative.
-
-    ``check_regressions()`` computes ``allowed = base * (1.0 + tolerance)`` and
-    fails only when ``current > allowed`` -- a ``nan`` tolerance makes that
-    comparison always ``False`` (``float`` comparisons against ``nan`` are
-    never true), and an ``inf`` tolerance makes ``allowed`` infinite, so both
-    let an arbitrarily regressed measurement print ``OK`` instead of failing
-    (Codex review, fresh evidence). A negative tolerance is also meaningless
-    here (it would demand *faster* than baseline just to pass). Rejecting all
-    three at parse time gives a clear ``argparse`` usage error instead of a
-    silently-neutered gate.
-    """
-    parsed = float(value)
-    if not math.isfinite(parsed) or parsed < 0:
-        raise argparse.ArgumentTypeError(
-            f"must be a finite, non-negative number, got {value!r}"
-        )
-    return parsed
+#: ``argparse`` ``type=`` for ``--regress-tolerance``/``--regress-min-delta-ms``:
+#: reject non-finite/negative. Now shared with benchmark_scaling.py via
+#: perf_measurement.finite_nonnegative_float_arg (the two scripts' identical
+#: regression-gate validation can't independently drift); kept under this
+#: module's own historical name since tests/test_header_graph_perf_gate.py
+#: references it directly.
+_finite_nonnegative_float = finite_nonnegative_float_arg
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
