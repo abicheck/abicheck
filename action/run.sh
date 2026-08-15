@@ -323,6 +323,17 @@ if ! _PY_SAFE_DIR="$(mktemp -d)"; then
   echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helpers without risking a checked-out repository shadowing the installed package."
   exit 1
 fi
+# Registered immediately, not left to the main EXIT trap much further down
+# this script (Codex review, fresh evidence): an early exit -- argument
+# validation, a no-baseline dry-run success, any error path before this
+# script reaches that later trap -- would otherwise leave $_PY_SAFE_DIR
+# behind uncleaned, accumulating private temporary directories across
+# repeated invocations on a persistent self-hosted runner. A later `trap
+# ... EXIT` (this script's main one) replaces this handler outright rather
+# than chaining it, which is fine here: that later trap already includes
+# `${_PY_SAFE_DIR:-}` in its own cleanup, so nothing is lost when it
+# installs -- this one only needs to cover the gap before it does.
+trap 'rm -rf "$_PY_SAFE_DIR"' EXIT
 
 # On most runners this is exactly the interpreter action.yml's own "Install
 # abicheck" step just `pip install`ed into, since `pip` itself resolves

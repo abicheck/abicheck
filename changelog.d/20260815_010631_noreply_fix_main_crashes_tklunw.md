@@ -68,7 +68,13 @@
   under a different, wrong compile context instead of failing on the
   invalid configuration. A value with no quoting/escaping at all still
   falls back to plain whitespace splitting, since that's provably
-  identical to real parsing for that shape.
+  identical to real parsing for that shape. The temporary directory's
+  cleanup is now also registered immediately after it's created (rather
+  than left to the script's main cleanup trap, installed much later), so
+  an early exit — argument validation, a no-baseline dry-run success —
+  can no longer leave it behind, accumulating private temporary
+  directories across repeated invocations on a persistent self-hosted
+  runner.
 - **The Windows-only compiler-flags tokenizer (`--gcc-options`/
   `--compiler-option`) now follows the standard Windows command-line
   backslash/quote parsing rule** (the same one `CommandLineToArgvW` and

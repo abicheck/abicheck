@@ -61,7 +61,7 @@ from pathlib import Path
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
-_PY_SAFE_DIR_END = "\nfi\n"
+_PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
 
 _MALICIOUS_MARKER = "MALICIOUS CODE EXECUTED"
 
@@ -401,3 +401,54 @@ class TestPyBinHasAbicheckFallback:
         )
         assert result.returncode == 0, result.stderr
         assert "HAS_ABICHECK=true" in result.stdout
+
+
+class TestPySafeDirCleanedUpOnEarlyExit:
+    """Codex review, fresh evidence: $_PY_SAFE_DIR's own creation is
+    followed immediately by a ``trap ... EXIT`` covering just it -- not
+    left to the script's main cleanup trap, installed much further down.
+    An early exit (argument validation, a no-baseline dry-run success, any
+    error path before that later trap installs) would otherwise leave the
+    private temporary directory behind, accumulating across repeated
+    invocations on a persistent self-hosted runner. A later, real
+    ``trap ... EXIT`` (this script's main one) replaces this handler
+    outright rather than chaining it, which is fine: that later trap
+    already covers ``$_PY_SAFE_DIR`` too.
+    """
+
+    def test_directory_is_removed_on_an_early_exit(self, tmp_path: Path) -> None:
+        script = _py_safe_dir_source() + 'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DIR="))
+        created_dir = line[len("DIR=") :]
+        assert not Path(created_dir).exists()
+
+    def test_without_the_early_trap_the_directory_actually_leaks(
+        self, tmp_path: Path
+    ) -> None:
+        """Proves the test above isn't vacuously passing -- the identical
+        mktemp call, minus only the trap, really does leave the directory
+        behind after the process exits."""
+        script = (
+            'if ! _PY_SAFE_DIR="$(mktemp -d)"; then exit 1; fi\n'
+            'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DIR="))
+        created_dir = line[len("DIR=") :]
+        try:
+            assert Path(created_dir).exists()
+        finally:
+            subprocess.run(["rm", "-rf", created_dir], timeout=10)

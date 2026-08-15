@@ -116,7 +116,7 @@ def _add_flag_source() -> str:
 # back to a shared directory, so the extracted block is the whole
 # if/fi -- not a single line.
 _PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
-_PY_SAFE_DIR_END = "\nfi\n"
+_PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
 
 # $_PY_BIN_HAS_ABICHECK is referenced (not redefined) inside
 # add_flag_shlex_split's real guard -- extracted verbatim for the identical
