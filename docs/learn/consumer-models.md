@@ -39,8 +39,10 @@ The same struct-layout change is:
   every release (a recompiled-source consumer never sees the old layout).
 - **A hard corruption bug** for a consumer holding an already-compiled
   binary built against the old layout (a dynamically-linked application).
-- **Irrelevant** for a static-linked consumer, who relinks and recompiles
-  by construction — see [Static & Header-Only Contracts](static-and-header-only.md).
+- **Irrelevant for the ordinary case** of a static-linked consumer, who
+  rebuilds and relinks from source by construction — but not for one that
+  keeps precompiled object files and only relinks them (see the table row
+  below) — see [Static & Header-Only Contracts](static-and-header-only.md).
 
 None of these are "the tool is inconsistent." They're correct, different
 answers to a question that silently changed underneath — the consumer
@@ -54,9 +56,9 @@ model — while the struct-layout question itself stayed exactly the same.
 | **Recompiled source consumer** | Only your public header API, at whatever revision it last compiled against | Source-incompatible header changes (signature changes, removed declarations, macro removal) | [Part 2](abi-series/02-symbol-contracts.md), [Part 6 — source-only breaks](abi-series/06-transitive-breaks.md#source-only-api-breaks-binary-identical) |
 | **Plugin implementation** (your library *is* the plugin, loaded by someone else's host) | The host's fixed entry-point symbols, callback signatures, and any host-defined struct it fills in | A changed/removed entry point the host still expects, an incompatible callback signature | [Plugin Systems](../use/plugin-systems.md), [Part 0 §5 — Plugin/SDK with `dlopen`](abi-series/00-product-contract.md#plugin-sdk-with-dlopen) |
 | **Host loading plugins** (your library loads *someone else's* code) | Its own advertised plugin ABI — the entry points and structs it promises to call correctly | Its own contract drifting out from under plugins that were built against an earlier version | [Plugin Systems](../use/plugin-systems.md) |
-| **FFI / language binding** | A hand-written or generated declaration of your C ABI in another language's own type system (ctypes, cffi, JNI, P/Invoke, …) — frozen at generation time, not re-derived from your headers automatically | A layout or signature change the binding's own frozen declarations don't reflect — the binding has no compiler to catch the drift for it | [Part 4 — C++ ABI](abi-series/04-cpp-abi.md) (for the C++-to-C-ABI boundary), [Behavioral & Semantic Compatibility](behavioral-compatibility.md) |
+| **FFI / language binding** | A declaration of your C ABI in another language's own type system (ctypes, cffi, JNI, P/Invoke, …). For a hand-maintained, vendored, or one-time-generated binding: frozen at whatever point it was last written, not re-derived from your headers automatically. For a binding generator wired into the consumer's own build: whatever the *current* headers say, re-derived on every build — the same contract as a recompiled-source consumer, just expressed through generated code | For the frozen case: a layout or signature change the binding's own stale declarations don't reflect, with no compiler to catch the drift. For the build-integrated case: the same source-incompatible changes that break a recompiled-source consumer | [Part 4 — C++ ABI](abi-series/04-cpp-abi.md) (for the C++-to-C-ABI boundary), [Behavioral & Semantic Compatibility](behavioral-compatibility.md) |
 | **Header-only consumer** | Every consumer recompiles your *implementation*, not just your interface, on every build — but an already-built header-only consumer still has whatever it inlined/instantiated baked into its binary at that point, the same as any other compiled artifact | A source-incompatible header change, a behavioral/semantic change invisible to the compiler entirely, *or* — for two independently-built components (a host and a plugin, say) that pulled in different header revisions — an ODR/ABI mismatch between what each baked in | [Static & Header-Only Contracts](static-and-header-only.md) |
-| **Static-linked consumer** | Your object code, linked directly into its own binary at build time — no runtime symbol resolution, no SONAME | Ordinarily nothing, since the typical case rebuilds and relinks from source — but a consumer that keeps *precompiled* object files and only relinks them against a new archive still has the old layout baked into those objects. An ordinary linker only resolves symbol names, not layout compatibility, so the link itself still succeeds; the mismatch is the same silent runtime corruption a dynamically-linked application has, just triggered the next time the program runs after this relink rather than after a `dlopen` | [Static & Header-Only Contracts](static-and-header-only.md) |
+| **Static-linked consumer** | Your object code, linked directly into its own binary at build time — no runtime symbol resolution, no SONAME | In the ordinary full rebuild-and-relink case: the same source-incompatible header changes that break a recompiled-source consumer (a removed declaration or incompatible signature simply fails to compile) — [Static & Header-Only Contracts](static-and-header-only.md) preserves source compatibility as a real part of this shape's contract, not just a formality. Separately: a consumer that keeps *precompiled* object files and only relinks them against a new archive still has the old layout baked into those objects. An ordinary linker only resolves symbol names, not layout compatibility, so the link itself still succeeds; the mismatch is the same silent runtime corruption a dynamically-linked application has, just triggered the next time the program runs after this relink rather than after a `dlopen` | [Static & Header-Only Contracts](static-and-header-only.md) |
 | **Bundle / product-release component** | Not just your library's own contract, but the *intra-bundle* relationships — which other components provide symbols it needs, which SONAMEs/versions it was released alongside | A sibling component's change that breaks a relationship your library itself never touched | [Part 6 — Transitive Breaks](abi-series/06-transitive-breaks.md), [Multi-Binary Releases](../use/multi-binary.md) |
 
 Two of these are worth naming as the genuine edge cases they are:
@@ -83,12 +85,16 @@ Two of these are worth naming as the genuine edge cases they are:
   build-integrated and machine-generated from the same headers/snapshot
   you already maintain, rather than hand-transcribed or vendored once and
   left to drift.
-- **Header-only has no binary boundary to fall back on at all.** Every other
-  row eventually reduces to "did the *interface* change" in some form abicheck
-  can observe. A header-only library has no compiled artifact of its own to
-  diff — see [Static & Header-Only Contracts](static-and-header-only.md) for
-  why this is a genuine, currently-unclosed gap in what static tooling can
-  verify, not just an unusual workflow.
+- **Header-only has no provider artifact to fall back on at all.** Every
+  other row has *some* compiled or declared provider artifact — a `.so`, a
+  static archive, a set of headers a compiler parses — that a static
+  comparison can inspect, even where (as the behavioral/data-wire pages
+  document) the *content* of that artifact can't answer every question. A
+  header-only library has no such artifact of its own, ever: there's
+  nothing to build and ship that isn't also the consumer's own source. See
+  [Static & Header-Only Contracts](static-and-header-only.md) for why this
+  is a genuine, currently-unclosed gap in what static tooling can verify,
+  not just an unusual workflow.
 
 ## Composing consumer model with the other axes
 
