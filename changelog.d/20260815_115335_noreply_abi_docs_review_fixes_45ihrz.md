@@ -25,9 +25,22 @@
   lookup key" to the unversioned ELF case, and no longer claims static
   linking ends the compatibility question.
 
+### Fixed
+
+- **`vtable_slot_count_changed` no longer reports the `_ZTV` group size as a
+  count of virtual slots.** The symbol spans the primary table plus any
+  vcall/vbase offsets and secondary tables, so under multiple or virtual
+  inheritance the derived figure exceeded the class's virtual count — the
+  catalog's own `case174_secondary_vtable_group_changed` read
+  `~3 -> ~8 virtual slots` for a `Derived` declaring no virtuals of its own.
+  The finding's detail now reads `~N -> ~M vtable-group entries`; the byte
+  sizes it reports were already exact and are unchanged, as are the
+  `ChangeKind`, verdict, and exit code.
+
 ### Changed
 
 - **`diff_elf_layout.py`'s module docstring now states the L0 vtable/RTTI
   signal's actual limits** — a pure virtual-function reorder preserves the
-  `_ZTV` symbol size and is not detected, and the detector answers "the
-  emitted group changed size", not "which slot moved".
+  `_ZTV` symbol size and is not detected, a virtual destructor occupies two
+  entries rather than one, and the detector answers "the emitted group
+  changed size", not "which slot moved".

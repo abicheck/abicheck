@@ -43,7 +43,7 @@ Verdict: BREAKING (exit 4)
    -> run(), progress() const, status() const, ~svm_algorithm())
   > Vtable slot reordering; virtual dispatch calls wrong method.
 - vtable_slot_count_changed: Vtable for 'mylib::svm_algorithm' changed size:
-  48 -> 56 bytes (~4 -> ~5 virtual slots)
+  48 -> 56 bytes (~4 -> ~5 vtable-group entries)
 - vtable_slot_count_changed: Vtable for 'mylib::detail::algorithm_iface'
   changed size: 48 -> 56 bytes
 - virtual_method_added: New virtual method added to existing class

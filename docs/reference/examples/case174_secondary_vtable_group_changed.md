@@ -51,7 +51,7 @@ Verdict: BREAKING (exit 4)
 - vptr_introduced: 'Base2' gained a vtable pointer (became polymorphic)
 - type_size_changed: Base2 (8 -> 64 bits); Derived (64 -> 128 bits)
 - vtable_slot_count_changed: Vtable for 'Derived' changed size: 40 -> 80
-  bytes (~3 -> ~8 virtual slots)
+  bytes (~3 -> ~8 vtable-group entries)
 - base_class_offset_changed: Base class 'Base2' moved within 'Derived'
   (0 -> 64 bits)
 - vtable_thunk_set_changed: Derived::~Derived() thunk added

@@ -39,7 +39,7 @@ Verdict: BREAKING (exit 4)
   > Base class layout change shifts derived member offsets and vtable
     pointers; this-pointer arithmetic breaks.
 - vtable_slot_count_changed: Vtable for 'Circle' changed size: 48 -> 56 bytes
-  (~4 -> ~5 virtual slots). A virtual method was added, removed, or
+  (~4 -> ~5 vtable-group entries). A virtual method was added, removed, or
   reordered; existing binaries dispatch through fixed vtable offsets and
   will call the wrong slot.
 

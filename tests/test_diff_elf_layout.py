@@ -36,7 +36,7 @@ from abicheck.diff_elf_layout import (
     _diff_elf_layout,
     _inheritance_shape,
     _sized_rtti,
-    _vtable_slots,
+    _vtable_group_entries,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model import AbiSnapshot
@@ -63,13 +63,13 @@ def _kinds(changes: list) -> list[ChangeKind]:
 # Pure helpers
 # ---------------------------------------------------------------------------
 class TestHelpers:
-    def test_vtable_slots_lp64(self) -> None:
+    def test_vtable_group_entries_lp64(self) -> None:
         # [offset-to-top, typeinfo, slot0, slot1] = 4 words → 2 slots
-        assert _vtable_slots(32, 8) == 2
-        assert _vtable_slots(48, 8) == 4
+        assert _vtable_group_entries(32, 8) == 2
+        assert _vtable_group_entries(48, 8) == 4
 
-    def test_vtable_slots_floor_at_zero(self) -> None:
-        assert _vtable_slots(8, 8) == 0
+    def test_vtable_group_entries_floor_at_zero(self) -> None:
+        assert _vtable_group_entries(8, 8) == 0
 
     def test_inheritance_shape_categories(self) -> None:
         assert "no base" in _inheritance_shape(16, 8)
@@ -83,8 +83,8 @@ class TestHelpers:
 
     def test_slot_and_shape_fall_back_on_bad_pointer_size(self) -> None:
         # A zero/negative pointer width must not divide-by-zero; fall back to 8.
-        assert _vtable_slots(48, 0) == 4
-        assert _vtable_slots(48, -1) == 4
+        assert _vtable_group_entries(48, 0) == 4
+        assert _vtable_group_entries(48, -1) == 4
         assert "no base" in _inheritance_shape(16, 0)
 
     # The demangler is monkeypatched so these branch tests are deterministic
@@ -137,6 +137,27 @@ class TestVtableSlotCount:
         assert _kinds(_diff_elf_layout(old, new)) == [
             ChangeKind.VTABLE_SLOT_COUNT_CHANGED
         ]
+
+    def test_description_does_not_claim_a_virtual_slot_count(self) -> None:
+        """The delta is over the whole ``_ZTV`` group, not the virtual count.
+
+        Regression guard for a real false diagnosis: the symbol spans the
+        primary table plus any vcall/vbase offsets and secondary tables, so
+        under multiple or virtual inheritance the derived figure exceeds the
+        class's virtual count. ``case174_secondary_vtable_group_changed`` is
+        the catalog witness — it reported "~3 -> ~8 virtual slots" for a
+        ``Derived`` with nothing like eight virtuals. The wording must stay
+        honest about what a size delta can establish.
+        """
+        # case174's real sizes: Base2 becomes polymorphic, so Derived gains a
+        # secondary table — no virtual is declared on Derived at all.
+        old = _snap(_obj("_ZTV7Derived", 40))
+        new = _snap(_obj("_ZTV7Derived", 80))
+        (change,) = _diff_elf_layout(old, new)
+        assert "virtual slots" not in change.description
+        assert "vtable-group entries" in change.description
+        # The byte sizes are the fact actually established; keep them exact.
+        assert change.old_value == "40" and change.new_value == "80"
 
     def test_stable_vtable_is_silent(self) -> None:
         old = _snap(_obj("_ZTV6Widget", 48))

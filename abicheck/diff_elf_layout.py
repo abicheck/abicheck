@@ -160,8 +160,16 @@ def _sized_rtti(
     return out
 
 
-def _vtable_slots(size_bytes: int, pointer_size: int) -> int:
-    """Approximate primary-vtable slot count (``size/ptr - 2``), floored at 0."""
+def _vtable_group_entries(size_bytes: int, pointer_size: int) -> int:
+    """Approximate entry count of the whole vtable *group* (``size/ptr - 2``).
+
+    Deliberately not called a slot count.  The ``_ZTV`` symbol spans the
+    primary table plus any vcall/vbase offsets and secondary tables, so for
+    multiple or virtual inheritance this figure exceeds the class's virtual
+    count — ``case174_secondary_vtable_group_changed`` reports ~8 entries for
+    a ``Derived`` with nothing like eight virtuals.  Only the *delta* is
+    meaningful at L0; identity needs L1/L2.  Floored at 0.
+    """
     if pointer_size <= 0:
         pointer_size = 8
     return max(0, size_bytes // pointer_size - 2)
@@ -341,14 +349,14 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         sym = "_ZTV" + key
         cls = _class_name(sym)
-        o_slots = _vtable_slots(o_size, pointer_size)
-        n_slots = _vtable_slots(n_size, pointer_size)
+        o_entries = _vtable_group_entries(o_size, pointer_size)
+        n_entries = _vtable_group_entries(n_size, pointer_size)
         changes.append(
             make_change(
                 ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
                 symbol=sym,
                 name=cls,
-                detail=f"~{o_slots} → ~{n_slots} virtual slots",
+                detail=f"~{o_entries} → ~{n_entries} vtable-group entries",
                 old=str(o_size),
                 new=str(n_size),
                 # Derived from symbol size alone (no DWARF/headers): the slot
