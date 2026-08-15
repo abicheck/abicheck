@@ -71,7 +71,7 @@ Make the tool convenient for AI agents and automation pipelines:
 - `--format json/markdown` output modes
 - Snapshot files for offline/async workflows (`abicheck dump` → `.abi.json`)
 
-**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--stat`, `--show-impact`, `--report-mode leaf`) for CI gate pipelines. (An MCP server for AI-agent integration shipped and was later removed; agent integrations now use the CLI's structured JSON/SARIF output or the typed Python API directly.)
+**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--stat`, `--report-mode leaf|impact`) for CI gate pipelines. (An MCP server for AI-agent integration shipped and was later removed; agent integrations now use the CLI's structured JSON/SARIF output or the typed Python API directly.)
 
 ---
 

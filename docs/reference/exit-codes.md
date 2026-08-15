@@ -118,7 +118,7 @@ any finding, or the severity gate's own contribution.
 tracked follow-up for extending this axis to the release fan-out).
 
 **Without `--require-complete-analysis` every pre-existing invocation's exit
-code is unchanged**, exactly as `--contract-evaluation`'s own coverage axis
+code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 
 ## Commands removed in the ADR-043 CLI reset

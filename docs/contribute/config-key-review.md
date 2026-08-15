@@ -321,8 +321,10 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    `compare`/`dump`; the legacy `--btf/--ctf/--dwarf` flags are hidden but still
    functional. `--dwarf-only` was **not** renamed (a rename breaks documented
    command lines; left as-is). (§3.4)
-4. ✅ **Done.** `--report-mode` gained `impact` (sugar for `full` +
-   `--show-impact`); `--show-impact` still works standalone. (§3.3)
+4. ✅ **Done, and since completed.** `--report-mode` first gained `impact`
+   as sugar for `full` + the standalone flag; that flag has since been
+   removed, so `--report-mode impact` is now the only way to ask for the
+   impact table. (§3.3)
 5. ✅ **Done.** `--compile-db` is hidden from `--help` but still functional as an
    alias of `-p/--build-dir`. (§3.2)
 

@@ -1284,11 +1284,56 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
-        "--gcc-options (CLI flag removed, CLI audit PR 5/5 -- the Action's"
-        " own `gcc-options` input, without the leading dashes, is unaffected"
-        " and still valid)",
-        ("--gcc-options",),
-        frozenset({"AGENTS.md", "use/github-action.md"}),
+        "--gcc-options/--gcc-option/--gcc-path/--gcc-prefix (the whole legacy"
+        " cross-toolchain family, superseded by --compiler-option/--compiler/"
+        " --compiler-prefix -- the Action's own `gcc-options`/`gcc-path`/"
+        " `gcc-prefix` inputs, without the leading dashes, are unaffected and"
+        " still valid)",
+        ("--gcc-options", "--gcc-option", "--gcc-path", "--gcc-prefix"),
+        frozenset(
+            {
+                "AGENTS.md",
+                "use/github-action.md",
+                # Names the retired spellings once, to point a reader at the
+                # --compiler* replacements -- the page documenting the family.
+                "use/dump-compare-flags.md",
+            }
+        ),
+    ),
+    (
+        "--verify-runtime (the consumer-execution probe; it had already been"
+        " reduced to a safety no-op, and the static --used-by scanner answers"
+        " the same undefined-symbol question without executing anything)",
+        ("--verify-runtime",),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--contract-evaluation (folded into --contract, which now both turns"
+        " the ADR-049 evaluator on and selects its evidence domain; the"
+        " former domain-less form is --contract auto)",
+        ("--contract-evaluation",),
+        frozenset({"AGENTS.md", "use/contract-evaluation.md"}),
+    ),
+    (
+        "--show-impact (folded into --report-mode impact, which was already"
+        " documented as its exact equivalent)",
+        ("--show-impact",),
+        frozenset(
+            {
+                "AGENTS.md",
+                # A point-in-time design review: §3.3 describes the surface as
+                # it was and recommends exactly this fold, so it names the
+                # flag in its own historical-record capacity.
+                "contribute/config-key-review.md",
+            }
+        ),
+    ),
+    (
+        "aggregate --expect/--optional/--report-prefix (the expected-target"
+        " set is declared by --manifest or --run-plan, or waived with"
+        " --discovered-only; the report-filename prefix is fixed)",
+        ("--report-prefix", "--expect", "--optional"),
+        frozenset({"AGENTS.md"}),
     ),
 )
 

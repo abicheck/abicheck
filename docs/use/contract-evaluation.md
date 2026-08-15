@@ -141,8 +141,14 @@ summary usually wants to say which one fired.
 
 ## Common mistakes
 
-- **Expecting `--contract` alone to do anything.** It needs
-  `--contract`.
+- **Expecting the Python API to infer evaluation from the mode.** The CLI
+  does — naming a domain is the whole request — but `CompareRequest`/
+  `ScanRequest` still require `contract_evaluation=True` *alongside*
+  `contract_mode`, and reject a mode given without it. They also have no
+  `auto`: pass `contract_mode=None` to leave the domain unstated.
+- **Passing `--contract` to `scan` without `--against`.** There is no
+  comparison to evaluate, so it is a usage error (exit `64`) rather than a
+  silently ignored flag.
 - **Suppressing to fix a coverage gap.** `--suppress` cannot reach a
   `CoverageFailure` — give the evaluator the missing evidence (headers,
   build info) or accept the gap explicitly with `contract.unresolved: warn`.
