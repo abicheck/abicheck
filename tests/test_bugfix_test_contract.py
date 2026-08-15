@@ -670,6 +670,50 @@ _RENAME_WITH_EDIT_DIFF = (
 )
 
 
+class TestGapAdmission:
+    """The template advertised a row nothing could ask for (Codex review).
+
+    AGENTS.md's rule is "generalize, or record the gap". An author who says
+    the fix does not close the class has followed half of that; the other half
+    is naming what is still unsupported.
+    """
+
+    @pytest.mark.parametrize(
+        "invariant",
+        [
+            "None — documented as a known gap",
+            "No general invariant; instance only",
+            "Could not generalise this one",
+        ],
+    )
+    def test_admitting_a_gap_asks_what_is_unsupported(self, invariant: str) -> None:
+        body = COMPLETE_BODY.replace(
+            "- General invariant: every supported algorithm round-trips at production scale",
+            f"- General invariant: {invariant}",
+        )
+        assert f"- General invariant: {invariant}" in body, "fixture must be edited"
+        missing = {r.key for r in gate.missing_requirements(body, ["abicheck/x.py"])}
+        assert "known-unsupported-cases" in missing
+
+    def test_a_real_invariant_does_not(self) -> None:
+        """Negative control: the row is not boilerplate on every fix."""
+        missing = {
+            r.key for r in gate.missing_requirements(COMPLETE_BODY, ["abicheck/x.py"])
+        }
+        assert "known-unsupported-cases" not in missing
+
+    def test_answering_it_satisfies_the_gate(self) -> None:
+        body = (
+            COMPLETE_BODY.replace(
+                "- General invariant: every supported algorithm round-trips at production scale",
+                "- General invariant: none — documented as a known gap",
+            )
+            + "\n- Known unsupported cases: multi-document SYCL output\n"
+        )
+        missing = {r.key for r in gate.missing_requirements(body, ["abicheck/x.py"])}
+        assert "known-unsupported-cases" not in missing
+
+
 class TestConditionalRequirements:
     """Each conditional exists because a real escape went through that surface."""
 

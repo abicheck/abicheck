@@ -199,6 +199,11 @@ class Requirement:
     #: ``None`` -> always required. Otherwise, required when any changed path
     #: matches one of these substrings.
     triggers: tuple[str, ...] | None = None
+    #: Required when *another* requirement's answer admits the fix is not
+    #: general. AGENTS.md's own rule is "generalize, or record the gap", so
+    #: the gap has to be stated somewhere — and the template advertised a row
+    #: for it that nothing could ever ask for (Codex review).
+    required_when_gap_admitted_in: str | None = None
 
     def applies_to(self, paths: list[str]) -> bool:
         if self.triggers is None:
@@ -211,6 +216,39 @@ class Requirement:
         # A conditional that fires on prose is boilerplate, not a signal.
         subject = [p for p in paths if _is_conditional_subject(p)]
         return any(t in p for p in subject for t in self.triggers)
+
+    def required_by(self, answers: dict[str, str]) -> bool:
+        """Does another answer's admission of a gap pull this row in?"""
+        if self.required_when_gap_admitted_in is None:
+            return False
+        answer = answers.get(self.required_when_gap_admitted_in, "")
+        return _admits_a_gap(answer)
+
+
+#: Phrases that mean "there is no general invariant here". Deliberately a
+#: short, explicit vocabulary rather than sentiment analysis: this only has to
+#: recognise the admission the repository's own convention asks an author to
+#: make ("generalize, or record the gap"), and a phrase it misses simply
+#: leaves the follow-up row unrequested, which is where things stood before.
+_GAP_ADMISSIONS = (
+    "none",
+    "n/a not general",
+    "no general",
+    "not general",
+    "known gap",
+    "documented as a gap",
+    "documented gap",
+    "could not generalise",
+    "could not generalize",
+    "instance only",
+)
+
+
+def _admits_a_gap(answer: str) -> bool:
+    text = answer.strip().lower()
+    if not text:
+        return False
+    return any(phrase in text for phrase in _GAP_ADMISSIONS)
 
 
 #: The four always-required answers, then the conditional ones. Each
@@ -305,6 +343,17 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             # prefix above.
             *_TRUST_BOUNDARY_PREFIXES,
         ),
+    ),
+    Requirement(
+        "known-unsupported-cases",
+        "Known unsupported cases",
+        "The general invariant answer says this fix does not close the whole "
+        "class. AGENTS.md's rule for that case is to record the gap rather "
+        "than ship a narrow patch as if it were complete, so name what is "
+        "still unsupported — the template advertised this row while nothing "
+        "could ever ask for it (Codex review).",
+        triggers=(),
+        required_when_gap_admitted_in="general-invariant",
     ),
     Requirement(
         "merge-pair",
@@ -714,7 +763,7 @@ def missing_requirements(body: str, paths: list[str]) -> list[Requirement]:
     answers = parse_answers(body)
     missing = []
     for req in REQUIREMENTS:
-        if not req.applies_to(paths):
+        if not (req.applies_to(paths) or req.required_by(answers)):
             continue
         value = answers.get(_normalize(req.prompt))
         if value is None or _PLACEHOLDER.match(value.strip()):
