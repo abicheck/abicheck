@@ -1126,13 +1126,28 @@ def compile_db_from_build_info(
     ``None`` without headers: a compile database only feeds the header AST,
     and a headerless ``--build-info`` run is an ordinary L3-only dump, not the
     usage error the dedicated flag used to raise ("requires -H/--header").
+
+    ``None`` for a *file* that is not a compile database, too. ``--build-info``
+    also accepts a Bazel aquery/cquery jsonproto, which
+    ``buildsource.inline._maybe_collect_bazel_build_info`` routes through the
+    Bazel adapter -- but only if it gets that far. Returning any file here
+    handed such a run to ``load_compile_db()``, which rejects a JSON object
+    with "compile_commands.json must be a JSON array" long before the adapter
+    is reached, so `--build-info aquery.json -H api.h` failed outright
+    (Codex review). ``sniff_build_info_format`` is the same content-based
+    classifier that dispatch uses, so the two cannot disagree about what a
+    given file is.
     """
+    from .buildsource.inline import sniff_build_info_format
+
     if build_info is None or not headers:
         return None
     if build_info.is_file():
-        return build_info
+        return build_info if sniff_build_info_format(build_info) == "compile_db" else None
     db = build_info / "compile_commands.json"
-    return db if db.is_file() else None
+    # Sniffed for the same reason: a build directory holding a non-array
+    # compile_commands.json is the identical mis-route one level down.
+    return db if db.is_file() and sniff_build_info_format(db) == "compile_db" else None
 
 
 def handle_non_elf_dump(

@@ -233,6 +233,34 @@ class TestDumpDryRun:
         # A directory operand resolves through its own compile_commands.json.
         assert compile_db_from_build_info(tmp_path, (header,)) == db
 
+    def test_compile_db_from_build_info_rejects_a_bazel_jsonproto(
+        self, tmp_path: Path
+    ) -> None:
+        """--build-info also takes a Bazel aquery/cquery jsonproto, which the
+        Bazel adapter routes -- but only if this does not first claim it as a
+        compile database. Treating any file as one handed such a run to
+        `load_compile_db()`, which rejects a JSON object outright, so
+        `--build-info aquery.json -H api.h` failed before the adapter ran
+        (Codex review)."""
+        from abicheck.cli_dump_helpers import compile_db_from_build_info
+
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        aquery = tmp_path / "aquery.json"
+        aquery.write_text('{"actions": [], "targets": []}', encoding="utf-8")
+        assert compile_db_from_build_info(aquery, (header,)) is None
+
+        cquery = tmp_path / "cquery.json"
+        cquery.write_text('{"results": []}', encoding="utf-8")
+        assert compile_db_from_build_info(cquery, (header,)) is None
+
+        # And the same one level down, for a build directory whose
+        # compile_commands.json is not the array the loader requires.
+        nested = tmp_path / "build"
+        nested.mkdir()
+        (nested / "compile_commands.json").write_text("{}", encoding="utf-8")
+        assert compile_db_from_build_info(nested, (header,)) is None
+
     def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
         # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only
         # meaningful for ELF; the real run raises BadParameter (exit 64) for
