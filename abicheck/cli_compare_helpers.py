@@ -56,6 +56,7 @@ from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
     _fold_suppression_audit_into_text as _fold_suppression_audit_into_text,
     _fold_use_case_impact_into_text,
+    format_carries_use_case_impact,
 )
 from .cli_compare_options import (
     _cli_flag,
@@ -1458,32 +1459,45 @@ def run_compare(
     # single-pair one would (ADR-037 D4).
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
 
-    # --stat promises one shape and one shape only ("With --format json, emits
-    # only the summary object"), which a use-case attribution block would
-    # break for every CI consumer parsing it. Rejected rather than silently
-    # dropped: a manifest that quietly attributes nothing is the same failure
-    # --use-cases is rejected for set inputs to avoid (Codex review).
-    # sarif/junit/html have no place for the attribution and their renderers
-    # never read `DiffResult.use_case_impact`, so the block was computed and
-    # then dropped -- an apparently successful report with the requested data
-    # silently missing (Codex review). Rejected for the same reason as --stat
-    # below: a manifest that attributes nothing, and says so nowhere, is the
-    # failure --use-cases is already rejected for set inputs to avoid.
-    if use_cases_manifest is not None and fmt in ("sarif", "junit", "html"):
-        raise click.UsageError(
-            f"--use-cases is not supported with --format {fmt}: that format "
-            "carries no use-case attribution, so the manifest would be "
-            "resolved and its result dropped. Use --format json/markdown/"
-            f"review for the attribution, or --write {fmt}=PATH to get a "
-            f"{fmt} report alongside one that carries it."
-        )
-    if stat and use_cases_manifest is not None:
-        raise click.UsageError(
-            "--use-cases is not supported with --stat: --stat emits only the "
-            "summary object (and one line of text), which the attribution "
-            "block would not fit. Drop --stat to get the use-case section, "
-            "or drop --use-cases to keep the summary-only shape."
-        )
+    # A manifest that is resolved and then has its result dropped is the same
+    # failure --use-cases is rejected for set inputs to avoid: an apparently
+    # successful report with the requested data silently missing. Two ways to
+    # land there -- sarif/junit/html render from `result` but never read
+    # `DiffResult.use_case_impact`, and --stat promises one shape and one only
+    # ("With --format json, emits only the summary object") that the block
+    # would break for every CI consumer parsing it.
+    #
+    # Asked across *every* rendered output rather than the primary alone: the
+    # secondary --write render reuses this same attributed result at
+    # report_mode="full" and stat=False, so `--format html --write json=PATH`
+    # does deliver the attribution and rejecting it was arbitrary -- the
+    # primary-only message below had in fact been proposing that exact
+    # arrangement as the fix (Codex review). One output carrying the block is
+    # enough; only when none does is the manifest genuinely resolved for
+    # nothing.
+    if use_cases_manifest is not None and not (
+        format_carries_use_case_impact(fmt, stat=stat)
+        or format_carries_use_case_impact(secondary_fmt)
+    ):
+        if stat and secondary_fmt is None:
+            detail = (
+                "--stat emits only the summary object (and one line of text), "
+                "which the attribution block would not fit. Drop --stat to get "
+                "the use-case section, add --write json=PATH to carry it "
+                "alongside the summary, or drop --use-cases."
+            )
+        else:
+            rendered = f"--format {fmt}" + (
+                f" and --write {secondary_fmt}=..." if secondary_fmt else ""
+            )
+            detail = (
+                f"no output this run renders ({rendered}) carries use-case "
+                "attribution, so the manifest would be resolved and its result "
+                "dropped. Use --format json/markdown/review, or add --write "
+                "json=PATH to get one output that carries it alongside the "
+                f"{fmt} report."
+            )
+        raise click.UsageError(f"--use-cases is not supported here: {detail}")
 
     if {old_kind, new_kind} & {"directory", "package"}:
         _reject_flags_unsupported_for_set_inputs(

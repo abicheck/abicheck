@@ -191,6 +191,11 @@ duplication, not a structural ownership conflict):
   in a documentation review: ADR-058/G36 still described the just-removed
   MCP server as a live, optional execution adapter. Add a registry entry
   whenever a PR deletes a flag/command/file another doc might still name.
+  This sweep also reads `examples/case*/README.md`, since those are the
+  generator sources for the published `docs/reference/examples/` case pages
+  — the generated pages themselves are skipped, so a stale flag left in a
+  case README would otherwise reproduce into a public page on the next
+  regeneration with nothing to catch it;
 
 ## Terminology registry
 

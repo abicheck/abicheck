@@ -371,7 +371,7 @@ class TestStatKeepsItsSummaryOnlyShape:
             ],
         )
         assert result.exit_code == 64, result.output
-        assert "--use-cases is not supported with --stat" in result.output
+        assert "--stat emits only the summary object" in result.output
 
     @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
     def test_a_format_that_cannot_carry_the_block_is_rejected(
@@ -394,7 +394,27 @@ class TestStatKeepsItsSummaryOnlyShape:
             ],
         )
         assert result.exit_code == 64, result.output
-        assert f"--use-cases is not supported with --format {fmt}" in result.output
+        assert "no output this run renders" in result.output
+        assert f"--format {fmt}" in result.output
+
+    def test_two_non_carrying_formats_are_still_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # The rescue is "some output carries it", not "a --write was given".
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new), "--use-cases", str(manifest),
+                "--format", "sarif", "-o", str(tmp_path / "r.sarif"),
+                "--write", f"html={tmp_path / 'r.html'}",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "no output this run renders" in result.output
+        assert "--write html=..." in result.output
 
     @pytest.mark.parametrize("fmt", ["json", "markdown", "review"])
     def test_the_carrying_formats_stay_accepted(

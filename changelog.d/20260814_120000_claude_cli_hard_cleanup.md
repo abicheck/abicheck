@@ -86,6 +86,13 @@
   text/markdown section. Read-only: an unattributed finding is an absence of
   proof, not proof the finding is harmless, so it never moves a verdict or an
   exit code. `project validate-use-cases` still checks a manifest's structure.
+  Rejected as a usage error when *no* output the run renders can carry the
+  attribution -- `sarif`/`junit`/`html` render from the same result but read
+  none of it, and `--stat` promises a summary-only shape -- rather than
+  resolving the manifest and silently dropping the result. A `--write
+  FORMAT=PATH` that does carry it makes the combination legal again, since
+  the secondary render reuses the same attributed comparison at full report
+  mode.
 
 ### Changed
 

@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner, Result
 
 from abicheck.buildsource.pack import BuildSourcePack
@@ -455,3 +456,59 @@ class TestUseCaseImpactOnCompare:
         )
         assert res.exit_code == 4, res.output
         assert "use_case_impact" not in _json_report(res)
+
+    @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
+    def test_a_carrying_secondary_rescues_a_non_carrying_primary(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        """``--format html --write json=PATH`` does deliver the attribution.
+
+        The secondary render reuses the same attributed ``DiffResult`` at
+        ``report_mode="full"``/``stat=False``, so rejecting on the primary
+        format alone was arbitrary -- the primary-only error message had in
+        fact been proposing this exact arrangement as the fix (Codex review).
+
+        Asserting the block really lands in the secondary file, not merely
+        that the invocation was accepted: "not rejected" would also pass
+        against a run that silently dropped it, which is the failure the
+        rejection exists to prevent in the first place.
+        """
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        secondary = tmp_path / "second.json"
+        res = _compare(
+            manifest, old, new,
+            "--format", fmt, "-o", str(tmp_path / f"r.{fmt}"),
+            "--write", f"json={secondary}",
+        )
+        assert res.exit_code == 4, res.output
+        assert "--use-cases is not supported" not in res.output
+        block = json.loads(secondary.read_text(encoding="utf-8"))["use_case_impact"]
+        assert block["by_use_case"]["training workflow"]
+
+    def test_stat_is_rescued_by_a_carrying_secondary_too(self, tmp_path: Path) -> None:
+        """``--stat`` constrains the *primary* shape only.
+
+        The secondary always renders the full report, so the summary-only
+        contract stays intact while the attribution still reaches the caller
+        (Codex review). Both halves are asserted in one run, so a fix that
+        delivered the block by widening ``--stat`` itself would fail.
+        """
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        primary = tmp_path / "stat.json"
+        secondary = tmp_path / "full.json"
+        res = _compare(
+            manifest, old, new,
+            "--stat", "--format", "json", "-o", str(primary),
+            "--write", f"json={secondary}",
+        )
+        assert res.exit_code == 4, res.output
+        assert "use_case_impact" in json.loads(secondary.read_text(encoding="utf-8"))
+        assert "use_case_impact" not in json.loads(primary.read_text(encoding="utf-8"))

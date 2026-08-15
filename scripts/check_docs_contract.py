@@ -68,6 +68,11 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
 DOCS = ROOT / "docs"
+#: The example-case tree whose per-case READMEs `gen_examples_docs.py`
+#: publishes into `docs/reference/examples/`. Named separately from ROOT so
+#: the retired-surface sweep can be pointed at a fixture tree in tests the
+#: same way DOCS already is.
+EXAMPLES = ROOT / "examples"
 
 #: Trees outside `docs/` whose Markdown may be registered as a topic's
 #: `task_pages`/`allowed_summaries` entry (ADR-058 / G36 P0.6). Only
@@ -1424,6 +1429,33 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
 )
 
 
+def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
+    """Every page the retired-surface sweep reads, with its allowlist key.
+
+    `docs/**/*.md` is the hand-authored narrative tree, keyed docs-relative
+    (what `_RETIRED_SURFACES`'s allowlists already spell).
+
+    `examples/case*/README.md` is here because it is the *generator source*
+    for the published `docs/reference/examples/case*.md` pages: those carry
+    the generated marker and are skipped below, so scanning only the output
+    tree left a stale flag in a case README reproducing into a public page on
+    the next `gen_examples_docs.py` run while this guard stayed green -- which
+    is exactly what happened to Case 148's `--compile-db` recommendation
+    (Codex review). Checking the source rather than the artifact is the same
+    direction every other generated-file gate in this repo takes.
+
+    Keyed repo-relative (`examples/caseNN.../README.md`), which cannot collide
+    with a docs-relative key, so an allowlist entry stays unambiguous about
+    which tree it exempts.
+    """
+    targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
+    targets += [
+        (p, f"examples/{p.relative_to(EXAMPLES).as_posix()}")
+        for p in sorted(EXAMPLES.glob("case*/README.md"))
+    ]
+    return targets
+
+
 def _check_retired_surfaces(f: Findings) -> None:
     """Flag a manual, non-historical page that still names a retired CLI
     flag/command/file by its exact dead spelling, as if it were live surface.
@@ -1436,8 +1468,7 @@ def _check_retired_surfaces(f: Findings) -> None:
     historical-record capacity, same reasoning as the ADR/plans/archive
     directory exemption below. WARN-only: a hit needs a human read to add
     historical framing or an allowlist entry, not an automatic rewrite."""
-    for path in sorted(DOCS.rglob("*.md")):
-        rel = path.relative_to(DOCS).as_posix()
+    for path, rel in _retired_surface_scan_targets():
         if rel.startswith(_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES):
             continue
         if _has_generated_marker(path):

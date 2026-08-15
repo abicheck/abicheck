@@ -802,6 +802,42 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     return f"rule#{index}"
 
 
+#: The formats a ``--use-cases`` attribution actually reaches a reader
+#: through. Two mechanisms, one set: the JSON paths emit ``use_case_impact``
+#: straight off the ``DiffResult`` (``reporter._add_use_case_impact``), and
+#: the three text-shaped formats get the section folded in by
+#: :func:`_fold_use_case_impact_into_text` below. sarif/junit/html render
+#: from the same attributed result and carry none of it. ``text`` is here
+#: because the fold accepts it, not because ``compare --format`` offers it.
+_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
+
+
+def format_carries_use_case_impact(fmt: str | None, *, stat: bool = False) -> bool:
+    """Would a report rendered as *fmt* carry the use-case attribution?
+
+    Asked once per rendered output, so ``compare``'s preflight can reject
+    ``--use-cases`` on the real condition -- *no* output carries it -- rather
+    than on the primary format alone. A ``--format html --write json=PATH``
+    run renders the secondary from the same attributed result, at
+    ``report_mode="full"`` and ``stat=False``, so the attribution does reach
+    the caller and rejecting it was arbitrary (Codex review); the primary's
+    own error message had already been proposing that exact arrangement.
+
+    Note the quantifier is the caller's, and it is the opposite of
+    :func:`contract_coverage_exit.report_carries_the_ledger`'s: that one asks
+    whether *every* output states the ledger, because it is deciding whether
+    a stderr notice would be a redundant second copy. This one feeds an
+    *any* -- one output carrying the block is enough for the run to be
+    meaningful.
+
+    ``stat`` is a property of the primary render only: the secondary always
+    renders the full report, so its caller leaves the default.
+    """
+    if fmt is None or stat:
+        return False
+    return fmt in _USE_CASE_IMPACT_BEARING_FORMATS
+
+
 def _fold_use_case_impact_into_text(
     text: str, fmt: str, result: Any, show_only: str | None = None
 ) -> str:
