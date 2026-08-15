@@ -49,15 +49,50 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
 - Requested-vs-effective *depth* reuses ``checker_types.EVIDENCE_DEPTH_VALUES``
   (``binary``/``headers``/``build``/``source``) rather than inventing a
   parallel vocabulary. ``requested_depth`` mirrors
-  ``DiffResult.requested_depth`` -- the G30 report-identity field nothing
-  populates yet (see that field's own docstring) -- so until a front end
-  starts setting it, this stays ``None`` and depth-completeness reduces to
-  reporting ``effective_depth`` alone. ``effective_depth`` is always
-  computed here, independent of that field, from what each side's snapshot
-  actually carries (mirrors ``cli_dump_helpers.evidence_depth_label``'s
-  logic, reimplemented locally rather than imported -- importing a CLI-layer
-  module from here would reach back through ``cli.py`` into ``checker.py``
-  and grow the CLI-registration import cycle the AI-readiness gate rejects).
+  ``DiffResult.requested_depth`` -- the G30 report-identity field. Finding
+  (review, P1, round 9): this field was documented as unpopulated by any
+  front end and this module's own ``depth_satisfied`` gate reduced to
+  reporting ``effective_depth`` alone as a result -- so an explicit
+  ``compare --depth source`` that never actually reached source evidence
+  (both sides lacking a compile database, say) silently read
+  ``requested_depth=None``/``depth_satisfied=None`` and could still report
+  ``status="complete"``. Fixed first at the one front end that knows the
+  user's real, explicit ``--depth`` request: ``cli_compare_helpers.
+  _report_compare_result`` copies its own Click-validated ``--depth``
+  string onto ``DiffResult.requested_depth`` before recomputing this block
+  (never an *inferred* depth from bare ``--sources``/``--build-info`` or
+  ``.abicheck.yml``'s ``source.method`` -- only an explicit flag is this
+  comparison's stated request in the same on-the-record way). That fix was
+  CLI-only, though the underlying gap was not (P2 review,
+  ``discussion_r3787839902``): ``service.run_compare_request()`` -- the
+  shared, typed Python-API/MCP entry point ``service_compare_pipeline.
+  classify_compare_pair`` implements -- never gets this treatment, since
+  the CLI's own ``compare`` command resolves its evidence through
+  ``resolve_compare_request`` but classifies through a hand-rolled
+  ``compare_snapshots`` call of its own (its ``--depth`` flag never even
+  reaches ``CompareRequest.depth``; that field only carries a real value
+  for a *direct* typed-API caller). Fixed there too:
+  ``classify_compare_pair`` now applies the identical ``if request.depth
+  is not None`` stamp-and-recompute, so a direct
+  ``service.run_compare_request(CompareRequest(..., depth="headers"))``
+  call gets the same `requested_depth`/`depth_satisfied` receipt the CLI
+  already did, without disturbing a caller that never sets
+  ``CompareRequest.depth`` (unaffected, same as before). The two call
+  sites are not one shared helper because each recomputes from genuinely
+  different inputs the pipeline made available at a different point: the
+  CLI recomputes with a possibly out-of-band ``--old/new-build-info``/
+  ``--old/new-sources`` pack (`_resolve_side_pack`) that never touches
+  ``old``/``new`` directly, while ``classify_compare_pair`` recomputes from
+  each snapshot's own already-embedded ``build_source`` (mirroring
+  ``checker.compare()``'s own call) since a typed request's
+  ``InputSpec.sources``/``build_info`` are embedded before resolution ever
+  returns -- there is no separate out-of-band pack to fold in on that path.
+  ``effective_depth`` is always computed here, independent of that field,
+  from what each side's snapshot actually carries (mirrors
+  ``cli_dump_helpers.evidence_depth_label``'s logic, reimplemented locally
+  rather than imported -- importing a CLI-layer module from here would
+  reach back through ``cli.py`` into ``checker.py`` and grow the
+  CLI-registration import cycle the AI-readiness gate rejects).
 - ``target_accounting`` (expected vs. resolved Bazel targets) rolls up P0.2's
   root-target resolution (``BuildEvidence.target_scope``) now that it has
   landed -- ``requested``/``resolved`` stay ``None`` only when neither side
@@ -1117,6 +1152,28 @@ def _graph_completeness(
     # ``--require-complete-analysis`` the same way the other coverage gaps in
     # this function already do, since neither side's individually-confirmed
     # coverage translates into anything the graph diff could actually use.
+    #
+    # Finding (review, P1, round 9): the fix above only fired on a
+    # *disjoint* pair -- ``isdisjoint()`` is true only when the two sets
+    # share NO member at all. It missed the partially-overlapping case: old
+    # confirmed ``{"call_graph", "type_graph"}``, new confirmed only
+    # ``{"call_graph"}``. The two sets are not disjoint (they share
+    # ``call_graph``), so the old check left ``graph_completeness`` at
+    # whatever the per-side loop above computed (``"complete"`` when nothing
+    # else tripped) -- but ``buildsource/source_graph_findings.py`` only
+    # ever trusts a family when it is confirmed on BOTH sides (see e.g.
+    # ``_family_confirmed``/``_common_dependency_edge_kinds`` in that
+    # module), so ``type_graph`` -- confirmed on old, never even attempted
+    # on new -- is silently skipped for this comparison exactly the same way
+    # a fully-disjoint pair is, just for one family instead of all of them.
+    # A subset relationship is still a real coverage gap: whatever family is
+    # in one side's confirmed set but not the other's was never examined on
+    # both sides, and the cross-snapshot diff cannot compare it. Fixed by
+    # comparing the two sets for *any* inequality (``!=``) rather than only
+    # a total disjunction -- a subset, superset, or partial-overlap pair are
+    # all "the two sides disagree on what they confirmed" just as much as a
+    # fully disjoint pair is, and each reports which family/families are
+    # confirmed on only one side.
     old_confirmed_families = {
         name for name, ok in (old_graph.extractor_passes or {}).items() if ok
     } | {name for name, ok in (old_graph.narrowed_passes or {}).items() if ok}
@@ -1125,18 +1182,20 @@ def _graph_completeness(
     } | {name for name, ok in (new_graph.narrowed_passes or {}).items() if ok}
     asymmetric_family_coverage = False
     if (
-        old_confirmed_families
-        and new_confirmed_families
-        and old_confirmed_families.isdisjoint(new_confirmed_families)
-    ):
+        old_confirmed_families or new_confirmed_families
+    ) and old_confirmed_families != new_confirmed_families:
         asymmetric_family_coverage = True
+        only_old = sorted(old_confirmed_families - new_confirmed_families)
+        only_new = sorted(new_confirmed_families - old_confirmed_families)
+        one_sided = sorted(set(only_old) | set(only_new))
         notes.append(
             "graph completeness unknown: the old side confirmed coverage "
-            f"only for {sorted(old_confirmed_families)!r} while the new "
-            f"side confirmed coverage only for {sorted(new_confirmed_families)!r} "
-            "-- the two sides share no common source-graph pass family, so "
-            "the cross-snapshot graph diff has no family it can actually "
-            "compare on both sides"
+            f"for {sorted(old_confirmed_families)!r} while the new side "
+            f"confirmed coverage for {sorted(new_confirmed_families)!r} -- "
+            f"{one_sided!r} family/families are confirmed on only one side, "
+            "and buildsource/source_graph_findings.py only trusts a family "
+            "when BOTH sides cover it, so the cross-snapshot graph diff "
+            "cannot compare on it"
         )
 
     if degraded:

@@ -1,0 +1,459 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""P0.4 round-9 review findings, split out of ``test_analysis_assurance.py``
+(``_extra``-style sibling, matching e.g. ``test_call_graph_extra.py``) purely
+to stay under the AI-readiness file-size hard cap -- the parent file was
+already at the 1500-line soft-limit WARN before these two findings' tests
+were added, and the tests below (~260 lines) pushed it past the 2000-line
+hard cap.
+
+Finding 1: ``DiffResult.requested_depth`` was never populated by any front
+end, so an explicit ``compare --depth source`` that never reached source
+evidence could still report ``status="complete"``.
+
+Finding 2: the round-8 asymmetric-confirmed-graph-family fix only detected a
+fully DISJOINT family-set pair (``isdisjoint()``); a partially overlapping
+pair (old confirms a superset of what new confirms) fell through to
+``"complete"`` even though the uncovered family is only trusted on one side.
+
+Duplicates the two small fixtures it needs (``_header_pair``/``_write``)
+rather than importing them from the parent module -- every other
+``_extra``-style sibling test file in this suite is self-contained the same
+way, and there is no existing cross-test-module import to follow instead.
+
+Finding 3 (PR #767 follow-up, P2 review ``discussion_r3787839902``): Finding
+1's fix above was CLI-only (``cli_compare_helpers._report_compare_result``);
+a direct ``service.run_compare_request()``/``CompareRequest`` caller -- the
+typed Python API / MCP ``abi_compare`` entry point, which never routes
+through that CLI helper -- still read ``requested_depth=None``/
+``depth_satisfied=None`` for an explicit, successfully-reached
+``CompareRequest.depth``. ``TestRequestedDepthPropagationSharedPipeline``
+below is the direct-API-level regression the CLI-only test suite never
+covered.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from abicheck import checker
+from abicheck.analysis_assurance import compute_analysis_assurance
+from abicheck.cli import main
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.serialization import save_snapshot, snapshot_to_json
+
+
+def _fn(name: str, mangled: str) -> Function:
+    return Function(
+        name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC
+    )
+
+
+def _write(tmp_path: Path, old: AbiSnapshot, new: AbiSnapshot) -> tuple[Path, Path]:
+    old_p = tmp_path / "old.json"
+    new_p = tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+    return old_p, new_p
+
+
+def _header_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A real, header-scoped, unchanged pair -- resolves a clean public
+    surface, so ``scope_resolved`` is True and ``status`` should read
+    ``"complete"`` with no gating flag involved. Mirrors
+    ``test_analysis_assurance._header_pair`` exactly.
+    """
+    common = {"library": "libfoo.so.1", "from_headers": True}
+    fns = [_fn("pub_a", "_Z5pub_av")]
+    return (
+        AbiSnapshot(version="1.0", functions=fns, **common),
+        AbiSnapshot(version="2.0", functions=fns, **common),
+    )
+
+
+class TestRequestedDepthPropagation:
+    """Round-9 review, Finding 1: the CLI's own resolved ``--depth`` flag
+    was never copied onto ``DiffResult.requested_depth`` before
+    ``analysis_assurance`` read it, so an explicit ``compare --depth
+    source`` that never actually reached source evidence (both sides lack
+    a compile database, say -- the effective depth stays ``headers``)
+    silently read ``requested_depth=None``/``depth_satisfied=None`` and
+    could still report ``status="complete"``, letting
+    ``--require-complete-analysis`` exit 0 despite the explicitly requested
+    depth never being reached.
+    """
+
+    def test_unit_level_unsatisfied_requested_depth_is_failed(self) -> None:
+        """Direct unit-level check: compute_analysis_assurance reads
+        DiffResult.requested_depth (now populated by the CLI) and gates on
+        it -- headers-only evidence never satisfies an explicit 'source'
+        request."""
+        old, new = _header_pair()
+        result = checker.compare(old, new)
+        assert result.analysis_assurance.status == "complete"  # sanity: no gap yet
+        result.requested_depth = "source"
+        aa = compute_analysis_assurance(result, old, new)
+        assert aa.requested_depth == "source"
+        assert aa.effective_depth == "headers"
+        assert aa.depth_satisfied is False
+        assert aa.status == "failed"
+        assert any("requested depth 'source' not reached" in n for n in aa.notes), (
+            aa.notes
+        )
+
+    def test_unit_level_satisfied_requested_depth_stays_complete(self) -> None:
+        """Companion positive case: an explicit requested depth that IS
+        reached must not regress to a non-complete status."""
+        old, new = _header_pair()
+        result = checker.compare(old, new)
+        result.requested_depth = "headers"
+        aa = compute_analysis_assurance(result, old, new)
+        assert aa.requested_depth == "headers"
+        assert aa.effective_depth == "headers"
+        assert aa.depth_satisfied is True
+        assert aa.status == "complete"
+
+    def test_cli_depth_source_with_no_compile_database_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end: `compare --depth source` on two plain header-scoped
+        JSON snapshots, with no --sources/--build-info given at all (so no
+        L4/L5 evidence is ever collected and the effective depth stays
+        'headers') must not read status='complete'."""
+        old, new = _header_pair()
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--depth",
+                "source",
+                "--format",
+                "json",
+            ],
+        )
+        assert res.exit_code in (0, 1, 2, 4), res.output
+        payload = json.loads(res.output[res.output.index("{") :])
+        aa = payload["analysis_assurance"]
+        assert aa["requested_depth"] == "source", aa
+        assert aa["effective_depth"] == "headers", aa
+        assert aa["depth_satisfied"] is False, aa
+        assert aa["status"] == "failed", aa
+
+    def test_require_complete_analysis_exits_nonzero_for_unsatisfied_depth(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--depth",
+                "source",
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code != 0, res.output
+
+    def test_depth_omitted_does_not_populate_requested_depth(
+        self, tmp_path: Path
+    ) -> None:
+        """No --depth flag at all must leave requested_depth None (never an
+        inferred value), matching the pre-existing default behavior for
+        every caller that doesn't opt into an explicit depth request."""
+        old, new = _header_pair()
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "json"],
+        )
+        assert res.exit_code in (0, 1, 2, 4), res.output
+        payload = json.loads(res.output[res.output.index("{") :])
+        aa = payload["analysis_assurance"]
+        assert aa["requested_depth"] is None, aa
+        assert aa["status"] == "complete", aa
+
+
+class TestRequestedDepthPropagationSharedPipeline:
+    """PR #767 follow-up (P2 review, ``discussion_r3787839902``): the CLI-only
+    fix above (``cli_compare_helpers._report_compare_result``) left the
+    shared ``service_compare_pipeline.classify_compare_pair`` -- what
+    ``service.run_compare_request()`` (the typed Python API / MCP
+    ``abi_compare`` entry point) actually runs -- never populating either
+    ``DiffResult.requested_depth`` or ``analysis_assurance.depth_satisfied``
+    for a direct caller's explicit ``CompareRequest.depth``.
+    """
+
+    def _snapshot_files(self, tmp_path: Path) -> tuple[Path, Path]:
+        old, new = _header_pair()
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(old, old_p)
+        save_snapshot(new, new_p)
+        return old_p, new_p
+
+    def test_direct_api_satisfied_depth_populates_requested_depth(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact repro from the review finding: a direct
+        ``run_compare_request(CompareRequest(..., depth="headers"))`` call on
+        two plain header-scoped snapshots reaches 'headers' evidence (so the
+        request IS satisfied) -- before this fix, the returned result still
+        silently read ``requested_depth=None``/``depth_satisfied=None``
+        despite the caller's explicit, successfully-reached request."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="headers"
+        )
+        result = run_compare_request(request).diff
+
+        assert result.requested_depth == "headers", result
+        aa = result.analysis_assurance
+        assert aa.requested_depth == "headers", aa
+        assert aa.effective_depth == "headers", aa
+        assert aa.depth_satisfied is True, aa
+        assert aa.status == "complete", aa
+
+    def test_direct_api_no_depth_leaves_requested_depth_none(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion negative case: a caller that never sets
+        ``CompareRequest.depth`` must see the identical, unaffected
+        ``requested_depth=None`` behavior as before this fix."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result = run_compare_request(request).diff
+
+        assert result.requested_depth is None, result
+        assert result.analysis_assurance.requested_depth is None
+        assert result.analysis_assurance.depth_satisfied is None
+        assert result.analysis_assurance.status == "complete"
+
+    def test_classify_compare_pair_unsatisfied_depth_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """Direct unit-level check of the fixed function itself
+        (``classify_compare_pair``), bypassing ``resolve_compare_request``'s
+        own separate ``enforce_requested_depth`` hard-fail (a request whose
+        depth is unreachable from a plain JSON-snapshot resolve raises
+        ``ValidationError`` before classification is ever reached -- see
+        ``service_input_resolution.enforce_requested_depth``) so the
+        'requested but not satisfied' half of this fix's own gate
+        (``analysis_assurance.status != 'complete'``) is exercised the same
+        way the CLI-fix's own
+        ``test_unit_level_unsatisfied_requested_depth_is_failed`` above
+        exercises it -- by constructing an already-resolved pair directly
+        rather than going through the full resolve step."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.service_compare_pipeline import (
+            ResolvedComparePair,
+            classify_compare_pair,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p),
+            new=InputSpec.of(new_p),
+            depth="source",
+        )
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+        pair = ResolvedComparePair(
+            old=old,
+            new=new,
+            old_fmt=None,
+            new_fmt=None,
+            old_evidence=evidence,
+            new_evidence=evidence,
+        )
+        result = classify_compare_pair(request, pair).diff
+
+        assert result.requested_depth == "source", result
+        aa = result.analysis_assurance
+        assert aa.requested_depth == "source", aa
+        assert aa.effective_depth == "headers", aa
+        assert aa.depth_satisfied is False, aa
+        assert aa.status != "complete", aa
+
+
+class TestGraphCompletenessPartialFamilyOverlap:
+    """Round-9 review, Finding 2: the round-8 fix only flagged a fully
+    DISJOINT confirmed-family pair (``isdisjoint()``); a partially
+    overlapping pair -- old confirmed {call_graph, type_graph}, new
+    confirmed only {call_graph} -- is not disjoint (they share
+    call_graph), so it fell through to "complete" even though
+    buildsource/source_graph_findings.py only trusts a family when BOTH
+    sides cover it, meaning type_graph was silently skipped for this
+    comparison.
+    """
+
+    def _pack_with_graph(self, tmp_path: Path, name: str, graph) -> object:
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        return BuildSourcePack(root=tmp_path / name, source_graph=graph)
+
+    def test_partial_overlap_confirmed_families_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness != "complete", aa
+        assert aa.graph_completeness == "unknown", aa
+        assert aa.status == "partial", aa
+        assert any("confirmed on only one side" in n for n in aa.notes), aa.notes
+        assert any("type_graph" in n for n in aa.notes), aa.notes
+
+    def test_require_complete_analysis_exits_nonzero_for_partial_overlap(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--require-complete-analysis",
+            ],
+        )
+        assert res.exit_code != 0, res.output
+
+    def test_disjoint_confirmed_families_still_asymmetric(self, tmp_path: Path) -> None:
+        """Companion: round 8's original disjoint case must not regress
+        under the new inequality-based check."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                extractor_passes={
+                    "header_call_graph": True,
+                    "header_type_graph": True,
+                }
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "unknown", aa
+        assert aa.status == "partial", aa
+        assert any("confirmed on only one side" in n for n in aa.notes), aa.notes
+
+    def test_identical_confirmed_families_still_complete(self, tmp_path: Path) -> None:
+        """Companion: both sides confirming the EXACT same family set must
+        still read complete -- the new inequality check must not regress
+        the ordinary, matching-family case."""
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "complete", aa
+        assert aa.status == "complete", aa
+
+    def test_unit_level_isdisjoint_vs_inequality_direct(self, tmp_path: Path) -> None:
+        """Direct unit-level check of _graph_completeness itself, isolating
+        the predicate from the rest of the rollup."""
+        from abicheck.analysis_assurance import _graph_completeness
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old_pack = BuildSourcePack(
+            root=tmp_path / "old",
+            source_graph=SourceGraphSummary(
+                extractor_passes={"call_graph": True, "type_graph": True}
+            ),
+        )
+        new_pack = BuildSourcePack(
+            root=tmp_path / "new",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        status, notes = _graph_completeness(old_pack, new_pack)
+        assert status == "unknown"
+        assert any("confirmed on only one side" in n for n in notes), notes

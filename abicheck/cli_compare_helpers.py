@@ -1065,6 +1065,7 @@ def _report_compare_result(
     old_build_info: Path | None, new_build_info: Path | None,
     old_sources: Path | None, new_sources: Path | None,
     require_complete_analysis: bool = False,
+    depth: str | None = None,
 ) -> None:
     """Everything after the comparison: annotate, scope, render, exit.
 
@@ -1076,6 +1077,29 @@ def _report_compare_result(
     from .cli_compare_receipt import record_resolved_config
 
     record_resolved_config(result, resolved_cfg, evaluation_config)
+
+    # P0.4 (P1 review, round 9): `DiffResult.requested_depth` -- the G30
+    # report-identity field `analysis_assurance.compute_analysis_assurance`
+    # reads to gate `depth_satisfied` -- was never actually populated by any
+    # front end (see that field's own comment in checker_types.py), so an
+    # explicit `compare --depth source` that never reached source evidence
+    # (e.g. both sides lack a compile database, so the effective depth stays
+    # `headers`) silently read `requested_depth=None`, `depth_satisfied=None`,
+    # and could still report `status="complete"` under
+    # `--require-complete-analysis`. `depth` here is `run_compare`'s own
+    # raw, Click-validated `--depth` string (one of
+    # `checker_types.EVIDENCE_DEPTH_VALUES`, `None` when the flag was
+    # omitted) -- copy it onto the result before recomputing
+    # `analysis_assurance` below so the requested-vs-effective gate actually
+    # has something to check. Only ever set when the flag was explicitly
+    # given, mirroring the same "explicit override, never inferred"
+    # discipline `_resolve_compare_collect_mode` already applies to `depth`
+    # itself for collect-mode resolution -- an inferred depth (from
+    # `--sources`/`--build-info` alone, or `.abicheck.yml`'s `source.method`)
+    # is not this comparison's stated request in the same on-the-record way
+    # an explicit `--depth` flag is.
+    if depth is not None:
+        result.requested_depth = depth
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed
@@ -1804,6 +1828,7 @@ def run_compare(
         old_build_info=old_build_info, new_build_info=new_build_info,
         old_sources=old_sources, new_sources=new_sources,
         require_complete_analysis=require_complete_analysis,
+        depth=depth,
     )
 
 

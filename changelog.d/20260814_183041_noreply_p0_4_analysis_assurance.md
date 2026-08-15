@@ -234,4 +234,55 @@
   sets (from the same `extractor_passes`/`narrowed_passes` dicts already
   read); a total mismatch now reads `graph_completeness="unknown"`, folding
   into `status="partial"` the same way the other coverage gaps already do.
+- **`compare`'s own `--depth` flag now actually reaches
+  `analysis_assurance.requested_depth`** (P1 review, round 9). Nothing
+  populated `DiffResult.requested_depth` before this fix, so an explicit
+  `compare --depth source` that never actually reached source evidence
+  (both sides lacking a compile database, say — the effective depth stays
+  `headers`) silently read `requested_depth=None`/`depth_satisfied=None`
+  and could still report `status="complete"`, letting
+  `--require-complete-analysis` exit `0` despite the explicitly requested
+  depth never being reached. `cli_compare_helpers._report_compare_result`
+  now copies its own Click-validated `--depth` string onto
+  `DiffResult.requested_depth` before recomputing `analysis_assurance` —
+  only ever from an *explicit* flag, never an inferred depth from bare
+  `--sources`/`--build-info` or `.abicheck.yml`'s `source.method`.
+- **`service.run_compare_request()` — the typed Python API / MCP
+  `abi_compare` entry point — now also propagates an explicit
+  `CompareRequest.depth` onto `requested_depth`/`depth_satisfied`** (P2
+  review, PR #767 follow-up, `discussion_r3787839902`). The round-9 fix
+  above was CLI-only: `cli_compare_helpers._report_compare_result` stamps
+  `DiffResult.requested_depth` from `compare`'s own Click-validated
+  `--depth`, but a direct typed-API caller passing
+  `CompareRequest(..., depth="headers")` never routes through that CLI
+  helper, so the identical successfully-reached, explicit depth request
+  still silently read `requested_depth=None`/`depth_satisfied=None` and
+  could report `status="complete"`. Fixed in the shared
+  `service_compare_pipeline.classify_compare_pair` (the classification half
+  both `run_compare_request` and the native `compare` CLI's
+  `resolve_and_apply` path build on) with the identical `if depth is not
+  None` guard, then recomputing `analysis_assurance` from each snapshot's
+  own embedded `build_source` (this path has no out-of-band
+  `--old/new-build-info`/`--old/new-sources` pack directory to fold in, so
+  it mirrors `checker.compare()`'s own recomputation rather than the CLI
+  helper's `_resolve_side_pack`). The CLI's own stamp in
+  `_report_compare_result` is deliberately kept, not removed — it still
+  needs to recompute after resolving its own out-of-band pack, which
+  `classify_compare_pair` has no visibility into.
+- **`graph_completeness`'s asymmetric-confirmed-family check now rejects a
+  PARTIALLY overlapping family-set pair, not only a fully disjoint one**
+  (P1 review, round 9 — fresh evidence after round 8's disjoint-family
+  fix). Old confirming `{call_graph, type_graph}` against new confirming
+  only `{call_graph}` is not disjoint (they share `call_graph`), so the
+  round-8 `isdisjoint()` check left `graph_completeness="complete"` even
+  though `buildsource/source_graph_findings.py` only trusts a family when
+  BOTH sides cover it — `type_graph`, confirmed on old and never even
+  attempted on new, was silently skipped for this comparison the same way
+  a fully disjoint pair already was, just for one family instead of all of
+  them. Fixed by comparing the two sides' confirmed-family sets for *any*
+  inequality (`!=`) rather than only total disjunction — a subset,
+  superset, or partial-overlap pair are all "the two sides disagree on
+  what they confirmed" just as much as a fully disjoint pair, and the
+  resulting note now names which family/families are confirmed on only
+  one side.
 
