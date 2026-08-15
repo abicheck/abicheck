@@ -16,4 +16,8 @@
   and the PR-comment step reran the whole comparison purely to obtain JSON --
   doubling a potentially expensive analysis to produce the file that injection
   exists to avoid rerunning for. Compare now applies the same
-  `_extra_args_has_write_flag` guard the scan branch already had.
+  `_extra_args_has_write_flag` guard the scan branch already had, and that
+  guard now splits `extra-args` the same way `CMD+=($INPUT_EXTRA_ARGS)` does
+  instead of matching literal spaces -- an `extra-args: |` YAML literal block
+  puts a newline between arguments, which produces a real `--write` token the
+  old check could not see.

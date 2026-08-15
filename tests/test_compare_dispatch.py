@@ -675,7 +675,7 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
 
 
 def test_the_hybrid_rejection_names_only_live_flags(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A recovery hint that names a removed flag is worse than none.
 

@@ -273,16 +273,31 @@ _is_release_style_operand() {
 # present restores the older, always-correct "no PR_JSON at all" fallback
 # path instead.
 #
-# A simple substring/word-boundary check on the raw string, matching this
-# script's existing extra-args handling (`CMD+=($INPUT_EXTRA_ARGS)`, plain
-# word-splitting, not full shell quoting) -- good enough to catch the
-# documented flag spellings without parsing arbitrary quoting.
+# Answered by splitting the value the same way the command line itself does
+# rather than by matching the raw string. `CMD+=($INPUT_EXTRA_ARGS)` is an
+# unquoted expansion, so bash word-splits on IFS -- space, tab AND newline --
+# and a `extra-args: |` YAML literal block (or anything with a tab, or with
+# another argument before it) produces a real `--write` token that a
+# literal-space substring check does not see (Codex review). It then injected
+# ours anyway and lost to the user's, which is precisely the case this guard
+# exists to prevent. `set --` reuses that identical splitting, so the guard
+# and the argv can never disagree about what a token is; it also inherits the
+# same pathname expansion, deliberately, for the same reason.
+#
+# Still not full shell-quoting parsing: an exotically quoted `--write` evades
+# this, matching this script's existing plain word-splitting handling of
+# extra-args everywhere else.
 _extra_args_has_write_flag() {
-  case " ${INPUT_EXTRA_ARGS:-} " in
-    *' --write '* | *' --write='*)
-      return 0
-      ;;
-  esac
+  local _arg
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    case "$_arg" in
+      --write | --write=*)
+        return 0
+        ;;
+    esac
+  done
   return 1
 }
 
