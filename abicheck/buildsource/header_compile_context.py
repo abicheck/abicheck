@@ -266,6 +266,7 @@ class _ExplicitPin:
     standard: bool = False
     target_triple: bool = False
     sysroot: bool = False
+    gcc_path: bool = False
     defines: frozenset[str] = field(default_factory=frozenset)
     undefines: frozenset[str] = field(default_factory=frozenset)
 
@@ -304,6 +305,7 @@ class _ExplicitPin:
             is not None,
             target_triple=target_triple,
             sysroot=sysroot,
+            gcc_path=explicit.gcc_path is not None,
             defines=frozenset(defines),
             undefines=frozenset(undefines),
         )
@@ -569,6 +571,7 @@ class _EffectiveContextSignature:
     include_paths: tuple[str, ...]
     system_include_paths: tuple[str, ...]
     abi_relevant_flags: tuple[str, ...]
+    gcc_path: str
 
     @classmethod
     def of(
@@ -594,6 +597,7 @@ class _EffectiveContextSignature:
                     msvc=_is_msvc_command(cu.argv),
                 )
             ),
+            gcc_path="" if pin.gcc_path else (_derived_gcc_path(cu) or ""),
         )
 
 
@@ -1009,6 +1013,21 @@ def resolve_header_compile_context(
     Per-field, not per-request: a genuine disagreement on any *other*,
     unpinned dimension still fails closed.
 
+    ``gcc_path`` (P2 review, ``discussion_r3788...`` follow-up, fresh
+    evidence) folds in :func:`_derived_gcc_path`'s own resolved driver
+    selector: the compiler itself supplies ABI-relevant built-in macros,
+    default include paths, and target defaults, so two otherwise-identical
+    grouped units that resolve to *different* clang-cl/MSVC drivers must not
+    silently collapse into one signature and pick the first unit's driver --
+    that would let the compile-database's own iteration order (unrelated to
+    any ABI-relevant fact) change the generated L2 snapshot. Masked to a
+    shared placeholder exactly like ``standard``/``target_triple``/
+    ``sysroot`` above when the caller's own *explicit* context already pins
+    a ``--gcc-path`` (``pin.gcc_path``): the caller's own value wins that
+    dimension regardless of what the matched units resolve to, so a
+    driver-only disagreement the caller already resolved must not raise
+    ``HeaderCompileContextAmbiguousError``.
+
     Raises :class:`~abicheck.errors.HeaderCompileContextAmbiguousError` when
     two or more of the matched ``CompileUnit``s disagree on an ABI-relevant
     field the caller has not already pinned via *explicit* — the one case
@@ -1148,7 +1167,37 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     if not cu.argv or not _is_msvc_command(cu.argv):
         return None
     driver = msvc_driver_token(cu.argv)
-    return driver if driver is not None else cu.argv[0]
+    token = driver if driver is not None else cu.argv[0]
+    return _resolve_driver_token(token, cu.directory)
+
+
+def _resolve_driver_token(token: str, directory: str) -> str:
+    """Expand ``~`` and resolve a path-bearing driver *token* against
+    *directory* (P2 review, ``discussion_r3788...`` follow-up, fresh
+    evidence).
+
+    Mirrors :func:`_resolve_cu_relative_path`'s treatment of every other
+    redacted/relative ``CompileUnit`` path field: a compile command naming
+    its compiler with a relative path (``../llvm/bin/clang-cl``) or a
+    home-redacted one (``~/llvm/bin/clang-cl``, ADR-032 D7) is only
+    meaningful relative to the compile unit's own ``directory`` -- not
+    abicheck's own current working directory, which is what a bare
+    ``shutil.which(token)``/subprocess call in
+    ``dumper_clang._resolve_clang_bin`` would otherwise use. Without this,
+    such a token was returned verbatim, so a genuinely executable compiler
+    (from the real build's own working directory) was reported missing.
+
+    A **bare** PATH name (``clang-cl``, no path separator at all) is left
+    unchanged -- resolving it against *directory* would be wrong, since a
+    bare name is looked up on ``PATH``, not relative to any directory.
+    """
+    expanded = os.path.expanduser(token)
+    if "/" not in expanded and "\\" not in expanded:
+        return expanded
+    path = Path(expanded)
+    if not path.is_absolute() and directory:
+        path = Path(directory).expanduser() / path
+    return str(path)
 
 
 def _ambiguity_message(
@@ -1160,18 +1209,19 @@ def _ambiguity_message(
         f"Public header(s) [{header_names}] are compiled under "
         f"{len(by_signature)} materially different, ABI-relevant compile "
         "contexts across the available L3 build evidence (differing "
-        "-std=/target/defines/include-search-order/sysroot/ABI-relevant "
-        "flags); abicheck cannot pick one context over another without "
-        "guessing. Narrow the input (--compile-db-filter / a project "
-        "compile: block / --gcc-options pinning the ambiguous field(s)) or "
-        "compare a header per contract at a time. Conflicting translation "
-        "units:",
+        "-std=/target/defines/include-search-order/sysroot/compiler-driver/"
+        "ABI-relevant flags); abicheck cannot pick one context over another "
+        "without guessing. Narrow the input (--compile-db-filter / a "
+        "project compile: block / --gcc-options/--gcc-path pinning the "
+        "ambiguous field(s)) or compare a header per contract at a time. "
+        "Conflicting translation units:",
     ]
     for sig, units in sorted(by_signature.items(), key=lambda kv: kv[0].standard):
         sample = units[0]
         lines.append(
             f"  - {sample.source or sample.id!r}: std={sig.standard or '(default)'} "
             f"target={sig.target_triple or '(default)'} "
+            f"gcc_path={sig.gcc_path or '(default)'} "
             f"abi_flags={list(sig.abi_relevant_flags)}"
         )
     return "\n".join(lines)

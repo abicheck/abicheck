@@ -75,6 +75,34 @@ def test_msvc_driver_token_keeps_first_match_when_argv_names_two():
     assert msvc_driver_token(argv) == "clang-cl"
 
 
+def test_msvc_driver_token_recognizes_versioned_clang_cl_behind_launcher():
+    # P2 review finding (launcher-wrapped supported CL-style alias
+    # follow-up): a versioned `clang-cl-20` behind a launcher (sccache) must
+    # be recognized as the MSVC driver token -- the same broader
+    # recognition `dumper_clang._is_cl_style_driver_name` already applies
+    # elsewhere -- not just the four exact `_MSVC_DRIVERS` spellings.
+    argv = ["sccache", "clang-cl-20", "/c", "foo.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl-20"
+
+
+def test_msvc_driver_token_recognizes_dpcpp_cl_behind_launcher():
+    # Same finding, Intel's dpcpp-cl alias (also `-cl`-suffixed, recognized
+    # by `_is_clang_family_binary`/`_is_cl_style_driver_name` elsewhere).
+    argv = ["sccache", "dpcpp-cl", "/c", "foo.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "dpcpp-cl"
+
+
+def test_msvc_driver_token_versioned_clang_cl_full_path():
+    # A versioned clang-cl behind a launcher, given as a full (Windows-style)
+    # path -- the version-suffix stripping happens on the basename, not the
+    # whole path.
+    argv = ["sccache", r"C:\LLVM\bin\clang-cl-18.exe", "/c", "foo.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == r"C:\LLVM\bin\clang-cl-18.exe"
+
+
 def test_source_from_argv_msvc_combined_forced_include_rejected():
     # /FIconfig.hpp is a combined forced-include option, never the TU.
     assert source_from_argv(["clang-cl", "/FIconfig.hpp", "foo.cc"]) == "foo.cc"

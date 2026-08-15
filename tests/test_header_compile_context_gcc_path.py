@@ -44,6 +44,7 @@ from abicheck.buildsource.header_compile_context import (
     resolve_header_compile_context,
 )
 from abicheck.compile_context import CompileContext
+from abicheck.errors import HeaderCompileContextAmbiguousError
 
 
 def _cu(**kwargs: object) -> CompileUnit:
@@ -110,6 +111,98 @@ def test_resolve_derives_gcc_path_behind_launcher_wrapper(tmp_path: Path) -> Non
     result = resolve_header_compile_context(ev, [header])
     assert result.context is not None
     assert result.context.gcc_path == "clang-cl"
+
+
+def test_resolve_derives_gcc_path_resolves_relative_driver_against_cu_directory(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (path-bearing driver token follow-up): a relative
+    driver path like ``../llvm/bin/clang-cl`` is only meaningful relative to
+    the compile unit's own ``directory`` -- resolving it against abicheck's
+    own CWD (the pre-fix behavior) reports a genuinely executable compiler
+    as missing."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    cu = _cu(
+        source=str(src),
+        directory=str(build_dir),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["../llvm/bin/clang-cl", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == str(build_dir / "../llvm/bin/clang-cl")
+
+
+def test_resolve_derives_gcc_path_expands_home_redacted_driver_token(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding: an evidence adapter's own home-redaction (ADR-032
+    D7, ``~/llvm/bin/clang-cl``) must be expanded, not returned verbatim --
+    ``shutil.which("~/llvm/bin/clang-cl")`` never resolves a literal tilde."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["~/llvm/bin/clang-cl", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path is not None
+    assert "~" not in result.context.gcc_path
+    assert result.context.gcc_path.endswith("llvm/bin/clang-cl")
+
+
+def test_resolve_derives_gcc_path_leaves_bare_path_name_unchanged(
+    tmp_path: Path,
+) -> None:
+    """A bare PATH name (no separator at all) must be left unchanged -- it is
+    looked up on PATH, not resolved against the compile unit's directory."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "clang-cl"
+
+
+def test_resolve_derives_gcc_path_absolute_driver_left_absolute(
+    tmp_path: Path,
+) -> None:
+    """An already-absolute driver path must not be joined onto ``directory``
+    a second time."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["/opt/llvm/bin/clang-cl", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "/opt/llvm/bin/clang-cl"
 
 
 def test_resolve_does_not_derive_gcc_path_for_non_msvc_unit(tmp_path: Path) -> None:
@@ -212,6 +305,101 @@ def test_merge_l3_compile_context_neither_explicit_adopts_derived_pair_together(
     assert merged is not None
     assert merged.gcc_path == "clang-cl"
     assert merged.gcc_prefix == "/opt/derived/bin/"
+
+
+def test_resolve_raises_ambiguous_when_otherwise_identical_units_differ_only_in_driver(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3788...`` ambiguity-grouping
+    follow-up): two matched compile units that are otherwise identical but
+    resolve to *different* clang-cl drivers must raise
+    ``HeaderCompileContextAmbiguousError``, not silently pick the first
+    unit's driver -- the compiler itself supplies ABI-relevant built-in
+    macros/default include paths/target defaults, so switching drivers
+    (e.g. because compile-database iteration order changed) can silently
+    change the generated L2 snapshot."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["cl.exe", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_same_driver_units_are_not_ambiguous(tmp_path: Path) -> None:
+    """Companion positive case: two otherwise-identical units that resolve
+    to the *same* driver must not raise -- the new gcc_path field in the
+    ambiguity signature must not introduce a false ambiguity for the common
+    case."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "clang-cl"
+
+
+def test_resolve_driver_disagreement_excused_when_caller_pins_explicit_gcc_path(
+    tmp_path: Path,
+) -> None:
+    """A driver-only disagreement the caller already resolved via an
+    explicit ``--gcc-path`` must not raise -- mirrors the existing
+    ``standard``/``target_triple``/``sysroot`` pin-masking behavior
+    (Finding 3 of the original P1 review) applied to the new gcc_path
+    dimension."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["cl.exe", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    explicit = CompileContext(gcc_path="/opt/custom/clang-cl")
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.context is not None
 
 
 def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(

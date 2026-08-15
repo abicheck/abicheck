@@ -252,3 +252,47 @@
   MSVC dialect was detected some other way (a bare `/c` marker or an
   explicit `--driver-mode=cl` naming no `cl`/`clang-cl`-basename token) and
   no more specific token exists to prefer.
+- **A thirteenth review round found three more gaps in the same
+  launcher/driver-selector machinery, all fresh evidence beyond the twelfth
+  round above.** (1) `adapters.base._msvc_driver_scan()`'s driver-token
+  match was exact-name-only against `_MSVC_DRIVERS`
+  (`cl`/`cl.exe`/`clang-cl`/`clang-cl.exe`), so a launcher-wrapped
+  *supported* CL-style alias — a versioned `sccache clang-cl-20 /c ...`
+  (LLVM/Debian packaging commonly ships a versioned executable) or Intel's
+  `sccache dpcpp-cl /c ...` — matched neither that set nor
+  `dumper_clang._is_cl_style_driver_name()`'s own already-broader
+  recognition (which strips a trailing version suffix and accepts any
+  `-cl`-suffixed stem), so the scan returned no driver token at all and
+  `_derived_gcc_path()` fell back to the launcher (`sccache`), which is
+  rejected as not clang-family — the exact failure this whole scan exists
+  to prevent, just for a versioned/aliased driver name instead of a bare
+  one. `_msvc_driver_scan()` now also recognizes any token
+  `_is_cl_style_driver_name()` accepts, reusing that existing recognizer
+  rather than growing a second, drifting name list. (2)
+  `header_compile_context._derived_gcc_path()` returned a resolved driver
+  token verbatim even when it was a *relative* path (`../llvm/bin/clang-cl`)
+  or a home-redacted one (`~/llvm/bin/clang-cl`, ADR-032 D7) — the caller
+  (`dumper_clang._resolve_clang_bin`'s `shutil.which`/subprocess execution)
+  resolves such a token from abicheck's own current working directory, not
+  the compile unit's own `directory`, so a genuinely executable compiler
+  from the real build was reported missing. A new `_resolve_driver_token()`
+  helper (mirroring the existing `_resolve_cu_relative_path()`'s treatment
+  of every other redacted/relative `CompileUnit` path field) expands `~`
+  and, for any token containing a path separator, resolves it relative to
+  `cu.directory` when not already absolute — a bare PATH name (no
+  separator) is left unchanged, since it's looked up on `PATH`, not
+  resolved against any directory. (3) `_EffectiveContextSignature` never
+  compared the derived compiler driver at all, so two otherwise-identical
+  matched compile units resolving to *different* clang-cl/MSVC drivers
+  (e.g. because compile-database iteration order changed which unit is
+  "first") silently grouped into one signature and applied the first
+  unit's driver — even though the compiler itself supplies ABI-relevant
+  built-in macros, default include paths, and target defaults, so this
+  could silently change the generated L2 snapshot without ever raising
+  `HeaderCompileContextAmbiguousError`. `_EffectiveContextSignature` now
+  carries a `gcc_path` field (`_derived_gcc_path()`'s own resolved value),
+  masked to a shared placeholder — mirroring `standard`/`target_triple`/
+  `sysroot` above — only when the caller's own explicit `CompileContext`
+  already pins a `--gcc-path` (`_ExplicitPin.gcc_path`, new), since the
+  caller's own value wins that dimension regardless of what the matched
+  units resolve to.

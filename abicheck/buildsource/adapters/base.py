@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 from typing import Protocol, runtime_checkable
 
+from ...dumper_clang import _is_cl_style_driver_name
 from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 
 # Source-file extension → normalized language token.
@@ -513,6 +514,23 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     compiler-cache/launcher wrapper (``sccache``, ``ccache``, ``distcc``, ...)
     commonly precedes the real driver, e.g. ``sccache clang-cl /std:c++20
     ...``, where ``argv[0]`` is the launcher, not the compiler.
+
+    The driver-token match itself is not exact-name-only (P2 review,
+    ``discussion_r3788...`` -- launcher-wrapped-alias follow-up, fresh
+    evidence): besides the four literal :data:`_MSVC_DRIVERS` spellings, any
+    token :func:`~abicheck.dumper_clang._is_cl_style_driver_name` recognizes
+    as CL-style (a versioned ``clang-cl-20``/``clang-cl-20.exe``, or Intel's
+    ``dpcpp-cl``) also marks the command MSVC-dialect and is captured as the
+    driver token. Without this, ``sccache clang-cl-20 /c ...`` or ``sccache
+    dpcpp-cl /c ...`` matched neither the exact-name set nor
+    :func:`_is_cl_style_driver_name`'s own broader recognition, so this scan
+    returned no driver token at all -- :func:`~abicheck.buildsource.
+    header_compile_context._derived_gcc_path` then fell back to ``argv[0]``
+    (the launcher, ``sccache``), which
+    ``dumper_clang._resolve_clang_bin``/``resolve_source_frontend_clang_bin``
+    reject as not clang-family, silently falling back to plain ``clang++``
+    even though a real, supported CL-style driver was named right there in
+    argv.
     """
     is_msvc = "/c" in argv
     driver_token: str | None = None
@@ -534,7 +552,7 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
             i += 1
             continue
         base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if base in _MSVC_DRIVERS:
+        if base in _MSVC_DRIVERS or _is_cl_style_driver_name(base):
             is_msvc = True
             if driver_token is None:
                 driver_token = arg
