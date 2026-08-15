@@ -33,29 +33,21 @@
   insert the current working directory into `sys.path[0]`, so on a
   `pull_request`-triggered workflow — where the checkout is the PR
   author's own, untrusted code — a PR that added a same-named module (e.g.
-  its own `abicheck/_compiler_options.py` or `abicheck/package.py`) could
-  make one of these inline scripts import and execute that code instead of
-  the real, pip-installed package. Every inline script that imports an
-  `abicheck` module now strips the CWD entry from `sys.path` before doing
-  so — filtering by *resolved path* against the real current directory,
-  not by matching the literal strings `""`/`"."`, since a caller with
-  `PYTHONPATH=.` set already has Python resolve that `.` into the
-  checkout's own absolute path before the filter ever runs — and the one
-  `-m abicheck.cli_pr_comment` invocation was converted to the equivalent
-  `-c`-based form so it could receive the same fix. Every one of these
-  invocations also now passes `-S` (skip automatic `site` processing) so
-  a checked-out PR's own top-level `sitecustomize.py`/`usercustomize.py`
-  can no longer execute during interpreter *startup* — before the
-  `sys.path`-filtering snippet above ever gets a chance to run a single
-  line — with `site.main()` called manually right after the filter to
-  restore normal site-packages access for the real, pip-installed package.
-- **`action/run.sh`'s checkout-shadowing filter now excludes every path
-  located anywhere inside the checkout, not just the checkout root
-  itself.** A common src-layout `PYTHONPATH=src` resolves to
-  `<checkout>/src` before the filter ever runs, so the earlier
-  resolved-path *equality* check left that descendant path — and any
-  `sitecustomize.py`/malicious `abicheck` package placed there —
-  importable.
+  its own `abicheck/_compiler_options.py` or `abicheck/package.py`), or a
+  top-level `sitecustomize.py`/`usercustomize.py` (auto-imported by
+  Python's `site` module during interpreter *startup*, before any `-c`
+  script body runs), could make one of these inline scripts import and
+  execute that code instead of the real, pip-installed package — including
+  via a `PYTHONPATH` entry the calling workflow set, resolved relative to
+  the checkout. Every inline script that imports an `abicheck` module now
+  runs from a freshly created, empty temporary directory with `PYTHONPATH`
+  cleared for that one invocation, so the checkout is never on `sys.path`
+  at any point during interpreter startup or after — closing both the
+  direct-import and the `sitecustomize` vector at once, for a bare CWD
+  entry, a `PYTHONPATH=.`-style entry, or a `PYTHONPATH=src`-style
+  descendant entry alike — and the one `-m abicheck.cli_pr_comment`
+  invocation was converted to the equivalent `-c`-based form so it could
+  receive the same fix.
 - **The Windows-only compiler-flags tokenizer (`--gcc-options`/
   `--compiler-option`) now follows the standard Windows command-line
   backslash/quote parsing rule** (the same one `CommandLineToArgvW` and

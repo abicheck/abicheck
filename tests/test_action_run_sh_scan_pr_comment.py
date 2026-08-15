@@ -220,11 +220,11 @@ def test_pr_comment_renderer_uses_resolved_py_bin_not_bare_python3():
     # sys.path[0], letting a malicious PR's own checked-out
     # abicheck/cli_pr_comment.py shadow the real, pip-installed module --
     # converted to an equivalent `-c '...runpy.run_module(...)...'`
-    # invocation prefixed with $_PY_SAFE_PATH (the same CWD-stripping
-    # snippet every other abicheck-importing inline script in this file
+    # invocation running from $_PY_SAFE_DIR (the same checkout-isolation
+    # mechanism every other abicheck-importing inline script in this file
     # now uses) to close that. runpy.run_module's own module-name string
     # argument is asserted here instead of the old literal `-m` spelling.
     text = RUN_SH.read_text(encoding="utf-8")
-    assert '"$_PY_BIN" -S -c "$_PY_SAFE_PATH"' in text
+    assert 'cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c' in text
     assert 'runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")' in text
     assert "python3 -m abicheck.cli_pr_comment" not in text

@@ -107,19 +107,19 @@ def _add_flag_source() -> str:
     return text[start:end]
 
 
-# $_PY_SAFE_PATH is referenced (not redefined) inside add_flag_shlex_split's
+# $_PY_SAFE_DIR is referenced (not redefined) inside add_flag_shlex_split's
 # real body -- extracted verbatim (Codex review: a harness that silently left
-# it unset would make the concatenation "$_PY_BIN" -c "$_PY_SAFE_PATH"'...'
-# collapse to an empty prefix, exercising *none* of the CWD-shadowing fix
-# that variable exists for, while every test here kept passing regardless).
-_PY_SAFE_PATH_START = "_PY_SAFE_PATH='"
-_PY_SAFE_PATH_END = "'\n"
+# it unset would make every "(cd \"$_PY_SAFE_DIR\" && ...)" wrapper `cd` into
+# an empty string, i.e. a no-op staying in the untrusted checkout, exercising
+# *none* of the CWD-shadowing fix that variable exists for, while every test
+# here kept passing regardless).
+_PY_SAFE_DIR_START = '_PY_SAFE_DIR="$(mktemp'
 
 
-def _py_safe_path_source() -> str:
+def _py_safe_dir_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_PY_SAFE_PATH_START)
-    end = text.index(_PY_SAFE_PATH_END, start) + len(_PY_SAFE_PATH_END)
+    start = text.index(_PY_SAFE_DIR_START)
+    end = text.index("\n", start) + 1
     return text[start:end]
 
 
@@ -185,10 +185,10 @@ def _run_region(
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
-        # $_PY_SAFE_PATH (extracted verbatim, not redefined -- see its own
+        # $_PY_SAFE_DIR (extracted verbatim, not redefined -- see its own
         # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-        + _py_safe_path_source()
+        + _py_safe_dir_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -223,10 +223,10 @@ def _run_region_raw(
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
-        # $_PY_SAFE_PATH (extracted verbatim, not redefined -- see its own
+        # $_PY_SAFE_DIR (extracted verbatim, not redefined -- see its own
         # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-        + _py_safe_path_source()
+        + _py_safe_dir_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -335,11 +335,23 @@ class TestCompileContextForwardingParity:
     def test_gcc_options_backslash_escaped_space_is_honored(self) -> None:
         """Sibling regression (Codex review, PR #774): the same hand-rolled
         lexer broke a real POSIX backslash-escaped space into two tokens
-        instead of one."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": r"-DMSG=hello\ world"}
+        instead of one.
+
+        Like :func:`test_gcc_options_unquoted_backslash_matches_the_real_python_helper`
+        below, a backslash-before-whitespace's correct handling is
+        platform-dependent by design: real POSIX collapses it into one
+        token, but the Windows-only tokenizer deliberately does not (see
+        ``_split_gcc_options_windows``'s own docstring, item #5) -- a
+        revision hardcoding the POSIX answer here failed on windows-latest
+        for exactly that reason. Asserted dynamically against the real
+        Python helper instead of one hardcoded platform's answer."""
+        value = r"-DMSG=hello\ world"
+        expected_tokens = split_gcc_options(value)
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
         cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
-        assert cmd.count("--compiler-option") == 1
-        assert "-DMSG=hello world" in cmd
+        assert cmd.count("--compiler-option") == len(expected_tokens)
+        for token in expected_tokens:
+            assert token in cmd
 
     def test_gcc_options_unquoted_backslash_matches_the_real_python_helper(
         self,
@@ -406,7 +418,7 @@ class TestCompileContextForwardingParity:
         harness = (
             'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
             '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-            + _py_safe_path_source()
+            + _py_safe_dir_source()
             + _add_flag_source()
             + _is_release_style_operand_source()
             + "\nCMD=()\n"

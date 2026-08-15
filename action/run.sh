@@ -97,14 +97,14 @@ add_flag_shlex_split() {
   # never subject to that conversion (only actual argv strings are), so
   # this sidesteps the whole class of corruption regardless of the exact
   # value shape that triggers it -- not just the one case that surfaced it.
-  split="$(printf '%s' "$value" | "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
+  split="$(printf '%s' "$value" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 
 from abicheck._compiler_options import split_gcc_options
 
 for tok in split_gcc_options(sys.stdin.read()):
     print(tok)
-')"
+'))"
   while IFS= read -r item; do
     # Codex review, fresh evidence: on windows-latest, $_PY_BIN resolves to
     # native python.exe, whose print() writes CRLF line endings by default
@@ -233,78 +233,56 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # Security: `python -c`/`python -m` insert this process's current working
 # directory ('' in sys.path, i.e. wherever this script's caller checked out
 # code for abicheck to analyze -- untrusted on a `pull_request`-triggered
-# workflow, since a PR author controls the checked-out tree) as sys.path[0].
+# workflow, since a PR author controls the checked-out tree) as sys.path[0],
+# and Python's automatic `site` module processing (which runs during
+# interpreter *startup*, before any `-c` script body gets to run a single
+# line of its own) auto-imports a discoverable `sitecustomize.py`/
+# `usercustomize.py` from anywhere on the resulting `sys.path` -- including
+# a `PYTHONPATH` entry resolved relative to that same untrusted checkout.
 # Any inline script below that imports a real `abicheck` submodule would,
-# without this, prefer a same-named module/package the checked-out tree
-# happens to contain (e.g. a malicious PR adding its own
-# `abicheck/_compiler_options.py`) over the actual, trusted, pip-installed
-# package -- executing attacker-controlled code inside this Action's own
-# process (Codex review, fresh evidence, empirically confirmed: a
-# fake `abicheck/_compiler_options.py` dropped into the CWD really does
-# shadow the installed one and run instead). Every inline script that
-# imports any `abicheck` module is prefixed with this snippet, which strips
-# just the CWD entry before that import -- deliberately not `python -I`
-# (also disables user site-packages and ignores PYTHONPATH/PYTHONHOME,
-# either of which a real, differently-configured CI environment could
-# legitimately need for `abicheck` to be importable at all) or `-P`
-# (identical, narrower isolation, but Python 3.11+ only -- this project
-# supports 3.10). A script with no `abicheck` import (e.g. the plain
+# without mitigation, prefer a same-named module/package the checked-out
+# tree happens to contain (e.g. a malicious PR adding its own
+# `abicheck/_compiler_options.py`, or a top-level `sitecustomize.py`) over
+# the actual, trusted, pip-installed package -- executing attacker-
+# controlled code inside this Action's own process (Codex review, fresh
+# evidence, empirically confirmed for both shapes).
+#
+# Three earlier revisions of this mitigation each tried to *filter*
+# sys.path from *inside* the `-c` script body after the fact (strip the
+# resolved CWD; strip a resolved PYTHONPATH=. entry; strip any descendant
+# path, not just an exact match; pair every call site with `-S` plus a
+# manual `site.main()` re-run to also outrun the sitecustomize auto-import
+# window) -- each fixed a real, independently-confirmed gap the previous
+# one left open, but the cumulative `-S` + manual `site.main()` re-
+# processing broke real `abicheck` importability on a `windows-latest` CI
+# runner for reasons that could not be fully root-caused remotely (exit
+# code 2 from the wrapping bash invocation, no further diagnostic
+# available). Rather than a fourth patch on the same fragile foundation,
+# this revision removes the foundation's own premise: instead of trying to
+# clean up `sys.path` *after* Python has already started resolving it
+# (racing `site`'s own automatic sitecustomize import), every inline script
+# that imports an `abicheck` module now runs from a freshly created, empty
+# temporary directory with `PYTHONPATH` cleared for that one invocation --
+# so the untrusted checkout is never on `sys.path` in the first place, at
+# any point during interpreter startup or after. `-S` and the whole
+# `sys.path`-filtering script are no longer needed: normal, unmodified
+# `site` processing runs, and it can only ever find a *real*
+# `sitecustomize.py` (if any) from actual site-packages, never one placed
+# in the checkout. A script with no `abicheck` import (e.g. the plain
 # `json`/`sys` JSON-parsing snippet elsewhere in this file) has nothing to
 # shadow and does not need this.
 #
-# Filters by *resolved path*, not the literal strings ""/"." (Codex review,
-# fresh evidence: a caller with PYTHONPATH=. already has Python resolve
-# that "." into the checkout's own absolute path -- not the literal string
-# "." -- before this snippet ever runs, confirmed empirically
-# (PYTHONPATH=. python3 -c "import sys; print(sys.path)" puts the resolved
-# absolute CWD in sys.path, not "."), so the earlier string-equality check
-# left that vector open). os.path.realpath() also resolves a symlink'd
-# checkout root to the same real CWD, and (verified) resolves the bare
-# empty-string entry -c itself inserts to that same real CWD too, so one
-# check covers both shapes without a separate special case for "".
-#
-# Removes any entry located *anywhere inside* the checkout, not just an
-# entry equal to it (Codex review, fresh evidence, on top of the above): a
-# workflow using a common src-layout `PYTHONPATH=src` resolves to
-# `<checkout>/src` before this snippet ever runs -- a strict equality
-# check leaves that descendant path (and any `sitecustomize.py`/malicious
-# `abicheck` package placed there) importable, confirmed empirically
-# (`PYTHONPATH=src` reproduces sitecustomize execution against the
-# equality-only filter). The real, pip-installed `abicheck` package is
-# never located inside the analyzed repository's own checkout -- even
-# this action's own self-referential dogfooding CI installs it via a
-# plain, non-editable `pip install <path>` (action.yml's "Install
-# abicheck" step), which copies into site-packages rather than keeping
-# sys.path pointed at the checkout -- so excluding every path under the
-# checkout cannot remove the real package, only untrusted content.
-#
-# Every call site pairs this with the interpreter's own `-S` flag (Codex
-# review, fresh evidence, on top of the filter above): a checked-out PR
-# adding a top-level `sitecustomize.py` gets it auto-imported by the `site`
-# module during normal interpreter startup -- BEFORE this `-c` script body
-# ever runs a single line of its own filtering, since site processing
-# happens as part of interpreter initialization itself. `-S` skips that
-# automatic site processing (including sitecustomize/usercustomize) so
-# nothing checkout-derived can execute before the filter below has a chance
-# to strip the checkout out of sys.path; `import site; site.main()` then
-# re-runs site processing manually, but only once the checkout entry is
-# already gone from sys.path, so the real, pip-installed site-packages
-# (needed for the following `import abicheck...`) get added back exactly
-# as normal while sitecustomize/usercustomize can no longer be found there.
-# Verified empirically both ways: a fake sitecustomize.py in the CWD
-# executes under `-S` + `site.main()` with no filtering (confirming the
-# vector is real), and does not execute once the filter runs first.
-_PY_SAFE_PATH='import os
-import sys
-_cwd = os.path.realpath(os.getcwd())
-_cwd_prefix = _cwd + os.sep
-def _is_checkout_path(p):
-    rp = os.path.realpath(p) if p else _cwd
-    return rp == _cwd or rp.startswith(_cwd_prefix)
-sys.path = [p for p in sys.path if not _is_checkout_path(p)]
-import site
-site.main()
-'
+# The real, pip-installed `abicheck` package is never located inside the
+# analyzed repository's own checkout, so neither the temp-directory CWD nor
+# the cleared `PYTHONPATH` can remove it -- even this action's own self-
+# referential dogfooding CI installs it via a plain, non-editable
+# `pip install <path>` (action.yml's "Install abicheck" step), which
+# copies into site-packages, and a `pip install -e .` (editable) install's
+# own import-hook mechanism (a `.pth` file registering a `sys.meta_path`
+# finder, confirmed directly against a real editable install) is likewise
+# unaffected by either change -- neither depends on `sys.path` carrying
+# the checkout, or on `PYTHONPATH` being set, to resolve `abicheck`.
+_PY_SAFE_DIR="$(mktemp -d 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}")"
 
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
@@ -496,23 +474,23 @@ for asset in data.get("assets") or []:
   # extraction safety here.
   case "$asset_name" in
     *.tar.zst)
-      "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
+      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
 
 TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir" \
+' "$archive_path" "$extracted_dir") \
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
       ;;
     *.tar.gz | *.tgz | *.tar)
-      "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
+      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
 
 TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir" \
+' "$archive_path" "$extracted_dir") \
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' -- it is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."; return 1; }
       ;;
     *)
@@ -552,7 +530,7 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
   fi
 
   local resolve_output
-  resolve_output=$("$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
+  resolve_output=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -1313,7 +1291,7 @@ STDERR_FILE=$(mktemp)
 #: a non-PR-comment run or `pr-comment-on: never` where the temp file was
 #: still created but never posted. Without this, a persistent self-hosted
 #: runner accumulates one JSON report per scan run indefinitely.
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
@@ -2316,16 +2294,16 @@ _maybe_post_pr_comment() {
   # other Python invocation in this script already uses.
   #
   # `-c '...runpy.run_module(...)...'` rather than the more obvious
-  # `-m abicheck.cli_pr_comment`, so `$_PY_SAFE_PATH` (see its own
-  # definition above) can strip the CWD-shadowing entry from sys.path
-  # before this module import too -- `-m` inserts the CWD into sys.path[0]
+  # `-m abicheck.cli_pr_comment`, so this can run from `$_PY_SAFE_DIR` (see
+  # its own definition above) the same way every other `abicheck`-importing
+  # invocation in this file does -- `-m` inserts the CWD into sys.path[0]
   # exactly like `-c` does, and this is the one inline-Python invocation in
   # this file that isn't already `-c`-shaped. Functionally identical to
   # `-m abicheck.cli_pr_comment` from click's own perspective (it reads
   # sys.argv[1:], unaffected by this); the only observable difference is
   # the program name `--help`/usage text shows ("-c" instead of the
   # resolved module path), which this Action does not depend on.
-  "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import runpy
 
 runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
@@ -2337,7 +2315,7 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
     ${run_url:+--report-url "$run_url"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
-    -o "$PR_BODY" || true
+    -o "$PR_BODY") || true
 
   if [[ ! -s "$PR_BODY" ]]; then
     echo "abicheck: no comment to post (no changes / --on=${INPUT_PR_COMMENT_ON:-changes})."
