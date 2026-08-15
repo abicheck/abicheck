@@ -62,11 +62,32 @@ class TestSplitGccOptionsWindows:
             "-DOK=1",
         ]
 
-    def test_backslash_escaped_space_is_honored(self) -> None:
-        # Codex review (P1): an escape=""-disabled lexer left a real
-        # backslash-escaped space as two separate tokens instead of one.
+    def test_backslash_before_whitespace_is_not_escaped(self) -> None:
+        # Codex review, fifth round: an earlier revision also escaped
+        # backslash-before-whitespace (to satisfy real POSIX's
+        # -DMSG=hello\ world idiom, even though the separate POSIX branch
+        # already handles real POSIX input on its own) -- this created a
+        # genuine Windows-specific ambiguity with the far more common shape
+        # of a path ending in a trailing directory separator right before
+        # the next flag, corrupting it into one token instead of two (see
+        # test_trailing_directory_separator_before_next_flag_stays_two_tokens).
+        # The backslash and the space are both left untouched here, unlike
+        # plain shlex (which would collapse them into one token).
         assert _split_gcc_options_windows(r"-DMSG=hello\ world") == [
-            "-DMSG=hello world"
+            "-DMSG=hello\\",
+            "world",
+        ]
+
+    def test_trailing_directory_separator_before_next_flag_stays_two_tokens(
+        self,
+    ) -> None:
+        # Codex review, fifth round: the exact regression this class exists
+        # to pin -- an unquoted Windows path ending in a trailing directory
+        # separator immediately before the next flag must not be merged
+        # with it into one corrupted token.
+        assert _split_gcc_options_windows(r"-IC:\sdk\ -DOK=1") == [
+            "-IC:\\sdk\\",
+            "-DOK=1",
         ]
 
     def test_backslash_escaped_quote_is_honored(self) -> None:
