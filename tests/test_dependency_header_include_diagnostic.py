@@ -25,6 +25,16 @@ choice) makes ``abicheck scan``/``compare``/``dump`` fail to parse the very
 first header that reaches into the dependency, with the parse aborting deep
 inside a transitively-``#include``d file the caller never named directly.
 
+Scoped to the plain ``-H``/``-I`` invocation with no ``--sources``/
+``--build-info``: when either of those is given, ``seed_l2_includes()``
+(``abicheck/buildsource/l2_seed.py``) auto-derives the build's own include
+dirs for exactly this case (an include path can also arrive through
+``--gcc-options``), so a real PVXS invocation that also passes
+``--sources``/``--build-info`` may need no explicit ``-I`` at all. This
+fixture intentionally covers the narrower, still-common case where neither
+is given -- the plain ``-H`` invocation the Action's `header`/`include`
+inputs describe.
+
 This is NOT a code defect in the header-parse pipeline: both header AST
 backends (castxml's ``_validate_castxml_output`` /
 ``dumper_castxml_probe.py`` and clang's ``diagnose_header_compile_failure``
