@@ -100,6 +100,14 @@ _TEST_DIR = "tests"
 _TEST_BASENAME_PREFIX = "test_"
 _TEST_BASENAME_SUFFIX = "_test.py"
 _TEST_BASENAMES = frozenset({"conftest.py"})
+#: Prose suffixes. A file under `tests/` with one of these is documentation,
+#: not an executable test or a fixture — editing `tests/CLAUDE.md` alongside a
+#: shipped-code fix must not satisfy "you changed a test" (Codex review).
+_DOC_SUFFIXES = (".md", ".rst")
+#: ...except under `golden/`, where `.md` files really are test data: the
+#: golden report snapshots are compared byte-for-byte, so changing one is a
+#: genuine test change. Verified against tests/golden/*.md.
+_TEST_DATA_DIR = "golden"
 
 
 @dataclass(frozen=True)
@@ -128,6 +136,20 @@ class Requirement:
 #: conditional requirement exists because a real escape in this repository went
 #: through that exact surface.
 REQUIREMENTS: tuple[Requirement, ...] = (
+    Requirement(
+        "bug-class",
+        "Bug class",
+        "The class of defect, not the one input that exposed it. This is the "
+        "question the whole contract turns on: every escape below was a fix "
+        "that closed an instance and left the class open.",
+    ),
+    Requirement(
+        "publicly-observable-failure",
+        "Publicly observable failure",
+        "What a user or CI would have seen. A fix that cannot be described "
+        "this way is usually being verified against internals rather than "
+        "against behaviour, which is how #699 passed its own tests.",
+    ),
     Requirement(
         "regression-test-fails-on-base",
         "Regression test fails on base",
@@ -179,7 +201,10 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "This diff touches the action/workflow trust boundary. Asserting the "
         "text of a YAML file does not prove the attack fails; #705 was "
         "text-asserted and #758 had to add the executing test.",
-        triggers=("action/", ".github/workflows/", "security"),
+        # "action.yml" also matches `.github/workflows/test-action.yml`, which
+        # is the Action's own test workflow — the same boundary, and already
+        # matched by the `.github/workflows/` entry anyway.
+        triggers=("action/", "action.yml", ".github/workflows/", "security"),
     ),
     Requirement(
         "merge-pair",
@@ -274,9 +299,10 @@ def is_test_path(path: str) -> bool:
     parts = PurePosixPath(path).parts
     if not parts:
         return False
-    if _TEST_DIR in parts[:-1]:
-        return True
     name = parts[-1]
+    if _TEST_DIR in parts[:-1]:
+        is_prose = name.endswith(_DOC_SUFFIXES)
+        return not is_prose or _TEST_DATA_DIR in parts[:-1]
     return (
         name.startswith(_TEST_BASENAME_PREFIX)
         or name.endswith(_TEST_BASENAME_SUFFIX)

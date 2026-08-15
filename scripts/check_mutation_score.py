@@ -429,6 +429,29 @@ def main(argv: list[str] | None = None) -> int:
     # unparsed output degrades to zero survivors while the stats report real
     # ones, and `_measurement_is_complete` accepts the stats as proof the run
     # happened, so every gate passes (Codex review).
+    # A summary-only text ("🙁 3") yields a survivor *count* with no
+    # attribution: `by_module` is empty, so the per-module gate compares
+    # nothing and reports success, and `--write-baseline` would record
+    # `total_survivors: 0` — silently discarding every survivor and then
+    # gating future runs against that fiction (Codex review). Counting is fine
+    # for the global-total check; anything that needs to know *where* the
+    # survivors are must refuse this input.
+    if survivors and not records:
+        needs_attribution = (
+            args.write_baseline
+            or args.diff_scoped
+            or (load_baseline(Path(args.baseline_file)) is not None)
+        )
+        if needs_attribution:
+            print(
+                f"ERROR: {survivors} surviving mutant(s) reported, but the "
+                "results carry no per-mutant listing to attribute them to a "
+                "module or function. Per-module gating, --diff-scoped and "
+                "--write-baseline all need that attribution; re-run with "
+                "`mutmut results` output rather than a summary."
+            )
+            return 1
+
     if stats is not None and "survived" in stats and stats["survived"] != survivors:
         print(
             f"ERROR: parsed {survivors} surviving mutant(s) but "

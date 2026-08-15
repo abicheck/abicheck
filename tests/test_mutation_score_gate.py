@@ -607,3 +607,82 @@ def test_absent_stats_do_not_trigger_the_cross_check(tmp_path: Path) -> None:
     """`--results-file` without a mutants/ directory is a legitimate mode."""
     results = _write(tmp_path, "r.txt", _TWO_MODULES)
     assert gate.main(["--results-file", results, "--baseline", "99"]) == 0
+
+
+# --- Codex review: a count without attribution cannot drive per-module gates --
+
+
+def test_summary_only_survivors_cannot_pass_the_per_module_gate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`🙁 3` gives a count but no attribution, so `by_module` is empty — the
+    per-module comparison then finds nothing to compare and reports success."""
+    results = _write(tmp_path, "r.txt", "🙁 3")
+    baseline = _baseline(tmp_path, {"abicheck/diff_types.py": 5})
+    rc = gate.main(["--results-file", results, "--baseline-file", baseline])
+    assert rc == 1
+    assert "no per-mutant listing" in capsys.readouterr().out
+
+
+def test_summary_only_survivors_cannot_write_a_baseline(tmp_path: Path) -> None:
+    """It would record `total_survivors: 0` and gate every later run on that."""
+    results = _write(tmp_path, "r.txt", "🙁 3")
+    out_file = tmp_path / "baseline.json"
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            str(out_file),
+            "--write-baseline",
+        ]
+    )
+    assert rc == 1
+    assert not out_file.exists()
+
+
+def test_summary_only_survivors_cannot_pass_the_diff_scoped_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    diff, _ = _diff_scoped_env(tmp_path, monkeypatch)
+    results = _write(tmp_path, "r.txt", "🙁 3")
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            str(tmp_path / "absent.json"),
+            "--diff-scoped",
+            "--diff-file",
+            diff,
+        ]
+    )
+    assert rc == 1
+
+
+def test_summary_only_survivors_still_serve_the_global_total_gate(
+    tmp_path: Path,
+) -> None:
+    """Negative control: counting needs no attribution, so the legacy
+    whole-repository check must keep working on a summary."""
+    results = _write(tmp_path, "r.txt", "🙁 3")
+    assert (
+        gate.main(
+            [
+                "--results-file",
+                results,
+                "--baseline-file",
+                str(tmp_path / "absent.json"),
+                "--baseline",
+                "5",
+            ]
+        )
+        == 0
+    )
+
+
+def test_zero_survivors_from_a_summary_is_not_blocked(tmp_path: Path) -> None:
+    """A clean summary carries no attribution either, but has nothing to lose."""
+    results = _write(tmp_path, "r.txt", "🎉 40  🙁 0")
+    baseline = _baseline(tmp_path, {"abicheck/diff_types.py": 0})
+    assert gate.main(["--results-file", results, "--baseline-file", baseline]) == 0

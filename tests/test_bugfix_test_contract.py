@@ -93,6 +93,11 @@ class TestStructuralRequirement:
     @pytest.mark.parametrize(
         "path",
         [
+            # Golden snapshots really are test data — they are compared
+            # byte-for-byte, so changing one is a genuine test change.
+            "tests/golden/func_removed.md",
+            "tests/golden/report.txt",
+            "tests/fixtures/snapshot.json",
             "tests/test_x.py",
             "tests/conftest.py",
             "tests/canonical_identity_contract.py",
@@ -116,6 +121,12 @@ class TestStructuralRequirement:
             "scripts/check_bugfix_test_contract.py",
             "abicheck/latest_test_helper.py",
             "abicheck/diff_types.py",
+            # Prose under tests/ is documentation, not an executable test — a
+            # fix that changes shipped code and only edits tests/CLAUDE.md
+            # must not satisfy the structural gate (Codex review).
+            "tests/CLAUDE.md",
+            "tests/scenarios/README.md",
+            "tests/fixtures/g32/README.md",
         ],
     )
     def test_shipped_files_whose_names_contain_test_are_not_tests(
@@ -238,6 +249,9 @@ class TestConditionalRequirements:
             ("abicheck/diff_filtering.py", "fp-fn-pair"),
             ("abicheck/checker_policy.py", "verdict-gate-exit"),
             ("abicheck/severity.py", "verdict-gate-exit"),
+            # The root manifest is the published Action; it shares the
+            # action/ trust boundary and must ask the same question.
+            ("action.yml", "malicious-fixture"),
         ],
     )
     def test_touching_the_surface_asks_its_question(self, path: str, key: str) -> None:
@@ -289,6 +303,35 @@ class TestRequirementCatalogue:
         """Every prompt must be answerable in the exact form the template ships."""
         body = "\n".join(f"- {r.prompt}: something real" for r in gate.REQUIREMENTS)
         assert gate.missing_requirements(body, ["abicheck/snapshot_io.py"]) == []
+
+    def test_every_required_template_row_is_actually_enforced(self) -> None:
+        """The reverse of the check below, and the direction that was missing.
+
+        `Bug class` and `Publicly observable failure` were presented to
+        contributors as required rows while no `Requirement` backed them, so a
+        fix PR could leave both blank and still pass the declared contract
+        (Codex review). Telling someone a field is mandatory and not checking
+        it is worse than not asking.
+        """
+        template = (
+            Path(__file__).resolve().parent.parent
+            / ".github"
+            / "PULL_REQUEST_TEMPLATE.md"
+        ).read_text(encoding="utf-8")
+        # Only the required block — the conditional rows ship inside an HTML
+        # comment and are asked for by the checker, not by the template.
+        required_block = template.split("<!-- Conditional")[0]
+        listed = {
+            gate._normalize(line.split(":", 1)[0].lstrip("- ").strip())
+            for line in required_block.splitlines()
+            if line.startswith("- ") and ":" in line
+        }
+        enforced = {gate._normalize(r.prompt) for r in gate.REQUIREMENTS}
+        unenforced = listed - enforced
+        assert not unenforced, (
+            f"PR template lists {sorted(unenforced)} as required, but no "
+            "Requirement enforces them"
+        )
 
     def test_the_shipped_pr_template_answers_every_prompt_it_lists(self) -> None:
         """The template's own labels must match the checker's prompts, or a
