@@ -118,6 +118,17 @@
   module imports (the ~24 `test_action_*` modules carrying private copies
   predate it and are unchanged).
 
+- **A side-qualified `--ast-frontend` no longer discards the other side's
+  configured frontend on the inline source-tree path either.** Click reports
+  one parameter source for the whole repeatable option, so
+  `--ast-frontend new=castxml` marks it command-line-supplied and the shared
+  value becomes a synthesized `auto` nobody typed. `resolve_compile_context`
+  already asked whether the *shared* value was itself stated; the inline
+  `--sources` path kept its own raw parameter-source read, so an
+  `--sources old=tree/` tree's `.abicheck.yml` `compile.frontend` was
+  suppressed and frozen at `auto`. Both now route through one helper, which
+  is the only place that parameter source is read.
+
 ### Changed
 
 - **`--policy-file` is folded into `--policy`, which now takes `NAME|PATH`.**

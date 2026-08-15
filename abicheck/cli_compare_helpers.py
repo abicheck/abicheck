@@ -92,6 +92,7 @@ from .cli_helpers_compare import (
     resolve_force_public_scope,
 )
 from .cli_options import (
+    _shared_frontend_explicit,
     resolve_compile_context,
     resolve_contract_domain,
     resolve_contract_evaluation,
@@ -761,10 +762,18 @@ def _embed_inline_source_sides(
         ctx.get_parameter_source("nostdinc")
         == click.core.ParameterSource.COMMANDLINE
     )
-    _frontend_explicit = (
-        ctx.get_parameter_source("header_backend")
-        == click.core.ParameterSource.COMMANDLINE
-    )
+    # The *shared* half only, via the same helper `resolve_compile_context`
+    # uses: Click reports one parameter source for the whole repeatable
+    # `--ast-frontend`, so `--ast-frontend new=castxml` alone marks it
+    # COMMANDLINE and `_split_sided_frontend` then synthesizes the shared
+    # value "auto" that nobody typed. Reading the parameter source directly
+    # handed that synthesized default to the *old* side as an explicit
+    # override, suppressing an `--old-sources` tree's own
+    # `.abicheck.yml` `compile.frontend` and freezing it at `auto` -- a
+    # materially different snapshot for the side the user never mentioned
+    # (Codex review). The per-side override is added back below, where it is
+    # genuinely explicit for that side.
+    _frontend_explicit = _shared_frontend_explicit(ctx)
     # G31 Phase C follow-up (Codex review): --lang has the identical
     # ctx.invoke-loses-COMMANDLINE-source problem as --ast-frontend/
     # --nostdinc immediately above -- without this, a `compare --lang c++

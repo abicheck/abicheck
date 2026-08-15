@@ -1541,3 +1541,86 @@ def test_neither_compiler_flag_given_no_crash(_compile_context_probe) -> None:
     result = CliRunner().invoke(_compile_context_probe, [])
     assert result.exit_code == 0, result.output
     assert "path=None prefix=None tokens=()" in result.output
+
+
+def test_a_one_sided_frontend_keeps_the_source_trees_configured_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The same rule on the *inline source-tree* path, which had its own copy.
+
+    ``resolve_compile_context`` was fixed to read the shared ``--ast-frontend``
+    value's own explicitness, but ``_embed_inline_source_sides`` still asked
+    Click for the whole parameter's source -- so ``--ast-frontend new=castxml``
+    marked it COMMANDLINE, the synthesized shared ``"auto"`` reached the *old*
+    side as an explicit override, and an ``--old-sources`` tree's own
+    ``.abicheck.yml`` ``compile.frontend`` was suppressed and frozen at
+    ``auto``: a materially different snapshot for the side the user never
+    mentioned (Codex review).
+
+    Asserted at the boundary the bug lives on -- what each side is *told* about
+    explicitness -- rather than through a full inline dump, so the test states
+    the contract rather than one downstream consequence of it.
+    """
+    import abicheck.cli_compare_helpers as helpers
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    src = tmp_path / "srctree"
+    src.mkdir()
+    (src / ".abicheck.yml").write_text(
+        "compile:\n  frontend: clang\n", encoding="utf-8"
+    )
+
+    seen: list[dict[str, object]] = []
+    real = helpers._embed_inline_source_side
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen.append(dict(kwargs))
+        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
+
+    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
+    assert real is not _spy  # the symbol really was patched, not shadowed
+    CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--sources", f"old={src}",
+            "--ast-frontend", "new=castxml",
+        ],
+    )
+    assert len(seen) == 2, seen
+    old_side, new_side = seen
+    # The side nobody named must not be told the frontend was stated: that is
+    # what lets its own source-tree config still apply.
+    assert old_side["frontend_explicit"] is False, old_side
+    # ...while the named side keeps its genuine per-side override.
+    assert new_side["frontend_explicit"] is True, new_side
+
+
+def test_a_shared_frontend_is_explicit_for_both_inline_source_sides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The other direction, so the fix above cannot be satisfied by simply
+    # never reporting the inline path's shared frontend as explicit.
+    import abicheck.cli_compare_helpers as helpers
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    src = tmp_path / "srctree2"
+    src.mkdir()
+
+    seen: list[dict[str, object]] = []
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen.append(dict(kwargs))
+        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
+
+    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
+    res = CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--sources", f"old={src}",
+            "--ast-frontend", "castxml",
+        ],
+    )
+    assert len(seen) == 2, res.output
+    assert all(s["frontend_explicit"] is True for s in seen), seen
