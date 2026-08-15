@@ -271,7 +271,15 @@ def has_explicit_cpp_std(
     """Return whether forwarded options explicitly select a C++ dialect."""
     tokens = list(gcc_option_tokens)
     if gcc_options:
-        tokens.extend(split_gcc_options(gcc_options))
+        try:
+            tokens.extend(split_gcc_options(gcc_options))
+        except ValueError:
+            # Same rule as explicit_language_standard's identical guard just
+            # below: malformed --gcc-options (e.g. an unbalanced quote) must
+            # not abort the dump (Codex review, fresh evidence -- this
+            # sibling helper previously disagreed with that one on the same
+            # failure mode).
+            pass
     for token in tokens:
         normalized = token.lower()
         if normalized.startswith("--"):

@@ -106,3 +106,33 @@
   quote (`-I"C:\Program Files\SDK\\"`) no longer fails to close the quoted
   region and raise a spurious error — both now resolved correctly by the
   same backslash-run-parity rule real Windows tooling uses.
+- **`action/run.sh`'s baseline-set temporary directory now fails the Action
+  loud, instead of silently continuing with an empty path, if canonicalizing
+  it fails** (`cd "$BASELINE_DIR" && pwd` — this script has no `set -e`, so
+  an unlikely `cd` failure previously left `BASELINE_DIR` empty and every
+  path derived from it resolved against the filesystem root instead of the
+  intended temporary directory).
+- **`has_explicit_cpp_std` no longer raises on a malformed `--gcc-options`
+  value** (e.g. an unbalanced quote) — it now degrades the same way its
+  sibling `explicit_language_standard` already does, instead of letting
+  `split_gcc_options`'s `ValueError` escape and abort the dump.
+- Fixed a genuine Windows CI regression surfaced by this PR's own review
+  cycle: `TestSplitGccOptionsPosix` (pinning `split_gcc_options`'s plain,
+  unmodified POSIX `shlex.split` behavior) ran unguarded on `windows-latest`,
+  where real `os.name` is `"nt"` — `split_gcc_options` correctly took the
+  Windows branch there, so every assertion in that class failed against the
+  wrong tokenizer. `os.name` is now forced to `"posix"` for the whole class,
+  matching the established pattern already used by
+  `TestSplitGccOptionsDispatch`. Separately, several `action/run.sh` test
+  harnesses (`test_action_compile_context_parity.py`,
+  `test_action_run_sh_legacy_aliases.py`, `test_action_run_sh_py_safe_path.py`)
+  invoked bash with the whole extracted script embedded as an inline `-c`
+  argument; on `windows-latest`, Python's `subprocess` reconstructs a single
+  Windows command-line string via `list2cmdline` (MSVC/CRT quoting), while
+  Git Bash's MSYS runtime re-derives its own argv from that string using a
+  materially different convention — for a script this size, with many
+  nested/embedded quotes, the two didn't always round-trip losslessly,
+  producing a genuine bash *parse* error unrelated to the script's own
+  (verified-valid) syntax. All three now write the script to a temp file and
+  run `bash <path>` instead, matching the pattern already established by
+  `test_action_run_sh_helpers.py`'s `_run_harness`.

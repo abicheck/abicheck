@@ -117,10 +117,12 @@ class TestSplitGccOptionsWindows:
             "-DFOO=bar",
         ]
 
-    def test_quoted_windows_path_still_uses_real_posix_escaping(self) -> None:
-        # A double-quoted value is a deliberate opt-in to POSIX double-
-        # quote semantics, so backslash-escaping inside it follows real
-        # shlex rules unconditionally, unlike the unquoted case above.
+    def test_quoted_windows_path_keeps_interior_backslashes_literal(self) -> None:
+        # A double-quoted value opens real Windows quote-grouping, but a
+        # backslash only carries special meaning immediately before a `"`
+        # (the backslash-run-parity rule real Windows tooling uses, not
+        # POSIX shlex escaping) -- an interior backslash not followed by a
+        # quote, like the two here, stays exactly as written, quoted or not.
         assert _split_gcc_options_windows(r'-DPATH="C:\a\b"') == [r"-DPATH=C:\a\b"]
 
     def test_single_quote_is_never_special(self) -> None:
@@ -192,7 +194,20 @@ class TestSplitGccOptionsPosix:
     Windows-only tokenizer everywhere silently changed this real, working
     POSIX behavior (e.g. ``-DVAR=\\$HOME`` keeping its backslash instead of
     resolving to ``-DVAR=$HOME``) even though POSIX was never the platform
-    with a bug to fix."""
+    with a bug to fix.
+
+    ``os.name`` is monkeypatched to ``"posix"`` for every test here (fresh
+    CI evidence: this whole class runs on ``windows-latest`` too, where
+    real ``os.name`` is ``"nt"`` -- without forcing it, ``split_gcc_options``
+    silently took the *Windows* branch here and every assertion below,
+    which specifically pins the POSIX branch's real shlex semantics, failed
+    against the wrong tokenizer instead of testing what it says it tests),
+    mirroring :class:`TestSplitGccOptionsDispatch`'s own established
+    pattern for exercising one branch regardless of the host OS."""
+
+    @pytest.fixture(autouse=True)
+    def _force_posix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_compiler_options.os, "name", "posix")
 
     def test_quoted_value_with_embedded_space_stays_one_token(self) -> None:
         assert split_gcc_options('-DMSG="hello world" -DOK=1') == [

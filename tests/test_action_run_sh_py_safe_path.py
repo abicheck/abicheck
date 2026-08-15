@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -110,6 +111,36 @@ def _bash_executable() -> str:
     return "bash"
 
 
+def _run_bash_script(
+    script: str,
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``script`` via a real bash, from a temp file rather than an
+    inline ``-c`` argument -- see ``test_action_run_sh_helpers._run_harness``
+    for the full rationale (Windows argv-reconstruction/console-encoding
+    mangling of a complex inline script with many nested quotes; confirmed
+    on windows-latest CI for this module's own scripts)."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 def _run_import_via_real_mechanism(
     cwd: Path, extra_env: dict[str, str] | None = None, *, use_the_fix: bool = True
 ) -> subprocess.CompletedProcess[str]:
@@ -138,14 +169,7 @@ def _run_import_via_real_mechanism(
             + "'\n"
         )
     env = {**os.environ, **(extra_env or {})}
-    return subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        env=env,
-        timeout=30,
-    )
+    return _run_bash_script(script, cwd=cwd, env=env, timeout=30)
 
 
 def _run_sitecustomize_probe_via_real_mechanism(
@@ -172,14 +196,7 @@ def _run_sitecustomize_probe_via_real_mechanism(
             + "'\n"
         )
     env = {**os.environ, **(extra_env or {})}
-    return subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        env=env,
-        timeout=30,
-    )
+    return _run_bash_script(script, cwd=cwd, env=env, timeout=30)
 
 
 class TestPySafeDirPreventsCheckoutShadowing:
@@ -303,13 +320,7 @@ class TestPySafeDirFailsClosedWhenMktempFails:
 
         script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
         env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=30,
-        )
+        result = _run_bash_script(script, env=env, timeout=30)
         assert result.returncode == 1
         assert "UNREACHABLE" not in result.stdout
         assert "::error::" in result.stdout
@@ -321,13 +332,7 @@ class TestPySafeDirFailsClosedWhenMktempFails:
         the identical block, with a real working mktemp, still resolves
         $_PY_SAFE_DIR normally."""
         script = _py_safe_dir_source() + 'echo "DIR: $_PY_SAFE_DIR"\n'
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            env=dict(os.environ),
-            timeout=30,
-        )
+        result = _run_bash_script(script, env=dict(os.environ), timeout=30)
         assert result.returncode == 0, result.stderr
         assert "DIR: " in result.stdout
         assert "UNREACHABLE" not in result.stdout
@@ -373,12 +378,7 @@ class TestPyBinHasAbicheckFallback:
             + self._py_bin_has_abicheck_source()
             + 'echo "HAS_ABICHECK=$_PY_BIN_HAS_ABICHECK"\n'
         )
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run_bash_script(script, timeout=30)
         assert result.returncode == 0, result.stderr
         assert "HAS_ABICHECK=false" in result.stdout
         assert "::warning::" in result.stdout
@@ -393,12 +393,7 @@ class TestPyBinHasAbicheckFallback:
             + self._py_bin_has_abicheck_source()
             + 'echo "HAS_ABICHECK=$_PY_BIN_HAS_ABICHECK"\n'
         )
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run_bash_script(script, timeout=30)
         assert result.returncode == 0, result.stderr
         assert "HAS_ABICHECK=true" in result.stdout
 
@@ -418,12 +413,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
 
     def test_directory_is_removed_on_an_early_exit(self, tmp_path: Path) -> None:
         script = _py_safe_dir_source() + 'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run_bash_script(script, timeout=30)
         assert result.returncode == 0, result.stderr
         line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DIR="))
         created_dir = line[len("DIR=") :]
@@ -439,12 +429,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
             'if ! _PY_SAFE_DIR="$(mktemp -d)"; then exit 1; fi\n'
             'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'
         )
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run_bash_script(script, timeout=30)
         assert result.returncode == 0, result.stderr
         line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DIR="))
         created_dir = line[len("DIR=") :]

@@ -348,8 +348,8 @@ def _combined_option_tokens(
     (snapshot provenance, schema v15) — the one place both forwarded-option
     spellings are merged into a single ordered token list, shared by every
     caller below so the split behavior can't drift between them (see
-    :func:`abicheck._compiler_options.split_gcc_options` for why it no
-    longer branches on ``os.name``)."""
+    :func:`abicheck._compiler_options.split_gcc_options` for its platform
+    dispatch on ``os.name``)."""
     tokens = list(gcc_option_tokens)
     if gcc_options:
         tokens.extend(split_gcc_options(gcc_options))

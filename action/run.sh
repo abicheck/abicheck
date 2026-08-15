@@ -723,7 +723,10 @@ if [[ -n "$ABI_BASELINE" \
   # valid baseline-set archive read as corrupt or missing. Resolving once
   # here, at the source, fixes every path derived from it without touching
   # each call site individually.
-  BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd)
+  if ! BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd); then
+    echo "::error::failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
+    exit 1
+  fi
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
   BASELINE_FILE=""

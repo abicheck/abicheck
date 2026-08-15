@@ -28,6 +28,7 @@ MODE.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -225,6 +226,15 @@ def test_pr_comment_renderer_uses_resolved_py_bin_not_bare_python3():
     # now uses) to close that. runpy.run_module's own module-name string
     # argument is asserted here instead of the old literal `-m` spelling.
     text = RUN_SH.read_text(encoding="utf-8")
-    assert 'cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c' in text
-    assert 'runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")' in text
+    # Codex review (fresh evidence): assert the isolation wrapper and the
+    # runpy call as one connected block, not as two independent substring
+    # matches -- either alone could pass against a script that moved the
+    # renderer back out of $_PY_SAFE_DIR while some *other* invocation still
+    # contains a matching wrapper/runpy line elsewhere in the file.
+    assert re.search(
+        r'cd "\$_PY_SAFE_DIR" && PYTHONPATH= "\$_PY_BIN" -c \'\n'
+        r"import runpy\n+"
+        r'runpy\.run_module\("abicheck\.cli_pr_comment", run_name="__main__"\)',
+        text,
+    ), "the PR-comment renderer is no longer invoked from inside the isolation wrapper"
     assert "python3 -m abicheck.cli_pr_comment" not in text

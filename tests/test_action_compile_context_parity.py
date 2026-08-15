@@ -33,7 +33,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from abicheck._compiler_options import split_gcc_options
 
@@ -186,6 +190,51 @@ _FULL_ENV = {
 }
 
 
+def _run_bash_script(
+    script: str,
+    env: dict[str, str] | None = None,
+    *,
+    check: bool = True,
+    text: bool = True,
+    cwd: Path | None = None,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[Any]:
+    """Run ``script`` via a real bash, from a temp file rather than as an
+    inline ``-c`` argument (Codex review, fresh evidence: windows-latest CI
+    failure, this module only). Windows processes have no real argv --
+    Python's ``subprocess`` reconstructs one command-line string via
+    ``list2cmdline`` (MSVC/CRT backslash-run-parity quoting), but Git Bash's
+    MSYS runtime re-derives its own argv from that same string using a
+    materially different convention. For a script this size, with many
+    nested/embedded single and double quotes (the extracted
+    ``add_flag_shlex_split`` region alone), the two conventions don't always
+    round-trip losslessly -- confirmed on windows-latest: a script verified
+    syntactically valid via ``bash -n`` on Linux produced a genuine bash
+    *parse* error when passed this way (\"unexpected EOF while looking for
+    matching `\"'\"), i.e. corruption in transit, not a real syntax defect
+    in the script text itself. A path argument sidesteps command-line
+    reconstruction entirely -- the same pattern already used by
+    ``test_action_run_sh_severity_summary.py``'s ``_run()`` and
+    ``test_action_run_sh_py_safe_path.py``."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=text,
+            env=env,
+            check=check,
+            cwd=cwd,
+            timeout=timeout,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 def _run_region(
     mode_marker: str,
     env_extra: dict[str, str],
@@ -218,13 +267,7 @@ def _run_region(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    out = subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
+    out = _run_bash_script(script, env, check=True)
     return out.stdout.splitlines(), out.stderr
 
 
@@ -257,13 +300,7 @@ def _run_region_raw(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    return subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
+    return _run_bash_script(script, env, check=False)
 
 
 class TestCompileContextForwardingParity:
@@ -487,13 +524,7 @@ class TestCompileContextForwardingParity:
             + 'add_flag "--compiler-option" "-DPATTERN=*"\n'
             + "printf '%s\\n' \"${CMD[@]}\"\n"
         )
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-            timeout=30,
-        )
+        result = _run_bash_script(script, check=False, cwd=tmp_path, timeout=30)
         assert result.returncode == 0, result.stderr
         assert "-DPATTERN=PLANTED_FILE" in result.stdout.splitlines()
         assert "-DPATTERN=*" not in result.stdout.splitlines()
@@ -511,6 +542,17 @@ class TestCompileContextForwardingParity:
         assert "::error::" in result.stdout
         assert "could not be parsed" in result.stdout
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The CRLF transport is simulated with a bash `python3` wrapper; a "
+            "Windows interpreter path embedded in that script would itself be "
+            "corrupted by backslash escaping, and the scenario this test "
+            "reproduces (fake python3 standing in for python.exe) is POSIX-only "
+            "by its own premise -- a real windows-latest run already exercises "
+            "the real CRLF transport directly."
+        ),
+    )
     def test_gcc_options_strips_crlf_from_windows_python_output(
         self, tmp_path: Path
     ) -> None:
@@ -544,7 +586,11 @@ class TestCompileContextForwardingParity:
         real_python3 = sys.executable
         fake_python3 = tmp_path / "python3"
         fake_python3.write_text(
-            f'#!/bin/bash\nexec "{real_python3}" "$@" | sed -u $\'s/$/\\r/\'\n'
+            # Plain `sed` (not GNU-only `sed -u`): the test reads the full
+            # output only after the process exits, so line buffering buys
+            # nothing here, and `-u` is unsupported by macOS's stock `sed`
+            # (Codex review, fresh evidence).
+            f'#!/bin/bash\nexec "{real_python3}" "$@" | sed $\'s/$/\\r/\'\n'
         )
         fake_python3.chmod(0o755)
         harness = (
@@ -567,13 +613,7 @@ class TestCompileContextForwardingParity:
             "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
             "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
         }
-        result = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True,
-            text=False,
-            env=env,
-            check=True,
-        )
+        result = _run_bash_script(script, env, check=True, text=False)
         cmd = [tok.decode("utf-8") for tok in result.stdout.split(b"\0") if tok]
         assert cmd.count("--compiler-option") == 2
         assert "-DFOO=1" in cmd
