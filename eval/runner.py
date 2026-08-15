@@ -233,10 +233,19 @@ def _cmake_configure(src_dir: Path, build_dir: Path, extra_args: list[str]) -> N
 
 
 def _dump_sources(tree: Path, build_dir: Path, out: Path) -> tuple[float, subprocess.CompletedProcess]:
+    # "full" was retired from the public --depth ladder (ADR-043 D2): it
+    # collapsed into "source" — replay *scope*, not a deeper depth, used to
+    # distinguish them (abicheck/buildsource/scan_levels.py's own
+    # EvidenceDepth.FULL docstring). "--depth full" is now a hard
+    # click.BadParameter, which for a while made *every* source-tier scan in
+    # this runner fail identically and silently (the scheduled workflow's
+    # source-tier job tolerates per-library failures, so a 0/N scanned run
+    # still "succeeded") -- see main()'s --fail-on-empty-source gate below,
+    # which is the guard against that specific failure mode recurring.
     return _run([
         "abicheck", "dump", "--sources", str(tree),
         "--build-info", str(build_dir),
-        "--depth", "full",
+        "--depth", "source",
         "-o", str(out),
     ])
 
@@ -362,6 +371,141 @@ def drift_rows(payload: dict) -> list[dict]:
     ]
 
 
+#: The evidence layers `source_scan_summary` requires -- (label, the
+#: `_source_coverage()` fact-count field that layer is "present" via, the
+#: `coverage_status` key `bs["manifest"]["coverage"]` records that layer
+#: under -- `abicheck/buildsource/cli_buildsource_helpers.py`'s
+#: `_LAYER_NAMES`/`CoverageStatus`). L3 (compile units) / L4 (declarations) /
+#: L5 (graph nodes) are exactly the three layers `--depth source` promises to
+#: collect (see the `dump --sources` docstring in `abicheck.cli_options`), so
+#: this is "check the PROMISED L3/L4/L5 evidence actually showed up," not an
+#: arbitrary subset. L4/L5 checks are meaningful specifically because the
+#: eval-suite CI job always installs clang+cmake (see eval-suite.yml's
+#: source-tier job) -- a real `--depth source` run in that environment should
+#: reach every layer, so a captured-but-empty L4/L5 is exactly as informative
+#: a signal as an empty L3 already was, not a normal degraded-environment
+#: case to tolerate.
+_EVIDENCE_LAYERS: tuple[tuple[str, str, str], ...] = (
+    ("L3", "l3_compile_units", "L3_build"),
+    ("L4", "l4_declarations", "L4_source_abi"),
+    ("L5", "l5_nodes", "L5_source_graph"),
+)
+
+
+def _side_has_layer_evidence(row: dict, side: str, field: str, status_key: str) -> bool:
+    """True only when *side* both has a positive `field` count AND the
+    manifest's own `coverage_status[status_key]` reads ``"present"`` --
+    a positive count alone is not proof of *complete* collection.
+
+    When source replay's L5 call/type pass degrades, `source_graph.nodes`
+    can still be populated by fallback nodes folded in from L3 targets,
+    compile units, and files, while the manifest's own coverage table
+    correctly records `L5_source_graph: partial` (Codex review, fresh
+    evidence) -- a count-only check would read that degraded row as full L5
+    evidence and let `--fail-on-empty-source` report success even though the
+    L5 extractor is systemically broken. The identical reasoning applies to
+    L3/L4: a subset-only collection (`CoverageStatus.PARTIAL`) can still
+    leave `l3_compile_units`/`l4_declarations` positive.
+    """
+    coverage = row.get(side) or {}
+    if coverage.get(field, 0) <= 0:
+        return False
+    status = (coverage.get("coverage_status") or {}).get(status_key)
+    return status == "present"
+
+
+def _row_has_full_evidence(row: dict) -> bool:
+    """True if *row* captured real, *complete* evidence for every
+    `_EVIDENCE_LAYERS` layer, on **both** the old and new snapshot sides.
+    """
+    return all(
+        _side_has_layer_evidence(row, side, field, status_key)
+        for side in ("old_coverage", "new_coverage")
+        for _label, field, status_key in _EVIDENCE_LAYERS
+    )
+
+
+def source_scan_summary(payload: dict) -> dict:
+    """Pure counts over the source-tier rows: total entries, how many actually
+    scanned (no `error`), and how many of *those* captured real L3/L4/L5
+    evidence **on both sides** (`_row_has_full_evidence`). The single source
+    of truth `source_tier_broken()` (the CI gate) and any caller inspecting a
+    results file share.
+
+    Both `old_coverage` and `new_coverage` are checked (Codex review, fresh
+    evidence) — a row whose *old* snapshot silently captured zero evidence
+    while the *new* one succeeded previously counted as "with evidence"
+    because only `new_coverage` was examined, which would pass this gate
+    while publishing a one-sided (and therefore already-misleading)
+    old-vs-new comparison for that library.
+    """
+    rows = payload.get("source_results", [])
+    scanned = [r for r in rows if "error" not in r]
+    with_evidence = [r for r in scanned if _row_has_full_evidence(r)]
+    return {"total": len(rows), "scanned": len(scanned), "with_evidence": len(with_evidence)}
+
+
+def source_tier_broken(payload: dict) -> str | None:
+    """A human-readable reason if the source tier (L3/L4/L5) is *systemically*
+    broken, or ``None`` if it's healthy enough to trust — the `--fail-on-empty-
+    source` CI gate.
+
+    Deliberately distinct from an individual library's own build/network
+    failure (which `scan_source_one` already records as a per-row `error` and
+    this function tolerates): a tool-level bug — e.g. an invalid CLI flag —
+    fails *every* entry identically, so `scanned == 0` across an otherwise
+    real manifest is a strong systemic signal a single flaky library never
+    produces on its own. `--depth full` doing exactly this (a hard
+    `click.BadParameter` on every single entry, indistinguishable from a
+    healthy 0-of-0 empty manifest run without this check) is the incident
+    this function exists to catch.
+
+    That "every entry failed the same way" inference needs at least two
+    independent entries to draw — with a single-library run (`total == 1`,
+    e.g. a `workflow_dispatch --only zlib` debugging a specific library),
+    `scanned == 0` is indistinguishable from an ordinary one-off build/network
+    hiccup, and treating it as systemic would silently break this function's
+    own documented promise to tolerate exactly that (Codex review, fresh
+    evidence). So `scanned == 0` is only a hard failure once there's a second
+    entry to compare against; a lone failing entry still shows up as an
+    ERR row in REPORT.md, it just doesn't fail this specific gate.
+
+    The second condition — every scan reports success but *none* captured
+    real evidence for every promised layer (`_EVIDENCE_LAYERS`: L3 compile
+    units, L4 declarations, L5 graph nodes) — has no such ambiguity even at
+    `total == 1`: a successful configure/build step that still produced zero
+    facts for a layer it claims coverage for is an internal inconsistency in
+    that one row already, not a cross-entry comparison, so it catches the
+    quieter failure mode (the tool runs without erroring but a
+    compile-DB/source-replay/graph-fold step silently produced nothing to
+    analyze) regardless of how many libraries were scanned.
+
+    Pure (no I/O): mirrors `drift_rows()`'s own "one shared definition of
+    failure" design for the binary tier.
+    """
+    summary = source_scan_summary(payload)
+    if summary["total"] == 0:
+        return None  # no source-carrying manifest entries were requested/exist
+    if summary["total"] > 1 and summary["scanned"] == 0:
+        return (
+            f"0/{summary['total']} source-tier scans succeeded — the whole "
+            "source tier is broken. A single library's own build/network "
+            "failure would still leave the others scanned; every entry "
+            "failing identically points at a tool-level bug (e.g. an invalid "
+            "abicheck CLI flag) rather than per-library flakiness."
+        )
+    if summary["scanned"] > 0 and summary["with_evidence"] == 0:
+        return (
+            f"{summary['scanned']}/{summary['total']} source-tier scans "
+            "reported success but NONE captured real evidence for every "
+            "promised layer (L3 compile units / L4 declarations / L5 graph "
+            "nodes, both old and new sides) — the source tier is not "
+            "actually collecting the L3/L4/L5 evidence it claims coverage "
+            "for."
+        )
+    return None
+
+
 def write_results(payload: dict) -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = payload["generated_utc"].replace(":", "").replace("-", "")
@@ -453,6 +597,13 @@ def main() -> None:
     ap.add_argument("--fail-on-drift", action="store_true",
                     help="exit non-zero if any binary-tier verdict drifts from its "
                          "manifest `expect` (or a scan errored) — the CI regression gate")
+    ap.add_argument("--fail-on-empty-source", action="store_true",
+                    help="exit non-zero if the source tier (L3/L4/L5) is systemically "
+                         "broken — zero of its entries scanned successfully, or every "
+                         "successful scan captured zero L3 build evidence. Does NOT "
+                         "fail on one library's own build/network failure (tolerated, "
+                         "same as --fail-on-drift's binary-tier counterpart isn't this "
+                         "flag's job) — see source_tier_broken()'s own docstring.")
     args = ap.parse_args()
 
     if args.report_only:
@@ -467,6 +618,7 @@ def main() -> None:
     (EVAL_DIR / "REPORT.md").write_text(render_report(payload), encoding="utf-8")
     print(f"report  → {EVAL_DIR / 'REPORT.md'}", file=sys.stderr)
 
+    failed = False
     if args.fail_on_drift:
         drift = drift_rows(payload)
         if drift:
@@ -474,8 +626,20 @@ def main() -> None:
                 f"{r['lib']}({r.get('verdict') or r.get('error', '?')[:30]})" for r in drift
             )
             print(f"FAIL: binary-tier drift/errors on {len(drift)} lib(s): {libs}", file=sys.stderr)
-            sys.exit(1)
-        print("OK: all binary-tier verdicts match expected", file=sys.stderr)
+            failed = True
+        else:
+            print("OK: all binary-tier verdicts match expected", file=sys.stderr)
+
+    if args.fail_on_empty_source:
+        reason = source_tier_broken(payload)
+        if reason:
+            print(f"FAIL: {reason}", file=sys.stderr)
+            failed = True
+        else:
+            print("OK: source tier is not systemically broken", file=sys.stderr)
+
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
