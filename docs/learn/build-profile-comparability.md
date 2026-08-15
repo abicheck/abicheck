@@ -10,6 +10,8 @@ depends_on:
   - abicheck/comparability_fields.py
   - abicheck/checker.py
   - abicheck/header_conditionals.py
+  - abicheck/dumper_contract.py
+  - abicheck/cli_dump_helpers.py
 lifecycle: active
 generated: false
 ---
@@ -65,11 +67,15 @@ addition" / "broken"), not folded into it:
    reason explaining which axis disagreed. Reporting an ordinary verdict
    here would be answering a question nobody asked ("is GCC's ABI
    compatible with Clang's ABI?") instead of the one that was actually
-   asked ("did *my* library change?"). You can force a tentative diff
-   anyway with the explicit
+   asked ("did *my* library change?"). For a single-pair `compare`, you
+   can force a tentative diff anyway with the explicit
    [`--diagnostic-comparison`](../reference/cli-reference.md) opt-out, and
    the resulting report is stamped `assurance: none` everywhere so nobody
-   downstream mistakes it for an ordinary, trustworthy result.
+   downstream mistakes it for an ordinary, trustworthy result. This
+   opt-out is **not available for a directory/package (release) fan-out**
+   — `_reject_set_input_flags()` rejects it outright there — so a
+   not-comparable library inside a release fan-out has no escape hatch;
+   compare that one library on its own instead.
 
 "The environment changed" is the *reason* outcome 2 fires, not a third
 outcome alongside it — the two are cause and effect of the same gate
@@ -132,7 +138,16 @@ before relying on which flags are actually pinned today.
 **`scope_fingerprint`** — the *declared surface* being compared: which
 public headers and header directories were in scope, and — for a
 manifest-driven multi-TU extraction — which translation units contributed.
-A path *inside* the checkout is relativized so two checkouts at different
+One deliberate exception: when a side declares exactly *one* header or
+exactly one public-header directory, `_compute_scope_fields()` collapses
+its identity to a fixed `<single-header>`/`<single-header-dir>` sentinel
+rather than the real name — renaming `foo.h` to `bar.h` while staying a
+single-header dump leaves `scope_fingerprint` completely unchanged. The
+gate is answering "is this still a single-header scope," not "is it still
+*this specific* header" — a rename inside an otherwise-unchanged
+single-header scope is exactly the kind of thing the ordinary diff (not
+this gate) is responsible for catching. A path *inside* the checkout is
+relativized so two checkouts at different
 nesting depths fingerprint identically — that's the "never absolute paths"
 case that matters for the common two-checkout comparison. A genuinely
 *external* path (declared absolute in the manifest, e.g. `/usr/include`, or

@@ -135,7 +135,9 @@ mechanics build-profile comparability *enforces* — the exact exit codes and
 the `--diagnostic-comparison` opt-out — are documented where they're
 enforced, in the [exit-code reference](../../reference/exit-codes.md) and
 [CLI reference](../../reference/cli-reference.md); the narrative page
-explains *why* the gate exists and what its three possible outcomes mean.
+explains *why* the gate exists and what its two possible gate outcomes
+(comparable, sitting in front of the ordinary verdict space; or
+not-comparable, a hard failure) mean.
 
 > **Rule of thumb:** name the dimension before you argue about whether a
 > change is "a break." A change that's a real source break and a total binary
