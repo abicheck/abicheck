@@ -75,6 +75,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutation_results import (  # noqa: E402
+    MODULE_SCOPE,
     MutantRecord,
     count_unresolved,
     functions_covering_lines,
@@ -264,7 +265,12 @@ def check_diff_scoped(
     for r in sorted(records, key=lambda r: r.key):
         if not r.is_survivor:
             continue
-        if r.function in touched.get(r.module_path, set()):
+        module_touched = touched.get(r.module_path, set())
+        if MODULE_SCOPE in module_touched:
+            failures.append(
+                f"  {r.module_path}::{r.function}  [{r.key}]  (module-scope change)"
+            )
+        elif r.function in module_touched:
             failures.append(f"  {r.module_path}::{r.function}  [{r.key}]")
     return failures
 

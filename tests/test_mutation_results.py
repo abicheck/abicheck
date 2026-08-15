@@ -223,8 +223,13 @@ class TestChangedFunctionAttribution:
     def test_async_def_is_covered(self) -> None:
         assert mr.functions_covering_lines(self.SOURCE, {10}) == {"fetch"}
 
-    def test_class_body_outside_any_method_matches_nothing(self) -> None:
-        assert mr.functions_covering_lines(self.SOURCE, {1}) == set()
+    def test_a_class_statement_is_module_scope_not_a_function(self) -> None:
+        """This previously asserted `set()`, which was correct about the
+        *function* question and wrong about the gate: a `class` line belongs to
+        no function body, yet changing it (its bases, its name) changes what
+        its methods do. Since mutmut mutates only function bodies, module scope
+        is the only attribution that lets the diff-scoped gate see it at all."""
+        assert mr.functions_covering_lines(self.SOURCE, {1}) == {mr.MODULE_SCOPE}
 
     def test_empty_line_set_is_empty_result(self) -> None:
         assert mr.functions_covering_lines(self.SOURCE, set()) == set()
@@ -247,12 +252,49 @@ class TestChangedFunctionAttribution:
         assert mr.functions_covering_lines(source, {3}) == {"alpha"}
         assert mr.functions_covering_lines(source, {4}) == {"alpha"}
         assert mr.functions_covering_lines(source, {5}) == {"alpha"}
-        # The import above the decorator is still outside any function.
-        assert mr.functions_covering_lines(source, {1}) == set()
+        # The import above the decorator belongs to no function — it is a
+        # module-scope change, not "nothing changed" (see
+        # test_an_import_change_is_module_scope_too).
+        assert mr.functions_covering_lines(source, {1}) == {mr.MODULE_SCOPE}
 
     def test_a_decorated_method_keeps_its_qualname(self) -> None:
         source = "class W:\n    @property\n    def area(self):\n        return 1\n"
         assert mr.functions_covering_lines(source, {2}) == {"W.area"}
+
+    MODULE_LEVEL_SOURCE = textwrap.dedent(
+        """\
+        import os
+
+        # a comment at module scope
+        _KINDS = frozenset({"a", "b"})
+
+        def uses_it(x):
+            return x in _KINDS
+        """
+    )
+
+    def test_a_module_level_edit_is_attributed_to_module_scope(self) -> None:
+        """Several mutated modules carry behaviour in top-level tables, and
+        mutmut mutates only function bodies — so "no function contains this
+        line" collapsed to "nothing changed" and the diff-scoped gate matched
+        no survivor at all (Codex review)."""
+        assert mr.functions_covering_lines(self.MODULE_LEVEL_SOURCE, {4}) == {
+            mr.MODULE_SCOPE
+        }
+
+    def test_an_import_change_is_module_scope_too(self) -> None:
+        assert mr.MODULE_SCOPE in mr.functions_covering_lines(
+            self.MODULE_LEVEL_SOURCE, {1}
+        )
+
+    @pytest.mark.parametrize("line", [2, 3, 5])
+    def test_blank_and_comment_lines_do_not_gate_a_module(self, line: int) -> None:
+        """Otherwise reformatting or a comment edit would gate every survivor
+        in the module."""
+        assert mr.functions_covering_lines(self.MODULE_LEVEL_SOURCE, {line}) == set()
+
+    def test_a_function_body_edit_is_not_module_scope(self) -> None:
+        assert mr.functions_covering_lines(self.MODULE_LEVEL_SOURCE, {7}) == {"uses_it"}
 
     def test_syntax_error_degrades_instead_of_raising(self) -> None:
         """A half-edited file must not crash the gate."""

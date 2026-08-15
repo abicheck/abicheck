@@ -283,6 +283,13 @@ def load_cicd_stats(mutants_dir: Path) -> dict[str, int] | None:
 # ---------------------------------------------------------------------------
 
 
+#: Sentinel for a change at module scope — outside every function body.
+#: Several mutated modules carry behaviour in top-level tables
+#: (`checker_policy`'s kind sets, `finding_identity`'s discriminator kinds), so
+#: "no function contains this line" must not collapse to "nothing changed".
+MODULE_SCOPE = "<module>"
+
+
 def functions_covering_lines(source: str, lines: set[int]) -> set[str]:
     """Qualnames of every function whose body encloses any of ``lines``.
 
@@ -326,4 +333,33 @@ def functions_covering_lines(source: str, lines: set[int]) -> set[str]:
                 walk(child, prefix)
 
     walk(tree, "")
+
+    # A changed line inside no function is a module-scope edit. mutmut only
+    # mutates function bodies, so such a line has no mutants of its own — but
+    # it can change what every function in the module does, and leaving
+    # `touched` empty made the diff-scoped gate match nothing and report OK
+    # for exactly those edits (Codex review). Blank and comment-only lines are
+    # excluded so reformatting does not gate a whole module.
+    covered = _lines_inside_functions(tree)
+    source_lines = source.splitlines()
+    for line in lines:
+        if line in covered:
+            continue
+        text = source_lines[line - 1].strip() if 0 < line <= len(source_lines) else ""
+        if text and not text.startswith("#"):
+            touched.add(MODULE_SCOPE)
+            break
     return touched
+
+
+def _lines_inside_functions(tree: ast.AST) -> set[int]:
+    """Every line number covered by some function body."""
+    covered: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            start = node.lineno
+            for decorator in getattr(node, "decorator_list", ()):
+                start = min(start, decorator.lineno)
+            end = getattr(node, "end_lineno", node.lineno) or node.lineno
+            covered.update(range(start, end + 1))
+    return covered

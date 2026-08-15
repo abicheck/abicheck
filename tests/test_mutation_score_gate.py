@@ -715,3 +715,38 @@ def test_an_unresolvable_base_ref_fails_the_diff_scoped_gate(
     assert rc == 1
     assert "would pass vacuously" in out
     assert "diff-scoped OK" not in out
+
+
+def test_a_module_scope_change_gates_every_survivor_in_that_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A top-level policy table can change what any function in the module
+    does, so a module-scope edit gates the module's survivors rather than
+    matching none of them."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(
+        "_KINDS = frozenset({'a'})\n\n\ndef untouched():\n    return _KINDS\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -1,1 +1,1 @@\n+_KINDS = frozenset({'a', 'b'})\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_untouched__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            diff,
+        ]
+    )
+    assert rc == 1
+    assert "module-scope change" in capsys.readouterr().out

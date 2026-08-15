@@ -81,7 +81,13 @@ _FIX_SUBJECT = re.compile(r"^(fix|perf|security)(\([^)]*\))?!?:", re.IGNORECASE)
 #: covered by the `test_action_run_sh_*` suites, so there is a real test to
 #: add.
 _SHIPPED_SUFFIXES_BY_PREFIX = {
-    "abicheck/": (".py",),
+    # `.yaml` and `.json` are packaged *runtime* contracts, not build config:
+    # abicheck/policies/*.yaml are the built-in policy profiles resolved by
+    # bare name through `policy_file.builtin_policy_path()`, and
+    # abicheck/schemas/*.json are the published report schemas. A correctness
+    # fix to either changes shipped behaviour with no `.py` touched (Codex
+    # review). `.md` stays out — the four CLAUDE.md files there are docs.
+    "abicheck/": (".py", ".yaml", ".json"),
     "scripts/": (".py",),
     "action/": (".py", ".sh"),
     # The plural tree: five published composite actions, consumed directly as

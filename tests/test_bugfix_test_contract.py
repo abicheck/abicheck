@@ -165,6 +165,27 @@ class TestStructuralRequirement:
     def test_non_code_files_in_the_action_tree_are_not_shipped_code(self) -> None:
         assert not gate.touches_shipped_code(["action/README.md", "action/AGENTS.md"])
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "abicheck/policies/security.yaml",
+            "abicheck/policies/glibc_symbol_versioned.yaml",
+            "abicheck/schemas/compare_report.schema.json",
+        ],
+    )
+    def test_packaged_runtime_data_is_shipped_code(self, path: str) -> None:
+        """The policy profiles are resolved by bare name through
+        `policy_file.builtin_policy_path()` and the schemas are the published
+        report contracts — a correctness fix to either changes shipped
+        behaviour with no `.py` touched (Codex review)."""
+        assert gate.touches_shipped_code([path])
+
+    def test_docs_inside_the_package_are_not_shipped_code(self) -> None:
+        """The four CLAUDE.md files under abicheck/ are documentation."""
+        assert not gate.touches_shipped_code(
+            ["abicheck/CLAUDE.md", "abicheck/buildsource/CLAUDE.md"]
+        )
+
     def test_the_root_action_manifest_is_shipped_code(self) -> None:
         """`action.yml` *is* the published composite Action — it declares the
         inputs and the executable steps — and has dedicated coverage in
