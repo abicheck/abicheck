@@ -71,6 +71,12 @@ ROOT = Path(__file__).resolve().parent.parent
 #: 1, so this can never mask one.
 EXIT_STRUCTURAL_ONLY = 2
 
+#: Returned when there was no diff to check at all — a local checkout with no
+#: `origin/main`, say. Distinct from the code above because the remediation
+#: and the amount actually checked differ: nothing ran here, and reporting the
+#: missing-PR-body reason would send a reader to the wrong fix (Codex review).
+EXIT_NO_DIFF = 3
+
 #: Used when neither the flag nor the environment names a ref — the local
 #: convenience path.
 _DEFAULT_BASE = "origin/main"
@@ -512,17 +518,27 @@ def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
     out: dict[str, list[tuple[int, str]]] = {}
     current: str | None = None
     next_line = 0
+    is_symlink = False
     for line in diff_text.splitlines():
         if line.startswith("diff --git "):
             # Reset first: a rename/copy-only entry carries no `+++` header,
             # so without this the previous file's attribution leaks into it.
             current = None
+            is_symlink = False
+            continue
+        if line.startswith("new file mode ") or line.startswith("new mode "):
+            # `120000` is a symlink. Git renders its *target path* as the
+            # added line, so `ln -s test_existing.py tests/test_regression.py`
+            # looked like a test file with content — a duplicate of an
+            # existing test accepted as new evidence (Codex review). Same
+            # category as a rename or a copy: it writes no assertion.
+            is_symlink = line.rstrip().endswith("120000")
             continue
         if line.startswith("+++ "):
             target = line[4:].strip()
             current = target[2:] if target.startswith("b/") else None
             continue
-        if current is None:
+        if current is None or is_symlink:
             continue
         m = _HUNK_NEW_SIDE.match(line)
         if m:
@@ -531,6 +547,34 @@ def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
         if line.startswith("+"):
             out.setdefault(current, []).append((next_line, line[1:]))
             next_line += 1
+    return out
+
+
+def removed_content_paths(diff_text: str) -> set[str]:
+    """Paths this diff removes at least one non-blank line from.
+
+    Used for *fixture* files only. Removing an expected line from a golden
+    snapshot is exactly how a fix that stops emitting spurious output proves
+    itself — it fails against the base behaviour — and an added-lines-only
+    scan rejected that PR as having no test change at all (Codex review).
+
+    Deliberately not applied to `.py` test modules: deleting lines there is
+    how a test gets weakened, which is the thing the gate exists to catch.
+    """
+    out: set[str] = set()
+    current: str | None = None
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            current = None
+            continue
+        if line.startswith("--- "):
+            target = line[4:].strip()
+            current = target[2:] if target.startswith("a/") else None
+            continue
+        if current is None or not line.startswith("-") or line.startswith("---"):
+            continue
+        if line[1:].strip():
+            out.add(current)
     return out
 
 
@@ -620,8 +664,17 @@ def adds_or_modifies_a_test(
     status while asserting nothing new.
     """
     with_content = added_content_paths(diff_text, read_new)
+    # A removal counts only in a *fixture*: dropping an expected line from a
+    # golden snapshot is how a fix that stops emitting spurious output proves
+    # itself, while dropping lines from a `.py` test module is how a test gets
+    # weakened (Codex review).
+    with_removals = {
+        path for path in removed_content_paths(diff_text) if not path.endswith(".py")
+    }
     return any(
-        status in ("A", "M") and is_test_path(path) and path in with_content
+        status in ("A", "M")
+        and is_test_path(path)
+        and (path in with_content or (status == "M" and path in with_removals))
         for status, path in changed
     )
 
@@ -717,15 +770,15 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             f"bugfix-test-contract: cannot diff {base}...{head} — nothing was "
-            f"checked (exit {EXIT_STRUCTURAL_ONLY}). Fetch the base branch to "
-            "run this locally."
+            f"checked (exit {EXIT_NO_DIFF}). Fetch the base branch to run this "
+            "locally."
         )
         # Partial, not a pass: without a diff even the structural half cannot
         # run, and returning 0 let `verify.py` record the step as passed and
         # the pr profile as complete — the same over-claim as a missing PR
         # body, from an input that is missing for a different reason (Codex
         # review).
-        return EXIT_STRUCTURAL_ONLY
+        return EXIT_NO_DIFF
 
     if not is_bugfix(subjects, args.title):
         print("bugfix-test-contract: not a fix/perf/security change — not applicable")

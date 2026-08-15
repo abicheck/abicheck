@@ -143,12 +143,15 @@ class TestStructuralRequirement:
 def _git_repo_with(tmp_path: Path, *, second_commit: dict[str, str]) -> Path:
     """A real repository: one base commit, then *second_commit*'s edits."""
     repo = tmp_path / "repo"
-    (repo / "tests").mkdir(parents=True)
+    (repo / "tests" / "golden").mkdir(parents=True)
     (repo / "scripts").mkdir()
     (repo / "tests" / "test_a.py").write_text(
         "def test_a():\n    assert 1 == 1\n    assert 2 == 2\n", encoding="utf-8"
     )
     (repo / "scripts" / "thing.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "tests" / "golden" / "report.md").write_text(
+        "line one\nspurious line\nline three\n", encoding="utf-8"
+    )
 
     def _git(*args: str) -> None:
         subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
@@ -186,6 +189,64 @@ class TestAgainstRealGit:
                 "tests/test_b.py": (
                     "def test_a():\n    assert 1 == 1\n    assert 2 == 2\n"
                 ),
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == 1
+
+    def test_an_added_symlink_to_an_existing_test_is_not_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`ln -s test_a.py tests/test_regression.py` writes no assertion.
+
+        Git renders a symlink's *target path* as the added line, so it looked
+        like a test file with content — a duplicate of an existing test
+        accepted as new evidence (Codex review).
+        """
+        repo = _git_repo_with(tmp_path, second_commit={"scripts/thing.py": "x = 2\n"})
+        (repo / "tests" / "test_regression.py").symlink_to("test_a.py")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "fix: link"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~2", "--head", "HEAD"]) == 1
+
+    def test_a_deletion_from_a_golden_snapshot_is_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fix that stops emitting spurious output proves itself by deleting
+        the expected line — that snapshot fails against the base behaviour.
+
+        An added-lines-only scan rejected such a PR as having no test change
+        at all, which is the gate blocking legitimate work rather than
+        catching an escape (Codex review).
+        """
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/golden/report.md": "line one\nline three\n",
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == (
+            gate.EXIT_STRUCTURAL_ONLY
+        )
+
+    def test_a_deletion_from_a_python_test_is_not_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control, and the reason the rule is fixture-only: deleting
+        lines from a `.py` test module is how a test gets weakened."""
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/test_a.py": "def test_a():\n    assert 1 == 1\n",
             },
         )
         monkeypatch.setattr(gate, "ROOT", repo)
@@ -891,7 +952,9 @@ class TestEmptyPrBody:
             raise subprocess.CalledProcessError(128, ["git", "diff"])
 
         monkeypatch.setattr(gate, "changed_files", _boom)
-        assert gate.main([]) == gate.EXIT_STRUCTURAL_ONLY
+        # A distinct code from the missing-body case: nothing ran here, so
+        # reporting that reason would send a reader to the wrong fix.
+        assert gate.main([]) == gate.EXIT_NO_DIFF
         assert "nothing was checked" in capsys.readouterr().out
 
     def test_an_unresolvable_ref_named_by_ci_is_still_a_failure(

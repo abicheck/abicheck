@@ -454,9 +454,11 @@ def test_the_bugfix_contract_step_reports_a_partial_run(
     assert step.precondition is None, (
         "a precondition would skip the step before its structural half ran"
     )
-    code, reason = step.partial
-    assert code == 2
-    assert "BUGFIX_CONTRACT_BODY_FILE" in reason
+    assert "BUGFIX_CONTRACT_BODY_FILE" in step.partial[2]
+    # A second code for a second reason: the two need different remediation
+    # and checked different amounts (Codex review).
+    assert "base ref" in step.partial[3]
+    assert step.partial[2] != step.partial[3]
 
 
 def test_a_partial_returncode_becomes_a_skip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -471,6 +473,23 @@ def test_a_partial_returncode_becomes_a_skip(monkeypatch: pytest.MonkeyPatch) ->
     result = verify.run_step(step)
     assert result["status"] == "skipped"
     assert result["returncode"] == 2
+    assert "BUGFIX_CONTRACT_BODY_FILE" in str(result["reason"])
+
+
+def test_each_partial_code_reports_its_own_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The receipt is the remediation, so it has to name the right one."""
+
+    class _Proc:
+        returncode = 3
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    result = verify.run_step(step)
+    assert result["status"] == "skipped"
+    assert "base ref" in str(result["reason"])
+    assert "BUGFIX_CONTRACT_BODY_FILE" not in str(result["reason"])
 
 
 def test_an_ordinary_failure_is_still_a_failure(

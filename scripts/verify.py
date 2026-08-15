@@ -197,11 +197,21 @@ def _pyscript(path: str, *args: str) -> tuple[str, ...]:
 #: no PR body was available, so the declared half never ran. Mapping that to a
 #: skip is what keeps a local `--profile pr` from claiming CI parity over half
 #: a gate, while still running the half that does not need a body.
-_BUGFIX_CONTRACT_PARTIAL = (
-    2,
-    "BUGFIX_CONTRACT_BODY_FILE is unset, so the declared half could not run "
-    "(the structural half did) — set it to a file holding the PR description",
-)
+_BUGFIX_CONTRACT_PARTIAL = {
+    2: (
+        "BUGFIX_CONTRACT_BODY_FILE is unset, so the declared half could not "
+        "run (the structural half did) — set it to a file holding the PR "
+        "description"
+    ),
+    # A second code, because the two situations need different remediation
+    # and checked different amounts. Reporting the body-file reason for a
+    # missing base ref sent the reader to the wrong fix and claimed the
+    # structural half had run when nothing had (Codex review).
+    3: (
+        "the base ref could not be resolved, so nothing was checked — fetch "
+        "the base branch (`git fetch origin main`)"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -211,11 +221,13 @@ class Step:
     profiles: frozenset[str]
     env: dict[str, str] = field(default_factory=dict)
     precondition: Callable[[], str | None] | None = None
-    #: ``(returncode, reason)``: a step that ran but could only do part of its
-    #: job reports that code, and this maps it to a skip so the profile-level
-    #: completeness contract sees it. Distinct from `precondition`, which
+    #: ``{returncode: reason}``: a step that ran but could only do part of its
+    #: job reports one of these codes, and this maps it to a skip so the
+    #: profile-level completeness contract sees it. A mapping rather than one
+    #: pair because a step can be partial for more than one reason, and the
+    #: receipt has to name the right one. Distinct from `precondition`, which
     #: decides *before* running and therefore runs nothing at all.
-    partial: tuple[int, str] | None = None
+    partial: dict[int, str] | None = None
     description: str = ""
 
 
@@ -559,12 +571,13 @@ def run_step(step: Step) -> dict[str, object]:
     env = {**os.environ, **step.env}
     proc = subprocess.run(step.cmd, cwd=ROOT, env=env)
     duration = time.time() - start
-    if step.partial is not None and proc.returncode == step.partial[0]:
-        print(f"=== {step.name}: PARTIAL ({duration:.1f}s) — {step.partial[1]} ===")
+    if step.partial is not None and proc.returncode in step.partial:
+        reason = step.partial[proc.returncode]
+        print(f"=== {step.name}: PARTIAL ({duration:.1f}s) — {reason} ===")
         return {
             "name": step.name,
             "status": "skipped",
-            "reason": step.partial[1],
+            "reason": reason,
             "duration_s": round(duration, 1),
             "returncode": proc.returncode,
         }
