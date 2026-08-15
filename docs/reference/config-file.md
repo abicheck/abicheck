@@ -155,7 +155,9 @@ effectively `true`) restricts analysis to the public exported surface;
 `collapse_versioned_symbols:` (default `false`) collapses symbol-versioned
 duplicates before diffing; `show_redundant:` (default `false`) disables
 redundancy filtering. `public_symbols:` is an explicit public-symbol overlay,
-additive with any CLI `scope.public_symbols` values — entries match **exactly**
+the only spelling for it — the per-run CLI duplicates that used to shadow
+this key were removed, so a project states it once, here — entries match
+**exactly**
 (the raw symbol, or a qualified name's trailing `::` segment, so `foo` also
 matches `ns::foo`); **globs/wildcards are not supported** (`mylib_*` matches
 nothing), list each symbol. See

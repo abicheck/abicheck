@@ -138,10 +138,9 @@ problem in CI.
 | `-o` / `--output` | Write report to file |
 | `--scope-public-headers` / `--no-scope-public-headers` | Restrict findings to the public-header ABI surface (on by default) |
 | `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
-| `severity.abi_breaking: error` / `severity.potential_breaking: error` / `severity.quality_issues: error` / `severity.addition: error` | Per-category severity overrides (`error`/`warning`/`info`) |
+| `.abicheck.yml`'s `severity:` block | Per-category overrides (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`, each `error`/`warning`/`info`) — config-only; `--severity-preset` is the per-run CLI knob |
 | `--suppress` | Suppression file (YAML) |
-| `--policy` | Verdict policy: `strict_abi` (default), `sdk_vendor`, `plugin_abi` |
-| `--policy` | Custom YAML policy overrides |
+| `--policy` | `NAME\|PATH` — a built-in profile (`strict_abi` (default), `sdk_vendor`, `plugin_abi`) or a policy document (a path, or a packaged built-in like `security`) |
 | `-v` / `--verbose` | Debug output |
 
 See `abicheck compare --help` for the complete flag set — `--used-by` is one

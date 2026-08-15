@@ -181,8 +181,9 @@ The highest applicable code wins. For example, if both `abi_breaking=error` and
 | `strict` | error | error | error | error |
 | `info-only` | info | info | info | info |
 
-Per-category overrides (`severity.abi_breaking: error`, `severity.potential_breaking: error`,
-`severity.quality_issues: error`, `severity.addition: error`) take precedence over the preset.
+Per-category overrides — `.abicheck.yml`'s `severity:` block
+(`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`) — take
+precedence over the preset.
 
 ### CI gate patterns
 
@@ -194,8 +195,9 @@ ret=$?
 [ $ret -eq 2 ] && echo "API_BREAK — source-level break" && exit 1
 echo "OK (NO_CHANGE or COMPATIBLE)"
 
-# Block unexpected API expansion (severity-aware)
-abicheck compare old.json new.json severity.addition: error
+# Block unexpected API expansion (severity-aware; `severity.addition: error`
+# in .abicheck.yml, which compare discovers from the working directory)
+abicheck compare old.json new.json
 ret=$?
 [ $ret -eq 1 ] && echo "ADDITIONS — unexpected API expansion" && exit 1
 [ $ret -eq 4 ] && echo "BREAKING — release blocked" && exit 1

@@ -13,14 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for check_docs_contract.py's retired-surface sweep.
+"""Unit tests for check_docs_contract.py's two surface-drift sweeps.
 
 Split out of ``test_docs_contract.py`` purely to keep that file under the
 AI-readiness file-size cap; the module loader and monkeypatch conventions
-are identical. The sweep is the check that flags a manual page still naming
-a retired CLI flag/command/file by its dead spelling, over both the
-hand-authored ``docs/`` tree and the ``examples/case*/README.md`` generator
-sources behind the published case pages.
+are identical. Both sweeps run over the same target set -- the hand-authored
+``docs/`` tree plus the ``examples/case*/README.md`` generator sources behind
+the published case pages:
+
+* ``_check_retired_surfaces`` -- a page still naming a retired CLI
+  flag/command/file by its dead spelling;
+* ``_check_config_keys_as_cli_operands`` -- a documented command line passing
+  a ``.abicheck.yml`` key as argv, which is what a mechanical
+  flag-to-config-key rewrite produces when it reaches an example instead of
+  prose.
 """
 
 from __future__ import annotations
@@ -247,3 +253,148 @@ def test_retired_surfaces_ignores_non_case_example_files(
     f = dc.Findings()
     dc._check_retired_surfaces(f)
     assert f.warnings == []
+
+
+# --- config keys passed as CLI operands -----------------------------------
+
+
+def _page(tmp_path: Path, body: str) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir(exist_ok=True)
+    (docs / "page.md").write_text(body, encoding="utf-8")
+
+
+def test_a_config_key_in_a_documented_command_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The exact shape that shipped: a flag demoted to a config-only key,
+    mechanically rewritten everywhere it was named -- correct in the prose
+    naming the key, wrong in every command line that used to pass the flag,
+    where Click reads it as two unexpected positional operands and exits 64
+    (Codex review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```bash\n"
+        "abicheck compare old.json new.json severity.addition: error\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "severity.addition" in f.warnings[0][1]
+    assert "docs/page.md:4" in f.warnings[0][1]
+
+
+def test_a_backslash_continued_command_is_joined_before_matching(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Every real recipe wraps; a per-line scan would miss the continuation
+    # lines, which is where the operands actually sat in five of the eight
+    # shipped instances.
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```bash\nabicheck compare old.so new.so \\\n"
+        "  --suppress s.yaml \\\n"
+        "  suppression.strict: true\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "suppression.strict" in f.warnings[0][1]
+
+
+def test_a_config_key_in_extra_args_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # `extra-args` is raw argv by another name, so the same token fails the
+    # same way -- one step removed from any `abicheck` line to match on.
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```yaml\n"
+        "extra-args: 'suppression.strict: true'\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "extra-args" in f.warnings[0][1]
+
+
+def test_the_same_key_in_a_config_block_is_not_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The half that must stay quiet, and the reason the check is scoped to
+    invocations: in a YAML config block, or in prose naming the key, this
+    exact token is the correct spelling. A check that flagged it everywhere
+    would be unusable on the very pages that document these keys."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\nSet `severity.addition: error` to gate on additions.\n\n"
+        "```yaml\nseverity:\n  addition: error\n```\n\n"
+        "```bash\nabicheck compare old.json new.json --config .abicheck.yml\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert f.warnings == []
+
+
+def test_prose_naming_the_tool_is_not_read_as_a_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # "abicheck reads .abicheck.yml ..." is a sentence, not an invocation --
+    # the subcommand requirement is what keeps it out.
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\nabicheck resolves severity.addition: error from config.\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert f.warnings == []
+
+
+def test_a_real_flag_value_is_not_mistaken_for_a_config_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # `--write json=out.json`, `--header old=include/`, a version like
+    # `v1.2:` -- none is a `key.subkey:` operand, and flagging one would make
+    # the check fire on correct recipes.
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```bash\nabicheck compare old.json new.json "
+        "--write json=out.json --header old=include/ --ast-frontend new=clang\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert f.warnings == []
+
+
+def test_example_case_readmes_are_swept_for_operands_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Same target set as the retired-surface sweep, for the same reason: a
+    # case README is the generator source for a published page.
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    examples = tmp_path / "examples"
+    (examples / "case999_demo").mkdir(parents=True)
+    (examples / "case999_demo" / "README.md").write_text(
+        "```bash\nabicheck compare a.json b.json scope.show_redundant: true\n```\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "EXAMPLES", examples)
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "examples/case999_demo/README.md" in f.warnings[0][1]
+
+
+def test_the_real_repo_has_no_config_key_operands() -> None:
+    # The smoke half: eight of these shipped across five pages before a
+    # reviewer read one.
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert f.warnings == [], f.warnings

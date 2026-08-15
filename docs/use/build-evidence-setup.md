@@ -206,9 +206,9 @@ sources:
 exit_code_scheme: auto     # auto | legacy | severity (ADR-037 D12)
 ```
 
-The matching CLI flags (e.g. `severity.abi_breaking: error`, `suppression.strict: true`,
-`scope.collapse_versioned_symbols: true`) stay as **hidden** per-run overrides — functional
-but off the visible surface. The L2/L4 frontend is one knob, `--ast-frontend`
+These keys are the **only** spelling for those settings: the hidden per-run
+CLI flags that used to shadow them were removed, so a project states each
+once, in config. The L2/L4 frontend is one knob, `--ast-frontend`
 (`auto`/`castxml`/`clang`; env `ABICHECK_AST_FRONTEND`), shared across header-AST
 parsing and source-ABI replay (ADR-037 D8). `hybrid` (G28 Phase 3) is header-AST
 only for now — it runs castxml and clang together and merges them, but has no

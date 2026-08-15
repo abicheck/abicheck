@@ -66,24 +66,44 @@ abicheck compare old.json new.json --severity-preset info-only
 
 ### Per-category overrides
 
-Override individual categories on top of a preset:
+`--severity-preset` is the whole per-run CLI surface. Individual categories
+are set in `.abicheck.yml`'s `severity:` block — one spelling, not a flag and
+a config key saying the same thing — and a per-category value overrides
+whatever the preset assigns that category:
 
-```bash
-# Default preset but fail on API additions too
-abicheck compare old.json new.json severity.addition: error
-
-# Strict preset but ignore quality issues
-abicheck compare old.json new.json --severity-preset strict severity.quality_issues: info
-
-# Only fail on binary ABI breaks, everything else informational
-abicheck compare old.json new.json --severity-preset info-only severity.abi_breaking: error
+```yaml
+# .abicheck.yml — default preset but fail on API additions too
+severity:
+  preset: default
+  addition: error
 ```
 
-Available flags:
-- `severity.abi_breaking {error,warning,info}`
-- `severity.potential_breaking {error,warning,info}`
-- `severity.quality_issues {error,warning,info}`
-- `severity.addition {error,warning,info}`
+```yaml
+# Strict preset but ignore quality issues
+severity:
+  preset: strict
+  quality_issues: info
+```
+
+```yaml
+# Only fail on binary ABI breaks, everything else informational
+severity:
+  preset: info-only
+  abi_breaking: error
+```
+
+`compare` discovers `.abicheck.yml` from the working directory, or takes one
+explicitly:
+
+```bash
+abicheck compare old.json new.json --config .abicheck.yml
+```
+
+Available keys, each `error`/`warning`/`info`:
+- `severity.abi_breaking`
+- `severity.potential_breaking`
+- `severity.quality_issues`
+- `severity.addition`
 
 ### Presets reference
 
@@ -94,7 +114,7 @@ computation follows; this page only documents how to select and override it.
 
 ## Exit codes
 
-When any severity setting is active — a `--severity-*` flag or a severity
+When any severity setting is active — `--severity-preset`, or a severity
 value in `.abicheck.yml` — the exit code is computed from the severity
 configuration instead of the legacy verdict system. See
 [Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-flag)
@@ -166,12 +186,20 @@ The GitHub Action supports severity configuration via inputs:
     # severity-preset: strict       # or use a preset
 ```
 
-For arbitrary `--severity-*` overrides not exposed as inputs, use `extra-args`:
+Per-category overrides are not Action inputs and are not `extra-args`
+either — they live in the repository's own `.abicheck.yml`, which the Action
+picks up from the checkout:
+
+```yaml
+# .abicheck.yml, committed alongside the workflow
+severity:
+  quality_issues: error
+  potential_breaking: info
+```
 
 ```yaml
 - uses: abicheck/abicheck@v0.5.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
-    extra-args: 'severity.quality_issues: error severity.potential_breaking: info'
 ```

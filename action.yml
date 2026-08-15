@@ -672,8 +672,9 @@ outputs:
   verdict:
     description: >
       ABI verdict. For compare (single-pair or directory/package operands):
-      COMPATIBLE, SEVERITY_ERROR (with --severity-* via extra-args, or when
-      a `severity.addition: error` config detects new public API additions),
+      COMPATIBLE, SEVERITY_ERROR (with the severity-preset input, or when a
+      `severity.addition: error` key in the repository's .abicheck.yml
+      detects new public API additions),
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
@@ -682,7 +683,7 @@ outputs:
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
-      `--severity-*` or `--exit-code-scheme` setting, when an error-level
+      severity or `--exit-code-scheme` setting, when an error-level
       category has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050

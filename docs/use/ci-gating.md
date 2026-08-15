@@ -183,9 +183,15 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 
 **Breakage-only gate** — report everything, fail only on binary ABI breaks:
 
+```yaml
+# .abicheck.yml
+severity:
+  preset: info-only
+  abi_breaking: error
+```
+
 ```bash
-abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --severity-preset info-only severity.abi_breaking: error
+abicheck compare baseline.json build/libfoo.so --header new=include/
 ```
 
 **Fail on source-level breaks too** (the legacy default behaviour, pinned
@@ -197,23 +203,34 @@ abicheck compare baseline.json build/libfoo.so --header new=include/ \
 ```
 
 **Strict API-surface governance** — also fail when new public API appears.
-Note that any `--severity-*` flag switches to the severity scheme, where
+Note that any severity setting switches to the severity scheme, where
 `potential_breaking` (which covers `API_BREAK`) defaults to `warning` — raise
 it to `error` too, or a source-level break that failed under the legacy
 scheme would now exit `0`:
 
+```yaml
+# .abicheck.yml
+severity:
+  potential_breaking: error
+  addition: error
+```
+
 ```bash
-abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  severity.potential_breaking: error \
-  severity.addition: error
+abicheck compare baseline.json build/libfoo.so --header new=include/
 ```
 
 **Vendor-friendly gate with audited waivers**:
 
+```yaml
+# .abicheck.yml
+suppression:
+  strict: true
+  require_justification: true
+```
+
 ```bash
 abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --policy sdk_vendor --suppress suppressions.yaml \
-  suppression.strict: true suppression.require_justification: true
+  --policy sdk_vendor --suppress suppressions.yaml
 ```
 
 More recipes: [Choose Your Workflow → How should CI behave](../start/choose-your-workflow.md)

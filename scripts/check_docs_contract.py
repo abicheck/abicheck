@@ -1568,6 +1568,87 @@ _STALE_PROCESS_LANGUAGE_PATTERNS = tuple(
 )
 
 
+#: A ``key.subkey:`` token -- what a `.abicheck.yml` block's setting looks
+#: like when it is written inline. Anchored to a whitespace/quote boundary so
+#: it cannot match inside a URL, a Python attribute access, or a flag value.
+_CONFIG_KEY_OPERAND_RE = re.compile(r"(?:^|[\s'\"])([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*):(?=\s|$)")
+
+#: A shell line invoking the tool, including a backslash-continued one. The
+#: subcommand list is deliberately explicit: `abicheck` alone also appears in
+#: prose like "abicheck reads .abicheck.yml", which is not a command line.
+_ABICHECK_COMMAND_RE = re.compile(
+    r"^\s*(?:\$\s*)?abicheck\s+"
+    r"(?:compare|scan|dump|aggregate|compat|deps|project|appcompat)\b"
+)
+
+#: The Action input that forwards raw argv. Same rule applies to its value:
+#: a config key written there reaches Click as a positional operand.
+_EXTRA_ARGS_RE = re.compile(r"^\s*extra-args:\s*(.+)$")
+
+
+def _shell_command_lines(text: str) -> list[tuple[int, str]]:
+    """Every ``abicheck <subcommand> ...`` invocation in *text*, with its
+    backslash continuations joined, as ``(line_number, command)``."""
+    out: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if _ABICHECK_COMMAND_RE.match(lines[i]):
+            start = i + 1
+            parts = [lines[i]]
+            while parts[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                parts.append(lines[i])
+            out.append((start, " ".join(p.rstrip().rstrip("\\") for p in parts)))
+        i += 1
+    return out
+
+
+def _check_config_keys_as_cli_operands(f: Findings) -> None:
+    """Flag a documented command line that passes a config key as argv.
+
+    The failure this exists for: when a hidden per-run flag is demoted to a
+    ``.abicheck.yml``-only setting, a mechanical rewrite of every mention
+    (``--severity-addition error`` -> ``severity.addition: error``) is correct
+    in the *prose* naming the key and wrong in every *command line* that used
+    to pass the flag -- Click sees two unexpected positional operands and the
+    example exits 64. Eight such examples shipped across five pages before a
+    reviewer read one of them (Codex review), because nothing distinguishes
+    the two contexts by eye.
+
+    Scoped to actual invocations (and the Action's ``extra-args``, which is
+    raw argv by another name), so prose and YAML config blocks -- where the
+    same token is exactly right -- are untouched. WARN-only, matching the
+    retired-surface sweep: the fix is a human decision about which spelling
+    the passage meant.
+    """
+    for path, rel in _retired_surface_scan_targets():
+        text = path.read_text(encoding="utf-8")
+        for line_no, command in _shell_command_lines(text):
+            for m in _CONFIG_KEY_OPERAND_RE.finditer(command):
+                f.warn(
+                    "config-key-as-cli-operand",
+                    f"{_rel(path)}:{line_no}: {m.group(1)!r} is a "
+                    ".abicheck.yml key, not a CLI operand -- this command "
+                    "exits 64 (Click reads it as unexpected positional "
+                    "arguments). Show a config file, or the flag that "
+                    "really exists.",
+                )
+        for i, line in enumerate(text.splitlines(), start=1):
+            em = _EXTRA_ARGS_RE.match(line)
+            if em is None:
+                continue
+            for m in _CONFIG_KEY_OPERAND_RE.finditer(em.group(1)):
+                f.warn(
+                    "config-key-as-cli-operand",
+                    f"{_rel(path)}:{i}: {m.group(1)!r} is a .abicheck.yml "
+                    "key, but `extra-args` is raw argv -- it reaches Click "
+                    "as unexpected positional arguments. Put it in the "
+                    "repository's .abicheck.yml instead.",
+                )
+        del rel
+
+
 def _check_stale_process_language(f: Findings) -> None:
     """Flag prose that describes the *page itself* (or the feature it
     documents) as unfinished/in-progress -- this class of claim is true only
@@ -1633,6 +1714,7 @@ def main() -> int:
     _check_duplicate_paragraphs(f)
     _check_stale_process_language(f)
     _check_retired_surfaces(f)
+    _check_config_keys_as_cli_operands(f)
     return f.report()
 
 

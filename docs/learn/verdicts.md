@@ -78,7 +78,7 @@ Changes found, but **backwards-compatible** — existing compiled consumers can 
 
 > **Note:** `noexcept` removal is **not** `COMPATIBLE` — it is `COMPATIBLE_WITH_RISK` (see below), because callers compiled assuming `noexcept` omit exception landing pads.
 
-**CI action:** warn; do not fail. Use a severity flag (e.g. `severity.addition: error`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
+**CI action:** warn; do not fail. Set a severity value (e.g. `severity.addition: error` in `.abicheck.yml`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
 
 ---
 

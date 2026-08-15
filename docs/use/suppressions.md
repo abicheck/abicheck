@@ -279,12 +279,17 @@ enforcement.
 ### Requiring justification (`suppression.require_justification: true`)
 
 In team environments, every suppression should explain *why* a breaking change
-is acceptable. The `suppression.require_justification: true` flag enforces this at load time:
+is acceptable. `.abicheck.yml`'s `suppression.require_justification: true`
+enforces this at load time:
+
+```yaml
+# .abicheck.yml
+suppression:
+  require_justification: true
+```
 
 ```bash
-abicheck compare old.so new.so \
-  --suppress suppressions.yaml \
-  suppression.require_justification: true
+abicheck compare old.so new.so --suppress suppressions.yaml
 ```
 
 If any rule has an empty or missing `reason` field, the command fails immediately:
@@ -304,10 +309,14 @@ The `suppression.strict: true` flag turns expired rules from silent no-ops into 
 failures. Without it, an expired rule simply stops matching (the underlying change
 reappears in the report). With it, the command fails before comparison even runs:
 
+```yaml
+# .abicheck.yml
+suppression:
+  strict: true
+```
+
 ```bash
-abicheck compare old.so new.so \
-  --suppress suppressions.yaml \
-  suppression.strict: true
+abicheck compare old.so new.so --suppress suppressions.yaml
 ```
 
 If any rule is past its `expires` date:
@@ -330,13 +339,16 @@ Both `suppression.strict: true` and `suppression.require_justification: true` wo
 
 For CI pipelines, combine both features:
 
+```yaml
+# .abicheck.yml — strict lifecycle enforcement
+suppression:
+  strict: true
+  require_justification: true
+```
+
 ```bash
-# Author suppressions.yaml by hand (see File format above), then
-# gate CI with strict lifecycle enforcement:
-abicheck compare old.so new.so -H include/ \
-  --suppress suppressions.yaml \
-  suppression.strict: true \
-  suppression.require_justification: true
+# Author suppressions.yaml by hand (see File format above), then gate CI:
+abicheck compare old.so new.so -H include/ --suppress suppressions.yaml
 ```
 
 This ensures that:

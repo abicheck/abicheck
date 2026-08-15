@@ -94,6 +94,17 @@
   the secondary render reuses the same attributed comparison at full report
   mode.
 
+- **Documentation examples that passed a now-config-only setting as a CLI
+  operand are fixed, and a gate stops the class recurring.** Demoting a
+  hidden flag to a `.abicheck.yml`-only key makes a mechanical rewrite of
+  every mention (`--severity-addition error` -> `severity.addition: error`)
+  correct in the prose naming the key and wrong in every command line that
+  used to pass the flag, where Click reads it as unexpected positional
+  operands and exits 64. Seventeen such examples across six pages are now
+  config blocks; `scripts/check_docs_contract.py` warns on any
+  `abicheck <subcommand> ...` line (or Action `extra-args` value) carrying a
+  `key.subkey:` operand, leaving prose and YAML config blocks alone.
+
 ### Changed
 
 - **`--policy-file` is folded into `--policy`, which now takes `NAME|PATH`.**

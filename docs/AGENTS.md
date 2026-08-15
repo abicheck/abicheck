@@ -196,6 +196,13 @@ duplication, not a structural ownership conflict):
   — the generated pages themselves are skipped, so a stale flag left in a
   case README would otherwise reproduce into a public page on the next
   regeneration with nothing to catch it;
+- a documented `abicheck <subcommand> ...` line — or an Action `extra-args`
+  value, which is raw argv by another name — passing a `.abicheck.yml` key as
+  an operand (`abicheck compare a b severity.addition: error`). This is what a
+  mechanical flag-to-config-key rewrite produces when it reaches an *example*
+  rather than the prose naming the key: correct-looking, and exit 64 for
+  anyone who copies it. Prose and YAML config blocks are deliberately
+  untouched, since the same token is the right spelling there;
 
 ## Terminology registry
 
