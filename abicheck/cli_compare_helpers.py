@@ -1500,6 +1500,36 @@ def run_compare(
             use_cases_manifest=use_cases_manifest,
         )
 
+    # Parsed here, in the preflight, not only at the post-comparison
+    # attribution call: --dry-run returns before that call, so a malformed
+    # manifest passed a dry run as "validated" (exit 0) while the identical
+    # real invocation rejected it (exit 64) -- the one thing --dry-run
+    # promises not to do (Codex review). The parse is pure I/O + validation,
+    # the same cheap read-only resolution the dry run already performs for
+    # every other input; the result is discarded because attribution needs
+    # both snapshots' graphs, which a dry run deliberately never builds.
+    #
+    # After the flag-combination rejections above, for the reason the
+    # --dump-manifest parse below states for itself: when --use-cases was
+    # never going to work here at all, "not supported with --stat" is the
+    # useful message, not "your manifest is malformed".
+    #
+    # The *other* --use-cases exit a dry run still cannot predict is "neither
+    # side carries a source graph", and deliberately so: that is a property
+    # of the resolved operands, not of the command line. It is knowable for a
+    # snapshot operand and unknowable for a live binary, whose graph only
+    # exists after a dump the dry run must not perform -- so checking it
+    # would make the dry run's answer depend on which operand shape it was
+    # given. Manifest validity has no such asymmetry.
+    if use_cases_manifest is not None:
+        from .errors import UseCaseManifestError
+        from .impact.use_cases import load_use_case_manifest
+
+        try:
+            load_use_case_manifest(use_cases_manifest)
+        except (UseCaseManifestError, OSError) as exc:
+            raise click.UsageError(str(exc)) from exc
+
     # Parsed after the directory/package rejection above (not before, like an
     # earlier revision of this function did): a malformed --dump-manifest on
     # a directory/package compare must fail with that block's clear "not

@@ -81,6 +81,14 @@ def _snapshot(graph: SourceGraphSummary | None, version: str) -> AbiSnapshot:
     return snap
 
 
+#: A structurally valid manifest, for tests whose subject is a *flag
+#: combination* rather than the manifest itself. Earlier revisions used
+#: ``use_cases: []`` here -- a mapping, which the manifest grammar rejects --
+#: and those tests passed only because the combination was rejected before
+#: anything parsed it. Validating the manifest in the preflight surfaced them.
+_VALID_MANIFEST = "- use_case: uc\n  entrypoints: [train]\n"
+
+
 def _change(symbol: str) -> Change:
     return Change(ChangeKind.FUNC_REMOVED, symbol, f"{symbol} removed")
 
@@ -268,7 +276,7 @@ class TestSetInputsAreRejected:
         (old_dir / "libfoo.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
         (new_dir / "libfoo.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
         manifest = tmp_path / "uc.yaml"
-        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
 
         result = CliRunner().invoke(
             main,
@@ -278,7 +286,7 @@ class TestSetInputsAreRejected:
         assert "--use-cases is not supported for directory/package" in result.output
 
     @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
-    def test_the_dry_run_agrees_with_the_real_run(
+    def test_the_dry_run_agrees_with_the_real_run_on_set_inputs(
         self, tmp_path: Path, extra: list[str]
     ) -> None:
         # A dry run must not report the combination as valid when the real run
@@ -289,7 +297,7 @@ class TestSetInputsAreRejected:
         (old_dir / "libfoo.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
         (new_dir / "libfoo.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
         manifest = tmp_path / "uc.yaml"
-        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
 
         result = CliRunner().invoke(
             main,
@@ -338,7 +346,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         # detailed section after the one-line stat output for the same reason.
         old, new = self._pair(tmp_path)
         manifest = tmp_path / "uc.yaml"
-        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -361,7 +369,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         already rejected for set inputs to avoid."""
         old, new = self._pair(tmp_path)
         manifest = tmp_path / "uc.yaml"
-        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -379,7 +387,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         # The rejection must be scoped to the formats that really drop it.
         old, new = self._pair(tmp_path)
         manifest = tmp_path / "uc.yaml"
-        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
         result = CliRunner().invoke(
             main,
             ["compare", str(old), str(new), "--use-cases", str(manifest),
@@ -558,3 +566,70 @@ class TestOneRowPerUseCaseNotPerManifestEntry:
 
         lines = render_use_case_impact_lines(self._impact(self._SPLIT))
         assert sum(1 for line in lines if "training:" in line) == 1, lines
+
+
+class TestTheDryRunValidatesTheManifest:
+    """`--dry-run`'s whole promise is that it validates the invocation.
+
+    The manifest was first read by the post-comparison attribution call, and
+    a dry run returns before that -- so `--dry-run --use-cases malformed.yaml`
+    reported a validated run (exit 0) while the identical real invocation
+    rejected it (exit 64) (Codex review).
+    """
+
+    @staticmethod
+    def _pair(tmp_path: Path) -> tuple[Path, Path]:
+        from abicheck.model import Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        paths = []
+        for name, version, funcs in (("old", "1", ["a", "b"]), ("new", "2", ["a"])):
+            snap = AbiSnapshot(
+                library="libfoo.so",
+                version=version,
+                functions=[
+                    Function(
+                        name=f, mangled=f, return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    )
+                    for f in funcs
+                ],
+            )
+            path = tmp_path / f"{name}.json"
+            path.write_text(snapshot_to_json(snap), encoding="utf-8")
+            paths.append(path)
+        return paths[0], paths[1]
+
+    @pytest.mark.parametrize(
+        ("label", "body"),
+        [
+            ("invalid yaml", "use_cases: [\n  broken: [\n"),
+            ("not a list", "use_case: training\n"),
+            ("entry missing a name", "- entrypoints: [train]\n"),
+        ],
+    )
+    def test_a_malformed_manifest_fails_the_dry_run_too(
+        self, tmp_path: Path, label: str, body: str
+    ) -> None:
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text(body, encoding="utf-8")
+        args = ["compare", str(old), str(new), "--use-cases", str(manifest)]
+
+        real = CliRunner().invoke(main, args)
+        dry = CliRunner().invoke(main, [*args, "--dry-run"])
+        # The exact agreement is the contract, not merely "both nonzero".
+        assert dry.exit_code == real.exit_code == 64, (label, dry.output)
+
+    def test_a_valid_manifest_still_passes_the_dry_run(self, tmp_path: Path) -> None:
+        # The validation must not turn every --use-cases dry run into an error.
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text(
+            "- use_case: training\n  entrypoints: [train]\n", encoding="utf-8"
+        )
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old), str(new), "--use-cases", str(manifest), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
