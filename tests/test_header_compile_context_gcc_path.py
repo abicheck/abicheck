@@ -467,3 +467,144 @@ def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(
     assert isinstance(compile_ctx, CompileContext)
     assert compile_ctx.gcc_path == "clang-cl"
     assert "/std:c++20" in compile_ctx.gcc_option_tokens
+
+
+def test_explicit_pin_of_recognizes_slash_d_define() -> None:
+    """P2 review finding ("Recognize /D while collecting explicit define
+    pins"): `_ExplicitPin.of()` only recognized `-D` (GCC/Clang spelling),
+    leaving `pin.defines` empty for a clang-cl caller pinning an ABI macro
+    via `/D_GLIBCXX_USE_CXX11_ABI=1` -- even though the raw-flag masking it
+    feeds (`_pinned_define_macro`) already recognized `/D` too. `clang-cl
+    /?` documents `/D <macro[=value]>` as the supported define form."""
+    from abicheck.buildsource.header_compile_context import _ExplicitPin
+
+    pin = _ExplicitPin.of(
+        CompileContext(gcc_option_tokens=("/D_GLIBCXX_USE_CXX11_ABI=1",))
+    )
+    assert pin.defines == frozenset({"_GLIBCXX_USE_CXX11_ABI"})
+
+
+def test_explicit_pin_of_recognizes_slash_u_undefine() -> None:
+    """Sibling case for MSVC/clang-cl's `/U` (undefine)."""
+    from abicheck.buildsource.header_compile_context import _ExplicitPin
+
+    pin = _ExplicitPin.of(CompileContext(gcc_option_tokens=("/U", "FOO")))
+    assert pin.undefines == frozenset({"FOO"})
+
+
+def test_resolve_slash_d_pin_excuses_clang_cl_macro_disagreement(
+    tmp_path: Path,
+) -> None:
+    """End-to-end regression for the same finding: a clang-cl caller pinning
+    `_GLIBCXX_USE_CXX11_ABI` via `/D_GLIBCXX_USE_CXX11_ABI=1` must excuse a
+    macro-only disagreement between two matched clang-cl compile units --
+    mirroring the existing `-D`-spelled sibling test in
+    test_header_compile_context.py
+    (test_resolve_explicit_define_pin_also_excuses_raw_abi_flag_survivor_disagreement)
+    but for the MSVC/clang-cl `/D` spelling end to end (both the structured
+    `cu.defines` entry and its raw `/D...` survivor in
+    `cu.abi_relevant_flags` must be excused, or the ambiguity error still
+    fires)."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "0"},
+        abi_relevant_flags=["/D_GLIBCXX_USE_CXX11_ABI=0"],
+        argv=["clang-cl", "/c", str(src_a)],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "1"},
+        abi_relevant_flags=["/D_GLIBCXX_USE_CXX11_ABI=1"],
+        argv=["clang-cl", "/c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    explicit = CompileContext(gcc_option_tokens=("/D_GLIBCXX_USE_CXX11_ABI=1",))
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.matched is True
+
+
+def test_resolve_slash_d_pin_still_fails_closed_without_pin(tmp_path: Path) -> None:
+    """Companion negative case: without the explicit /D pin, the identical
+    disagreement still raises -- proving the excuse above genuinely comes
+    from the pin, not from some other masking."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "0"},
+        abi_relevant_flags=["/D_GLIBCXX_USE_CXX11_ABI=0"],
+        argv=["clang-cl", "/c", str(src_a)],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "1"},
+        abi_relevant_flags=["/D_GLIBCXX_USE_CXX11_ABI=1"],
+        argv=["clang-cl", "/c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_explicit_pin_of_gcc_path_true_for_gcc_prefix_only() -> None:
+    """P2 review finding ("Treat an explicit prefix as a compiler-selector
+    pin"): `_ExplicitPin.gcc_path` must also be True when only
+    `explicit.gcc_prefix` is set -- either explicit selector field alone
+    already fully resolves the compiler-selection dimension for
+    `_merge_l3_compile_context`'s purposes (per the earlier gcc_path/
+    gcc_prefix mutual-exclusivity fix), so the ambiguity-signature masking
+    must treat the two as one dimension too."""
+    from abicheck.buildsource.header_compile_context import _ExplicitPin
+
+    pin = _ExplicitPin.of(CompileContext(gcc_prefix="/opt/llvm/bin/"))
+    assert pin.gcc_path is True
+
+
+def test_resolve_gcc_prefix_only_excuses_driver_disagreement(
+    tmp_path: Path,
+) -> None:
+    """End-to-end regression: a caller supplying only `gcc_prefix` (never
+    `gcc_path`) must excuse a driver-only disagreement between matched
+    units the same way an explicit `gcc_path` already does -- mirroring
+    test_resolve_driver_disagreement_excused_when_caller_pins_explicit_gcc_path
+    above but with `gcc_prefix` as the sole explicit selector. Before the
+    fix, `_ExplicitPin.of()` checked only `explicit.gcc_path is not None`,
+    so this raised `HeaderCompileContextAmbiguousError` even though
+    `_merge_l3_compile_context` already treats the explicit prefix as
+    authoritative and discards every derived path."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["cl.exe", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    explicit = CompileContext(gcc_prefix="/opt/llvm/bin/")
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.matched is True

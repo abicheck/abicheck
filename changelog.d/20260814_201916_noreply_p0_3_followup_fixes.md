@@ -296,3 +296,51 @@
   already pins a `--gcc-path` (`_ExplicitPin.gcc_path`, new), since the
   caller's own value wins that dimension regardless of what the matched
   units resolve to.
+- **A fourteenth review round found four more gaps across the same
+  `_ExplicitPin`/ambiguity-signature/build-options machinery.** (1)
+  `header_compile_context._ExplicitPin.of()`'s macro-pin scan recognized
+  only GCC/Clang's `-D`/`-U` spelling, even though the raw-flag masking it
+  feeds (`_mask_pinned_abi_flags()`, via `_pinned_define_macro()`) already
+  recognized MSVC/clang-cl's `/D`/`/U` spelling too — so a clang-cl caller
+  pinning an ABI macro via `/D_GLIBCXX_USE_CXX11_ABI=1` left `pin.defines`
+  empty, and two matched units disagreeing only on that macro's value
+  stayed spuriously ambiguous despite the documented override. `clang-cl
+  /?` documents `/D <macro[=value]>` as the supported define form; `_
+  ExplicitPin.of()` now recognizes both `-D`/`-U` and `/D`/`/U` uniformly,
+  mirroring `_pinned_define_macro()`'s own recognition. (2)
+  `adapters.base.derive_build_options()`'s broad `-target`-prefix filter
+  (meant to drop a raw `-target`/`--sysroot`/`-isysroot` survivor already
+  represented by the structured `target_triple`/`sysroot` fields) also
+  silently dropped a `-target-abi`/`-target-cpu`/`-target-feature`/
+  `-target-linker-version` survivor — none of those four is represented by
+  any structured `CompileUnit` field at all (they carry real, independent
+  ABI-relevant information), so a compile unit's own resolved value for one
+  of them produced no `BuildOption` and no build-evidence drift finding,
+  in both the bare-token normalized form (`-target-abi=aapcs`) and the
+  `-Xclang`-wrapped normalized form. `_add_generic_flag_option()` now
+  exempts these four (via a new `_is_split_operand_abi_flag_survivor()`
+  predicate) from that broad filter, letting them fall through to the
+  generic option path instead of being dropped. (3)
+  `adapters.base._msvc_driver_scan()`'s CL-style-driver-name match
+  (`_is_cl_style_driver_name()`, a bare, extension-agnostic name-suffix
+  check) was applied to *every* argv token, not just the command's own
+  executable/launcher position(s) — so a GNU translation unit whose source
+  basename happens to end in `-cl` (e.g. `foo-cl.cpp`) was mistaken for a
+  CL-style driver, flipping the whole command to MSVC dialect and, via
+  `_derived_gcc_path()`, recording the source path itself as `gcc_path`;
+  multiple otherwise-identical units could then spuriously fail ambiguity
+  grouping, while a single unit lost its recorded compiler entirely. The
+  scan is now restricted to the command's actual leading executable
+  token(s) — `argv[0]`, plus `argv[1]` too when `argv[0]`'s basename is a
+  recognized launcher (`sccache`/`ccache`/`distcc`) — via a new
+  `_executable_token_positions()` helper. (4)
+  `header_compile_context._ExplicitPin.gcc_path` checked only `explicit.
+  gcc_path is not None`, even though `service_input_resolution.
+  _merge_l3_compile_context()` (per the twelfth round above) already
+  treats `gcc_path`/`gcc_prefix` as one mutually exclusive compiler
+  selector — so a caller supplying only `gcc_prefix` against matched units
+  naming different clang-cl drivers still raised
+  `HeaderCompileContextAmbiguousError` before the merge step ever got a
+  chance to apply the caller's already-resolved explicit selection.
+  `_ExplicitPin.gcc_path` is now `True` when *either* `explicit.gcc_path`
+  or `explicit.gcc_prefix` is set.

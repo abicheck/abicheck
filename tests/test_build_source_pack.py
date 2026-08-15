@@ -679,6 +679,75 @@ def test_broadened_abi_flag_vocabulary_is_captured(flag):
     assert extract_abi_relevant_flags(["clang", flag, "-c", "foo.cpp"]) == [flag]
 
 
+def test_split_target_abi_flag_survivor_produces_build_option():
+    # P2 review finding ("Preserve bare split target flags in build
+    # options"): `derive_build_options()`'s broad "-target"-prefix filter
+    # (meant to drop a raw -target/--sysroot/-isysroot survivor already
+    # represented by the structured target_triple/sysroot fields) must not
+    # also drop a -target-abi/-target-cpu/-target-feature/
+    # -target-linker-version survivor -- none of those four is represented
+    # by any structured CompileUnit field, so dropping one silently
+    # discarded real, independent ABI-relevant information and no
+    # build-evidence drift finding was ever produced for it.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    abi_relevant_flags = extract_abi_relevant_flags(
+        ["clang", "-cc1", "-target-abi", "aapcs", "-c", "t.c"]
+    )
+    assert abi_relevant_flags == ["-target-abi=aapcs"]
+    cu = CompileUnit(
+        id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags
+    )
+    opts = {(o.key, o.value) for o in derive_build_options([cu])}
+    assert ("-target-abi", "-target-abi=aapcs") in opts
+
+
+def test_split_target_abi_flag_xclang_wrapped_survivor_produces_build_option():
+    # Sibling case: the real-world -Xclang-wrapped spelling
+    # (`-Xclang -target-abi -Xclang aapcs`) must produce a BuildOption too.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    abi_relevant_flags = extract_abi_relevant_flags(
+        ["clang", "-Xclang", "-target-abi", "-Xclang", "aapcs", "-c", "t.c"]
+    )
+    assert abi_relevant_flags == ["-Xclang -target-abi=aapcs"]
+    cu = CompileUnit(
+        id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags
+    )
+    opts = {(o.key, o.value) for o in derive_build_options([cu])}
+    assert ("-Xclang -target-abi", "-Xclang -target-abi=aapcs") in opts
+
+
+def test_split_target_abi_flag_disagreement_still_diffable_across_units():
+    # End-to-end: two compile units disagreeing only on -target-abi must
+    # produce two distinct BuildOption values, not silently collapse to
+    # nothing (which used to make the disagreement invisible to
+    # build_diff._diff_options / ABI_RELEVANT_BUILD_FLAG_CHANGED).
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu_a = CompileUnit(
+        id="cu://a",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(
+            ["clang", "-cc1", "-target-abi", "aapcs", "-c", "a.c"]
+        ),
+    )
+    cu_b = CompileUnit(
+        id="cu://b",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(
+            ["clang", "-cc1", "-target-abi", "aapcs16", "-c", "b.c"]
+        ),
+    )
+    values = {
+        o.value for o in derive_build_options([cu_a, cu_b]) if o.key == "-target-abi"
+    }
+    assert values == {"-target-abi=aapcs", "-target-abi=aapcs16"}
+
+
 @pytest.mark.parametrize("flag", [
     "-fsycl",
     "-fsycl-host-only",

@@ -264,6 +264,43 @@ _SPLIT_OPERAND_ABI_FLAGS = frozenset(
     }
 )
 
+#: The literal marker :func:`extract_abi_relevant_flags` prepends to a
+#: ``-Xclang``-wrapped split-operand flag's internal encoding -- mirrors
+#: ``header_compile_context._XCLANG_WRAPPED_MARKER`` exactly (that module's
+#: own docstring has the full reasoning); duplicated here rather than
+#: imported to keep this leaf module's own constant self-contained, the same
+#: way :data:`_SPLIT_OPERAND_ABI_FLAGS` itself is the shared source of truth
+#: both modules already read independently.
+_XCLANG_WRAPPED_ABI_FLAG_MARKER = "-Xclang "
+
+
+def _is_split_operand_abi_flag_survivor(flag: str) -> bool:
+    """True when *flag* is one of :data:`_SPLIT_OPERAND_ABI_FLAGS`'s own
+    normalized survivor encodings (P2 review, ``discussion_r3788...``
+    follow-up, fresh evidence).
+
+    :func:`extract_abi_relevant_flags` normalizes a genuinely split
+    two-token flag like ``-target-abi <value>`` (and its
+    ``-Xclang``-wrapped real-world spelling, ``-Xclang -target-abi -Xclang
+    <value>``) into one internal ``<flag>=<value>``/``-Xclang
+    <flag>=<value>`` token -- see :data:`_SPLIT_OPERAND_ABI_FLAGS`'s own
+    docstring for the full reasoning. Every one of these four flags
+    (``-target-abi``/``-target-cpu``/``-target-feature``/
+    ``-target-linker-version``) shares the ``-target`` prefix
+    :data:`_TOOLCHAIN_PATH_FLAG_PREFIXES` matches to drop a raw
+    ``-target``/``--sysroot``/``-isysroot`` survivor as fully redundant
+    with the structured ``target_triple``/``sysroot`` fields -- but unlike
+    those, none of these four is represented by any structured
+    ``CompileUnit`` field at all, so dropping one silently discards real,
+    independent ABI-relevant information (a real regression this predicate
+    exists to prevent -- see :func:`_add_generic_flag_option`'s own call
+    site).
+    """
+    candidate = flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
+    name, sep, _value = candidate.partition("=")
+    return sep != "" and name in _SPLIT_OPERAND_ABI_FLAGS
+
+
 #: Macro defines whose value is ABI-relevant even though they're plain -D flags.
 _ABI_RELEVANT_DEFINES: tuple[str, ...] = (
     "_GLIBCXX_USE_CXX11_ABI",
@@ -494,6 +531,42 @@ _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
     "/external:",
 )
 
+#: Compiler-cache/launcher wrapper basenames that may precede the real
+#: driver at ``argv[0]`` (P2 review, "Limit CL-driver matching to executable
+#: tokens" follow-up, fresh evidence) -- when ``argv[0]``'s basename is one
+#: of these, the real driver is expected at ``argv[1]`` instead, e.g.
+#: ``sccache clang-cl /std:c++20 ...``. Mirrors the same three launchers
+#: this module's own :func:`_msvc_driver_scan` docstring already names.
+_COMPILER_LAUNCHER_BASENAMES: frozenset[str] = frozenset(
+    {"sccache", "ccache", "distcc"}
+)
+
+
+def _executable_token_positions(argv: list[str]) -> frozenset[int]:
+    """The argv index/indices that can legitimately name the compiler itself.
+
+    Just ``{0}``, plus ``{1}`` too when ``argv[0]``'s basename is a
+    recognized compiler-cache/launcher wrapper
+    (:data:`_COMPILER_LAUNCHER_BASENAMES`) -- the real driver then sits one
+    token later. Used by :func:`_msvc_driver_scan` to restrict its CL-style
+    driver-name matching to the command's own leading executable/launcher
+    position(s), never a later operand (P2 review, fresh evidence): for a
+    GNU translation unit whose *source* basename happens to end in ``-cl``
+    (e.g. ``foo-cl.cpp``), ``dumper_clang._is_cl_style_driver_name`` -- a
+    bare, extension-agnostic name-suffix check -- cannot tell that source
+    token apart from a real CL-style driver on name alone. Scanning every
+    argv token (the pre-fix behavior) let such a source file be mistaken
+    for the compiler, wrongly flipping the whole command to MSVC dialect and
+    recording the source path itself as ``gcc_path``.
+    """
+    if not argv:
+        return frozenset()
+    positions = {0}
+    base0 = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if base0 in _COMPILER_LAUNCHER_BASENAMES and len(argv) > 1:
+        positions.add(1)
+    return frozenset(positions)
+
 
 def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     """Shared scan behind :func:`_is_msvc_command` and :func:`msvc_driver_token`.
@@ -531,9 +604,27 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     reject as not clang-family, silently falling back to plain ``clang++``
     even though a real, supported CL-style driver was named right there in
     argv.
+
+    **The CL-style-name match itself is restricted to the command's own
+    leading executable/launcher position(s), not every argv token (P2
+    review, "Limit CL-driver matching to executable tokens" follow-up,
+    fresh evidence).** :func:`_is_cl_style_driver_name` is a bare,
+    extension-agnostic name-suffix check (any stem ending in ``-cl``) —
+    applying it to *every* token, including a translation unit's own source
+    argument, misidentifies a GNU source file like ``foo-cl.cpp`` as a
+    CL-style driver (``Path("foo-cl.cpp").stem`` is ``"foo-cl"``, which
+    does end in ``-cl``). That silently flipped the whole command to MSVC
+    dialect and, downstream in
+    :func:`~abicheck.buildsource.header_compile_context._derived_gcc_path`,
+    recorded the *source path itself* as ``gcc_path`` — corrupting
+    ambiguity grouping (multiple otherwise-identical units spuriously
+    disagree) and losing the recorded compiler for a lone unit. See
+    :func:`_executable_token_positions` for exactly which position(s) are
+    scanned.
     """
     is_msvc = "/c" in argv
     driver_token: str | None = None
+    executable_positions = _executable_token_positions(argv)
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -551,11 +642,12 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
             is_msvc = True
             i += 1
             continue
-        base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if base in _MSVC_DRIVERS or _is_cl_style_driver_name(base):
-            is_msvc = True
-            if driver_token is None:
-                driver_token = arg
+        if i in executable_positions:
+            base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if base in _MSVC_DRIVERS or _is_cl_style_driver_name(base):
+                is_msvc = True
+                if driver_token is None:
+                    driver_token = arg
         i += 1
     return is_msvc, driver_token
 
@@ -830,11 +922,21 @@ def _add_generic_flag_option(
                 std_val,
                 raw=flag,
             )
-    elif flag.startswith(_TOOLCHAIN_PATH_FLAG_PREFIXES):
+    elif flag.startswith(
+        _TOOLCHAIN_PATH_FLAG_PREFIXES
+    ) and not _is_split_operand_abi_flag_survivor(flag):
         # sysroot/target are already emitted from the normalized
         # structured fields above. Re-adding the raw flag would
         # double-count and make split (``--sysroot /sdk``) vs combined
         # (``--sysroot=/sdk``) spelling look like a change.
+        #
+        # A -target-abi/-target-cpu/-target-feature/-target-linker-version
+        # survivor (P2 review, ``discussion_r3788...`` follow-up) shares the
+        # bare "-target" prefix this filter matches but is NOT represented
+        # by any structured field -- see
+        # `_is_split_operand_abi_flag_survivor`'s own docstring -- so it must
+        # fall through to the generic option path below instead of being
+        # dropped here.
         return
     else:
         _add_build_option(out, seen, flag.split("=", 1)[0], flag, raw=flag)

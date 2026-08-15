@@ -108,6 +108,36 @@ def test_source_from_argv_msvc_combined_forced_include_rejected():
     assert source_from_argv(["clang-cl", "/FIconfig.hpp", "foo.cc"]) == "foo.cc"
 
 
+def test_msvc_driver_scan_does_not_mistake_cl_suffixed_source_for_driver():
+    # P2 review finding ("Limit CL-driver matching to executable tokens"):
+    # a GNU translation unit whose source basename ends in "-cl" (e.g.
+    # foo-cl.cpp) must not be mistaken for a CL-style driver just because
+    # `_is_cl_style_driver_name` is a bare name-suffix check applied to
+    # every argv token -- the match must be restricted to the command's own
+    # leading executable position(s).
+    argv = ["gcc", "-c", "foo-cl.cpp"]
+    assert _is_msvc_command(argv) is False
+    assert msvc_driver_token(argv) is None
+
+
+def test_msvc_driver_scan_does_not_mistake_cl_suffixed_source_behind_launcher():
+    # Same finding, with a recognized launcher wrapper at argv[0] -- the
+    # scan must still only consider argv[0]/argv[1] (the launcher and the
+    # real compiler), never the source operand that follows.
+    argv = ["sccache", "gcc", "-c", "foo-cl.cpp"]
+    assert _is_msvc_command(argv) is False
+    assert msvc_driver_token(argv) is None
+
+
+def test_msvc_driver_scan_still_finds_real_driver_when_source_is_cl_suffixed():
+    # Companion positive case: a genuine clang-cl driver at argv[0] must
+    # still be recognized even when the TU it compiles happens to have a
+    # "-cl"-suffixed basename.
+    argv = ["clang-cl", "/std:c++20", "/c", "foo-cl.cpp"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
 def test_source_from_argv_tp_space_separated_form():
     # `/Tp <file>` (space-separated) names the C++ TU explicitly.
     assert source_from_argv(["cl.exe", "/c", "/Tp", "foo.cc", "/Fofoo.obj"]) == "foo.cc"

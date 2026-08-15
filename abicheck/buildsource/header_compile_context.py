@@ -266,6 +266,24 @@ class _ExplicitPin:
     standard: bool = False
     target_triple: bool = False
     sysroot: bool = False
+    #: True when the caller's *explicit* context pins the compiler-selector
+    #: dimension via EITHER ``gcc_path`` OR ``gcc_prefix`` (P2 review,
+    #: ``discussion_r3788...`` follow-up, fresh evidence) -- the field name
+    #: is kept as ``gcc_path`` (matching ``_EffectiveContextSignature.
+    #: gcc_path``, the dimension it masks) even though it now also answers
+    #: for ``gcc_prefix``. ``service_input_resolution._merge_l3_compile_
+    #: context`` already treats ``gcc_path``/``gcc_prefix`` as one mutually
+    #: exclusive compiler selector (its own "one logical compiler-selector,
+    #: not two independent ones" comment) -- when a caller supplies only
+    #: ``gcc_prefix`` and matched units name different clang-cl drivers, that
+    #: merge step correctly discards every derived path in favor of the
+    #: explicit prefix, so the ambiguity-signature masking above must treat
+    #: the dimension as already resolved too. Checking only ``gcc_path is
+    #: not None`` left a caller who pinned solely ``gcc_prefix`` with this
+    #: still ``False``, so ``_EffectiveContextSignature.of`` compared the
+    #: matched units' real, differing ``gcc_path`` values and raised
+    #: ``HeaderCompileContextAmbiguousError`` before the merge step ever got
+    #: a chance to apply the caller's already-resolved selection.
     gcc_path: bool = False
     defines: frozenset[str] = field(default_factory=frozenset)
     undefines: frozenset[str] = field(default_factory=frozenset)
@@ -287,15 +305,15 @@ class _ExplicitPin:
                 target_triple = True
             elif tok in ("--sysroot", "-isysroot") or tok.startswith("--sysroot="):
                 sysroot = True
-            elif tok == "-D" and i + 1 < n:
+            elif tok in ("-D", "/D") and i + 1 < n:
                 defines.add(tokens[i + 1].split("=", 1)[0])
                 i += 1
-            elif tok.startswith("-D") and len(tok) > 2:
+            elif tok.startswith(("-D", "/D")) and len(tok) > 2:
                 defines.add(tok[2:].split("=", 1)[0])
-            elif tok == "-U" and i + 1 < n:
+            elif tok in ("-U", "/U") and i + 1 < n:
                 undefines.add(tokens[i + 1])
                 i += 1
-            elif tok.startswith("-U") and len(tok) > 2:
+            elif tok.startswith(("-U", "/U")) and len(tok) > 2:
                 undefines.add(tok[2:])
             i += 1
         return cls(
@@ -305,7 +323,7 @@ class _ExplicitPin:
             is not None,
             target_triple=target_triple,
             sysroot=sysroot,
-            gcc_path=explicit.gcc_path is not None,
+            gcc_path=explicit.gcc_path is not None or explicit.gcc_prefix is not None,
             defines=frozenset(defines),
             undefines=frozenset(undefines),
         )
@@ -1006,12 +1024,24 @@ def resolve_header_compile_context(
     *explicit* is the caller's own, already-supplied L2 context (``evidence.
     compile`` on the service_input_resolution path) — when given, any
     ABI-relevant dimension it already pins (an explicit ``-std=``/
-    ``--target=``/``--sysroot=``/``-isysroot`` or a specific ``-D``/``-U``
-    macro; see :class:`_ExplicitPin`) is excluded from the multi-unit
-    ambiguity comparison below, since the caller's own value wins that
-    dimension regardless of what the matched compile units say (Finding 3).
-    Per-field, not per-request: a genuine disagreement on any *other*,
-    unpinned dimension still fails closed.
+    ``--target=``/``--sysroot=``/``-isysroot`` or a specific ``-D``/``/D``/
+    ``-U``/``/U`` macro; see :class:`_ExplicitPin`) is excluded from the
+    multi-unit ambiguity comparison below, since the caller's own value wins
+    that dimension regardless of what the matched compile units say
+    (Finding 3). Per-field, not per-request: a genuine disagreement on any
+    *other*, unpinned dimension still fails closed.
+
+    ``/D``/``/U`` (P2 review, ``discussion_r3788...`` follow-up, fresh
+    evidence): :class:`_ExplicitPin`'s own macro-pin scan used to recognize
+    only GCC/Clang's ``-D``/``-U`` spelling, even though the raw-flag masking
+    it feeds (:func:`_mask_pinned_abi_flags`, via :func:`_pinned_define_macro`)
+    already recognized MSVC/clang-cl's ``/D``/``/U`` spelling too -- so a
+    clang-cl caller pinning an ABI macro via ``/D_GLIBCXX_USE_CXX11_ABI=1``
+    left ``pin.defines`` empty, and two matched units disagreeing only on
+    that macro's value stayed spuriously ambiguous despite the documented
+    override. ``clang-cl /?`` documents ``/D <macro[=value]>`` as the
+    supported define form, mirrored here the same way :class:`_ExplicitPin`
+    itself already scans ``-D``/``-U`` for the GCC/Clang spelling.
 
     ``gcc_path`` (P2 review, ``discussion_r3788...`` follow-up, fresh
     evidence) folds in :func:`_derived_gcc_path`'s own resolved driver
@@ -1023,9 +1053,11 @@ def resolve_header_compile_context(
     any ABI-relevant fact) change the generated L2 snapshot. Masked to a
     shared placeholder exactly like ``standard``/``target_triple``/
     ``sysroot`` above when the caller's own *explicit* context already pins
-    a ``--gcc-path`` (``pin.gcc_path``): the caller's own value wins that
-    dimension regardless of what the matched units resolve to, so a
-    driver-only disagreement the caller already resolved must not raise
+    a ``--gcc-path`` OR a ``--gcc-prefix`` (``pin.gcc_path``, which answers
+    for either explicit selector field -- see that field's own docstring):
+    the caller's own value wins that dimension regardless of what the
+    matched units resolve to, so a driver-only disagreement the caller
+    already resolved -- via either spelling -- must not raise
     ``HeaderCompileContextAmbiguousError``.
 
     Raises :class:`~abicheck.errors.HeaderCompileContextAmbiguousError` when
