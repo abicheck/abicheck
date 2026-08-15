@@ -371,17 +371,28 @@ def drift_rows(payload: dict) -> list[dict]:
     ]
 
 
+def _side_has_l3_evidence(row: dict, side: str) -> bool:
+    return (row.get(side) or {}).get("l3_compile_units", 0) > 0
+
+
 def source_scan_summary(payload: dict) -> dict:
     """Pure counts over the source-tier rows: total entries, how many actually
     scanned (no `error`), and how many of *those* captured any real L3 build
-    evidence. The single source of truth `source_tier_broken()` (the CI gate)
-    and any caller inspecting a results file share.
+    evidence **on both sides**. The single source of truth `source_tier_broken()`
+    (the CI gate) and any caller inspecting a results file share.
+
+    Both `old_coverage` and `new_coverage` are checked (Codex review, fresh
+    evidence) — a row whose *old* snapshot silently captured zero L3 units
+    while the *new* one succeeded previously counted as "with evidence"
+    because only `new_coverage` was examined, which would pass this gate
+    while publishing a one-sided (and therefore already-misleading)
+    old-vs-new comparison for that library.
     """
     rows = payload.get("source_results", [])
     scanned = [r for r in rows if "error" not in r]
     with_evidence = [
         r for r in scanned
-        if (r.get("new_coverage") or {}).get("l3_compile_units", 0) > 0
+        if _side_has_l3_evidence(r, "old_coverage") and _side_has_l3_evidence(r, "new_coverage")
     ]
     return {"total": len(rows), "scanned": len(scanned), "with_evidence": len(with_evidence)}
 

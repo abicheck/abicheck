@@ -124,12 +124,25 @@ def test_dump_sources_uses_depth_source_not_the_retired_full_rung() -> None:
 
 
 class TestSourceTierBroken:
-    def _row(self, lib: str, *, error: str | None = None, l3: int = 3) -> dict:
+    def _row(
+        self,
+        lib: str,
+        *,
+        error: str | None = None,
+        l3: int = 3,
+        old_l3: int | None = None,
+    ) -> dict:
+        """A source-tier row shaped like `scan_source_one()`'s real output —
+        both `old_coverage` and `new_coverage` present. `old_l3` defaults to
+        the same value as `l3` (both sides "healthy"); pass it explicitly to
+        build a one-sided row (only one snapshot actually captured evidence).
+        """
         if error is not None:
             return {"lib": lib, "error": error}
         return {
             "lib": lib,
             "verdict": "COMPATIBLE",
+            "old_coverage": {"l3_compile_units": l3 if old_l3 is None else old_l3},
             "new_coverage": {"l3_compile_units": l3},
         }
 
@@ -177,6 +190,21 @@ class TestSourceTierBroken:
         assert "2/2" in reason
         assert "l3_compile_units" in reason
 
+    def test_flags_evidence_present_on_only_one_side(self) -> None:
+        # Regression guard (Codex review): a row whose OLD snapshot silently
+        # captured zero L3 units while the NEW one succeeded must NOT count
+        # as "with evidence" -- that comparison is one-sided and already
+        # misleading, even though *a* snapshot has real data.
+        payload = {
+            "source_results": [
+                self._row("zlib", l3=5, old_l3=0),
+                self._row("zstd", l3=5, old_l3=0),
+            ]
+        }
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "2/2" in reason
+
     def test_source_scan_summary_counts(self) -> None:
         payload = {
             "source_results": [
@@ -187,6 +215,16 @@ class TestSourceTierBroken:
         }
         summary = runner.source_scan_summary(payload)
         assert summary == {"total": 3, "scanned": 2, "with_evidence": 1}
+
+    def test_source_scan_summary_requires_evidence_on_both_sides(self) -> None:
+        payload = {
+            "source_results": [
+                self._row("zlib", l3=5, old_l3=0),  # new has evidence, old doesn't
+                self._row("zstd"),  # both sides healthy
+            ]
+        }
+        summary = runner.source_scan_summary(payload)
+        assert summary == {"total": 2, "scanned": 2, "with_evidence": 1}
 
 
 def test_source_entries_filters_to_source_blocks_and_only() -> None:
