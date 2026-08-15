@@ -297,25 +297,67 @@ version = "literal: pyproject.toml: project.version"
 #
 # Focus on the core detection modules where surviving mutants indicate
 # test gaps that could allow regressions:
-source_paths = [
-    "abicheck/diff_symbols.py",      # function/variable/parameter detectors
-    "abicheck/diff_types.py",        # type/enum/union/typedef detectors
-    "abicheck/diff_platform.py",     # ELF/DWARF/PE/Mach-O detectors
+# `source_paths` is what gets **copied** into `mutants/`, and mutmut runs the
+# suite from inside that directory — so it has to be the whole importable
+# package. Listing individual files here produced a `mutants/abicheck/` with
+# no `__init__.py` and 14 of 272 modules, which shadows the real package as a
+# namespace package: `import abicheck` resolved to that partial copy and
+# `abicheck.__version__` / `abicheck.compat` were simply absent, so mutmut
+# aborted at "failed to collect stats" before generating a single result.
+# (The editable install cannot save it — its finder is *appended* to
+# sys.meta_path, so the path finder reaches `mutants/` first.)
+#
+# `only_mutate` is the actual scope: the core detector logic where a
+# surviving mutant means a test gap. Everything else is copied verbatim so
+# imports resolve, and is never mutated.
+source_paths = ["abicheck"]
+# mutmut runs the suite with `mutants/` as the working directory, so a test
+# that reads a repository file (`examples/ground_truth.json`,
+# `.github/workflows/*.yml`, `scripts/*.py`, `docs/**`) resolves it relative to
+# that copy and fails at collection — 37 collection errors on the first run
+# that got this far, each of them a `FileNotFoundError`, and any one of them
+# aborts the whole lane before a single mutant is measured. These are
+# copy-only: nothing here is walked for mutation. Listing a path that does not
+# exist is harmless (mutmut skips it), so this is deliberately generous rather
+# than minimal — the failure mode of a missing entry is a dead lane.
+also_copy = [
+    ".github",
+    ".pre-commit-config.yaml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "action",
+    "action.yml",
+    "actions",
+    "agent-evals",
+    "changelog.d",
+    "contrib",
+    "docs",
+    "eval",
+    "examples",
+    "mkdocs.yml",
+    "pixi.lock",
+    "scripts",
+    "skills-src",
+    "validation",
+]
+only_mutate = [
+    "abicheck/diff_symbols.py",  # function/variable/parameter detectors
+    "abicheck/diff_types.py",  # type/enum/union/typedef detectors
+    "abicheck/diff_platform.py",  # ELF/DWARF/PE/Mach-O detectors
     "abicheck/diff_vtable_layout.py",  # G23 B2 vtable-group reconstruction
-    "abicheck/diff_filtering.py",    # deduplication and redundancy logic
-    "abicheck/checker_policy.py",    # verdict classification
-    "abicheck/idioms.py",            # ADR-027 idiom & anti-pattern recognisers
+    "abicheck/diff_filtering.py",  # deduplication and redundancy logic
+    "abicheck/checker_policy.py",  # verdict classification
+    "abicheck/idioms.py",  # ADR-027 idiom & anti-pattern recognisers
     "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
-    "abicheck/surface_graph.py",     # ADR-027 declaration-graph substrate
-    # Added after the #753 -> #759 canonical-finding-id escape: identity,
-    # suppression and the snapshot storage boundary are all places where a
-    # test can execute a line without checking the value it produced, which
-    # is exactly what mutation testing measures.
+    "abicheck/surface_graph.py",  # ADR-027 declaration-graph substrate
     "abicheck/finding_identity.py",  # canonical/normalized finding identity
     "abicheck/name_classification.py",  # internal/public name classification
-    "abicheck/suppression.py",       # suppression rule matching
-    "abicheck/snapshot_io.py",       # ADR-059 storage envelope (gzip/zstd)
-    "abicheck/serialization.py",     # snapshot (de)serialization
+    "abicheck/suppression.py",  # suppression rule matching
+    "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
+    "abicheck/serialization.py",  # snapshot (de)serialization
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = [

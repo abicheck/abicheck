@@ -47,16 +47,41 @@ def _on_block(wf: dict) -> dict:
     return wf.get("on", wf.get(True))
 
 
-def _source_paths() -> list[str]:
+def _mutmut_config() -> dict:
     with open(REPO_ROOT / "pyproject.toml", "rb") as fh:
-        return tomllib.load(fh)["tool"]["mutmut"]["source_paths"]
+        return tomllib.load(fh)["tool"]["mutmut"]
+
+
+def _source_paths() -> list[str]:
+    """What mutmut **copies** into `mutants/` — the whole importable package.
+
+    Not the mutation scope; see `_only_mutate()`. The two were the same list
+    once, and that is exactly what broke the lane: mutmut runs the suite from
+    inside `mutants/`, so a copy holding 14 of 272 modules and no
+    `__init__.py` shadowed the real package as a namespace package and every
+    run died at "failed to collect stats".
+    """
+    return _mutmut_config()["source_paths"]
+
+
+def _only_mutate() -> list[str]:
+    """The modules actually mutated — the detector core."""
+    return _mutmut_config()["only_mutate"]
+
+
+def _filters() -> dict[str, list[str]]:
+    """Every dorny/paths-filter list in the `resolve` job."""
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    step = next(s for s in steps if "paths-filter" in str(s.get("uses", "")))
+    return yaml.safe_load(step["with"]["filters"])
 
 
 def _paths_filter() -> list[str]:
-    """The dorny/paths-filter list in the `resolve` job."""
-    steps = _workflow()["jobs"]["resolve"]["steps"]
-    step = next(s for s in steps if "paths-filter" in str(s.get("uses", "")))
-    return yaml.safe_load(step["with"]["filters"])["mutated"]
+    return _filters()["mutated"]
+
+
+def _test_filter() -> list[str]:
+    return _filters()["mutated_tests"]
 
 
 #: The lane's own infrastructure. A change to any of these must start the
@@ -79,11 +104,11 @@ def _test_globs() -> set[str]:
     than listed, so a module added there without its tests fails the contract
     below instead of silently losing its trigger.
     """
-    return {f"tests/test_{PurePosixPath(p).stem}*.py" for p in _source_paths()}
+    return {f"tests/test_{PurePosixPath(p).stem}*.py" for p in _only_mutate()}
 
 
 def test_paths_filter_covers_every_mutated_modules_tests() -> None:
-    missing = _test_globs() - set(_paths_filter())
+    missing = _test_globs() - set(_test_filter())
     assert not missing, (
         f"mutated module(s) whose tests have no trigger: {sorted(missing)} — a "
         "PR weakening only those tests would not start this lane."
@@ -91,7 +116,7 @@ def test_paths_filter_covers_every_mutated_modules_tests() -> None:
 
 
 def test_paths_filter_covers_every_mutated_source_path() -> None:
-    missing = set(_source_paths()) - set(_paths_filter())
+    missing = set(_only_mutate()) - set(_paths_filter())
     assert not missing, (
         f"mutated module(s) {sorted(missing)} have no trigger — they would be "
         "checked only on the weekly run."
@@ -107,10 +132,8 @@ def test_paths_filter_covers_the_lanes_own_infrastructure() -> None:
 
 def test_the_filter_is_exactly_sources_plus_infrastructure() -> None:
     """No stray entries — the filter is a contract, not a wishlist."""
-    assert (
-        set(_paths_filter())
-        == set(_source_paths()) | _INFRASTRUCTURE_PATHS | _test_globs()
-    )
+    assert set(_paths_filter()) == set(_only_mutate()) | _INFRASTRUCTURE_PATHS
+    assert set(_test_filter()) == _test_globs()
 
 
 def test_the_lane_does_not_cache_mutmut_results() -> None:
@@ -148,11 +171,39 @@ def test_the_run_decision_is_path_match_or_label() -> None:
     steps = _workflow()["jobs"]["resolve"]["steps"]
     decide = next(s for s in steps if s.get("id") == "decide")
     script = decide["run"]
-    assert '"$MATCHED" = "true" ] || [ "$LABELLED" = "true"' in script, (
-        "the run decision must OR the path match with the label"
+    assert (
+        '"$MATCHED" = "true" ] || [ "$MATCHED_TESTS" = "true" ] '
+        '|| [ "$LABELLED" = "true"'
+    ) in script, (
+        "the run decision must OR the production path match, the detector-test "
+        "match and the label"
     )
     # A non-PR event (schedule / dispatch) must always run.
     assert 'if [ "$GITHUB_EVENT_NAME" != "pull_request" ]' in script
+
+
+def test_a_detector_test_change_makes_the_pr_lane_fail_closed() -> None:
+    """A test-only diff has no changed production function to scope to, so
+    --diff-scoped alone reports "gated nothing" and exits 0 — green for a run
+    that checked nothing. That case, and only that case, requires a baseline
+    (Codex review)."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    pr_step = next(
+        s for s in steps if "--diff-scoped" in str(s.get("run", "")) and "run" in s
+    )
+    assert "--require-baseline" in pr_step["run"]
+    assert pr_step["env"]["DETECTOR_TESTS"].strip().startswith("${{")
+    assert "detector_tests" in pr_step["env"]["DETECTOR_TESTS"]
+
+
+def test_the_detector_test_signal_is_published_by_resolve() -> None:
+    """Otherwise the fail-closed branch above reads an always-empty variable
+    and silently never fires."""
+    outputs = _workflow()["jobs"]["resolve"]["outputs"]
+    assert "detector_tests" in outputs
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    decide = next(s for s in steps if s.get("id") == "decide")
+    assert 'echo "detector_tests=$MATCHED_TESTS"' in decide["run"]
 
 
 def test_the_mutmut_job_is_gated_on_that_decision() -> None:
@@ -171,8 +222,67 @@ def test_the_scheduled_lane_requires_a_baseline() -> None:
 
 
 def test_every_mutated_module_exists() -> None:
-    missing = [p for p in _source_paths() if not (REPO_ROOT / p).is_file()]
-    assert not missing, f"[tool.mutmut].source_paths names missing files: {missing}"
+    missing = [p for p in _only_mutate() if not (REPO_ROOT / p).is_file()]
+    assert not missing, f"[tool.mutmut].only_mutate names missing files: {missing}"
+
+
+def test_source_paths_is_the_importable_package_not_a_file_list() -> None:
+    """The regression that made this lane fail on its first real run.
+
+    mutmut copies `source_paths` into `mutants/` and runs the suite from
+    there. With individual files listed, `mutants/abicheck/` held 14 of 272
+    modules and no `__init__.py`, so `import abicheck` resolved to that
+    partial copy as a namespace package — `abicheck.__version__` and
+    `abicheck.compat` were absent and mutmut aborted at "failed to collect
+    stats" before generating a single result. The editable install does not
+    save it: its finder is appended to `sys.meta_path`, so the path finder
+    reaches `mutants/` first. Reproduced locally and in CI.
+    """
+    for path in _source_paths():
+        assert (REPO_ROOT / path).is_dir(), (
+            f"[tool.mutmut].source_paths entry {path!r} is not a directory — "
+            "mutmut would copy an incomplete package into mutants/"
+        )
+        assert (REPO_ROOT / path / "__init__.py").is_file(), (
+            f"{path} has no __init__.py, so the copy under mutants/ would "
+            "shadow the real package as a namespace package"
+        )
+
+
+def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
+    """mutmut runs the suite from inside `mutants/`, so a test that reads a
+    repository file resolves it relative to that copy.
+
+    Without these, collection died with 37 `FileNotFoundError`s — and any one
+    of them aborts the lane before a single mutant is measured. Pinned by
+    directory rather than by the individual files, since the failure mode of a
+    missing entry is a dead lane, not a wrong number.
+    """
+    also_copy = set(_mutmut_config().get("also_copy", []))
+    required = {".github", "docs", "examples", "scripts", "skills-src", "agent-evals"}
+    missing = required - also_copy
+    assert not missing, (
+        f"tests read these repository paths but mutmut would not copy them: "
+        f"{sorted(missing)}"
+    )
+
+
+def test_every_copied_path_that_exists_is_a_real_repository_path() -> None:
+    """A typo in `also_copy` is silent — mutmut skips a path that does not
+    exist — so the entry would simply never arrive under `mutants/`."""
+    unknown = [
+        p for p in _mutmut_config().get("also_copy", []) if not (REPO_ROOT / p).exists()
+    ]
+    assert not unknown, f"[tool.mutmut].also_copy names nonexistent paths: {unknown}"
+
+
+def test_every_mutated_module_lives_under_a_copied_source_path() -> None:
+    """`only_mutate` narrows what is mutated; it cannot reach outside what is
+    copied, so a module named there but not under `source_paths` is mutated
+    nowhere."""
+    roots = tuple(f"{p.rstrip('/')}/" for p in _source_paths())
+    outside = [p for p in _only_mutate() if not p.startswith(roots)]
+    assert not outside, f"only_mutate names paths outside source_paths: {outside}"
 
 
 def test_mutmut_config_uses_v3_key_names() -> None:

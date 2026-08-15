@@ -52,6 +52,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       run: ${{ steps.decide.outputs.run }}
+      detector_tests: ${{ steps.decide.outputs.detector_tests }}
     steps:
       - uses: actions/checkout@v6
       - name: Detect changes to mutated modules (PR only)
@@ -85,14 +86,23 @@ jobs:
               - 'tests/test_mutation_results.py'
               - '.github/workflows/mutation.yml'
               - 'pyproject.toml'
-              # The mutated modules' own tests. A PR that only weakens or
-              # deletes assertions in a detector test changes no production
-              # file, so none of the entries above matched and this lane did
-              # not start at all — the survivors that weakening creates would
-              # surface only on the next weekly run (Codex review). One glob
-              # per mutated module, mechanically enforced by
-              # tests/test_mutation_workflow_contract.py, so adding a module
-              # to `source_paths` without its tests fails that contract.
+            # The mutated modules' own tests, kept as their own filter so the
+            # run below can tell "a detector test changed" from "the lane's
+            # own infrastructure changed" — only the former has something to
+            # gate and therefore has to fail closed (Codex review). A PR that
+            # only weakens or deletes assertions in a detector test changes no
+            # production file, so `mutated` alone never started this lane at
+            # all. One glob per mutated module, mechanically enforced by
+            # tests/test_mutation_workflow_contract.py.
+            #
+            # Known limit, deliberately not widened here: these are naming
+            # convention matches. 257 of the ~450 test files import a mutated
+            # module directly (measured), so a trigger that is *complete*
+            # rather than conventional is effectively `tests/**` — i.e. a
+            # 120-minute job on most PRs. That is a CI-cost decision, not a
+            # drive-by change; the weekly full run and the `mutation` label
+            # remain the complete checks.
+            mutated_tests:
               - 'tests/test_diff_symbols*.py'
               - 'tests/test_diff_types*.py'
               - 'tests/test_diff_platform*.py'
@@ -111,15 +121,24 @@ jobs:
         id: decide
         env:
           MATCHED: ${{ steps.changed.outputs.mutated }}
+          MATCHED_TESTS: ${{ steps.changed.outputs.mutated_tests }}
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'mutation') }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$MATCHED" = "true" ] || [ "$LABELLED" = "true" ]; then
+            echo "detector_tests=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$MATCHED" = "true" ] || [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+          # A detector test changed, so this run has something real to check.
+          # It is also the one case --diff-scoped cannot check by itself: the
+          # branch changed no production function, so there is nothing to
+          # scope to and the answer only exists as drift against a baseline.
+          echo "detector_tests=$MATCHED_TESTS" >> "$GITHUB_OUTPUT"
 
   mutmut:
     name: mutmut (detector core)
@@ -164,9 +183,24 @@ jobs:
 
       - name: Run mutation testing (diff-scoped)
         if: github.event_name == 'pull_request'
+        # --require-baseline when a detector test changed: that diff has no
+        # changed production function for --diff-scoped to scope to, so
+        # without it the job reports "gated nothing" and still exits 0 —
+        # green for a run that checked nothing, which is the shape this lane
+        # exists to remove (Codex review). It fails until
+        # mutation-baseline.json is recorded (workflow_dispatch,
+        # write_baseline: true), which is the honest state: weakening a
+        # detector test is only detectable as drift.
+        env:
+          DETECTOR_TESTS: ${{ needs.resolve.outputs.detector_tests }}
         run: |
+          require=""
+          if [ "$DETECTOR_TESTS" = "true" ]; then
+            require="--require-baseline"
+          fi
           python scripts/check_mutation_score.py --run --diff-scoped \
             --base-ref origin/${{ github.base_ref }} \
+            $require \
             --json mutation-receipt.json
       - name: Run mutation testing (baseline drift)
         if: github.event_name == 'schedule'
