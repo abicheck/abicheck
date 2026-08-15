@@ -205,6 +205,22 @@ class TestResolutionsUnionBothSides:
         assert r.unresolved_entrypoints == ("predict",)
         assert impact is not None and impact.by_use_case["uc"]
 
+    def test_only_the_old_side_has_a_graph(self) -> None:
+        # The mirror of the case above, and the one `_merge_resolutions`
+        # short-circuits on: with no NEW-side resolutions there is nothing to
+        # union, so OLD's answer stands rather than being discarded.
+        impact = build_use_case_impact(
+            self._DEFS,
+            _snapshot(_graph("train"), "1"),
+            _snapshot(None, "2"),
+            [_change("train")],
+            manifest="uc.yaml",
+        )
+        r = self._resolution(impact)
+        assert r.resolved_entrypoints == ("train",)
+        assert r.unresolved_entrypoints == ("predict",)
+        assert impact is not None and impact.by_use_case["uc"]
+
     def test_an_entrypoint_neither_side_resolves_stays_unresolved(self) -> None:
         impact = build_use_case_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train", "ghost"))],
