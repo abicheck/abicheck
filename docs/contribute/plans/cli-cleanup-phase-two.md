@@ -391,9 +391,22 @@ the parser to lists only — every existing trusted string config would break.
 2. An auto-discovered `.abicheck.yml` never executes a query.
 3. `dump --dry-run` prints the exact argv, the cwd, the resulting compile-DB
    path, and why the query will or will not run.
-4. A source-depth request with no compile DB produces an actionable error:
-   *"source depth requested, compile DB missing; configure `build.query` or
-   provide `--build-info`"*.
+4. A source-depth request produces an actionable error only when the
+   requested rung is genuinely unreached — **not** merely on "no compile DB
+   present." A raw compile-database `--build-info` never carries L4 facts by
+   itself, but a *pack-shaped* `--build-info` (e.g. from a previous
+   `collect`, or the abicheck-cc wrapper) can carry its own `source_abi` and
+   satisfy `--depth source` with no compile DB at all — already a supported,
+   tested path (`tests/test_dry_run_contract.py::
+   test_depth_source_with_prebuilt_pack_build_info_does_not_block`), and the
+   suggested remedy in the error message is itself `--build-info`, so the
+   check must not reject the thing it's telling the user to do. Gate the
+   error on the existing achieved-depth check (whether the resulting
+   snapshot's evidence actually reaches the requested rung), not on compile-DB
+   presence: *"source depth requested, compile DB missing; configure
+   `build.query` or provide `--build-info`"* only when neither a compile DB
+   nor another source-evidence provider (a pack's own `source_abi`) satisfies
+   the requested depth.
 5. Docs carry a minimal throwaway-config example, so the removed flags have a
    one-paste replacement.
 
@@ -491,8 +504,14 @@ abicheck scan --artifact-set directory/
 abicheck scan --artifact-set-manifest set.json
 ```
 
-Invariants that stay: exactly one of positional `ARTIFACT` or `--artifact-set`;
-`--artifact-set` is incompatible with `--against`.
+Invariants that stay, extended to cover the optional manifest form too: exactly
+one of positional `ARTIFACT`, `--artifact-set`, or `--artifact-set-manifest`
+(three mutually exclusive operands if the manifest form ships, not two); each
+of the two set-mode operands is incompatible with `--against`, the same
+audit-only rejection applying to the manifest form as to `--artifact-set`
+itself. If `--artifact-set-manifest` is not implemented in this PR, state that
+explicitly rather than leaving the invariant silently ambiguous about a form
+the surrounding text already shows as a usage example.
 
 **Sequencing note:** the syntax cleanup is lower value than finishing set-mode
 *semantics* — expected provider DSO, a symbol moved between sibling libraries,
