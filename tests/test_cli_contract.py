@@ -371,16 +371,30 @@ def test_ast_frontend_is_the_only_frontend_spelling(cmd_name: str) -> None:
     assert "--header-backend" not in param.opts
 
 
-def test_per_side_ast_frontend_has_no_legacy_alias() -> None:
-    """Per-side ``--old/new-ast-frontend`` carry no legacy ``--*-header-backend``."""
+def test_per_side_ast_frontend_is_spelled_on_ast_frontend_itself() -> None:
+    """The per-side frontend override is ``--ast-frontend old=``/``new=``.
+
+    ADR-040 Lever 1's side-prefix convention, not a third and fourth flag:
+    the separate ``--ast-frontend old=``/``--ast-frontend new=`` pair (and the
+    ``--*-header-backend`` aliases before it) are gone, and ``compare``'s
+    ``--ast-frontend`` is repeatable so each side can name its own.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
     cmd = _registered_commands()["compare"]
-    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
-    for dest, new, old in (
-        ("old_header_backend", "--old-ast-frontend", "--old-header-backend"),
-        ("new_header_backend", "--new-ast-frontend", "--new-header-backend"),
-    ):
-        assert new in by_dest[dest].opts
-        assert old not in by_dest[dest].opts
+    dests = {p.name for p in cmd.params}  # type: ignore[attr-defined]
+    assert "old_header_backend" not in dests
+    assert "new_header_backend" not in dests
+
+    param = {p.name: p for p in cmd.params}["header_backend"]  # type: ignore[attr-defined]
+    assert param.multiple
+    assert param.opts == ["--ast-frontend"]
+
+    out = CliRunner().invoke(main, ["compare", "--help-all"]).output
+    assert "--ast-frontend old=" not in out
+    assert "--ast-frontend new=" not in out
 
 
 def test_legacy_header_backend_flag_is_rejected(
@@ -456,7 +470,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--btf",
         "--bundle-cohort",
         "--bundle-system-providers",
-        "--collapse-versioned-symbols",
         "--compiler",
         "--compiler-option",
         "--compiler-prefix",
@@ -491,14 +504,13 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--help",
         "--help-all",
         "--include",
-        "--include-dependencies",
+        "--include-system-declarations",
         "--include-private-dso",
         "--jobs",
         "--keep-extracted",
         "--lang",
         "--ld-library-path",
         "--manifest",
-        "--new-ast-frontend",
         "--no-bundle-analysis",
         "--no-debuginfod",
         "--no-demangle",
@@ -507,48 +519,35 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--no-nostdinc",
         "--no-pattern-verdicts",
         "--no-scope-public-headers",
-        "--no-show-redundant",
         "--nostdinc",
-        "--old-ast-frontend",
         "--output",
         "--output-dir",
         "--pack",
         "--pattern-verdicts",
         "--pdb-path",
         "--policy",
-        "--policy-file",
         "--post-manifest",
         "--probe-matrix",
         "--profile",
-        "--public-symbol",
-        "--public-symbols-list",
         "--recommend",
         "--reconcile-build-context",
         "--report-mode",
         "--require-complete-analysis",
-        "--require-justification",
         "--required-symbol",
         "--required-symbols",
         "--scope-public-headers",
         "--search-path",
-        "--secondary-format",
-        "--secondary-output",
-        "--severity-abi-breaking",
-        "--severity-addition",
-        "--severity-potential-breaking",
         "--severity-preset",
-        "--severity-quality-issues",
         "--show-filtered",
         "--show-only",
-        "--show-redundant",
         "--sources",
         "--stat",
-        "--strict-suppressions",
         "--suppress",
         "--surface-metrics",
         "--sysroot",
         "--used-by",
         "--verbose",
+        "--write",
         "--version",
         "-H",
         "-I",
@@ -659,7 +658,7 @@ def test_no_option_has_empty_help() -> None:
     A blank ``--help`` line is a UX defect (the flag shows with no description).
     Hidden options are exempt — they are deliberately off the help surface. This
     guards the cleanup that routed `-v/--verbose` through `@verbose_option` and
-    filled the stray blank `-o`/`--format`/`--policy-file` strings.
+    filled the stray blank `-o`/`--format`/`--policy` strings.
     """
     import click
 

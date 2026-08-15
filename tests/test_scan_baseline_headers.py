@@ -73,7 +73,7 @@ def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> N
 
 def test_scan_exposes_against_config_surface_options() -> None:
     # ADR-049 Phase 5 §6.4: `--against` gets the same config surface as
-    # `compare` (`--policy`/`--policy-file`/`--suppress`/
+    # `compare` (`--policy`/`--policy`/`--suppress`/
     # `--scope-public-headers`/`--strict-suppressions`/`--public-symbol`/
     # `--public-symbols-list`/`--pattern-verdicts`/`--env-matrix`), not a
     # hardcoded strict_abi/unsuppressed/scoped-True baseline comparison.
@@ -325,7 +325,7 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
 def test_run_baseline_compare_forwards_policy_file_to_embedded_build_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Codex P1 review on PR #657: `--policy-file`'s evidence_policy knobs
+    # Codex P1 review on PR #657: `--policy`'s evidence_policy knobs
     # (require_evidence / evidence-verdict overrides, ADR-033 D7) are applied
     # by `prepare_embedded_build_source`, not `compare_snapshots` -- passing
     # `policy_file` only to the latter silently drops mandatory-evidence
@@ -406,7 +406,7 @@ def test_scan_rejects_comparison_only_flags_without_against(
 ) -> None:
     # Codex P2 review on PR #657: without --against, run_scan_core never
     # calls _run_baseline_compare, so these flags would otherwise be
-    # silently parsed and discarded -- including a --policy-file
+    # silently parsed and discarded -- including a --policy
     # require_evidence setting the user actually needed. Must be a loud
     # usage error (exit 64), not a silent no-op.
     from click.testing import CliRunner

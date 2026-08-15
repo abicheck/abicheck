@@ -156,7 +156,7 @@ class TestCompareLang:
         assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
 
 
-# ── per-side --old-ast-frontend / --new-ast-frontend on compare ───────
+# ── per-side --ast-frontend old= / --ast-frontend new= on compare ───────
 
 class TestPerSideHeaderBackend:
     def _two_elf(self, tmp_path):
@@ -169,7 +169,7 @@ class TestPerSideHeaderBackend:
         return old_so, new_so, header
 
     def test_per_side_backend_routed_independently(self, tmp_path, monkeypatch):
-        """--old-ast-frontend castxml + --new-ast-frontend clang reach each side."""
+        """--ast-frontend old= castxml + --ast-frontend new= clang reach each side."""
         old_so, new_so, header = self._two_elf(tmp_path)
         calls = []
 
@@ -180,7 +180,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--old-ast-frontend", "castxml", "--new-ast-frontend", "clang",
+            "--ast-frontend old=", "castxml", "--ast-frontend new=", "clang",
         ])
         assert result.exit_code == 0
         # The L0 hard-removal fold-in (case97 fix) would add two more calls,
@@ -225,7 +225,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "castxml", "--new-ast-frontend", "clang",
+            "--ast-frontend", "castxml", "--ast-frontend new=", "clang",
         ])
         assert result.exit_code == 0
         assert calls[0].get("header_backend") == "castxml"

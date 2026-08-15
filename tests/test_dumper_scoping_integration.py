@@ -118,6 +118,6 @@ def test_include_dependencies_keeps_real_system_header_type(tmp_path: Path) -> N
     api = tmp_path / "api.h"
     snap = dump(so, headers=[api], compiler="cc", lang="C")
 
-    # No scoping applied at all (the CLI --include-dependencies path) -- the
+    # No scoping applied at all (the CLI --include-system-declarations path) -- the
     # unscoped snapshot straight from dump() must still carry struct tm.
     assert "tm" in {t.name for t in snap.types}

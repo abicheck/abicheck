@@ -583,27 +583,25 @@ def resolve_compare_config(
     cfg: BuildConfig | None,
     *,
     cli_severity_preset: str | None,
-    cli_severity_abi_breaking: str | None,
-    cli_severity_potential_breaking: str | None,
-    cli_severity_quality_issues: str | None,
-    cli_severity_addition: str | None,
     cli_scope_public: bool | None,
-    cli_collapse_versioned_symbols: bool | None,
-    cli_public_symbols: tuple[str, ...] = (),
-    cli_strict_suppressions: bool | None = None,
-    cli_require_justification: bool | None = None,
     cli_exit_code_scheme: str | None = None,
     cli_debug_format: str | None = None,
     cli_dwarf_only: bool | None = None,
     cli_debuginfod: bool | None = None,
     cli_debuginfod_url: str | None = None,
-    cli_show_redundant: bool | None = None,
 ) -> ResolvedCompareConfig:
     """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
 
     Pure (no Click/IO) so the precedence contract is unit-testable per key
     (``test_config_precedence``). Each ``cli_*`` argument is ``None`` when the
     user did not pass the corresponding flag.
+
+    Only the keys that still have a CLI flag take a ``cli_*`` argument. The
+    per-category severity levels, the suppression strict/justification pair,
+    the public-symbol overlay, ``collapse_versioned_symbols`` and
+    ``show_redundant`` were hidden CLI duplicates of a config key and have
+    been removed from the CLI, so ``.abicheck.yml`` is now their only source
+    and they are read straight off *cfg*.
     """
     from .severity import resolve_severity_config
 
@@ -614,7 +612,7 @@ def resolve_compare_config(
             return conf
         return default
 
-    # Severity: merge preset + per-category from CLI → config → preset/default.
+    # Severity: preset from CLI → config; per-category from config only.
     c_preset = cfg.severity_preset if cfg else None
     c_abi = cfg.severity_abi_breaking if cfg else None
     c_pot = cfg.severity_potential_breaking if cfg else None
@@ -622,20 +620,7 @@ def resolve_compare_config(
     c_add = cfg.severity_addition if cfg else None
 
     eff_preset = cli_severity_preset if cli_severity_preset is not None else c_preset
-    eff_abi = (
-        cli_severity_abi_breaking if cli_severity_abi_breaking is not None else c_abi
-    )
-    eff_pot = (
-        cli_severity_potential_breaking
-        if cli_severity_potential_breaking is not None
-        else c_pot
-    )
-    eff_qual = (
-        cli_severity_quality_issues
-        if cli_severity_quality_issues is not None
-        else c_qual
-    )
-    eff_add = cli_severity_addition if cli_severity_addition is not None else c_add
+    eff_abi, eff_pot, eff_qual, eff_add = c_abi, c_pot, c_qual, c_add
 
     severity_active = any(
         v is not None for v in (eff_preset, eff_abi, eff_pot, eff_qual, eff_add)
@@ -651,29 +636,11 @@ def resolve_compare_config(
     scope_public = bool(
         _pick(cli_scope_public, cfg.scope_public if cfg else None, True)
     )
-    collapse = bool(
-        _pick(
-            cli_collapse_versioned_symbols,
-            cfg.collapse_versioned_symbols if cfg else None,
-            False,
-        )
-    )
-    # Public-symbol overlay is additive: config list + any CLI additions.
+    collapse = bool(cfg.collapse_versioned_symbols) if cfg else False
     merged_public: list[str] = list(cfg.public_symbols) if cfg else []
-    for s in cli_public_symbols:
-        if s not in merged_public:
-            merged_public.append(s)
 
-    strict = bool(
-        _pick(cli_strict_suppressions, cfg.suppression_strict if cfg else None, False)
-    )
-    require_just = bool(
-        _pick(
-            cli_require_justification,
-            cfg.suppression_require_justification if cfg else None,
-            False,
-        )
-    )
+    strict = bool(cfg.suppression_strict) if cfg else False
+    require_just = bool(cfg.suppression_require_justification) if cfg else False
 
     raw_scheme = str(
         _pick(cli_exit_code_scheme, cfg.exit_code_scheme if cfg else None, "auto")
@@ -685,7 +652,7 @@ def resolve_compare_config(
 
     source_method = cfg.source_method if cfg else None
 
-    # ADR-040 Lever 2: debug-resolution + show-redundant demotion (CLI > config).
+    # ADR-040 Lever 2: debug-resolution demotion (CLI > config).
     debug_format = _pick(cli_debug_format, cfg.debug_format if cfg else None, None)
     dwarf_only = bool(
         _pick(cli_dwarf_only, cfg.debug_dwarf_only if cfg else None, False)
@@ -696,9 +663,7 @@ def resolve_compare_config(
     debuginfod_url = _pick(
         cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
     )
-    show_redundant = bool(
-        _pick(cli_show_redundant, cfg.scope_show_redundant if cfg else None, False)
-    )
+    show_redundant = bool(cfg.scope_show_redundant) if cfg else False
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -955,7 +920,7 @@ def _scoped_exit_code(
 
     ADR-043's --used-by/--required-symbol(s) floor the exit code on the
     *scoped* verdict rather than the full library's -- but that floor must
-    still respect ``--exit-code-scheme severity``/``--severity-*``: without
+    still respect ``--exit-code-scheme severity``/``--severity-preset``: without
     this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
     matter what severity configuration the caller passed, because the scoped
     branch returned straight to ``sys.exit`` before the severity-aware exit
@@ -1098,7 +1063,7 @@ def _apply_used_by_scoping(
     needs. Attaches a JSON-safe summary to ``result.used_by`` for the
     renderer and returns the worst app's exit code, computed under
     *exit_code_scheme* (legacy verdict floor, or severity-aware over each
-    app's relevant changes when the caller passed --severity-*).
+    app's relevant changes when the caller passed a severity setting).
 
     *suppression* (ADR-044 P2, Codex review) is forwarded to
     :func:`~abicheck.appcompat.scope_diff_to_app`: its findings are

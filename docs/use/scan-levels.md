@@ -216,7 +216,7 @@ the request to collect build evidence.
 Make is queried with a fixed dry-run command (`make -B -n -k -w`) and the transcript
 is scraped as reduced-confidence L3 evidence. This lets Make/EPICS-style projects
 work without a manual `compile_commands.json`; a real compile DB (for example
-from `bear -- make`, then `--compile-db compile_commands.json`) is still preferred
+from `bear -- make`, then `--build-info compile_commands.json`) is still preferred
 when available.
 
 Only an abicheck-constructed command runs automatically. An *arbitrary*

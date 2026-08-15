@@ -84,7 +84,7 @@ A real invocation is a point in this space:
 | Build-config matrix (`probe`) | `complete` | **G2 closed**: wired into `compare`; both CXX floor and API_DEPENDS proven e2e (`.o` `.symtab` surface capture fixed) |
 | Bundle / multi-library | `complete` | all detectors run via `compare-release`; case84 validated e2e (Linux-only by design; cross-platform → G1) |
 | Plugin (host↔plugin) | `complete` | **G5 closed**: `plugin-check` CLI + `check_plugin_host_contract` API + plugin_abi policy |
-| Security-hardening drift | `complete` | **G12 closed**: full checksec surface (RELRO/BIND_NOW/PIE/canary/FORTIFY/W^X) diffed; shipped `--policy-file security` gate |
+| Security-hardening drift | `complete` | **G12 closed**: full checksec surface (RELRO/BIND_NOW/PIE/canary/FORTIFY/W^X) diffed; shipped `--policy security` gate |
 | GNU Make / EPICS-style zero-config build evidence | `complete` | **PR #464**: `--sources` auto-runs fixed GNU Make dry-run query when no compile DB exists; CI covers GNU/BSD launcher selection and make/gmake/gnumake/mingw32 transcript parsing |
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
 | Kernel / eBPF (BTF/CTF) | `complete` | **G6 closed**: BTF + CTF struct-change run through `compare`; committed `case121` BTF blobs + bare-blob CLI ingestion + `gcc -gbtf` integration fixture |

@@ -40,7 +40,7 @@ annotated with:
 - `caused_count` — number of derived changes collapsed
 - `affected_symbols` — list of affected interface names
 
-This keeps reports focused on root causes. Use `--show-redundant` to disable
+This keeps reports focused on root causes. Use `scope.show_redundant: true` to disable
 filtering and see all changes.
 
 ### How it appears in each format
@@ -48,7 +48,7 @@ filtering and see all changes.
 **Markdown**: An info note at the bottom:
 ```
 > ℹ️ 12 redundant change(s) hidden (derived from root type changes).
-> Use `--show-redundant` to show all.
+> Use `scope.show_redundant: true` to show all.
 ```
 
 **JSON**: A top-level `redundant_count` field, and per-change `caused_by_type`
@@ -85,7 +85,7 @@ regardless of surface).
 
 Use `--show-filtered` to print the ledger on the terminal.
 
-### Widening the surface (`--public-symbol`)
+### Widening the surface (`scope.public_symbols`)
 
 Some symbols you *do* guarantee as public can't be seen by header provenance —
 hand-written asm stubs, `.def` exports, `extern "C"` shims, or symbols whose
@@ -96,11 +96,11 @@ than demoted:
 ```bash
 # Force individual symbols (repeatable), à la abi-compliance-checker -symbols-list
 abicheck compare old.so new.so --scope-public-headers \
-    --public-symbol my_asm_stub --public-symbol _ZN3foo3barEv
+    scope.public_symbols my_asm_stub scope.public_symbols _ZN3foo3barEv
 
 # Or from a file (one symbol per line; '#' comments and blank lines ignored)
 abicheck compare old.so new.so --scope-public-headers \
-    --public-symbols-list public.syms
+    scope.public_symbols public.syms
 ```
 
 Matching is on the symbol as recorded on the finding (mangled or demangled),
@@ -124,8 +124,9 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
   reachability-based rather than provenance-confirmed (reduced confidence).
 
 The `private-header` / `system-header` reasons are provenance-derived: they
-only appear when the snapshots were produced with `--public-header` /
-`--public-header-dir` (ADR-015). `--public-header` is supported for
+only appear when the snapshots were produced with a `-H`/`--header`
+public-header set (ADR-015) -- `dump` derives provenance from it directly, and
+`scan` additionally accepts `--public-header-dir`. Provenance is supported for
 ELF, PE (provenance from PDB `LF_UDT_SRC_LINE`), and Mach-O inputs. Without a
 public-header set, every declaration's origin is `unknown` and only the
 linkage/reachability reasons above are emitted.
@@ -287,9 +288,9 @@ how many interfaces each affects. Available in Markdown and HTML formats.
 abicheck compare old.json new.json --report-mode impact
 ```
 
-## A second output format from the same run (`--secondary-format`)
+## A second output format from the same run (`--write`)
 
-`compare` computes its comparison once; `--secondary-format` renders that
+`compare` computes its comparison once; `--write FORMAT=PATH` renders that
 same result into a second format/file, instead of requiring a second
 `abicheck compare` invocation to get a different format:
 
@@ -298,14 +299,13 @@ same result into a second format/file, instead of requiring a second
 # one comparison, two outputs.
 abicheck compare old.json new.json \
   --format markdown \
-  --secondary-format json --secondary-output report.json
+  --write json=report.json
 ```
 
-- `--secondary-format` and `--secondary-output` require each other — either
-  alone is rejected (passing just `--secondary-output` would otherwise
-  silently produce no secondary artifact at all).
-- `--secondary-output` must point at a different file than `--output`/`-o` —
-  otherwise the secondary render would silently overwrite the primary report.
+- One `FORMAT=PATH` operand: the format and its destination are stated
+  together, so neither half can be given without the other.
+- `PATH` must point at a different file than `--output`/`-o` — otherwise the
+  secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
   `--show-only`/`--stat`, which describe only the primary format's display.
 - Not supported for directory/package (release) comparisons — the release
@@ -720,7 +720,7 @@ The block also carries `policy` — the resolved compatibility policy name
 real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
 shapes, which never reach policy classification).
 
-Since schema 1.14, the block also discloses the active `--policy-file`
+Since schema 1.14, the block also discloses the active `--policy`
 audit trail — previously a `scan --format json` reader could see a
 downgraded verdict with no way to tell which rule produced it, unlike the
 `compare`/report path. `policy_overrides` (a `ChangeKind -> verdict` map)
@@ -809,7 +809,7 @@ abicheck compare old.so new.so -H include/ --recommend
 ```
 
 The recommendation is **policy-aware** (it honours `--policy` and
-`--policy-file`):
+`--policy`):
 
 | Verdict | Bump | SONAME |
 |---------|------|--------|

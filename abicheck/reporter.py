@@ -209,6 +209,7 @@ def to_stat_json(
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
+    _add_use_case_impact(d, result)
     return json.dumps(d, indent=indent)
 
 
@@ -285,6 +286,20 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
     }
 
 
+def _add_use_case_impact(d: dict[str, object], result: DiffResult) -> None:
+    """``compare --use-cases``'s attribution block, when the run produced one.
+
+    Omitted entirely without the flag rather than emitted empty: an empty
+    block would read as "no use case is affected" for a run that never
+    resolved a manifest.
+    """
+    from .impact.use_case_impact import UseCaseImpact
+
+    impact = result.use_case_impact
+    if isinstance(impact, UseCaseImpact):
+        d["use_case_impact"] = impact.to_dict()
+
+
 def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's unconditional
     ``analysis_assurance`` (piggybacked here, unguarded below, to stay under
@@ -298,6 +313,8 @@ def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
+
+    _add_use_case_impact(d, result)
 
     ctx = result.contract_context
     if ctx is None:
@@ -1030,7 +1047,7 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
     # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
-    # Change/ChangeKind finding, so it stays unreachable by --severity-*
+    # Change/ChangeKind finding, so it stays unreachable by severity
     # promotion. Omitted entirely (not emitted as null) when unset, matching
     # every other optional field in this builder.
     if result.contract_coverage is not None:

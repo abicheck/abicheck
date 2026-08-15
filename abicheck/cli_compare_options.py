@@ -116,7 +116,7 @@ def _reject_set_input_flags(
         )
     if secondary_fmt is not None:
         raise click.UsageError(
-            "--secondary-format is not supported for directory/package "
+            "--write is not supported for directory/package "
             "(release) comparisons yet; it applies to single-file / snapshot "
             "inputs. Compare the libraries individually to use it."
         )
@@ -206,7 +206,7 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     flag always wins over the per-format default.
 
     Shared by the primary render (:func:`_normalize_compare_options`) and
-    the ``--secondary-format`` render in :func:`run_compare`, each resolved
+    the ``--write`` render in :func:`run_compare`, each resolved
     against its own format — a machine primary format paired with a text
     secondary format (or vice versa) must not inherit the other's default.
     """

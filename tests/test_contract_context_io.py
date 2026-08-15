@@ -271,7 +271,7 @@ class TestResolvedContextContent:
     """What the persisted context says about the run that produced it."""
 
     def test_policy_file_overrides_reach_the_persisted_config(self) -> None:
-        """A ``--policy-file`` override affected the comparison, so it is recorded.
+        """A ``--policy`` override affected the comparison, so it is recorded.
 
         Persisting only the base-policy name would make the "resolved"
         configuration wrong in exactly the way an audit consumer would act on
@@ -336,7 +336,7 @@ class TestResolvedContextContent:
         """A resolved field with no recorded source is an audit gap.
 
         ``surface.internal_namespaces`` reached the resolved config from the
-        same ``--policy-file`` as ``policy.overrides``, but only the latter
+        same ``--policy`` as ``policy.overrides``, but only the latter
         got a provenance entry (Codex review).
         """
         from abicheck.policy_file import PolicyFile

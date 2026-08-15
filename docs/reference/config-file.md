@@ -155,7 +155,7 @@ effectively `true`) restricts analysis to the public exported surface;
 `collapse_versioned_symbols:` (default `false`) collapses symbol-versioned
 duplicates before diffing; `show_redundant:` (default `false`) disables
 redundancy filtering. `public_symbols:` is an explicit public-symbol overlay,
-additive with any CLI `--public-symbol` values — entries match **exactly**
+additive with any CLI `scope.public_symbols` values — entries match **exactly**
 (the raw symbol, or a qualified name's trailing `::` segment, so `foo` also
 matches `ns::foo`); **globs/wildcards are not supported** (`mylib_*` matches
 nothing), list each symbol. See
@@ -278,7 +278,7 @@ files**, not in `.abicheck.yml`:
 
 | Concept | File / flag | Top-level schema | Docs |
 |---------|-------------|------------------|------|
-| Policy profile | `--policy-file <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `reclassify`, `frozen_namespaces`, `evidence_policy` | [Policies](../use/policies.md) |
+| Policy profile | `--policy <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `reclassify`, `frozen_namespaces`, `evidence_policy` | [Policies](../use/policies.md) |
 | Suppression rules | `--suppress <file>` (`suppression.py`) | Suppression rule entries (YAML or ABICC format) | [Suppressions](../use/suppressions.md) |
 
 The `evidence_policy` block is part of the **policy file**, not `.abicheck.yml`.

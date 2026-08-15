@@ -1100,7 +1100,7 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
             "-DBAR=2",
             "--ast-frontend",
             "castxml",
-            "--new-ast-frontend",
+            "--ast-frontend new=",
             "clang",
         ],
     )

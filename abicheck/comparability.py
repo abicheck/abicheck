@@ -729,7 +729,7 @@ def _check_dependency_scope_comparable(
     (Codex review, PR #651 follow-up): ``dumper_scoping.py``'s default
     filtering already shipped before this field existed, so an ordinary
     pre-v18 baseline dumped with `dump`'s default (no
-    ``--include-dependencies``) is almost always *already filtered* content
+    ``--include-system-declarations``) is almost always *already filtered* content
     that simply predates the tag — treating its ``None`` as ``"full"`` would
     spuriously ``ScopeMismatchError`` the single most common workflow
     (compare a committed/cached baseline against a fresh default dump),
@@ -760,7 +760,7 @@ def _check_dependency_scope_comparable(
         "toolchain/system-header declarations (`dump`'s default; see "
         "dumper_scoping.py) and the other does not, so they do not cover "
         "the same declared surface. Regenerate both snapshots with the same "
-        "mode: pass --include-dependencies on both sides, or on neither."
+        "mode: pass --include-system-declarations on both sides, or on neither."
     )
     return ComparabilityMismatch(kind="dependency_scope", reason=reason)
 

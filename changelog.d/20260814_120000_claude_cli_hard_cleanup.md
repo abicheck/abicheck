@@ -44,3 +44,75 @@
   exists to prevent, and `--optional` was only ever a modifier on `--expect`.
   The report-filename prefix is fixed at `abi-report-`; a report that
   self-identifies a `target_id` never consulted it anyway.
+
+- **The four per-category `--severity-*` flags are removed** from `compare`,
+  `scan --against`, and the composite Action's `severity-addition` input.
+  They were hidden CLI duplicates of `.abicheck.yml`'s own `severity:` block,
+  which is now their one spelling; a hidden flag that shadows a config key is
+  a second way to say one thing, and the config file is the half that
+  survives across invocations. `--severity-preset` stays as the visible
+  coarse per-run override.
+
+- **`--strict-suppressions`, `--require-justification`, `--public-symbol`,
+  `--public-symbols-list`, `--show-redundant` and `--collapse-versioned-symbols`
+  are removed** from `compare` and `scan`, for the same reason: each was a
+  hidden duplicate of a `suppression:`/`scope:` config key
+  (`suppression.strict`, `suppression.require_justification`,
+  `scope.public_symbols`, `scope.show_redundant`,
+  `scope.collapse_versioned_symbols`), which is now the only spelling.
+
+- **`dump --public-header` and `--public-header-dir` are removed.**
+  Declaration provenance (ADR-015) now comes from `-H/--header` itself: a
+  file entry tags that header public, a directory entry tags everything
+  under it — the same partition `compare` has always applied to its own
+  `-H` list. `scan` keeps its own `--public-header-dir`.
+
+- **`dump -p/--build-dir` and `--compile-db`, and `scan --compile-db`, are
+  removed.** `--build-info` already takes exactly that operand — a build
+  directory, a `compile_commands.json`, or a pre-captured pack — so it is
+  now the one flag for it, on every command. When it resolves to a compile
+  database and `-H/--header` is given, that database parameterizes the
+  header parse the way `-p` used to; `--compile-db-filter` still scopes it.
+  One usage error goes away with the flag: a database with no headers is now
+  an ordinary L3-only dump rather than "requires -H/--header".
+
+- **`project validate-use-cases --against`/`--against-new` are removed**, and
+  the capability they carried is now `compare --use-cases MANIFEST`. A
+  manifest validator had grown a second snapshot-diffing surface inside it;
+  the attribution belongs where the comparison already happens. The new flag
+  resolves each declared use case's entrypoints against *both* sides' source
+  graphs and reports which of the comparison's own findings each use case
+  reaches, as the report's `use_case_impact` block (schema 2.39) and a
+  text/markdown section. Read-only: an unattributed finding is an absence of
+  proof, not proof the finding is harmless, so it never moves a verdict or an
+  exit code. `project validate-use-cases` still checks a manifest's structure.
+
+### Changed
+
+- **`--policy-file` is folded into `--policy`, which now takes `NAME|PATH`.**
+  A built-in profile name (`strict_abi`/`sdk_vendor`/`plugin_abi`) selects
+  that profile; anything else is resolved as a policy document — a path, or a
+  packaged built-in like `security` — exactly what `--policy-file` did. Two
+  flags for one question, the second silently winning when both were given,
+  is now one. The Action's `policy-file` input is unchanged and still
+  outranks `policy`.
+
+- **`--secondary-format` + `--secondary-output` are folded into
+  `--write FORMAT=PATH`** on `compare` and `scan --against`. Half the pair
+  was a usage error in either direction, so they were one option spelled as
+  two; the format and its destination are now stated together and the two
+  half-given checks are gone rather than unreachable.
+
+- **The per-side `--old-ast-frontend`/`--new-ast-frontend` pair is folded
+  into a side-aware `--ast-frontend`** on `compare`:
+  `--ast-frontend old=castxml --ast-frontend new=clang`, ADR-040 Lever 1's
+  same `old=`/`new=` prefix convention as `--header`/`--include`/`--version`.
+  A bare value still applies to both sides. `dump`/`scan` keep the
+  single-valued spelling.
+
+- **`--include-dependencies` is renamed `--include-system-declarations`.**
+  It restores the declarations a system/toolchain header contributed to the
+  header AST, which has nothing to do with the `DT_NEEDED` library graph
+  `--follow-deps` walks — the old name read as the latter. The snapshot
+  field, the `service.run_dump` parameter, and the cache key keep their
+  internal `include_dependencies` spelling.

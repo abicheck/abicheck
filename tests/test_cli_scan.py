@@ -188,13 +188,26 @@ def test_scan_breaking_with_severity_default_still_exits_four(
     assert res.exit_code == 4, res.output
 
 
+@pytest.fixture
+def addition_error_config(tmp_path):
+    """A project config promoting additions to error.
+
+    The per-category severity levels are config-only -- the hidden
+    ``--severity-addition`` flag that duplicated this key was removed -- so
+    the tests that need one name a file.
+    """
+    cfg = tmp_path / "addition-error.abicheck.yml"
+    cfg.write_text("severity:\n  addition: error\n", encoding="utf-8")
+    return cfg
+
+
 def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
-    runner, baseline_snap, new_snap_compatible
+    runner, baseline_snap, new_snap_compatible, addition_error_config
 ):
     # Codex review: under the severity scheme a *compatible* diff can exit
-    # non-zero (`--severity-addition error` on an additions-only diff exits
-    # 1). Without a gate block in the report that reads as "COMPATIBLE, exit
-    # 1, no stated cause" -- indistinguishable from ADR-049 Phase 7's
+    # non-zero (a `severity.addition: error` config on an additions-only diff
+    # exits 1). Without a gate block in the report that reads as "COMPATIBLE,
+    # exit 1, no stated cause" -- indistinguishable from ADR-049 Phase 7's
     # orthogonal contract-coverage 1. The block names the culprit category.
     res = runner.invoke(
         main,
@@ -203,8 +216,8 @@ def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
             str(new_snap_compatible),
             "--against",
             str(baseline_snap),
-            "--severity-addition",
-            "error",
+            "--config",
+            str(addition_error_config),
             "--format",
             "json",
         ],
@@ -219,7 +232,7 @@ def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
 
 
 def test_scan_severity_blocking_addition_is_named_in_findings(
-    runner, baseline_snap, new_snap_compatible
+    runner, baseline_snap, new_snap_compatible, addition_error_config
 ):
     # Codex review: the gate named the blocking *category* and count while
     # `_baseline_summary` omitted compatible findings, so the report gave no
@@ -227,7 +240,7 @@ def test_scan_severity_blocking_addition_is_named_in_findings(
     res = runner.invoke(
         main,
         ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
-         "--severity-addition", "error", "--format", "json"],
+         "--config", str(addition_error_config), "--format", "json"],
     )
     assert res.exit_code == 1, res.output
     findings = _payload(res)["diff"].get("findings") or []
@@ -276,7 +289,7 @@ def test_scan_legacy_scheme_emits_no_severity_gate_block(
 
 
 def test_scan_severity_gate_is_rendered_in_default_text_output(
-    runner, baseline_snap, new_snap_compatible
+    runner, baseline_snap, new_snap_compatible, addition_error_config
 ):
     # Codex review: text is the *default* format, so the JSON gate block
     # alone left the common case unexplained -- `Verdict: COMPATIBLE` and
@@ -289,8 +302,8 @@ def test_scan_severity_gate_is_rendered_in_default_text_output(
             str(new_snap_compatible),
             "--against",
             str(baseline_snap),
-            "--severity-addition",
-            "error",
+            "--config",
+            str(addition_error_config),
         ],
     )
     assert res.exit_code == 1, res.output
@@ -390,7 +403,7 @@ class TestScanEmitReportCoverageDiagnostic:
     ``text``.
 
     Codex review: the guard checked only the primary ``fmt``, so a ``scan
-    --format json --secondary-format text`` run wrote a secondary text report
+    --format json --write text=...`` run wrote a secondary text report
     with no ledger of its own (unlike JSON) and no stderr notice either --
     the coverage-gated exit had no explanation anywhere reachable from the
     text side.
@@ -573,10 +586,8 @@ def test_scan_secondary_format_writes_json_alongside_primary_text(
             str(baseline_snap),
             "-o",
             str(primary),
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(secondary),
+            "--write",
+            f"json={secondary}",
         ],
     )
     assert res.exit_code == 0, res.output
@@ -586,28 +597,26 @@ def test_scan_secondary_format_writes_json_alongside_primary_text(
     assert payload["scan_schema_version"]
 
 
-def test_scan_secondary_format_requires_secondary_output(runner, new_snap_compatible):
-    res = runner.invoke(
-        main, ["scan", str(new_snap_compatible), "--secondary-format", "json"]
-    )
-    assert res.exit_code != 0
-    assert "--secondary-format requires --secondary-output" in res.output
+def test_scan_write_rejects_a_half_given_operand(runner, new_snap_compatible):
+    """``--write``'s FORMAT=PATH operand cannot be half-given.
+
+    The pair it replaced needed a check in each direction; one operand makes
+    both a parse error instead.
+    """
+    for operand in ("json", "=out.json", "json="):
+        res = runner.invoke(
+            main, ["scan", str(new_snap_compatible), "--write", operand]
+        )
+        assert res.exit_code != 0, operand
+        assert "FORMAT=PATH" in res.output, operand
 
 
-def test_scan_secondary_output_requires_secondary_format(
-    runner, new_snap_compatible, tmp_path
-):
+def test_scan_write_rejects_an_unrenderable_format(runner, new_snap_compatible):
     res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--secondary-output",
-            str(tmp_path / "x.json"),
-        ],
+        main, ["scan", str(new_snap_compatible), "--write", "sarif=x.sarif"]
     )
     assert res.exit_code != 0
-    assert "--secondary-output requires --secondary-format" in res.output
+    assert "not a renderable format here" in res.output
 
 
 def test_scan_secondary_output_must_differ_from_primary(
@@ -621,14 +630,12 @@ def test_scan_secondary_output_must_differ_from_primary(
             str(new_snap_compatible),
             "-o",
             str(same),
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(same),
+            "--write",
+            f"json={same}",
         ],
     )
     assert res.exit_code != 0
-    assert "--secondary-output must differ from --output" in res.output
+    assert "--write's PATH must differ from --output" in res.output
 
 
 def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible, tmp_path):
@@ -638,14 +645,12 @@ def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible
             "scan",
             str(new_snap_compatible),
             "--dry-run",
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(tmp_path / "x.json"),
+            "--write",
+            f"json={tmp_path / 'x.json'}",
         ],
     )
     assert res.exit_code != 0
-    assert "--dry-run cannot be combined with --secondary-output" in res.output
+    assert "--dry-run cannot be combined with --write" in res.output
 
 
 def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
@@ -655,10 +660,8 @@ def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
             "scan",
             "--artifact-set",
             str(tmp_path),
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(tmp_path / "x.json"),
+            "--write",
+            f"json={tmp_path / 'x.json'}",
         ],
     )
     assert res.exit_code != 0
@@ -1832,7 +1835,7 @@ def test_out_of_tree_compile_db_is_accepted(runner, tmp_path, new_snap_compatibl
         [
             "scan",
             str(new_snap_compatible),
-            "--compile-db",
+            "--build-info",
             str(cc),
             "--depth",
             "build",
@@ -2641,7 +2644,7 @@ def test_depth_binary_clears_source_inputs(
             str(new_snap_compatible),
             "--sources",
             str(src),
-            "--compile-db",
+            "--build-info",
             str(cdb),
             "--depth",
             "binary",
@@ -2757,7 +2760,6 @@ def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
     baseline_header = tmp_path / "old-include"
     sources = tmp_path / "src"
     build_info = tmp_path / "build"
-    compile_db = tmp_path / "compile_commands.json"
 
     assert cs._normalize_depth_inputs(
         EvidenceDepth.BINARY,
@@ -2765,16 +2767,14 @@ def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
         (baseline_header,),
         sources,
         build_info,
-        compile_db,
-    ) == ((), (), None, None, None)
+    ) == ((), (), None, None)
     assert cs._normalize_depth_inputs(
         EvidenceDepth.HEADERS,
         (header,),
         (baseline_header,),
         sources,
         build_info,
-        compile_db,
-    ) == ((header,), (baseline_header,), sources, build_info, compile_db)
+    ) == ((header,), (baseline_header,), sources, build_info)
 
 
 # NOTE: test_estimate_uses_resolved_level_not_raw_flags (--estimate) is deleted

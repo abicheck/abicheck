@@ -367,7 +367,7 @@ def _resolve_release_severity_config(
     severity_quality_issues: str | None,
     severity_addition: str | None,
 ) -> SeverityConfig | None:
-    """Resolve the severity config, or None when no ``--severity-*`` was set."""
+    """Resolve the severity config, or None when no severity setting was in effect."""
     if not any(
         v is not None
         for v in (
@@ -400,7 +400,7 @@ def _compute_release_severity_exit_code(
 ) -> int | None:
     """Compute the severity-aware exit code aggregated across all libraries.
 
-    Returns ``None`` when no ``--severity-*`` option was supplied (callers
+    Returns ``None`` when no severity setting was in effect (callers
     keep the legacy verdict-based exit). Otherwise returns the worst
     :func:`compute_exit_code` over the per-library changes. Each library is
     classified with *its own* ``DiffResult._effective_kind_sets()`` (kind-level
@@ -707,7 +707,7 @@ def _format_release_json(
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
     }
-    # Severity config block (present only when --severity-* was active), mirroring
+    # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
     # which categories are gated to error and bucket findings accordingly.
     if severity_config is not None:

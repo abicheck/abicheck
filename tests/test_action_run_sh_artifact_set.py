@@ -199,7 +199,7 @@ class TestScanArtifactSetForwarding:
 class TestScanPolicyFlagsOmittedWithoutBaseline:
     """P1 regression (Codex review): cli_scan.py's
     ``_reject_comparison_only_flags()`` hard-rejects ``--policy``/
-    ``--policy-file``/``--suppress`` on a scan with no ``--against``
+    ``--policy``/``--suppress`` on a scan with no ``--against``
     baseline. ``action.yml``'s ``policy`` input has a non-empty default
     (``strict_abi``), so it is *always* present in ``INPUT_POLICY`` — an
     unconditional forward would break every existing audit-only scan step
@@ -228,7 +228,7 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
             "INPUT_POLICY_FILE": "policy.yml",
             "INPUT_SUPPRESS": "suppress.yml",
         })
-        assert "--policy-file" not in cmd
+        assert "--policy" not in cmd
         assert "--suppress" not in cmd
 
     def test_new_library_set_audit_only_omits_default_policy_flag(self) -> None:
@@ -251,7 +251,7 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
         })
         i = cmd.index("--policy")
         assert cmd[i + 1] == "sdk_vendor"
-        i = cmd.index("--policy-file")
+        i = cmd.index("--policy")
         assert cmd[i + 1] == "policy.yml"
         i = cmd.index("--suppress")
         assert cmd[i + 1] == "suppress.yml"

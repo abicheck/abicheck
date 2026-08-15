@@ -258,9 +258,6 @@ inputs:
       channel: none), which always carries its own top-level exit_code.
     required: false
     default: 'default'
-  severity-addition:
-    description: 'Severity for new public API additions: error, warning, or info. Forwarded to the internal analysis step.'
-    required: false
   extra-args:
     description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
     required: false
@@ -565,7 +562,6 @@ runs:
         policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
-        severity-addition: ${{ inputs.severity-addition }}
         extra-args: ${{ inputs.extra-args }}
         format: 'json'
         output-file: 'check-target-analysis.json'

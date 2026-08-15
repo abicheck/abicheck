@@ -344,7 +344,7 @@ def _add_severity_blocking_compatible_findings(
     ``_baseline_summary`` omits ``diff.compatible`` from ``findings`` because
     under the legacy scheme those findings never gate -- so naming them would
     be noise. Severity inverts that for two categories: with
-    ``--severity-addition error`` a compatible diff exits 1, and the report
+    ``severity.addition: error`` a compatible diff exits 1, and the report
     then named the blocking *category* and count while giving no symbol, kind,
     or description for the finding that actually failed the scan (Codex
     review).
@@ -417,8 +417,7 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
     """The compatible findings whose own category is one severity blamed.
 
     Slicing all of ``diff.compatible`` spent the report's budget on the
-    *non-blocking* compatible category too -- with ``--severity-addition
-    error`` a quality finding is as compatible as an addition, but only the
+    *non-blocking* compatible category too -- with ``severity.addition: error`` a quality finding is as compatible as an addition, but only the
     addition failed the run (Codex review). Classified through
     ``classify_change_object`` -- the same ``classify_effective_change`` the
     gate itself routed through -- so the two cannot disagree about which
@@ -1145,7 +1144,7 @@ def _run_baseline_compare(
 
         # §6.4 cross-command parity, and the reason this block is not
         # optional: under the severity scheme a *compatible* diff can exit
-        # non-zero (`--severity-addition error` on an additions-only diff
+        # non-zero (`severity.addition: error` on an additions-only diff
         # exits 1), and without the gate block the report said `COMPATIBLE`
         # with exit 1 and no stated cause -- indistinguishable from ADR-049's
         # orthogonal contract-coverage 1 (Codex review). Built by

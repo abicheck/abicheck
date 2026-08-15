@@ -44,7 +44,7 @@ exist. ``scan`` shares ``compare``'s policy/suppression/scope surface
 ``--public-symbol``/``--public-symbols-list``/``--contract``), so those
 resolve from real flags with real D7 layers.
 
-``scan --against`` *does* now accept ``--severity-preset``/``--severity-*``/
+``scan --against`` *does* now accept ``--severity-preset``/
 ``--exit-code-scheme`` (mirroring ``compare``, since the fix that closed the
 "scan never consults severity" gap documented in AGENTS.md's "Known gaps"),
 and those flags really do drive a severity-scheme run's exit code -- see
@@ -84,8 +84,6 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     "policy_file_path",
     "suppress",
     "scope_public_headers",
-    "public_symbols",
-    "public_symbols_list",
     "contract_mode",
     "pack_paths",
 )
@@ -257,7 +255,7 @@ def record_resolved_config(result: Any, config: Any) -> None:
     ``compare``'s equivalent there is no gate half to reconcile *for this
     receipt specifically*: ``config`` (from :func:`resolve_scan_config`) has
     its severity/exit-code-scheme fields blanked to built-in defaults
-    regardless of what real ``--severity-*``/``--exit-code-scheme`` flags the
+    regardless of what real ``--severity-preset``/``--exit-code-scheme`` flags the
     run was given (see :func:`_without_gate_settings`), so there is nothing
     to reconcile with -- it is inert by construction, not because ``scan``
     lacks a gate (it has one; see the module docstring). The "values from

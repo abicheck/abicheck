@@ -256,7 +256,7 @@ def _incomplete_is_blocking(
     regardless of *which exit-code scheme actually produced the report* —
     but the two schemes disagree on what a bare ``risk``-severity finding
     contributes. *legacy* scheme (``report["severity"]`` absent — no
-    ``--severity-*`` flags; *levels* is ``{}``) maps every verdict to a
+    a severity setting; *levels* is ``{}``) maps every verdict to a
     **fixed** exit code via ``severity.legacy_exit_code`` regardless of any
     per-category config: ``BREAKING`` → 4, ``API_BREAK`` → 2, and
     critically ``COMPATIBLE_WITH_RISK`` (a bare ``risk`` finding) → **0** —

@@ -147,7 +147,6 @@ UNVERIFIED = frozenset(
         "constant_removed",
         "constexpr_value_changed",
         "consumer_required_symbol_removed",
-        "consumer_runtime_load_failed",
         "cpo_kind_changed",
         "cpu_dispatch_isa_dropped",
         "ctor_explicit_added",

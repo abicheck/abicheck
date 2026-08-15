@@ -181,7 +181,7 @@ class TestCompareIgnoredFlagsWarnings:
 
 class TestComparePolicyFileWarning:
     def test_policy_ignored_when_policy_file_given(self, tmp_path):
-        """When --policy-file is given, --policy is warned as ignored."""
+        """When --policy is given, --policy is warned as ignored."""
         old_p, new_p = _make_snapshots(tmp_path)
 
         policy_file = tmp_path / "policy.yaml"
@@ -194,7 +194,7 @@ class TestComparePolicyFileWarning:
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p),
             "--policy", "sdk_vendor",
-            "--policy-file", str(policy_file),
+            "--policy", str(policy_file),
         ])
         assert result.exit_code == 0
         assert "ignored" in result.output.lower()
@@ -217,7 +217,7 @@ class TestComparePolicyFileErrors:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p),
-            "--policy-file", str(policy_file),
+            "--policy", str(policy_file),
         ])
         assert result.exit_code != 0
         assert "missing dep" in result.output
@@ -236,7 +236,7 @@ class TestComparePolicyFileErrors:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p),
-            "--policy-file", str(policy_file),
+            "--policy", str(policy_file),
         ])
         assert result.exit_code != 0
         assert "invalid format" in result.output

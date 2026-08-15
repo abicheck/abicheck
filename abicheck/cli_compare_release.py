@@ -121,7 +121,7 @@ def _run_compare_pair(
     default drift). ``include_dependencies`` (default ``True``) is the same
     reasoning applied to dependency-scope: without threading it through here
     too, a directory/package `compare` would silently stay unfiltered
-    regardless of `--include-dependencies`, drifting from a single-pair
+    regardless of `--include-system-declarations`, drifting from a single-pair
     `compare` of the identical library (Codex review). ``contract_evaluation``/
     ``contract_mode`` (CLI-audit P1, release/package contract parity) are the
     same pass-through: ``service.run_compare`` already runs ADR-049's whole
@@ -264,7 +264,7 @@ def _compare_one_library(
         # compatible_additions historically counts *all* compatible changes
         # (additions + quality issues). Emit the quality subset separately so
         # downstream consumers (e.g. the PR-comment renderer) can gate the two
-        # categories independently under --severity-quality-issues.
+        # categories independently under the config's severity.quality_issues.
         from .checker_policy import ADDITION_KINDS
 
         n_quality = sum(1 for c in result.compatible if c.kind not in ADDITION_KINDS)
@@ -1005,7 +1005,7 @@ def _release_gating_buckets(
     only the three verdict buckets that ever gate the legacy exit code are
     used. With *severity_config* active, the release can instead exit
     non-zero because a category that's normally compatible (additions,
-    quality issues) was promoted to ``error`` — e.g. ``--severity-addition
+    quality issues) was promoted to ``error`` — e.g. ``severity.addition:
     error`` — so every category the active config gates to ``error`` is
     used instead (Codex review on #557: walking only the legacy buckets left
     a library reporting ``severity.exit_code: 1`` with an empty ``findings``
@@ -1327,10 +1327,16 @@ def compare_release_cmd(
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
     severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
+    # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
+    # this engine with the *already-merged* per-category severity levels it
+    # resolved from `.abicheck.yml` (the four `--severity-<category>` CLI
+    # flags were removed -- see `cli_options.severity_options`). Plain
+    # keyword parameters, so the fan-out can still state them without
+    # re-exposing a user-facing flag on an unregistered internal command.
+    severity_abi_breaking: str | None = None,
+    severity_potential_breaking: str | None = None,
+    severity_quality_issues: str | None = None,
+    severity_addition: str | None = None,
     release_exit_code_scheme: str | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
@@ -1349,7 +1355,7 @@ def compare_release_cmd(
       8  Library removed (only when --fail-on-removed-library)
 
     \b
-    With any --severity-* option, exit codes follow the severity-aware scheme
+    With a severity setting in effect, exit codes follow the severity-aware scheme
     aggregated across all libraries (and bundle/matrix findings):
       0  no error-level findings
       1  error in quality/addition categories only
@@ -1474,7 +1480,7 @@ def compare_release_cmd(
             # collected inside _compare_release_libraries, same pass as the
             # per-library JUnit re-run — reflect the same severity-aware gate as
             # the exit code below, instead of the legacy kind-set mapping. Returns
-            # None when no --severity-* option was supplied, or when compare's
+            # None when no severity setting was in effect, or when compare's
             # resolved config pins the legacy scheme for set inputs.
             severity_config = _resolve_release_severity_config(
                 severity_preset,
@@ -1486,7 +1492,7 @@ def compare_release_cmd(
             if release_exit_code_scheme == "severity" and severity_config is None:
                 # The resolved scheme is "severity" (e.g. .abicheck.yml's
                 # exit_code_scheme: severity with no severity: block at all) but
-                # no --severity-* flag was ever set, so the raw-args resolution
+                # no severity setting was ever in effect, so the raw-args resolution
                 # above returned None. The single-file compare path never hits
                 # this: its resolved_cfg.severity is unconditionally populated
                 # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not

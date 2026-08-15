@@ -924,7 +924,7 @@ def test_user_define_flags_combines_tokens_and_gcc_options():
     assert _user_define_flags(("-DA",), None) == ["-DA"]
     # --gcc-options (-UKEEP -DB) is applied before the --compiler-option token (-DA).
     assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-UKEEP", "-DB", "-DA"]
-    # Order-sensitivity: --gcc-options=-DKEEP then --gcc-option=-UKEEP must leave
+    # Order-sensitivity: --gcc-options=-DKEEP then --compiler-option=-UKEEP must leave
     # KEEP inactive (token last wins), matching dumper.py.
     from abicheck.header_conditionals import defines_from_flags
 

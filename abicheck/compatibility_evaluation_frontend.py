@@ -39,7 +39,7 @@ the CLI's own ``compare`` kwargs against the equivalent
 
 - :func:`compare_cli_inputs` -- the ``compare`` command's real kwargs
   (``cli.py``'s option destinations: ``--contract``, ``--scope-public-headers``,
-  ``--policy``/``--policy-file``, ``--severity-*``, ``--exit-code-scheme``,
+  ``--policy``/``--policy-file``, ``--severity-preset``, ``--exit-code-scheme``,
   ``--public-symbol``, ``--suppress``), plus the set of parameters the user
   *actually typed* (Click's ``ctx.get_parameter_source(...)`` is what a live
   caller would pass), since several of those options carry a non-``None``
@@ -703,7 +703,7 @@ def _resolve(
     the ``default`` slot rather than becoming candidates because a candidate
     at the stating layer would *tie* with an explicit per-category flag at
     that same layer -- and refining a preset with one category flag
-    (``--severity-preset strict --severity-addition info``) is legal, not a
+    (``--severity-preset strict`` plus ``severity.addition: info``) is legal, not a
     conflict.
 
     *allow_run_profile* is forwarded to :func:`resolve_field`, which rejects a
@@ -1188,7 +1188,7 @@ def resolve_compatibility_evaluation_config(
         policy_file=explicit.policy_file,
         layer=layer,
         sha256=policy_source.sha256,
-        option=spell("--policy-file", "policy_file_path"),
+        option=spell("--policy", "policy_file_path"),
     )
     internal_namespaces, prov[INTERNAL_NAMESPACES_FIELD] = _resolve(
         INTERNAL_NAMESPACES_FIELD,
@@ -1227,7 +1227,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 builtin_policy_identity(explicit.policy_file.base_policy),
-                option=spell("--policy-file", "policy_file_path"),
+                option=spell("--policy", "policy_file_path"),
                 source_kind="policy_file",
                 reference=explicit.policy_file.base_policy,
                 sha256=policy_source.sha256,
@@ -1289,7 +1289,7 @@ def resolve_compatibility_evaluation_config(
         policy_source=policy_source,
         pack_contributors=override_pack_contributors,
         pack_option=pack_option,
-        policy_file_option=spell("--policy-file", "policy_file_path"),
+        policy_file_option=spell("--policy", "policy_file_path"),
         explicit_overrides=policy_overrides_explicit,
     )
     policy = CompatibilityPolicyConfig(
@@ -1898,7 +1898,7 @@ def unstatable_selectors(
     it is confidently wrong. Four instances have now been found by review:
     the original explicit-candidate default that motivated ``spell()``,
     ``--policy``/``--scope-public-headers`` on a ``ScanRequest``,
-    ``--severity-*`` on the MCP tool, and -- once those were routed through
+    ``--severity-preset`` on the MCP tool, and -- once those were routed through
     ``spell()`` -- a ``ScanRequest`` receipt naming ``CompareRequest``'s
     ``scope_public``/``policy_file_path``/``suppress``, which is a *different*
     entity's field list.

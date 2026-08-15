@@ -58,7 +58,7 @@ generated: false
     feature, not a default-on one. A selected `--pack` **alone** (no
     `--contract`) still resolves and applies its own fields,
     though: a `kind: policy` pack overriding a `ChangeKind` moves the
-    verdict and the exit code the same way an equivalent `--policy-file`
+    verdict and the exit code the same way an equivalent `--policy`
     override would (see "Selecting a pack" below), independent of contract
     evaluation. (A `kind: contract` pack's `contract.unresolved` is the one
     field that specifically needs `--contract` too, since nothing
@@ -123,7 +123,7 @@ Rules that fall out of it:
   selected packs > base", read conservatively). "Stated" includes a value
   *derived* from a statement: choosing `--severity-preset strict` states every
   `gate.severity.*` category the preset expands into, so a gate pack cannot
-  replace one of them — while a single `--severity-addition info` still refines
+  replace one of them — while a single `severity.addition: info` still refines
   the preset, which is not a conflict. A field stated this way is also exempt
   from pack-vs-pack conflict detection: two packs disagreeing about a value the
   resolution takes from neither of them decides nothing.
@@ -144,7 +144,7 @@ the shadowed input is retained in the receipt
 
 | Pair | Winner | Why |
 |---|---|---|
-| `--policy` + `--policy-file` | the file's `base_policy` | D7, verbatim: `--policy-file` "keeps winning as documented and tested today". `--policy`'s own help text already says it is ignored then. |
+| `--policy` + `--policy` | the file's `base_policy` | D7, verbatim: `--policy` "keeps winning as documented and tested today". `--policy`'s own help text already says it is ignored then. |
 | `--contract` + `--scope-public-headers`/`--no-` | the explicit `--contract` | The Phase 6 flag documents that "an explicit value outranks those"; the live CLI accepts the pair today. |
 
 ## Where each field comes from
@@ -155,15 +155,15 @@ the shadowed input is retained in the receipt
 | `contract.unresolved` | — | — | — | `contract` |
 | `contract.overlays` | — | — | — | `contract` |
 | `contract.packs` | *(pack paths)* | — | — | — |
-| `surface.internal_namespaces` | `--policy-file` | — | — | `contract` |
-| `surface.explicit_scope` | `--public-symbol`, `--public-symbols-list` | `force_public_symbols` | `scope.public_symbols` | — |
+| `surface.internal_namespaces` | `--policy` | — | — | `contract` |
+| `surface.explicit_scope` | `scope.public_symbols`, `scope.public_symbols` | `force_public_symbols` | `scope.public_symbols` | — |
 | `assurance.require_evidence` | — | — | — | `contract` |
-| `policy.base` | `--policy-file` `base_policy`; legacy `--policy` | `policy` | — | — |
-| `policy.overrides` | `--policy-file` `overrides:` | — | — | `policy` |
+| `policy.base` | `--policy` `base_policy`; legacy `--policy` | `policy` | — | — |
+| `policy.overrides` | `--policy` `overrides:` | — | — | `policy` |
 | `policy.packs` | *(pack paths)* | — | — | — |
 | `gate.exit_code_scheme` | `--exit-code-scheme`; `--profile` (see below) | — | `exit_code_scheme` | `gate` |
 | `gate.preset` | `--severity-preset` | — | `severity.preset` | — |
-| `gate.severity.*` | `--severity-abi-breaking`, … | — | `severity.*` | `gate` |
+| `gate.severity.*` | `severity.abi_breaking: error`, … | — | `severity.*` | `gate` |
 | `gate.packs` | *(pack paths)* | — | — | — |
 | `suppressions` | `--suppress` | `suppress` | — | — |
 
@@ -180,7 +180,7 @@ concrete scheme, and the receipt records `auto` as what was selected. (A
 project config's own `auto` is indistinguishable from an unset key, since that
 is `BuildConfig`'s default for it, so it contributes nothing.)
 
-`--strict-suppressions` and `--require-justification` are real inputs with no
+`suppression.strict: true` and `suppression.require_justification: true` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.
 
 ### The `run_profile` tier and `--profile ci-gate`
@@ -234,7 +234,7 @@ explicit value resolves it; a contract pack and a gate pack can never conflict
 with each other. Load order is never a tiebreak.
 
 An unknown `ChangeKind` slug in a `kind: policy` pack is a hard error, exactly
-as in a `--policy-file`, so a renamed kind cannot silently disable a rule.
+as in a `--policy`, so a renamed kind cannot silently disable a rule.
 
 ### Selecting a pack
 
@@ -280,7 +280,7 @@ cfg.provenance["policy.base"].reference    # "sdk_vendor"
 An entry records the winning layer, the kind of source, its reference/path/
 digest, the field location inside that source, the full `selected_by` selection
 chain, and any shadowed legacy input. A file-derived entry carries that file's
-own content digest — the `--policy-file` document's bytes, or the selected pack
+own content digest — the `--policy` document's bytes, or the selected pack
 manifest's `id`/`version`/`sha256` — so a receipt naming a since-edited file can
 still prove which content produced the value. For a composed field
 (`policy.overrides`, `surface.explicit_scope`), `selected_by` lists only the

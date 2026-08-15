@@ -110,7 +110,7 @@ def _is_failure(
     report or the severity-aware exit code.
 
     When *severity_config* is given (from ``--severity-preset`` or
-    ``--severity-*`` overrides), it is the sole source of truth — a finding
+    ``severity:`` config overrides), it is the sole source of truth — a finding
     fails only when its effective category's configured level is
     ``"error"`` — mirroring :func:`abicheck.severity.compute_exit_code`
     exactly, so the JUnit file can never disagree with the severity-aware
@@ -961,7 +961,7 @@ def to_junit_xml(
         Optional ``--show-only`` filter string.
     severity_config:
         Optional severity configuration (from ``--severity-preset`` or
-        ``--severity-*`` overrides).  When provided, the JUnit failure
+        ``severity:`` config overrides).  When provided, the JUnit failure
         classification honours user-configured severity escalations.
     report_mode:
         ``"full"`` (default) or ``"root-cause"`` (G29 Phase 3, ADR-052

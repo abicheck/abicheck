@@ -119,7 +119,7 @@ class MarkReachability:
     resolution of ADR-052's own open measurement question ("is
     ``assess_change`` ever called more than once for the same ``Change``
     within one ``compare`` run"): measured directly (not assumed) via
-    ``compare --format json --secondary-format sarif``, which renders the
+    ``compare --format json --write sarif=abi.sarif``, which renders the
     identical ``DiffResult``/``Change`` objects twice in one process --
     ``reporter.py``'s JSON path and ``sarif.py``'s SARIF path each call
     ``assess_change`` independently. A one-off instrumented run over a

@@ -99,7 +99,7 @@ extension (`COMPILE_UNIT_INCLUDES_FILE` edges, one extra `clang -M`
 invocation per top-level header) is likewise always attempted. The legacy
 `--header-graph`/`--header-graph-includes` flags still exist but are hidden,
 deprecated no-ops. Declaration provenance (public vs. internal) still needs
-`--public-header`/`--public-header-dir`, same as any other dump — without it
+`-H`/`--header` (a directory entry tags everything under it public), same as any other dump — without it
 every declaration's visibility is `unknown` and the internal-dependency
 findings below have nothing to classify against. Not yet available on `scan`.
 With a clang header AST (`--ast-frontend clang`) it reuses

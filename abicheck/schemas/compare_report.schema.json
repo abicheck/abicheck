@@ -125,7 +125,7 @@
         "string",
         "null"
       ],
-      "description": "Schema 2.17 (ADR-050 D2). Set to \"partial\" when exactly one side of an otherwise-successful comparison carried a given ExtractionContract fingerprint (profile or scope) and the other didn't -- e.g. a freshly-produced snapshot compared against a pre-ADR-050 stored baseline. Report-level metadata, never a Change/ChangeKind finding, so it cannot be reached by --severity-* promotion. Omitted (or null) when both sides had equal fingerprint coverage.",
+      "description": "Schema 2.17 (ADR-050 D2). Set to \"partial\" when exactly one side of an otherwise-successful comparison carried a given ExtractionContract fingerprint (profile or scope) and the other didn't -- e.g. a freshly-produced snapshot compared against a pre-ADR-050 stored baseline. Report-level metadata, never a Change/ChangeKind finding, so it cannot be reached by severity promotion. Omitted (or null) when both sides had equal fingerprint coverage.",
       "enum": [
         "partial",
         null
@@ -1072,6 +1072,41 @@
       ],
       "description": "ADR-049 (schema 2.26): what `contract_coverage_failures` contributes to the exit code \u2014 1 when non-empty, 0 otherwise, and 0 when `contract.unresolved=warn` accepted the failures. **Applied** since ADR-049 Phase 7: the process exit status is floored to this value (folded with max, so it never lowers a 2/4 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses. Present only alongside `contract_coverage_failures`."
     },
+    "use_case_impact": {
+      "type": "object",
+      "description": "Schema 2.39. Present only under `compare --use-cases MANIFEST`: the declared use cases, each one's resolved/unresolved entrypoints, and this comparison's findings attributed to the use cases whose entrypoints can be shown to reach them. Read-only evidence -- never an input to a verdict, gate, or exit code; unattributed_changes counts the findings no declared entrypoint could be shown to reach, which is an absence of proof rather than proof they are harmless.",
+      "properties": {
+        "manifest": {"type": "string"},
+        "use_case_count": {"type": "integer"},
+        "total_changes": {"type": "integer"},
+        "unattributed_changes": {"type": "integer"},
+        "use_cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "use_case": {"type": "string"},
+              "resolved_entrypoints": {"type": "array", "items": {"type": "string"}},
+              "unresolved_entrypoints": {"type": "array", "items": {"type": "string"}},
+              "tests": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "by_use_case": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {"type": "string"},
+                "kind": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
     "analysis_assurance": {
       "type": "object",
       "description": "P0.4 (schema 2.38): the analysis-assurance axis, orthogonal to verdict \u2014 how complete/trustworthy the evidence behind this comparison was. Unconditionally present on every compare-report JSON (checker.compare() always populates DiffResult.analysis_assurance). See analysis_assurance.py.",
@@ -1186,7 +1221,7 @@
     },
     "severity": {
       "type": "object",
-      "description": "Present only when --severity-* configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
+      "description": "Present only when a severity configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
       "required": [
         "config",
         "categories",

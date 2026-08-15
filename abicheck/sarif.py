@@ -104,7 +104,7 @@ def _severity(
     (:func:`abicheck.severity.classify_effective_change`) — the same
     classification the exit code and ``severityGate`` properties block use —
     so a SARIF consumer keying off ``level`` never disagrees with the
-    configured gate (e.g. ``--severity-addition error`` must show additions
+    configured gate (e.g. ``severity.addition: error`` must show additions
     as ``level: error``, not the legacy policy severity).
 
     Without a *severity_config*, whenever the canonical per-finding verdict

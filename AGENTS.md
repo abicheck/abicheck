@@ -156,7 +156,7 @@ Core pipeline (in order of data flow):
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
    - `dumper_scoping.py` — dependency exclusion, on by default (`dump`/
-     `compare --include-dependencies` opts out, both sharing one
+     `compare --include-system-declarations` opts out, both sharing one
      `cli_options.include_dependencies_option` decorator): drops
      declarations whose own defining header is a toolchain/system header
      (`/usr/include`, MSVC `VC/Tools`, the Xcode/macOS SDK, ...) so a full
@@ -234,7 +234,7 @@ Core pipeline (in order of data flow):
    - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's per-field
      front-end wirings: `resolve_legacy_contract_mode` (`contract.mode` from
      the real `--scope-public-headers`/`--no-` flag),
-     `resolve_internal_namespaces` (from a real `--policy-file`),
+     `resolve_internal_namespaces` (from a real `--policy` document),
      `resolve_selected_packs`/`resolve_policy_pack_overrides`/
      `resolve_pack_field_assignments` (real pack manifests → the three
      `*.packs` fields, `policy.overrides`, and — through an explicit
@@ -273,7 +273,7 @@ Core pipeline (in order of data flow):
      (`policy.overrides`, `surface.internal_namespaces`) and the resolved
      compare config (`gate.exit_code_scheme`, `gate.severity.*`). Ordering
      matters: the config is resolved from the *explicitly given*
-     `--policy-file` and only then folded, since folding first would present
+     `--policy` document and only then folded, since folding first would present
      a pack's override to the resolver as an explicit one.
      `UNAPPLIED_PACK_FIELDS` is the enforcement half — a routable field with
      no engine consumer (`contract.overlays`, `assurance.require_evidence`)
@@ -827,9 +827,9 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Exit codes
 
-- `compare` command (legacy, without `--severity-*` flags): 0 = compatible, 2 = source break, 4 = ABI break
-- `compare` command (severity-aware, with any `--severity-*` flag): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--severity-*`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
+- `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
+- `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract-evaluation`, a selected
   `--contract` domain whose required evidence is incomplete contributes
@@ -1245,7 +1245,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   still dropping what's only reachable transitively through that type's
   own internals (`std::string::_Alloc_hider` and the like stay excluded).
   **Still open, deliberately not attempted in the same change:** the
-  chosen dependency-scoping mode (scoped vs. `--include-dependencies`) is
+  chosen dependency-scoping mode (scoped vs. `--include-system-declarations`) is
   not part of the `ExtractionContract` `scope_fingerprint`
   (`comparability.py`'s `SCOPE_FIELD_KEYS`), so two snapshots extracted
   under different scoping modes can still compare as "comparable" even
@@ -1258,7 +1258,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   `test_comparability_gate.py`'s existing superset-growth assertions), not
   a drive-by extension of the direct-reference fix above. Until then, the
   safe authoritative flow for a compiler/stdlib-sensitive comparison is
-  either `--include-dependencies` on both `dump` invocations, or comparing
+  either `--include-system-declarations` on both `dump` invocations, or comparing
   two default-scoped persisted snapshots against each other rather than
   mixing a persisted baseline JSON with a live-binary operand.
 

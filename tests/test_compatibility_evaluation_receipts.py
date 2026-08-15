@@ -182,7 +182,7 @@ class TestOverridesContributors:
             )
         )
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
-        assert options == {"--policy-file"}
+        assert options == {"--policy"}
 
     def test_a_fully_shadowed_policy_pack_is_not_credited(self, tmp_path):
         pack = _write_pack(
@@ -205,7 +205,7 @@ class TestOverridesContributors:
         )
         assert cfg.policy.overrides["soname_changed"] is Verdict.COMPATIBLE
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
-        assert options == {"--policy-file"}
+        assert options == {"--policy"}
 
     def test_a_contributing_policy_pack_is_credited(self, tmp_path):
         pack = _write_pack(
@@ -227,7 +227,7 @@ class TestOverridesContributors:
             )
         )
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
-        assert options == {"--policy-file", "--pack"}
+        assert options == {"--policy", "--pack"}
 
 
 class TestPathInputsAreNotSilentlyIgnored:
@@ -521,7 +521,7 @@ class TestOverridesReceiptNamesEachContributingPack:
             for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by
         ]
         assert entries == [
-            ("--policy-file", str(tmp_path / "policy.yml")),
+            ("--policy", str(tmp_path / "policy.yml")),
             ("--pack", str(contributing)),
         ]
 
@@ -815,7 +815,7 @@ class TestReceiptNamesTheStatingFrontEnd:
             e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by
         ] == ["--no-scope-public-headers"]
         assert [e.option for e in cfg.provenance[POLICY_BASE_FIELD].selected_by] == [
-            "--policy-file"
+            "--policy"
         ]
 
 

@@ -244,10 +244,6 @@ on:
         description: 'Forwarded to the internal compare step. Defaults to ''default'' so the report always carries a severity block.'
         type: string
         default: 'default'
-      severity-addition:
-        description: 'Severity for new public API additions: error, warning, or info.'
-        type: string
-        default: ''
       extra-args:
         description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
         type: string
@@ -492,7 +488,6 @@ jobs:
           policy-file: ${{ inputs.policy-file }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
-          severity-addition: ${{ inputs.severity-addition }}
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}

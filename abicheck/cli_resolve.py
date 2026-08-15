@@ -585,7 +585,7 @@ def _resolve_compare_snapshots(
     from .errors import SnapshotError, ValidationError
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
-        # The per-side --old/new-ast-frontend rides on that side's own
+        # The per-side --ast-frontend old=/new= rides on that side's own
         # CompileContext.frontend, which `_run_dump_uncached` documents as
         # outranking the bare both-sides `header_backend`. The caller has
         # already neutralised `compile_context.frontend` to "auto" for exactly
@@ -663,8 +663,8 @@ _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
     "sysroot": "--sysroot",
     "nostdinc": "--nostdinc",
     "header_backend": "--ast-frontend",
-    "old_header_backend": "--old-ast-frontend",
-    "new_header_backend": "--new-ast-frontend",
+    "old_header_backend": "--ast-frontend old=",
+    "new_header_backend": "--ast-frontend new=",
     "frontend_context": "--frontend-context",
 }
 

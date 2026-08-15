@@ -168,7 +168,7 @@ from .model import (
 #     from v9 onward (Codex review, PR #636).
 # v18: `AbiSnapshot.dependency_scope` — records whether `dump`'s default
 #     toolchain/system-header exclusion (`dumper_scoping.py`) was applied
-#     ("filtered") or opted out of via `--include-dependencies` ("full").
+#     ("filtered") or opted out of via `--include-system-declarations` ("full").
 #     Purely additive: a pre-v18 reader loads it as its default (`None`),
 #     i.e. "not recorded". `comparability.check_contracts_comparable`
 #     deliberately does NOT treat that `None` as either mode -- an ordinary

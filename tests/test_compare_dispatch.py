@@ -884,12 +884,12 @@ class TestCompareDispatch:
         assert code == 4
         assert "BREAKING" in out
 
-    @pytest.mark.parametrize("flag, expected", [("--include-dependencies", True), (None, False)])
+    @pytest.mark.parametrize("flag, expected", [("--include-system-declarations", True), (None, False)])
     def test_include_dependencies_reaches_set_comparison(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool,
     ) -> None:
         """Codex review: a directory/package ``compare`` used to drop
-        ``--include-dependencies`` entirely on its way through
+        ``--include-system-declarations`` entirely on its way through
         ``_dispatch_release_compare`` -> ``_compare_release_libraries`` ->
         ``_run_compare_pair``, so set comparisons stayed unfiltered
         regardless of the flag. Assert it now reaches the per-library engine

@@ -73,7 +73,7 @@ def pack_option(f: F) -> F:
                        "the coverage it configures); 'kind: gate' assigns "
                        "gate.exit_code_scheme and gate.severity.<category>. Composition "
                        "is D8's: an explicitly stated value (--policy-file, "
-                       "--exit-code-scheme, --severity-*, a --profile, or .abicheck.yml) "
+                       "--exit-code-scheme, --severity-preset, a --profile, or .abicheck.yml) "
                        "always outranks a pack, and two selected packs assigning "
                        "different values to the same field are a usage error unless "
                        "something else already states it. A manifest assigning a field "
@@ -83,7 +83,7 @@ def pack_option(f: F) -> F:
                        "before the effective configuration is resolved. On `scan` "
                        "this requires --against (a pack's only application there is "
                        "the baseline comparison) and a 'kind: gate' pack is rejected: "
-                       "`scan --against` does honour --severity-*/--exit-code-scheme "
+                       "`scan --against` does honour --severity-preset/--exit-code-scheme "
                        "given directly, but does not yet fold a gate pack's gate.* "
                        "assignments, so pass those settings directly instead.")(f)
     return f

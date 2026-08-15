@@ -70,20 +70,20 @@ Override individual categories on top of a preset:
 
 ```bash
 # Default preset but fail on API additions too
-abicheck compare old.json new.json --severity-addition error
+abicheck compare old.json new.json severity.addition: error
 
 # Strict preset but ignore quality issues
-abicheck compare old.json new.json --severity-preset strict --severity-quality-issues info
+abicheck compare old.json new.json --severity-preset strict severity.quality_issues: info
 
 # Only fail on binary ABI breaks, everything else informational
-abicheck compare old.json new.json --severity-preset info-only --severity-abi-breaking error
+abicheck compare old.json new.json --severity-preset info-only severity.abi_breaking: error
 ```
 
 Available flags:
-- `--severity-abi-breaking {error,warning,info}`
-- `--severity-potential-breaking {error,warning,info}`
-- `--severity-quality-issues {error,warning,info}`
-- `--severity-addition {error,warning,info}`
+- `severity.abi_breaking {error,warning,info}`
+- `severity.potential_breaking {error,warning,info}`
+- `severity.quality_issues {error,warning,info}`
+- `severity.addition {error,warning,info}`
 
 ### Presets reference
 
@@ -173,5 +173,5 @@ For arbitrary `--severity-*` overrides not exposed as inputs, use `extra-args`:
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
-    extra-args: '--severity-quality-issues error --severity-potential-breaking info'
+    extra-args: 'severity.quality_issues: error severity.potential_breaking: info'
 ```

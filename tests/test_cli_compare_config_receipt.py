@@ -108,14 +108,14 @@ class TestCanonicalResolverIsWhatRuns:
         """
         policy = tmp_path / "p.yaml"
         policy.write_text("base_policy: sdk_vendor\n", encoding="utf-8")
-        ctx = _context(tmp_path, "--policy-file", str(policy))
+        ctx = _context(tmp_path, "--policy", str(policy))
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "sdk_vendor"
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["layer"] == "explicit_cli"
         assert prov["path"] == str(policy)
         assert prov["sha256"]
-        assert prov["selected_by"][0]["option"] == "--policy-file"
+        assert prov["selected_by"][0]["option"] == "--policy"
 
     def test_suppression_receipt_names_the_file_it_was_read_from(self, tmp_path):
         """The core verb sees a ``SuppressionList``; only the front end knows
@@ -240,7 +240,7 @@ class TestCanonicalResolverIsWhatRuns:
         ctx = _context(tmp_path, "--policy", "sdk_vendor")
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "sdk_vendor"
         # D7 puts a `--policy` candidate at the LEGACY_ALIAS layer: it is the
-        # older spelling `--policy-file` supersedes.
+        # older spelling `--policy` supersedes.
         assert ctx["field_provenance"]["policy.base"]["layer"] == "legacy_alias"
 
 

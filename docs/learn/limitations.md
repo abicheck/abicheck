@@ -166,7 +166,7 @@ For `abicheck compat` pipelines, use `-s` to treat `COMPATIBLE` as blocking.
 For `abicheck compare` pipelines, a bare `compare` never fails on
 `COMPATIBLE`/addition findings at all (legacy exit scheme: `0` compatible,
 `2` source break, `4` ABI break — additions don't raise either). To block
-on them, add any `--severity-*` flag (e.g. `--severity-addition error`),
+on them, add any `--severity-*` flag (e.g. `severity.addition: error`),
 which switches `compare` to the severity-aware exit scheme and makes an
 error-level addition finding exit `1` — **but only when nothing already
 pins the scheme explicitly.** If a project's `.abicheck.yml` sets

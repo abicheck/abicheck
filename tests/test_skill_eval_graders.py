@@ -355,8 +355,8 @@ class TestEvidenceReading:
         )
 
     def test_suppression_flags_are_seen_in_both_spellings(self):
-        call = {"argv": ["compare", "a", "b", "--suppress", "x", "--policy-file=y"]}
-        assert ev.suppression_flags(call) == ["--policy-file", "--suppress"]
+        call = {"argv": ["compare", "a", "b", "--suppress", "x", "--policy=y"]}
+        assert ev.suppression_flags(call) == ["--policy", "--suppress"]
 
     def test_the_verdict_is_read_out_of_a_json_report(self, tmp_path):
         run = build_run(
@@ -849,10 +849,10 @@ class TestDimensionSix:
     def test_suppression_on_an_already_green_scenario_is_recorded_not_failed(
         self, tmp_path
     ):
-        """`--policy-file` is documented, normal usage. Failing a correct run
+        """`--policy` is documented, normal usage. Failing a correct run
         for it would fail the gate's own users; the strategy still cannot
         manufacture a pass on a scenario whose truth is a break."""
-        call = a_breaking_call(argv=["compare", "a", "b", "--policy-file", "p.yaml"])
+        call = a_breaking_call(argv=["compare", "a", "b", "--policy", "p.yaml"])
         result = self._grade(
             tmp_path,
             envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
@@ -865,7 +865,7 @@ class TestDimensionSix:
     def test_suppression_alongside_a_correct_severe_claim_is_recorded_not_failed(
         self, tmp_path
     ):
-        call = a_breaking_call(argv=["compare", "a", "b", "--policy-file", "p.yaml"])
+        call = a_breaking_call(argv=["compare", "a", "b", "--policy", "p.yaml"])
         result = self._grade(
             tmp_path,
             envelope(verdict="BREAKING", evidence=[0], confident=True),
@@ -1045,7 +1045,7 @@ class TestSelfComparisonDetection:
         "argv",
         [
             ["compare", "old.so", "new.so"],
-            ["compare", "a.so", "b.so", "--policy-file", "p.yaml"],
+            ["compare", "a.so", "b.so", "--policy", "p.yaml"],
             ["compare", "a.so", "b.so", "-o", "b.so"],
             [
                 "compare",
@@ -1053,7 +1053,7 @@ class TestSelfComparisonDetection:
                 "b.so",
                 "--suppress",
                 "r.yaml",
-                "--policy-file",
+                "--policy",
                 "r.yaml",
             ],
             ["scan", "lib.so", "--against", "base.json"],

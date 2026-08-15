@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING, TypeVar, overload
 import click
 
 from .cli_params import (
+    BUILTIN_POLICY_PROFILES,
+    DEFAULT_POLICY_PROFILE,
     DEPTH_PARAM,
     POLICY_FILE_PARAM,
     SIDED_BUILD_INFO_PARAM,
@@ -40,6 +42,7 @@ from .cli_params import (
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
     SIDED_STR_PARAM,
+    SidedChoiceParam,
 )
 from .cli_secondary_output import secondary_output_options as _secondary_output_options
 
@@ -165,10 +168,34 @@ def _split_sided_version(
     return old, new
 
 
+def _split_sided_frontend(
+    pairs: Sequence[tuple[str, str]],
+) -> tuple[str, str | None, str | None]:
+    """Resolve ``--ast-frontend``'s ``(side, frontend)`` pairs.
+
+    The "base + per-side override" model :func:`_split_sided_base` implements
+    for paths, for a string with a default: a bare/``both=`` value is the
+    frontend both sides use, ``old=``/``new=`` override one side (``None`` =
+    inherit the base), and an unset base is ``"auto"``. Last value wins per
+    bucket.
+    """
+    base = "auto"
+    old: str | None = None
+    new: str | None = None
+    for side, frontend in pairs:
+        if side == "both":
+            base = frontend
+        elif side == "old":
+            old = frontend
+        else:
+            new = frontend
+    return base, old, new
+
+
 def normalize_sided_options(kwargs: dict[str, object]) -> None:
     """Translate the sided ``header``/``include``/``sources``/``build_info``/
-    ``debug_root``/``pdb``/``probe_matrix``/``version`` dests into the per-side
-    kwargs the command bodies consume, in place (ADR-040 L1).
+    ``debug_root``/``pdb``/``probe_matrix``/``version``/``ast-frontend`` dests
+    into the per-side kwargs the command bodies consume, in place (ADR-040 L1).
 
     Absent keys are left untouched, so this is safe to call on any command that
     composes only a subset of the sided families.
@@ -224,6 +251,13 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         old_v, new_v = _split_sided_version(kwargs.pop("version"))  # type: ignore[arg-type]
         kwargs["old_version"] = old_v
         kwargs["new_version"] = new_v
+    if isinstance(kwargs.get("header_backend"), tuple):
+        base_f, old_f, new_f = _split_sided_frontend(
+            kwargs["header_backend"]  # type: ignore[arg-type]
+        )
+        kwargs["header_backend"] = base_f
+        kwargs["old_header_backend"] = old_f
+        kwargs["new_header_backend"] = new_f
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -381,11 +415,39 @@ def release_input_options(func: F) -> F:
     return func
 
 
-def policy_options(func: F) -> F:
-    """Verdict-classification policy + suppression file (`--policy`/`--policy-file`/`--suppress`).
+def _resolve_policy_operand(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str:
+    """Split ``--policy NAME|PATH`` into a profile and a policy document.
 
-    Shared verbatim by every verdict-emitting command. (``--policy`` accepting a
-    *path* directly, folding ``--policy-file`` in, is a later-phase D4 change.)
+    ``--policy`` used to name only a built-in profile, with a separate
+    ``--policy-file`` naming a document -- two flags for the one question
+    "how are verdicts classified for this run?", and the second silently
+    winning when both were given. One flag now answers it: a
+    :data:`~abicheck.cli_params.BUILTIN_POLICY_PROFILES` name selects that
+    profile, anything else is resolved as a document (a path, or a packaged
+    built-in like ``security``) and runs under the default profile, exactly
+    what ``--policy-file`` did.
+
+    The document half is published on ``ctx.params["policy_file_path"]`` --
+    the same key the old option bound -- so every consumer downstream still
+    receives the pair it always did, and only the user-facing spelling
+    changed.
+    """
+    resolved = value if value is not None else DEFAULT_POLICY_PROFILE
+    if resolved in BUILTIN_POLICY_PROFILES:
+        ctx.params["policy_file_path"] = None
+        return resolved
+    ctx.params["policy_file_path"] = POLICY_FILE_PARAM.convert(resolved, param, ctx)
+    return DEFAULT_POLICY_PROFILE
+
+
+def policy_options(func: F) -> F:
+    """Verdict-classification policy + suppression file (`--policy`/`--suppress`).
+
+    Shared verbatim by every verdict-emitting command. ADR-037 D4's fold: the
+    separate ``--policy-file`` is gone and ``--policy`` takes both operands
+    (see :func:`_resolve_policy_operand`).
     """
     func = click.option(
         "--suppress",
@@ -394,82 +456,46 @@ def policy_options(func: F) -> F:
         help="Suppression file (YAML) to filter known/intentional changes.",
     )(func)
     func = click.option(
-        "--policy-file",
-        "policy_file_path",
-        type=POLICY_FILE_PARAM,
-        default=None,
-        help="YAML policy file with per-kind ('overrides:') or selector-scoped "
-        "('reclassify:') verdict re-classification, or a built-in name "
-        "(e.g. 'security'). Overrides --policy.",
-    )(func)
-    func = click.option(
         "--policy",
         "policy",
-        type=click.Choice(
-            ["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True
-        ),
-        default="strict_abi",
+        metavar="NAME|PATH",
+        default=DEFAULT_POLICY_PROFILE,
         show_default=True,
-        help="Built-in policy profile for verdict classification. Ignored when "
-        "--policy-file is given.",
+        callback=_resolve_policy_operand,
+        help="How verdicts are classified: a built-in profile "
+        "(strict_abi, sdk_vendor, plugin_abi), or a YAML policy document -- "
+        "a path, or a packaged built-in name like 'security' -- carrying "
+        "per-kind ('overrides:') or selector-scoped ('reclassify:') "
+        "re-classification.",
     )(func)
     return func
 
 
 def severity_options(func: F) -> F:
-    """The severity preset + the four per-category overrides.
+    """``--severity-preset``, the one visible severity control.
 
-    ADR-037 D4 demotes the per-category flags into ``.abicheck.yml``'s
-    ``severity:`` block (G22 Phase 5): they stay on the CLI as **hidden**
-    overrides (a CLI value still beats config for a one-off run), but the visible
-    surface keeps only ``--severity-preset``. The whole family remains a genuine
-    shared decorator across ``compare`` / ``compare-release`` / ``appcompat`` so
-    the contract gate (D10.2) still sees it composed once, not copy-pasted.
+    ADR-037 D4 demoted the four per-category overrides
+    (``--severity-abi-breaking``/``--severity-potential-breaking``/
+    ``--severity-quality-issues``/``--severity-addition``) into
+    ``.abicheck.yml``'s ``severity:`` block, and they have now been removed
+    from the CLI outright: a hidden flag that duplicates a config key is a
+    second way to say one thing, and the config block is the one that
+    survives across invocations. ``severity:`` in the project config is the
+    only per-category spelling; the preset stays on the CLI because it is a
+    genuine one-off coarse override.
+
+    Still a shared decorator across ``compare`` / ``compare-release`` /
+    ``appcompat`` so the contract gate (D10.2) sees it composed once, not
+    copy-pasted.
     """
-    func = click.option(
-        "--severity-addition",
-        "severity_addition",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for new public API additions (config: "
-        "severity.addition). Beats the preset and config for this run.",
-    )(func)
-    func = click.option(
-        "--severity-quality-issues",
-        "severity_quality_issues",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for quality issues like std symbol leaks (config: "
-        "severity.quality_issues).",
-    )(func)
-    func = click.option(
-        "--severity-potential-breaking",
-        "severity_potential_breaking",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for potential incompatibilities needing review "
-        "(config: severity.potential_breaking).",
-    )(func)
-    func = click.option(
-        "--severity-abi-breaking",
-        "severity_abi_breaking",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for clear ABI/API incompatibilities (config: "
-        "severity.abi_breaking).",
-    )(func)
     func = click.option(
         "--severity-preset",
         "severity_preset",
         type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
         default=None,
         help="Severity preset: 'default', 'strict', or 'info-only'. "
-        "Controls exit codes and report labels. Per-category "
-        "--severity-* options override the chosen preset.",
+        "Controls exit codes and report labels. A project config's "
+        "severity: block overrides individual categories of the preset.",
     )(func)
     return func
 
@@ -498,7 +524,7 @@ def snapshot_compression_option(func: F) -> F:
 
 
 def include_dependencies_option(func: F) -> F:
-    """``--include-dependencies``, shared by ``dump`` and ``compare``
+    """``--include-system-declarations``, shared by ``dump`` and ``compare``
     (dumper_scoping.py): by default, toolchain/system-header declarations
     (std::/SYCL/etc. pulled in transitively by #include) are excluded from
     a header-AST dump -- a header-origin filter, not a public-API-surface
@@ -510,14 +536,24 @@ def include_dependencies_option(func: F) -> F:
     DWARF/DWARF-advanced collections keyed off them; an embedded header-only
     semantic graph (always attached by default) is not filtered. A filtered
     and an unfiltered snapshot are not comparable -- mixing them raises
-    ScopeMismatchError."""
+    ScopeMismatchError.
+
+    Named for what it does rather than for the internal
+    ``include_dependencies`` dest it still binds (kept because
+    ``AbiSnapshot.dependency_scope``, ``service.run_dump``'s parameter, and
+    the snapshot cache key all spell it that way): "dependencies" reads as
+    the DT_NEEDED library graph ``--follow-deps`` walks, which is a
+    different thing entirely, while what this flag actually restores is the
+    *declarations* a system/toolchain header contributed to the AST."""
     func = click.option(
-        "--include-dependencies",
+        "--include-system-declarations",
         "include_dependencies",
         is_flag=True,
         default=False,
-        help="Include toolchain/system-header declarations (std::/SYCL/etc. "
-        "pulled in transitively by #include). By default these are "
+        help="Include declarations that came from toolchain/system headers "
+        "(std::/SYCL/etc. pulled in transitively by #include). Unrelated to "
+        "--follow-deps, which walks the DT_NEEDED library graph. By default "
+        "these declarations are "
         "excluded -- pass this flag to get the old, unfiltered full "
         "surface instead. A no-op on a binary-only/DWARF-only dump. "
         "Mixing a filtered and an unfiltered snapshot across a "
@@ -628,8 +664,24 @@ _enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
 )
 
 
-def compile_context_options(func: F) -> F:
+#: The AST frontends ``--ast-frontend`` accepts, in one place so the sided and
+#: single-valued spellings of the option cannot drift apart.
+AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
+
+
+def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]:
     """L2 header-AST compile context — the cross-toolchain + frontend family.
+
+    A factory (``@compile_context_options()``) because ``--ast-frontend`` is
+    side-aware on ``compare`` and single-valued on ``dump``/``scan``: with
+    *sided_frontend*, it becomes a repeatable ``[old=|new=]FRONTEND`` option
+    (ADR-040 Lever 1's convention, the same one ``--header``/``--include``/
+    ``--version`` follow) and :func:`normalize_sided_options` splits it back
+    into the ``header_backend`` / ``old_header_backend`` /
+    ``new_header_backend`` triple the compare flow already threads. That
+    replaces the separate ``--old-ast-frontend``/``--new-ast-frontend`` pair,
+    which were a third and fourth spelling of one setting on the one command
+    that has two sides.
 
     The single source of truth for the flags that tell the header frontend how to
     parse the public headers: ``--ast-frontend`` (which frontend), the cross
@@ -645,118 +697,136 @@ def compile_context_options(func: F) -> F:
     ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
     :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
     """
-    func = click.option(
-        "--frontend-context",
-        "frontend_context",
-        default="host",
-        show_default=True,
-        type=click.Choice(["host", "device"], case_sensitive=False),
-        help="Which AST context the L2 header frontend should target (ADR-050 "
-        "D3/D5). 'device' selects the SYCL/DPC++ offload-device AST from a "
-        "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
-        "loudly if the configured frontend cannot produce a device context. "
-        "Matches a manifest's own frontend_context field for the legacy, "
-        "non-manifest path.",
-    )(func)
-    func = click.option(
-        "--nostdinc/--no-nostdinc",
-        "nostdinc",
-        default=False,
-        help="Do not search the standard system include paths (suppresses the "
-        "castxml/clang system-include auto-detection too). Paired form so an "
-        "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
-        "true` for a one-off run (CLI > config).",
-    )(func)
-    func = click.option(
-        "--sysroot",
-        "sysroot",
-        type=click.Path(path_type=Path),
-        default=None,
-        help="Alternative system root directory for header resolution.",
-    )(func)
-    # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
-    # The one spelling for the cross-toolchain family. The former
-    # --gcc-path/--gcc-prefix/--gcc-option names were always misleading (each
-    # accepts a Clang cross-compiler binary just as well) and are removed
-    # outright rather than kept as aliases -- carrying two spellings meant a
-    # per-invocation conflict resolver whose only correct answer for the
-    # repeatable --*-option pair was to reject mixing them anyway.
-    # `gcc_path`/`gcc_prefix`/`gcc_option_tokens`/`gcc_options` stay as
-    # internal `CompileContext` field names (also composed from build-context
-    # flags and the castxml/clang command assembly, and serialized into the
-    # run-plan JSON) -- only the user-facing CLI flags are gone.
-    func = click.option(
-        "--compiler-option",
-        "compiler_option_tokens",
-        multiple=True,
-        help="A single extra compiler flag passed to the header frontend verbatim "
-        "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
-        "e.g. --compiler-option=-include --compiler-option='some header.h'.",
-    )(func)
-    func = click.option(
-        "--compiler-prefix",
-        "compiler_prefix",
-        default=None,
-        help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
-    )(func)
-    func = click.option(
-        "--compiler",
-        "compiler_path",
-        default=None,
-        help="Path to a GCC/G++ or Clang cross-compiler binary.",
-    )(func)
-    func = click.option(
-        "--allow-unsupported-castxml",
-        is_flag=True,
-        expose_value=False,
-        envvar="ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
-        callback=_enable_unsupported_castxml_for_command,
-        help="Proceed with a CastXML build outside the supported version range "
-        "(castxml_policy.MIN_CASTXML/MAX_CASTXML/MIN_CASTXML_CLANG_MAJOR) instead "
-        "of aborting the scan before headers are parsed. Exploratory-mode-only: "
-        "the resulting snapshot's ast_toolchain_supported is recorded as false "
-        "with ast_toolchain_unsupported_reasons, so it is never mistaken for a "
-        "normal supported scan and cannot become a new strict baseline without a "
-        "further explicit acknowledgment.",
-    )(func)
-    func = click.option(
-        "--allow-ast-frontend-fallback",
-        is_flag=True,
-        expose_value=False,
-        envvar="ABICHECK_ALLOW_AST_FALLBACK",
-        callback=_enable_ast_fallback_for_command,
-        help="Allow auto-selected CastXML to fall back to Clang for a recognized "
-        "toolchain mismatch, an unsupported CastXML release, or a direct-include "
-        "guard. Disabled by default because the frontends can produce materially "
-        "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
-        "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
-        "routes to Clang without this flag, since CastXML has no host/device "
-        "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
-        "has no device concept either) still rejects it.",
-    )(func)
-    func = click.option(
-        "--ast-frontend",
-        "header_backend",
-        default="auto",
-        show_default=True,
-        type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
-        help="C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
-        "or clang (-ast-dump=json; for hosts where castxml is absent or its "
-        "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
-        "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
-        "costs roughly 2x a single-backend dump; never selected by auto. auto "
-        "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
-        "changes producer unless --allow-ast-frontend-fallback (or "
-        "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
-        "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
-        "castxml (no pin) routes to clang since castxml can't satisfy it at "
-        "all (a castxml- or hybrid-pinned auto still rejects it, since "
-        "hybrid has no device concept either; an explicit clang, or auto "
-        "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
-        "directly). "
-        "Env: ABICHECK_AST_FRONTEND.",
-    )(func)
-    return func
+
+    def _apply(func: F) -> F:
+        func = click.option(
+            "--frontend-context",
+            "frontend_context",
+            default="host",
+            show_default=True,
+            type=click.Choice(["host", "device"], case_sensitive=False),
+            help="Which AST context the L2 header frontend should target (ADR-050 "
+            "D3/D5). 'device' selects the SYCL/DPC++ offload-device AST from a "
+            "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
+            "loudly if the configured frontend cannot produce a device context. "
+            "Matches a manifest's own frontend_context field for the legacy, "
+            "non-manifest path.",
+        )(func)
+        func = click.option(
+            "--nostdinc/--no-nostdinc",
+            "nostdinc",
+            default=False,
+            help="Do not search the standard system include paths (suppresses the "
+            "castxml/clang system-include auto-detection too). Paired form so an "
+            "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
+            "true` for a one-off run (CLI > config).",
+        )(func)
+        func = click.option(
+            "--sysroot",
+            "sysroot",
+            type=click.Path(path_type=Path),
+            default=None,
+            help="Alternative system root directory for header resolution.",
+        )(func)
+        # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
+        # The one spelling for the cross-toolchain family. The former
+        # --gcc-path/--gcc-prefix/--gcc-option names were always misleading (each
+        # accepts a Clang cross-compiler binary just as well) and are removed
+        # outright rather than kept as aliases -- carrying two spellings meant a
+        # per-invocation conflict resolver whose only correct answer for the
+        # repeatable --*-option pair was to reject mixing them anyway.
+        # `gcc_path`/`gcc_prefix`/`gcc_option_tokens`/`gcc_options` stay as
+        # internal `CompileContext` field names (also composed from build-context
+        # flags and the castxml/clang command assembly, and serialized into the
+        # run-plan JSON) -- only the user-facing CLI flags are gone.
+        func = click.option(
+            "--compiler-option",
+            "compiler_option_tokens",
+            multiple=True,
+            help="A single extra compiler flag passed to the header frontend verbatim "
+            "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
+            "e.g. --compiler-option=-include --compiler-option='some header.h'.",
+        )(func)
+        func = click.option(
+            "--compiler-prefix",
+            "compiler_prefix",
+            default=None,
+            help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
+        )(func)
+        func = click.option(
+            "--compiler",
+            "compiler_path",
+            default=None,
+            help="Path to a GCC/G++ or Clang cross-compiler binary.",
+        )(func)
+        func = click.option(
+            "--allow-unsupported-castxml",
+            is_flag=True,
+            expose_value=False,
+            envvar="ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
+            callback=_enable_unsupported_castxml_for_command,
+            help="Proceed with a CastXML build outside the supported version range "
+            "(castxml_policy.MIN_CASTXML/MAX_CASTXML/MIN_CASTXML_CLANG_MAJOR) instead "
+            "of aborting the scan before headers are parsed. Exploratory-mode-only: "
+            "the resulting snapshot's ast_toolchain_supported is recorded as false "
+            "with ast_toolchain_unsupported_reasons, so it is never mistaken for a "
+            "normal supported scan and cannot become a new strict baseline without a "
+            "further explicit acknowledgment.",
+        )(func)
+        func = click.option(
+            "--allow-ast-frontend-fallback",
+            is_flag=True,
+            expose_value=False,
+            envvar="ABICHECK_ALLOW_AST_FALLBACK",
+            callback=_enable_ast_fallback_for_command,
+            help="Allow auto-selected CastXML to fall back to Clang for a recognized "
+            "toolchain mismatch, an unsupported CastXML release, or a direct-include "
+            "guard. Disabled by default because the frontends can produce materially "
+            "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
+            "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
+            "routes to Clang without this flag, since CastXML has no host/device "
+            "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
+            "has no device concept either) still rejects it.",
+        )(func)
+        func = click.option(
+            "--ast-frontend",
+            "header_backend",
+            **(
+                {
+                    "multiple": True,
+                    "type": SidedChoiceParam(AST_FRONTENDS),
+                }
+                if sided_frontend
+                else {
+                    "default": "auto",
+                    "show_default": True,
+                    "type": click.Choice(AST_FRONTENDS, case_sensitive=False),
+                }
+            ),
+            help=("Scope to one side with an 'old='/'new=' prefix, repeating the "
+            "flag per side (e.g. --ast-frontend old=castxml --ast-frontend "
+            "new=clang) when the old release parses on one frontend and the new "
+            "one needs the other; a bare value applies to both (default: auto). "
+            if sided_frontend else "")
+            + "C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
+            "or clang (-ast-dump=json; for hosts where castxml is absent or its "
+            "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
+            "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
+            "costs roughly 2x a single-backend dump; never selected by auto. auto "
+            "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
+            "changes producer unless --allow-ast-frontend-fallback (or "
+            "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
+            "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
+            "castxml (no pin) routes to clang since castxml can't satisfy it at "
+            "all (a castxml- or hybrid-pinned auto still rejects it, since "
+            "hybrid has no device concept either; an explicit clang, or auto "
+            "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
+            "directly). "
+            "Env: ABICHECK_AST_FRONTEND.",
+        )(func)
+        return func
+
+    return _apply
 
 
 def merge_compile_config(
@@ -1066,7 +1136,7 @@ def output_options(
     return deco
 
 
-#: The ``--secondary-format``/``--secondary-output`` decorator factory
+#: The ``--write FORMAT=PATH`` decorator factory
 #: (Codex review: previously declared inline, separately, by ``compare``
 #: and ``scan --against``, with drifted help text and duplicated
 #: ``reject_incoherent_*`` validation logic) lives in the dependency-free
@@ -1546,7 +1616,9 @@ def build_source_dump_options(func: F) -> F:
         default=None,
         help="Optional build context: a build dir, a compile_commands.json, "
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
-        "omitted.",
+        "omitted. When it resolves to a compile database and -H/--header is "
+        "given, that database also parameterizes the header parse with the "
+        "build's exact flags (scope it with --compile-db-filter).",
     )(func)
     return func
 

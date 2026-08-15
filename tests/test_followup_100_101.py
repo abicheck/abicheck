@@ -386,13 +386,13 @@ class TestCliPolicy:
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
-                ["compare", str(old_p), str(new_p), "--policy-file", str(policy_p)],
+                ["compare", str(old_p), str(new_p), "--policy", str(policy_p)],
             )
 
         assert result.exit_code == 0, result.output
 
     def test_policy_file_wins_over_policy_flag(self, tmp_path: Any) -> None:
-        """--policy-file base_policy takes precedence; --policy is ignored."""
+        """--policy base_policy takes precedence; --policy is ignored."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -414,7 +414,7 @@ class TestCliPolicy:
                 main,
                 ["compare", str(old_p), str(new_p),
                  "--policy", "sdk_vendor",
-                 "--policy-file", str(policy_p)],
+                 "--policy", str(policy_p)],
             )
 
         assert result.exit_code == 0, result.output
@@ -435,9 +435,9 @@ class TestCliPolicy:
                       if getattr(p, "name", "") == "policy")
         choices = set(policy.type.choices)  # type: ignore[attr-defined]
         assert {"sdk_vendor", "plugin_abi", "strict_abi"} <= choices
-        # --policy-file is documented (stable single-token flag name).
+        # --policy is documented (stable single-token flag name).
         norm = result.output.replace("│", "").replace("\n", "").replace(" ", "")
-        assert "--policy-file" in norm
+        assert "--policy" in norm
 
 
 class TestDiffResultPolicyAwareProperties:

@@ -192,7 +192,7 @@ class TestDependencyScopeComparabilityGate:
     a later follow-up in this same PR -- see
     changelog.d/20260729_claude_compare_default_dependency_filtering.md),
     so the mismatch this gate guards against now arises mainly from an
-    *explicit* `--include-dependencies` override on only one side, or a
+    *explicit* `--include-system-declarations` override on only one side, or a
     pre-v18/legacy snapshot mixed with a current-build one -- not from
     ordinary live-binary compare defaults disagreeing with each other."""
 

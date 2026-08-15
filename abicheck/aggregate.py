@@ -38,7 +38,7 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
   decision (``severity.{exit_code,blocking,blocking_categories}``, computed by
   ``reporter._build_severity_json`` → ``severity.compute_gate_decision``);
   ``aggregate`` combines those, it never recomputes a gate from the verdict.
-  Reports produced without a ``--severity-*`` policy carry no gate block, so
+  Reports produced without a severity policy carry no gate block, so
   they fall back to the legacy verdict→exit mapping.
 * **coverage** — did every *required* target actually report? A required gap is
   a *coverage* failure (exit ``1``), never masqueraded as an ABI break.
@@ -159,7 +159,7 @@ def parse_check_id(target_id: str) -> CheckIdParts | None:
 AGGREGATE_MANIFEST_VERSION = "1.0"
 
 #: Legacy verdict → gate exit code, used only for reports that carry no
-#: ``severity`` gate block (i.e. produced without a ``--severity-*`` policy).
+#: ``severity`` gate block (i.e. produced without a severity policy).
 #: Mirrors ``compare``'s legacy scheme: NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK
 #: are non-blocking (0), API_BREAK is a source break (2), BREAKING an ABI break
 #: (4). A report *with* a gate block uses that block's own ``exit_code`` — the

@@ -231,7 +231,7 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 To enable suppression lifecycle enforcement, pass the flags via `extra-args`:
 
 ```yaml
-extra-args: '--strict-suppressions --require-justification'
+extra-args: 'suppression.strict: true suppression.require_justification: true'
 ```
 
 ### Action behavior

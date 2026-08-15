@@ -1,0 +1,9 @@
+# Fixture for .github/workflows/test-action.yml's severity lane: promote a
+# compatible API addition to an error-level finding, so a comparison whose
+# only change is an addition still fails the gate.
+#
+# The per-category severity levels are config-only -- the hidden
+# `--severity-addition` CLI flag that duplicated this key was removed -- so a
+# CI lane exercising them names a config file instead of a flag.
+severity:
+  addition: error

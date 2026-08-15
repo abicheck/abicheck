@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """ADR-049 Phase 1: tests for the legacy-scope-flag -> contract.mode wiring,
-the --policy-file -> surface.internal_namespaces wiring, and the
+the --policy -> surface.internal_namespaces wiring, and the
 --pack-paths -> contract.packs/policy.packs/gate.packs wiring."""
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ class TestNoPolicyFile:
         assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
 
     def test_untouched_default_matches_todays_real_behavior(self):
-        # No --policy-file at all means no PolicyFile is even constructed --
+        # No --policy at all means no PolicyFile is even constructed --
         # every consuming step already falls back to its own
         # DEFAULT_INTERNAL_NAMESPACES today; accepting ADR-049 must not
         # silently change that.
@@ -120,7 +120,7 @@ class TestNoPolicyFile:
 
 class TestPolicyFileSetsNamespaces:
     def test_policy_file_with_namespaces_resolves_to_explicit_cli(self):
-        # --policy-file is a flag the user explicitly passed on this
+        # --policy is a flag the user explicitly passed on this
         # invocation -- EXPLICIT_CLI tier, not PROJECT_CONFIG (which is for
         # an implicitly-discovered project file), so it isn't silently
         # outranked by a lower-precedence-by-mechanism candidate (Codex
@@ -171,7 +171,7 @@ class TestPolicyFileSetsNamespaces:
         _, prov = resolve_internal_namespaces(policy_file=pf)
         assert prov.source_kind == "policy_file"
         assert prov.path == "policy.yml"
-        assert prov.selected_by[0].option == "--policy-file"
+        assert prov.selected_by[0].option == "--policy"
         assert prov.selected_by[0].path == "policy.yml"
 
 

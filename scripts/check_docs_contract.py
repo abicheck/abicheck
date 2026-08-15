@@ -1335,6 +1335,92 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--report-prefix", "--expect", "--optional"),
         frozenset({"AGENTS.md"}),
     ),
+    (
+        "the four per-category --severity-<category> flags (hidden duplicates"
+        " of .abicheck.yml's own severity: block, which is now their one"
+        " spelling; --severity-preset stays as the coarse per-run override)",
+        (
+            "--severity-abi-breaking",
+            "--severity-potential-breaking",
+            "--severity-quality-issues",
+            "--severity-addition",
+        ),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--strict-suppressions/--require-justification/--public-symbol/"
+        "--public-symbols-list/--show-redundant/--collapse-versioned-symbols"
+        " (hidden duplicates of the suppression:/scope: config blocks, which"
+        " are now their one spelling)",
+        (
+            "--strict-suppressions",
+            "--require-justification",
+            "--public-symbols-list",
+            "--public-symbol",
+            "--show-redundant",
+            "--collapse-versioned-symbols",
+        ),
+        frozenset({"AGENTS.md"}),
+    ),
+    # `dump --public-header`/`--public-header-dir` are gone too (declaration
+    # provenance comes from -H/--header itself now), but they are deliberately
+    # NOT registered here: `scan --public-header-dir` is still live, and this
+    # gate matches plain substrings, so a pattern that catches the retired
+    # `dump` spelling necessarily catches the surviving `scan` one. The
+    # executable guard for that pair is `tests/test_cli_contract.py`'s
+    # per-command option-set snapshot.
+    (
+        "dump -p/--build-dir and --compile-db, and scan --compile-db"
+        " (--build-info already takes a build dir, a compile_commands.json,"
+        " or a pack -- the one flag for that operand; --compile-db-filter"
+        " still scopes it)",
+        ("--build-dir", "--compile-db "),
+        frozenset(
+            {
+                "AGENTS.md",
+                # A point-in-time design review: it inventories the surface
+                # as it was, in its own historical-record capacity.
+                "contribute/config-key-review.md",
+            }
+        ),
+    ),
+    (
+        "--policy-file (folded into --policy, which now takes a built-in"
+        " profile name or a policy document -- a path, or a packaged built-in"
+        " like 'security'; the Action's own `policy-file` input, without the"
+        " leading dashes, is unaffected and still valid)",
+        ("--policy-file",),
+        frozenset({"AGENTS.md", "reference/github-action-inputs.md"}),
+    ),
+    (
+        "--secondary-format/--secondary-output (folded into --write"
+        " FORMAT=PATH -- half the pair was a usage error either direction, so"
+        " they were one option spelled as two)",
+        ("--secondary-format", "--secondary-output"),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--old-ast-frontend/--new-ast-frontend (--ast-frontend is side-aware"
+        " on compare: --ast-frontend old=castxml --ast-frontend new=clang,"
+        " ADR-040 Lever 1's prefix convention)",
+        ("--old-ast-frontend", "--new-ast-frontend"),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--include-dependencies (renamed --include-system-declarations: it"
+        " restores the declarations a system/toolchain header contributed to"
+        " the AST, which is unrelated to the DT_NEEDED library graph"
+        " --follow-deps walks)",
+        ("--include-dependencies",),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "project validate-use-cases --against/--against-new (resolving a"
+        " manifest against a real library, and attributing a comparison's"
+        " findings to the use cases that reach them, is compare --use-cases)",
+        ("--against-new",),
+        frozenset({"AGENTS.md"}),
+    ),
 )
 
 

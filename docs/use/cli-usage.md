@@ -185,7 +185,7 @@ abicheck compare old.json new.json --profile ci-gate
 abicheck compare old.json new.json --profile release-cut --format json
 ```
 
-> `--show-only` filtering, `--show-redundant`, `--stat`, and
+> `--show-only` filtering, `scope.show_redundant: true`, `--stat`, and
 > `--report-mode leaf|impact` are covered in full on
 > [Output Formats](output-formats.md) — all are display-only and do not affect
 > the verdict or exit code.

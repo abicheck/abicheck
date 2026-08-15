@@ -261,7 +261,7 @@ class TestResolveInput:
     def test_include_dependencies_reaches_target_through_linker_script(self, tmp_path):
         """Codex review: the recursive resolve_input() call following a GNU
         ld linker script to its real target used to drop include_dependencies
-        back to its default (True), so `compare --include-dependencies`
+        back to its default (True), so `compare --include-system-declarations`
         (filtered by default) silently stopped filtering for any operand
         that happened to be a linker script instead of the DSO directly."""
         target = tmp_path / "libfoo.so.1"

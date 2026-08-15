@@ -210,7 +210,7 @@ class AnnotateLayoutUnverifiableCoveredByVtableChanged:
     potential_breaking/quality_issues/addition, each independently
     error/warning/info) — and that axis is chosen by a caller entirely
     *after* ``compare()`` returns (``cli.py``'s ``--severity-preset``/
-    ``--severity-*`` flags, applied to an already-built ``DiffResult``).
+    severity settings, applied to an already-built ``DiffResult``).
     No decision made inside ``compare()`` can be correct for a
     configuration ``compare()`` never sees: a policy-unconfigured run with
     ``abi_breaking=info``/``potential_breaking=error`` reproduces the exact

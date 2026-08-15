@@ -228,7 +228,7 @@ def test_policy_file_symbol_version_required_added_is_risk_by_default(tmp_path: 
 # ── Built-in shipped policies (G12) ───────────────────────────────────────
 
 def test_builtin_security_policy_resolves_by_name() -> None:
-    """`--policy-file security` resolves to the packaged security.yaml."""
+    """`--policy security` resolves to the packaged security.yaml."""
     from abicheck.policies import builtin_policy_names
     from abicheck.policy_file import builtin_policy_path
 

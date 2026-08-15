@@ -1033,7 +1033,7 @@ class AbiSnapshot:
     # Dependency-scoping mode (schema v18) — whether toolchain/system-header
     # declarations were excluded from this snapshot's flat lists/DWARF
     # collections by ``dumper_scoping.scope_snapshot_excluding_dependencies``
-    # ("filtered") or deliberately kept ("full", via ``--include-dependencies``).
+    # ("filtered") or deliberately kept ("full", via ``--include-system-declarations``).
     # ``dump`` and ``compare``'s own live-binary dumping (``service.run_dump``)
     # both filter by default and tag "filtered"; a direct Python API caller of
     # ``service.run_dump``/``resolve_input`` gets the opposite default

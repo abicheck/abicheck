@@ -138,10 +138,10 @@ problem in CI.
 | `-o` / `--output` | Write report to file |
 | `--scope-public-headers` / `--no-scope-public-headers` | Restrict findings to the public-header ABI surface (on by default) |
 | `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
-| `--severity-abi-breaking` / `--severity-potential-breaking` / `--severity-quality-issues` / `--severity-addition` | Per-category severity overrides (`error`/`warning`/`info`) |
+| `severity.abi_breaking: error` / `severity.potential_breaking: error` / `severity.quality_issues: error` / `severity.addition: error` | Per-category severity overrides (`error`/`warning`/`info`) |
 | `--suppress` | Suppression file (YAML) |
 | `--policy` | Verdict policy: `strict_abi` (default), `sdk_vendor`, `plugin_abi` |
-| `--policy-file` | Custom YAML policy overrides |
+| `--policy` | Custom YAML policy overrides |
 | `-v` / `--verbose` | Debug output |
 
 See `abicheck compare --help` for the complete flag set — `--used-by` is one
@@ -187,7 +187,7 @@ required symbol/version/entrypoint has no matching diff `Change` for the
 severity machinery to see on its own, so it is floored in separately —
 under the severity scheme it counts toward, and can trip, the
 `abi_breaking` category exactly as a real `FUNC_REMOVED` finding would,
-including respecting a demoted `--severity-abi-breaking info` (i.e. a
+including respecting a demoted `severity.abi_breaking: info` (i.e. a
 missing-contract symbol is not a hidden, unconfigurable floor to `4`
 anymore).
 

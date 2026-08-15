@@ -13,9 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The shared ``--secondary-format``/``--secondary-output`` option pair and
-its coherence validator (Codex review, PR #748) -- a dependency-free leaf
-module, not a member of ``cli_options.py`` itself.
+"""The shared ``--write FORMAT=PATH`` option and its coherence validator
+(Codex review, PR #748) -- a dependency-free leaf module, not a member of
+``cli_options.py`` itself.
+
+``--write`` replaces the ``--secondary-format``/``--secondary-output`` pair
+it grew out of. The two flags only ever meant anything together -- half of
+the pair was a usage error either direction -- so they were one option
+spelled as two, and the format-and-destination operand says the same thing
+in one place.
 
 ``compare`` (``cli.py``) and ``scan`` (``cli_scan.py``) both declared this
 flag family, and validated it, with separately hand-copied help text and
@@ -44,40 +50,66 @@ import click
 F = TypeVar("F", bound=Callable[..., object])
 
 
+def _parse_write_operand(
+    value: str, formats: Sequence[str], param: click.Parameter | None
+) -> tuple[str, Path]:
+    """Split one ``FORMAT=PATH`` operand, or raise ``BadParameter``."""
+    fmt, sep, raw_path = value.partition("=")
+    if not sep or not fmt or not raw_path:
+        raise click.BadParameter(
+            f"{value!r}: expected FORMAT=PATH (e.g. "
+            f"'{formats[0]}=report.{formats[0]}').",
+            param=param,
+        )
+    if fmt not in formats:
+        raise click.BadParameter(
+            f"{fmt!r}: not a renderable format here "
+            f"(choose from {', '.join(formats)}).",
+            param=param,
+        )
+    return fmt, Path(raw_path)
+
+
 def secondary_output_options(
     formats: Sequence[str],
     *,
-    format_help: str = "Emit a second output format from this same run, "
-    "without re-running it a second time. Requires --secondary-output "
-    "(writing two formats to the same stream would be ambiguous).",
+    format_help: str = "Emit a second output format from this same run, to "
+    "its own file, without re-running the analysis. FORMAT is one of "
+    "{formats}; PATH must differ from --output/-o.",
 ) -> Callable[[F], F]:
-    """Factory for the ``--secondary-format`` / ``--secondary-output`` pair.
+    """Factory for the ``--write FORMAT=PATH`` option.
 
     A factory rather than a bare decorator, mirroring ``cli_options.
     output_options``, because the *set* of renderable secondary formats
     legitimately differs per command (``compare`` supports the full
     ``json``/``markdown``/``sarif``/``html``/``junit``/``review`` set;
     ``scan --against`` only ever produces ``text``/``json``) -- but the
-    option pair's structure, flag spellings, and ``--secondary-output``
-    help text live here once.
+    option's structure, flag spelling, and help text live here once.
+
+    The parsed operand is published as the ``secondary_fmt`` /
+    ``secondary_output`` pair the whole rendering path already threads, so
+    only the user-facing spelling changed.
     """
+    allowed = list(formats)
+
+    def _callback(
+        ctx: click.Context, param: click.Parameter, value: str | None
+    ) -> str | None:
+        if value is None:
+            ctx.params["secondary_output"] = None
+            return None
+        fmt, path = _parse_write_operand(value, allowed, param)
+        ctx.params["secondary_output"] = path
+        return fmt
 
     def deco(func: F) -> F:
         func = click.option(
-            "--secondary-output",
-            "secondary_output",
-            type=click.Path(dir_okay=False, path_type=Path),
-            default=None,
-            help="File path to write --secondary-format's output to. Must "
-            "differ from --output/-o, or the secondary render would "
-            "silently overwrite the primary report.",
-        )(func)
-        func = click.option(
-            "--secondary-format",
+            "--write",
             "secondary_fmt",
-            type=click.Choice(list(formats)),
+            metavar="FORMAT=PATH",
             default=None,
-            help=format_help,
+            callback=_callback,
+            help=format_help.format(formats="/".join(allowed)),
         )(func)
         return func
 
@@ -91,34 +123,27 @@ def reject_incoherent_secondary_output(
     secondary_fmt: str | None,
     secondary_output: Path | None,
 ) -> None:
-    """The four ``--secondary-*`` coherence checks every command with the
-    :func:`secondary_output_options` pair shares: a dry run asked to write
-    a secondary report, a half-given ``--secondary-*`` pair either
-    direction, and two reports aimed at the same file. Raised as
+    """The two ``--write`` coherence checks every command carrying the
+    :func:`secondary_output_options` option shares: a dry run asked to write
+    a secondary report, and two reports aimed at the same file. Raised as
     ``UsageError`` (exit 64) up front, before any real work.
+
+    The old ``--secondary-format``/``--secondary-output`` pair also needed a
+    half-given check in each direction; ``--write``'s single ``FORMAT=PATH``
+    operand cannot be half-given, so those two are gone rather than
+    unreachable.
 
     Command-specific extra checks (``compare``'s ``--contract`` gate,
     ``scan``'s ``--artifact-set`` incompatibility) are NOT this function's
-    job and stay in each command's own wrapper -- this covers only the
-    ``--secondary-*`` pair's own internal coherence, the part that was
-    previously duplicated byte-for-byte between the two commands.
+    job and stay in each command's own wrapper -- this covers only
+    ``--write``'s own internal coherence, the part that was previously
+    duplicated byte-for-byte between the two commands.
     """
     if dry_run and secondary_output is not None:
         raise click.UsageError(
-            "--dry-run cannot be combined with --secondary-output: a dry "
-            "run performs no analysis and writes nothing, so there is no "
-            "secondary report to produce."
-        )
-    if secondary_fmt is not None and secondary_output is None:
-        raise click.UsageError(
-            "--secondary-format requires --secondary-output: writing two "
-            "output formats to the same stream would be ambiguous."
-        )
-    if secondary_output is not None and secondary_fmt is None:
-        raise click.UsageError(
-            "--secondary-output requires --secondary-format: with no "
-            "format given there is nothing to render, and the path would "
-            "be silently ignored."
+            "--dry-run cannot be combined with --write: a dry run performs "
+            "no analysis and writes nothing, so there is no secondary "
+            "report to produce."
         )
     if (
         secondary_output is not None
@@ -126,7 +151,7 @@ def reject_incoherent_secondary_output(
         and secondary_output.resolve() == output.resolve()
     ):
         raise click.UsageError(
-            "--secondary-output must differ from --output/-o: writing both "
+            "--write's PATH must differ from --output/-o: writing both "
             "formats to the same file would silently overwrite the primary "
             "report with the secondary one."
         )

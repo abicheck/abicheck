@@ -469,7 +469,21 @@ from typing import Any
 #:       rebase claimed that version first for P0.2's ``layer_coverage``
 #:       root-target keys (same "renumber, don't reuse" convention as the
 #:       2.32/2.36 entries above).
-REPORT_SCHEMA_VERSION = "2.38"
+#: 2.39 — new top-level ``use_case_impact`` object, present only under
+#:       ``compare --use-cases MANIFEST`` (``impact/use_case_impact.py``):
+#:       the manifest's declared use cases, each one's resolved and
+#:       unresolved entrypoints, and this comparison's own findings
+#:       attributed to the use cases whose entrypoints can be *shown* to
+#:       reach them, plus an ``unattributed_changes`` count for the
+#:       remainder. Read-only evidence -- it never reaches a verdict, a
+#:       gate, or an exit code, because an unattributed finding is an
+#:       absence of proof rather than proof the finding is harmless. Omitted
+#:       entirely without the flag rather than emitted empty (an empty block
+#:       would read as "no use case is affected" for a run that never
+#:       resolved a manifest). Replaces the ``project validate-use-cases
+#:       --against/--against-new`` report, which diffed two snapshots inside
+#:       a manifest validator. Additive optional top-level key.
+REPORT_SCHEMA_VERSION = "2.39"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -590,8 +604,7 @@ REPORT_SCHEMA_VERSION = "2.38"
 #:       ``exit_code``/``blocking``/``blocking_categories``, built by the one
 #:       shared ``reporter._build_severity_json``), emitted when ``scan
 #:       --against`` resolves the ``severity`` exit-code scheme. Under that
-#:       scheme a *compatible* diff can exit non-zero (``--severity-addition
-#:       error`` on an additions-only diff exits 1), so without this block a
+#:       scheme a *compatible* diff can exit non-zero (``severity.addition: error`` on an additions-only diff exits 1), so without this block a
 #:       report read ``COMPATIBLE`` with exit 1 and no stated cause --
 #:       indistinguishable from ADR-049 Phase 7's orthogonal
 #:       contract-coverage 1 (Codex review). Absent under the default legacy

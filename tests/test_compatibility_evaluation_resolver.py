@@ -211,8 +211,8 @@ class TestLegacyAliasConflict:
         assert exc_info.value.field_name == "contract.mode"
 
     def test_disagreement_is_tolerated_when_agreement_not_required(self):
-        # ADR-049 D7: the --policy/--policy-file compatibility exception --
-        # --policy-file (explicit_cli) keeps winning over a disagreeing
+        # ADR-049 D7: the --policy/--policy compatibility exception --
+        # --policy (explicit_cli) keeps winning over a disagreeing
         # --policy (legacy_alias) input.
         candidates = [
             _candidate(SelectorLayer.LEGACY_ALIAS, ContractMode.ALL),

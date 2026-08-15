@@ -208,9 +208,6 @@ on:
       severity-preset:
         type: string
         default: 'default'
-      severity-addition:
-        type: string
-        default: ''
       extra-args:
         type: string
         default: ''
@@ -963,7 +960,6 @@ jobs:
           policy-file: ${{ inputs.policy-file }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
-          severity-addition: ${{ inputs.severity-addition }}
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}

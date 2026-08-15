@@ -45,16 +45,11 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
             "--version",
         }
     ),
-    "policy": frozenset({"--policy", "--policy-file", "--suppress"}),
-    "severity": frozenset(
-        {
-            "--severity-preset",
-            "--severity-abi-breaking",
-            "--severity-potential-breaking",
-            "--severity-quality-issues",
-            "--severity-addition",
-        }
-    ),
+    "policy": frozenset({"--policy", "--suppress"}),
+    # Only ``--severity-preset``: the four per-category overrides were hidden
+    # duplicates of ``.abicheck.yml``'s ``severity:`` block and have been
+    # removed from the CLI (see ``cli_options.severity_options``).
+    "severity": frozenset({"--severity-preset"}),
     "scope": frozenset({"--scope-public-headers"}),
     "output": frozenset({"--format", "--output"}),
     # Two-sided evidence family (ADR-037 D3 ``@evidence_options``): registered
@@ -204,16 +199,14 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
         "1-2 lower BASE to bring the net well below today."
     ),
-    "--secondary-format": (
-        "Emits a second output format from the same comparison run (e.g. a "
-        "--secondary-format json artifact alongside a --format markdown report), "
-        "so a CI caller (the GitHub Action's PR-comment JSON) no longer has to "
-        "re-invoke abicheck a second time. A per-run rendering choice, not a "
-        "stable project setting."
-    ),
-    "--secondary-output": (
-        "Companion to --secondary-format: the file path its output is written "
-        "to. Always used together, like -o/--output for --format."
+    "--write": (
+        "Emits a second output format from the same comparison run to its own "
+        "file (e.g. --write json=abi.json alongside a --format markdown "
+        "report), so a CI caller (the GitHub Action's PR-comment JSON) no "
+        "longer has to re-invoke abicheck a second time. One FORMAT=PATH "
+        "operand rather than the --secondary-format/--secondary-output pair it "
+        "replaces, which was a usage error unless both were given. A per-run "
+        "rendering choice, not a stable project setting."
     ),
     "--dry-run": (
         "ADR-043: resolve and validate the invocation without running the diff. "
@@ -259,7 +252,7 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "extraction-target choice, not a stable project setting -- like "
         "--ast-frontend."
     ),
-    "--include-dependencies": (
+    "--include-system-declarations": (
         "Shared with dump (cli_options.include_dependencies_option): whether "
         "to include toolchain/system-header declarations in a live-binary "
         "side's dependency scope for this comparison. Which mode a given "

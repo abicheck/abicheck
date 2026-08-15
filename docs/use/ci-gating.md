@@ -64,7 +64,7 @@ unscoped path:
    feature existed.
 2. **Classify (policy).** The active [policy profile](policies.md)
    (`--policy strict_abi|sdk_vendor|plugin_abi` or a custom
-   `--policy-file`) maps each *evaluated* change kind to its impact — the
+   `--policy`) maps each *evaluated* change kind to its impact — the
    same change can be `API_BREAK` under `strict_abi` but `COMPATIBLE` under
    `sdk_vendor`. A `NOT_EVALUATED` finding is not scored by policy at all.
 3. **Waive (suppressions).** [Suppression rules](suppressions.md)
@@ -172,8 +172,8 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 - **Suppressions → verdict, severity, and exit code.** Suppressed changes are
   removed before scoring, so they affect *all* downstream outputs: the
   verdict, the severity category counts, and therefore the exit code — under
-  either scheme. Guard the waiver list itself with `--strict-suppressions`
-  (fail on unused/expired rules) and `--require-justification`.
+  either scheme. Guard the waiver list itself with `suppression.strict: true`
+  (fail on unused/expired rules) and `suppression.require_justification: true`.
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see
@@ -185,7 +185,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 
 ```bash
 abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --severity-preset info-only --severity-abi-breaking error
+  --severity-preset info-only severity.abi_breaking: error
 ```
 
 **Fail on source-level breaks too** (the legacy default behaviour, pinned
@@ -204,8 +204,8 @@ scheme would now exit `0`:
 
 ```bash
 abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --severity-potential-breaking error \
-  --severity-addition error
+  severity.potential_breaking: error \
+  severity.addition: error
 ```
 
 **Vendor-friendly gate with audited waivers**:
@@ -213,7 +213,7 @@ abicheck compare baseline.json build/libfoo.so --header new=include/ \
 ```bash
 abicheck compare baseline.json build/libfoo.so --header new=include/ \
   --policy sdk_vendor --suppress suppressions.yaml \
-  --strict-suppressions --require-justification
+  suppression.strict: true suppression.require_justification: true
 ```
 
 More recipes: [Choose Your Workflow → How should CI behave](../start/choose-your-workflow.md)

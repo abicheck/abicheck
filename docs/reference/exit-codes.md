@@ -181,8 +181,8 @@ The highest applicable code wins. For example, if both `abi_breaking=error` and
 | `strict` | error | error | error | error |
 | `info-only` | info | info | info | info |
 
-Per-category overrides (`--severity-abi-breaking`, `--severity-potential-breaking`,
-`--severity-quality-issues`, `--severity-addition`) take precedence over the preset.
+Per-category overrides (`severity.abi_breaking: error`, `severity.potential_breaking: error`,
+`severity.quality_issues: error`, `severity.addition: error`) take precedence over the preset.
 
 ### CI gate patterns
 
@@ -195,7 +195,7 @@ ret=$?
 echo "OK (NO_CHANGE or COMPATIBLE)"
 
 # Block unexpected API expansion (severity-aware)
-abicheck compare old.json new.json --severity-addition error
+abicheck compare old.json new.json severity.addition: error
 ret=$?
 [ $ret -eq 1 ] && echo "ADDITIONS — unexpected API expansion" && exit 1
 [ $ret -eq 4 ] && echo "BREAKING — release blocked" && exit 1
@@ -299,7 +299,7 @@ Under the `severity` scheme the JSON report's `diff` block also carries a
 `blocking`/`blocking_categories` shape `compare`'s own report uses (one
 shared builder, so the two are comparable field by field), added in
 `scan_schema_version` 1.9. It is what makes a non-zero exit on an otherwise
-*compatible* diff self-explanatory: `--severity-addition error` on an
+*compatible* diff self-explanatory: `severity.addition: error` on an
 additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
 the cause, distinguishing it from the orthogonal contract-coverage `1`
 above. The default **text** output states the same fact in its
@@ -626,11 +626,11 @@ none of these rows — it always exits `0`/`1`/`64`; see
 
 \* Severity exit codes depend on the configuration, and the range covers the
 whole configuration space — **including demotion of a real break**. With
-`--severity-addition error`, additions exit `1`; with `--severity-preset
+`severity.addition: error`, additions exit `1`; with `--severity-preset
 info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
 comparison included. The default preset leaves `potential_breaking` at
 `warning`, so an `API_BREAK` exits `0` unless `--severity-preset strict` (or
-`--severity-potential-breaking error`) raises it to `2`. Read the report's
+`severity.potential_breaking: error`) raises it to `2`. Read the report's
 own `severity` gate block — `exit_code`/`blocking`/`blocking_categories` —
 rather than inferring the cause from the code.
 
@@ -647,7 +647,7 @@ json` if your pipeline needs to distinguish them. Under a resolved
 `severity` scheme (`scan --against` with any `--severity-*`/
 `--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
 the `compare` exit (severity) column on the same `*` terms, in **both**
-directions: `--severity-addition error` exits `1` on an additions-only diff,
+directions: `severity.addition: error` exits `1` on an additions-only diff,
 and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
 ["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 

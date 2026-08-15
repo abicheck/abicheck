@@ -78,7 +78,7 @@ Changes found, but **backwards-compatible** — existing compiled consumers can 
 
 > **Note:** `noexcept` removal is **not** `COMPATIBLE` — it is `COMPATIBLE_WITH_RISK` (see below), because callers compiled assuming `noexcept` omit exception landing pads.
 
-**CI action:** warn; do not fail. Use a severity flag (e.g. `--severity-addition error`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
+**CI action:** warn; do not fail. Use a severity flag (e.g. `severity.addition: error`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
 
 ---
 
@@ -212,7 +212,7 @@ the severity of the findings) becomes the process **exit code** your CI reads:
 \* Severity-aware codes depend on the active severity configuration. Under the
 **`default`** preset (`abi_breaking=error`, everything else `warning`/`info`),
 only `BREAKING` reaches an error level, so the other rows exit `0` unless you
-raise their category — e.g. `--severity-addition error` makes an
+raise their category — e.g. `severity.addition: error` makes an
 additions-only `COMPATIBLE` exit `1`, and `--severity-preset strict` makes
 `API_BREAK`/`COMPATIBLE_WITH_RISK` exit `2`.
 

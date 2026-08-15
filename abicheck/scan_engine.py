@@ -286,7 +286,7 @@ def _build_new_snapshot(
             # *include_dependencies* itself is derived from the baseline's
             # own explicit tag when one is given (see run_scan_core's
             # _scan_candidate_include_dependencies) so the inverse, explicit
-            # `dump --include-dependencies` baseline workflow isn't
+            # `dump --include-system-declarations` baseline workflow isn't
             # hard-broken the other way (Codex review, fresh evidence).
             include_dependencies=include_dependencies,
         )
@@ -351,10 +351,10 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     -- correct for the single most common case: no baseline, a native-binary
     baseline (which now resolves filtered too), or a JSON baseline that is
     itself filtered/untagged. Only a JSON baseline explicitly dumped with
-    ``dump --include-dependencies`` (tagged ``"full"``) needs the candidate
+    ``dump --include-system-declarations`` (tagged ``"full"``) needs the candidate
     to go unfiltered too, else the comparability gate hard-fails that
     legitimate, if less common, inverse workflow (Codex review, fresh
-    evidence) -- and ``scan`` has no ``--include-dependencies`` flag of its
+    evidence) -- and ``scan`` has no ``--include-system-declarations`` flag of its
     own to let a caller request it directly. A cheap, best-effort JSON peek
     (not a full ``resolve_input``/dump) so this never triggers expensive
     work merely to decide a default; any failure to read/parse falls back to
@@ -394,7 +394,7 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     # not JSON text, so both the tail-byte-scan trick below and a plain-text
     # `json.load` would silently fail to find `dependency_scope` regardless
     # of its real value, always falling through to the `False` (filtered)
-    # default even for a baseline explicitly dumped `--include-dependencies`
+    # default even for a baseline explicitly dumped `--include-system-declarations`
     # (tagged `"full"`). Decode through the canonical snapshot I/O path
     # first for a compressed file -- skipping the tail-scan heuristic
     # entirely (it has no equivalent for compressed content: the *decoded*
@@ -908,7 +908,7 @@ def run_scan_core(
     ``_run_baseline_compare`` when a ``baseline`` is given — closing the
     asymmetry documented in AGENTS.md's "Known gaps": `scan --against` used
     to compute its exit code from the verdict alone (``legacy_exit_code``)
-    regardless of any ``--severity-*``/``.abicheck.yml`` ``severity:``
+    regardless of any ``--severity-preset``/``.abicheck.yml`` ``severity:``
     setting, unlike `compare`. ``exit_code_scheme == "severity"`` there now
     uses ``severity.compute_exit_code`` the same way `compare` does; the
     default ``"legacy"`` reproduces the prior, unchanged behavior exactly.

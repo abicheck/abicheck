@@ -463,8 +463,7 @@ def emit_github_step_summary(
 
     *severity_config*, when given, is forwarded to :func:`abicheck.reporter.to_markdown`
     so the step summary carries the same "Severity Configuration" section the
-    inline annotations are already gated on — without it, `--severity-addition
-    error` (for example) could fail the annotations/exit code while the step
+    inline annotations are already gated on — without it, `severity.addition: error` (for example) could fail the annotations/exit code while the step
     summary still rendered the legacy compatible report with no severity gate
     section, contradicting the actual gate on the same PR.
 

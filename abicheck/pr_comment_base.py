@@ -329,7 +329,7 @@ def _normalize_location(raw: str) -> str:
 def _severity_levels(report: dict[str, object]) -> dict[str, str]:
     """Resolved per-category severity levels from the report, or ``{}``.
 
-    Present when the comparison ran with a severity config (``--severity-*`` /
+    Present when the comparison ran with a severity config (a ``severity:`` config /
     preset). A category set to ``error`` turns the check red, so the comment
     must file that category's findings under Breaking to match — this covers
     ``severity-addition: error`` and any preset/extra-arg path uniformly.

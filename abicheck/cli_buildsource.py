@@ -561,7 +561,7 @@ def _write_snapshot_output(
     the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).
     *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when given,
     ``check_requested_depth_satisfied`` raises if the snapshot did not actually reach
-    it. Unless *include_dependencies* is set (``dump --include-dependencies``),
+    it. Unless *include_dependencies* is set (``dump --include-system-declarations``),
     toolchain/system-header declarations are excluded from the snapshot right before
     serialization by default, once every embed step above has had its chance to fill
     in the snapshot — see ``dumper_scoping.py`` for what "dependency" means here.

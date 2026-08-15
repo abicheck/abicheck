@@ -519,7 +519,7 @@ class TestLoadSuppressionAndPolicy:
         pol.write_text("base_policy: strict_abi\n")
         _, pf = _load_suppression_and_policy(None, "sdk_vendor", pol)
         assert pf is not None
-        assert "is ignored when --policy-file is given" in capsys.readouterr().err
+        assert "is ignored when --policy is given" in capsys.readouterr().err
 
     def test_policy_file_surfaces_validate_overrides_warnings(
         self, tmp_path: Path, capsys

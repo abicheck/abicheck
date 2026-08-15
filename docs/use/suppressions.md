@@ -273,41 +273,41 @@ enforcement.
 2. Author     Write candidates.yml by hand from the diff (see File format above),
               filling in reason fields and expiry dates
 3. Enforce    abicheck compare old.so new.so --suppress candidates.yml \
-                --strict-suppressions --require-justification
+                suppression.strict: true suppression.require_justification: true
 ```
 
-### Requiring justification (`--require-justification`)
+### Requiring justification (`suppression.require_justification: true`)
 
 In team environments, every suppression should explain *why* a breaking change
-is acceptable. The `--require-justification` flag enforces this at load time:
+is acceptable. The `suppression.require_justification: true` flag enforces this at load time:
 
 ```bash
 abicheck compare old.so new.so \
   --suppress suppressions.yaml \
-  --require-justification
+  suppression.require_justification: true
 ```
 
 If any rule has an empty or missing `reason` field, the command fails immediately:
 
 ```
 Error: Invalid value for '--suppress': Suppression rule 3 has no 'reason' field.
-All suppression rules must include a justification when --require-justification is set.
+All suppression rules must include a justification when suppression.require_justification: true is set.
 ```
 
 This pairs well with a hand-authored candidate file that starts with empty
-`reason` fields: `--require-justification` will fail the run until every rule
+`reason` fields: `suppression.require_justification: true` will fail the run until every rule
 is reviewed and filled in.
 
-### Failing on expired suppressions (`--strict-suppressions`)
+### Failing on expired suppressions (`suppression.strict: true`)
 
-The `--strict-suppressions` flag turns expired rules from silent no-ops into hard
+The `suppression.strict: true` flag turns expired rules from silent no-ops into hard
 failures. Without it, an expired rule simply stops matching (the underlying change
 reappears in the report). With it, the command fails before comparison even runs:
 
 ```bash
 abicheck compare old.so new.so \
   --suppress suppressions.yaml \
-  --strict-suppressions
+  suppression.strict: true
 ```
 
 If any rule is past its `expires` date:
@@ -323,7 +323,7 @@ This prevents stale suppressions from accumulating. When a rule expires, the tea
 must explicitly decide: remove it (the change is no longer expected), or renew it
 with an updated expiry and reason.
 
-Both `--strict-suppressions` and `--require-justification` work on `compare`
+Both `suppression.strict: true` and `suppression.require_justification: true` work on `compare`
 (single-library and bundle/package inputs).
 
 ### Recommended CI configuration
@@ -335,8 +335,8 @@ For CI pipelines, combine both features:
 # gate CI with strict lifecycle enforcement:
 abicheck compare old.so new.so -H include/ \
   --suppress suppressions.yaml \
-  --strict-suppressions \
-  --require-justification
+  suppression.strict: true \
+  suppression.require_justification: true
 ```
 
 This ensures that:

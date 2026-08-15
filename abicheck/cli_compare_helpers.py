@@ -55,6 +55,7 @@ from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
     _fold_suppression_audit_into_text as _fold_suppression_audit_into_text,
+    _fold_use_case_impact_into_text,
 )
 from .cli_compare_options import (
     _cli_flag,
@@ -123,22 +124,13 @@ def _resolve_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
     scope_public_headers: bool,
-    collapse_versioned_symbols: bool,
-    public_symbols: tuple[str, ...],
-    strict_suppressions: bool,
-    require_justification: bool,
     exit_code_scheme: str | None,
     debug_format_opt: str | None,
     debug_format: str | None,
     dwarf_only: bool,
     debuginfod: bool,
     debuginfod_url: str | None,
-    show_redundant: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -166,21 +158,9 @@ def _resolve_compare_config(
     resolved_cfg = resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
-        cli_severity_abi_breaking=severity_abi_breaking,
-        cli_severity_potential_breaking=severity_potential_breaking,
-        cli_severity_quality_issues=severity_quality_issues,
-        cli_severity_addition=severity_addition,
         cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        cli_collapse_versioned_symbols=_cli_flag(
-            "collapse_versioned_symbols", collapse_versioned_symbols
-        ),
-        cli_public_symbols=public_symbols,
-        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
-        cli_require_justification=_cli_flag(
-            "require_justification", require_justification
-        ),
         cli_exit_code_scheme=exit_code_scheme,
-        # ADR-040 Lever 2: debug-resolution + show-redundant demoted to config.
+        # ADR-040 Lever 2: debug-resolution demoted to config.
         # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
         # config wins); the is_flags need the COMMANDLINE-source gate so their
         # default ``False`` doesn't mask a configured ``True``. A typed legacy
@@ -192,7 +172,6 @@ def _resolve_compare_config(
         cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
         cli_debuginfod=_cli_flag("debuginfod", debuginfod),
         cli_debuginfod_url=debuginfod_url,
-        cli_show_redundant=_cli_flag("show_redundant", show_redundant),
     )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
@@ -775,7 +754,7 @@ def _embed_inline_source_sides(
     # CLI-over-config explicitness read from compare's *real* ctx (where
     # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
     # dump runs under ctx.invoke where that signal is lost, so we compute it
-    # here and thread it through (Codex review). A per-side --old/new-ast-frontend
+    # here and thread it through (Codex review). A per-side --ast-frontend old=/new=
     # is itself an explicit frontend for that side.
     _nostdinc_explicit = (
         ctx.get_parameter_source("nostdinc")
@@ -856,11 +835,8 @@ def _resolve_evaluation_config(
     suppression: Any, suppress: Path | None, symbols_list: Any,
     contract_mode: str | None, contract_evaluation: bool,
     scope_public_headers: bool,
-    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     require_justification: bool,
     exit_code_scheme: str | None, severity_preset: str | None,
-    severity_abi_breaking: str | None, severity_potential_breaking: str | None,
-    severity_quality_issues: str | None, severity_addition: str | None,
     pack_paths: tuple[Path, ...],
     policy_selected_by: str | None, policy_selected_path: Path | None,
     policy_selected_sha: str | None,
@@ -893,16 +869,10 @@ def _resolve_evaluation_config(
                 "scope_public_headers": scope_public_headers,
                 "policy": policy,
                 "policy_file_path": policy_file_path,
-                "public_symbols": public_symbols,
-                "public_symbols_list": public_symbols_list,
                 "suppress": suppress,
                 "require_justification": require_justification,
                 "exit_code_scheme": exit_code_scheme,
                 "severity_preset": severity_preset,
-                "severity_abi_breaking": severity_abi_breaking,
-                "severity_potential_breaking": severity_potential_breaking,
-                "severity_quality_issues": severity_quality_issues,
-                "severity_addition": severity_addition,
                 "pack_paths": pack_paths,
             },
             resolved_cfg=resolved_cfg,
@@ -943,7 +913,7 @@ def _render_compare_report(
 ) -> str:
     """Render one compare report and fold every post-render section into it.
 
-    The primary (``--format``) and secondary (``--secondary-format``) renders
+    The primary (``--format``) and secondary (``--write``) renders
     run the identical four-step pipeline and differ only in their arguments, so
     they share this one function rather than keeping two copies that can drift.
     """
@@ -966,11 +936,51 @@ def _render_compare_report(
     text = _fold_suppression_audit_into_text(
         text, fmt, getattr(result, "suppression_audit", None)
     )
+    text = _fold_use_case_impact_into_text(text, fmt, result)
     return _fold_evidence_depth_into_json(
         text, fmt, old, new,
         old_build_info=old_build_info, new_build_info=new_build_info,
         old_sources=old_sources, new_sources=new_sources,
     )
+
+
+def _attach_use_case_impact(
+    result: Any, old: Any, new: Any, manifest: Path | None
+) -> None:
+    """Attach ``compare --use-cases``'s attribution block to *result*.
+
+    A no-op without the flag. A malformed manifest, and a pair with no
+    source graph on either side to resolve entrypoints against, are usage
+    errors (exit 64) rather than a silently missing section -- the user
+    asked for an attribution the run cannot produce, and an absent block
+    would read as "no use case is affected".
+    """
+    if manifest is None:
+        return
+    from .errors import UseCaseManifestError
+    from .impact.use_case_impact import build_use_case_impact
+    from .impact.use_cases import load_use_case_manifest
+
+    try:
+        definitions = load_use_case_manifest(manifest)
+    except (UseCaseManifestError, OSError) as exc:
+        # OSError alongside the manifest-specific error: Click's exists=True
+        # only proves the path was there at parse time, not at the read a
+        # moment later, and an unhandled OSError would exit 1 with a bare
+        # traceback instead of the documented usage-error path.
+        raise click.UsageError(str(exc)) from exc
+
+    impact = build_use_case_impact(
+        definitions, old, new, list(result.changes), manifest=str(manifest)
+    )
+    if impact is None:
+        raise click.UsageError(
+            f"--use-cases {manifest} needs a source graph to resolve "
+            "entrypoints against, and neither side carries one (dump with "
+            "--sources/--build-info, or ensure the always-on header-only "
+            "graph attached)."
+        )
+    result.use_case_impact = impact
 
 
 def _attach_suppression_audit(result: Any, suppression: Any) -> None:
@@ -1070,6 +1080,7 @@ def _report_compare_result(
     old_sources: Path | None, new_sources: Path | None,
     require_complete_analysis: bool = False,
     depth: str | None = None,
+    use_cases_manifest: Path | None = None,
 ) -> None:
     """Everything after the comparison: annotate, scope, render, exit.
 
@@ -1199,6 +1210,8 @@ def _report_compare_result(
     if audit_suppressions:
         _attach_suppression_audit(result, suppression)
 
+    _attach_use_case_impact(result, old, new, use_cases_manifest)
+
     # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/
     # --required-symbol scoping above can add scoped_only_changes (fresh
     # Change objects scope_diff_to_app/scope_diff_to_required_symbols
@@ -1300,22 +1313,17 @@ def run_compare(
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,
     fmt: str, demangle: bool | None, output: Path | None,
-    suppress: Path | None, strict_suppressions: bool, require_justification: bool,
+    suppress: Path | None,
     policy: str, policy_file_path: Path | None,
     pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
     dwarf_only: bool,
     severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
     config: Path | None,
     exit_code_scheme: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     include_dependencies: bool,
-    show_redundant: bool, show_only: str | None, stat: bool,
-    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
-    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
+    show_only: str | None, stat: bool,
+    scope_public_headers: bool, show_filtered: bool,
     post_manifest_path: Path | None,
     report_mode: str,
     recommend: bool,
@@ -1334,6 +1342,7 @@ def run_compare(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
     verbose: bool,
+    use_cases_manifest: Path | None = None,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
     depth: str | None = None,
@@ -1409,31 +1418,24 @@ def run_compare(
     cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
-        severity_abi_breaking=severity_abi_breaking,
-        severity_potential_breaking=severity_potential_breaking,
-        severity_quality_issues=severity_quality_issues,
-        severity_addition=severity_addition,
         scope_public_headers=scope_public_headers,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        public_symbols=public_symbols,
-        strict_suppressions=strict_suppressions,
-        require_justification=require_justification,
         exit_code_scheme=exit_code_scheme,
         debug_format_opt=debug_format_opt,
         debug_format=debug_format,
         dwarf_only=dwarf_only,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
-        show_redundant=show_redundant,
     )
     sev_config = resolved_cfg.severity
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
-    # ADR-040 Lever 2: the demoted debug-resolution + show-redundant knobs are now
-    # resolved (CLI > config > default); overwrite the raw flag locals so the rest
-    # of the flow sees the merged values.
+    # ADR-040 Lever 2: the demoted debug-resolution knobs are now resolved
+    # (CLI > config > default); overwrite the raw flag locals so the rest of
+    # the flow sees the merged values. The config-only knobs above
+    # (collapse/strict/justification/show_redundant) have no flag left to
+    # overwrite -- they are simply read off the resolved config.
     debug_format_opt = resolved_cfg.debug_format
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod
@@ -1572,7 +1574,7 @@ def run_compare(
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver folds the project's .abicheck.yml compile: block into the CLI
     # cross-toolchain/frontend flags (CLI > config) and appends config include_dirs
-    # after the -I roots. It applies to both sides; the per-side --old/new-ast-frontend
+    # after the -I roots. It applies to both sides; a per-side --ast-frontend old=/new=
     # overrides still win for the frontend (threaded separately below). cfg_path is
     # the same config compare resolves everything else from (explicit --config or the
     # .abicheck.yml auto-discovered from cwd).
@@ -1593,7 +1595,7 @@ def run_compare(
     # tuple, else the overridden side would lose them (Codex review).
     config_includes = tuple(merged_includes[len(includes):])
     # The merged frontend flows to both sides through the explicit header_backend
-    # (so --old/new-ast-frontend can still override per side); neutralize the
+    # (so --ast-frontend old=/new= can still override per side); neutralize the
     # frontend on the threaded context so run_dump's `compile.frontend` does NOT
     # outrank that per-side header_backend (it only carries the --gcc-*/--sysroot/
     # --nostdinc knobs for both sides).
@@ -1719,7 +1721,7 @@ def run_compare(
     # One read for both consumers -- the live overlay and the ADR-049 receipt
     # that names this file with its digest (see the helper for why).
     force_public, symbols_list = resolve_force_public_scope(
-        resolved_cfg.public_symbols, public_symbols_list
+        resolved_cfg.public_symbols, None
     )
     _warn_force_public_ignored(force_public, scope_public_headers)
 
@@ -1731,13 +1733,8 @@ def run_compare(
         symbols_list=symbols_list,
         contract_mode=contract_mode, contract_evaluation=contract_evaluation,
         scope_public_headers=scope_public_headers,
-        public_symbols=public_symbols, public_symbols_list=public_symbols_list,
         require_justification=require_justification,
         exit_code_scheme=exit_code_scheme, severity_preset=severity_preset,
-        severity_abi_breaking=severity_abi_breaking,
-        severity_potential_breaking=severity_potential_breaking,
-        severity_quality_issues=severity_quality_issues,
-        severity_addition=severity_addition,
         pack_paths=pack_paths,
         policy_selected_by=policy_selected_by,
         policy_selected_path=policy_selected_path,
@@ -1830,6 +1827,7 @@ def run_compare(
         old_sources=old_sources, new_sources=new_sources,
         require_complete_analysis=require_complete_analysis,
         depth=depth,
+        use_cases_manifest=use_cases_manifest,
     )
 
 

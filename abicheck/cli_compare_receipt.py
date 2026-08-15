@@ -67,16 +67,10 @@ COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "scope_public_headers",
     "policy",
     "policy_file_path",
-    "public_symbols",
-    "public_symbols_list",
     "suppress",
     "require_justification",
     "exit_code_scheme",
     "severity_preset",
-    "severity_abi_breaking",
-    "severity_potential_breaking",
-    "severity_quality_issues",
-    "severity_addition",
     "pack_paths",
 )
 

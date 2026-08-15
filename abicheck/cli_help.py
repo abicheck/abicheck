@@ -101,8 +101,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Toolchain (header parsing)",
             "options": [
                 "--ast-frontend",
-                "--old-ast-frontend",
-                "--new-ast-frontend",
                 "--compiler",
                 "--compiler-prefix",
                 "--compiler-option",
@@ -114,15 +112,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Policy & severity",
             "options": [
                 "--policy",
-                "--policy-file",
                 "--suppress",
-                "--strict-suppressions",
-                "--require-justification",
                 "--severity-preset",
-                "--severity-abi-breaking",
-                "--severity-potential-breaking",
-                "--severity-quality-issues",
-                "--severity-addition",
             ],
         },
         {
@@ -130,10 +121,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--scope-public-headers",
                 "--show-filtered",
-                "--show-redundant",
-                "--collapse-versioned-symbols",
-                "--public-symbol",
-                "--public-symbols-list",
             ],
         },
         {
@@ -195,8 +182,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--header",
                 "--include",
-                "--public-header",
-                "--public-header-dir",
                 "--version",
                 "--lang",
             ],
@@ -230,7 +215,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--depth",
                 "--build-info",
                 "--sources",
-                "--build-dir",
                 "--compile-db-filter",
                 "--build-query",
                 "--build-compile-db",
@@ -254,10 +238,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--binary",
                 "--header",
                 "--include",
-                "--public-header-dir",
                 "--sources",
                 "--build-info",
-                "--compile-db",
                 "--config",
             ],
         },
@@ -297,22 +279,14 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Policy & severity",
             "options": [
                 "--policy",
-                "--policy-file",
                 "--suppress",
-                "--strict-suppressions",
                 "--severity-preset",
-                "--severity-abi-breaking",
-                "--severity-potential-breaking",
-                "--severity-quality-issues",
-                "--severity-addition",
             ],
         },
         {
             "name": "Public-surface scoping",
             "options": [
                 "--scope-public-headers",
-                "--public-symbol",
-                "--public-symbols-list",
             ],
         },
         {
@@ -439,7 +413,6 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Policy & severity
         "config",
         "policy",
-        "policy_file_path",
         "suppress",
         "severity_preset",
         # Scoped comparison (ADR-043) — headline feature, not a long-tail knob

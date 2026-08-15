@@ -70,7 +70,7 @@ result.
 # L2 header declarations, all inline, in one snapshot (L0–L5 together).
 # Unseeded `--depth source` already analyses the whole target (the old
 # separate `full` rung collapsed into `source` — ADR-043):
-abicheck dump libfoo.so -H include/ --sources . --compile-db build/compile_commands.json \
+abicheck dump libfoo.so -H include/ --sources . --build-info build/compile_commands.json \
   --depth source -o libfoo.full.json
 ```
 

@@ -110,8 +110,11 @@ inputs:
       Directory whose headers are treated as public for provenance
       classification (repeatable, space-separated) — establishes the
       public/internal boundary so leakage/RTTI/exported-vs-public
-      cross-checks run instead of skipping. dump and scan modes only
-      (`--public-header-dir` on the CLI); compare has no equivalent flag.
+      cross-checks run instead of skipping. scan mode forwards it as
+      `--public-header-dir`; dump mode forwards it as one more `-H/--header`
+      root, which is where `dump` reads declaration provenance from (a
+      directory entry tags everything under it public). compare has no
+      equivalent flag.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
@@ -321,9 +324,11 @@ inputs:
     required: false
   compile-db:
     description: >
-      Explicit path to a compile_commands.json (scan mode; also compare
-      mode's new side when build-info is unset). For dump mode this is
-      folded into build-info. Use when the compile DB is not under sources.
+      Explicit path to a compile_commands.json, when it is not under
+      `sources`. Folded into `--build-info` for every mode (scan, dump, and
+      compare mode's new side) — `--build-info` already accepts a build dir,
+      a compile_commands.json, or a pre-captured pack, so it is the one flag
+      that takes this operand.
     required: false
   build-config:
     description: >
@@ -533,7 +538,12 @@ inputs:
     required: false
     default: 'strict_abi'
   policy-file:
-    description: 'Path to a YAML policy file with per-kind (overrides:) or selector-scoped (reclassify:) verdict re-classification.'
+    description: >
+      Path to a YAML policy document with per-kind (overrides:) or
+      selector-scoped (reclassify:) verdict re-classification, or the name of
+      a packaged built-in one (e.g. `security`). Forwarded as `--policy`,
+      which takes a profile name or a document; setting this outranks
+      `policy` for the run, exactly as the removed `--policy-file` flag did.
     required: false
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes.'
@@ -600,12 +610,6 @@ inputs:
       Severity preset: 'default', 'strict', or 'info-only'.
       Controls exit codes and report labels. Only applies to compare mode.
     required: false
-  severity-addition:
-    description: >
-      Severity for new public API additions: 'error', 'warning', or 'info'.
-      Set to 'error' to fail the step when additions are detected.
-      Only applies to compare mode.
-    required: false
   jobs:
     description: >
       Number of parallel library comparisons for compare mode when
@@ -669,7 +673,7 @@ outputs:
     description: >
       ABI verdict. For compare (single-pair or directory/package operands):
       COMPATIBLE, SEVERITY_ERROR (with --severity-* via extra-args, or when
-      --severity-addition=error detects new public API additions),
+      a `severity.addition: error` config detects new public API additions),
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
@@ -929,7 +933,6 @@ runs:
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
-        INPUT_SEVERITY_ADDITION: ${{ inputs.severity-addition }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}

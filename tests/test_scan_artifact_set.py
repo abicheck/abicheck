@@ -1208,7 +1208,7 @@ class TestArtifactSetComparisonOnlyFlagsRejected:
     (never has --against), but the "these flags only mean anything with
     --against" guard only ran on the single-binary path -- the
     --artifact-set branch's own early ``return`` bypassed it entirely, so
-    e.g. --suppress/--policy-file/--env-matrix were silently parsed and
+    e.g. --suppress/--policy/--env-matrix were silently parsed and
     discarded for a set instead of erroring.
     """
 

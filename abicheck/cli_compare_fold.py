@@ -74,7 +74,7 @@ def _fold_scoped_compat_into_text(
     scoped-only fold-in unfiltered would let a `--show-only` run re-surface a
     finding it explicitly excluded (Codex review, mirrors the identical
     ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
-    deliberately always-unfiltered, e.g. the ``--secondary-format`` render,
+    deliberately always-unfiltered, e.g. the ``--write`` render,
     which ignores the primary format's own ``--show-only``.
 
     *report_mode* ``"root-cause"`` skips the markdown/text
@@ -800,6 +800,28 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     if selectors:
         return selectors
     return f"rule#{index}"
+
+
+def _fold_use_case_impact_into_text(text: str, fmt: str, result: Any) -> str:
+    """Fold ``compare --use-cases``'s attribution into the rendered report.
+
+    Markdown/text/review only. The JSON paths already carry the block --
+    ``reporter._add_use_case_impact`` emits it straight off
+    ``DiffResult.use_case_impact`` -- so folding it again here would write
+    the key twice; the structured formats (sarif, junit, html) are left
+    untouched, the same scope boundary
+    :func:`_fold_suppression_audit_into_text` uses.
+    """
+    from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
+
+    impact = getattr(result, "use_case_impact", None)
+    if not isinstance(impact, UseCaseImpact) or fmt not in (
+        "markdown",
+        "text",
+        "review",
+    ):
+        return text
+    return "\n".join([text, *render_use_case_impact_lines(impact)])
 
 
 def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
