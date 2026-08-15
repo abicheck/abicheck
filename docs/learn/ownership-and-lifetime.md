@@ -123,15 +123,25 @@ enough to treat as proof:
   possible: `T&`/`const T&`/a non-owning `std::span`/`std::string_view` for
   borrowed access, a library-provided RAII wrapper (a "handle" class) around
   an opaque C pointer for a stable ABI boundary that still encodes ownership
-  in C++ consumer code. For transferred ownership, `std::unique_ptr<T>`/
-  `std::shared_ptr<T>` with their *default* deleter are only safe when both
-  sides are guaranteed to share the same allocator, CRT, and standard-library
-  ABI — across the CRT/allocator-mismatch boundary this page opens with, a
-  default-deleted `unique_ptr<T>` returned from the library runs the
-  *consumer's* `delete` on memory the *library* allocated, which is exactly
-  the heap corruption described above. Across such a boundary, use a custom
-  deleter that calls an exported library-side destroy function, or the
-  opaque-handle RAII wrapper instead.
+  in C++ consumer code. For transferred ownership, `std::unique_ptr<T>`'s and
+  `std::shared_ptr<T>`'s *default* deleters behave differently across a
+  CRT/allocator-mismatch boundary, and the two must not be treated the same
+  way: `unique_ptr<T>`'s deleter is baked into its own type, so whichever code
+  instantiates the destructor — typically the consumer, wherever the
+  `unique_ptr` variable goes out of scope — runs `delete` there; a
+  default-deleted `unique_ptr<T>` returned from the library therefore runs
+  the *consumer's* `delete` on memory the *library* allocated, exactly the
+  heap corruption described above. `shared_ptr<T>`'s deleter, by contrast, is
+  *type-erased into its control block* at construction time, so a
+  `shared_ptr` the library constructs keeps calling back into the library's
+  own deletion path even when the consumer releases the last reference —
+  the default deleter is safe on this specific hazard. `shared_ptr` still
+  needs a compatible standard-library ABI on both sides (the control block's
+  own layout) and the same careful cross-module lifetime discipline this
+  whole page is about, just not a custom deleter for *this* reason. Across an
+  allocator/CRT-mismatch boundary, give `unique_ptr<T>` a custom deleter that
+  calls an exported library-side destroy function, or use the opaque-handle
+  RAII wrapper instead.
 - **Never change an ownership contract silently**, even when the signature
   is unaffected — this is exactly the class of change
   [Behavioral & Semantic Compatibility](behavioral-compatibility.md) says

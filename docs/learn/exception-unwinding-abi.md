@@ -80,12 +80,15 @@ real trap is narrower than "hidden visibility breaks the catch":
 > A `catch` genuinely fails to match when there is **no string fallback to
 > fall back to** — a runtime/toolchain configuration that compares
 > `type_info` by pointer identity alone (some non-GNU C++ runtimes, or a
-> GNU runtime built without the weak/COMDAT `type_info` merging this
-> fallback assumes), or when the thrown type's RTTI symbol is genuinely
-> stripped from the binary entirely (not merely hidden, and not merely
-> `-fno-rtti` — see above, that flag alone doesn't remove exception
-> `type_info`). In either case the exception unwinds past the intended
-> handler and `std::terminate()` fires.
+> GNU target configured to *assume* `type_info` names are already merged
+> into one unique instance — `__GXX_MERGED_TYPEINFO_NAMES`, not the common
+> default on typical Linux/glibc targets — which skips the string fallback
+> because it isn't supposed to need it; hidden visibility can then violate
+> that very assumption without the runtime detecting it), or when the
+> thrown type's RTTI symbol is genuinely stripped from the binary entirely
+> (not merely hidden, and not merely `-fno-rtti` — see above, that flag
+> alone doesn't remove exception `type_info`). In either case the exception
+> unwinds past the intended handler and `std::terminate()` fires.
 
 **Default visibility on a thrown type's `type_info`** (in practice: a
 polymorphic type with a key function, or an explicitly exported RTTI

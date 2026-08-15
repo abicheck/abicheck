@@ -46,8 +46,8 @@ reported 91 false-positive breaks caused by `ix86_*` symbols).
 ## How abicheck filters these symbols
 
 `abicheck` applies an ABI-relevance filter, `is_abi_relevant_elf_symbol()` in
-[`elf_symbol_filter.py`](https://github.com/abicheck/abicheck/blob/main/abicheck/elf_symbol_filter.py),
-when reading `.dynsym`. It excludes a symbol when it matches any of several
+`abicheck/elf_symbol_filter.py`, when reading `.dynsym`. It excludes a symbol
+when it matches any of several
 categories — the function itself, not this page, is the exact list, since a
 hand-copied prefix table here would drift the moment the filter changes:
 
