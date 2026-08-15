@@ -4,6 +4,45 @@
 # runs abicheck, captures the exit code, and sets outputs.
 set -uo pipefail
 
+# `$OSTYPE` is a bash builtin, always set, no external command needed --
+# Git Bash on GitHub's windows-latest runners reports "msys" (Cygwin
+# reports "cygwin"), every other supported runner reports something else
+# ("linux-gnu", "darwin*", ...). Computed once, used below by
+# `_is_path_already_qualified` to gate Windows-only path forms (a
+# drive-letter prefix, a leading backslash) behind actually running on
+# Windows -- see that function's own docstring for why (Codex review,
+# fresh evidence: a POSIX relative filename that happens to start with a
+# single character followed by a literal `:`, e.g. `a:baseline.json`,
+# would otherwise be misrecognized as an already-qualified Windows path on
+# every platform, not just Windows).
+case "$OSTYPE" in
+  msys* | cygwin* | win32*) _RUNNING_ON_WINDOWS=true ;;
+  *) _RUNNING_ON_WINDOWS=false ;;
+esac
+
+# Shared by every `$PWD`-anchoring decision below ($_PY_BIN canonicalization,
+# `_report_query`'s report-path anchoring): a path is "already qualified" --
+# must NOT get a `$PWD/` prefix -- when it's POSIX-absolute on any platform,
+# or (Windows only) drive-absolute (`C:\...`), drive-relative (`C:foo`, no
+# separator after the drive letter -- relative to that drive's own current
+# directory, a distinct real Windows path form this script has no way to
+# resolve either way, so a `$PWD/` prefix would be unconditionally wrong),
+# UNC (`\\server\share\...`), or root-relative (`\foo`). Gated on
+# `$_RUNNING_ON_WINDOWS` rather than applied unconditionally, since a bare
+# `?:*`/`\\*` pattern would otherwise also match a genuine POSIX relative
+# filename that happens to start with that shape (e.g. `a:baseline.json`).
+_is_path_already_qualified() {
+  case "$1" in
+    /*) return 0 ;;
+  esac
+  if [[ "$_RUNNING_ON_WINDOWS" == "true" ]]; then
+    case "$1" in
+      ?:* | \\*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Helper: append a flag with value(s) to the command array.
 # Prefer one item per line (a YAML block scalar, e.g. `headers: |`) — that
@@ -274,16 +313,9 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # as unusable (Codex review, fresh evidence). Anchored to $PWD here, before
 # any `cd` happens, using the same portable absolute-path check
 # (`_report_query` below) already uses for the identical reason.
-case "$_PY_BIN" in
-  /* | ?:* | \\*) ;; # already qualified: POSIX absolute, Windows drive-absolute
-    # (C:\...) or drive-relative (C:report.json -- relative to drive C's own
-    # current directory, a distinct real Windows path form this bash script
-    # has no way to correctly resolve against $PWD either way, so it is left
-    # alone rather than unconditionally, and definitely wrongly, prefixed),
-    # or UNC/root-relative (\\server\share\..., \foo)
-  "") ;; # not found at all -- leave empty, existing fallbacks handle this
-  *) _PY_BIN="$PWD/$_PY_BIN" ;;
-esac
+if [[ -n "$_PY_BIN" ]] && ! _is_path_already_qualified "$_PY_BIN"; then
+  _PY_BIN="$PWD/$_PY_BIN"
+fi
 
 # ---------------------------------------------------------------------------
 # Security: `python -c`/`python -m` insert this process's current working
@@ -1533,15 +1565,9 @@ _report_query() {
   # $PWD *before* that cd, since that's the correct base directory at this
   # point in the script.
   local report_path="$1"
-  case "$report_path" in
-    /* | ?:* | \\*) ;; # already qualified: POSIX absolute, Windows drive-absolute
-    # (C:\...) or drive-relative (C:report.json -- relative to drive C's own
-    # current directory, a distinct real Windows path form this bash script
-    # has no way to correctly resolve against $PWD either way, so it is left
-    # alone rather than unconditionally, and definitely wrongly, prefixed),
-    # or UNC/root-relative (\\server\share\..., \foo)
-    *) report_path="$PWD/$report_path" ;;
-  esac
+  if ! _is_path_already_qualified "$report_path"; then
+    report_path="$PWD/$report_path"
+  fi
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null
 import json
 import sys

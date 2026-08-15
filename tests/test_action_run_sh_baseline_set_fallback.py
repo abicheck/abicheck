@@ -62,14 +62,32 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = '_PY_BIN="$(command -v python3'
 _END_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 
+#: The extracted region's own `$_PY_BIN` anchoring (and, further down,
+#: `_report_query`'s report-path anchoring) both delegate to this shared,
+#: `$OSTYPE`-gated helper rather than a duplicated `case` pattern -- must be
+#: defined in the harness too, or every call resolves as "command not
+#: found" and the whole region silently degrades (Codex review, fresh
+#: evidence).
+_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
+_PATH_QUALIFIED_HELPER_END = "\n}\n"
+
 PROFILE = "linux-x86_64-gcc13-release"
+
+
+def _path_qualified_helper_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PATH_QUALIFIED_HELPER_START)
+    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
+        _PATH_QUALIFIED_HELPER_END
+    )
+    return text[start:end]
 
 
 def _baseline_region() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start)
-    return text[start:end]
+    return _path_qualified_helper_source() + "\n" + text[start:end]
 
 
 def _bash_executable() -> str:

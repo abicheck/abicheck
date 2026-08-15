@@ -67,7 +67,16 @@ _PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
 _MALICIOUS_MARKER = "MALICIOUS CODE EXECUTED"
 
 _PY_BIN_RESOLUTION_START = '_PY_BIN="$(command -v python3 || command -v python || true)"'
-_PY_BIN_RESOLUTION_END = "\nesac\n"
+_PY_BIN_RESOLUTION_END = "\nfi\n"
+
+#: `$_PY_BIN`'s anchoring (below) delegates to this shared helper -- also
+#: used by `_report_query`'s report-path anchoring -- rather than
+#: duplicating the OS-gated qualification logic (Codex review, fresh
+#: evidence: a bare drive-letter/backslash pattern applied unconditionally
+#: on every platform would misrecognize a genuine POSIX relative filename
+#: shaped like `a:baseline.json` as an already-qualified Windows path).
+_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
+_PATH_QUALIFIED_HELPER_END = "\n}\n"
 
 
 def _py_safe_dir_source() -> str:
@@ -81,17 +90,32 @@ def _py_safe_dir_source() -> str:
     return text[start:end]
 
 
+def _path_qualified_helper_source() -> str:
+    """Extract ``$OSTYPE``-detection + ``_is_path_already_qualified()``
+    verbatim -- required by ``_py_bin_resolution_source()`` below, since the
+    real anchoring block now delegates to it instead of a duplicated
+    ``case`` pattern."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PATH_QUALIFIED_HELPER_START)
+    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
+        _PATH_QUALIFIED_HELPER_END
+    )
+    return text[start:end]
+
+
 def _py_bin_resolution_source() -> str:
     """Extract the real ``$_PY_BIN`` resolution verbatim -- the
     ``command -v`` lookup plus its immediately-following absolute-path
-    canonicalization ``case`` block (Codex review, fresh evidence: a
+    canonicalization ``if`` block (Codex review, fresh evidence: a
     relative PATH entry can make ``command -v`` return a path relative to
     the CWD, which every ``(cd "$_PY_SAFE_DIR" && ... "$_PY_BIN" ...)``
-    invocation below would then resolve against the wrong directory)."""
+    invocation below would then resolve against the wrong directory).
+    Prefixed with ``_path_qualified_helper_source()``, since the real
+    anchoring now calls that shared function."""
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_PY_BIN_RESOLUTION_START)
     end = text.index(_PY_BIN_RESOLUTION_END, start) + len(_PY_BIN_RESOLUTION_END)
-    return text[start:end]
+    return _path_qualified_helper_source() + "\n" + text[start:end]
 
 
 def _write_fake_abicheck_package(root: Path) -> None:

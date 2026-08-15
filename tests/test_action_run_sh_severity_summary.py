@@ -93,7 +93,9 @@ def _verdict_case_region() -> str:
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start) + len(_END_MARKER)
     return (
-        py_bin_match.group(0)
+        _path_qualified_helper_source()
+        + "\n"
+        + py_bin_match.group(0)
         + "\n"
         + _py_safe_dir_source()
         + helpers
@@ -103,7 +105,7 @@ def _verdict_case_region() -> str:
 
 
 #: `_report_query`'s own report-path anchoring block: `local report_path=`
-#: through its closing `esac` -- extracted separately from the rest of the
+#: through its closing `fi` -- extracted separately from the rest of the
 #: function (which shells out to Python) so its anchoring *decision* can be
 #: tested directly, without needing a real file for the Python heredoc to
 #: read (Codex review, fresh evidence: a Windows UNC path like
@@ -111,7 +113,23 @@ def _verdict_case_region() -> str:
 #: drive-letter branch of the original pattern and was wrongly rewritten as
 #: ``$PWD/\\server\share\report.json``).
 _REPORT_PATH_ANCHOR_START = 'local report_path="$1"'
-_REPORT_PATH_ANCHOR_END = "\n  esac\n"
+_REPORT_PATH_ANCHOR_END = "\n  fi\n"
+
+#: The anchoring block above delegates to this shared, ``$OSTYPE``-gated
+#: helper (also used by ``$_PY_BIN``'s own anchoring) rather than a
+#: duplicated ``case`` pattern -- required in the harness for the same
+#: reason.
+_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
+_PATH_QUALIFIED_HELPER_END = "\n}\n"
+
+
+def _path_qualified_helper_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PATH_QUALIFIED_HELPER_START)
+    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
+        _PATH_QUALIFIED_HELPER_END
+    )
+    return text[start:end]
 
 
 def _report_path_anchor_source() -> str:
@@ -329,13 +347,23 @@ class TestSeverityErrorSummaryLine:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestReportPathAnchoring:
-    """`_report_query`'s path-anchoring `case` block (Codex review, fresh
-    evidence): a path that is already absolute in *some* real-world sense
-    must survive unchanged, not get a spurious `$PWD/` prefix prepended."""
+    """`_report_query`'s path-anchoring block (Codex review, fresh
+    evidence): a path that is already qualified in *some* real-world sense
+    must survive unchanged, not get a spurious `$PWD/` prefix prepended --
+    and a Windows-only path form (drive letter, backslash) must not be
+    misrecognized as already-qualified on a non-Windows host, where it's
+    exercising `_is_path_already_qualified`'s `$OSTYPE` gate (Codex review,
+    fresh evidence, second round: an earlier revision applied the
+    drive-letter/backslash forms unconditionally on every platform, so a
+    genuine POSIX relative filename shaped like `a:baseline.json` was
+    wrongly left un-anchored there too)."""
 
-    def _anchor(self, report_path: str, cwd: Path) -> str:
+    def _anchor(
+        self, report_path: str, cwd: Path, *, windows: bool = False
+    ) -> str:
         script = (
-            'f() {\n  local report_path="$1"\n'
+            _path_qualified_helper_source()
+            + '\nf() {\n  local report_path="$1"\n'
             + _report_path_anchor_source()[len(_REPORT_PATH_ANCHOR_START) :]
             + '  printf "%s" "$report_path"\n}\nf "$1"\n'
         )
@@ -344,12 +372,20 @@ class TestReportPathAnchoring:
         ) as f:
             f.write(script)
             script_path = f.name
+        env = dict(os.environ)
+        # `$OSTYPE` is what `_is_path_already_qualified` gates the
+        # Windows-only path forms on -- forced here rather than relying on
+        # whatever platform actually runs this test, so both branches are
+        # exercised regardless of host OS (mirrors the established
+        # `os.name`-monkeypatching pattern in test_compiler_options.py).
+        env["OSTYPE"] = "msys" if windows else "linux-gnu"
         try:
             result = subprocess.run(
                 [_bash_executable(), script_path, report_path],
                 capture_output=True,
                 text=True,
                 cwd=cwd,
+                env=env,
             )
         finally:
             os.unlink(script_path)
@@ -359,28 +395,61 @@ class TestReportPathAnchoring:
     def test_posix_absolute_path_is_unchanged(self, tmp_path: Path) -> None:
         assert self._anchor("/abs/report.json", tmp_path) == "/abs/report.json"
 
-    def test_windows_drive_letter_path_is_unchanged(self, tmp_path: Path) -> None:
-        assert self._anchor("C:\\report.json", tmp_path) == "C:\\report.json"
+    def test_windows_drive_letter_path_is_unchanged_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        assert (
+            self._anchor("C:\\report.json", tmp_path, windows=True)
+            == "C:\\report.json"
+        )
 
-    def test_unc_path_is_unchanged(self, tmp_path: Path) -> None:
+    def test_unc_path_is_unchanged_on_windows(self, tmp_path: Path) -> None:
         """The original bug: `\\\\server\\share\\report.json` matched neither
         the POSIX nor drive-letter branch and was wrongly rewritten with a
         `$PWD/` prefix -- silently pointing at a nonexistent path and making
         `_report_query` read as "no report available"."""
         unc = "\\\\server\\share\\report.json"
-        assert self._anchor(unc, tmp_path) == unc
+        assert self._anchor(unc, tmp_path, windows=True) == unc
 
-    def test_windows_root_relative_path_is_unchanged(self, tmp_path: Path) -> None:
-        assert self._anchor("\\report.json", tmp_path) == "\\report.json"
+    def test_windows_root_relative_path_is_unchanged_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        assert (
+            self._anchor("\\report.json", tmp_path, windows=True)
+            == "\\report.json"
+        )
 
-    def test_windows_drive_relative_path_is_unchanged(self, tmp_path: Path) -> None:
+    def test_windows_drive_relative_path_is_unchanged_on_windows(
+        self, tmp_path: Path
+    ) -> None:
         """`C:report.json` (no separator after the drive letter) is a
         distinct, real Windows path form -- relative to drive C's own
         current directory, not drive C's root. This bash script has no way
         to correctly resolve it against $PWD either way, so a `$PWD/`
         prefix would be unconditionally wrong, not just "some other
         wrong" -- left alone instead (Codex review, fresh evidence)."""
-        assert self._anchor("C:report.json", tmp_path) == "C:report.json"
+        assert (
+            self._anchor("C:report.json", tmp_path, windows=True)
+            == "C:report.json"
+        )
 
     def test_genuinely_relative_path_is_anchored_to_pwd(self, tmp_path: Path) -> None:
         assert self._anchor("report.json", tmp_path) == f"{tmp_path}/report.json"
+
+    def test_windows_only_forms_still_anchored_on_a_non_windows_host(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, second round: the drive-letter/
+        backslash recognition is Windows-only -- a genuine POSIX relative
+        filename shaped like a Windows path (e.g. `a:baseline.json`, a
+        single character then a literal `:`) must still be anchored to
+        `$PWD` on a non-Windows host, not misrecognized as already
+        qualified just because it happens to match that shape."""
+        assert (
+            self._anchor("a:baseline.json", tmp_path, windows=False)
+            == f"{tmp_path}/a:baseline.json"
+        )
+        assert (
+            self._anchor("\\report.json", tmp_path, windows=False)
+            == f"{tmp_path}/\\report.json"
+        )

@@ -137,6 +137,17 @@
   real report silently unreadable and the Job Summary/PR-comment severity
   lookups fall back to their generic "no report available" message instead
   of the report's actual verdict (Codex review).
+- **The Windows-only path-qualification check (drive letter, UNC, root-
+  relative) used by `$_PY_BIN` canonicalization and `_report_query`'s
+  report-path anchoring is now gated on actually running on Windows
+  (`$OSTYPE`), not applied unconditionally on every platform.** Extracted
+  into one shared `_is_path_already_qualified()` helper instead of two
+  duplicated `case` patterns. Applying the drive-letter/backslash forms
+  unconditionally meant a genuine POSIX relative filename shaped like a
+  Windows path (e.g. `a:baseline.json`, a single character then a literal
+  `:`) was wrongly recognized as already-qualified and left un-anchored on
+  Linux/macOS too, instead of being anchored to `$PWD` like any other
+  relative path (Codex review).
 - **`_user_define_flags` (the ADR-039 build-context collector's global
   `-D`/`-U` harvester, `cli_dump_helpers.py`) now tokenizes its
   `--gcc-options` string with the shared `split_gcc_options`, not a bare
