@@ -1821,8 +1821,10 @@ _PLAIN_TOKEN = st.text(
     max_size=10,
 ).filter(
     lambda t: (
-        t.lower().removesuffix(".exe") not in _LAUNCHERS
-        and t.lower() not in ("env", "env.exe")
+        t.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+        not in _LAUNCHERS
+        and t.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        not in ("env", "env.exe")
     )
 )
 

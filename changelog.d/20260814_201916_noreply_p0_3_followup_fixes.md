@@ -436,7 +436,7 @@
   `-Xclang`-wrapped four-token form regardless of the original capture
   shape. Both branches now converge on the identical `-Xclang`-wrapped
   reconstruction, computed from whichever internal encoding matched (the
-  `-Xclang ` marker is stripped first, if present, before parsing).
+  `` `-Xclang ` `` marker is stripped first, if present, before parsing).
 - **A seventeenth review round found the sixteenth round's own
   `split_operand_survivor()` unification fixed *decode* but not *encode*.**
   `adapters.base.extract_abi_relevant_flags()` — the function that
@@ -597,3 +597,44 @@
   this round's three findings too. Left open pending either a maintainer
   with direct CI-runner access, or the fresh CI run this round's own push
   triggers narrowing down which specific errors recur.
+
+- **Round 20** closed four of the five remaining CodeRabbit findings on this
+  PR (the fifth was already correct, verified rather than re-fixed):
+  1. `adapters.base._add_generic_flag_option`'s generic-flag `BuildOption`
+     projection now strips a legacy `-Xclang `-marker survivor prefix (the
+     pre-round-17 internal encoding, still decode-only-recognized per
+     `_XCLANG_WRAPPED_ABI_FLAG_MARKER`'s own docstring) before deriving the
+     option's key/value, while still preserving the original, unstripped
+     token in `raw` — without this, a legacy evidence pack's marked survivor
+     and a freshly-captured pack's canonical survivor for the identical
+     `-target-abi`/`-target-cpu`/`-target-feature`/`-target-linker-version`
+     flag derived two different `BuildOption` keys
+     (`-Xclang -target-abi` vs. `-target-abi`), so `build_diff` read one
+     unchanged option as a false removal on one side plus a false addition
+     on the other. Regression test:
+     `test_split_target_abi_flag_legacy_xclang_marker_survivor_produces_same_option`
+     in `tests/test_build_source_pack.py`.
+  2. `_argv.py`'s `split_operand_survivor` docstring corrected — it no
+     longer claims `extract_abi_relevant_flags` normalizes the
+     `-Xclang`-wrapped capture shape into a second, distinct internal
+     encoding; both capture shapes have encoded identically (no marker)
+     since round 17, and the marker is decode-only backward compatibility.
+  3. This changelog fragment's own markdownlint MD038 violation (a
+     trailing-space code span in single backticks) fixed by padding with
+     double backticks.
+  4. The fifth CodeRabbit finding on `tests/test_header_compile_context_gcc_path.py`
+     was verified already correct on this commit (no stray `os` usage
+     outside a docstring) — nothing to fix, per CodeRabbit's own "✅
+     Addressed" note.
+  5. `tests/test_source_extractors.py`'s `_PLAIN_TOKEN` Hypothesis filter
+     now compares each generated token's own basename (splitting on both
+     `/` and `\`) against the launcher/`env` name sets, matching
+     `_skip_env_prefix`/`strip_launchers`'s own basename-based matching —
+     previously it compared the whole token, so Hypothesis could generate a
+     token like `a/env` that `strip_launchers` correctly strips (by
+     basename) but the test's own filter didn't exclude, causing
+     intermittent assertion failures.
+  Also hoisted the already-computed `_is_msvc_command(cu.argv)` local in
+  `header_compile_context.py`'s flag-rendering function into one variable
+  reused by both call sites, instead of recomputing it a second time in the
+  per-flag loop (CodeRabbit nitpick).

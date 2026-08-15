@@ -28,6 +28,7 @@ from typing import Protocol, runtime_checkable
 from ...dumper_clang import _is_cl_style_driver_name
 from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 from ..source_extractors._argv import (
+    _XCLANG_WRAPPED_ABI_FLAG_MARKER,
     SPLIT_OPERAND_ABI_FLAGS,
     is_split_operand_abi_flag_survivor,
     split_operand_survivor as split_operand_survivor,
@@ -963,17 +964,33 @@ def _add_generic_flag_option(
     seen: set[tuple[str, str]],
 ) -> None:
     """Record a non-mode ABI-relevant flag (define/std/generic) as a BuildOption."""
-    if flag.startswith(("-D", "/D")):
-        key, _, value = flag[2:].partition("=")
+    # A legacy evidence pack may still carry the pre-canonicalization
+    # ``-Xclang ``-marker survivor spelling for a split-operand cc1 flag
+    # (round 20, CodeRabbit finding 1: ``-Xclang -target-abi=aapcs`` instead
+    # of the canonical, unmarked ``-target-abi=aapcs`` --
+    # ``SPLIT_OPERAND_ABI_FLAGS``'s own docstring, "Canonicalize equivalent
+    # cc1 survivor spellings"). Strip the marker before deriving the key/value
+    # below so the marked and unmarked spellings of the identical flag
+    # produce the SAME ``BuildOption`` -- otherwise ``build_diff`` reads one
+    # side's marked survivor and the other side's canonical survivor as a
+    # false removal + addition. The original token is preserved verbatim in
+    # ``raw`` regardless.
+    key_flag = (
+        flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
+        if is_split_operand_abi_flag_survivor(flag)
+        else flag
+    )
+    if key_flag.startswith(("-D", "/D")):
+        key, _, value = key_flag[2:].partition("=")
         _add_build_option(out, seen, f"define:{key}", value, raw=flag)
-    elif flag.startswith(_STD_FLAG_PREFIXES):
+    elif key_flag.startswith(_STD_FLAG_PREFIXES):
         # Language standard. GCC ``-std=`` is already captured via
         # cu.standard above; MSVC ``/std:`` is not parsed into
         # cu.standard, so normalize it into the same std:<lang> option
         # here (only when the structured field didn't already set it).
         if not cu.standard:
-            sep = "=" if "=" in flag else ":"
-            std_val = flag.split(sep, 1)[1] if sep in flag else flag
+            sep = "=" if "=" in key_flag else ":"
+            std_val = key_flag.split(sep, 1)[1] if sep in key_flag else key_flag
             _add_build_option(
                 out,
                 seen,
@@ -981,9 +998,9 @@ def _add_generic_flag_option(
                 std_val,
                 raw=flag,
             )
-    elif flag.startswith(
+    elif key_flag.startswith(
         _TOOLCHAIN_PATH_FLAG_PREFIXES
-    ) and not is_split_operand_abi_flag_survivor(flag):
+    ) and not is_split_operand_abi_flag_survivor(key_flag):
         # sysroot/target are already emitted from the normalized
         # structured fields above. Re-adding the raw flag would
         # double-count and make split (``--sysroot /sdk``) vs combined
@@ -998,7 +1015,7 @@ def _add_generic_flag_option(
         # path below instead of being dropped here.
         return
     else:
-        _add_build_option(out, seen, flag.split("=", 1)[0], flag, raw=flag)
+        _add_build_option(out, seen, key_flag.split("=", 1)[0], key_flag, raw=flag)
 
 
 def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:

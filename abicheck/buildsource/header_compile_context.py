@@ -895,7 +895,8 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
     result.
     """
     flags: list[str] = []
-    if _is_msvc_command(cu.argv):
+    msvc = _is_msvc_command(cu.argv)
+    if msvc:
         flags.append("--driver-mode=cl")
     if cu.standard and not _standard_conflicts_with_forced_language(
         cu.standard, forced_language
@@ -926,9 +927,7 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
             ["-isystem", _resolve_cu_relative_path(inc, cu.directory).as_posix()]
         )
     for f in cu.abi_relevant_flags:
-        if _is_structured_field_flag(
-            f, cu_standard=cu.standard, msvc=_is_msvc_command(cu.argv)
-        ):
+        if _is_structured_field_flag(f, cu_standard=cu.standard, msvc=msvc):
             continue
         flags.extend(_split_operand_survivor(f))
     return flags

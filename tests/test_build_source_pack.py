@@ -792,6 +792,56 @@ def test_split_target_abi_flag_disagreement_across_capture_forms_still_diffable(
     assert values == {"-target-abi=aapcs", "-target-abi=aapcs16"}
 
 
+def test_split_target_abi_flag_legacy_xclang_marker_survivor_produces_same_option():
+    # Round 20 CodeRabbit finding 1 (abicheck/buildsource/adapters/base.py:
+    # 964-987): a legacy evidence pack persisted before the round-17
+    # canonicalization fix may still carry the OLD internal encoding -- a
+    # leading `-Xclang ` marker prepended directly to the `<flag>=<value>`
+    # token (`-Xclang -target-abi=aapcs`), never emitted by the current
+    # producer but still recognized on decode (see
+    # `_XCLANG_WRAPPED_ABI_FLAG_MARKER`'s own docstring). Without stripping
+    # that marker before deriving the BuildOption key,
+    # `_add_generic_flag_option`'s `flag.split("=", 1)[0]` read it as an
+    # entirely different key (`-Xclang -target-abi`) than the canonical,
+    # unmarked survivor's key (`-target-abi`) -- so a legacy pack on one
+    # side of a comparison and a freshly-captured pack on the other read as
+    # a false removal + addition of the identical option.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    legacy_marked_flag = "-Xclang -target-abi=aapcs"
+    canonical_flag = "-target-abi=aapcs"
+
+    cu_legacy = CompileUnit(
+        id="cu://legacy", language="CXX", abi_relevant_flags=[legacy_marked_flag]
+    )
+    cu_canonical = CompileUnit(
+        id="cu://canonical", language="CXX", abi_relevant_flags=[canonical_flag]
+    )
+
+    legacy_opts = {(o.key, o.value) for o in derive_build_options([cu_legacy])}
+    canonical_opts = {(o.key, o.value) for o in derive_build_options([cu_canonical])}
+    assert legacy_opts == canonical_opts == {("-target-abi", "-target-abi=aapcs")}
+
+    # And together, in one derive_build_options call, they must collapse to
+    # the SAME single option rather than producing two BuildOptions.
+    combined = [
+        o
+        for o in derive_build_options([cu_legacy, cu_canonical])
+        if o.key == "-target-abi"
+    ]
+    assert len(combined) == 1
+    assert (combined[0].key, combined[0].value) == ("-target-abi", "-target-abi=aapcs")
+
+    # The original, unstripped token must still be preserved verbatim in
+    # `raw` for the legacy-marked survivor -- only the derived key/value are
+    # normalized, not the recorded raw evidence.
+    legacy_raw = next(
+        o.raw for o in derive_build_options([cu_legacy]) if o.key == "-target-abi"
+    )
+    assert legacy_raw == legacy_marked_flag
+
+
 def test_split_target_abi_flag_disagreement_still_diffable_across_units():
     # End-to-end: two compile units disagreeing only on -target-abi must
     # produce two distinct BuildOption values, not silently collapse to

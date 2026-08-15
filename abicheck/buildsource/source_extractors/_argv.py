@@ -244,11 +244,13 @@ def split_operand_survivor(flag: str) -> list[str]:
     wrapped in ``-Xclang`` on both sides (``-Xclang -target-abi -Xclang
     aapcs``, never the bare two-token form -- confirmed against a real
     ``clang -cc1 --help``/driver error). ``extract_abi_relevant_flags``
-    normalizes that wrapped shape into a second, distinct internal encoding
-    (a leading ``-Xclang `` marker, see
-    :data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`), which this function
-    reconstructs into the full four-token ``["-Xclang", "<flag>", "-Xclang",
-    "<value>"]`` form -- a bare, unwrapped ``-target-abi aapcs`` is not valid
+    normalizes that wrapped shape onto the SAME canonical
+    ``<flag>=<value>`` encoding as the bare capture; an earlier revision
+    marked it with a leading ``-Xclang `` prefix (see
+    :data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`, still decoded here for
+    backward compatibility only). Either encoding is reconstructed into the
+    full four-token ``["-Xclang", "<flag>", "-Xclang", "<value>"]`` form --
+    a bare, unwrapped ``-target-abi aapcs`` is not valid
     on a normal ``clang`` driver invocation (rejected with "unknown
     argument"), so replaying the wrapped survivor without its ``-Xclang``
     forwarding would produce an invalid command.
