@@ -482,7 +482,13 @@ from typing import Any
 #:       would read as "no use case is affected" for a run that never
 #:       resolved a manifest). Replaces the ``project validate-use-cases
 #:       --against/--against-new`` report, which diffed two snapshots inside
-#:       a manifest validator. Additive optional top-level key.
+#:       a manifest validator. Each attributed row carries the report's own
+#:       ``finding_id`` alongside ``symbol``/``kind``, since those two do not
+#:       identify a finding (one symbol can emit one ``ChangeKind`` more than
+#:       once), so a row joins back to ``changes``/``findings``. Under
+#:       ``--show-only`` the block is projected onto the displayed findings,
+#:       so it never names a change the report itself omits. Additive
+#:       optional top-level key.
 REPORT_SCHEMA_VERSION = "2.39"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

@@ -936,7 +936,7 @@ def _render_compare_report(
     text = _fold_suppression_audit_into_text(
         text, fmt, getattr(result, "suppression_audit", None)
     )
-    text = _fold_use_case_impact_into_text(text, fmt, result)
+    text = _fold_use_case_impact_into_text(text, fmt, result, show_only)
     return _fold_evidence_depth_into_json(
         text, fmt, old, new,
         old_build_info=old_build_info, new_build_info=new_build_info,

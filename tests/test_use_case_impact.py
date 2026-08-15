@@ -39,7 +39,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.cli import main
 from abicheck.impact.use_case_impact import (
-    UseCaseChange,
+    UseCaseImpact,
     build_use_case_impact,
 )
 from abicheck.impact.use_cases import UseCaseDefinition, UseCaseResolution
@@ -113,10 +113,13 @@ class TestAttributionUnionsBothSides:
             manifest="uc.yaml",
         )
         assert impact is not None
-        assert impact.by_use_case["uc"] == (
-            UseCaseChange(symbol="train", kind="func_removed"),
-            UseCaseChange(symbol="predict", kind="func_removed"),
-        )
+        assert [(c.symbol, c.kind) for c in impact.by_use_case["uc"]] == [
+            ("train", "func_removed"),
+            ("predict", "func_removed"),
+        ]
+        # Each row carries the report's own finding_id, so two findings that
+        # share a symbol and kind stay distinguishable and joinable.
+        assert all(c.finding_id for c in impact.by_use_case["uc"])
         assert impact.unattributed_changes == 0
 
     def test_a_symbol_no_entrypoint_reaches_is_counted_unattributed(self) -> None:
@@ -249,9 +252,9 @@ class TestReportShape:
                 "tests": ["t1"],
             }
         ]
-        assert d["by_use_case"] == {
-            "uc": [{"symbol": "train", "kind": "func_removed"}]
-        }
+        (row,) = d["by_use_case"]["uc"]
+        assert (row["symbol"], row["kind"]) == ("train", "func_removed")
+        assert row["finding_id"]
 
 
 class TestSetInputsAreRejected:
@@ -384,3 +387,75 @@ class TestStatKeepsItsSummaryOnlyShape:
         )
         assert result.use_case_impact is not None  # the block really exists
         assert "use_case_impact" not in json.loads(to_stat_json(result))
+
+
+class TestRestrictedToTheDisplayedFindings:
+    """``--show-only`` filters what the report lists; the attribution was
+    built from every finding, so the block named changes absent from the
+    findings section beside it (Codex review)."""
+
+    _DEFS = [UseCaseDefinition(use_case="uc", entrypoints=("train", "predict"))]
+
+    def _impact(self, changes: list[Change]) -> UseCaseImpact:
+        graph = _graph("train", "predict")
+        impact = build_use_case_impact(
+            self._DEFS,
+            _snapshot(graph, "1"),
+            _snapshot(graph, "2"),
+            changes,
+            manifest="uc.yaml",
+        )
+        assert impact is not None
+        return impact
+
+    def test_a_dropped_finding_leaves_the_block(self) -> None:
+        changes = [_change("train"), _change("predict")]
+        impact = self._impact(changes)
+        shown = impact.restricted_to([changes[0]])
+        assert [c.symbol for c in shown.by_use_case["uc"]] == ["train"]
+
+    def test_the_counters_describe_the_displayed_set(self) -> None:
+        changes = [_change("train"), _change("orphan")]
+        impact = self._impact(changes)
+        assert (impact.total_changes, impact.unattributed_changes) == (2, 1)
+        # Only the unattributed one is displayed: the counters must follow
+        # what the reader sees, not the set they cannot.
+        shown = impact.restricted_to([changes[1]])
+        assert (shown.total_changes, shown.unattributed_changes) == (1, 1)
+        assert shown.by_use_case == {}
+
+    def test_a_use_case_left_with_nothing_is_dropped(self) -> None:
+        changes = [_change("train")]
+        impact = self._impact(changes)
+        assert impact.by_use_case
+        assert self._impact(changes).restricted_to([]).by_use_case == {}
+
+    def test_resolutions_survive_the_projection(self) -> None:
+        # The manifest's own entrypoint resolution is a property of the
+        # comparison, not of which findings are on screen.
+        impact = self._impact([_change("train")])
+        assert impact.restricted_to([]).resolutions == impact.resolutions
+
+    def test_two_findings_sharing_symbol_and_kind_project_independently(
+        self,
+    ) -> None:
+        """The join is on finding_id, not (symbol, kind).
+
+        One symbol can emit the same ChangeKind twice -- two parameters of
+        one function each changing pointer depth -- and joining on
+        (symbol, kind) would keep or drop both together.
+        """
+        from abicheck.checker_policy import ChangeKind
+
+        first = Change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "train", "param 0: int* -> int**"
+        )
+        second = Change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "train", "param 1: int* -> int**"
+        )
+        impact = self._impact([first, second])
+        rows = impact.by_use_case["uc"]
+        assert len(rows) == 2
+        assert len({c.finding_id for c in rows}) == 2, "the two rows collided"
+        shown = impact.restricted_to([first])
+        assert [c.finding_id for c in shown.by_use_case["uc"]] == [rows[0].finding_id]

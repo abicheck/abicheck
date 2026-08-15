@@ -515,7 +515,7 @@ def _to_json_leaf(
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result)
+    _add_contract_context(d, result, changes)
     # Codex review: full/root-cause mode call this; leaf mode never did,
     # silently dropping policy_overrides/policy_reclassify here.
     _add_policy_overrides(d, result)
@@ -713,7 +713,7 @@ def _to_json_root_cause(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result)
+    _add_contract_context(d, result, changes)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1157,7 +1157,7 @@ def to_json(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result)
+    _add_contract_context(d, result, changes)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)

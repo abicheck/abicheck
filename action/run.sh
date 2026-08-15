@@ -1316,6 +1316,20 @@ elif [[ "$MODE" == "scan" ]]; then
   # `scan --compile-db` is gone: --build-info already accepts a build dir, a
   # compile_commands.json, or a pack, so a compile-db input is one more way
   # to name the same operand.
+  #
+  # Rejected rather than resolved by the fallback below when both are set,
+  # and *only* in scan mode. Scan is the one mode whose behavior this changed:
+  # it used to forward both operands (`--build-info` AND `--compile-db`) and
+  # the scan pipeline gave `compile-db` precedence, so collapsing them onto
+  # one flag silently analyzes a different build context than the same
+  # workflow used to (Codex review). Compare and dump have always used this
+  # same fallback -- `compare` never had a `--compile-db` flag to forward --
+  # so their "build-info wins" precedence is pre-existing, documented
+  # behavior, not a regression, and is deliberately left alone.
+  if [[ -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
+    echo "::error::build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
+    exit 1
+  fi
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.

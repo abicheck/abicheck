@@ -30,10 +30,16 @@ from typing import TYPE_CHECKING, Any
 from .impact.use_case_impact import add_use_case_impact
 
 if TYPE_CHECKING:
-    from .checker_types import DiffResult
+    from collections.abc import Sequence
+
+    from .checker_types import Change, DiffResult
 
 
-def add_contract_context(d: dict[str, Any], result: DiffResult) -> None:
+def add_contract_context(
+    d: dict[str, Any],
+    result: DiffResult,
+    displayed: Sequence[Change] | None = None,
+) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's unconditional
     ``analysis_assurance`` (piggybacked here, unguarded below, to stay under
     the file-size cap). ``contract_context`` itself stays opt-in
@@ -46,7 +52,7 @@ def add_contract_context(d: dict[str, Any], result: DiffResult) -> None:
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
-    add_use_case_impact(d, result)
+    add_use_case_impact(d, result, displayed)
 
     ctx = result.contract_context
     if ctx is None:

@@ -802,7 +802,9 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     return f"rule#{index}"
 
 
-def _fold_use_case_impact_into_text(text: str, fmt: str, result: Any) -> str:
+def _fold_use_case_impact_into_text(
+    text: str, fmt: str, result: Any, show_only: str | None = None
+) -> str:
     """Fold ``compare --use-cases``'s attribution into the rendered report.
 
     Markdown/text/review only. The JSON paths already carry the block --
@@ -811,6 +813,12 @@ def _fold_use_case_impact_into_text(text: str, fmt: str, result: Any) -> str:
     the key twice; the structured formats (sarif, junit, html) are left
     untouched, the same scope boundary
     :func:`_fold_suppression_audit_into_text` uses.
+
+    *show_only* projects the attribution onto the findings the report above
+    it actually lists, so the section cannot resurface a change the filter
+    removed (Codex review) -- the same thing
+    :func:`_fold_scoped_compat_into_text` does for its own scoped-only
+    changes, and the same projection the JSON paths apply.
     """
     from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
 
@@ -821,6 +829,21 @@ def _fold_use_case_impact_into_text(text: str, fmt: str, result: Any) -> str:
         "review",
     ):
         return text
+    if show_only:
+        from .reporter import apply_show_only
+
+        # Every argument the JSON paths pass, so a policy-sensitive token
+        # ("breaking") filters identically in both renders rather than
+        # against the default policy here.
+        impact = impact.restricted_to(
+            apply_show_only(
+                list(result.changes),
+                show_only,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+            )
+        )
     return "\n".join([text, *render_use_case_impact_lines(impact)])
 
 

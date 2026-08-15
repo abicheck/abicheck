@@ -54,13 +54,29 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class UseCaseChange:
-    """One finding named by one use case."""
+    """One finding named by one use case.
+
+    *finding_id* is the report's own ``finding_id``
+    (:func:`~abicheck.finding_identity.report_finding_id`), not a third
+    descriptive field: ``(symbol, kind)`` does not identify a finding. One
+    symbol can emit the same ``ChangeKind`` more than once -- two parameters
+    of one function each changing pointer depth is the case that function's
+    own docstring names -- so without it two distinct findings collapse to
+    identical rows, and a consumer can neither tell them apart nor join them
+    back to the report's ``findings`` array (Codex review). It is also what
+    makes :meth:`UseCaseImpact.restricted_to` exact.
+    """
 
     symbol: str
     kind: str
+    finding_id: str = ""
 
     def to_dict(self) -> dict[str, str]:
-        return {"symbol": self.symbol, "kind": self.kind}
+        return {
+            "symbol": self.symbol,
+            "kind": self.kind,
+            "finding_id": self.finding_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -81,6 +97,44 @@ class UseCaseImpact:
     unattributed_changes: int
     resolutions: tuple[UseCaseResolution, ...] = ()
     by_use_case: dict[str, tuple[UseCaseChange, ...]] = field(default_factory=dict)
+
+    def restricted_to(self, changes: Sequence[Change]) -> UseCaseImpact:
+        """This attribution as it applies to *changes* alone.
+
+        ``--show-only`` filters what the report displays, and the attribution
+        was built from every finding -- so the block listed changes absent
+        from the findings section beside it, resurfacing exactly what the user
+        filtered out (Codex review). Projecting onto the displayed set keeps
+        the two halves of one report describing the same findings, the way
+        ``_fold_scoped_compat_into_text`` already filters its own scoped-only
+        changes.
+
+        Exact rather than approximate because the projection joins on
+        ``finding_id``: joining on ``(symbol, kind)`` would keep or drop both
+        of two same-symbol same-kind findings together. Counters are
+        recomputed against *changes*, so ``total_changes`` and
+        ``unattributed_changes`` describe what the reader is looking at
+        instead of a set they cannot see.
+        """
+        from ..finding_identity import report_finding_id
+
+        displayed = {report_finding_id(c) for c in changes}
+        by_use_case = {
+            name: kept
+            for name, entries in self.by_use_case.items()
+            if (kept := tuple(c for c in entries if c.finding_id in displayed))
+        }
+        attributed = {c.finding_id for entries in by_use_case.values() for c in entries}
+        return UseCaseImpact(
+            manifest=self.manifest,
+            use_case_count=self.use_case_count,
+            total_changes=len(changes),
+            unattributed_changes=sum(
+                1 for c in changes if report_finding_id(c) not in attributed
+            ),
+            resolutions=self.resolutions,
+            by_use_case=by_use_case,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -170,6 +224,7 @@ def build_use_case_impact(
     never looked. The caller turns that into its own usage error or silence,
     as fits its surface.
     """
+    from ..finding_identity import report_finding_id
     from .use_cases import explain_use_case_impact, resolve_use_case_entrypoints
 
     old_graph = _source_graph(old_snapshot)
@@ -213,7 +268,11 @@ def build_use_case_impact(
         reached = named.get(change.symbol, ())
         for use_case in reached:
             by_use_case.setdefault(use_case, []).append(
-                UseCaseChange(symbol=change.symbol, kind=change.kind.value)
+                UseCaseChange(
+                    symbol=change.symbol,
+                    kind=change.kind.value,
+                    finding_id=report_finding_id(change),
+                )
             )
         if not reached:
             unattributed += 1
@@ -249,7 +308,9 @@ def render_use_case_impact_lines(impact: UseCaseImpact) -> list[str]:
     return lines
 
 
-def add_use_case_impact(d: dict[str, Any], result: Any) -> None:
+def add_use_case_impact(
+    d: dict[str, Any], result: Any, displayed: Sequence[Change] | None = None
+) -> None:
     """Emit ``compare --use-cases``'s block into a JSON report dict.
 
     Lives here rather than in ``reporter.py`` for the ordinary reason that
@@ -258,7 +319,15 @@ def add_use_case_impact(d: dict[str, Any], result: Any) -> None:
     Omitted entirely without the flag rather than emitted empty: an empty
     block would read as "no use case is affected" for a run that never
     resolved a manifest.
+
+    *displayed*, when given, is the change list this report actually shows
+    (``--show-only`` already applied); the block is projected onto it so it
+    cannot name a finding the reader cannot see. ``None`` means "everything
+    is displayed" and emits the block unchanged -- distinct from an empty
+    list, which really is a report showing nothing.
     """
     impact = getattr(result, "use_case_impact", None)
     if isinstance(impact, UseCaseImpact):
+        if displayed is not None:
+            impact = impact.restricted_to(displayed)
         d["use_case_impact"] = impact.to_dict()

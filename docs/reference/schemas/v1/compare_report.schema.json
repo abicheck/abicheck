@@ -1100,7 +1100,8 @@
               "type": "object",
               "properties": {
                 "symbol": {"type": "string"},
-                "kind": {"type": "string"}
+                "kind": {"type": "string"},
+                "finding_id": {"type": "string", "description": "The report's own finding_id for this change, so a row joins back to the findings/changes array \u2014 (symbol, kind) alone does not identify a finding (one symbol can emit the same kind twice)."}
               }
             }
           }

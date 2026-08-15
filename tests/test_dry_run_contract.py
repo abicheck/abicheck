@@ -233,6 +233,55 @@ class TestDumpDryRun:
         # A directory operand resolves through its own compile_commands.json.
         assert compile_db_from_build_info(tmp_path, (header,)) == db
 
+    def test_a_filter_that_would_scope_only_l2_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """--compile-db-filter parameterizes the header parse only, and L3
+        collection reads the same database through an adapter with no filter
+        of its own -- so a monorepo database would embed build facts for
+        translation units the filter excludes.
+
+        The removed -p/--compile-db spelling refused this outright
+        (`resolve_compile_db_l3_reuse` declined to promote a filtered header
+        database to L3). Folding the operand into --build-info removed that
+        decision point, turning a loud refusal into a silent unfiltered
+        collection (Codex review); this pins the refusal.
+        """
+        from abicheck.cli_dump_helpers import compile_db_filter_scope_error
+
+        db = tmp_path / "compile_commands.json"
+        assert compile_db_filter_scope_error("src/**", db, "source-target")
+        # Every way the combination cannot arise answers None.
+        assert compile_db_filter_scope_error(None, db, "source-target") is None
+        assert compile_db_filter_scope_error("src/**", None, "source-target") is None
+        assert compile_db_filter_scope_error("src/**", db, "off") is None
+
+    def test_the_filter_refusal_reaches_the_cli(self, tmp_path: Path) -> None:
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps([{
+                "directory": str(tmp_path),
+                "command": f"cc -c {header} -o f.o",
+                "file": str(header),
+            }]),
+            encoding="utf-8",
+        )
+        args = [
+            "dump", str(so), "--dry-run", "-H", str(header),
+            "--build-info", str(db), "--depth", "build",
+        ]
+        refused = CliRunner().invoke(main, [*args, "--compile-db-filter", "src/**"])
+        assert refused.exit_code == 64, refused.output
+        assert "--compile-db-filter scopes the L2 header parse only" in refused.output
+        # Without the filter the identical invocation is accepted, so the
+        # refusal is scoped to the combination and not to --build-info.
+        allowed = CliRunner().invoke(main, args)
+        assert allowed.exit_code == 0, allowed.output
+
     def test_compile_db_from_build_info_rejects_a_bazel_jsonproto(
         self, tmp_path: Path
     ) -> None:

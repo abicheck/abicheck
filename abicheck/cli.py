@@ -40,6 +40,7 @@ from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
+    compile_db_filter_scope_error,
     compile_db_from_build_info,
     handle_non_elf_dump,
     perform_elf_dump,
@@ -562,6 +563,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # --depth binary has had its say about the headers (a headerless dump has
     # no header AST for a database to parameterize).
     compile_db_path = compile_db_from_build_info(build_info, headers)
+    if (
+        _filter_scope_error := compile_db_filter_scope_error(
+            compile_db_filter, compile_db_path, collect_mode
+        )
+    ) is not None:
+        raise click.UsageError(_filter_scope_error)
 
     # Fold the project's .abicheck.yml compile: block into the L2 compile context
     # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,

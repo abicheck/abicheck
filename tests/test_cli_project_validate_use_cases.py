@@ -300,13 +300,16 @@ class TestUseCaseImpactOnCompare:
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
         res = _compare(manifest, old, new, "--format", "json")
         assert res.exit_code == 4, res.output
-        block = _json_report(res)["use_case_impact"]
+        doc = _json_report(res)
+        block = doc["use_case_impact"]
         assert block["manifest"] == str(manifest)
         assert block["use_case_count"] == 1
         assert block["unattributed_changes"] == 0
-        assert block["by_use_case"] == {
-            "training workflow": [{"symbol": "train", "kind": "func_removed"}]
-        }
+        (row,) = block["by_use_case"]["training workflow"]
+        assert (row["symbol"], row["kind"]) == ("train", "func_removed")
+        # finding_id is what lets a consumer join this row back to the
+        # report's own findings array, so pin the join, not just the key.
+        assert row["finding_id"] in {c["finding_id"] for c in doc["changes"]}
         assert block["use_cases"] == [
             {
                 "use_case": "training workflow",
@@ -347,10 +350,42 @@ class TestUseCaseImpactOnCompare:
         old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
         new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
         res = _compare(manifest, old, new, "--format", "json")
-        block = _json_report(res)["use_case_impact"]
-        assert block["by_use_case"] == {
-            "training workflow": [{"symbol": "train", "kind": "func_added"}]
-        }
+        doc = _json_report(res)
+        block = doc["use_case_impact"]
+        (row,) = block["by_use_case"]["training workflow"]
+        assert (row["symbol"], row["kind"]) == ("train", "func_added")
+        assert row["finding_id"] in {c["finding_id"] for c in doc["changes"]}
+
+    def test_show_only_scopes_the_block_to_the_displayed_findings(
+        self, tmp_path: Path
+    ) -> None:
+        """--show-only filters what the report lists, and the attribution was
+        built from every finding -- so the block named a change absent from
+        the findings section beside it, resurfacing exactly what the user
+        filtered out (Codex review)."""
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
+        new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
+
+        # Unfiltered: the added function is attributed and listed.
+        full = _json_report(_compare(manifest, old, new, "--format", "json"))
+        assert full["use_case_impact"]["by_use_case"]["training workflow"]
+
+        # `--show-only removed` displays no findings here (the only change is
+        # an addition), so the block must attribute none either.
+        scoped = _json_report(
+            _compare(
+                manifest, old, new, "--format", "json", "--show-only", "removed"
+            )
+        )
+        block = scoped["use_case_impact"]
+        assert block["by_use_case"] == {}
+        assert block["total_changes"] == len(scoped["changes"])
+        # The manifest's own entrypoint resolution is a property of the
+        # comparison, not of what is on screen, so it survives untouched.
+        assert block["use_cases"] == full["use_case_impact"]["use_cases"]
 
     def test_no_changes_between_identical_snapshots(self, tmp_path: Path) -> None:
         manifest = _write_manifest(
