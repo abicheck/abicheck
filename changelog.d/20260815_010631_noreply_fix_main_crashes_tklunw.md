@@ -22,7 +22,9 @@
   real Python helper directly (via stdin, to also avoid Git Bash/MSYS's
   automatic argv path-conversion mangling a value containing a
   POSIX-style path segment) instead of carrying its own copy of the
-  tokenizer.
+  tokenizer, and no longer lets a stray carriage return survive into a
+  forwarded flag on Windows (native `python.exe`'s `print()` writes CRLF
+  line endings on that platform, which bash's `read` alone doesn't strip).
 
 ### Security
 

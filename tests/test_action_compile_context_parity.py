@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from abicheck._compiler_options import split_gcc_options
@@ -106,6 +107,22 @@ def _add_flag_source() -> str:
     return text[start:end]
 
 
+# $_PY_SAFE_PATH is referenced (not redefined) inside add_flag_shlex_split's
+# real body -- extracted verbatim (Codex review: a harness that silently left
+# it unset would make the concatenation "$_PY_BIN" -c "$_PY_SAFE_PATH"'...'
+# collapse to an empty prefix, exercising *none* of the CWD-shadowing fix
+# that variable exists for, while every test here kept passing regardless).
+_PY_SAFE_PATH_START = "_PY_SAFE_PATH='"
+_PY_SAFE_PATH_END = "'\n"
+
+
+def _py_safe_path_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PY_SAFE_PATH_START)
+    end = text.index(_PY_SAFE_PATH_END, start) + len(_PY_SAFE_PATH_END)
+    return text[start:end]
+
+
 def _compile_context_region(
     mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
 ) -> str:
@@ -168,7 +185,10 @@ def _run_region(
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
+        # $_PY_SAFE_PATH (extracted verbatim, not redefined -- see its own
+        # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_path_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -203,7 +223,10 @@ def _run_region_raw(
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
+        # $_PY_SAFE_PATH (extracted verbatim, not redefined -- see its own
+        # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_path_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -343,6 +366,74 @@ class TestCompileContextForwardingParity:
         assert cmd.count("--compiler-option") == len(expected_tokens)
         for token in expected_tokens:
             assert token in cmd
+
+    def test_gcc_options_strips_crlf_from_windows_python_output(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, seventh round: on windows-latest, ``$_PY_BIN``
+        resolves to native ``python.exe``, whose ``print()`` writes CRLF
+        line endings by default (Python's text-mode stdout translates
+        ``"\\n"`` to ``os.linesep`` on write, regardless of whether stdout
+        is a console or -- as here -- a pipe). bash's ``read`` only splits
+        on LF, so without stripping it, every forwarded token would gain a
+        trailing ``\\r`` (e.g. ``-DFOO=1`` arriving as ``-DFOO=1\\r``),
+        corrupting every downstream compiler invocation. This can't be
+        reproduced with the real ``python3`` on this (POSIX) host --
+        ``os.linesep`` is already ``"\\n"`` here -- so a fake ``python3`` on
+        ``PATH`` stands in for ``python.exe``, wrapping the real
+        interpreter's output with a CRLF-emitting filter, the same
+        transport shape a real Windows run would produce.
+
+        Deliberately does NOT go through :func:`_run_region` -- its own
+        ``printf '%s\\n' "${CMD[@]}"`` capture, read back via
+        ``subprocess.run(text=True)`` /``.splitlines()``, treats a
+        corrupted ``token\\r`` immediately followed by that printf's own
+        ``\\n`` as one ordinary CRLF line ending and silently normalizes it
+        away -- exactly the masking Codex's review comment named, and
+        confirmed here by first writing this test against the *unfixed*
+        code: ``_run_region``-based assertions kept passing even with
+        ``action/run.sh``'s CR-stripping line deleted. A NUL-delimited,
+        raw-bytes capture (no ``text=True``, no intervening ``\\n`` anywhere
+        near the ``\\r``) is the one shape that can't launder the bug away
+        the same way.
+        """
+        real_python3 = sys.executable
+        fake_python3 = tmp_path / "python3"
+        fake_python3.write_text(
+            f'#!/bin/bash\nexec "{real_python3}" "$@" | sed -u $\'s/$/\\r/\'\n'
+        )
+        fake_python3.chmod(0o755)
+        harness = (
+            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + _py_safe_path_source()
+            + _add_flag_source()
+            + _is_release_style_operand_source()
+            + "\nCMD=()\n"
+        )
+        script = (
+            harness
+            + _compile_context_region(_SCAN_MODE_MARKER)
+            + "\nprintf '%s\\0' \"${CMD[@]}\"\n"
+        )
+        env = {
+            **os.environ,
+            **_FULL_ENV,
+            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        }
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=False,
+            env=env,
+            check=True,
+        )
+        cmd = [tok.decode("utf-8") for tok in result.stdout.split(b"\0") if tok]
+        assert cmd.count("--compiler-option") == 2
+        assert "-DFOO=1" in cmd
+        assert "-DBAR=2" in cmd
+        assert not any("\r" in token for token in cmd)
 
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(

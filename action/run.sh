@@ -106,6 +106,15 @@ for tok in split_gcc_options(sys.stdin.read()):
     print(tok)
 ')"
   while IFS= read -r item; do
+    # Codex review, fresh evidence: on windows-latest, $_PY_BIN resolves to
+    # native python.exe, whose print() writes CRLF line endings by default
+    # (Python's text-mode stdout translates "\n" to os.linesep on write,
+    # regardless of whether stdout is a console or -- as here -- a pipe).
+    # bash's `read` only splits on LF, so it would otherwise leave a
+    # trailing \r glued onto every token, corrupting each forwarded flag
+    # (e.g. -DFOO=1 arrives as -DFOO=1\r). Harmless no-op on POSIX, where
+    # this never appears in the first place.
+    item="${item%$'\r'}"
     [[ -n "$item" ]] && CMD+=("$flag" "$item")
   done <<< "$split"
 }
