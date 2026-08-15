@@ -130,6 +130,20 @@ jobs:
           ABICHECK_MIN_EXECUTED: '1'
         run: python -m pytest tests/test_mutation_results.py -m slow -q
 
+      - name: Decide whether the cache is safe to reuse
+        id: scope
+        if: github.event_name == 'pull_request'
+        # mutmut skips a mutant whose *source function hash* is unchanged, and
+        # a module-level constant is not part of any function's hash. So a warm
+        # cache reuses verdicts computed before the constant changed, which
+        # silently defeats the module-scope attribution the gate now does
+        # (Codex review). A module-scope change means: do a full run.
+        run: |
+          scope=$(python scripts/check_mutation_score.py --print-changed-scope \
+            --base-ref "origin/${{ github.base_ref }}")
+          echo "changed=$scope" >> "$GITHUB_OUTPUT"
+          echo "changed scope: $scope"
+
       - name: Restore mutmut cache
         # PR lane only, and deliberately so. mutmut skips a mutant whose
         # *source function hash* is unchanged, so a warm cache reuses verdicts
@@ -139,7 +153,9 @@ jobs:
         # commit that weakens only test assertions leaves every source hash
         # untouched, so the stale "killed" outcomes would be reused and the
         # regression would go unreported (Codex review).
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.scope.outputs.changed != 'module'
         uses: actions/cache@v4
         with:
           # mutmut skips a mutant whose function hash is unchanged, so a warm

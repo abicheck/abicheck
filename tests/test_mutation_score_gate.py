@@ -750,3 +750,60 @@ def test_a_module_scope_change_gates_every_survivor_in_that_module(
     )
     assert rc == 1
     assert "module-scope change" in capsys.readouterr().out
+
+
+class TestChangedScopeProbe:
+    """`--print-changed-scope` decides whether mutation.yml may reuse the
+    mutmut cache. It fails safe: anything it cannot determine answers
+    "module", i.e. do a full run."""
+
+    def _probe(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, diff: str) -> str:
+        (tmp_path / "abicheck").mkdir(exist_ok=True)
+        (tmp_path / "abicheck" / "diff_types.py").write_text(
+            "_KINDS = frozenset({'a'})\n\n\ndef f():\n    return _KINDS\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.mutmut]\nsource_paths = ["abicheck/diff_types.py"]\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+        path = _write(tmp_path, "d.diff", diff)
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            gate.main(["--print-changed-scope", "--diff-file", path])
+        return buf.getvalue().strip()
+
+    def test_a_module_level_edit_answers_module(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        diff = "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -1,1 +1,1 @@\n+_KINDS = frozenset({'a','b'})\n"
+        assert self._probe(tmp_path, monkeypatch, diff) == "module"
+
+    def test_a_function_body_edit_answers_function(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        diff = "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -5,1 +5,1 @@\n+    return None\n"
+        assert self._probe(tmp_path, monkeypatch, diff) == "function"
+
+    def test_a_change_outside_the_mutated_modules_answers_function(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the mutated modules' staleness matters."""
+        diff = "--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1,1 +1,1 @@\n+text\n"
+        assert self._probe(tmp_path, monkeypatch, diff) == "function"
+
+    def test_an_unresolvable_base_ref_fails_safe(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            gate.main(["--print-changed-scope", "--base-ref", "definitely-not-a-ref"])
+        assert buf.getvalue().strip() == "module"

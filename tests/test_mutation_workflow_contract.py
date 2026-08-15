@@ -101,7 +101,11 @@ def test_the_cache_is_restored_only_on_the_pr_lane() -> None:
     untouched and the stale "killed" outcomes would be reused."""
     steps = _workflow()["jobs"]["mutmut"]["steps"]
     cache = next(s for s in steps if str(s.get("uses", "")).startswith("actions/cache"))
-    assert cache.get("if") == "github.event_name == 'pull_request'"
+    # Asserted as a clause rather than by exact string: the condition gained a
+    # second guard (module-scope changes also skip the cache), and pinning the
+    # whole expression would make this test fail on any further, correct
+    # tightening.
+    assert "github.event_name == 'pull_request'" in cache.get("if", "")
 
 
 def test_the_scheduled_lane_requires_a_baseline() -> None:
@@ -191,3 +195,24 @@ def test_mutmut_is_version_pinned() -> None:
     """An unpinned install is how this lane silently changed behaviour before."""
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "mutmut>=3.7,<4" in text
+
+
+def test_the_cache_is_skipped_for_a_module_scope_change() -> None:
+    """The module-scope attribution added for the diff-scoped gate is defeated
+    by a warm cache: mutmut skips a mutant whose *function* hash is unchanged,
+    and a module-level constant belongs to no function's hash, so the gate
+    would compare against verdicts computed before the constant changed
+    (Codex review)."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    scope = next(s for s in steps if s.get("id") == "scope")
+    assert "--print-changed-scope" in scope["run"]
+
+    cache = next(s for s in steps if str(s.get("uses", "")).startswith("actions/cache"))
+    condition = cache["if"]
+    assert "steps.scope.outputs.changed != 'module'" in condition
+    assert "github.event_name == 'pull_request'" in condition
+
+    names = [s.get("name", "") for s in steps]
+    assert names.index("Decide whether the cache is safe to reuse") < names.index(
+        "Restore mutmut cache"
+    )
