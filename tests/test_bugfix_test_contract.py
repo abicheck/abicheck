@@ -90,6 +90,45 @@ class TestStructuralRequirement:
     def test_a_plugin_subtree_test_counts(self) -> None:
         assert gate.touches_tests(["contrib/abicheck-clang-plugin/tests/test_x.py"])
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tests/test_x.py",
+            "tests/conftest.py",
+            "tests/canonical_identity_contract.py",
+            "contrib/abicheck-clang-plugin/tests/test_x.py",
+            "foo/bar_test.py",
+        ],
+    )
+    def test_real_test_paths_are_recognised(self, path: str) -> None:
+        assert gate.is_test_path(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # A shipped script whose *name* merely contains `test_`. The
+            # substring form matched these, so a fix editing only one of them
+            # satisfied the "you must change a test" requirement with no test —
+            # passing exactly the case the gate rejects (Codex review). The
+            # second entry is this checker itself, which makes the hole
+            # self-referential.
+            "scripts/summarize_test_durations.py",
+            "scripts/check_bugfix_test_contract.py",
+            "abicheck/latest_test_helper.py",
+            "abicheck/diff_types.py",
+        ],
+    )
+    def test_shipped_files_whose_names_contain_test_are_not_tests(
+        self, path: str
+    ) -> None:
+        assert not gate.is_test_path(path)
+
+    def test_a_fix_to_the_checker_itself_still_requires_a_test(self) -> None:
+        """End-to-end form of the hole: shipped code, no test, must not pass."""
+        paths = ["scripts/check_bugfix_test_contract.py"]
+        assert gate.touches_shipped_code(paths)
+        assert not gate.touches_tests(paths)
+
     def test_docs_only_change_is_not_shipped_code(self) -> None:
         assert not gate.touches_shipped_code(["docs/x.md", "README.md"])
 

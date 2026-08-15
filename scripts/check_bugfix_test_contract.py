@@ -58,7 +58,7 @@ import argparse
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -88,8 +88,12 @@ _SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 #: to it can and should carry a test (Codex review).
 _SHIPPED_FILES = frozenset({"action.yml"})
 
-#: Anything that counts as a test change.
-_TEST_MARKERS = ("tests/", "/tests/", "test_")
+#: Directory component that marks a test tree.
+_TEST_DIR = "tests"
+#: Basename shapes that mark a test module.
+_TEST_BASENAME_PREFIX = "test_"
+_TEST_BASENAME_SUFFIX = "_test.py"
+_TEST_BASENAMES = frozenset({"conftest.py"})
 
 
 @dataclass(frozen=True)
@@ -110,7 +114,7 @@ class Requirement:
         # the area it covers (tests/test_finding_identity.py) would otherwise
         # ask its question on every test-only change, and a conditional that
         # fires on everything is boilerplate rather than a signal.
-        subject = [p for p in paths if not any(m in p for m in _TEST_MARKERS)]
+        subject = [p for p in paths if not is_test_path(p)]
         return any(t in p for p in subject for t in self.triggers)
 
 
@@ -250,8 +254,32 @@ def touches_shipped_code(paths: list[str]) -> bool:
     )
 
 
+def is_test_path(path: str) -> bool:
+    """Is *path* a test file?
+
+    Deliberately structural — a `tests/` **directory component**, or a test
+    **basename** — rather than a substring search for `test_` anywhere in the
+    path. The substring form matched shipped sources whose names merely contain
+    it, including `scripts/summarize_test_durations.py` and this checker itself
+    (`check_bugfix_test_contract.py`), so a fix editing only those satisfied
+    the structural requirement with no test at all — passing exactly the case
+    it exists to reject (Codex review).
+    """
+    parts = PurePosixPath(path).parts
+    if not parts:
+        return False
+    if _TEST_DIR in parts[:-1]:
+        return True
+    name = parts[-1]
+    return (
+        name.startswith(_TEST_BASENAME_PREFIX)
+        or name.endswith(_TEST_BASENAME_SUFFIX)
+        or name in _TEST_BASENAMES
+    )
+
+
 def touches_tests(paths: list[str]) -> bool:
-    return any(any(m in p for m in _TEST_MARKERS) for p in paths)
+    return any(is_test_path(p) for p in paths)
 
 
 def parse_answers(body: str) -> dict[str, str]:
