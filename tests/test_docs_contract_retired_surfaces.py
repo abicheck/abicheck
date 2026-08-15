@@ -194,17 +194,19 @@ def test_retired_surfaces_exempts_migration_lifecycle(
 def _isolated_examples_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Point the retired-surface sweep's examples arm at an empty tree.
 
-    ``_check_retired_surfaces`` reads ``examples/case*/README.md`` alongside
-    ``docs/`` (those READMEs are the generator source for the published case
-    pages, which carry the generated marker and are skipped). Every test here
-    already redirects ``DOCS`` to a fixture tree; without the same redirect
-    for ``EXAMPLES`` they would keep scanning the real catalogue, so an
-    unrelated stale flag in one case README would fail assertions about a
-    fixture page. Tests exercising the examples arm override this.
+    Both sweeps read ``examples/case*/README.md`` and
+    ``tests/scenarios/*.yaml`` alongside ``docs/``. Every test here already
+    redirects ``DOCS`` to a fixture tree; without the same redirect for those
+    two they would keep scanning the real trees, so an unrelated stale flag in
+    one case README or scenario would fail assertions about a fixture page.
+    Tests exercising those arms override this.
     """
     empty = tmp_path / "_no_examples"
     empty.mkdir()
     monkeypatch.setattr(dc, "EXAMPLES", empty)
+    no_scenarios = tmp_path / "_no_scenarios"
+    no_scenarios.mkdir()
+    monkeypatch.setattr(dc, "SCENARIOS", no_scenarios)
 
 
 def test_retired_surfaces_scans_example_case_readmes(
@@ -398,3 +400,45 @@ def test_the_real_repo_has_no_config_key_operands() -> None:
     f = dc.Findings()
     dc._check_config_keys_as_cli_operands(f)
     assert f.warnings == [], f.warnings
+
+
+def test_retired_surfaces_scans_the_scenario_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A scenario's ``flow:`` is a command a reader is meant to run.
+
+    The catalogue's own structural tests check that a flow *has* an automated
+    counterpart, not that the command it prints still parses -- so a scenario
+    kept advertising a removed `scan --compile-db` while both those tests and
+    this sweep stayed green (Codex review).
+    """
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    scenarios = tmp_path / "tests" / "scenarios"
+    scenarios.mkdir(parents=True)
+    (scenarios / "gating.yaml").write_text(
+        "- id: SC-X\n  flow:\n"
+        "    - abicheck dump lib.so --source-abi-cache /tmp/c\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "SCENARIOS", scenarios)
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "tests/scenarios/gating.yaml" in f.warnings[0][1]
+
+
+def test_the_real_scenario_catalog_is_in_the_target_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring half: the real catalogue is actually reached.
+
+    The autouse fixture isolates ``SCENARIOS`` for every other test here, so
+    without this one a regression that dropped the arm entirely would leave
+    the whole file green.
+    """
+    monkeypatch.undo()
+    keys = {rel for _, rel in dc._retired_surface_scan_targets()}
+    scenario_keys = {k for k in keys if k.startswith("tests/scenarios/")}
+    assert scenario_keys, sorted(keys)[:5]
+    assert "tests/scenarios/ci_gating.yaml" in scenario_keys

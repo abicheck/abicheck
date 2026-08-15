@@ -195,7 +195,10 @@ duplication, not a structural ownership conflict):
   generator sources for the published `docs/reference/examples/` case pages
   — the generated pages themselves are skipped, so a stale flag left in a
   case README would otherwise reproduce into a public page on the next
-  regeneration with nothing to catch it;
+  regeneration with nothing to catch it, and over `tests/scenarios/*.yaml`,
+  whose `flow:` entries are commands a reader is meant to be able to run --
+  the catalogue's structural tests check that a flow *has* an automated
+  counterpart, not that the command it prints still parses;
 - a documented `abicheck <subcommand> ...` line — or an Action `extra-args`
   value, which is raw argv by another name — passing a `.abicheck.yml` key as
   an operand (`abicheck compare a b severity.addition: error`). This is what a

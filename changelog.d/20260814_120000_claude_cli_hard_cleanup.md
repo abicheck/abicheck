@@ -103,7 +103,11 @@
   operands and exits 64. Seventeen such examples across six pages are now
   config blocks; `scripts/check_docs_contract.py` warns on any
   `abicheck <subcommand> ...` line (or Action `extra-args` value) carrying a
-  `key.subkey:` operand, leaving prose and YAML config blocks alone.
+  `key.subkey:` operand, leaving prose and YAML config blocks alone. The
+  retired-surface sweep also grew to cover `tests/scenarios/*.yaml`, whose
+  `flow:` entries are commands a reader is meant to run -- the catalogue's own
+  structural tests check that a flow has an automated counterpart, not that
+  the command it prints still parses.
 
 ### Changed
 

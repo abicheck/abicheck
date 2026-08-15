@@ -73,6 +73,11 @@ DOCS = ROOT / "docs"
 #: the retired-surface sweep can be pointed at a fixture tree in tests the
 #: same way DOCS already is.
 EXAMPLES = ROOT / "examples"
+#: The user-flow catalogue. Each entry's `flow:` is a command a reader is
+#: meant to be able to run, so it is documentation by another file extension
+#: -- swept alongside the trees above, and pointable at a fixture tree the
+#: same way.
+SCENARIOS = ROOT / "tests" / "scenarios"
 
 #: Trees outside `docs/` whose Markdown may be registered as a topic's
 #: `task_pages`/`allowed_summaries` entry (ADR-058 / G36 P0.6). Only
@@ -1444,14 +1449,25 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     (Codex review). Checking the source rather than the artifact is the same
     direction every other generated-file gate in this repo takes.
 
-    Keyed repo-relative (`examples/caseNN.../README.md`), which cannot collide
-    with a docs-relative key, so an allowlist entry stays unambiguous about
-    which tree it exempts.
+    `tests/scenarios/*.yaml` is here for the same reason one step further out:
+    it is the repository's user-flow catalogue, and each entry's `flow:` is a
+    command a reader is meant to be able to run. Its structural tests check
+    that a flow *has* an automated counterpart, not that the command it prints
+    still parses -- so a scenario kept advertising a removed `scan
+    --compile-db` while both this sweep and those tests stayed green (Codex
+    review). YAML rather than Markdown, but the same failure and the same fix.
+
+    Keyed repo-relative (`examples/caseNN.../README.md`,
+    `tests/scenarios/x.yaml`), which cannot collide with a docs-relative key,
+    so an allowlist entry stays unambiguous about which tree it exempts.
     """
     targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
     targets += [
         (p, f"examples/{p.relative_to(EXAMPLES).as_posix()}")
         for p in sorted(EXAMPLES.glob("case*/README.md"))
+    ]
+    targets += [
+        (p, f"tests/scenarios/{p.name}") for p in sorted(SCENARIOS.glob("*.yaml"))
     ]
     return targets
 

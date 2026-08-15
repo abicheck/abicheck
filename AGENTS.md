@@ -282,7 +282,7 @@ Core pipeline (in order of data flow):
      listed, never neither. `contract.unresolved` left that list in Phase 7,
      when the coverage exit gave it a consumer. Three more routes are
      rejected for adjacent reasons: a field whose consumer only runs under
-     `--contract-evaluation` when that flag is absent
+     contract evaluation when no `--contract` was given
      (`CONTRACT_EVALUATION_ONLY_FIELDS`), a value the runtime does not act on
      (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
      empty — each is a pack recorded as active configuration that changes
@@ -298,10 +298,12 @@ Core pipeline (in order of data flow):
      resolved that early
    - `contract_evaluation.py` — ADR-049's contract-relevance evaluator: one
      `ContractEvaluationDecision` (relevance + stable reason code +
-     assurance) per already-emitted finding. Computed only under `compare
-     --contract-evaluation`. Which evidence domain it judges against is
-     selected by `compare --contract public|exports|all` (ADR-049 Phase 6);
-     omitted, the domain still follows `--scope-public-headers`/
+     assurance) per already-emitted finding. Computed only when `compare`
+     is given `--contract`, which both activates the evaluation and selects
+     the evidence domain it judges against: `public|exports|all` name one
+     (ADR-049 Phase 6), while `auto` activates without naming one and lets
+     D7's lower tiers decide. Under `auto` the domain follows
+     `--scope-public-headers`/
      `--no-scope-public-headers`, and an explicit value outranks that legacy
      alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
      (D7 precedence). **No longer advisory** — see `contract_pipeline.py`
@@ -340,7 +342,7 @@ Core pipeline (in order of data flow):
      `checker._compute_verdict_for` and `severity.compute_exit_code`/
      `compute_gate_decision` share so the verdict and the gate cannot exclude
      different sets. An **unstamped** finding is evaluated, which is what
-     keeps every run without `--contract-evaluation` bit-for-bit unchanged
+     keeps every run without `--contract` bit-for-bit unchanged
    - `contract_evidence_collect.py` — ADR-049 Phase 3's *observed provider
      ledger* (plan §4.1) and the raw type graph Phase 4 persists. Produces
      one `EvidenceSearchRecord` per (provider, side) — `public_header`,
@@ -366,7 +368,7 @@ Core pipeline (in order of data flow):
      one place suppression is applied — cannot see one;
      `suppression_reaches_coverage_failures()` is the executable *proof* of
      that, not its enforcement. `coverage_exit_contribution()` states §6.1's
-     `0`/`1`. Emitted by `reporter.py` under `--contract-evaluation`
+     `0`/`1`. Emitted by `reporter.py` under `--contract`
      (report schema 2.26), `[]` rather than omitted when a domain closed
    - `contract_coverage_exit.py` — ADR-049 Phase 7: the step that turns the
      ledger's `0`/`1` into a real exit code. Deliberately the *only* place
@@ -384,7 +386,7 @@ Core pipeline (in order of data flow):
      not hiding it. `reporter.py` emits *this* function's answer as
      `contract_coverage_exit_contribution`, so the number a user reads is
      the one that gated them. `0` whenever no contract context exists: a run
-     without `--contract-evaluation` has no selected domain to be short of
+     without `--contract` has no selected domain to be short of
      evidence for, which is what keeps every pre-existing invocation's exit
      code unchanged
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
@@ -831,12 +833,12 @@ Once a root command genuinely clears the bar above, pick the right home:
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
 - `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
-  `scan --against` alike:** under `--contract-evaluation`, a selected
-  `--contract` domain whose required evidence is incomplete contributes
+  `scan --against` alike:** under `--contract`, the selected
+  domain whose required evidence is incomplete contributes
   **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
   `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's
   compatibility decision or gate contribution. Without
-  `--contract-evaluation` the contribution is always `0`, so every
+  `--contract` the contribution is always `0`, so every
   pre-existing invocation is unchanged. Every consumer that publishes an
   exit status folds it and explains it — the two CLIs and the composite
   Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
