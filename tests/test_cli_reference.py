@@ -146,7 +146,7 @@ def test_option_row_hides_click_internal_unset_sentinel():
     _FakeSentinel.__name__ = "Sentinel"
 
     class _FakeParam:
-        opts = ("--expect",)
+        opts = ("--manifest",)
         default = _FakeSentinel()
         required = False
         help = "Some help text."
@@ -154,4 +154,4 @@ def test_option_row_hides_click_internal_unset_sentinel():
 
     row = gen._option_row(_FakeParam())
     assert "Sentinel" not in row
-    assert "| `--expect` | no | — | Some help text. |" == row
+    assert "| `--manifest` | no | — | Some help text. |" == row

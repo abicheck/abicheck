@@ -196,7 +196,7 @@ directory.
 Two things are required, not optional, and omitting either exits 64:
 
 - **`REPORTS_DIR`** — a positional operand, not an option.
-- **An expected-target mode** — `--manifest`, `--run-plan`, or `--expect`.
+- **An expected-target mode** — `--manifest` or `--run-plan`.
   Prefer one of these: they declare the targets the matrix *must* produce, so
   a target that produced no report at all is reported as missing instead of
   silently absent. That is precisely the **not run** state of step 4, and

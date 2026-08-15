@@ -162,8 +162,6 @@ cannot tell a missing required target from an intentionally absent one):
   and feed the same file to both the matrix and the gate.
 - `--run-plan run-plan.json` — a `project plan` run-plan, projected
   internally into the same manifest shape.
-- `--expect <ids>` (repeatable/comma-separated) with optional `--optional
-  <ids>`.
 - `--discovered-only` — aggregate whatever reports are present with **no
   required-target coverage gate** (a missing target is simply not counted,
   never a coverage failure). This disables only the `coverage` axis — the
@@ -316,9 +314,7 @@ abicheck aggregate REPORTS_DIR \
 |---|:---:|---|
 | `--manifest PATH` | — | The single source of truth for the expected-target set. |
 | `--run-plan PATH` | — | Alternative to `--manifest`: a `project plan` run-plan.json. |
-| `--expect <ids>` / `--optional <ids>` | — | Inline alternative to a manifest file. |
 | `--discovered-only` | — | No required-target coverage gate (contract coverage still applies). |
-| `--report-prefix` | `abi-report-` | Stripped from a report's filename stem when it has no self-identified `target_id`. |
 | `--on-missing-required` | `fail` | `fail` \| `warn`. |
 | `--on-unexpected-target` | `include` | `include` \| `warn` \| `fail` \| `ignore`. |
 | `--format` | `text` | `text` \| `json`. |

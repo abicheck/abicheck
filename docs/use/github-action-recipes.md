@@ -255,10 +255,10 @@ jobs:
 ```
 
 The gate downloads the manifest as an artifact (not `actions/checkout`), so it
-gates against the exact target set the matrix was planned from. For a quick
-inline set instead of a manifest, `--expect linux-x86_64,macos-arm64,windows-x86_64`
-with optional `--optional <ids>` is equivalent; `--discovered-only` opts out of
-the coverage gate entirely. One of the three is **required** — a bare
+gates against the exact target set the matrix was planned from. `--run-plan
+run-plan.json` is the equivalent for a `project plan`-driven workflow, and
+`--discovered-only` opts out of the coverage gate entirely. One of the three is
+**required** — a bare
 `aggregate abi-reports/` is a usage error, because with no declared target set
 the gate cannot tell a missing required target from an absent one. `aggregate`
 then guarantees the properties the old hand-written gate loop silently violated:
@@ -291,8 +291,8 @@ then guarantees the properties the old hand-written gate loop silently violated:
     nor skips the fan-in. Pass `--on-missing-required warn` to `aggregate` if
     you want a missing required target to be reported but not fail the gate (the
     per-target gate decisions alone then decide the exit code); mark a target
-    `"required": false` in the manifest (or `--optional`) if its absence should
-    never fail coverage.
+    `"required": false` in the manifest if its absence should never fail
+    coverage.
 
 Sample output when the Windows leg failed to produce a report:
 

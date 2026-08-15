@@ -418,13 +418,11 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
   for a `project plan`-driven workflow instead of a separate manifest
   projection step); each check's own `check_id` becomes the expected target
   id, matching what `check-target` writes as every report's `target_id`.
-- `--expect <ids>` (repeatable / comma-separated), with optional `--optional
-  <ids>` — an inline alternative to a manifest file.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
   **no required-target coverage gate** (a missing target is simply not
   counted, never a coverage failure — the `contract_coverage` axis is
   unaffected and still applies to whatever *is* present). Required to run
-  without a manifest/`--expect`: with no declared target set the gate cannot
+  without `--manifest`/`--run-plan`: with no declared target set the gate cannot
   tell a missing required target from an intentionally absent one, so a bare
   `aggregate reports/` is a usage error (exit `64`), not a silent pass.
 

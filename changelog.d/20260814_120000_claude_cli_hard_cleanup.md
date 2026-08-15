@@ -36,3 +36,11 @@
 - **`compare --show-impact` is removed.** `--report-mode impact` was documented
   as its exact equivalent (`full` plus the impact table) and is now the one way
   to ask for that table.
+
+- **`aggregate --expect` / `--optional` / `--report-prefix` are removed.**
+  The expected-target set is now declared only by `--manifest` or `--run-plan`
+  (or waived with `--discovered-only`): an inline id list retyped on the
+  command line is exactly the plan-vs-gate drift the shared manifest file
+  exists to prevent, and `--optional` was only ever a modifier on `--expect`.
+  The report-filename prefix is fixed at `abi-report-`; a report that
+  self-identifies a `target_id` never consulted it anyway.

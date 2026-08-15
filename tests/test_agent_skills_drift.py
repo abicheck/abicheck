@@ -622,7 +622,7 @@ def test_no_skill_tells_an_agent_to_read_an_integration_only_field(tmp_path):
 
 
 def test_cited_aggregate_invocations_satisfy_its_required_option_group(tmp_path):
-    """`aggregate` requires one of `--manifest`/`--run-plan`/`--expect`, or an
+    """`aggregate` requires one of `--manifest`/`--run-plan`, or an
     explicit `--discovered-only`, and enforces it **in the command body** —
     not in the Click parser. So neither the option-name check nor the
     positional-argument check above can see a violation: both passed while the
