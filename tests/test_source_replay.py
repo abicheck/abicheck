@@ -699,7 +699,7 @@ def test_extractor_version_folds_in_cache_identity_extra_hook() -> None:
 
 
 def test_extractor_version_changes_with_clang_bin_override() -> None:
-    """A resolved ``--gcc-path`` override (``clang_bin``/``compiler_binary``)
+    """A resolved ``--compiler`` override (``clang_bin``/``compiler_binary``)
     must change ``ClangSourceExtractor``'s cache identity -- otherwise a
     warm ``--source-abi-cache-dir`` populated under plain ``clang`` would be
     treated as a hit for a later run honoring a different compiler,
@@ -739,7 +739,7 @@ def test_cache_key_changes_with_extractor_compiler_override(tmp_path: Path) -> N
 
 
 def test_cache_key_uses_compiler_override_for_replay_flag_mode(tmp_path: Path) -> None:
-    """A --gcc-path override that switches a GNU-argv compile unit into CL
+    """A --compiler override that switches a GNU-argv compile unit into CL
     mode changes which flags replay_extra_flags() recognizes (/FI vs
     -include), and the cache key must follow that mode -- not the compile
     unit's own un-overridden argv (Codex review, sixth round)."""

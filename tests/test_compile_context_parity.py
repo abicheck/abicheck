@@ -265,7 +265,7 @@ def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
 
 
 def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> None:
-    """CLI --compiler-option/--gcc-option tokens must win over a config-
+    """CLI --compiler-option tokens must win over a config-
     synthesized -std=/-D, the same way the now-removed --gcc-options scalar
     used to (Codex review, PR #757): appending config tokens *after* the
     CLI's own gcc_option_tokens silently let `compile.std` override an
@@ -1187,7 +1187,7 @@ def test_compare_rejects_compiler_aliases_for_set_inputs(
     directory/package operands exactly like their legacy gcc_* counterparts
     (test_compare_rejects_compile_context_for_set_inputs above) -- without
     this, --compiler would silently no-op instead of raising, unlike
-    --gcc-path (Codex review, PR #757)."""
+    --compiler (Codex review, PR #757)."""
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
     old_dir.mkdir()

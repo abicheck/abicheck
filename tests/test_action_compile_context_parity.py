@@ -351,7 +351,7 @@ class TestCompileContextForwardingParity:
         # scalar --gcc-options (last-of-two-identical-values wins), but
         # --compiler-option is `multiple=True` and genuinely accumulates every
         # occurrence, so the duplicate silently doubled every forwarded
-        # --gcc-path/--gcc-prefix/--compiler-option/--sysroot token.
+        # --compiler/--compiler-prefix/--compiler-option/--sysroot token.
         assert cmd.count("--compiler") == 1
         assert cmd.count("--compiler-prefix") == 1
         assert cmd.count("--compiler-option") == 1

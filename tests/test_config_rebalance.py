@@ -409,9 +409,8 @@ class TestFlagBudget:
                      "--exit-code-scheme", "--scope-public-headers",
                      # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
                      # the toolchain family (shared with dump/scan) stay visible.
-                     # --gcc-path itself is now a hidden, deprecated alias for
-                     # --compiler (CLI audit PR 2/5) -- --compiler is its
-                     # visible successor.
+                     # --gcc-path, the former spelling, is removed outright;
+                     # --compiler is its visible successor.
                      "--debug-root", "--compiler", "--sysroot"):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
 

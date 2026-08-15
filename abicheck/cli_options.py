@@ -855,7 +855,7 @@ def merge_compile_config(
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI
-        # --compiler-option/--gcc-option token appended after it is the one a
+        # --compiler-option token appended after it is the one a
         # compiler actually honors for a repeated flag like -std= (Codex
         # review: appending config tokens *after* CLI ones silently let
         # `compile.std`/`compile.defines` override an explicit CLI

@@ -865,7 +865,7 @@ def test_collect_build_context_forced_include_marks_fields_ambiguous(tmp_path):
     guarded field is flagged ``ambiguous`` (Codex review #498, P1)."""
     h = tmp_path / "config.h"
     h.write_text("struct Config {\n#ifdef KEEP\n int legacy;\n#endif\n};")
-    # forced include via user --gcc-option pass-through
+    # forced include via user --compiler-option pass-through
     _, reg = collect_build_context(
         [h], None, extra_flags=["-DKEEP", "-include", "prelude.h"]
     )
@@ -916,13 +916,13 @@ def test_collect_build_context_skips_unreadable_header(tmp_path):
 def test_user_define_flags_combines_tokens_and_gcc_options():
     """The dump collects the user's global flags in the **same order the real dump
     applies them**: the ``--gcc-options`` string first, then the repeatable
-    ``--gcc-option`` tokens (``dumper._castxml_cmd`` order), so ``-D``/``-U`` of the
+    ``--compiler-option`` tokens (``dumper._castxml_cmd`` order), so ``-D``/``-U`` of the
     same macro resolve identically on both sides (Codex review #498)."""
     from abicheck.cli_dump_helpers import _user_define_flags
 
     assert _user_define_flags((), None) == []
     assert _user_define_flags(("-DA",), None) == ["-DA"]
-    # --gcc-options (-UKEEP -DB) is applied before the --gcc-option token (-DA).
+    # --gcc-options (-UKEEP -DB) is applied before the --compiler-option token (-DA).
     assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-UKEEP", "-DB", "-DA"]
     # Order-sensitivity: --gcc-options=-DKEEP then --gcc-option=-UKEEP must leave
     # KEEP inactive (token last wins), matching dumper.py.

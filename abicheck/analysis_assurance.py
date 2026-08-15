@@ -27,7 +27,7 @@ ADR-049's contract-relevance/evidence/coverage machinery
 (``contract_evaluation.py``, ``contract_coverage_ledger.py``,
 ``contract_coverage_exit.py``, ...) already answers a *narrower* version of
 this question -- "was there enough evidence to trust a *contract-relevance*
-decision" -- and only when a caller opts into ``--contract-evaluation``. This
+decision" -- and only when a caller opts into ``--contract``. This
 module answers the broader question for *every* comparison, opt-in or not:
 did the analysis itself (depth, translation-unit accounting, export
 accounting, header/build/source-graph evidence) come back complete, whatever

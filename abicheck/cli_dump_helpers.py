@@ -94,7 +94,7 @@ def _user_define_flags(
     ``dumper._castxml_cmd`` appends ``gcc_options`` first, then
     ``gcc_option_tokens`` (see ``dumper.py``), so the collector must too (Codex
     review #498). Order is significant because ``defines_from_flags`` honours
-    ``-D``/``-U`` sequence: ``--gcc-options=-DKEEP --gcc-option=-UKEEP`` must leave
+    ``-D``/``-U`` sequence: a composed ``-DKEEP`` followed by ``--compiler-option=-UKEEP`` must leave
     ``KEEP`` *inactive* on both the parse and the harvest, else the reconciler
     would add back a field the real parse pruned. These flags are applied on top
     of the compile-DB intersection, so a user ``-UKEEP`` also overrides a database

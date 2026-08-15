@@ -959,7 +959,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         bug, not one this phase introduced"): a bundle cell's `new-library`
         is the `bundle-staging` *directory* it stages its members into, and
         `cli_resolve._reject_compile_context_for_set_inputs` hard-rejects
-        `--gcc-path`/`--gcc-options` for a directory/package compare, since
+        `--compiler`/`--gcc-options` for a directory/package compare, since
         the per-library release fan-out never threads a single-pair L2
         compile context to each pair. Before this guard, a profile that set
         `compile.binding` for its target cells would have that same per-cell

@@ -251,7 +251,7 @@ def _build_castxml_command(
         cmd += ["-nostdinc"]
     if gcc_options:
         cmd += split_gcc_options(gcc_options)
-    # Repeatable --gcc-option: each value is one literal compiler argument,
+    # Repeatable --compiler-option: each value is one literal compiler argument,
     # appended verbatim (no shlex split) so a flag whose value contains
     # whitespace survives intact and identically on POSIX and Windows.
     cmd += list(gcc_option_tokens)
@@ -259,7 +259,7 @@ def _build_castxml_command(
     explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
     # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
     # which is rejected when parsing a .h file in C mode. Force C mode, but only
-    # impose gnu11 when the user did not request a C standard via --gcc-option(s)
+    # impose gnu11 when the user did not request a C standard via --compiler-option
     # — otherwise their -std=gnu17/c99 would be overridden by a later flag.
     if not force_cpp and cc_id == "gnu":
         cmd += ["-x", "c"]
@@ -330,7 +330,7 @@ def _build_clang_header_command(
         cmd += ["-nostdinc"]
     if gcc_options:
         cmd += split_gcc_options(gcc_options)
-    # Repeatable --gcc-option: one literal argument each (no shlex split).
+    # Repeatable --compiler-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
     if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")

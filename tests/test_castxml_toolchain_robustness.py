@@ -581,7 +581,7 @@ class TestHeaderToolchainErrorClass:
 class TestG16ClangFallbackRespectsConfiguredDriver:
     """The G16 recoverable-fallback guard must probe the exact clang driver
     _run_clang() would actually invoke (_resolve_clang_bin honors
-    --gcc-path/--gcc-prefix), not a bare "clang" on PATH -- a caller-
+    --compiler/--compiler-prefix), not a bare "clang" on PATH -- a caller-
     configured or prefixed clang may be available and should let the
     fallback recover even when bare "clang" isn't on PATH at all (Codex
     review). Fully mocked -- no castxml/clang needed."""
@@ -607,7 +607,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
 
         def fake_which(name):  # noqa: ANN001
             # Bare "clang"/"clang++" is NOT on PATH -- only the exact
-            # --gcc-path driver is.
+            # --compiler driver is.
             return configured if name == configured else None
 
         sentinel = MagicMock()

@@ -527,7 +527,7 @@ def test_seed_l2_includes_noop_when_gcc_options_supply_includes(tmp_path):
 
 
 def test_seed_l2_includes_noop_when_gcc_option_tokens_supply_includes(tmp_path):
-    # Same for the repeatable --gcc-option token form (`-I`, `<dir>`).
+    # Same for the repeatable --compiler-option token form (`-I`, `<dir>`).
     from abicheck.buildsource.inline import seed_l2_includes
 
     _compile_db_tree(tmp_path)

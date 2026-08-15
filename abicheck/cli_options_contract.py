@@ -298,7 +298,7 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "compatibility verdict. Whether a given run needs that extra "
         "assurance floor varies per invocation (e.g. a release gate vs. an "
         "exploratory local diff), not a stable project default -- like "
-        "--contract-evaluation/--audit-suppressions above."
+        "--contract/--audit-suppressions above."
     ),
 }
 

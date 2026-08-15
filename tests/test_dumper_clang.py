@@ -2952,7 +2952,7 @@ def test_build_clang_header_command_stock_clang_sycl_not_gated(tmp_path: Path) -
     # Codex review (PR #643): stock upstream clang accepts a bare -fsycl and
     # parses it as a single pass fine, but does not recognize
     # -fsycl-host-only at all -- it hard-rejects it with "unknown argument".
-    # Appending it here would turn a working --gcc-path clang + -fsycl parse
+    # Appending it here would turn a working --compiler clang + -fsycl parse
     # into a guaranteed failure, so this must stay gated on the resolved
     # binary actually being an Intel oneAPI driver (icx/icpx/dpcpp[-cl]).
     agg = tmp_path / "agg.hpp"
@@ -2963,7 +2963,7 @@ def test_build_clang_header_command_stock_clang_sycl_not_gated(tmp_path: Path) -
 
 
 def test_build_clang_header_command_sycl_via_gcc_option_tokens(tmp_path: Path) -> None:
-    # The repeatable --gcc-option path (gcc_option_tokens) must be checked the
+    # The repeatable --compiler-option path (gcc_option_tokens) must be checked the
     # same way as the shlex-split --gcc-options string.
     agg = tmp_path / "agg.hpp"
     cmd = _build_clang_header_command(
@@ -5076,7 +5076,7 @@ def test_clang_header_dump_nonzero_exit_raises(
     ],
 )
 def test_is_clang_family_binary(path: str, expected: bool) -> None:
-    """Pure-function unit test for the --gcc-path clang-family classifier,
+    """Pure-function unit test for the --compiler clang-family classifier,
     directly exercising both the "clang" substring branch and the vendor
     alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
     _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
@@ -5110,7 +5110,7 @@ def test_is_intel_sycl_driver(path: str, expected: bool) -> None:
 def test_clang_header_dump_gcc_path_not_used_as_clang(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # A --gcc-path pointing at g++ must NOT become the clang executable.
+    # A --compiler pointing at g++ must NOT become the clang executable.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     seen = {}
@@ -5158,7 +5158,7 @@ def test_clang_header_dump_gcc_path_recognizes_icx_family(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gcc_path: str
 ) -> None:
     # Intel's oneAPI DPC++/C++ compiler is clang-based (accepts -Xclang directly)
-    # but is not spelled "clang" -- --gcc-path must still be honored for it
+    # but is not spelled "clang" -- --compiler must still be honored for it
     # instead of silently falling back to a plain "clang" on PATH (a different,
     # possibly differently-configured compiler than the one the real build used).
     header = tmp_path / "foo.h"
@@ -5422,7 +5422,7 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
     from abicheck import dumper_sysinc
 
     monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
-    # An explicit GNU --gcc-path is used verbatim…
+    # An explicit GNU --compiler is used verbatim…
     assert _resolve_probe_compiler("c++", "/opt/gcc-13/bin/g++", None) == (
         "/opt/gcc-13/bin/g++"
     )
@@ -5439,7 +5439,7 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
 def test_resolve_probe_compiler_skips_clang_family_aliases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A --gcc-path icx/icpx/dpcpp/dpcpp-cl is clang-family, not GNU — probing it
+    """A --compiler icx/icpx/dpcpp/dpcpp-cl is clang-family, not GNU — probing it
     (instead of a real g++/gcc on PATH) yields incomplete system include dirs
     (e.g. missing /usr/include with stdlib.h), since these are the same clang
     binary under a different name, not real gcc/g++."""
@@ -5578,7 +5578,7 @@ def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> 
 def test_resolve_clang_system_includes_respects_passthrough(
     monkeypatch: pytest.MonkeyPatch, gcc_options, gcc_option_tokens
 ) -> None:
-    # Hermetic/cross flags supplied via --gcc-options/--gcc-option must suppress
+    # Hermetic/cross flags supplied via --compiler-option must suppress
     # the host probe too, not just the structured nostdinc/sysroot (Codex review).
     from abicheck import dumper_sysinc
 
@@ -5720,7 +5720,7 @@ def test_resolve_source_frontend_clang_bin_no_overrides() -> None:
 
 
 def test_resolve_source_frontend_clang_bin_honors_clang_family_gcc_path() -> None:
-    """A ``--gcc-path`` pointing at a clang-family binary (e.g. an Intel oneAPI
+    """A ``--compiler`` pointing at a clang-family binary (e.g. an Intel oneAPI
     ``icpx`` symlink) is used directly for L4/S2 replay, not a plain fallback —
     otherwise a non-default toolchain's real compiler is silently ignored."""
     from abicheck.dumper_clang import resolve_source_frontend_clang_bin
@@ -5749,7 +5749,7 @@ def test_resolve_source_frontend_clang_bin_keeps_cl_style_when_not_excluded() ->
     """L4 source-ABI replay (``ClangSourceExtractor``) already detects a CL
     compile unit and re-drives it with ``--driver-mode=cl`` -- unlike the S2
     preprocessor pre-scan, it must not fall back to a plain, non-CL
-    ``clang``/``clang++`` for a ``--gcc-path clang-cl``/``dpcpp-cl`` build,
+    ``clang``/``clang++`` for a ``--compiler clang-cl``/``dpcpp-cl`` build,
     or an Intel DPC++/SYCL context parsed at L2 gets replayed through stock
     Clang at L4 and silently loses source-ABI coverage."""
     from abicheck.dumper_clang import resolve_source_frontend_clang_bin
