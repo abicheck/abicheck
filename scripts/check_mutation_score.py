@@ -478,6 +478,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {module}: {len(keys)}")
 
     exit_code = 0
+    #: Did any check in this run actually have something to compare against?
+    #: A run that gated nothing must never be reported as a pass.
+    gated = True
     baseline_modules = load_baseline(Path(args.baseline_file))
     total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
     # "Report-only" means there is genuinely nothing to be measured against.
@@ -561,6 +564,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("\n".join(failures))
             exit_code = 1
+        elif n_funcs == 0 and baseline_modules is None:
+            # The test-only diff. This gate is attribution-based, so a branch
+            # that weakens assertions without touching a production function
+            # gives it nothing to scope to — and "OK" for a run that examined
+            # zero functions reads as a pass it never made (Codex review). The
+            # survivors such a branch creates are only visible as *drift*,
+            # which needs the baseline file.
+            gated = False
+            print(
+                "mutation-score: diff-scoped examined 0 changed functions and "
+                f"there is no per-module baseline at {args.baseline_file}, so "
+                "this run GATED NOTHING. A test-only change can only be "
+                "checked as drift; record the baseline once with the "
+                "workflow_dispatch lane (write_baseline: true)."
+            )
         else:
             print("mutation-score: diff-scoped OK (no survivors in changed functions)")
 
@@ -597,6 +615,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"mutation-score: OK ({survivors} == baseline {total_baseline})")
 
+    if args.require_baseline and not gated:
+        print(
+            "ERROR: --require-baseline was passed but this run had nothing to "
+            "gate against (no changed production function, no baseline)."
+        )
+        exit_code = 1
+
     if args.json:
         Path(args.json).write_text(
             json.dumps(
@@ -605,6 +630,7 @@ def main(argv: list[str] | None = None) -> int:
                     "unresolved": unresolved,
                     "stats": stats,
                     "by_module": by_module,
+                    "gated": gated,
                     "exit_code": exit_code,
                 },
                 indent=2,

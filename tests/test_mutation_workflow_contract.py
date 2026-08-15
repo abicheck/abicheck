@@ -27,7 +27,7 @@ pixi/pre-commit/CI all route through `scripts/verify.py`'s step catalog.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import tomllib
@@ -70,6 +70,26 @@ _INFRASTRUCTURE_PATHS = {
 }
 
 
+def _test_globs() -> set[str]:
+    """One `tests/test_<stem>*.py` glob per mutated module.
+
+    A PR that only weakens a detector test changes no production file, so the
+    source-path entries alone never start the lane and the resulting survivors
+    wait for the weekly run (Codex review). Derived from `source_paths` rather
+    than listed, so a module added there without its tests fails the contract
+    below instead of silently losing its trigger.
+    """
+    return {f"tests/test_{PurePosixPath(p).stem}*.py" for p in _source_paths()}
+
+
+def test_paths_filter_covers_every_mutated_modules_tests() -> None:
+    missing = _test_globs() - set(_paths_filter())
+    assert not missing, (
+        f"mutated module(s) whose tests have no trigger: {sorted(missing)} — a "
+        "PR weakening only those tests would not start this lane."
+    )
+
+
 def test_paths_filter_covers_every_mutated_source_path() -> None:
     missing = set(_source_paths()) - set(_paths_filter())
     assert not missing, (
@@ -87,7 +107,10 @@ def test_paths_filter_covers_the_lanes_own_infrastructure() -> None:
 
 def test_the_filter_is_exactly_sources_plus_infrastructure() -> None:
     """No stray entries — the filter is a contract, not a wishlist."""
-    assert set(_paths_filter()) == set(_source_paths()) | _INFRASTRUCTURE_PATHS
+    assert (
+        set(_paths_filter())
+        == set(_source_paths()) | _INFRASTRUCTURE_PATHS | _test_globs()
+    )
 
 
 def test_the_lane_does_not_cache_mutmut_results() -> None:

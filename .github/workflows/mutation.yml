@@ -85,6 +85,28 @@ jobs:
               - 'tests/test_mutation_results.py'
               - '.github/workflows/mutation.yml'
               - 'pyproject.toml'
+              # The mutated modules' own tests. A PR that only weakens or
+              # deletes assertions in a detector test changes no production
+              # file, so none of the entries above matched and this lane did
+              # not start at all — the survivors that weakening creates would
+              # surface only on the next weekly run (Codex review). One glob
+              # per mutated module, mechanically enforced by
+              # tests/test_mutation_workflow_contract.py, so adding a module
+              # to `source_paths` without its tests fails that contract.
+              - 'tests/test_diff_symbols*.py'
+              - 'tests/test_diff_types*.py'
+              - 'tests/test_diff_platform*.py'
+              - 'tests/test_diff_vtable_layout*.py'
+              - 'tests/test_diff_filtering*.py'
+              - 'tests/test_checker_policy*.py'
+              - 'tests/test_idioms*.py'
+              - 'tests/test_pattern_verdicts*.py'
+              - 'tests/test_surface_graph*.py'
+              - 'tests/test_finding_identity*.py'
+              - 'tests/test_name_classification*.py'
+              - 'tests/test_suppression*.py'
+              - 'tests/test_snapshot_io*.py'
+              - 'tests/test_serialization*.py'
       - name: Decide whether to run
         id: decide
         env:

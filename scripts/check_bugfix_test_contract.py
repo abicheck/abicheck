@@ -360,6 +360,20 @@ def changed_files(base: str, head: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def unified_diff(base: str, head: str) -> str:
+    """The diff itself, for the content half of the test-evidence question.
+
+    Rename detection is **on** here, unlike :func:`changed_files`. The two want
+    opposite things from the same diff: the status listing wants a rename split
+    into its `D` and `A` halves so a deleted test is still visible as a
+    deletion, while the content check wants the halves paired, so a pure rename
+    reduces to "no lines added" instead of looking like a brand-new test file
+    (Codex review). `--unified=0` keeps context lines out of the added-line
+    scan.
+    """
+    return _git(["diff", "-M", "--unified=0", f"{base}...{head}"])
+
+
 def commit_subjects(base: str, head: str) -> list[str]:
     out = _git(["log", "--format=%s", f"{base}..{head}"])
     return [line for line in out.splitlines() if line]
@@ -418,12 +432,63 @@ def touches_tests(paths: list[str]) -> bool:
     return any(is_test_path(p) for p in paths)
 
 
-def adds_or_modifies_a_test(changed: list[tuple[str, str]]) -> bool:
+def added_content_paths(diff_text: str) -> set[str]:
+    """Paths this diff adds at least one line of *substantive* content to.
+
+    Pure, so it can be tested against diff text directly. Two exclusions, both
+    of which are content-shaped rather than status-shaped:
+
+    * A **pure rename** produces no added lines at all under rename detection
+      (`similarity index 100%`, no `+++` header), so it never appears here.
+      This is the reason the function exists: `changed_files()` runs with
+      `--no-renames`, which reports `git mv tests/test_a.py tests/test_b.py`
+      as one `D` and one `A`, and a status-only predicate read that `A` as a
+      regression test (Codex review). Renaming a test is not writing one.
+    * Blank lines, and comment-only lines in Python, are not evidence either.
+      They are the cheapest possible way to produce an `M` on a test file.
+
+    The comment rule is `.py`-only on purpose: `#` starts a heading in a
+    golden Markdown snapshot and is ordinary content in most fixture formats,
+    so applying it everywhere would discard real test-data changes.
+    """
+    out: set[str] = set()
+    current: str | None = None
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            # Reset first: a rename-only entry carries no `+++` header at all,
+            # so without this the previous file's attribution would leak into
+            # it and any following `+` line would be credited to the rename.
+            current = None
+            continue
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            current = target[2:] if target.startswith("b/") else None
+            continue
+        if current is None or not line.startswith("+"):
+            continue
+        body = line[1:].strip()
+        if not body:
+            continue
+        if current.endswith(".py") and body.startswith("#"):
+            continue
+        out.add(current)
+    return out
+
+
+def adds_or_modifies_a_test(changed: list[tuple[str, str]], diff_text: str) -> bool:
     """Positive evidence that a regression test exists.
 
-    Deleting a test is a change to a test path and the opposite of evidence.
+    Both halves are required, because each catches something the other cannot:
+    the *status* rules out a deletion (the opposite of evidence) and a type
+    change (retyping a test file is not writing one), while the *content* rules
+    out a rename or a whitespace/comment-only edit, which carry an `A`/`M`
+    status while asserting nothing new.
     """
-    return any(status in ("A", "M") and is_test_path(path) for status, path in changed)
+    with_content = added_content_paths(diff_text)
+    return any(
+        status in ("A", "M") and is_test_path(path) and path in with_content
+        for status, path in changed
+    )
 
 
 def strip_html_comments(text: str) -> str:
@@ -505,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         changed = changed_files(base, head)
         paths = [path for _status, path in changed]
+        diff_text = unified_diff(base, head)
         subjects = commit_subjects(base, head)
     except subprocess.CalledProcessError as e:
         # An unresolvable ref is a real failure when CI named the refs, and an
@@ -527,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
 
     # --- structural ----------------------------------------------------
-    if touches_shipped_code(paths) and not adds_or_modifies_a_test(changed):
+    if touches_shipped_code(paths) and not adds_or_modifies_a_test(changed, diff_text):
         failures.append(
             "This fix changes shipped code but no test. A fix with no test "
             "cannot fail if it is reverted — add the regression test, or use "

@@ -110,24 +110,100 @@ class TestStructuralRequirement:
         """Deleting a test is a change to a test path and the opposite of
         evidence — it let a fix satisfy the requirement by removing coverage
         (Codex review)."""
-        assert not gate.adds_or_modifies_a_test([("D", "tests/test_x.py")])
+        assert not gate.adds_or_modifies_a_test(
+            [("D", "tests/test_x.py")], _deletion_diff("tests/test_x.py")
+        )
 
     @pytest.mark.parametrize("status", ["A", "M"])
     def test_an_added_or_modified_test_is_evidence(self, status: str) -> None:
-        assert gate.adds_or_modifies_a_test([(status, "tests/test_x.py")])
+        assert gate.adds_or_modifies_a_test(
+            [(status, "tests/test_x.py")], _content_diff("tests/test_x.py")
+        )
 
     def test_a_deleted_test_alongside_an_added_one_is_still_evidence(self) -> None:
         """Replacing a test is legitimate — only *deletion alone* is not."""
         assert gate.adds_or_modifies_a_test(
-            [("D", "tests/test_old.py"), ("A", "tests/test_new.py")]
+            [("D", "tests/test_old.py"), ("A", "tests/test_new.py")],
+            _deletion_diff("tests/test_old.py") + _content_diff("tests/test_new.py"),
         )
 
     def test_a_modified_non_test_is_not_evidence(self) -> None:
-        assert not gate.adds_or_modifies_a_test([("M", "abicheck/diff_types.py")])
+        assert not gate.adds_or_modifies_a_test(
+            [("M", "abicheck/diff_types.py")], _content_diff("abicheck/diff_types.py")
+        )
 
     def test_a_type_change_is_not_test_evidence(self) -> None:
         """Retyping a test file is not writing one."""
-        assert not gate.adds_or_modifies_a_test([("T", "tests/test_x.py")])
+        assert not gate.adds_or_modifies_a_test(
+            [("T", "tests/test_x.py")], _content_diff("tests/test_x.py")
+        )
+
+
+class TestContentEvidence:
+    """The status alone is not evidence — the added lines have to say something.
+
+    `changed_files()` runs with `--no-renames`, so `git mv` arrives as one `D`
+    and one `A`; a status-only predicate read that `A` as a regression test
+    (Codex review). These pin the content half.
+    """
+
+    def test_a_pure_rename_is_not_a_regression_test(self) -> None:
+        assert not gate.adds_or_modifies_a_test(
+            [("D", "tests/test_old.py"), ("A", "tests/test_new.py")],
+            _RENAME_DIFF,
+        )
+
+    def test_a_rename_carrying_a_real_edit_is_evidence(self) -> None:
+        """Negative control: moving a test *and* strengthening it still counts."""
+        assert gate.adds_or_modifies_a_test(
+            [("D", "tests/test_old.py"), ("A", "tests/test_new.py")],
+            _RENAME_WITH_EDIT_DIFF,
+        )
+
+    @pytest.mark.parametrize(
+        "added",
+        [
+            "",
+            "   ",
+            "# a note about the fix",
+            "    # TODO: come back to this",
+        ],
+    )
+    def test_blank_or_comment_only_python_lines_are_not_evidence(
+        self, added: str
+    ) -> None:
+        diff = _content_diff("tests/test_x.py", added)
+        assert not gate.adds_or_modifies_a_test([("M", "tests/test_x.py")], diff)
+
+    def test_a_hash_line_in_test_data_is_still_evidence(self) -> None:
+        """The comment rule is `.py`-only: `#` is a heading in a golden
+        Markdown snapshot and ordinary content in most fixture formats."""
+        diff = _content_diff("tests/golden/report.md", "# Summary")
+        assert gate.adds_or_modifies_a_test([("M", "tests/golden/report.md")], diff)
+
+    def test_the_content_diff_is_taken_with_rename_detection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The two diffs want opposite things: the status listing splits a
+        rename into `D`+`A` so a deleted test stays visible, the content scan
+        pairs them so a pure rename adds nothing. Every fixture in this class
+        assumes the paired shape, so the flag is pinned rather than assumed."""
+        seen: dict[str, list[str]] = {}
+
+        def _spy(args: list[str]) -> str:
+            seen["args"] = args
+            return ""
+
+        monkeypatch.setattr(gate, "_git", _spy)
+        gate.unified_diff("A", "B")
+        assert "-M" in seen["args"]
+        assert "--no-renames" not in seen["args"]
+
+    def test_added_lines_are_attributed_to_their_own_file(self) -> None:
+        """A rename entry carries no `+++` header, so the previous file's
+        attribution must not leak into it."""
+        diff = _content_diff("abicheck/checker.py") + _RENAME_DIFF
+        assert gate.added_content_paths(diff) == {"abicheck/checker.py"}
 
     def test_the_diff_filter_keeps_type_changes(self) -> None:
         """Replacing a shipped script with a symlink is a real behavioural
@@ -310,6 +386,49 @@ class TestAlwaysRequiredAnswers:
             r.key for r in gate.missing_requirements(body, ["abicheck/checker.py"])
         }
         assert key in missing
+
+
+def _content_diff(path: str, added: str = "    assert f(2) == 4") -> str:
+    """One file with one added line, in `git diff --unified=0 -M` shape."""
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        "@@ -1,0 +2 @@\n"
+        f"+{added}\n"
+    )
+
+
+def _deletion_diff(path: str) -> str:
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        "deleted file mode 100644\n"
+        f"--- a/{path}\n"
+        "+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-    assert f(2) == 4\n"
+    )
+
+
+#: Real `git diff -M` output shape for `git mv` with no edit: no `+++` header
+#: at all, so nothing is added anywhere.
+_RENAME_DIFF = (
+    "diff --git a/tests/test_old.py b/tests/test_new.py\n"
+    "similarity index 100%\n"
+    "rename from tests/test_old.py\n"
+    "rename to tests/test_new.py\n"
+)
+
+_RENAME_WITH_EDIT_DIFF = (
+    "diff --git a/tests/test_old.py b/tests/test_new.py\n"
+    "similarity index 92%\n"
+    "rename from tests/test_old.py\n"
+    "rename to tests/test_new.py\n"
+    "--- a/tests/test_old.py\n"
+    "+++ b/tests/test_new.py\n"
+    "@@ -3,0 +4 @@\n"
+    "+    assert f(-1) == 1\n"
+)
 
 
 class TestConditionalRequirements:
@@ -519,6 +638,9 @@ class TestEmptyPrBody:
             lambda b, h: [("M", "abicheck/x.py"), ("A", "tests/test_x.py")],
         )
         monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        monkeypatch.setattr(
+            gate, "unified_diff", lambda b, h: _content_diff("tests/test_x.py")
+        )
         empty = tmp_path / "body.md"
         empty.write_text("   \n\n", encoding="utf-8")
         rc = gate.main(["--base", "A", "--head", "B", "--body-file", str(empty)])
@@ -535,6 +657,9 @@ class TestEmptyPrBody:
             lambda b, h: [("M", "abicheck/x.py"), ("A", "tests/test_x.py")],
         )
         monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        monkeypatch.setattr(
+            gate, "unified_diff", lambda b, h: _content_diff("tests/test_x.py")
+        )
         rc = gate.main(["--base", "A", "--head", "B"])
         assert rc == 0
         assert "no --body-file given" in capsys.readouterr().out
@@ -548,6 +673,9 @@ class TestEmptyPrBody:
             lambda b, h: [("M", "abicheck/cli_deps.py"), ("A", "tests/test_x.py")],
         )
         monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        monkeypatch.setattr(
+            gate, "unified_diff", lambda b, h: _content_diff("tests/test_x.py")
+        )
         body = tmp_path / "body.md"
         body.write_text(COMPLETE_BODY, encoding="utf-8")
         assert gate.main(["--base", "A", "--head", "B", "--body-file", str(body)]) == 0
