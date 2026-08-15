@@ -163,3 +163,27 @@ class TestToAggregateManifest:
         restored = RunPlan.from_dict({"schema": "something-else", "checks": []})
         assert restored.schema == "something-else"
         assert restored.gate_missing_required is None
+
+    @pytest.mark.parametrize(
+        "bad_gate",
+        [
+            "not-an-object",
+            {"unknown_key": "fail"},
+            {"missing_required": "bogus"},
+            {"unexpected_target": "bogus"},
+        ],
+    )
+    def test_malformed_v2_gate_is_rejected_not_silently_discarded(self, bad_gate) -> None:
+        """Codex review, fresh evidence: a malformed `gate` on an otherwise
+        valid v2 plan must be a loud AggregateError, not silently coerced to
+        "no gate" -- `to_aggregate_manifest()` would then omit the policy
+        entirely and `aggregate` would apply the hard-coded fail/include
+        defaults, potentially reversing the requested CI outcome. Mirrors
+        `ExpectedTargets.from_manifest_data()`'s own validation for a
+        hand-authored manifest's `gate` block."""
+        from abicheck.aggregate import AggregateError
+
+        with pytest.raises(AggregateError):
+            RunPlan.from_dict(
+                {"schema": "abicheck.run-plan/v2", "checks": [], "gate": bad_gate}
+            )

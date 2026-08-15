@@ -205,6 +205,61 @@ def _run_plan_schema_version(schema: str) -> int | None:
     return int(suffix) if suffix.isdigit() else None
 
 
+def _parse_run_plan_gate(gate_raw: Any) -> tuple[str | None, str | None]:
+    """Validate a ``run-plan.json`` top-level ``gate`` block.
+
+    ``None`` (the key absent) -> ``(None, None)``, same as everywhere else in
+    this module. Present but malformed -- not an object, an unknown key, or
+    a value outside :class:`~abicheck.aggregate_manifest.OnMissingRequired`/
+    :class:`~abicheck.aggregate_manifest.OnUnexpectedTarget` -- is a loud
+    :class:`~abicheck.aggregate_manifest.AggregateError`, not a silent
+    coercion to "no gate" (Codex review, fresh evidence: an earlier revision
+    treated any non-dict/malformed ``gate`` the same as an absent one, so a
+    corrupted or hand-authored v2 plan's requested policy could be silently
+    discarded and `aggregate` would fall back to the hard-coded defaults --
+    potentially reversing the requested CI outcome instead of failing loud).
+    Mirrors :func:`abicheck.aggregate_manifest._parse_manifest_gate`'s own
+    key/value validation exactly, kept as a separate function here (not a
+    shared call) since that function's own version check is shaped for the
+    manifest's ``MAJOR.MINOR`` scheme, not this module's ``vN`` one -- the
+    two callers already do their own, differently-shaped version checks.
+    """
+    if gate_raw is None:
+        return None, None
+    from ..aggregate_manifest import (
+        AggregateError,
+        OnMissingRequired,
+        OnUnexpectedTarget,
+    )
+
+    if not isinstance(gate_raw, dict):
+        raise AggregateError("run-plan 'gate' must be an object")
+    unknown = sorted(set(gate_raw) - {"missing_required", "unexpected_target"})
+    if unknown:
+        raise AggregateError(f"run-plan 'gate': unknown key(s) {unknown!r}")
+    mr_raw = gate_raw.get("missing_required")
+    missing_required: str | None = None
+    if mr_raw is not None:
+        try:
+            missing_required = OnMissingRequired(mr_raw).value
+        except ValueError as exc:
+            raise AggregateError(
+                f"run-plan 'gate.missing_required' {mr_raw!r} must be one of "
+                f"{[v.value for v in OnMissingRequired]}"
+            ) from exc
+    ut_raw = gate_raw.get("unexpected_target")
+    unexpected_target: str | None = None
+    if ut_raw is not None:
+        try:
+            unexpected_target = OnUnexpectedTarget(ut_raw).value
+        except ValueError as exc:
+            raise AggregateError(
+                f"run-plan 'gate.unexpected_target' {ut_raw!r} must be one "
+                f"of {[v.value for v in OnUnexpectedTarget]}"
+            ) from exc
+    return missing_required, unexpected_target
+
+
 def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     """Compose ``compile_spec``'s standard/stdlib/target/abi_macros/args axes
     into one space-joined extra-flags string, forwarded verbatim as
@@ -479,7 +534,9 @@ class RunPlan:
         # set, regardless of whatever self.schema was constructed with --
         # this is a discriminator an old reader must see, not a caller-
         # overridable label (see RUN_PLAN_SCHEMA_GATE's own docstring).
-        d: dict[str, Any] = {"schema": RUN_PLAN_SCHEMA_GATE if has_gate else self.schema}
+        d: dict[str, Any] = {
+            "schema": RUN_PLAN_SCHEMA_GATE if has_gate else self.schema
+        }
         if self.project:
             d["project"] = self.project
         if self.head_sha:
@@ -513,8 +570,8 @@ class RunPlan:
                 "abicheck"
             )
         gate_raw = d.get("gate")
-        gate = gate_raw if isinstance(gate_raw, dict) else {}
-        if gate and (version is None or version < 2):
+        gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(gate_raw)
+        if gate_raw is not None and (version is None or version < 2):
             from ..aggregate_manifest import AggregateError
 
             raise AggregateError(
@@ -528,8 +585,8 @@ class RunPlan:
             project=_opt_str(d.get("project")),
             head_sha=_opt_str(d.get("head_sha")),
             checks=checks,
-            gate_missing_required=_opt_str(gate.get("missing_required")) or None,
-            gate_unexpected_target=_opt_str(gate.get("unexpected_target")) or None,
+            gate_missing_required=gate_missing_required,
+            gate_unexpected_target=gate_unexpected_target,
         )
 
 
@@ -999,7 +1056,10 @@ def to_aggregate_manifest(
     # CLI cleanup phase two, PR 2: project the plan's own gate policy into
     # the manifest's `gate` block -- the same field `--manifest` reads,
     # so `--run-plan`/`--manifest` express identical policy shapes.
-    if plan.gate_missing_required is not None or plan.gate_unexpected_target is not None:
+    if (
+        plan.gate_missing_required is not None
+        or plan.gate_unexpected_target is not None
+    ):
         gate: dict[str, Any] = {}
         if plan.gate_missing_required is not None:
             gate["missing_required"] = plan.gate_missing_required

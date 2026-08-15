@@ -3224,6 +3224,19 @@ class TestRenderOutput:
         assert "changes" not in d
         assert d["verdict"] == diff_result.verdict.value
 
+    def test_stat_kwarg_with_junit_fmt_is_never_short_circuited(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: the pre-PR-1 `--stat` boolean's own
+        guard was `if stat and fmt != "junit": ...` -- JUnit was *never*
+        replaced by the one-line summary, since an XML consumer needs the
+        real `<testsuite>` document regardless of `--stat`. A revision of
+        this shim that routed every non-JSON `fmt` (JUnit included) to the
+        human one-line renderer silently broke that XML consumer."""
+        assert render_output(
+            "junit", diff_result, snap, stat=True
+        ) == render_output("junit", diff_result, snap, stat=False)
+
     def test_show_recommendation_kwarg_is_accepted_and_inert(self, diff_result, snap):
         """Same compatibility contract as `stat` above: `show_recommendation`
         is accepted (never a TypeError) but has no effect, since the

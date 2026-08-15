@@ -86,15 +86,19 @@ def render_output(
 
     ``stat=True`` reproduces the old ``--stat`` boolean's own format-dependent
     dispatch, not a single fixed replacement — the pre-removal behaviour it
-    stands in for was itself two different payloads depending on *fmt*:
+    stands in for was itself three different outcomes depending on *fmt*:
     ``to_stat_json`` (a summary-only JSON object, no ``changes`` array) for
-    ``fmt="json"``, and ``to_stat`` (a human one-line string) for every other
-    *fmt*, matching plain ``fmt=ONELINE_FORMAT``. A caller doing
-    ``render_output("json", ..., stat=True)`` and feeding the result to
-    ``json.loads()`` must keep getting JSON back, not human text (Codex
-    review — an earlier revision of this shim collapsed both cases onto
-    ``to_stat``, silently breaking that caller). *fmt* values other than
-    ``"json"`` fall through to the one-line renderer, same as before.
+    ``fmt="json"``; ``fmt="junit"`` was *never* short-circuited by ``stat`` at
+    all (the pre-removal code's own guard was ``if stat and fmt != "junit":
+    ...``) and always fell through to real JUnit XML, since a JUnit consumer
+    needs the structured `<testsuite>` document regardless of ``--stat``; and
+    ``to_stat`` (a human one-line string) for every other *fmt*, matching
+    plain ``fmt=ONELINE_FORMAT``. A caller doing ``render_output("json", ...,
+    stat=True)`` and feeding the result to ``json.loads()``, or
+    ``render_output("junit", ..., stat=True)`` and feeding the result to an
+    XML parser, must keep getting that shape back, not human text (Codex
+    review, two rounds — an earlier revision of this shim collapsed every
+    case but JSON onto ``to_stat``, silently breaking a JUnit caller too).
 
     Raises:
         ValidationError: For unrecognised output format.
@@ -102,7 +106,7 @@ def render_output(
     if stat and fmt == "json":
         return to_stat_json(result, severity_config=severity_config)
 
-    if stat or fmt == ONELINE_FORMAT:
+    if (stat and fmt != "junit") or fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
     if fmt == "json":
