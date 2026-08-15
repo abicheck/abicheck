@@ -156,8 +156,12 @@ class TestScanRequireCompleteAnalysisCliIntegration:
         code silently."""
         res = _scan(tmp_path, _elf_only_pair(), "--require-complete-analysis")
         assert res.exit_code == 1, res.output
-        assert "Analysis assurance incomplete" in res.output, res.output
-        assert "--require-complete-analysis" in res.output, res.output
+        # Asserted on the real, separately-captured stderr stream (not
+        # `res.output`, which mixes stdout+stderr) -- the diagnostic must
+        # actually land on stderr, not merely appear somewhere in combined
+        # terminal output (CodeRabbit review).
+        assert "Analysis assurance incomplete" in res.stderr, res.stderr
+        assert "--require-complete-analysis" in res.stderr, res.stderr
 
     def test_flag_never_lowers_a_real_abi_break_end_to_end(
         self, tmp_path: Path

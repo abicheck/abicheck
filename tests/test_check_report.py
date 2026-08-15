@@ -677,6 +677,52 @@ class TestAugmentReport:
             {"provider": "public_header"}
         ]
 
+    def test_advisory_also_neutralizes_the_analysis_assurance_axis(self):
+        """P0.4's analysis-assurance contribution is the exact sibling of
+        the contract-coverage one above -- a second, independent way this
+        report can raise an exit code, so it needs the identical
+        neutralization or an advisory cell still drives the trailing
+        aggregate to exit 1 through this axis instead."""
+        out = augment_report(
+            {
+                "verdict": "BREAKING",
+                "severity": {"exit_code": 4, "blocking": True},
+                "analysis_assurance_exit_contribution": 1,
+                "analysis_assurance": {"status": "partial"},
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["analysis_assurance_exit_contribution"] == 0
+        # Not gating is not the same as hiding: the descriptive block stays
+        # exactly as recorded, same discipline as the coverage ledger.
+        assert out["analysis_assurance"] == {"status": "partial"}
+
+    def test_advisory_neutralizes_a_scan_reports_nested_assurance_contribution(self):
+        """A `scan --against` report carries this field under `diff`, same
+        as the contract-coverage one."""
+        out = augment_report(
+            {
+                "scan_schema_version": "1.17",
+                "exit_code": 1,
+                "verdict": "NO_CHANGE",
+                "diff": {
+                    "verdict": "NO_CHANGE",
+                    "analysis_assurance_exit_contribution": 1,
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_code"] == 0
+        assert out["diff"]["analysis_assurance_exit_contribution"] == 0
+
     def test_neutralization_covers_every_block_the_aggregate_reads(self):
         # The invariant behind the fix: the writer must zero exactly the
         # blocks the reader consults. Asserting it against the shared

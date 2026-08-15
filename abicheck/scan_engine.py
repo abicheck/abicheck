@@ -62,7 +62,12 @@ from .buildsource.poi import (
 )
 from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskScore
-from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
+from .buildsource.scan_levels import (
+    EvidenceDepth,
+    ScanMode,
+    SourceMethod,
+    public_depth_value,
+)
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
@@ -1149,8 +1154,21 @@ def run_scan_core(
                     # DiffResult.requested_depth -- an auto-resolved depth
                     # is not this scan's stated request the same way an
                     # explicit pin is.
+                    #
+                    # `public_depth_value()` (Codex review, fresh evidence):
+                    # a typed caller can pin the internal-only FULL/GRAPH
+                    # rungs (ScanRequest.depth, or source_method s6/s4),
+                    # which `analysis_assurance.py`'s public four-rung
+                    # ladder does not recognize -- its `_DEPTH_RANK.get(...,
+                    # 0)` would read either as rank 0, the *shallowest*
+                    # rung, letting `depth_satisfied`/`status` read as
+                    # satisfied/complete for a request the ladder never
+                    # actually evaluated. Both normalize to `source`, the
+                    # rung this class's own docstring already says they are.
                     requested_depth=(
-                        eff_depth_enum.value if pinned_explicit else None
+                        public_depth_value(eff_depth_enum)
+                        if pinned_explicit
+                        else None
                     ),
                 )
         except deadline.DeadlineExceeded as exc:

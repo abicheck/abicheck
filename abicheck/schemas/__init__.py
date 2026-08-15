@@ -739,7 +739,21 @@ REPORT_SCHEMA_VERSION = "2.39"
 #:        controls whether an incomplete status additionally floors the
 #:        exit code. Additive key, absent only for the ``NOT_COMPARABLE``/
 #:        audit-only ``diff`` shapes that never reach a real comparison.
-SCAN_SCHEMA_VERSION = "1.16"
+#: 1.17 -- P0.4: the ``diff`` block gains ``analysis_assurance_exit_
+#:        contribution`` (``0``/``1``), the exact sibling of the pre-existing
+#:        ``contract_coverage_exit_contribution`` for the analysis-assurance
+#:        axis -- read directly rather than recomputed by
+#:        ``aggregate.GateInfo.from_scan_report``/``_analysis_assurance_exit``,
+#:        since the aggregate holds none of the evidence needed to answer it
+#:        again (Codex review: without this field, a target whose severity
+#:        gate read ``0`` but whose analysis-assurance axis independently
+#:        floored the real exit to ``1`` fed the aggregate a green result for
+#:        that target). Always present on a real ``--against`` comparison,
+#:        regardless of whether ``--require-complete-analysis`` was passed
+#:        (``0`` either way when the flag wasn't given or the status was
+#:        already ``complete``). Additive key, absent only for the same
+#:        NOT_COMPARABLE/audit-only shapes ``analysis_assurance`` itself is.
+SCAN_SCHEMA_VERSION = "1.17"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

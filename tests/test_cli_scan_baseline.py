@@ -312,6 +312,7 @@ class TestBaselineSummaryKeysArePinned:
             "policy_reclassify",
             "policy_file",
             "analysis_assurance",
+            "analysis_assurance_exit_contribution",
         }
     )
 

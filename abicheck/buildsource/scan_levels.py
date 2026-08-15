@@ -114,6 +114,29 @@ _SERVICE_DEPTH_ALIASES: dict[str, EvidenceDepth] = {
 }
 
 
+def public_depth_value(depth: EvidenceDepth) -> str:
+    """*depth*'s spelling on the public, four-rung assurance ladder
+    (``EVIDENCE_DEPTH_VALUES``/``USER_DEPTHS``) -- ``FULL``/``GRAPH``
+    collapse to ``"source"``, the rung this class's own docstring already
+    says they are: internal replay-*scope* variants of the same evidence
+    tier, never a deeper or shallower one.
+
+    A CLI-facing pin is always a real :data:`USER_DEPTHS` member and passes
+    through unchanged. This exists for the internal-only rungs a mode
+    preset (``pr-deep`` -> ``GRAPH``, ``baseline`` -> ``FULL``, see
+    :data:`_MODE_PRESET`) or a typed ``ScanRequest.depth`` pin can
+    still reach -- without normalizing before it is stamped onto
+    ``DiffResult.requested_depth``, ``analysis_assurance.py``'s own
+    ``_DEPTH_RANK.get(value, 0)`` reads an unrecognized ``"full"``/``"graph"``
+    as rank ``0`` (the *shallowest* rung), so ``depth_satisfied`` could read
+    ``True`` -- and the run's ``status`` could read ``"complete"`` -- for a
+    request the comparison never actually evaluated against the real ladder
+    (Codex review, PR #780)."""
+    if depth in (EvidenceDepth.FULL, EvidenceDepth.GRAPH):
+        return EvidenceDepth.SOURCE.value
+    return depth.value
+
+
 class SourceScope(str, Enum):
     """Internal replay-scope axis for ``EvidenceDepth.SOURCE`` (ADR-043 D2/D3).
 

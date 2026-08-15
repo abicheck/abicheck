@@ -729,7 +729,12 @@ def _resolve_baseline_header_scope(
     return bl_headers, bl_includes, bl_public_headers, bl_public_dirs
 
 
-def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, Any]:
+def _baseline_summary(
+    diff: Any,
+    max_findings: int | None = None,
+    *,
+    require_complete_analysis: bool = False,
+) -> dict[str, Any]:
     """Build the always-on ``scan --against`` summary block from *diff*.
 
     Counts, detector provenance, the capped gating findings and the
@@ -744,6 +749,15 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     accumulated into ``findings_truncated_kinds``/``suppressed_truncated_kinds``
     (kind -> count cut) so the shape of what was dropped is visible without
     rerunning at a higher cap.
+
+    *require_complete_analysis* mirrors the identically-named CLI flag: it
+    is stamped into the summary's own ``analysis_assurance_exit_contribution``
+    (schema 1.17) so a downstream reader -- chiefly ``abicheck aggregate``
+    (``aggregate.GateInfo.from_scan_report``, which reads only the nested
+    compatibility gate) -- can see whether this axis contributed to the
+    exit code without recomputing it, the same way
+    ``contract_coverage_exit_contribution`` already lets it read the
+    orthogonal coverage axis (Codex review).
     """
     cap = _resolve_max_baseline_findings(max_findings)
     summary: dict[str, Any] = {
@@ -926,10 +940,22 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     # separate `compare` invocation. `checker.compare` (reached through
     # `compare_snapshots` above) always attaches the result to *diff*, so
     # this is unconditional here too, exactly like `compare`'s report.
-    from .analysis_assurance import analysis_assurance_report_dict
+    from .analysis_assurance import (
+        analysis_assurance_exit_contribution,
+        analysis_assurance_report_dict,
+    )
 
     if (aa_block := analysis_assurance_report_dict(diff)) is not None:
         summary["analysis_assurance"] = aa_block
+    # The contribution is persisted unconditionally, mirroring
+    # `contract_coverage_exit_contribution`'s own always-present shape --
+    # `0` both when the flag was never given and when it was given but the
+    # status was already `complete`, so a reader's `_is_valid_contribution`
+    # check never has to distinguish "not requested" from "requested and
+    # satisfied" (neither should gate).
+    summary["analysis_assurance_exit_contribution"] = analysis_assurance_exit_contribution(
+        diff, require_complete=require_complete_analysis
+    )
     return summary
 
 
@@ -1183,7 +1209,11 @@ def _run_baseline_compare(
             old_pack=getattr(old_snap, "build_source", None),
             new_pack=getattr(new_snap, "build_source", None),
         )
-    summary = _baseline_summary(diff, max_findings=max_findings)
+    summary = _baseline_summary(
+        diff,
+        max_findings=max_findings,
+        require_complete_analysis=require_complete_analysis,
+    )
     # ADR-049 Phase 5: install this front end's own resolved configuration
     # over the narrower object `checker.compare` reconstructs from its
     # arguments, then emit the whole persisted context -- which `scan

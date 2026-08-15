@@ -76,3 +76,38 @@
   `reference/github-action-inputs.md` as a `task_pages` entry, so the new
   input's documentation ownership is registered per `docs/AGENTS.md`'s
   "every new Action input" rule.
+
+- **`abicheck aggregate` now folds P0.4's analysis-assurance axis
+  (aggregate schema 1.5).** `scan --against --require-complete-analysis`
+  computed and folded its own exit-code floor, but never persisted the
+  contribution into the report itself — so a target whose severity gate
+  read a clean `0` while the analysis-assurance axis independently floored
+  its *real* exit to `1` fed `aggregate` a green result for that target,
+  since `GateInfo.from_scan_report`/`from_report_data` read only the
+  nested compatibility gate (Codex review). `scan`'s JSON summary now
+  always carries `analysis_assurance_exit_contribution` (schema 1.17,
+  under `diff`), the exact sibling of the pre-existing
+  `contract_coverage_exit_contribution`, and `aggregate` reads and folds
+  it the identical way: a new `analysis_assurance_exit`/
+  `analysis_assurance_targets` axis on `TargetReport`/`AggregateResult`,
+  folded into `exit_code()` with `max` (never lowers a real break), a
+  top-level `analysis_assurance` summary block (`aggregate_report.schema.
+  json` and its published mirror), a `render_text()` block, and
+  `buildsource.check_report._neutralize_gate` zeroing it for
+  `gate-mode: advisory` alongside the coverage axis it mirrors.
+
+- **A typed `ScanRequest.depth` pin of the internal-only `full`/`graph`
+  rungs could report a false `"complete"` analysis-assurance status
+  (Codex review, fresh evidence).** `scan_engine.py` stamped
+  `DiffResult.requested_depth` from the raw resolved `EvidenceDepth`
+  value, but `analysis_assurance.py`'s public four-rung ladder
+  (`binary`/`headers`/`build`/`source`) doesn't recognize `full`/`graph`
+  (internal replay-scope variants of `source`, reachable only via a typed
+  `ScanRequest.depth` pin or `source_method` `s6`/`s4`, never via the CLI's
+  own `--depth`) — its `_DEPTH_RANK.get(value, 0)` read either as rank 0,
+  the *shallowest* rung, so `depth_satisfied`/`status` could read as
+  satisfied/`"complete"` for a request the ladder never actually
+  evaluated. Fixed with a new `scan_levels.public_depth_value()` helper
+  (both rungs normalize to `source`, per `EvidenceDepth`'s own docstring)
+  applied before the stamp, plus a primitive-level property test covering
+  every `EvidenceDepth` member.
