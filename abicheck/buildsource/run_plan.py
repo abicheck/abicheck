@@ -205,11 +205,11 @@ def _run_plan_schema_version(schema: str) -> int | None:
     return int(suffix) if suffix.isdigit() else None
 
 
-def _parse_run_plan_gate(gate_raw: Any) -> tuple[str | None, str | None]:
+def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
     """Validate a ``run-plan.json`` top-level ``gate`` block.
 
-    ``None`` (the key absent) -> ``(None, None)``, same as everywhere else in
-    this module. Present but malformed -- not an object, an unknown key, or
+    The key absent -> ``(None, None)``, same as everywhere else in this
+    module. Present but malformed -- not an object, an unknown key, or
     a value outside :class:`~abicheck.aggregate_manifest.OnMissingRequired`/
     :class:`~abicheck.aggregate_manifest.OnUnexpectedTarget` -- is a loud
     :class:`~abicheck.aggregate_manifest.AggregateError`, not a silent
@@ -223,23 +223,36 @@ def _parse_run_plan_gate(gate_raw: Any) -> tuple[str | None, str | None]:
     shared call) since that function's own version check is shaped for the
     manifest's ``MAJOR.MINOR`` scheme, not this module's ``vN`` one -- the
     two callers already do their own, differently-shaped version checks.
+
+    Takes the whole top-level mapping (not a pre-extracted ``gate`` value)
+    so it can distinguish the key being absent from it being explicitly
+    present with a JSON ``null`` -- a plain ``.get("gate")`` on the caller's
+    side would conflate the two, and an explicit ``"gate": null`` (or a
+    sub-key like ``"missing_required": null``) is rejected outright rather
+    than silently treated the same as "not specified" (Codex review, fresh
+    evidence -- the same conflation the sibling manifest-side fix closes).
     """
-    if gate_raw is None:
+    if "gate" not in d:
         return None, None
+    gate_raw = d["gate"]
     from ..aggregate_manifest import (
         AggregateError,
         OnMissingRequired,
         OnUnexpectedTarget,
     )
 
+    if gate_raw is None:
+        raise AggregateError("run-plan 'gate' must not be null")
     if not isinstance(gate_raw, dict):
         raise AggregateError("run-plan 'gate' must be an object")
     unknown = sorted(set(gate_raw) - {"missing_required", "unexpected_target"})
     if unknown:
         raise AggregateError(f"run-plan 'gate': unknown key(s) {unknown!r}")
-    mr_raw = gate_raw.get("missing_required")
     missing_required: str | None = None
-    if mr_raw is not None:
+    if "missing_required" in gate_raw:
+        mr_raw = gate_raw["missing_required"]
+        if mr_raw is None:
+            raise AggregateError("run-plan 'gate.missing_required' must not be null")
         try:
             missing_required = OnMissingRequired(mr_raw).value
         except ValueError as exc:
@@ -247,9 +260,11 @@ def _parse_run_plan_gate(gate_raw: Any) -> tuple[str | None, str | None]:
                 f"run-plan 'gate.missing_required' {mr_raw!r} must be one of "
                 f"{[v.value for v in OnMissingRequired]}"
             ) from exc
-    ut_raw = gate_raw.get("unexpected_target")
     unexpected_target: str | None = None
-    if ut_raw is not None:
+    if "unexpected_target" in gate_raw:
+        ut_raw = gate_raw["unexpected_target"]
+        if ut_raw is None:
+            raise AggregateError("run-plan 'gate.unexpected_target' must not be null")
         try:
             unexpected_target = OnUnexpectedTarget(ut_raw).value
         except ValueError as exc:
@@ -569,9 +584,8 @@ class RunPlan:
                 f"supports (max v{_RUN_PLAN_SCHEMA_MAX_SUPPORTED}); upgrade "
                 "abicheck"
             )
-        gate_raw = d.get("gate")
-        gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(gate_raw)
-        if gate_raw is not None and (version is None or version < 2):
+        gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
+        if "gate" in d and (version is None or version < 2):
             from ..aggregate_manifest import AggregateError
 
             raise AggregateError(

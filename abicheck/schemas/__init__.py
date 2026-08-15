@@ -798,9 +798,20 @@ def current(name: str) -> str | int:
         from ..buildsource.build_output import BUILD_OUTPUT_SCHEMA
 
         return BUILD_OUTPUT_SCHEMA
-    from ..buildsource.run_plan import RUN_PLAN_SCHEMA
+    # RUN_PLAN_SCHEMA_GATE, not the base RUN_PLAN_SCHEMA -- a run-plan.json
+    # is stamped one of two schema strings depending on whether it carries a
+    # `gate` block (CLI cleanup phase two, PR 2 continuation), so there is
+    # no single fixed "the" version this artifact always emits. This
+    # registry promises "the current version abicheck emits" (this
+    # function's own docstring); the highest version abicheck can produce
+    # is the truthful answer an external integrator/doc generator needs to
+    # be prepared to parse, not the lower, conditionally-emitted one (Codex
+    # review, fresh evidence -- reporting the base RUN_PLAN_SCHEMA here made
+    # this registry silently unaware of the newly emitted gate-bearing
+    # format).
+    from ..buildsource.run_plan import RUN_PLAN_SCHEMA_GATE
 
-    return RUN_PLAN_SCHEMA
+    return RUN_PLAN_SCHEMA_GATE
 
 
 __all__ = [

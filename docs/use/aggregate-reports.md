@@ -185,7 +185,9 @@ CLI flags):
 controls a report whose target isn't in the expected set. Omitting `gate`
 keeps the same defaults (`missing_required: fail`, `unexpected_target:
 include`) this command always had; the resolved policy and its source
-(`manifest`/`run-plan`/`default`) are reported back in `effective_policy`.
+(`manifest`/`run-plan`/`explicit`/`default`) are reported back in
+`effective_policy` — `explicit` only appears for a direct Python-API caller
+of `aggregate()` forcing a value (there is no CLI spelling for it).
 
 ## Reconciling findings across compiler/build profiles
 

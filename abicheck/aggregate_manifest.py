@@ -109,12 +109,21 @@ def _parse_manifest_gate(
 ) -> tuple[OnMissingRequired | None, OnUnexpectedTarget | None]:
     """Parse a manifest/run-plan-projected ``gate`` block (schema 2.0+).
 
-    Absent → ``(None, None)`` (the caller applies the hard-coded defaults).
-    Present → both sub-keys are optional and independently validated; an
-    invalid value is a loud :class:`AggregateError`, not a silent fallback to
-    the default (CLI cleanup phase two, PR 2 — this block replaces the
-    removed ``--on-missing-required``/``--on-unexpected-target`` CLI flags,
-    so a typo here has nowhere else to be caught).
+    Key absent → ``(None, None)`` (the caller applies the hard-coded
+    defaults). Key present → both sub-keys are optional and independently
+    validated; an invalid value is a loud :class:`AggregateError`, not a
+    silent fallback to the default (CLI cleanup phase two, PR 2 — this block
+    replaces the removed ``--on-missing-required``/``--on-unexpected-target``
+    CLI flags, so a typo here has nowhere else to be caught). An explicit
+    JSON ``null`` — for ``gate`` itself, or for either sub-key — is
+    deliberately **not** treated the same as the key being absent (Codex
+    review, fresh evidence): the two are different producer intents (never
+    mentioned this at all, vs. this field explicitly present with a
+    JSON-``null`` value), and conflating them let a hand-authored, templated,
+    or corrupted v2 manifest with e.g. ``"gate": null`` or ``"gate":
+    {"missing_required": null}`` silently fall back to the hard-coded
+    ``fail``/``include`` defaults instead of failing closed on the malformed
+    input.
 
     A manifest that carries ``gate`` while *also* explicitly declaring a
     pre-2.0 ``aggregate_manifest_version`` is rejected outright, rather than
@@ -131,9 +140,11 @@ def _parse_manifest_gate(
     absent version is treated as "current MAJOR", same as everywhere else in
     this module, so an unversioned manifest carrying ``gate`` is accepted.
     """
-    gate_raw = data.get("gate")
-    if gate_raw is None:
+    if "gate" not in data:
         return None, None
+    gate_raw = data["gate"]
+    if gate_raw is None:
+        raise AggregateError("manifest 'gate' must not be null")
     if isinstance(version_raw, str) and version_raw:
         # Already validated as a well-formed MAJOR.MINOR string by
         # _check_manifest_version before this function is ever called.
@@ -151,8 +162,10 @@ def _parse_manifest_gate(
     if unknown:
         raise AggregateError(f"manifest 'gate': unknown key(s) {unknown!r}")
     missing_required: OnMissingRequired | None = None
-    mr_raw = gate_raw.get("missing_required")
-    if mr_raw is not None:
+    if "missing_required" in gate_raw:
+        mr_raw = gate_raw["missing_required"]
+        if mr_raw is None:
+            raise AggregateError("manifest 'gate.missing_required' must not be null")
         try:
             missing_required = OnMissingRequired(mr_raw)
         except ValueError as exc:
@@ -161,8 +174,10 @@ def _parse_manifest_gate(
                 f"{[v.value for v in OnMissingRequired]}"
             ) from exc
     unexpected_target: OnUnexpectedTarget | None = None
-    ut_raw = gate_raw.get("unexpected_target")
-    if ut_raw is not None:
+    if "unexpected_target" in gate_raw:
+        ut_raw = gate_raw["unexpected_target"]
+        if ut_raw is None:
+            raise AggregateError("manifest 'gate.unexpected_target' must not be null")
         try:
             unexpected_target = OnUnexpectedTarget(ut_raw)
         except ValueError as exc:
@@ -271,11 +286,19 @@ def resolve_gate_policy(
     tell the two apart; the caller (``cli_aggregate.py``) knows which flag
     it received and passes the right label. Returns
     ``(missing_required, unexpected_target, policy_source)``, where
-    ``policy_source`` is *source_hint* when the manifest supplied at least
-    one of the two fields, or ``"default"`` otherwise (also always
-    ``"default"`` for an explicit override, since that's neither a manifest
-    nor a run-plan value; and always ``"default"`` for discovered-only mode,
-    where *expected* is ``None`` and neither policy is applicable).
+    ``policy_source`` is ``"explicit"`` when the caller passed at least one
+    explicit override (Codex review, fresh evidence -- an earlier revision
+    reported this case as ``"default"``, which is factually wrong: the
+    *resolved* value is the caller's own override, not the hard-coded
+    default, so labeling it "default" misrepresents the audit field to
+    anyone reading ``effective_policy`` back), else *source_hint* when the
+    manifest supplied at least one of the two fields, else ``"default"``
+    (also the value for discovered-only mode, where *expected* is ``None``
+    and neither policy is applicable). This is a single scalar covering both
+    fields, same coarse-grained approximation the manifest/default split
+    already had before explicit overrides were distinguished -- a caller
+    overriding only one of the two fields still reports one combined source,
+    not independent per-field provenance.
     """
     manifest_missing_required = expected.gate_missing_required if expected else None
     manifest_unexpected_target = expected.gate_unexpected_target if expected else None
@@ -296,12 +319,13 @@ def resolve_gate_policy(
     manifest_supplied_something = (
         manifest_missing_required is not None or manifest_unexpected_target is not None
     )
-    no_explicit_override = (
-        explicit_missing_required is None and explicit_unexpected_target is None
+    has_explicit_override = (
+        explicit_missing_required is not None or explicit_unexpected_target is not None
     )
-    policy_source = (
-        source_hint
-        if manifest_supplied_something and no_explicit_override
-        else "default"
-    )
+    if has_explicit_override:
+        policy_source = "explicit"
+    elif manifest_supplied_something:
+        policy_source = source_hint
+    else:
+        policy_source = "default"
     return resolved_missing_required, resolved_unexpected_target, policy_source

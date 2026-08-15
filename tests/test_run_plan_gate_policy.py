@@ -171,6 +171,9 @@ class TestToAggregateManifest:
             {"unknown_key": "fail"},
             {"missing_required": "bogus"},
             {"unexpected_target": "bogus"},
+            None,
+            {"missing_required": None},
+            {"unexpected_target": None},
         ],
     )
     def test_malformed_v2_gate_is_rejected_not_silently_discarded(self, bad_gate) -> None:
