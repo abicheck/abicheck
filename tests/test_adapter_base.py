@@ -164,6 +164,29 @@ def test_msvc_driver_token_recognizes_icecc_and_icerun_launchers():
     assert msvc_driver_token(["icerun", "clang-cl", "/c", "foo.cc"]) == "clang-cl"
 
 
+def test_msvc_driver_token_resolves_relative_driver_via_env_chdir():
+    # P2 review round 19 Finding 1: `msvc_driver_token` (through
+    # `_msvc_driver_scan`) must return the *stripped* driver token
+    # `strip_launchers` computed -- which now folds an `env -C DIR` prefix
+    # into a relative driver path -- not the raw, unfolded `argv[i]`.
+    import os
+
+    argv = ["env", "-C", "build", "../llvm/bin/clang-cl", "/std:c++20", "/c", "foo.cc"]
+    assert msvc_driver_token(argv) == os.path.normpath("llvm/bin/clang-cl")
+
+
+def test_msvc_driver_token_resolves_bare_driver_via_env_path(tmp_path):
+    # P2 review round 19 Finding 2: same, for a bare driver name only
+    # resolvable through an `env PATH=...` override.
+    import stat
+
+    driver = tmp_path / "clang-cl"
+    driver.write_text("", encoding="utf-8")
+    driver.chmod(driver.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    argv = ["env", f"PATH={tmp_path}", "clang-cl", "/c", "foo.cc"]
+    assert msvc_driver_token(argv) == str(driver)
+
+
 def test_msvc_driver_token_behind_chained_launchers():
     # source_extractors._argv.strip_launchers unwraps a chain of launcher
     # tokens (and any per-launcher `KEY=VALUE` config override) in one pass;

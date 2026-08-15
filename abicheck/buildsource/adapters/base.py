@@ -638,6 +638,18 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     is_msvc = "/c" in argv
     driver_token: str | None = None
     executable_positions = _executable_token_positions(argv)
+    # The token at the *stripped* driver position is taken from
+    # `strip_launchers`'s own return value, not `argv[driver_index]`
+    # directly (P2 review round 19, "Apply env chdir before resolving
+    # relative compiler paths" / "Resolve drivers using the env-supplied
+    # PATH", fresh evidence): `strip_launchers` now folds an `env -C DIR`/
+    # `env PATH=...` prefix's effect into the driver token it returns (see
+    # its own docstring) -- reading the raw, unfolded `argv[driver_index]`
+    # here instead would silently discard that correction for every caller
+    # of `msvc_driver_token`/`_derived_gcc_path`, the exact regression this
+    # fix exists to prevent.
+    stripped = strip_launchers(argv) if argv else []
+    driver_index = len(argv) - len(stripped)
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -660,7 +672,9 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
             if base in _MSVC_DRIVERS or _is_cl_style_driver_name(base):
                 is_msvc = True
                 if driver_token is None:
-                    driver_token = arg
+                    driver_token = (
+                        stripped[0] if i == driver_index and stripped else arg
+                    )
         i += 1
     return is_msvc, driver_token
 

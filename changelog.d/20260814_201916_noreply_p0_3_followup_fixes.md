@@ -489,3 +489,111 @@
   `pick_compiler_binary()`, `include_graph.py`, `build_context.py`, and
   `cc_wrapper.py`, every caller benefits from this fix, not just the L2
   clang-cl driver-selection path the finding was reported against.
+- **A nineteenth review round (two findings) found round 18's `env`-prefix
+  unwrapping recognized and discarded `env -C DIR`/`env PATH=...` as purely
+  cosmetic, when both change how the *driver token* it locates must be
+  interpreted.** (1) `env -C build ../llvm/bin/clang-cl ...` changes the
+  effective working directory the driver runs from — GNU `env --help`
+  documents `-C`/`--chdir=DIR` as "change working directory to DIR before
+  running the command" — so a relative driver token following it is only
+  meaningful relative to `<cu.directory>/DIR`, not bare `cu.directory`.
+  `header_compile_context._derived_gcc_path()` previously resolved such a
+  token straight against `cu.directory`, reporting a genuinely executable
+  compiler as missing (or silently resolving to a different file that
+  happens to exist one directory up). (2) `env PATH=/opt/llvm/bin
+  clang-cl ...` scopes a `PATH` override to the launched command only, so a
+  bare driver name resolvable exclusively through that overridden `PATH`
+  (not abicheck's own inherited one) previously reached
+  `dumper_clang._resolve_clang_bin`/replay subprocess spawning unresolved,
+  reporting the recorded compiler as missing or silently substituting a
+  different one found on the inherited `PATH` instead.
+  `source_extractors._argv._skip_env_prefix()` now captures both values
+  (the most recent `-C`/`--chdir[=DIR]` and `PATH=...` seen, closest to the
+  driver) instead of discarding them, and a new `_apply_env_context()`
+  helper folds their effect directly into the driver token
+  `strip_launchers()` returns: a relative, path-shaped token is joined onto
+  the chdir directory and lexically normalized (`os.path.normpath` —
+  matching `_resolve_driver_token()`'s own existing lexical, symlink-blind
+  convention, so the result composes correctly through that function's
+  later join against `cu.directory` with no further changes needed there),
+  and a bare token is resolved to an absolute path via
+  `shutil.which(token, path=env_path)` when found, left unchanged
+  otherwise. Because `strip_launchers()` is the shared primitive behind
+  every caller listed above, folding the correction into its own return
+  value (rather than threading two new fields through each call site)
+  means every existing caller gets the corrected token for free, with no
+  signature change. One additional fix was needed for the correction to
+  actually reach `header_compile_context._derived_gcc_path()`:
+  `adapters.base._msvc_driver_scan()` was reading the raw, unfolded
+  `argv[driver_index]` directly instead of `strip_launchers(argv)`'s own
+  (now-corrected) first element — silently discarding both corrections for
+  `msvc_driver_token()`'s one real caller — so it now reads the resolved
+  token from `strip_launchers()`'s return value at the stripped driver
+  position instead.
+- **Investigated a real, still-unreproduced CI discrepancy reported against
+  this same PR (round 19), confirmed NOT pre-existing on `main`.** Three
+  canonical-lane CI checks on this branch's own commits (`ai-readiness`'s
+  `mypy-baseline` reporting 4 phantom errors with no printed diagnostic
+  lines; `lint-and-types`'s `ruff check`/`mypy` both failing with zero
+  output between their own start/result markers; 19-25 `NameError: name
+  'os' is not defined` failures in `tests/test_header_compile_context.py`/
+  `tests/test_header_compile_context_gcc_path.py` only under the exact CI
+  `-n auto --dist worksteal` flags) do not reproduce against the identical
+  commits' most recent `main` CI run (which is green apart from one
+  already-known, unrelated Windows flake), ruling out CI-wide infra noise
+  or a pre-existing repo issue as the explanation. Despite that, this pass
+  could not reproduce any of the three locally either — including via a
+  from-scratch `git clone` into a brand-new virtualenv with the exact CI-
+  pinned tool versions (`mypy==1.19.1`, `ruff==0.16.3`) and a
+  closely-matching Python patch (3.13.12 local vs. CI's 3.13.15), run with
+  `-n 4 --dist worksteal` to match CI's runner core count: `mypy
+  abicheck/` and `scripts/check_ai_readiness.py` both report a clean 0
+  errors/0 findings-worth-blocking every time, and
+  `python scripts/verify.py --profile pr --only lint,typecheck,docs-build`
+  — the literal command `.github/workflows/ci.yml`'s `lint-and-types` job
+  runs — passes all three steps cleanly with no output at all, matching
+  CI's own green `main` run and giving no reason to expect the reported
+  zero-output failure on this exact commit. No `NameError` of any kind
+  appears anywhere in a full fast-lane run under CI's exact flags either
+  (that run did surface 47 failures, but every one traces to this
+  *sandbox's* own pre-existing, unrelated environment quirks — an
+  unsupported PyPI `castxml` 0.6.3 on `PATH` tripping a version-policy
+  guard before the code under test even runs, `python3 -I` isolated
+  subprocess calls in `tests/test_action_resolve_baseline.py` not seeing a
+  user-site-installed `abicheck` package, and one `agent-evals` test
+  needing git history this clone's shallow fetch doesn't have — none
+  matching the reported shape and reproducing identically against a
+  from-scratch `main` clone too, so none are a regression from this
+  round's own changes). One genuine, if tangential, side-finding along the
+  way: a bare, whole-tree `ruff format --check abicheck/ tests/` (the
+  `fmt-check` step `scripts/verify.py`'s own catalog defines, but which
+  `lint-and-types` does **not** actually invoke — only `lint`/`typecheck`/
+  `docs-build` are) fails broadly (482 of 1001 files) on this exact commit
+  regardless of ruff version (reproduced identically under both the
+  `pixi.lock`-pinned `ruff==0.15.22` and the unpinned `>=0.3` constraint's
+  currently-latest `0.16.3`) — `ruff.toml` sets no `[format]`/`line-length`
+  override, so the formatter defaults to wrapping at 88 columns despite
+  this repo's own "No line length limit (ruff E501 ignored)" convention
+  covering only the *linter*'s `E501`, not the separate formatter. Real,
+  but not the cause of the reported mystery (that step isn't part of any
+  CI job that runs today), and pre-existing on `main` rather than
+  introduced by any of this PR's 19 rounds — noted here rather than
+  "fixed" since deciding *how* to reconcile the formatter with the
+  documented line-length policy (an explicit large `line-length`, disabling
+  `fmt-check` from the catalog entirely, or reformatting 482 files) is a
+  repo-hygiene decision for a maintainer, out of scope for this round's own
+  two review findings. This is now a
+  two-agent-plus-coordinator-independent failure to reproduce despite
+  exhausting every practical local avenue (sequential and parallel runs,
+  both Python 3.11 and 3.13, fresh worktrees, and now a fresh clone plus
+  fresh venv); `.github/workflows/ci.yml`'s own `ai-readiness` job comment
+  independently documents that at least one adjacent metric in this same
+  job ("`fast_test_cases_collected`... observed to drift by a small,
+  unexplained amount even between environments that match on Python
+  version and every dependency version") is already known to be
+  non-deterministic across otherwise-identical environments for reasons
+  nobody has fully diagnosed, which is at least consistent with (though
+  not proof of) a similarly environment-level, non-code explanation for
+  this round's three findings too. Left open pending either a maintainer
+  with direct CI-runner access, or the fresh CI run this round's own push
+  triggers narrowing down which specific errors recur.

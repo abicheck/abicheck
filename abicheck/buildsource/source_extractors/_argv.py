@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from collections.abc import Sequence
 
 from ..build_evidence import CompileUnit
@@ -93,7 +94,24 @@ _ENV_NO_OPERAND_FLAGS = frozenset(
 #: ``env`` flags that take a following, separate-token operand: POSIX
 #: ``-u NAME`` (unset one variable) and GNU's ``-C``/``--chdir DIR``
 #: extension (change directory before running the command).
+#:
+#: ``-C``/``--chdir`` is matched separately, ahead of this generic set, by
+#: :func:`_skip_env_prefix` -- unlike ``-u``/``--unset``, its *value* is
+#: needed downstream (see :data:`_ENV_CHDIR_FLAGS`'s own docstring), not
+#: merely skipped.
 _ENV_OPERAND_FLAGS = frozenset({"-u", "--unset", "-C", "--chdir"})
+#: The subset of :data:`_ENV_OPERAND_FLAGS` whose operand is captured (not
+#: just skipped) by :func:`_skip_env_prefix`, feeding
+#: :func:`_apply_env_context`'s chdir-folding below (P2 review, "Apply env
+#: chdir before resolving relative compiler paths", fresh evidence).
+_ENV_CHDIR_FLAGS = frozenset({"-C", "--chdir"})
+#: The env-assignment name whose value is captured (not just skipped) by
+#: :func:`_skip_env_prefix`, feeding :func:`_apply_env_context`'s
+#: PATH-resolution below (P2 review, "Resolve drivers using the
+#: env-supplied PATH", fresh evidence). Only a *bare* driver name (no path
+#: separator) is ever looked up against it -- see that function's own
+#: docstring.
+_ENV_PATH_ASSIGNMENT_PREFIX = "PATH="
 #: Preprocessor macro define/undef option prefixes. Their *values* reach the
 #: compiler verbatim (argv, no shell expansion), so a literal ``~`` in e.g.
 #: ``-DDEFAULT_DIR=~/app`` must NOT be home-expanded during replay — unlike the
@@ -414,7 +432,7 @@ def basename(path: str) -> str:
     return re.split(r"[\\/]", path)[-1]
 
 
-def _skip_env_prefix(argv: list[str], i: int) -> int:
+def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | None]:
     """Skip a leading POSIX ``env`` invocation and its flags/assignments.
 
     A real build recipe recorded via an environment-scoped invocation or
@@ -434,31 +452,139 @@ def _skip_env_prefix(argv: list[str], i: int) -> int:
     the recorded toolchain's built-ins, default headers, and target
     defaults.
 
-    Returns *i* unchanged when ``argv[i]`` does not name ``env`` itself, so
-    a caller can call this unconditionally ahead of launcher-prefix
-    stripping. Reuses :data:`_LAUNCHER_CONFIG_OVERRIDE_RE` for the
-    ``NAME=VALUE`` assignments -- the identical shape ccache's own
+    Returns ``(i, chdir, env_path)``: *i* unchanged (and ``chdir``/
+    ``env_path`` both ``None``) when ``argv[i]`` does not name ``env``
+    itself, so a caller can call this unconditionally ahead of
+    launcher-prefix stripping. Reuses :data:`_LAUNCHER_CONFIG_OVERRIDE_RE`
+    for the ``NAME=VALUE`` assignments -- the identical shape ccache's own
     config-override tokens already use, see that pattern's docstring.
+
+    *chdir* and *env_path* are two of ``env``'s own effects that change how
+    the token :func:`strip_launchers` returns as the driver must be
+    interpreted, not merely which token it is (P2 review round 19, "Apply
+    env chdir before resolving relative compiler paths" /
+    "Resolve drivers using the env-supplied PATH", fresh evidence): an
+    earlier revision recognized and *discarded* both ``-C DIR``/
+    ``--chdir[=DIR]`` and a ``PATH=...`` assignment identically to every
+    other skipped flag/assignment, correctly finding the real driver token
+    but silently dropping information needed to resolve THAT token
+    correctly --
+
+    * ``-C DIR`` (GNU ``env``'s documented "change working directory to DIR
+      before running the command" extension) means a *relative* driver path
+      following it (``env -C build ../llvm/bin/clang-cl ...``) is relative
+      to ``<cu.directory>/DIR``, not bare ``cu.directory`` --
+      :func:`~abicheck.buildsource.header_compile_context._derived_gcc_path`
+      previously resolved it against ``cu.directory`` alone, reporting a
+      genuinely executable compiler as missing (or, worse, silently
+      resolving to a *different*, wrong file that happens to exist at the
+      un-chdir'd location).
+    * ``PATH=/opt/llvm/bin`` (env's documented ``NAME=VALUE`` command-scoped
+      environment override) means a *bare* driver name that follows
+      (``env PATH=/opt/llvm/bin clang-cl ...``) may only be resolvable
+      through that overridden ``PATH``, not abicheck's own inherited one --
+      every downstream ``shutil.which``-style lookup (``_resolve_clang_bin``,
+      replay subprocess spawning) searches the wrong list of directories
+      without it.
+
+    Returned rather than acted on here: this function only locates the
+    prefix and its two carried values; :func:`strip_launchers` (the one
+    caller) applies them to the actual driver token once it is known, via
+    :func:`_apply_env_context`.
     """
     if i >= len(argv) or basename(argv[i]).lower() not in _ENV_BASENAMES:
-        return i
+        return i, None, None
     i += 1
+    chdir: str | None = None
+    env_path: str | None = None
     while i < len(argv):
         arg = argv[i]
         if arg in _ENV_NO_OPERAND_FLAGS:
             i += 1
             continue
+        if arg in _ENV_CHDIR_FLAGS and i + 1 < len(argv):
+            chdir = argv[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--chdir="):
+            chdir = arg.removeprefix("--chdir=")
+            i += 1
+            continue
         if arg in _ENV_OPERAND_FLAGS and i + 1 < len(argv):
             i += 2
             continue
-        if arg.startswith("--unset=") or arg.startswith("--chdir="):
+        if arg.startswith("--unset="):
+            i += 1
+            continue
+        if arg.startswith(_ENV_PATH_ASSIGNMENT_PREFIX):
+            env_path = arg.removeprefix(_ENV_PATH_ASSIGNMENT_PREFIX)
             i += 1
             continue
         if _LAUNCHER_CONFIG_OVERRIDE_RE.match(arg):
             i += 1
             continue
         break
-    return i
+    return i, chdir, env_path
+
+
+def _apply_env_context(token: str, chdir: str | None, env_path: str | None) -> str:
+    """Fold a leading ``env -C DIR``/``env PATH=...`` prefix's effect into
+    *token*, the driver argv token :func:`strip_launchers` is about to
+    return (P2 review round 19, both findings, fresh evidence).
+
+    Chosen deliberately as the ONE place both effects are resolved, rather
+    than threading ``chdir``/``env_path`` as new fields through every one of
+    :func:`strip_launchers`'s several call sites
+    (``header_compile_context._derived_gcc_path``, ``adapters.base``'s
+    driver-position scan, ``cc_wrapper.py``, ``include_graph.py``,
+    ``build_context.py``): folding the effect into the token itself here
+    means every existing caller gets the corrected token for free, with no
+    signature change and no new field for a caller that doesn't care about
+    ``env`` to thread through unused.
+
+    **Chdir** (``-C DIR``): only meaningful for a *relative, separator-
+    bearing* token -- a bare PATH name (``clang-cl``, matched by
+    :func:`is_msvc_mode` and friends via basename lookup) is looked up on
+    ``PATH``, never relative to any directory, and an already-absolute
+    token needs no adjustment. For a relative, path-shaped token, DIR is
+    folded onto it via a plain lexical join+normalize (``os.path.join`` +
+    ``os.path.normpath``, matching ``header_compile_context.
+    _resolve_driver_token``'s own lexical, symlink-blind convention for
+    every other redacted/relative ``CompileUnit`` path field) -- the result
+    is still a *relative* path (DIR is not itself resolved against
+    anything here), so the existing downstream join against
+    ``cu.directory`` in ``_resolve_driver_token`` composes correctly
+    without needing to know an ``env -C`` prefix was ever involved: joining
+    ``build`` onto ``../llvm/bin/clang-cl`` and normalizing collapses to
+    ``llvm/bin/clang-cl``, which ``_resolve_driver_token`` then joins onto
+    ``cu.directory`` exactly as it already does for any other relative
+    driver token.
+
+    **PATH** (``PATH=...``): only meaningful for a *bare* token (no path
+    separator at all) -- a path-shaped token is unambiguous regardless of
+    which ``PATH`` would have been searched. Resolved immediately via
+    ``shutil.which(token, path=env_path)`` into an absolute path when
+    found, so no downstream consumer needs to know the env override
+    existed at all; left unchanged (the pre-fix, bare-name behavior) when
+    the name isn't found on that PATH either -- the same conservative,
+    no-worse-than-before fallback every other best-effort resolution in
+    this module already uses.
+
+    A token that is itself a flag (starts with ``-``) -- meaning
+    :func:`strip_launchers` found no real driver token at all -- is left
+    completely untouched; neither effect applies to a non-existent driver.
+    """
+    if not token or token.startswith("-"):
+        return token
+    if "/" in token or "\\" in token:
+        if chdir and not os.path.isabs(token):
+            return os.path.normpath(os.path.join(chdir, token))
+        return token
+    if env_path:
+        resolved = shutil.which(token, path=env_path)
+        if resolved:
+            return resolved
+    return token
 
 
 def strip_launchers(argv: list[str]) -> list[str]:
@@ -477,15 +603,32 @@ def strip_launchers(argv: list[str]) -> list[str]:
     ``env`` invocation may appear between launchers, so the two prefix kinds
     are unwrapped in a loop until neither can strip anything further, rather
     than each running only once.
+
+    An ``env -C DIR``/``env PATH=...`` prefix's effect on how the resulting
+    driver token must be interpreted -- not merely which token it is -- is
+    folded into that token before it is returned (P2 review round 19, both
+    findings; see :func:`_apply_env_context`'s own docstring for the full
+    reasoning): a relative driver path is joined onto the *effective* chdir
+    directory (the most recent ``-C``/``--chdir`` seen, closest to the
+    driver, if more than one ``env`` prefix chains), and a bare driver name
+    is resolved to an absolute path via the most recent env-supplied
+    ``PATH`` when found there. Every existing caller of this function
+    receives the corrected token automatically, with no signature change.
     """
     i = 0
     progressed = True
+    chdir: str | None = None
+    env_path: str | None = None
     while progressed:
         progressed = False
-        new_i = _skip_env_prefix(argv, i)
+        new_i, new_chdir, new_path = _skip_env_prefix(argv, i)
         if new_i != i:
             i = new_i
             progressed = True
+            if new_chdir is not None:
+                chdir = new_chdir
+            if new_path is not None:
+                env_path = new_path
         while (
             i < len(argv)
             and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
@@ -494,7 +637,13 @@ def strip_launchers(argv: list[str]) -> list[str]:
             while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
                 i += 1
             progressed = True
-    return argv[i:]
+    result = argv[i:]
+    if not result or (chdir is None and env_path is None):
+        return result
+    resolved = _apply_env_context(result[0], chdir, env_path)
+    if resolved == result[0]:
+        return result
+    return [resolved, *result[1:]]
 
 
 def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:

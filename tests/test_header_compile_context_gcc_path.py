@@ -148,6 +148,109 @@ def test_resolve_derives_gcc_path_resolves_relative_driver_against_cu_directory(
     assert result.context.gcc_path == str(tmp_path / "llvm" / "bin" / "clang-cl")
 
 
+def test_resolve_derives_gcc_path_resolves_relative_driver_via_env_chdir(
+    tmp_path: Path,
+) -> None:
+    """P2 review round 19 Finding 1 (``_argv.py:453``): ``env -C DIR``
+    changes the EFFECTIVE working directory the driver runs from, so a
+    relative driver token following it is relative to
+    ``<cu.directory>/DIR``, not bare ``cu.directory``. Before the fix,
+    ``strip_launchers`` recognized and discarded ``-C build`` as a cosmetic
+    prefix, and ``_derived_gcc_path`` resolved ``../llvm/bin/clang-cl``
+    straight against ``cu.directory`` (``tmp_path``), landing one directory
+    too high (``tmp_path.parent / "llvm/bin/clang-cl"``) instead of the
+    correct ``tmp_path / "llvm/bin/clang-cl"``."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[
+            "env",
+            "-C",
+            "build",
+            "../llvm/bin/clang-cl",
+            "/std:c++20",
+            "-c",
+            str(src),
+        ],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == str(tmp_path / "llvm" / "bin" / "clang-cl")
+
+
+def test_resolve_derives_gcc_path_resolves_bare_driver_via_env_path(
+    tmp_path: Path,
+) -> None:
+    """P2 review round 19 Finding 2 (``_argv.py:459``): ``env PATH=...``
+    scopes a PATH override to the launched command, so a bare driver name
+    that only exists on that overridden PATH (not abicheck's own inherited
+    PATH) must still resolve. Before the fix, ``strip_launchers`` discarded
+    the ``PATH=...`` assignment along with every other skipped token,
+    leaving the bare ``clang-cl`` name unresolved -- ``_resolve_clang_bin``
+    would report it missing when it isn't on the *inherited* PATH."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    bin_dir = tmp_path / "opt_llvm_bin"
+    bin_dir.mkdir()
+    driver = bin_dir / "clang-cl"
+    driver.write_text("", encoding="utf-8")
+    driver.chmod(0o755)
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[
+            "env",
+            f"PATH={bin_dir}",
+            "clang-cl",
+            "/std:c++20",
+            "-c",
+            str(src),
+        ],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == str(driver)
+
+
+def test_resolve_derives_gcc_path_bare_driver_unresolvable_env_path_left_bare(
+    tmp_path: Path,
+) -> None:
+    """Negative case: when the env-supplied PATH doesn't actually contain
+    the named driver, the bare name is left unchanged (the pre-fix
+    behavior) rather than raising or fabricating a path."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[
+            "env",
+            "PATH=/definitely/does/not/exist",
+            "clang-cl",
+            "/std:c++20",
+            "-c",
+            str(src),
+        ],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "clang-cl"
+
+
 def test_resolve_derives_gcc_path_expands_home_redacted_driver_token(
     tmp_path: Path,
 ) -> None:
