@@ -1677,6 +1677,13 @@ elif query == "coverage_where":
             )
         )
     )
+elif query == "assurance_notes":
+    # `analysis_assurance.notes` — same field name and shape on both compare
+    # (document root) and scan (nested under `diff`), read through the same
+    # `_either` fallback the coverage/severity queries above already use.
+    aa = _either("analysis_assurance", {})
+    notes = aa.get("notes") if isinstance(aa, dict) else None
+    print("; ".join(str(n) for n in (notes or [])))
 else:
     raise SystemExit(2)
 PYQUERY
@@ -1732,6 +1739,26 @@ _coverage_gated() {
   # signal available at all.
   echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete' \
     && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by contract.unresolved=warn'
+}
+
+# Did P0.4's orthogonal analysis-assurance axis (--require-complete-analysis,
+# analysis_assurance.py) contribute to this exit?
+#
+# Unlike `_coverage_gated` above, the JSON report's own `analysis_assurance`
+# block is NOT self-describing here: `checker.compare` always attaches it
+# (status included) regardless of whether `--require-complete-analysis` was
+# ever passed, so a present, non-"complete" status alone cannot tell "this
+# run asked to gate on it" apart from "this run's evidence happens to be
+# partial and nobody asked". The one place that distinction is actually made
+# is `assurance_floor_diagnostic` (analysis_assurance.py), which only prints
+# when *both* the flag was set *and* the status fell short of "complete" --
+# unconditionally on stderr, regardless of --format, exactly like every
+# other diagnostic this file greps for. That stderr line is therefore the
+# authoritative (only) signal, not a fallback the way the JSON-first
+# coverage check above uses one.
+_assurance_gated() {
+  echo "$STDERR_CONTENT" \
+    | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
@@ -2073,9 +2100,23 @@ elif [[ "$MODE" == "scan" ]]; then
           if _coverage_gated; then
             echo "::warning::abicheck scan also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
           fi
+          if _assurance_gated; then
+            echo "::warning::abicheck scan also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+          fi
         elif _coverage_gated; then
           VERDICT="COVERAGE_INCOMPLETE"
           echo "::warning::abicheck scan could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI or API break — the compatibility verdict is unchanged; the contract-coverage axis is reporting that part of the surface could not be checked."
+          if _assurance_gated; then
+            echo "::warning::abicheck scan also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+          fi
+        elif _assurance_gated; then
+          # P0.4's orthogonal analysis-assurance axis (--require-complete-
+          # analysis), mirroring the coverage branch immediately above --
+          # same "not a break, not this run's compatibility verdict" shape,
+          # different axis (evidence completeness rather than contract
+          # domain closure).
+          VERDICT="ANALYSIS_INCOMPLETE"
+          echo "::warning::abicheck scan's own evidence was not fully complete under --require-complete-analysis (exit code 1). This is NOT an ABI or API break — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
         else
           VERDICT="ERROR"
         fi
@@ -2129,21 +2170,39 @@ else
           VERDICT="ERROR"
           echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 1)."
           echo "::error::Check the command and inputs above."
-        elif _coverage_gated; then
-          # `compare` shares exit 1 between two independent axes, so the
-          # report's pre-fold `severity.exit_code` is what tells them apart
-          # rather than a guess. Only when the severity gate itself did not
-          # produce 1 is this run gated by coverage *alone*.
+        elif _coverage_gated || _assurance_gated; then
+          # `compare` shares exit 1 between up to three independent axes
+          # (severity policy, ADR-049 contract coverage, P0.4 analysis
+          # assurance), so the report's pre-fold `severity.exit_code` is
+          # what tells them apart rather than a guess. Only when the
+          # severity gate itself did not produce 1 is this run gated by
+          # coverage and/or assurance *alone*.
           _sev_exit=$(_severity_gate_exit)
           if [[ "$_sev_exit" == "0" ]]; then
-            VERDICT="COVERAGE_INCOMPLETE"
-            echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
+            if _coverage_gated; then
+              VERDICT="COVERAGE_INCOMPLETE"
+              echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
+              if _assurance_gated; then
+                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+              fi
+            else
+              # P0.4's orthogonal analysis-assurance axis alone (no
+              # contract-coverage gap this run) -- same "not a break, not a
+              # severity-policy failure" shape as the coverage branch above.
+              VERDICT="ANALYSIS_INCOMPLETE"
+              echo "::warning::abicheck's own evidence was not fully complete under --require-complete-analysis (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
+            fi
           else
             # Either severity gated too, or there is no readable JSON report
             # to tell. Keep the established verdict rather than overwrite it
-            # on a guess, and say that coverage also contributed.
+            # on a guess, and say that coverage/assurance also contributed.
             VERDICT="SEVERITY_ERROR"
-            echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+            if _coverage_gated; then
+              echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+            fi
+            if _assurance_gated; then
+              echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+            fi
           fi
         else
           VERDICT="SEVERITY_ERROR"
@@ -2268,6 +2327,21 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
           echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence: \`$_coverage_where\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\` (which keeps the findings reported, and only zeroes this contribution)."
         else
           echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`contract_coverage_failures\` in the JSON report."
+        fi
+        ;;
+      ANALYSIS_INCOMPLETE)
+        # P0.4's orthogonal analysis-assurance axis (exit code 1,
+        # --require-complete-analysis). `analysis_assurance.notes` names
+        # what actually fell short (depth, TU/export accounting,
+        # fact-set comparability, header-context drift, ...) the same way
+        # `coverage_where` does for the contract-coverage sibling above.
+        _assurance_notes=""
+        _json_src=$(_json_report_src)
+        _assurance_notes=$(_report_query "$_json_src" assurance_notes)
+        if [[ -n "$_assurance_notes" ]]; then
+          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
+        else
+          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`analysis_assurance\` in the JSON report."
         fi
         ;;
       PASS)
@@ -2750,6 +2824,16 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
+  # P0.4's analysis-assurance axis, unconditional for the identical reason
+  # the contract-coverage axis immediately above is: no fail-on-* flag
+  # governs it, and `_assurance_gated()` is read directly rather than the
+  # VERDICT/GATE_TIER label so a higher-priority BREAKING/API_BREAK exit
+  # cannot silently swallow it.
+  if _assurance_gated; then
+    echo "::error::abicheck scan's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
+    FINAL_EXIT=1
+  fi
+
 else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
@@ -2785,6 +2869,13 @@ else
   # step green) cannot silently swallow it.
   if _coverage_gated; then
     echo "::error::abicheck could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
+    FINAL_EXIT=1
+  fi
+
+  # P0.4's analysis-assurance axis, unconditional exactly like the
+  # contract-coverage check immediately above and for the same reason.
+  if _assurance_gated; then
+    echo "::error::abicheck's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
     FINAL_EXIT=1
   fi
 fi

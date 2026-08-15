@@ -96,30 +96,39 @@ behavior is as documented below.
 
 ## Analysis-assurance contribution (P0.4)
 
-`compare` always computes and reports `analysis_assurance` — a third,
-orthogonal axis alongside the compatibility verdict and the policy/severity
-gate, answering "how complete and trustworthy was the evidence behind this
-comparison" independently of whatever the verdict says. Its `status` field is
-one of `complete`, `partial`, `failed`, `not_comparable`, or `not_requested`,
-and it is always present in `--format json` output (`analysis_assurance`
-top-level key), regardless of any flag.
+`compare`, and `scan --against`, always compute and report
+`analysis_assurance` — a third, orthogonal axis alongside the compatibility
+verdict and the policy/severity gate, answering "how complete and
+trustworthy was the evidence behind this comparison" independently of
+whatever the verdict says. Its `status` field is one of `complete`,
+`partial`, `failed`, `not_comparable`, or `not_requested`, and it is always
+present in `--format json` output (`analysis_assurance` — a top-level key on
+`compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
 is purely informational until a caller opts in. Passing `--require-complete-
-analysis` makes `compare` additionally contribute exit `1` whenever
-`analysis_assurance.status` is not `complete`, folded with the same `max`
-discipline the contract-coverage axis above uses: it raises a clean `0` to
-`1` and **never lowers** a `2`/`4` — incomplete assurance cannot demote a real
-ABI break to "warnings only", and it never rewrites the compatibility verdict,
-any finding, or the severity gate's own contribution.
+analysis` makes `compare`/`scan --against` additionally contribute exit `1`
+whenever `analysis_assurance.status` is not `complete`, folded with the same
+`max` discipline the contract-coverage axis above uses: it raises a clean `0`
+to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
+demote a real ABI break to "warnings only", and it never rewrites the
+compatibility verdict, any finding, or the severity gate's own contribution.
 
-`--require-complete-analysis` is single-pair only; a directory/package
+`--require-complete-analysis` is single-pair only. A directory/package
 (release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out).
+tracked follow-up for extending this axis to the release fan-out); `scan
+--against` rejects it without `--against`, alongside every other
+baseline-only flag — there is no comparison for it to gate on otherwise.
 
 **Without `--require-complete-analysis` every pre-existing invocation's exit
 code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
+
+The composite GitHub Action folds this the same way it folds the
+contract-coverage axis: an assurance-gated exit `1` (passed via `extra-args`
+on either command) maps to a dedicated `ANALYSIS_INCOMPLETE` verdict —
+never the compatibility verdict, and unconditional (no `fail-on-*` input
+disables it).
 
 ## Commands removed in the ADR-043 CLI reset
 
@@ -328,10 +337,12 @@ never clear one a severity category already raised.
 `aggregate` reads that `diff.severity` block as the target's compatibility
 gate when it is present, exactly as it reads a `compare` report's own
 `severity` block (and with the same fail-closed validation). This is what
-keeps the two orthogonal axes separable for a scan target: a legacy-scheme
-scan has no native exit `1`, so a raw `1` can only be the coverage
-contribution — but a severity-scheme scan *does* (an error-level addition),
-and folding both to `1` would otherwise be indistinguishable. See
+keeps the orthogonal axes separable for a scan target: a legacy-scheme scan
+has no native exit `1`, so a raw `1` can only be the contract-coverage
+and/or analysis-assurance contribution (both orthogonal, both readable from
+their own report fields regardless of scheme) — but a severity-scheme scan
+*also* has a native `1` (an error-level addition), and folding all of these
+to `1` would otherwise be indistinguishable. See
 [`abicheck aggregate`](#abicheck-aggregate).
 
 `scan --dry-run` previews whichever scheme the invocation resolves —

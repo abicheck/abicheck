@@ -406,6 +406,7 @@ def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
         ["--severity-preset", "info-only"],
         ["--exit-code-scheme", "severity"],
         ["--max-findings", "5"],
+        ["--require-complete-analysis"],
     ],
 )
 def test_scan_rejects_comparison_only_flags_without_against(

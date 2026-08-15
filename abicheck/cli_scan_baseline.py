@@ -917,6 +917,19 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
                 "suppressed_truncated_kinds",
                 (_change_kind_str(c) for c in suppressed_changes[cap:]),
             )
+    # P0.4: `compare`'s own JSON report always carries `analysis_assurance`
+    # (`reporter._add_analysis_assurance`, via the same narrowing helper),
+    # regardless of whether `--require-complete-analysis` was passed --
+    # `scan --against`'s summary carried nothing equivalent, so a caller
+    # could not tell how complete/trustworthy a scan's own evidence was
+    # (depth, TU/export accounting, header-context drift, ...) without a
+    # separate `compare` invocation. `checker.compare` (reached through
+    # `compare_snapshots` above) always attaches the result to *diff*, so
+    # this is unconditional here too, exactly like `compare`'s report.
+    from .analysis_assurance import analysis_assurance_report_dict
+
+    if (aa_block := analysis_assurance_report_dict(diff)) is not None:
+        summary["analysis_assurance"] = aa_block
     return summary
 
 
@@ -984,6 +997,7 @@ def _run_baseline_compare(
     sev_config: Any = None,
     exit_code_scheme: str = "legacy",
     max_findings: int | None = None,
+    require_complete_analysis: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -1024,6 +1038,16 @@ def _run_baseline_compare(
     uses — so source-only / graph findings the collected evidence reveals are
     folded into the verdict too (``checker.compare`` itself does not read
     ``build_source``).
+
+    *require_complete_analysis* mirrors ``compare``'s own P0.4
+    ``--require-complete-analysis``: ``checker.compare`` (reached through
+    :func:`~abicheck.service.compare_snapshots` above) always attaches an
+    ``analysis_assurance`` result to *diff* regardless of this flag, and
+    :func:`_baseline_summary` always reports it in ``--format json`` --
+    this parameter only controls whether an incomplete status additionally
+    floors the returned exit code (folded with the same ``max`` discipline
+    :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` already
+    uses for its own orthogonal axis, immediately below).
     """
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
@@ -1185,4 +1209,14 @@ def _run_baseline_compare(
     # the point -- a ledger that gated one command and not the other would be
     # exactly the cross-command divergence §6.4's Gate exists to catch.
     exit_code = fold_coverage_exit(base_exit, diff)
+    # P0.4: the analysis-assurance axis, folded the same `max` way and for
+    # the same reason -- `compare`'s own `_exit_with_severity_or_verdict`
+    # folds both immediately in sequence so a caller cannot pick up one
+    # orthogonal axis and forget the other. `0` contribution, and this is a
+    # pure no-op, whenever the flag was not passed (default False).
+    from .analysis_assurance import fold_analysis_assurance_exit
+
+    exit_code = fold_analysis_assurance_exit(
+        exit_code, diff, require_complete=require_complete_analysis
+    )
     return verdict, exit_code, summary

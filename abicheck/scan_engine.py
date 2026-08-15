@@ -884,6 +884,7 @@ def run_scan_core(
     exit_code_scheme: str = "legacy",
     sibling_exported_symbols: frozenset[str] | None = None,
     max_findings: int | None = None,
+    require_complete_analysis: bool = False,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1140,6 +1141,7 @@ def run_scan_core(
                     sev_config=sev_config,
                     exit_code_scheme=exit_code_scheme,
                     max_findings=max_findings,
+                    require_complete_analysis=require_complete_analysis,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

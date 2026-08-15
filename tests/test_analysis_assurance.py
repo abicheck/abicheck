@@ -1338,6 +1338,12 @@ class TestAnalysisAssuranceCliIntegration:
         assert "--require-complete-analysis" in res.output
 
 
+# ``scan --against --require-complete-analysis``'s own CLI-integration
+# tests moved to tests/test_scan_analysis_assurance.py (this file is at the
+# AGENTS.md 2000-line hard cap; a sibling module is the established split
+# pattern, not a second copy of the fixtures below).
+
+
 class TestAnalysisAssuranceOutOfBandPack:
     """P1 review (finding 1): ``--build-info``/``--sources`` point ``compare``
     at an out-of-band pack directory that ``_resolve_side_pack`` uses for the
