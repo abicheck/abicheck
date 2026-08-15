@@ -385,7 +385,7 @@ Render comparison result in the requested output format.
 | `demangle` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `stat` | `bool` | `False` |
-| `show_recommendation` | `bool` | `True` |
+| `show_recommendation` | `bool` | `False` |
 
 **Returns:** `str`
 
