@@ -54,6 +54,8 @@ class TestChangedFilesArePerfSensitive:
             "abicheck/checker.py",
             "abicheck/diff_symbols.py",  # abicheck/diff_*.py glob
             "abicheck/diff_types.py",
+            "abicheck/detectors.py",
+            "abicheck/detector_registry.py",
             "scripts/benchmark_scaling.py",
             "scripts/perf_measurement.py",
             "tests/test_benchmark_scaling.py",

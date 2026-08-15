@@ -74,6 +74,16 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/diff_*.py",
     "abicheck/checker.py",
     "abicheck/checker_policy.py",
+    # checker.compare() calls the registry's ensure_loaded()/run_all() for
+    # every comparison this workflow benchmarks -- detector discovery,
+    # ordering, and dispatch are exactly as load-bearing as checker.py
+    # itself (abicheck/CLAUDE.md's own "Classify changes" pipeline stage
+    # lists these two alongside checker.py/checker_policy.py), and were
+    # missing from both this list and the paths: filter it replaced (Codex
+    # review, fresh evidence -- a pre-existing gap this classify job's own
+    # PERF_SENSITIVE_PATTERNS ported forward rather than introduced).
+    "abicheck/detectors.py",
+    "abicheck/detector_registry.py",
     "abicheck/post_processing.py",
     "abicheck/internal_leak.py",
     "abicheck/demangle.py",
