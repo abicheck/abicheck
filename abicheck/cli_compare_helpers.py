@@ -1501,13 +1501,26 @@ def run_compare(
         format_carries_use_case_impact(fmt)
         or format_carries_use_case_impact(secondary_fmt)
     ):
-        if fmt == ONELINE_FORMAT and secondary_fmt is None:
+        if fmt == ONELINE_FORMAT:
+            # `fmt` here is the internal-only "oneline" value (reachable only
+            # via --profile quick's injected default) -- never a spelling
+            # the user typed as --format, so the generic `rendered = f"
+            # --format {fmt}"` branch below would name a flag value that
+            # doesn't exist on the command line. Name --profile quick
+            # instead, and still mention the secondary format when one is
+            # ALSO ledgerless (--profile quick --write sarif=...), rather
+            # than silently dropping that half of the picture (Codex
+            # review, fresh evidence).
+            also = (
+                f" The --write {secondary_fmt}=... output does not carry it "
+                "either." if secondary_fmt else ""
+            )
             detail = (
                 "--profile quick emits only a one-line summary, which the "
                 "attribution block would not fit. Use a different profile "
                 "or --format to get the use-case section, add --write "
                 "json=PATH to carry it alongside the summary, or drop "
-                "--use-cases."
+                "--use-cases." + also
             )
         else:
             rendered = f"--format {fmt}" + (

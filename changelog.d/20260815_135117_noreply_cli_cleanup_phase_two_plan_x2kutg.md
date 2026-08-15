@@ -9,18 +9,23 @@ it should read in CHANGELOG.md. Delete the other sections.
 ### Removed
 
 - **`compare --stat` and `compare --recommend` are gone.** CLI cleanup phase
-  two, PR 1 (ADR-037). `--stat`'s human one-line summary moves to the
-  built-in `--profile quick` (unchanged output); `--stat --format json`
-  moves to plain `--format json`, which already carries the same `summary`
-  object alongside the full `changes` array. `--recommend` is gone because
-  the release recommendation is now unconditional: always in JSON's
-  `release_recommendation` field (already true before this change) and now
-  always rendered in `markdown`/`review` output too. An explicit `--format`
-  on the command line always overrides `--profile quick`'s injected format,
-  so `--profile quick --format json` now returns the full JSON report
-  rather than a summary-only shape — a deliberate refinement over the old
-  `--stat` boolean's behavior. Neither flag gets a deprecation alias; both
-  exit `64` with `No such option`.
+  two, PR 1 (ADR-037). Manual human `--stat` use moves to `--format review`;
+  the built-in `--profile quick` keeps its own internal one-line renderer,
+  but is also an *analysis* profile (`--depth binary`), so it is not a
+  behavior-preserving substitute for `--stat` on its own — pair it with an
+  explicit `--depth` to keep the same evidence level. `--stat --format
+  json` moves to plain `--format json` in full report mode, which already
+  carries the same `summary` object alongside the full `changes` array
+  (`--report-mode leaf` intentionally omits `binary_compatibility_pct`/
+  `affected_pct`). `--recommend` is gone because the release recommendation
+  is now unconditional: always in JSON's `release_recommendation` field
+  (already true before this change) and now always rendered in
+  `markdown`/`review` output too. An explicit `--format` on the command
+  line always overrides `--profile quick`'s injected format, so `--profile
+  quick --format json` now returns the full JSON report rather than a
+  summary-only shape — a deliberate refinement over the old `--stat`
+  boolean's behavior. Neither flag gets a deprecation alias; both exit `64`
+  with `No such option`.
 
 <!--
 ### Changed

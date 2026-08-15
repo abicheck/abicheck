@@ -521,3 +521,10 @@ class TestUseCaseImpactOnCompare:
         # The primary one-line render carries no JSON at all to check for the
         # block's absence in -- it's a bare one-line summary on stdout.
         assert "use_case_impact" not in res.output
+        # Confirms the primary really is the one-line format (not, say,
+        # markdown that merely happens to omit the block) -- a single line,
+        # no newline. stdout, not .output: an "Evidence coverage:" stderr
+        # diagnostic is otherwise mixed in and legitimately multi-line
+        # (CodeRabbit review; the multi-line failure this assertion first
+        # hit against `.output` confirmed that diagnostic exists).
+        assert "\n" not in res.stdout.strip()

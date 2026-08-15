@@ -350,7 +350,7 @@ pip install -e ".[dev]" zstandard
 python validation/scripts/run_matrix.py     # -> validation/data/results.json
 # 4. reproduce the FP-1 recovery
 abicheck compare <tbb-2021.5>/libtbb.so.12.5 <tbb-2021.9>/libtbb.so.12.9 \
-  --suppress validation/suppress_internal.yaml --profile quick   # 216 -> 2 breaking
+  --suppress validation/suppress_internal.yaml --format review   # 216 -> 2 breaking
 ```
 
 **Committed artifacts:**

@@ -6,6 +6,7 @@ error recovery, and stack-check command.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import struct
 from pathlib import Path
@@ -15,6 +16,20 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+
+#: Click <8.2's `CliRunner` merges stderr into stdout by default
+#: (`mix_stderr=True`), so `result.stdout` alone is not actually isolated
+#: from a stderr warning on those versions -- only `mix_stderr=False` (a
+#: parameter Click 8.2+ removed entirely, since it made stdout/stderr
+#: genuinely separate unconditionally) restores the isolation `result.stdout`
+#: is meant to provide here. `click>=8.0` is the declared floor (no upper
+#: bound), so this repo's test suite must tolerate both shapes (CodeRabbit
+#: review, fresh evidence).
+_ISOLATED_STDOUT_RUNNER_KWARGS = (
+    {"mix_stderr": False}
+    if "mix_stderr" in inspect.signature(CliRunner.__init__).parameters
+    else {}
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -225,13 +240,16 @@ class TestStatOutput:
         old = _make_json_snapshot(tmp_path, name="libold", version="1.0")
         new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
 
-        runner = CliRunner()
+        runner = CliRunner(**_ISOLATED_STDOUT_RUNNER_KWARGS)
         result = runner.invoke(main, [
             "compare", str(old), str(new), "--profile", "quick", "--format", "json",
         ])
         assert result.exit_code == 0
         # Read stdout (not .output) so any stderr warning — e.g. the
         # public-surface scoping fallback — does not corrupt the JSON payload.
+        # Isolated from stderr on every supported Click version via
+        # _ISOLATED_STDOUT_RUNNER_KWARGS above (Click <8.2 merges the two by
+        # default unless mix_stderr=False is passed explicitly).
         data = json.loads(result.stdout)
         assert "verdict" in data
         assert "changes" in data

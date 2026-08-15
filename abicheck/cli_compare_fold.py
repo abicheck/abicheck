@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contract_gating import zero_scoped_out_gate_contributions
+from .service_render import ONELINE_FORMAT
 
 # Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
 # and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
@@ -116,19 +117,20 @@ def _fold_scoped_compat_into_text(
         return fold.into_json(text)
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
-    if fmt == "oneline":
-        # service_render.ONELINE_FORMAT (the built-in `quick` --profile's
-        # output), duplicated as a literal rather than imported -- same
-        # leaf-module-independence reasoning as contract_coverage_exit.py's
-        # own `_ONELINE_FORMAT` (CLI cleanup phase two, PR 1). Unlike
-        # markdown/text/review's into_text (which appends a scoped section
-        # after the existing report), the incoming `text` here is the
-        # *unscoped* one-liner and must be replaced outright, not appended
-        # to -- appending would break the one-line contract --profile quick
+    if fmt == ONELINE_FORMAT:
+        # The built-in `quick` --profile's output. Unlike markdown/text/
+        # review's into_text (which appends a scoped section after the
+        # existing report), the incoming `text` here is the *unscoped*
+        # one-liner and must be replaced outright, not appended to --
+        # appending would break the one-line contract --profile quick
         # exists to guarantee, and leaving it as the leading line would
         # print the wrong (full-library) verdict/counts next to a process
         # exit code computed from the scoped result (Codex review, fresh
-        # evidence).
+        # evidence). Imported rather than duplicated as a literal --
+        # cli_compare_helpers.py already imports the same constant, so the
+        # leaf-module-independence argument contract_coverage_exit.py's own
+        # `_ONELINE_FORMAT` duplicate makes doesn't hold here (CodeRabbit
+        # review).
         return fold.into_oneline()
     return text
 

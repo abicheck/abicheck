@@ -284,6 +284,11 @@ class TestTheGatingConditionIsVisible:
             "exports",
         )
         assert result.exit_code == 1, result.output
+        # Confirms this really went through the one-line renderer (not, say,
+        # a format that happens to also lack the ledger) -- the coverage
+        # notice is appended after it, so the output leads with the
+        # one-liner's own verdict label (CodeRabbit review).
+        assert result.output.startswith("NO_CHANGE:"), result.output
         assert "Contract coverage incomplete" in result.output
 
     def test_it_does_not_claim_a_floor_it_did_not_apply(self) -> None:

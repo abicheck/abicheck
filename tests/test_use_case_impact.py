@@ -375,6 +375,33 @@ class TestStatKeepsItsSummaryOnlyShape:
         assert result.exit_code == 64, result.output
         assert "--profile quick emits only a one-line summary" in result.output
 
+    def test_quick_profile_with_a_non_carrying_secondary_names_no_fake_flag(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review, fresh evidence: with `secondary_fmt` present
+        (e.g. `--write sarif=...`), the primary format's own message
+        branch used to run instead, naming `--format oneline` -- a value
+        the user never typed and cannot type (`oneline` is the internal
+        format `--profile quick` injects, never on the public `--format`
+        Choice list). The quick-profile message must fire regardless of
+        `secondary_fmt`, and should still mention the secondary output when
+        it is ALSO ledgerless."""
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--profile", "quick", "--use-cases", str(manifest),
+                "--write", f"sarif={tmp_path / 'r.sarif'}",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "--profile quick emits only a one-line summary" in result.output
+        assert "--format oneline" not in result.output
+        assert "--write sarif=..." in result.output
+
     @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
     def test_a_format_that_cannot_carry_the_block_is_rejected(
         self, tmp_path: Path, fmt: str
