@@ -7,6 +7,9 @@ canonical_for:
   - build-profile-comparability
 depends_on:
   - abicheck/comparability.py
+  - abicheck/comparability_fields.py
+  - abicheck/checker.py
+  - abicheck/header_conditionals.py
 lifecycle: active
 generated: false
 ---
@@ -110,7 +113,7 @@ the snapshot:
 | `endianness` | Byte order — layout and wire-format sensitive |
 | `macro_ops` | Which `-D`/`-U` macros were in effect — conditional compilation changes what's even declared |
 | `pass_through_flags` | ABI-relevant compiler flags forwarded as-is. Today `pass_through_flags_from_tokens()` recognizes only `-include <path>` — the one currently-known must-handle repeatable, order-sensitive frontend flag; other flags (e.g. `-fvisibility=`, `-fshort-enums`) are not yet classified into this field and are simply omitted rather than mis-hashed |
-| `include_sequence` / `header_sequence` | *Content* of the resolved `-I` search path and header set — never absolute path shape, since a two-checkout compare's old/new sides necessarily resolve to different paths for what may be an identical logical surface |
+| `include_sequence` / `header_sequence` | Order and *declared-slot* identity of the include directories/headers fed through the dedicated `extra_includes`/manifest `includes` mechanism (never absolute path shape for those, so a two-checkout compare's differently-nested old/new sides still fingerprint identically) — narrower than "every resolved `-I`/`-isystem`": a raw `-I`/`-isystem` token embedded in `gcc_options` rather than passed through the dedicated mechanism is not collected into this field today, so replacing what a raw compiler flag points at can leave it unchanged |
 | `frontend_context_kind` | Appended only for a DPC++-capable frontend (a SYCL host/device split); absent from the fingerprint on an ordinary clang/castxml dump |
 
 This table is a narrative summary, not the field list's fact owner — the
