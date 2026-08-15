@@ -140,6 +140,78 @@ class TestStructuralRequirement:
         )
 
 
+def _git_repo_with(tmp_path: Path, *, second_commit: dict[str, str]) -> Path:
+    """A real repository: one base commit, then *second_commit*'s edits."""
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "scripts").mkdir()
+    (repo / "tests" / "test_a.py").write_text(
+        "def test_a():\n    assert 1 == 1\n    assert 2 == 2\n", encoding="utf-8"
+    )
+    (repo / "scripts" / "thing.py").write_text("x = 1\n", encoding="utf-8")
+
+    def _git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    _git("init", "-q", ".")
+    _git("config", "user.email", "t@example.invalid")
+    _git("config", "user.name", "t")
+    _git("add", "-A")
+    _git("commit", "-qm", "base")
+    for rel, content in second_commit.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(content, encoding="utf-8")
+    _git("add", "-A")
+    _git("commit", "-qm", "fix: thing")
+    return repo
+
+
+class TestAgainstRealGit:
+    """The evidence rules, exercised through real `git diff` output.
+
+    The fixtures elsewhere in this file are transcribed from real git, but a
+    transcription cannot catch the flags being wrong — and the copy case was
+    exactly that: the parsing was already correct, the diff simply never
+    reported a copy (Codex review).
+    """
+
+    def test_an_unchanged_copy_of_a_test_does_not_satisfy_the_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                # Byte-identical copy of tests/test_a.py.
+                "tests/test_b.py": (
+                    "def test_a():\n    assert 1 == 1\n    assert 2 == 2\n"
+                ),
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == 1
+
+    def test_a_real_new_assertion_does_satisfy_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control, through the same path: a copy that actually adds
+        an assertion is evidence."""
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/test_b.py": (
+                    "def test_a():\n    assert 1 == 1\n"
+                    "    assert 2 == 2\n    assert 3 == 3\n"
+                ),
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == (
+            gate.EXIT_STRUCTURAL_ONLY
+        )
+
+
 class TestContentEvidence:
     """The status alone is not evidence — the added lines have to say something.
 
@@ -152,6 +224,23 @@ class TestContentEvidence:
         assert not gate.adds_or_modifies_a_test(
             [("D", "tests/test_old.py"), ("A", "tests/test_new.py")],
             _RENAME_DIFF,
+        )
+
+    def test_an_unchanged_copy_is_not_a_regression_test(self) -> None:
+        """Duplicating a test is not writing one.
+
+        Real `git diff -C --find-copies-harder` output for
+        `cp tests/test_a.py tests/test_b.py`: no `+++` header at all, so the
+        copy contributes no added lines. Without copy detection git reported
+        it as a new file with every line added, and it passed (Codex review).
+        """
+        assert not gate.adds_or_modifies_a_test([("A", "tests/test_b.py")], _COPY_DIFF)
+
+    def test_a_copy_carrying_a_real_edit_is_evidence(self) -> None:
+        """Negative control: starting from an existing test and adding a real
+        assertion is legitimate — copy detection must not reject that."""
+        assert gate.adds_or_modifies_a_test(
+            [("A", "tests/test_b.py")], _COPY_WITH_EDIT_DIFF
         )
 
     def test_a_rename_carrying_a_real_edit_is_evidence(self) -> None:
@@ -198,6 +287,11 @@ class TestContentEvidence:
         monkeypatch.setattr(gate, "_git", _spy)
         gate.unified_diff("A", "B")
         assert "-M" in seen["args"]
+        # Copies as well: `cp test_a.py test_b.py` is a rename's twin, and
+        # without `-C --find-copies-harder` git reports it as a new file with
+        # every line added (Codex review).
+        assert "-C" in seen["args"]
+        assert "--find-copies-harder" in seen["args"]
         assert "--no-renames" not in seen["args"]
 
     def test_added_lines_are_attributed_to_their_own_file(self) -> None:
@@ -435,6 +529,25 @@ _RENAME_DIFF = (
     "similarity index 100%\n"
     "rename from tests/test_old.py\n"
     "rename to tests/test_new.py\n"
+)
+
+#: Real `git diff -C --find-copies-harder` output for an unchanged copy.
+_COPY_DIFF = (
+    "diff --git a/tests/test_a.py b/tests/test_b.py\n"
+    "similarity index 100%\n"
+    "copy from tests/test_a.py\n"
+    "copy to tests/test_b.py\n"
+)
+
+_COPY_WITH_EDIT_DIFF = (
+    "diff --git a/tests/test_a.py b/tests/test_b.py\n"
+    "similarity index 87%\n"
+    "copy from tests/test_a.py\n"
+    "copy to tests/test_b.py\n"
+    "--- a/tests/test_a.py\n"
+    "+++ b/tests/test_b.py\n"
+    "@@ -3,0 +4 @@\n"
+    "+    assert f(0) == 0\n"
 )
 
 _RENAME_WITH_EDIT_DIFF = (

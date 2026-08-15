@@ -400,7 +400,23 @@ def unified_diff(base: str, head: str) -> str:
     (Codex review). `--unified=0` keeps context lines out of the added-line
     scan.
     """
-    return _git(["diff", "-M", "--unified=0", f"{base}...{head}"])
+    return _git(
+        [
+            "diff",
+            "-M",
+            # Copies too, and `--find-copies-harder` so a copy from a file the
+            # branch did not otherwise touch is still found. `cp tests/test_a.py
+            # tests/test_b.py` is a rename's twin: without this git reports the
+            # copy as a brand-new file with every line added, and duplicating
+            # an existing test counted as writing one (Codex review). With it,
+            # a pure copy carries `similarity index 100%` and no `+++` header,
+            # so it contributes no added lines — verified against real git.
+            "-C",
+            "--find-copies-harder",
+            "--unified=0",
+            f"{base}...{head}",
+        ]
+    )
 
 
 def commit_subjects(base: str, head: str) -> list[str]:
