@@ -195,9 +195,16 @@ then the version number communicates compatibility:
 - **MINOR** — backward-compatible additions.
 - **PATCH** — backward-compatible bug fixes.
 
-That maps cleanly onto abicheck's [verdicts](../verdicts.md) — *but only after*
-the public API is declared (§3). abicheck detects the change and classifies it;
-**you** decide what the classification means for your version number and release.
+A verdict **constrains** the version number; it does not choose it. Read the
+table below in one direction only: a finding can tell you a version bump is
+*not sufficient*, but no finding can tell you a release is *only* a bug fix.
+That is a claim about everything the release changed — behavior, wire formats,
+performance and concurrency contracts, documentation promises — and a scan of
+two binaries has no visibility into most of it.
+
+abicheck detects the change and classifies it; **you** decide what the
+classification means for your version number and release, *and only after* the
+public API is declared (§3).
 
 ### abicheck verdict → SemVer action
 
@@ -207,8 +214,15 @@ the public API is declared (§3). abicheck detects the change and classifies it;
 | **`API_BREAK`** | **Source** users may fail to recompile, but already-built binaries may still load | **Major** bump *if source compatibility is promised*; otherwise a documented source migration |
 | **`COMPATIBLE` (addition)** | Existing users keep working; new public API added | Usually **minor** bump |
 | **`COMPATIBLE_WITH_RISK`** | ABI likely intact, but a deployment/security/runtime assumption changed | Usually a **release note** + policy review; sometimes block |
-| **`NO_CHANGE`** | No relevant public-contract change detected | **Patch** / implementation-only release |
+| **`NO_CHANGE`** | No relevant public-contract change detected *in the evidence provided* | **Not a version decision on its own.** It says this scan found no ABI/API diff — not that the release is a bug fix. Any level from patch to major can still be correct; behavioral, wire-format, and semantic changes are invisible here |
 | **Internal / private change** | No public-contract change *if truly hidden* | **No** SemVer impact |
+
+A `NO_CHANGE` release still lands at minor if it added public functionality
+somewhere this scan didn't look, and at major if it changed a documented
+behavior, a serialized format, or a threading guarantee. Those contracts are
+covered by [Behavioral](../behavioral-compatibility.md) and
+[Data/Wire](../data-wire-compatibility.md) compatibility, and neither is
+provable by comparing two artifacts.
 
 > abicheck's `compare` mode is the only one with the full verdict vocabulary —
 > in particular the `API_BREAK` distinction between *source* breaks and *binary*

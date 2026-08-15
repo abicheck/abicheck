@@ -121,14 +121,34 @@ Two categories matter for the rest of the series:
 
 | Kind | `nm` letter | Meaning |
 |------|-------------|---------|
-| **Defined** (exported) | `T`, `D`, `B`, `W`… | "I provide this name; here is its code/data." |
+| **Defined** | `T`, `D`, `B`, `W`… | "I provide this name; here is its code/data." |
 | **Undefined** (imported) | `U` | "I use this name; somebody else must provide it." |
 
+!!! warning "Defined is not the same as exported"
+    These are four separate properties, and a compatibility question usually
+    turns on the last one:
+
+    1. **defined** in this object at all (has code/data here);
+    2. its **binding** — `GLOBAL`, `WEAK`, or `LOCAL` (a lowercase `nm` letter
+       means local: `t`, `d`, `b`);
+    3. present in **`.dynsym`**, the table the dynamic loader can see;
+    4. **externally visible** — not hidden by `-fvisibility=hidden`, a version
+       script, or an `internal`/`hidden` visibility attribute.
+
+    A `T` in `nm` output tells you (1) and, by its case, (2). It does not tell
+    you (3) or (4) — `nm -D` (which reads `.dynsym`) does.
+    [Part 5](05-linker-elf.md) covers visibility and export control.
+
 Linking is, at its heart, **matching every `U` to a `T`/`D` somewhere**. If a
-single `U` has no match, the link (or the load) fails. The name is the *only*
-key used for matching — not the function's parameter types, not the variable's
-size. Hold onto that: it is the root cause of an entire family of breaks in
-[Part 2](02-symbol-contracts.md).
+single `U` has no match, the link (or the load) fails. In the simplest ELF
+case — a plain `.so` with no symbol versions — the name is the *only* key used for matching: not
+the function's parameter types, not the variable's size. Hold onto that: it is
+the root cause of an entire family of breaks in
+[Part 2](02-symbol-contracts.md). Real platforms add a second key alongside the
+name — an ELF **symbol version** (`foo@@GLIBC_2.14`), a Mach-O **two-level
+namespace** entry recording *which* library a symbol came from, or a PE
+**ordinal** import that carries no name at all — each covered in
+[Part 5](05-linker-elf.md).
 
 ### Names in C vs C++ — mangling
 
@@ -193,9 +213,11 @@ nm: libmath.release.so: no symbols
 ```
 
 This is the detail people miss: **"stripped" does not mean "no symbols" — it
-means "no *local* symbols and no debug info."** The exported, demangled symbol
-names, their versions, and the SONAME are still fully readable on a "fully
-stripped" `.so`.
+means "no *local* symbols and no debug info."** The exported symbol names, their
+versions, and the SONAME are still fully readable on a "fully stripped" `.so`.
+Those names are stored **mangled** (`_ZN3geo3addEii`); the readable form above
+is produced by `nm -C`, `c++filt`, or the checker at display time — nothing in
+the binary stores a demangled name.
 
 **(3) The split-debug pair** is how distros ship both: the release `.so` above,
 *plus* a separate `.debug` file holding the DWARF that was stripped out of it,
@@ -255,9 +277,16 @@ resolvable at runtime via a `debuginfod` server; macOS ships the equivalent as a
 There are two ways the linker can satisfy your program's undefined symbols.
 
 **Static linking** copies the needed code *into* your executable at build time.
-The library's bytes become part of `a.out`. Once built, there is no further
-dependency — and no further compatibility question, because nothing can change
-underneath you.
+The library's bytes become part of `a.out`. Once built, that executable has no
+further *runtime* dependency on the library — nothing can be swapped underneath
+it at load time.
+
+That removes one compatibility question, not all of them. Static linking still
+leaves the **source** contract (consumers recompile against your headers), the
+**archive/object** contract (old object files relinked against a new `.a`), the
+**compiler ABI** both sides must agree on, LTO/bitcode-format compatibility, and
+every header-only or inline body that got baked into the consumer's own object
+code. See [Static & Header-Only Compatibility](../static-and-header-only.md).
 
 **Dynamic linking** leaves the undefined symbols *unresolved* in your
 executable and records a note that says "find these in `libfoo.so` at startup."

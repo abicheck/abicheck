@@ -20,8 +20,12 @@ visible in DWARF debug info:
 
 * **vtable** (``_ZTV<type>``) — laid out as ``[offset-to-top, typeinfo*,
   slot0, slot1, …]``.  Its ``st_size`` therefore grows or shrinks by one
-  pointer for every virtual function added, removed, or (net) reordered.
-  ``slots ≈ size/pointer_size − 2`` for the primary vtable.
+  pointer per virtual function *net* added or removed.
+  ``slots ≈ size/pointer_size − 2`` for the primary vtable.  Note what this
+  does *not* cover: a pure reorder of existing virtuals keeps the slot count
+  — and so the symbol size — identical, so it is invisible here even though
+  it is a hard break.  L0 answers "the emitted vtable group changed size",
+  not "which slot moved"; identity needs L1/L2 evidence.
 
 * **typeinfo** (``_ZTI<type>``) — its concrete runtime class encodes the
   inheritance shape:
@@ -36,11 +40,12 @@ visible in DWARF debug info:
                                                         non-public bases
   =====================  =============================  ==================
 
-This means a virtual-method change or a base-class change is observable from
-``.dynsym`` symbol sizes **alone** — no debug info, no headers.  That closes
-the blind spot a pure symbol-name dump has: swapping a member's type or adding
-a virtual method need not rename any mangled symbol, yet it does resize the
-class's ``_ZTV`` / ``_ZTI`` object.
+This means a *size-changing* virtual-method or base-class change is observable
+from ``.dynsym`` symbol sizes **alone** — no debug info, no headers.  That
+narrows the blind spot a pure symbol-name dump has: adding a virtual method
+need not rename any mangled symbol, yet it does resize the class's ``_ZTV``.
+It does not close the blind spot: a base-class change that keeps the same
+``type_info`` runtime class and entry count resizes nothing either.
 
 Scope: this detector only fires when the *same* ``_ZTV`` / ``_ZTI`` symbol is
 present on **both** sides with a **different** size.  A vtable/typeinfo object

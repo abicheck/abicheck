@@ -56,20 +56,34 @@ MSVC counterpart, not a cosmetically renamed one:
   the full unmodelled list).
 - **Vtable/RTTI layout is a different structure, not a relocated Itanium
   one.** Multiple and virtual inheritance under MSVC introduce **vbtables**
-  (virtual base tables) and, for a class with more than one polymorphic
-  base, more than one vtable pointer — a shape Itanium's single-vtable-slot
-  model doesn't have at all. RTTI is reached through a `CompleteObjectLocator`
-  chain rather than Itanium's `type_info`-via-vtable-slot approach.
+  (virtual base tables), and virtual-base access goes through a vbtable
+  pointer rather than Itanium's vcall/vbase offsets stored *inside* the
+  vtable. Note what is *not* the difference: multiple vptrs are not
+  MSVC-specific — Itanium also gives a class **secondary virtual tables**,
+  one per polymorphic base after the primary, so "more than one vptr" is a
+  property of multiple inheritance in both models. RTTI is where the shapes
+  genuinely part company: MSVC reaches it through a `CompleteObjectLocator`
+  chain, Itanium through a `type_info` pointer stored in the vtable itself.
   [Platform Support](../reference/platforms.md#known-limitations-by-platform)
   already states the practical consequence plainly: *"MSVC vtable layout
   differs from Itanium ABI; vtable diff results may be inaccurate."* Treat
   a `TYPE_VTABLE_CHANGED` finding on an MSVC-compiled type as a signal to
   investigate, not as evidence carrying the same weight it has on ELF/Itanium.
 - **Calling convention is part of the decorated name, not a separate ABI
-  fact abicheck classifies.** `__cdecl`/`__stdcall`/`__fastcall`/`__thiscall`
-  each decorate differently (leading underscore, `@N` stack-cleanup suffix,
-  or neither) — so a convention change on an otherwise-unchanged function
-  changes the decorated name itself. abicheck has no dedicated
+  fact abicheck classifies — and this is mostly an x86-32 concern.**
+  `__cdecl`/`__stdcall`/`__fastcall`/`__thiscall` each decorate differently
+  (leading underscore, `@N` stack-cleanup suffix, or neither) — so a
+  convention change on an otherwise-unchanged function changes the decorated
+  name itself. Which target you are on decides how much of this is live:
+
+  | Target | What actually varies |
+  |---|---|
+  | Windows **x86** (32-bit) | The full `__cdecl`/`__stdcall`/`__fastcall`/`__thiscall` matrix: argument registers, who cleans the stack, and the decoration that encodes it |
+  | Windows **x64** | One platform convention. The x86 keywords are accepted and [**ignored**](https://learn.microsoft.com/en-us/cpp/cpp/argument-passing-and-naming-conventions); only `__vectorcall` is a genuinely distinct alternative |
+  | Windows **ARM/ARM64** | The platform ABI. The x86 keywords/decoration model does not apply |
+
+  So on x64 and ARM64 a convention keyword change is normally a no-op, and a
+  decorated-name change points at something else. abicheck has no dedicated
   calling-convention `ChangeKind`; it reports this the same way it would
   report an unrelated rename: `func_removed` + `func_added` on the two
   distinct decorated names. This is tracked as a known upstream-parity gap
@@ -99,9 +113,21 @@ and method calling convention, not for parameter/return types or vtables.
 
 One Windows-specific hazard has no ELF counterpart at all, and it's easy to
 miss because nothing about it looks like an ABI break in the Itanium sense:
-**each DLL may link its own CRT**, so memory allocated with `malloc`/`new` in
-one module must not be `free`d/`delete`d across a DLL boundary — a rule with
-no equivalent on Linux's single-system-libc model. This is documented as a
+**modules can end up with different CRT copies**, and an allocation must be
+released by the same CRT that made it. The precise condition matters, because
+the blanket form of the rule ("every DLL has its own heap") is not true:
+
+| Configuration | Cross-module `free`/`delete` |
+|---|---|
+| All modules link the **same dynamic** CRT/UCRT (`/MD`) | One shared heap — works, but still couples every module to that exact runtime |
+| Any module links the **static** CRT (`/MT`) | Its own private heap — cross-module release is undefined behavior |
+| Mixed `/MT` and `/MD`, or different runtime versions/configurations | Different heaps — same undefined behavior |
+
+Since a library cannot see how its consumers were built, the safe design rule
+is unconditional even though the hazard is not: **allocate and release in the
+same owning module**, through a matched exported create/destroy pair. This is
+a rule with no equivalent on Linux's single-system-libc model, and it is
+documented as a
 row in [Part 5's PE/COFF parallels table](abi-series/05-linker-elf.md#pecoff-and-mach-o-parallels);
 it's called out again here because it's the kind of hazard a reader arriving
 from the Itanium-first Parts 3–5 has no prior mental model to expect at all —

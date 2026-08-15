@@ -146,12 +146,15 @@ Two lessons hide in this table:
 - **Evidence runs in both directions.** More input doesn't just find more breaks —
   it *dismisses* false alarms. Header scoping is what lets a checker say
   "that struct changed, but it was never part of the public surface."
-- **The staircase is real and measurable.** Over the example catalog, a stripped
-  binary alone reaches the correct verdict for about a third of cases; adding
-  debug info takes it to ~75%; headers to ~90%; build data to ~95%; source and
-  source-graph data close the rest
-  (current numbers in the
-  [evidence-tier table](../../reference/tool-comparison.md#which-source-discovers-what)).
+- **The staircase is real and measurable.** Over the example catalog, correct-
+  verdict coverage rises at every step from a stripped binary up to full source
+  evidence, and the false-negative count falls with it. This page deliberately
+  quotes **no percentages**: there is exactly one measured table, it carries its
+  own freshness caveat and denominator definition, and a second hand-copied set
+  of numbers here would go stale silently. Read it at
+  [Evidence & Detectability § What each layer buys](../evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives),
+  with the per-source breakdown in the
+  [evidence-tier table](../../reference/tool-comparison.md#which-source-discovers-what).
 
 ---
 

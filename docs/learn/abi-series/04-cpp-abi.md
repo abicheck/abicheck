@@ -201,15 +201,36 @@ mangler ignored it: `void reset() noexcept` and `void reset()` both mangle to
 `_ZN6Buffer5resetEv` and resolve to the *same* `.dynsym` entry. Removing
 `noexcept` therefore **does not break linkage** — hence not BREAKING.
 
-What it *does* break is the caller's **unwinding assumption**. The v1 compiler
-saw `noexcept`, so it omitted exception landing pads, cleanup frames, and
-`.eh_frame` entries at the call site. If v2 now throws, the exception propagates
-into a frame with no unwinding metadata and `std::terminate()` fires
-unconditionally — every destructor skipped, every `catch` bypassed.
+What it *does* put at risk is the caller's **unwinding assumption**. The v1
+compiler saw `noexcept` and compiled the call site on the promise that nothing
+would propagate out of it — typically emitting no cleanup landing pad for that
+call. If v2 now throws, an exception travels through a frame that was never
+compiled to cooperate with it.
+
+Keep four independent facts separate here, because they have different
+mechanisms and different verdicts:
+
+1. **Linkage.** On an ordinary member or free function, toggling `noexcept`
+   leaves the mangled symbol unchanged — so nothing breaks at link or load
+   time.
+2. **Type system.** Since C++17 `noexcept` *is* part of the function type, so it
+   does participate in mangling wherever a full function type is encoded (see
+   the C++17 note below).
+3. **Behavioral contract.** Letting an exception escape where a compiled caller
+   was promised none is a real incompatibility — but what actually *happens*
+   (local cleanups skipped, an outer handler still reached, or
+   `std::terminate()`) depends on the compiled caller, the toolchain, and the
+   control flow. It is not one fixed outcome, and this page deliberately does
+   not assert one; the mechanics are owned by
+   [Exception Unwinding](../exception-unwinding-abi.md).
+4. **Scanner behavior.** The bare `noexcept` toggle, a runtime-floor finding,
+   and a genuine symbol/type break are three *different* findings from
+   different evidence — don't explain them with one mechanism (see the note
+   below).
 
 This is the deployment-risk shape: binary-linkable, source-recompilable, but
-**semantically unsafe** for binaries built under the stricter old contract — the
-kind of change that merits review rather than a silent pass.
+**semantically riskier** for binaries built under the stricter old contract —
+the kind of change that merits review rather than a silent pass.
 
 !!! note "How abicheck sees it"
     abicheck classifies the bare change kinds `func_noexcept_removed` /
@@ -261,12 +282,15 @@ cross-DSO RTTI trap, and what abicheck can and cannot observe about it.
 
 ## 6. Trivial → non-trivial: the invisible calling-convention flip
 
-The System V AMD64 convention passes **trivially-copyable** aggregates directly
-in registers, but passes **non-trivially-copyable** ones *by invisible
-reference* — the caller materializes the object on the stack and hands the callee
-a pointer. Whether a class is trivially copyable is decided by whether it has
-*user-provided* copy/move/destructor special members. **A single line flips the
-register/memory decision.**
+The System V AMD64 convention passes an aggregate that is **trivial for the
+purposes of calls** directly in registers, but passes a **non-trivial** one *by
+invisible reference* — the caller materializes the object on the stack and hands
+the callee a pointer. The governing property is the Itanium ABI's
+[*non-trivial for the purposes of calls*](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#non-trivial-parameters)
+rule (a user-provided copy/move constructor or destructor, or a member/base that
+has one) — related to, but not identical with,
+`std::is_trivially_copyable`. **A single line flips the register/memory
+decision.**
 
 ```cpp
 /* v1 */ struct Point { double x, y; };                 // trivially copyable
@@ -280,9 +304,18 @@ garbage, with no toolchain diagnostic
 ([case69](../../reference/examples/case69_trivial_to_nontrivial.md)).
 
 !!! note "How abicheck sees it"
-    No header-diff tool that looks only at declarations catches this. abicheck
-    reports `value_abi_trait_changed` by inspecting the DWARF
-    trivially-copyable flag.
+    No header-diff tool that looks only at declarations catches this. Two
+    *different* findings cover it, from two different evidence sources — the
+    exact per-kind mapping is owned by
+    [Class Layout ABI & API](../class-layout-abi.md#the-class-layout-change-catalog-mapped-to-abicheck):
+
+    - `value_abi_trait_changed` (L1, DWARF). DWARF has no
+      "trivially copyable" attribute; abicheck *infers* non-triviality-for-calls
+      from the DIE structure (a user-provided destructor or copy/move
+      constructor, a base class, or a member whose own type is non-trivial).
+    - `trivially_copyable_lost` (L2, header AST). Read from the compiler's own
+      trait, which only the direct-clang AST path supplies — not castxml, and
+      not DWARF.
 
     **Design rule:** pin the trivially-copyable status of any by-value type
     from version 1. If cleanup might ever be needed, commit *from day one* to
