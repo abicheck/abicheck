@@ -167,6 +167,26 @@ class TestSourceTierBroken:
         }
         assert runner.source_tier_broken(payload) is None
 
+    def test_none_on_single_library_run_that_fails_ordinarily(self) -> None:
+        # Regression guard (Codex review): a `workflow_dispatch --only zlib`
+        # debugging run where that one library's own build/network hiccup
+        # fails is indistinguishable, with only one entry, from the tool
+        # itself being systemically broken -- there's no second entry to
+        # compare against. `total == 1` must not be treated as "every entry
+        # failed identically" the way `total > 1` legitimately is.
+        payload = {"source_results": [self._row("zlib", error="git clone timed out")]}
+        assert runner.source_tier_broken(payload) is None
+
+    def test_flags_single_library_success_with_zero_evidence(self) -> None:
+        # Unlike the "ordinary failure" case above, a single library that
+        # reports SUCCESS (no `error`) but captured zero L3 evidence is an
+        # internal inconsistency in that one row already -- no second entry
+        # needed to know something's wrong, so this stays gated at total == 1.
+        payload = {"source_results": [self._row("zlib", l3=0)]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "1/1" in reason
+
     def test_flags_zero_scanned_as_systemic_failure(self) -> None:
         # The exact shape of the `--depth full` incident: every entry fails
         # identically (the same CLI usage error), not a per-library issue.

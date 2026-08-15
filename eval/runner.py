@@ -410,10 +410,25 @@ def source_tier_broken(payload: dict) -> str | None:
     produces on its own. `--depth full` doing exactly this (a hard
     `click.BadParameter` on every single entry, indistinguishable from a
     healthy 0-of-0 empty manifest run without this check) is the incident
-    this function exists to catch. The second condition — every scan reports
-    success but *none* captured real L3 evidence — catches the quieter
-    failure mode where the tool runs without erroring but the build/compile-DB
-    step silently produced nothing to analyze.
+    this function exists to catch.
+
+    That "every entry failed the same way" inference needs at least two
+    independent entries to draw — with a single-library run (`total == 1`,
+    e.g. a `workflow_dispatch --only zlib` debugging a specific library),
+    `scanned == 0` is indistinguishable from an ordinary one-off build/network
+    hiccup, and treating it as systemic would silently break this function's
+    own documented promise to tolerate exactly that (Codex review, fresh
+    evidence). So `scanned == 0` is only a hard failure once there's a second
+    entry to compare against; a lone failing entry still shows up as an
+    ERR row in REPORT.md, it just doesn't fail this specific gate.
+
+    The second condition — every scan reports success but *none* captured
+    real L3 evidence — has no such ambiguity even at `total == 1`: a
+    successful configure/build step that still produced zero L3 compile
+    units is an internal inconsistency in that one row already, not a
+    cross-entry comparison, so it catches the quieter failure mode (the tool
+    runs without erroring but the build/compile-DB step silently produced
+    nothing to analyze) regardless of how many libraries were scanned.
 
     Pure (no I/O): mirrors `drift_rows()`'s own "one shared definition of
     failure" design for the binary tier.
@@ -421,7 +436,7 @@ def source_tier_broken(payload: dict) -> str | None:
     summary = source_scan_summary(payload)
     if summary["total"] == 0:
         return None  # no source-carrying manifest entries were requested/exist
-    if summary["scanned"] == 0:
+    if summary["total"] > 1 and summary["scanned"] == 0:
         return (
             f"0/{summary['total']} source-tier scans succeeded — the whole "
             "source tier is broken. A single library's own build/network "
@@ -429,7 +444,7 @@ def source_tier_broken(payload: dict) -> str | None:
             "failing identically points at a tool-level bug (e.g. an invalid "
             "abicheck CLI flag) rather than per-library flakiness."
         )
-    if summary["with_evidence"] == 0:
+    if summary["scanned"] > 0 and summary["with_evidence"] == 0:
         return (
             f"{summary['scanned']}/{summary['total']} source-tier scans "
             "reported success but NONE captured any L3 build evidence "
