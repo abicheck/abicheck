@@ -411,9 +411,9 @@ def record_resolved_config(
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    A no-op unless ``--contract-evaluation`` produced a context (and unless
+    A no-op unless ``--contract`` produced a context (and unless
     the caller resolved a *config* at all -- a run with neither
-    ``--contract-evaluation`` nor ``--pack`` resolves nothing, since nothing
+    ``--contract`` nor ``--pack`` resolves nothing, since nothing
     would read the result). Runs before any report is rendered, so every
     output path sees one configuration resolved by the canonical resolver
     rather than the core verb's argument-shaped reconstruction, and sees the

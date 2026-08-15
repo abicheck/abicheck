@@ -306,7 +306,7 @@ class _ScopedFold:
         # published `gate_contribution: 4` on a run that exited 0 (Codex
         # review, reproduced with a removal outside the required-symbol
         # contract). Only entries that already carry the field are
-        # touched, so a run without --contract-evaluation is unaffected.
+        # touched, so a run without --contract is unaffected.
         # Called here, *before* the scoped-only/missing-contract fold-in
         # below: those are the scoped gate's own findings and only the
         # ones tracked in `scoped_relevant_finding_ids` would survive it.

@@ -353,7 +353,7 @@ def build_contract_stage(
     # observable -- the exact "re-evaluate under a different contract without
     # re-reading the binaries" guarantee Phase 4 advertises (Codex review,
     # fresh evidence). The cost is one export-table match per side, paid only
-    # under `--contract-evaluation`, which is off by default.
+    # under `--contract`, which is off by default.
     exports_old = compute_export_surface(old)
     exports_new = compute_export_surface(new)
 

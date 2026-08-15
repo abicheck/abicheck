@@ -195,7 +195,7 @@ class TestReleaseContractCoverageFold:
         "worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"]
     )
     def test_zero_contribution_is_a_true_no_op(self, worst: str) -> None:
-        # The default (no --contract-evaluation) must reproduce every
+        # The default (no --contract) must reproduce every
         # pre-existing exit code exactly -- this is what
         # test_compare_release_flow_matches_canonical already asserts
         # without the new keyword; this locks the explicit-zero case too.

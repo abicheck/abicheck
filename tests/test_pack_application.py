@@ -923,7 +923,7 @@ class TestOnlyAppliedFieldsAreAccepted:
     ) -> None:
         """The directory/package fan-out dispatches before the effective
         configuration is resolved, so a pack there would be accepted and score
-        nothing -- the same reason `--contract-evaluation` is rejected."""
+        nothing -- the same reason `--contract` is rejected."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -1017,7 +1017,6 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            "--contract-evaluation",
             # See the parity test below: `all` keeps ADR-049 Phase 7's
             # contract-coverage axis quiet so this stays a test about packs.
             "--contract",
@@ -1053,7 +1052,6 @@ class TestReceiptAgreesWithWhatScored:
         compare_out = tmp_path / "compare.json"
         scan_out = tmp_path / "scan.json"
         common = [
-            "--contract-evaluation",
             # Pin the rollback domain so this stays a test about `packs`.
             # ADR-049 Phase 7 made the contract-coverage axis real, and this
             # fixture's symbols carry no header provenance, so `public` would
@@ -1110,7 +1108,8 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "--format",
             "json",
             "--pack",

@@ -1055,7 +1055,7 @@ def _announce_exit_scheme(
     else:
         click.echo(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
-            "with --contract-evaluation, 1=incomplete contract coverage; with "
+            "with --contract, 1=incomplete contract coverage; with "
             "--require-complete-analysis, 1=incomplete analysis assurance -- both "
             "orthogonal axes that never lower a 2/4). "
             "Pass --exit-code-scheme severity (or a --severity-* setting) for the "
@@ -1690,16 +1690,14 @@ def _embed_inline_source_side(
               default="full", show_default=True,
               help="Report mode: 'full' lists all changes individually (default), "
                    "'leaf' groups by root type changes with impact lists, "
-                   "'impact' behaves as 'full' with the impact summary table enabled "
-                   "(equivalent to --report-mode full --show-impact), "
+                   "'impact' behaves as 'full' plus an impact summary table "
+                   "listing root changes and the interfaces they affect, "
                    "'root-cause' groups findings sharing a root cause "
                    "(Change.caused_by_type) under one entry for "
                    "--format json/markdown (the default rendered text output); "
                    "--format sarif keeps its normal one-result-per-finding "
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
-@click.option("--show-impact", is_flag=True, default=False,
-              help="Append an impact summary table showing root changes and affected interfaces.")
 @click.option("--recommend", is_flag=True, default=False,
               help="Append a release recommendation (semver bump + SONAME action) to the "
                    "report. Always present in --format json under 'release_recommendation'.")
@@ -1738,14 +1736,14 @@ def _embed_inline_source_side(
                    "reader knows not to trust it the way an ordinary comparable "
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
-@contract_options  # ADR-049: --contract-evaluation/--contract/--audit-suppressions
+@contract_options  # ADR-049: --contract/--audit-suppressions
 @pack_option  # ADR-049 D8: --pack
 @click.option("--require-complete-analysis", "require_complete_analysis",
               is_flag=True, default=False,
               help="P0.4: fail the build when analysis_assurance.status is not "
                    "'complete', independent of the compatibility verdict. "
                    "Contributes exit 1, folded with max the same way "
-                   "--contract-evaluation's coverage axis is (ADR-049 Phase 7): "
+                   "--contract's coverage axis is (ADR-049 Phase 7): "
                    "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
                    "compares only, not the directory/package release fan-out. "
                    "See docs/reference/exit-codes.md.")
@@ -1774,11 +1772,11 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       2  Error-level findings in potential_breaking (but not abi_breaking)
       4  Error-level findings in abi_breaking
     \b
-    Orthogonal to both tables (ADR-049 Phase 7): with --contract-evaluation,
+    Orthogonal to both tables (ADR-049 Phase 7): with --contract,
     incomplete contract coverage of the selected --contract domain
     contributes exit 1. It is folded with max, so it raises a clean 0 to 1
     and never lowers a 2/4 — under the legacy scheme, 1 can only mean this.
-    Without --contract-evaluation there is no domain to be short of evidence
+    Without --contract there is no domain to be short of evidence
     for and the tables above are exhaustive. Set contract.unresolved=warn
     (via a `kind: contract` --pack) to accept incomplete coverage.
     \b

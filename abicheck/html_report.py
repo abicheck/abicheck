@@ -886,7 +886,7 @@ def generate_html_report(
     # metric reads 100%, with the relevance and reason appearing nowhere
     # (Codex review, reproduced). It gets its own section below instead --
     # conserved and explained, not filed under a verdict policy never
-    # reached. Empty for every run without `--contract-evaluation`.
+    # reached. Empty for every run without `--contract`.
     from .contract_gating import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
@@ -1157,7 +1157,7 @@ def _build_sections_html(
     section: those findings were never scored by compatibility policy, so
     filing them under Removed/Changed/Added would contradict the verdict
     banner at the top of the same page. Defaults to nothing, so a run without
-    `--contract-evaluation` produces the identical document it always did.
+    `--contract` produces the identical document it always did.
     """
     sections: list[str] = []
     for title, anchor, css_class, items in (

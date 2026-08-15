@@ -82,7 +82,7 @@ class TestFlagForwarded:
     def test_contract_evaluation_flag_forwarded_to_compare_snapshots(
         self, tmp_path, monkeypatch
     ):
-        """--contract-evaluation must reach compare_snapshots as a real
+        """--contract must reach compare_snapshots as a real
         keyword, not be silently dropped at the Click/run_compare boundary
         (the same class of regression test_cli_comparability_gate.py already
         guards for --diagnostic-comparison)."""
@@ -105,7 +105,7 @@ class TestFlagForwarded:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--contract-evaluation"],
+            ["compare", str(old_p), str(new_p), "--contract", "public"],
         )
         assert result.exit_code == 0
         assert captured["contract_evaluation"] is True
@@ -142,7 +142,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -180,7 +181,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -310,7 +312,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -337,7 +340,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
                 "--severity-abi-breaking",
@@ -369,7 +373,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
                 "--exit-code-scheme",
@@ -397,7 +402,6 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
                 "--contract",
                 "exports",
                 "--format",
@@ -425,7 +429,10 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                # --contract auto asks for a decision without naming a domain,
+                # so the legacy alias below is what actually selects one.
+                "--contract",
+                "auto",
                 "--scope-public-headers",
                 "--format",
                 "json",
@@ -437,7 +444,10 @@ class TestEndToEndJsonReport:
     def test_help_all_mentions_flag(self):
         result = CliRunner().invoke(main, ["compare", "--help-all"])
         assert result.exit_code == 0
-        assert "--contract-evaluation" in result.output
+        assert "--contract" in result.output
+        # The standalone --contract flag is gone: naming a domain
+        # is the request, so there is no second way to ask for the same thing.
+        assert "--contract-evaluation" not in result.output
 
 
 class TestShowFilteredAuditLedger:
@@ -481,7 +491,8 @@ class TestShowFilteredAuditLedger:
                 str(new_p),
                 "--scope-public-headers",
                 "--show-filtered",
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -534,7 +545,7 @@ class TestShowFilteredAuditLedger:
 
 class TestReleaseFanOutContractParity:
     """CLI-audit P1 (release/package contract parity): the per-library
-    directory/package fan-out now threads --contract-evaluation/--contract
+    directory/package fan-out now threads --contract/--contract
     straight into each pair's own service.run_compare() call, the exact
     same Tier-2 chokepoint a single-pair `compare` uses -- so a library
     compared through the fan-out gets the identical contract decision it
@@ -558,7 +569,8 @@ class TestReleaseFanOutContractParity:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
                 "--output-dir",
@@ -578,7 +590,7 @@ class TestReleaseFanOutContractParity:
         assert stamped, "per-library report must carry ADR-049 contract fields"
 
     def test_contract_evaluation_off_by_default(self, tmp_path):
-        # No --contract-evaluation: every pre-existing directory/package
+        # No --contract: every pre-existing directory/package
         # report is unaffected -- library JSON carries no contract fields.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
@@ -610,7 +622,7 @@ class TestReleaseFanOutContractParity:
     def test_contract_alone_implies_contract_evaluation_on_directory_inputs(
         self, tmp_path
     ):
-        # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+        # CLI audit PR 3/5: --contract alone now implies --contract
         # (abicheck.cli_options.resolve_contract_evaluation), resolved
         # unconditionally in run_compare ahead of the directory/package
         # dispatch -- so this now behaves identically to explicitly passing
@@ -644,7 +656,7 @@ class TestReleaseFanOutContractParity:
         lib_report = json.loads((out_dir / "libfoo.json").read_text())
         assert any("contract_relevance" in c for c in lib_report["changes"]), (
             "--contract public alone must stamp contract_relevance, same as "
-            "--contract-evaluation --contract public would"
+            "--contract --contract public would"
         )
 
     def test_pack_still_rejected_on_directory_inputs(self, tmp_path):
@@ -737,7 +749,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -828,7 +841,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -897,7 +911,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -948,7 +963,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -987,7 +1003,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         # root-cause builds its own missing-label lines independently of
         # cli_compare_fold._fold_scoped_compat_into_text (the latter is
         # explicitly skipped for root-cause markdown), so the same
-        # --contract-evaluation tag was silently dropped for this one
+        # --contract tag was silently dropped for this one
         # report mode even after the fold-in path was fixed.
         from abicheck.appcompat import AppCompatResult
 
@@ -1011,7 +1027,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--report-mode",
                 "root-cause",
             ],

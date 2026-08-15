@@ -109,7 +109,6 @@ class TestTheCoverageExitIsApplied:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--contract-evaluation",
             "--contract",
             "exports",
         )
@@ -122,14 +121,14 @@ class TestTheCoverageExitIsApplied:
         root or closure evidence and therefore cannot be short of any. A
         rollback that could itself fail on coverage would not be one."""
         result = _compare(
-            tmp_path, _compatible_pair(), "--contract-evaluation", "--contract", "all"
+            tmp_path, _compatible_pair(), "--contract", "all"
         )
         assert result.exit_code == 0, result.output
 
     def test_a_run_that_never_asked_the_question_is_untouched(
         self, tmp_path: Path
     ) -> None:
-        """No `--contract-evaluation` means no selected domain to be short of
+        """No `--contract` means no selected domain to be short of
         evidence for. Inventing a floor there would fail invocations that
         never opted in -- which is every pre-existing one."""
         result = _compare(tmp_path, _compatible_pair())
@@ -171,7 +170,6 @@ class TestTheCoverageExitIsApplied:
             _breaking_pair(),
             "--format",
             "json",
-            "--contract-evaluation",
             "--contract",
             "exports",
         )
@@ -201,7 +199,6 @@ class TestTheCoverageExitIsApplied:
                 str(new_p),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "--contract",
                 "exports",
                 "-o",
@@ -227,7 +224,6 @@ class TestTheGatingConditionIsVisible:
             _compatible_pair(),
             "--format",
             fmt,
-            "--contract-evaluation",
             "--contract",
             "exports",
         )
@@ -258,7 +254,6 @@ class TestTheGatingConditionIsVisible:
                 str(new_p),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "--contract",
                 "exports",
             ],
@@ -281,7 +276,6 @@ class TestTheGatingConditionIsVisible:
             "--stat",
             "--format",
             "json",
-            "--contract-evaluation",
             "--contract",
             "exports",
         )
@@ -332,7 +326,6 @@ class TestTheGatingConditionIsVisible:
                 str(new_p),
                 "--against",
                 str(old_p),
-                "--contract-evaluation",
                 "--contract",
                 "exports",
             ],
@@ -369,7 +362,6 @@ class TestTheGatingConditionIsVisible:
                 "markdown",
                 "--secondary-output",
                 str(tmp_path / "r.md"),
-                "--contract-evaluation",
                 "--contract",
                 "exports",
             ],
@@ -381,7 +373,7 @@ class TestTheGatingConditionIsVisible:
         """No notice when there is nothing to explain -- otherwise the message
         becomes noise every run prints and no one reads."""
         result = _compare(
-            tmp_path, _compatible_pair(), "--contract-evaluation", "--contract", "all"
+            tmp_path, _compatible_pair(), "--contract", "all"
         )
         assert result.exit_code == 0, result.output
         assert "Contract coverage incomplete" not in result.output
@@ -405,7 +397,6 @@ class TestArtifactsAgreeWithTheProcessExit:
             "sarif",
             "-o",
             str(out),
-            "--contract-evaluation",
             "--contract",
             "exports",
         )
@@ -457,7 +448,6 @@ class TestArtifactsAgreeWithTheProcessExit:
             "sarif",
             "-o",
             str(out),
-            "--contract-evaluation",
             "--contract",
             mode,
         )
@@ -481,7 +471,7 @@ class TestTheExitCodeContractIsDocumented:
         assert "contract coverage" in help_text.lower(), help_text
         # ...and says it is orthogonal, since the whole point is that it does
         # not displace the compatibility verdict it sits beside.
-        assert "--contract-evaluation" in help_text, help_text
+        assert "--contract" in help_text, help_text
 
     def test_the_dry_run_scheme_banner_says_it_too(self, tmp_path: Path) -> None:
         """`compare --dry-run`'s banner states the legacy scheme's codes. It
@@ -548,7 +538,7 @@ class TestCompareAndScanFoldTheAxisIdentically:
         self, tmp_path: Path, pair, mode: str, expected: int
     ) -> None:
         old_p, new_p = _write(tmp_path, *pair)
-        common = ["--contract-evaluation", "--contract", mode]
+        common = ["--contract", mode]
         runner = CliRunner()
         compare = runner.invoke(main, ["compare", str(old_p), str(new_p), *common])
         scan = runner.invoke(
@@ -577,7 +567,6 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--contract-evaluation",
             "--contract",
             "exports",
             "--pack",
@@ -603,7 +592,6 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
                 str(new_p),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "--contract",
                 "exports",
                 "--pack",
@@ -639,7 +627,7 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         result = CliRunner().invoke(main, argv)
         assert result.exit_code == 64, result.output
         assert "contract.unresolved" in result.output
-        assert "--contract-evaluation" in result.output
+        assert "--contract" in result.output
 
     def test_the_dry_run_rejects_it_too(self, tmp_path: Path) -> None:
         """`--dry-run` must not approve a plan the identical real run rejects.
@@ -675,7 +663,6 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
             _compatible_pair(),
             "--format",
             "review",
-            "--contract-evaluation",
             "--contract",
             "exports",
             "--pack",
@@ -701,12 +688,11 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         coverage 1 falls away.
         """
         without = _compare(
-            tmp_path, _breaking_pair(), "--contract-evaluation", "--contract", mode
+            tmp_path, _breaking_pair(), "--contract", mode
         )
         with_warn = _compare(
             tmp_path,
             _breaking_pair(),
-            "--contract-evaluation",
             "--contract",
             mode,
             "--pack",

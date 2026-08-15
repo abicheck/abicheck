@@ -102,7 +102,7 @@ yourself, and do not read their absence as an old schema version.
 
 ## 4. Contract coverage — the orthogonal axis
 
-Present under `--contract-evaluation`:
+Present under `--contract`:
 
 ```
 contract_coverage_failures              unsuppressible coverage failures
@@ -133,7 +133,7 @@ Per finding, the fields that carry the reasoning:
 | `old_value`, `new_value` | the concrete delta |
 | `evidence_status` | what evidence backed this specific finding |
 | `caused_by_type`, `caused_count` | root-cause grouping key |
-| `contract_relevance`, `contract_reason_code`, `contract_assurance` | contract-relevance decision (under `--contract-evaluation`) |
+| `contract_relevance`, `contract_reason_code`, `contract_assurance` | contract-relevance decision (under `--contract`) |
 | `compatibility_decision` | `null` means policy did not score it — not a sixth verdict |
 | `gate_contribution` | what it contributed to the gate |
 | `recommended_action`, `reviewer_action` | suggested next step |
@@ -158,7 +158,7 @@ invoked:
 |---|---|
 | `severity` | severity-aware grading was resolved from *any* source — a `--severity-*` flag, a `.abicheck.yml` `severity:` map or `exit_code_scheme: severity`, a run profile, or a gate pack |
 | `scope` | `--scope-public-headers` was requested |
-| `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract-evaluation` was passed |
+| `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract` was passed |
 | `root_causes`, `root_cause_count` | `--report-mode root-cause` |
 | `reason` | the comparison was refused (`verdict: null`) |
 | `coverage_warnings` | the run actually had coverage gaps — a clean run omits the key entirely, which is good news, not a malformed report |

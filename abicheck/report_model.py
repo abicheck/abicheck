@@ -146,7 +146,7 @@ class ReportModel:
         all four buckets (ADR-049 D1) and returned by
         :meth:`classify_not_evaluated` instead — the partition is over the
         compatibility axis, and those findings are not on it. Without
-        ``--contract-evaluation`` nothing is excluded.
+        ``--contract`` nothing is excluded.
         """
         from .contract_gating import is_evaluated
 

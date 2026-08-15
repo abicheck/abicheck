@@ -548,7 +548,7 @@ class TestDimensionTwo:
     def test_claiming_coverage_gaps_without_contract_evaluation_is_refuted(
         self, tmp_path
     ):
-        """Without --contract-evaluation the coverage axis is identically 0."""
+        """Without --contract the coverage axis is identically 0."""
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])
         parsed, _ = claim_mod.extract(
             envelope(
@@ -567,7 +567,7 @@ class TestDimensionTwo:
         )
 
     def test_coverage_gaps_stand_when_contract_evaluation_was_asked_for(self, tmp_path):
-        call = a_breaking_call(argv=["compare", "a", "b", "--contract-evaluation"])
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract", "public"])
         run = build_run(tmp_path, final="", calls=[call])
         parsed, _ = claim_mod.extract(
             envelope(

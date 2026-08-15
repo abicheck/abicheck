@@ -95,6 +95,7 @@ from .cli_options import (
     pack_option,
     policy_options,
     resolve_compile_context,
+    resolve_contract_domain,
     resolve_contract_evaluation,
     scope_options,
     secondary_output_options,
@@ -416,7 +417,7 @@ def _dry_run_exit_code_lines(
         lines.append(
             "a real scan run's exit codes are 0 no error-level findings, "
             "1 error-level addition/quality findings (or incomplete contract "
-            "coverage under --contract-evaluation), 2 error-level "
+            "coverage under --contract), 2 error-level "
             "potential_breaking, 4 error-level abi_breaking, "
             f"{tail} -- a category set to warning/info never gates, so a "
             "breaking comparison can exit 0"
@@ -424,7 +425,7 @@ def _dry_run_exit_code_lines(
         return lines
     lines.append(
         "a real scan run's exit codes are 0 compatible, "
-        "1 incomplete contract coverage (--contract-evaluation only), "
+        "1 incomplete contract coverage (--contract only), "
         f"2 API break, 4 ABI break, {tail}"
     )
     return lines
@@ -753,7 +754,6 @@ _COMPARISON_ONLY_FLAGS = {
     "public_symbols_list": "--public-symbols-list",
     "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
     "env_matrix_path": "--env-matrix",
-    "contract_evaluation": "--contract-evaluation",
     "contract_mode": "--contract",
     # ADR-049 D8: a pack's only application here is the baseline comparison's
     # policy file, so without one it would configure nothing.
@@ -965,7 +965,7 @@ def _resolve_scan_evaluation_config(
 
     Returns ``(resolved_config, policy_file)`` -- ``(None, policy_file)`` when
     there is nothing to resolve, i.e. no ``--against`` to compare against or
-    neither ``--contract-evaluation`` nor ``--pack`` given.
+    neither ``--contract`` nor ``--pack`` given.
 
     ADR-049 Phase 5's "same typed config", for the third and last front end.
     ``checker.compare`` can only claim ``API_REQUEST`` for arguments it was
@@ -1328,34 +1328,16 @@ def _discover_scan_project_config(
 )
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract), --against only
 @click.option(
-    "--contract-evaluation",
-    "contract_evaluation",
-    is_flag=True,
-    default=False,
-    help="With --against: stamp each comparison finding with its ADR-049 "
-    "contract decision (contract_relevance / contract_reason_code / "
-    "contract_assurance / contract_evidence_refs), exactly as `compare "
-    "--contract-evaluation` does. The decisions are authoritative (ADR-049 "
-    "Phase 7): relevance is classified before compatibility policy, which "
-    "then scores only IN_CONTRACT/NOT_APPLICABLE findings -- so this changes "
-    "the verdict and the exit code, while the excluded findings stay in the "
-    "report with the reason they did not gate. Separately, if the selected "
-    "domain's evidence is incomplete the orthogonal contract-coverage ledger "
-    "contributes exit 1 (folded with max, so it never lowers a 2/4). Set "
-    "contract.unresolved=warn via a `kind: contract` --pack to accept "
-    "incomplete coverage; the failures stay reported either way.",
-)
-@click.option(
     "--contract",
     "contract_mode",
-    type=click.Choice(["public", "exports", "all"]),
+    type=click.Choice(["public", "exports", "all", "auto"]),
     default=None,
-    help="With --against: which evidence domain --contract-evaluation judges "
+    help="With --against: which evidence domain each finding is judged "
     "against ('public' header-derived surface, 'exports' the binary's own "
-    "export table plus its type closure, 'all' every entity). Omitted, the "
-    "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Implies --contract-evaluation if it isn't already given (CLI audit "
-    "PR 3/5). The domain decides which findings "
+    "export table plus its type closure, 'all' every entity, 'auto' let the "
+    "D7 chain below an explicit CLI value decide) -- and the flag "
+    "that turns the ADR-049 contract evaluator on; omit it and nothing about "
+    "the run changes. The domain decides which findings "
     "compatibility policy scores, so it can change the verdict and the exit "
     "code, and it is also what the orthogonal contract-coverage axis is "
     "answered against (mirrors `compare --contract`).",
@@ -1441,7 +1423,6 @@ def scan_cmd(
     public_symbols_list: Path | None,
     pattern_verdicts: bool,
     env_matrix_path: Path | None,
-    contract_evaluation: bool,
     contract_mode: str | None,
     pack_paths: tuple[Path, ...],
     lang: str,
@@ -1477,11 +1458,11 @@ def scan_cmd(
     \b
     Exit codes (legacy scheme — the default):
       0  compatible (or advisory-only findings)
-      1  incomplete contract coverage (ADR-049 Phase 7): with
-         --contract-evaluation, the selected --contract domain's required
-         evidence could not be closed. Orthogonal — folded with max, so it
-         raises a clean 0 and never lowers a 2/4, and it never changes the
-         compatibility verdict. Only reachable with --contract-evaluation
+      1  incomplete contract coverage (ADR-049 Phase 7): the selected
+         --contract domain's required evidence could not be closed.
+         Orthogonal — folded with max, so it raises a clean 0 and never
+         lowers a 2/4, and it never changes the compatibility verdict.
+         Only reachable with --contract
       2  source-level / API break (incl. API_BREAK cross-source findings)
       4  ABI break (from the --against comparison)
       5  --budget overflow
@@ -1765,14 +1746,14 @@ def scan_cmd(
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
 
-    # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+    # --contract is the only way to ask for the ADR-049 evaluator on the CLI
     # (abicheck.cli_options.resolve_contract_evaluation), mirroring
     # `compare`'s own resolution in `cli_compare_helpers.run_compare` --
     # resolved here, before contract_evaluation is used for anything else
-    # in this function, same as the Tier-2 entry's (`service.
-    # _validate_contract_mode`) explicit-only contract stays untouched for
-    # direct Python API callers.
-    contract_evaluation = resolve_contract_evaluation(contract_mode, contract_evaluation)
+    # in this function. The Tier-2 entry's (`service._validate_contract_mode`)
+    # explicit-only contract stays untouched for direct Python API callers.
+    contract_evaluation = resolve_contract_evaluation(contract_mode)
+    contract_mode = resolve_contract_domain(contract_mode)
 
     from .errors import AbicheckError
     from .service import load_env_matrix

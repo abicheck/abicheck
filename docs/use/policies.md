@@ -15,7 +15,7 @@ generated: false
 `abicheck compare` supports policy-based verdict classification.
 
 > Policy classification is one stage of the CI gating pipeline — it runs
-> after contract relevance (under `--contract-evaluation`) has decided which
+> after contract relevance (under `--contract`) has decided which
 > findings are even in scope, and before suppression and severity/exit-code
 > scoring. See [CI Gating](ci-gating.md) for the full order and how policy
 > combines with contract relevance, suppressions, severity, and baselines.
@@ -324,7 +324,7 @@ field are a usage error rather than a silent last-one-wins.
 
 `kind: contract` and `kind: gate` packs carry the other two namespaces
 (internal namespaces and `contract.unresolved`; and the exit-code scheme /
-severity levels). `contract.unresolved` needs `--contract-evaluation` to have
+severity levels). `contract.unresolved` needs `--contract` to have
 any effect — it configures the contract-coverage exit, which is only computed
 when a domain is selected to measure coverage of — so assigning it without
 that flag is a usage error rather than a silently inert setting.

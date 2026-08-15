@@ -1385,7 +1385,7 @@ class TestManglingComparability:
 
 
 #: Same finding as `_SIZE_CHANGED`, but as a profile that ran
-#: `--contract-evaluation` would stamp it -- IN_CONTRACT and gating.
+#: `--contract` would stamp it -- IN_CONTRACT and gating.
 _SIZE_CHANGED_IN_CONTRACT = {
     **_SIZE_CHANGED,
     "contract_relevance": "IN_CONTRACT",
@@ -1393,7 +1393,7 @@ _SIZE_CHANGED_IN_CONTRACT = {
     "compatibility_decision": "BREAKING",
     "gate_contribution": 1,
 }
-#: The same logical finding, as a profile that ran `--contract-evaluation`
+#: The same logical finding, as a profile that ran `--contract`
 #: under a domain that could not resolve it would stamp it -- unresolved and
 #: not gating.
 _SIZE_CHANGED_UNRESOLVED = {

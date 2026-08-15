@@ -73,7 +73,12 @@ def _write_pair(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _context(tmp_path: Path, *args: str) -> dict:
-    """Run ``compare --contract-evaluation`` and return its evaluation context."""
+    """Run ``compare --contract auto`` and return its evaluation context.
+
+    ``auto`` evaluates while leaving the domain to the D7 chain below an
+    explicit CLI value -- which is the point for a receipt test asking which
+    layer chose a field.
+    """
     old_p, new_p = _write_pair(tmp_path)
     result = CliRunner().invoke(
         main,
@@ -81,7 +86,8 @@ def _context(tmp_path: Path, *args: str) -> dict:
             "compare",
             str(old_p),
             str(new_p),
-            "--contract-evaluation",
+            "--contract",
+            "auto",
             "--format",
             "json",
             *args,
@@ -677,7 +683,8 @@ class TestWiringContract:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -701,7 +708,7 @@ class TestWiringContract:
             resolve_cli_config(params, typed=(), project_cfg=None, project_path=None)
 
     def test_recording_is_a_noop_without_a_context(self):
-        """Every run that did not ask for ``--contract-evaluation`` has no
+        """Every run that did not ask for ``--contract`` has no
         context to record onto, and must not pay for a resolution either."""
         from abicheck.cli_compare_receipt import record_resolved_config
 

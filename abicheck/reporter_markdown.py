@@ -536,7 +536,7 @@ def _format_leaf_type_change(c: Change) -> list[str]:
     # routes root TYPE_* changes through this function, never through
     # _format_change_md -- unlike the full/root-cause views, a leaf-mode
     # type finding's own contract decision (already stamped when
-    # --contract-evaluation was requested) was silently dropped. Mirrors
+    # --contract was requested) was silently dropped. Mirrors
     # _format_change_md's own "no-op unless already stamped" idiom.
     if c.contract_relevance is not None:
         text = _contract_decision_text(
@@ -1002,7 +1002,7 @@ def _to_markdown_root_cause(
                 # already-stamped decision off of (unlike scoped_only,
                 # rendered via _format_change_md above), so unlike every
                 # other contract-rendering site in this fix, this one
-                # genuinely needs the caller's own --contract-evaluation
+                # genuinely needs the caller's own --contract
                 # intent threaded through explicitly.
                 if contract_evaluation:
                     from .contract_scoped_promotion import (
@@ -1361,7 +1361,7 @@ def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
     relevance and reason code that explain *why* they did not gate.
 
     Empty (and so entirely absent) unless the run opted into
-    ``--contract-evaluation``.
+    ``--contract``.
     """
     if not not_evaluated:
         return []
@@ -1969,11 +1969,11 @@ def _format_change_md(c: object) -> str:
         suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
 
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract-evaluation's
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract's
     # own help text promises every finding is stamped with a contract
     # decision, but only the JSON report (reporter.py's
     # _add_contract_evaluation_fields) ever rendered it -- an ordinary
-    # `compare --contract-evaluation` run (default markdown format) was
+    # `compare --contract` run (default markdown format) was
     # byte-for-byte identical to one without the flag. A no-op when *c* was
     # never stamped (contract_evaluation not requested), mirroring that
     # helper's own documented default.

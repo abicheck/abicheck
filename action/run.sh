@@ -1637,7 +1637,7 @@ PYQUERY
 
 # Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
 #
-# Since ADR-049 Phase 7, a run passing --contract-evaluation (via extra-args)
+# Since ADR-049 Phase 7, a run passing --contract (via extra-args)
 # whose selected contract domain cannot be closed on the available evidence
 # contributes exit 1 — independently of the compatibility verdict, which the
 # axis deliberately never rewrites. Without asking, `scan` published
@@ -1647,7 +1647,7 @@ PYQUERY
 # Two signals, mirroring where abicheck itself puts the answer: the JSON
 # report carries `contract_coverage_exit_contribution`, and for every other
 # renderer — which omits the ledger — the same fact is announced on stderr.
-# Absent both (no --contract-evaluation), the field reads 0 and the mapping
+# Absent both (no --contract), the field reads 0 and the mapping
 # below is exactly what it was.
 #
 # The JSON answer is AUTHORITATIVE when readable, and the stderr grep is

@@ -561,7 +561,7 @@ def _emitted_top_level_fields(tmp_path) -> set[str]:
     variants = (
         [],
         ["--severity-preset", "default"],
-        ["--contract-evaluation"],
+        ["--contract", "public"],
         ["--report-mode", "root-cause"],
         ["--scope-public-headers"],
     )

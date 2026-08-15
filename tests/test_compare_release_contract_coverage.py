@@ -64,7 +64,7 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
     # CLI-audit P1 (release/package contract parity): present, and matches
     # single-pair compare JSON's field name, whenever any library entry
     # carries the per-library contract_coverage_exit_contribution key --
-    # the marker that --contract-evaluation was active for this run.
+    # the marker that --contract was active for this run.
     libs = [
         {
             "library": "liba.so",

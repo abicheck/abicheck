@@ -266,20 +266,13 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "invocation needs varies per run (matching whatever a baseline was "
         "dumped with), not a stable project setting."
     ),
-    "--contract-evaluation": (
-        "ADR-049 Phase 3: opts one invocation into the shadow contract "
-        "evaluator's advisory per-finding relevance/reason/assurance fields. "
-        "Whether a given comparison run wants that extra detail varies per "
-        "invocation (e.g. an ad hoc audit vs. a routine CI gate), not a "
-        "stable project default -- like --pattern-verdicts/--surface-metrics."
-    ),
     "--contract": (
-        "ADR-049 Phase 6: picks which evidence domain --contract-evaluation "
-        "judges each finding against (public/exports/all). Meaningful only "
-        "alongside that flag, and varies with what a given run is asking -- "
-        "'what does my declared header surface promise' vs. 'what does this "
-        "binary actually export' -- so it follows --contract-evaluation's own "
-        "per-invocation nature rather than being a stable project default."
+        "ADR-049: opts one invocation into the contract evaluator and picks "
+        "which evidence domain it judges each finding against (public/"
+        "exports/all). What a given run is asking varies with it -- 'what "
+        "does my declared header surface promise' vs. 'what does this binary "
+        "actually export' -- so it is a per-invocation choice, not a stable "
+        "project default, like --pattern-verdicts/--surface-metrics."
     ),
     "--pack": (
         "ADR-049 D8: selects a reusable configuration pack (policy/contract/"
@@ -297,7 +290,7 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "run's findings. Whether a given run wants that extra hygiene check "
         "varies per invocation (e.g. a periodic suppression-file review vs. "
         "a routine CI gate), not a stable project default -- like "
-        "--contract-evaluation above."
+        "--contract above."
     ),
     "--require-complete-analysis": (
         "P0.4: opts one invocation into gating its exit code on "

@@ -891,35 +891,46 @@ def merge_compile_config(
     return merged, includes
 
 
-def resolve_contract_evaluation(
-    contract_mode: str | None, contract_evaluation: bool
-) -> bool:
-    """CLI audit PR 3/5: ``--contract VALUE`` alone enables the evaluator.
+def resolve_contract_evaluation(contract_mode: str | None) -> bool:
+    """``--contract VALUE`` is what enables the ADR-049 evaluator on the CLI.
 
-    Previously ``compare``/``scan`` hard-rejected ``--contract public`` given
-    without ``--contract-evaluation`` (a `UsageError`, exit 64) -- correct in
-    that the flag would otherwise silently do nothing, but an extra flag for
-    a choice that already only has one interpretation ("I named a domain, so
-    judge against it"). Since the Tier-1 core (`checker.compare`) already
-    documents *contract_mode* as inert-not-erroring when *contract_evaluation*
-    is unset, and the strict rejection was purely a CLI-level "did you
-    forget a flag" guard rather than a core invariant, this loosens that
-    guard into an implication instead: given a domain, evaluation turns on.
+    There used to be a separate ``--contract-evaluation`` switch, and
+    ``--contract`` without it was a hard `UsageError` (exit 64). That was
+    first loosened into an implication (naming a domain is enough to ask for
+    a decision against it), which left two ways to request one thing; the
+    standalone switch is now gone, so the flag *is* the request.
 
     Deliberately CLI-only. The typed Python API (`api_types.CompareRequest.
     validation_errors`) and the Tier-2 entry (`service._validate_contract_mode`)
-    keep rejecting a *contract_mode* given without an explicit
-    `contract_evaluation=True` -- both are documented public-API contracts
-    (CLAUDE.md: changing them is a breaking Python API change, coordinated
-    separately from a CLI ergonomics fix) and this resolver runs strictly
-    before either is ever constructed, so an implied `True` is indistinguishable
-    from an explicit one to them: no working invocation of either changes,
-    and no previously-erroring CLI invocation now behaves differently there.
-    Never lowers `contract_evaluation` -- an explicit `--contract-evaluation`
-    with no `--contract` is untouched (still legacy shadow-evaluator behavior,
-    domain-less).
+    keep requiring an explicit `contract_evaluation=True` alongside a
+    *contract_mode* -- both are documented public-API contracts (CLAUDE.md:
+    changing them is a breaking Python API change, coordinated separately from
+    a CLI ergonomics fix) and this resolver runs strictly before either is ever
+    constructed, so the value it derives is indistinguishable from an
+    explicitly-passed one to them.
+
+    The former domain-less evaluation (``--contract-evaluation`` with no
+    ``--contract``, whose domain fell through to the D7 chain below an
+    explicit CLI value) is spelled ``--contract auto``:
+    :func:`resolve_contract_domain` maps it back to ``None``, which is exactly
+    the state that lets `compatibility_evaluation_wiring.
+    resolve_legacy_contract_mode`'s ``--scope-public-headers`` reading, and
+    then `.abicheck.yml`, decide the domain.
     """
-    return contract_evaluation or contract_mode is not None
+    return contract_mode is not None
+
+
+def resolve_contract_domain(contract_mode: str | None) -> str | None:
+    """Map ``--contract auto`` back to "no explicit domain stated".
+
+    ``auto`` exists only to separate the two questions the one flag now
+    answers: *evaluate at all* (any value) and *which domain* (a named one).
+    Downstream, "the caller stated no domain" has always been spelled ``None``,
+    and every D7 tier below ``explicit_cli`` keys off that -- so ``auto`` must
+    not reach the resolver as a literal, or it would read as an explicit CLI
+    value outranking the very layers it exists to defer to.
+    """
+    return None if contract_mode == "auto" else contract_mode
 
 
 def resolve_compile_context(

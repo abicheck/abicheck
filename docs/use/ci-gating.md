@@ -27,7 +27,7 @@ knobs interact.
 flowchart LR
     B["Baseline<br/>(snapshot / library)"] --> D["Detect changes<br/>(compare)"]
     N["New build"] --> D
-    D --> CR["1 · Contract relevance<br/>(--contract-evaluation, opt-in)"]
+    D --> CR["1 · Contract relevance<br/>(--contract, opt-in)"]
     CR --> P["2 · Policy classifies<br/>EVALUATED findings"]
     P --> S["3 · Suppressions<br/>waive findings"]
     S --> V["4 · Verdict + severity<br/>categories"]
@@ -49,7 +49,7 @@ the stages below (the numbers match the diagram above), which is the
 normative order `contract_pipeline.py` fixes (ADR-049 D9) for the ordinary,
 unscoped path:
 
-1. **Classify contract relevance — opt-in, `--contract-evaluation`.** Only
+1. **Classify contract relevance — opt-in, `--contract`.** Only
    when this flag is set: each finding is classified against the selected
    [contract mode](../reference/compatibility-evaluation-config.md)
    (`public`/`exports`/`all`, or the legacy `--scope-public-headers` alias)
@@ -59,7 +59,7 @@ unscoped path:
    including `PROVEN_OUT_OF_CONTRACT` — are `NOT_EVALUATED`: their
    `compatibility_decision` is JSON `null` and they contribute `0` to the
    gate, but they stay listed in the report with the reason code that says
-   why. Without `--contract-evaluation`, every finding is `EVALUATED` and
+   why. Without `--contract`, every finding is `EVALUATED` and
    this stage is a no-op — every exit code is unchanged from before this
    feature existed.
 2. **Classify (policy).** The active [policy profile](policies.md)
@@ -85,11 +85,11 @@ unscoped path:
    run has been *told* what the contract is (a concrete consumer's imports,
    or an explicit entrypoint list — ADR-049 §4.3), and that outranks
    whatever the snapshot-derived relevance in step 1 concluded on its own.
-   For a finding already carrying a relevance (i.e. `--contract-evaluation`
+   For a finding already carrying a relevance (i.e. `--contract`
    was also set), a match against that explicit scope *promotes* it to
    `IN_CONTRACT` — never demotes — and the affected verdict/gate is then
    recomputed, monotonically: promotion can only raise it. Without
-   `--contract-evaluation`, findings carry no relevance to promote, so this
+   `--contract`, findings carry no relevance to promote, so this
    step has nothing to do.
 6. **Exit.** The exit code comes from one of the two schemes below, folded
    with the orthogonal contract-coverage contribution (next section) —
@@ -97,7 +97,7 @@ unscoped path:
    `--required-symbol` run.
 
 **Contract coverage runs alongside, not inside, this chain.** Under
-`--contract-evaluation`, if the selected domain's required evidence is
+`--contract`, if the selected domain's required evidence is
 incomplete (missing, partial, stale, or contradictory), `compare`/
 `scan --against` contribute an additional, independent exit `1` — folded
 with `max` against whatever the six stages above produced, so it can raise a
@@ -157,7 +157,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
   policy classification; a `NOT_EVALUATED` finding (out-of-contract or
   unresolved) never gets a `ChangeKind` verdict at all, so downgrading a kind
   in a custom policy has no effect on a finding contract relevance already
-  excluded. This stage is opt-in (`--contract-evaluation`) and off by
+  excluded. This stage is opt-in (`--contract`) and off by
   default — every other bullet below applies unconditionally.
 - **Policy → severity.** Severity categorizes changes *after* the policy has
   classified them. If `sdk_vendor` downgrades a kind from `potential_breaking`

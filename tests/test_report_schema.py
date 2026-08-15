@@ -305,7 +305,7 @@ class TestReportValidatesAgainstSchema:
         # evaluation's own help text promises every finding is stamped, but
         # only the JSON report (reporter._add_contract_evaluation_fields)
         # ever rendered the decision -- an ordinary `compare
-        # --contract-evaluation` run (default markdown format) was
+        # --contract` run (default markdown format) was
         # byte-for-byte identical to one without the flag.
         old, new = _breaking_pair()
         md_with = reporter.to_markdown(compare(old, new, contract_evaluation=True))

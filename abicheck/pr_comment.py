@@ -715,7 +715,7 @@ def _release_contract_coverage_findings(
     *which provider* fell short within them — a caller wanting that detail
     still needs ``--format json``'s per-library section.
 
-    Always ``([], False)`` when the run never passed ``--contract-evaluation``
+    Always ``([], False)`` when the run never passed ``--contract``
     — both keys are entirely absent then, mirroring the single-pair report's
     own "no key" (not "empty list") convention.
     """

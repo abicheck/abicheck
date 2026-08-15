@@ -195,7 +195,7 @@ def _needs_contract_evaluation_error(
 ) -> PackManifestError:
     """The rejection for a field this *invocation* enabled no consumer for."""
     return PackManifestError(
-        f"{source}: {field_name!r} needs --contract-evaluation to have any "
+        f"{source}: {field_name!r} needs --contract to have any "
         f"effect ({reason}). Add it, or drop the assignment -- a pack "
         "recorded as active configuration while changing nothing is the "
         "failure this check exists to prevent."
@@ -413,7 +413,7 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
 
 
 #: Pack fields whose engine consumer only runs under contract evaluation,
-#: mapped to why. Assigning one without ``--contract-evaluation`` resolves
+#: mapped to why. Assigning one without ``--contract`` resolves
 #: and records a value nothing will read -- the decorative-pack failure this
 #: module exists to prevent -- so it is rejected rather than accepted
 #: (Codex review). Distinct from :data:`UNAPPLIED_PACK_FIELDS`, which is
@@ -422,7 +422,7 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
 CONTRACT_EVALUATION_ONLY_FIELDS: Mapping[str, str] = {
     "contract.unresolved": (
         "it configures the contract-coverage exit, which is only computed "
-        "when --contract-evaluation selects a domain to measure coverage of"
+        "when --contract selects a domain to measure coverage of"
     ),
 }
 

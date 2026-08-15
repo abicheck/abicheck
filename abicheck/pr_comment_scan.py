@@ -579,7 +579,7 @@ def _scan_promoted_compatible_counts(
     """Exact ``(promoted_addition_count, promoted_quality_count)`` for a
     severity-config-promoted ``compatible`` category -- immune both to
     ``diff["findings"]``'s report cap (like the classified ``breaking`` list
-    built from it) and to ``--contract-evaluation``'s ``NOT_EVALUATED``
+    built from it) and to ``--contract``'s ``NOT_EVALUATED``
     findings (Codex review, two rounds):
 
     Round 1 read ``diff["severity"]["categories"]["addition"]["count"]``
@@ -842,7 +842,7 @@ def from_scan(
     # top level the way `compare`'s own report carries them -- reading the
     # top-level `report` here (as an earlier revision did) always saw an
     # absent key (Codex review: a real `--severity-addition error` /
-    # `--contract-evaluation` scan silently lost both signals).
+    # `--contract` scan silently lost both signals).
     levels = _severity_levels(diff_dict) if diff_dict is not None else {}
     symbols: list[str] = []
     for raw in (findings_raw, additions_raw, quality_raw):

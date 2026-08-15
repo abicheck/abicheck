@@ -90,7 +90,7 @@ Add as the situation requires:
 - `--policy plugin_abi` / `--policy sdk_vendor`, or `--policy-file`, when the
   project has its own view of what a given change kind means
   ([policies and suppressions](../shared/policies-and-suppressions.md)).
-- `--contract-evaluation --contract public` when you need per-finding
+- `--contract public` when you need per-finding
   contract relevance and its coverage ledger
   ([public surface and scoping](../shared/public-surface-and-scoping.md)).
 - `--suppress FILE` only when the project already has a suppression file.

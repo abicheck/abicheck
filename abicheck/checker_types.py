@@ -598,7 +598,7 @@ class DiffResult:
         still in ``changes``, they are listed by :attr:`not_evaluated`, and
         every renderer discloses them with their relevance and reason.
 
-        Without ``--contract-evaluation`` no finding carries a relevance at
+        Without ``--contract`` no finding carries a relevance at
         all, so this returns ``changes`` unchanged and every bucket is
         exactly what it was before ADR-049.
         """
@@ -612,7 +612,7 @@ class DiffResult:
 
         ``PROVEN_OUT_OF_CONTRACT``, ``UNKNOWN_UNPROVEN`` and
         ``UNKNOWN_UNRESOLVED`` findings, in ``changes`` order. Empty for
-        every run that did not opt into ``--contract-evaluation``.
+        every run that did not opt into ``--contract``.
         """
         from .contract_gating import is_evaluated
 

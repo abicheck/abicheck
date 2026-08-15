@@ -789,7 +789,7 @@ def compute_exit_code(
     -- contributes ``0`` and is skipped here. It keeps its place in the
     report and in every ledger; what it loses is the ability to gate. Every
     finding is evaluated for a run that did not opt into
-    ``--contract-evaluation``, so this is inert by default.
+    ``--contract``, so this is inert by default.
     """
     worst = 0
     for change in gate_eligible_changes(changes):

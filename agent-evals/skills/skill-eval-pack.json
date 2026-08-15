@@ -490,7 +490,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:37681454b57e50fd979443c523798c41741e43a5af67711f065778435d68329a",
+      "digest": "sha256:02dfe93f5d0b6528b17e2f365efe48e5c615f28800b484dede8f0a74b0c7be29",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -534,7 +534,7 @@
       "roots": [
         ".agents/skills/native-api-evolution"
       ],
-      "tree": "sha256:62117dadc2aedbe118bbaf179aed8947a5c1b6065daa4376fbf994b0245be70c"
+      "tree": "sha256:38895d73652f1d9891d8b06a7da9565c8f9ce307c1a4293670134759b8f8c363"
     },
     "native-binary-compatibility-review": {
       "affects": [
@@ -543,7 +543,7 @@
       "roots": [
         ".agents/skills/native-binary-compatibility-review"
       ],
-      "tree": "sha256:c579b08dc091d4d72018373098741d697de6ced0271d191966b84e69fabcc354"
+      "tree": "sha256:b3922a764441f92454e64c0eb5d2271a64d1f8ab4428ca09e137f3fe4e74bf59"
     },
     "native-consumer-compatibility": {
       "affects": [
@@ -552,7 +552,7 @@
       "roots": [
         ".agents/skills/native-consumer-compatibility"
       ],
-      "tree": "sha256:3219d973f5c6e4c30dd60f3d429c87b3e4bf457cf95184bb0e86db07743982b5"
+      "tree": "sha256:487ed3e9e1d141ab1cd8e6fec50a8ef8f81c20d3b3356cad1496774fec33fc0e"
     },
     "native-release-compatibility": {
       "affects": [
@@ -561,7 +561,7 @@
       "roots": [
         ".agents/skills/native-release-compatibility"
       ],
-      "tree": "sha256:346f6570c849b8a157b42bb9b00281bae45993bba7a9c7703a7a6744692b90ea"
+      "tree": "sha256:01a754b8551ce1446e1ed6afe85d0f2e3cfe7b04b90211b0cc78805d82695f6f"
     }
   }
 }

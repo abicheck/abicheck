@@ -141,7 +141,7 @@ def _reject_set_input_flags(
             "hatch (a mismatch there still raises unhandled). Compare the "
             "specific library individually to use it."
         )
-    # --contract-evaluation/--contract are deliberately NOT rejected here
+    # --contract/--contract are deliberately NOT rejected here
     # (CLI-audit P1, release/package contract parity): the per-library
     # fan-out now threads both straight into each pair's own
     # service.run_compare(contract_evaluation=..., contract_mode=...) call

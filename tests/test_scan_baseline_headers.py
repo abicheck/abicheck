@@ -89,7 +89,6 @@ def test_scan_exposes_against_config_surface_options() -> None:
         "pattern_verdicts",
         "env_matrix_path",
         # ADR-049 Phase 5 §6.4's contract-relevance half of the same parity.
-        "contract_evaluation",
         "contract_mode",
     } <= dests
 

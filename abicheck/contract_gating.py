@@ -35,7 +35,7 @@ the orthogonal contract-coverage ledger
 exit ``1`` for the unresolved case.
 
 **An unstamped finding is evaluated.** ``contract_relevance is None`` means
-the run never opted into ``--contract-evaluation`` at all (it is off by
+the run never opted into ``--contract`` at all (it is off by
 default), so there is no contract decision to defer to and the legacy
 behaviour -- every finding scores -- is the correct and only answer. That
 default is what keeps this module bit-for-bit inert for every pre-existing
@@ -135,7 +135,7 @@ def zero_scoped_out_gate_contributions(payload: object, result: object) -> None:
     those are the scoped gate's own findings, and only the ones already
     tracked in ``scoped_relevant_finding_ids`` would survive this filter.
     Only entries that already carry the field are touched, so a run without
-    ``--contract-evaluation`` is unaffected.
+    ``--contract`` is unaffected.
     """
     scoped_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
 

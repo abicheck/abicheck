@@ -818,7 +818,7 @@ def _filtered_internal_entry(c: Change) -> dict[str, object]:
     # (folded into all_changes alongside `kept`) -- this second, independent
     # serialization of the identical Change objects (scope.filtered_internal_changes,
     # distinct from surface_scope.out_of_surface_changes above) never read the
-    # fields, so a --contract-evaluation consumer of this established ledger
+    # fields, so a --contract consumer of this established ledger
     # missed the decision even though the sibling ledger already carried it.
     _add_contract_evaluation_fields(entry, c)
     return entry
@@ -1342,7 +1342,7 @@ def _add_contract_evaluation_fields(
     # consumer can't join a demoted/suppressed/reconciled finding to its
     # decision. Stamped here, only when absent -- and unconditionally,
     # ahead of the contract_relevance early return below: an ordinary run
-    # without `--contract-evaluation` still calls this on every one of
+    # without `--contract` still calls this on every one of
     # those entries and still needs a joinable id (Codex review: an
     # earlier revision stamped this after the early return instead,
     # silently skipping it on every default-run audit-ledger entry).

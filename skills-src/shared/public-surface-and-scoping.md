@@ -31,16 +31,16 @@ not make it public, is owned by
 toolchain or system header by default. That is a header-*origin* filter, not
 an ABI-visibility one: the library's own private declarations are still kept.
 
-## `--contract` and `--contract-evaluation`
+## `--contract` and `--contract`
 
-`--contract-evaluation` turns on per-finding contract-relevance classification,
+`--contract` turns on per-finding contract-relevance classification,
 and `--contract` selects the evidence domain it judges against:
 
 - `public` — the public-header surface.
 - `exports` — the binary's observed export table.
 - `all` — no domain restriction.
 
-This is **not** cosmetic. Under `--contract-evaluation` the relevance decision
+This is **not** cosmetic. Under `--contract` the relevance decision
 runs before compatibility policy, so the selected domain can change the finding
 set, the verdict, and the exit code. Each finding gains
 `contract_relevance`, `contract_reason_code`, `contract_assurance`, and

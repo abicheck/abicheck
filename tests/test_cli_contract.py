@@ -462,7 +462,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--compiler-prefix",
         "--config",
         "--contract",
-        "--contract-evaluation",
         "--ctf",
         "--debug-format",
         "--debug-root",
@@ -540,7 +539,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--severity-preset",
         "--severity-quality-issues",
         "--show-filtered",
-        "--show-impact",
         "--show-only",
         "--show-redundant",
         "--sources",
@@ -874,7 +872,7 @@ def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
 
 
 def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
-    """``--contract`` alone now implies ``--contract-evaluation`` (ADR-049
+    """``--contract`` alone now implies ``--contract`` (ADR-049
     Phase 6, CLI audit PR 3/5: abicheck.cli_options.resolve_contract_evaluation).
 
     It selects the domain the shadow evaluator judges against, and naming a
@@ -916,7 +914,6 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
             "compare",
             str(old_path),
             str(new_path),
-            "--contract-evaluation",
             "--contract",
             "exports",
             "--format",
@@ -929,12 +926,12 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
 
 
 def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> None:
-    """``--contract-evaluation``/``--contract`` now DO have per-library
+    """``--contract``/``--contract`` now DO have per-library
     fan-out wiring (CLI-audit P1, release/package contract parity) --
     ``_reject_set_input_flags`` no longer even accepts these two kwargs.
     See ``test_cli_compare_contract_evaluation.py::
     TestReleaseFanOutContractParity`` for the positive CLI-level coverage
-    (directory `compare` with `--contract-evaluation` now applies per
+    (directory `compare` with `--contract` now applies per
     library, same as a single-pair `compare`). ``--pack`` stays rejected
     for directory inputs -- see the same test class's
     ``test_pack_still_rejected_on_directory_inputs``.

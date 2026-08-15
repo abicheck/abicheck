@@ -1359,7 +1359,7 @@ def compare_release_cmd(
     comparison ERROR still floors the exit at 4, regardless of severity settings.
 
     \b
-    Under --contract-evaluation, each library's own ADR-049 Phase 7 contract-
+    Under --contract, each library's own ADR-049 Phase 7 contract-
     coverage floor (0/1) folds into the release exit code with max() -- the
     same orthogonal axis a single-pair `compare` applies: it can raise a
     clean 0 to 1 but never lowers a real 2/4/8.
@@ -1546,7 +1546,7 @@ def compare_release_cmd(
             # across every library with max() -- one library's incomplete
             # evidence must still raise the release's exit code, the same rule
             # contract_coverage_exit.fold_coverage_exit applies to a single pair.
-            # `0` (the default fold value) when --contract-evaluation was never
+            # `0` (the default fold value) when --contract was never
             # given, or every library's own selected domain closed cleanly.
             contract_coverage_exit_contribution = max(
                 (
@@ -1565,7 +1565,7 @@ def compare_release_cmd(
             # how many failures exist across the whole release -- real even
             # when `contract.unresolved: warn` zeroed every library's own
             # exit contribution. Stays 0 (not omitted) for a run that never
-            # passed --contract-evaluation, same as the count field above.
+            # passed --contract, same as the count field above.
             contract_coverage_failure_count = sum(
                 count
                 for entry in library_results

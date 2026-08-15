@@ -12,17 +12,17 @@ generated: false
 
 # Compatibility evaluation configuration (ADR-049)
 
-!!! info "Status: resolved *and* applied — opt-in via `--contract-evaluation`"
+!!! info "Status: resolved *and* applied — opt-in via `--contract`"
 
     This page is the reference for one typed object
     (`abicheck.compatibility_evaluation_frontend`) that resolves every
     setting deciding what a comparison promises, how a change to it is
     classified, and what blocks CI — resolved once, identically, whichever
-    front end asked for the run. `abicheck compare --contract-evaluation`
+    front end asked for the run. `abicheck compare --contract public`
     resolves one such object per run and reports it, as the
     `contract_context.evaluation_context` block of its JSON report.
 
-    **The object is not merely reported — under `--contract-evaluation` it is
+    **The object is not merely reported — under `--contract` it is
     authoritative** (ADR-049 Phase 7, `contract_pipeline.py`). Two
     independent things follow from a resolved `contract.mode`:
 
@@ -52,16 +52,16 @@ generated: false
       overall because the evidence needed to trust that picture was
       incomplete. See [Exit Codes](exit-codes.md).
 
-    Outside both `--contract-evaluation` and a selected `--pack`, a
+    Outside both `--contract` and a selected `--pack`, a
     `compare`/`scan` run resolves nothing from this object at all and every
     other command is unaffected — contract evaluation is still an opt-in
     feature, not a default-on one. A selected `--pack` **alone** (no
-    `--contract-evaluation`) still resolves and applies its own fields,
+    `--contract`) still resolves and applies its own fields,
     though: a `kind: policy` pack overriding a `ChangeKind` moves the
     verdict and the exit code the same way an equivalent `--policy-file`
     override would (see "Selecting a pack" below), independent of contract
     evaluation. (A `kind: contract` pack's `contract.unresolved` is the one
-    field that specifically needs `--contract-evaluation` too, since nothing
+    field that specifically needs `--contract` too, since nothing
     consumes it otherwise — see "Pack manifests" below.)
 
     The historical shadow/advisory design this feature shipped with first —

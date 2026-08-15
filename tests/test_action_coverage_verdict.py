@@ -682,7 +682,7 @@ class TestCompareTellsTheTwoAxesApart:
     def test_a_run_without_contract_evaluation_is_unchanged(
         self, tmp_path: Path
     ) -> None:
-        """No `--contract-evaluation` means no ledger keys at all, which must
+        """No `--contract` means no ledger keys at all, which must
         read as a contribution of 0 rather than as an unanswered question."""
         outputs = self._compare_outputs(
             tmp_path,

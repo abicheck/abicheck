@@ -149,7 +149,7 @@ example — every real report carries the field):
 
 `contract_coverage` is present in every `--format json` output, with
 `exit_contribution: 0` and an empty `incomplete_targets` list when no
-target's report used `--contract-evaluation` — it is never omitted.
+target's report used `--contract` — it is never omitted.
 
 ## Declaring the expected-target set
 
@@ -261,7 +261,7 @@ gating), the other's evidence can't resolve it either way
 (`UNKNOWN_UNRESOLVED`, not gating) — and `scope: all_profiles` alone would
 present that as one uniformly-understood break.
 
-When at least one affected profile's report ran `--contract-evaluation`,
+When at least one affected profile's report ran `--contract`,
 its `finding_matrix` entry carries a `profile_contract` array — one entry
 per *affected* profile, in the same order as `affected_profiles` (a
 profile confirmed clean of the finding has no contract decision about it

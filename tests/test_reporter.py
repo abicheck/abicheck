@@ -1013,8 +1013,8 @@ class TestRootCauseMarkdown:
         assert "## Severity Configuration" in md
 
     def test_show_impact_appends_impact_table(self):
-        """Codex review: --show-impact silently dropped the Impact Summary
-        table under --report-mode root-cause, unlike full/leaf markdown."""
+        """Codex review: the impact table was silently dropped under
+        --report-mode root-cause, unlike full/leaf markdown."""
         c = Change(
             ChangeKind.TYPE_SIZE_CHANGED,
             "X",

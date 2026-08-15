@@ -31,7 +31,7 @@ have been invisible:
    *which* layer selected a value. ``compare`` and the MCP tool were fixed
    earlier in this phase; ``scan --against`` still reported the core verb's
    reconstruction.
-2. **No context was emitted.** ``scan --against --contract-evaluation``
+2. **No context was emitted.** ``scan --against --contract``
    stamped each finding's contract decision but its JSON payload carried no
    ``contract_context`` block at all, so the receipt those decisions rest on
    -- the observed provider evidence, the resolved configuration, the
@@ -253,7 +253,7 @@ def _without_gate_settings(project: Any) -> Any:
 def record_resolved_config(result: Any, config: Any) -> None:
     """Install *config* on *result*'s persisted context, if it has one.
 
-    A no-op unless ``--contract-evaluation`` produced a context. Unlike
+    A no-op unless ``--contract`` produced a context. Unlike
     ``compare``'s equivalent there is no gate half to reconcile *for this
     receipt specifically*: ``config`` (from :func:`resolve_scan_config`) has
     its severity/exit-code-scheme fields blanked to built-in defaults

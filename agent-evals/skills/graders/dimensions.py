@@ -163,9 +163,9 @@ def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str 
             return "claimed a target went unrun, but every matrix cell has a state"
         return None
     if reason == "contract_coverage_incomplete":
-        # ADR-049 Phase 7: without --contract-evaluation the coverage
-        # contribution is identically 0, so no domain can be short of evidence.
-        if not any("--contract-evaluation" in (c.get("argv") or []) for c in calls):
+        # ADR-049 Phase 7: without --contract the coverage contribution is
+        # identically 0, so no domain can be short of evidence.
+        if not any("--contract" in (c.get("argv") or []) for c in calls):
             return (
                 "claimed contract coverage is incomplete, but no recorded call "
                 "asked for contract evaluation, under which coverage is not "

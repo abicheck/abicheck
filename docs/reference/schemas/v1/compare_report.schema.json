@@ -540,7 +540,7 @@
     },
     "contract_context": {
       "type": "object",
-      "description": "ADR-049 Phase 4 (schema 2.25): present only when the caller opts into `compare --contract-evaluation`. The three sibling blocks ADR-049 plan Section 5.1 persists together, so a decision can be replayed (from the receipt alone) or re-evaluated under a different contract mode (from the observations alone) without re-reading any binary or header. Advisory only; never affects verdict, severity, or any exit code.",
+      "description": "ADR-049 Phase 4 (schema 2.25): present only when the caller opts into `compare --contract`. The three sibling blocks ADR-049 plan Section 5.1 persists together, so a decision can be replayed (from the receipt alone) or re-evaluated under a different contract mode (from the observations alone) without re-reading any binary or header. Advisory only; never affects verdict, severity, or any exit code.",
       "required": [
         "contract_evidence",
         "evaluation_context",
@@ -1015,7 +1015,7 @@
     },
     "contract_coverage_failures": {
       "type": "array",
-      "description": "ADR-049 Phase 5 (schema 2.26): present only when the caller opts into `compare --contract-evaluation`. The sibling contract-coverage ledger of ADR-049 plan Section 6.1 \u2014 one entry per provider/domain coverage failure for the contract domain this run selected. Deliberately not change rows: a coverage failure carries no ChangeKind and never enters `changes`, which is what makes it unsuppressible ('ordinary change suppressions ... cannot suppress a provider/domain coverage failure', Section 6.2). Derived from `contract_context`, so the same provider record is a failure under one domain and advisory under another. An empty array is a real value meaning the selected domain closed. Never affects verdict or severity. It does affect the process exit status: ADR-049 Phase 7 applies the sibling `contract_coverage_exit_contribution` as an orthogonal floor (folded with max, so it never lowers a 2/4).",
+      "description": "ADR-049 Phase 5 (schema 2.26): present only when the caller opts into `compare --contract`. The sibling contract-coverage ledger of ADR-049 plan Section 6.1 \u2014 one entry per provider/domain coverage failure for the contract domain this run selected. Deliberately not change rows: a coverage failure carries no ChangeKind and never enters `changes`, which is what makes it unsuppressible ('ordinary change suppressions ... cannot suppress a provider/domain coverage failure', Section 6.2). Derived from `contract_context`, so the same provider record is a failure under one domain and advisory under another. An empty array is a real value meaning the selected domain closed. Never affects verdict or severity. It does affect the process exit status: ADR-049 Phase 7 applies the sibling `contract_coverage_exit_contribution` as an orthogonal floor (folded with max, so it never lowers a 2/4).",
       "items": {
         "type": "object",
         "properties": {

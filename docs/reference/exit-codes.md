@@ -18,7 +18,7 @@ generated: false
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
-Under `--contract-evaluation`, each finding's contract relevance is classified
+Under `--contract`, each finding's contract relevance is classified
 **before** compatibility policy runs, and policy then scores only the
 `EVALUATED` findings — those whose relevance is `IN_CONTRACT` or
 `NOT_APPLICABLE`. A `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN` or
@@ -39,13 +39,13 @@ independently-orthogonal axis below (missing evidence contributing its own
 exit `1`), not from relevance itself; that's what stops missing evidence
 from being the cheapest way to pass.
 
-**Without `--contract-evaluation` no finding carries a relevance**, so every
+**Without `--contract` no finding carries a relevance**, so every
 finding is scored exactly as before and every exit code below is unchanged.
 
 ## Contract-coverage contribution (ADR-049)
 
 `compare` and `scan --against` carry an **orthogonal contract-coverage axis**
-under `--contract-evaluation`. Complete coverage of the mode-selected evidence
+under `--contract`. Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
 identity-incomplete **required domain evidence** is recorded as a
 `CoverageFailure` in the run-level `contract_coverage_failures` ledger and
@@ -70,7 +70,7 @@ library`'s exit `8` is checked ahead of the coverage-only fallback, so a
 removed library's own signal is never masked by an unrelated coverage gap
 (and a real verdict-based `2`/`4` still wins outright over both, unchanged).
 
-**Without `--contract-evaluation` there is no selected domain, so the
+**Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.
 
 Ordinary change suppressions cannot clear a provider/domain coverage failure —
@@ -391,7 +391,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract-evaluation`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
+| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -437,7 +437,7 @@ gate but not in required coverage. The `--format json` output is versioned
 for the current value) and carries the four axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
 — the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
-present even when no target used `--contract-evaluation` (an empty
+present even when no target used `--contract` (an empty
 `incomplete_targets` list, not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the

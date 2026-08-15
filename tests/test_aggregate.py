@@ -1546,7 +1546,7 @@ class TestContractCoverageAxis:
         assert result.exit_code() == 4
 
     def test_a_report_without_the_key_contributes_nothing(self, tmp_path: Path) -> None:
-        # Every pre-2.26 report, and every run without --contract-evaluation:
+        # Every pre-2.26 report, and every run without --contract:
         # no contract domain was selected, so there is none to be short of
         # evidence for. This is what keeps existing matrices unchanged.
         _write_report(tmp_path, LINUX, "COMPATIBLE")

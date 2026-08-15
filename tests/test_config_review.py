@@ -3,7 +3,7 @@
 - compare: tri-state --demangle (default ON for human formats, OFF for json/sarif)
 - compare: explicit exit-code-scheme announcement on stderr
 - compare / dump: --debug-format selector superseding --btf/--ctf/--dwarf
-- compare: --report-mode impact == full + --show-impact
+- compare: --report-mode impact is the one way to ask for the impact table
 - compare-release: --scope-public-headers default ON + toggle, -j default 0,
   severity-aware exit aggregation
 - appcompat: --scope-public-headers wiring, -H/-I ignored-mode warning,

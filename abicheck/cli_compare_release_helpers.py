@@ -527,7 +527,7 @@ def _exit_compare_release(
     for a single-pair ``compare``) except ``not_comparable``, which fires
     before any library was even scored: it can raise a clean 0 to 1, never
     lower a real 2/4/8, and is `0` (a no-op fold) for every run that never
-    passed ``--contract-evaluation``.
+    passed ``--contract``.
     """
     if worst_verdict == "not_comparable":
         sys.exit(16)
@@ -723,7 +723,7 @@ def _format_release_json(
     # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
     # release/package parity), max()-aggregated across every library. Only
     # present when at least one library entry carries the per-library key --
-    # i.e. --contract-evaluation was active -- mirroring the severity block's
+    # i.e. --contract was active -- mirroring the severity block's
     # own "present only when active" convention, and matching single-pair
     # `compare` JSON's `contract_coverage_exit_contribution` field name so a
     # consumer reads the same key regardless of which command produced it.

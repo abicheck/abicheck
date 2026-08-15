@@ -1775,7 +1775,7 @@ class TestContractEvaluationProperties:
         # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged)
         # must reach JUnit's properties, not just JSON/SARIF (Codex review) --
         # and unlike contract properties, it must appear on every run, not
-        # only under --contract-evaluation.
+        # only under --contract.
         change = Change(
             ChangeKind.LAYOUT_UNVERIFIABLE,
             "Foo",
@@ -1853,7 +1853,7 @@ class TestContractEvaluationProperties:
         self,
     ) -> None:
         # Codex review, fresh evidence: a testcase already carrying contract
-        # properties (--contract-evaluation) must not get a *second* sibling
+        # properties (--contract) must not get a *second* sibling
         # <properties> element for the correlation -- `tc.find("properties")`
         # (the lookup every consumer, including this repo's own tests, uses)
         # only ever sees the first one, so a second element silently hid the

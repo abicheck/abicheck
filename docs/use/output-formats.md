@@ -278,13 +278,13 @@ abicheck compare old.so new.so --report-mode root-cause --format sarif
 }
 ```
 
-## `--show-impact`
+## `--report-mode impact`
 
-Appends an impact summary table to the report, showing root changes and how many
-interfaces each affects. Available in Markdown and HTML formats.
+Renders the `full` report plus an impact summary table showing root changes and
+how many interfaces each affects. Available in Markdown and HTML formats.
 
 ```bash
-abicheck compare old.json new.json --show-impact
+abicheck compare old.json new.json --report-mode impact
 ```
 
 ## A second output format from the same run (`--secondary-format`)
@@ -537,7 +537,7 @@ gets two additional fields alongside the existing `config`/`categories`/
 
 ### Contract-evaluation report fields (`contract_relevance`, `contract_coverage_failures`)
 
-Under `--contract-evaluation`, two field groups appear that aren't present
+Under `--contract`, two field groups appear that aren't present
 in a plain `compare` report — mental model and command reference:
 [Contract-Aware Compatibility](../learn/contract-aware-compatibility.md),
 [Contract Evaluation](contract-evaluation.md).

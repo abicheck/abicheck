@@ -671,7 +671,7 @@ outputs:
       ABI verdict. For compare (single-pair or directory/package operands):
       COMPATIBLE, SEVERITY_ERROR (with --severity-* via extra-args, or when
       --severity-addition=error detects new public API additions),
-      COVERAGE_INCOMPLETE (with --contract-evaluation via extra-args, when
+      COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
       compatibility verdict unchanged), API_BREAK, BREAKING,

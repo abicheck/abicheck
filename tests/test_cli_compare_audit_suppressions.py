@@ -19,7 +19,7 @@ Wires the existing, previously-orphaned ``SuppressionList.audit()``/
 ``SuppressionAudit`` (``suppression.py``) into the ``compare`` CLI: an
 additional hygiene check over the ``--suppress`` rule file (stale/high-risk/
 expired/near-expiry rules) against this run's own findings, folded into the
-rendered report the same way ``--contract-evaluation`` is (see
+rendered report the same way ``--contract`` is (see
 ``cli_compare_fold.py``'s ``_fold_suppression_audit_into_text``)."""
 
 from __future__ import annotations

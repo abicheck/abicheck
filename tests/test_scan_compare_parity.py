@@ -657,7 +657,7 @@ def _both(
 ) -> tuple[dict, dict]:
     """Run both commands on the same inputs/flags; return their JSON payloads.
 
-    Always passes ``--contract-evaluation`` so the contract fields are
+    Always passes ``--contract`` so the contract fields are
     actually populated -- an all-``None`` comparison of those four keys
     would pass vacuously.
     """
@@ -673,7 +673,8 @@ def _both(
             str(new),
             "--format",
             "json",
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "-o",
             str(report_path),
             *extra,
@@ -689,7 +690,8 @@ def _both(
             str(old),
             "--format",
             "json",
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "-o",
             str(scan_path),
             *extra,
@@ -960,11 +962,11 @@ class TestFieldForFieldParity:
         tmp_path: Path,
     ) -> None:
         # CLI audit PR 3/5: `--contract` alone now *implies*
-        # `--contract-evaluation` in both commands (the one place they must
+        # `--contract` in both commands (the one place they must
         # still agree -- abicheck.cli_options.resolve_contract_evaluation is
         # the single shared resolver both route through), rather than the two
         # rejecting it identically as a UsageError. Each now behaves exactly
-        # as if `--contract-evaluation` had also been passed explicitly.
+        # as if `--contract` had also been passed explicitly.
         #
         # Exit-code parity alone doesn't prove the evaluator actually ran --
         # a pre-existing ABI break can produce the same exit code whether or
@@ -977,7 +979,7 @@ class TestFieldForFieldParity:
         import json
 
         implicit_args = ["--contract", "exports"]
-        explicit_args = ["--contract-evaluation", "--contract", "exports"]
+        explicit_args = ["--contract", "exports"]
 
         def _compare_json(args: list[str], name: str) -> dict:
             out = tmp_path / f"{name}.json"
@@ -1023,10 +1025,10 @@ class TestFieldForFieldParity:
         # a baseline there is no comparison for them to configure, so
         # accepting them would silently discard the request.
         res = runner.invoke(
-            main, ["scan", str(new_snap_breaking), "--contract-evaluation"]
+            main, ["scan", str(new_snap_breaking), "--contract", "public"]
         )
         assert res.exit_code == 64, res.output
-        assert "--contract-evaluation" in res.output
+        assert "--contract" in res.output
 
 
 _LIB_V1 = """
@@ -1212,6 +1214,9 @@ class TestScanResolvesTheSameTypedConfig:
         import json
 
         out = tmp_path / "scan-ctx.json"
+        # --contract is what turns the evaluator on, so a case that does not
+        # override the domain still has to name one for a context to exist.
+        domain = [] if "--contract" in extra else ["--contract", "public"]
         res = runner.invoke(
             main,
             [
@@ -1221,9 +1226,9 @@ class TestScanResolvesTheSameTypedConfig:
                 str(old),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "-o",
                 str(out),
+                *domain,
                 *extra,
             ],
         )
@@ -1297,7 +1302,8 @@ class TestScanResolvesTheSameTypedConfig:
                 str(new),
                 "--format",
                 "json",
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "-o",
                 str(report_path),
             ],
@@ -1325,7 +1331,8 @@ class TestScanResolvesTheSameTypedConfig:
                 str(old),
                 "--format",
                 "json",
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "-o",
                 str(out),
             ],

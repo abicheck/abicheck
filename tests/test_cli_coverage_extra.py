@@ -266,8 +266,8 @@ class TestRenderOutputFormats:
     # test_html_output: covered by test_cli_unit.py::TestCompareHtml
     # test_json_output: covered by test_cli_unit.py::TestCompareJson
 
-    def test_show_impact_flag(self, tmp_path: Path) -> None:
-        """--show-impact includes impact summary when type changes have affected symbols."""
+    def test_report_mode_impact(self, tmp_path: Path) -> None:
+        """--report-mode impact includes the impact summary when type changes have affected symbols."""
         from abicheck.model import (
             AbiSnapshot,
             Function,
@@ -297,7 +297,9 @@ class TestRenderOutputFormats:
         new_f.write_text(snapshot_to_json(new_snap), encoding="utf-8")
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_f), str(new_f), "--show-impact"])
+        result = runner.invoke(
+            main, ["compare", str(old_f), str(new_f), "--report-mode", "impact"]
+        )
         assert result.exit_code == 4  # breaking (struct size changed)
         assert "Impact Summary" in result.output or "impact" in result.output.lower()
 

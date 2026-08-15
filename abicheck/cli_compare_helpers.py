@@ -89,7 +89,11 @@ from .cli_helpers_compare import (
     load_required_symbols,
     resolve_force_public_scope,
 )
-from .cli_options import resolve_compile_context, resolve_contract_evaluation
+from .cli_options import (
+    resolve_compile_context,
+    resolve_contract_domain,
+    resolve_contract_evaluation,
+)
 from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
     _reject_compile_context_for_set_inputs,
@@ -263,7 +267,6 @@ def _normalize_compare_options(
     demangle: bool | None,
     fmt: str,
     report_mode: str,
-    show_impact: bool,
     old_sources: Path | None = None,
     new_sources: Path | None = None,
     old_build_info: Path | None = None,
@@ -296,10 +299,12 @@ def _normalize_compare_options(
 
     demangle_resolved = _resolve_demangle(fmt, demangle)
 
-    # --report-mode impact is sugar for "full" report with the impact table on.
-    if report_mode == "impact":
+    # --report-mode impact is sugar for a "full" report with the impact table
+    # on -- the one way to ask for that table (the separate --show-impact flag
+    # it used to duplicate is gone).
+    show_impact = report_mode == "impact"
+    if show_impact:
         report_mode = "full"
-        show_impact = True
 
     return _NormalizedCompareOptions(
         collect_mode, headers, old_headers_only, new_headers_only,
@@ -434,7 +439,7 @@ def _render_compare_dry_run(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}; contract coverage adds an orthogonal 1 under --contract-evaluation",
+        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}; contract coverage adds an orthogonal 1 under --contract",
     )
     if {old_kind, new_kind} & {"directory", "package"}:
         result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
@@ -545,7 +550,7 @@ def _reject_incoherent_compare_flags(
     (Codex review) -- see ``cli_options.reject_incoherent_secondary_output``,
     which this delegates to rather than duplicating them here.
 
-    A ``--contract`` domain given without ``--contract-evaluation`` used to
+    A ``--contract`` domain given without ``--contract`` used to
     be rejected here too (it would otherwise silently do nothing); CLI audit
     PR 3/5 loosens that into an implication instead -- see
     :func:`abicheck.cli_options.resolve_contract_evaluation`, called by this
@@ -1200,7 +1205,7 @@ def _report_compare_result(
     # synthesize, e.g. PE_ORDINAL_RETARGETED) and mark existing
     # result.changes entries as relevant to the scoped contract -- neither
     # ever passes through checker._apply_contract_evaluation_shadow, so
-    # both stayed permanently unstamped even when --contract-evaluation was
+    # both stayed permanently unstamped even when --contract was
     # given. This must run before _render_output below serializes
     # result.changes, and mirrors the identical fix already applied to the
     # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
@@ -1312,7 +1317,7 @@ def run_compare(
     scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     post_manifest_path: Path | None,
-    report_mode: str, show_impact: bool,
+    report_mode: str,
     recommend: bool,
     debug_format_opt: str | None,
     debug_format: str | None,
@@ -1341,7 +1346,6 @@ def run_compare(
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
     diagnostic_comparison: bool = False,
-    contract_evaluation: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
     pack_paths: tuple[Path, ...] = (),
@@ -1361,13 +1365,14 @@ def run_compare(
         secondary_output=secondary_output,
         secondary_fmt=secondary_fmt,
     )
-    # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+    # --contract is the only way to ask for the ADR-049 evaluator on the CLI
     # (abicheck.cli_options.resolve_contract_evaluation) -- resolved here,
     # before contract_evaluation is used for anything else in this function,
     # so every downstream use (the typed CompareRequest included) sees the
-    # already-resolved value and behaves exactly as if the user had typed
-    # both flags explicitly.
-    contract_evaluation = resolve_contract_evaluation(contract_mode, contract_evaluation)
+    # already-resolved value and behaves exactly as if the caller had passed
+    # contract_evaluation=True explicitly.
+    contract_evaluation = resolve_contract_evaluation(contract_mode)
+    contract_mode = resolve_contract_domain(contract_mode)
     _setup_verbosity(verbose)
 
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
@@ -1559,7 +1564,7 @@ def run_compare(
         old_headers_only=old_headers_only, new_headers_only=new_headers_only,
         debug_format_opt=debug_format_opt, debug_format=debug_format,
         demangle=demangle, fmt=fmt,
-        report_mode=report_mode, show_impact=show_impact,
+        report_mode=report_mode,
         old_sources=old_sources, new_sources=new_sources,
         old_build_info=old_build_info, new_build_info=new_build_info,
     )

@@ -22,3 +22,17 @@
   internal `gcc_*` field names are unchanged, as are the Action's `gcc-path`/
   `gcc-prefix`/`gcc-options` inputs (they now forward to the `--compiler*`
   flags).
+
+- **`--contract-evaluation` is removed** from `compare` and `scan --against`.
+  `--contract` was already enough to ask for a contract decision, so the
+  standalone switch was a second way to request one thing. `--contract` now
+  takes a fourth value, `auto`, for the one case the switch alone expressed —
+  evaluate, but let the domain fall through to
+  `--scope-public-headers`/`--no-scope-public-headers` and then `.abicheck.yml`
+  rather than stating it on the command line. The typed Python API
+  (`CompareRequest`/`ScanRequest.contract_evaluation`) is unchanged; it still
+  requires the flag and the mode together.
+
+- **`compare --show-impact` is removed.** `--report-mode impact` was documented
+  as its exact equivalent (`full` plus the impact table) and is now the one way
+  to ask for that table.

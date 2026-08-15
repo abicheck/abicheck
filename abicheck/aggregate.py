@@ -97,7 +97,7 @@ from .change_registry_types import Verdict
 #: "Clang: UNKNOWN_UNRESOLVED and not gating" no longer collapse into the
 #: same ``affected_profiles`` membership fact for one logical finding.
 #: Purely additive and inert: present only when at least one profile ran
-#: ``--contract-evaluation`` for that target, never changes ``scope`` or
+#: ``--contract`` for that target, never changes ``scope`` or
 #: any existing key, and a ``1.3``-shaped consumer that ignores unknown
 #: keys keeps reading a ``1.4`` document correctly.
 AGGREGATE_SCHEMA_VERSION = "1.4"
@@ -1274,7 +1274,7 @@ class _LoadedReport:
     #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
     #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26).
     #: ``0`` for every report that carries none -- a run without
-    #: ``--contract-evaluation`` selected no contract domain, so it cannot be
+    #: ``--contract`` selected no contract domain, so it cannot be
     #: short of evidence for one.
     contract_coverage_exit: int = 0
     #: Whether the report listed any coverage failure at all -- true even
@@ -1351,7 +1351,7 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     Fails *open*, unlike the ``severity`` gate's ``_MalformedGate``: an absent
     or unusable value means "this report says nothing about a contract
     domain", which is the honest reading for every pre-2.26 report and every
-    run without ``--contract-evaluation``. Treating it as a failure would make
+    run without ``--contract``. Treating it as a failure would make
     the aggregate block on reports that never asked the question.
 
     A ``scan --against`` report carries the field one level down, inside its
@@ -1496,7 +1496,7 @@ def _contract_coverage_incomplete(data: Mapping[str, Any]) -> bool:
     does not is a guaranteed divergence. A non-list, or an empty list, is
     "nothing to report" -- the same fail-open reading as the contribution, and
     correct for every pre-2.26 report and every run without
-    ``--contract-evaluation``.
+    ``--contract``.
     """
     for block in contract_coverage_blocks(data):
         failures = block.get("contract_coverage_failures")
