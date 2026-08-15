@@ -802,6 +802,29 @@ runs:
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        # validate-inputs.sh's own compile-context guard (ast-frontend/
+        # gcc-*/sysroot/nostdinc for a directory/package compare operand)
+        # and its new require-complete-analysis release-operand guard both
+        # read these -- previously missing from this step's env block
+        # entirely, so both checks always read their inputs as unset/false
+        # here regardless of what the workflow set, and only the identical
+        # check re-run inside run.sh (which *is* wired) ever actually fired
+        # (Codex review; found while wiring require-complete-analysis
+        # through this same step).
+        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
+        INPUT_GCC_PATH: ${{ inputs.gcc-path }}
+        INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
+        INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
+        INPUT_SYSROOT: ${{ inputs.sysroot }}
+        INPUT_NOSTDINC: ${{ inputs.nostdinc }}
+        INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
+        # The scan build-info/compile-db conflict guard below also reads
+        # these -- same previously-missing-from-this-step-entirely gap,
+        # caught by the same generalized contract test
+        # (test_every_validate_inputs_var_is_set_by_its_own_step) once it
+        # existed, rather than found by review a second time.
+        INPUT_BUILD_INFO: ${{ inputs.build-info }}
+        INPUT_COMPILE_DB: ${{ inputs.compile-db }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────

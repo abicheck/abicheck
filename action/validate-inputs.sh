@@ -35,6 +35,7 @@ GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}"
 SYSROOT="${INPUT_SYSROOT:-}"
 NOSTDINC="${INPUT_NOSTDINC:-false}"
 SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-}"
+REQUIRE_COMPLETE_ANALYSIS="${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
 # format (RPM, Deb, tar, conda, wheel) — mirrors action/run.sh's
@@ -187,6 +188,17 @@ case "$MODE" in
             || -n "$SYSROOT" || "$NOSTDINC" == "true" ]]; then
         _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       fi
+    fi
+    # P0.4: require-complete-analysis is rejected outright by run.sh for a
+    # directory/package operand too -- the per-library release fan-out has
+    # no single analysis_assurance result to gate on -- so mirror that
+    # check here as well (same rationale as the compile-context guard
+    # immediately above: without it, a slow dependency-install step still
+    # runs before the request is rejected).
+    if [[ "$REQUIRE_COMPLETE_ANALYSIS" == "true" ]] \
+       && { { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
+            || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; }; then
+      _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
     fi
     ;;
   *)

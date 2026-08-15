@@ -55,4 +55,17 @@
   compare ungated despite the caller's explicit request — `run.sh` now
   fails the step loudly for that shape instead, the same treatment its
   own L2 compile-context and evidence-flag guards already give their own
-  release-incompatible inputs.
+  release-incompatible inputs. The release-operand rejection is also now
+  mirrored in `action/validate-inputs.sh` (fail-fast, before dependency
+  install), and wiring it there surfaced two *pre-existing*, unrelated
+  gaps of the identical shape in that earlier step's own `env:` block:
+  `ast-frontend`/`gcc-path`/`gcc-prefix`/`gcc-options`/`sysroot`/
+  `nostdinc` (its own directory/package compile-context guard) and
+  `build-info`/`compile-db` (its scan build-info/compile-db conflict
+  guard) were never mapped into that step's env either, so both checks
+  always read their inputs as unset/false there and only ever fired via
+  the identical, correctly-wired check re-running later in `run.sh` — now
+  fixed alongside, with a new generalized contract test
+  (`test_every_validate_inputs_var_is_set_by_its_own_step`, mirroring the
+  existing `run.sh`-scoped ones) so this class of gap can't reopen
+  unnoticed for a future input either.
