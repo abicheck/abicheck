@@ -144,6 +144,21 @@ class TestScanRequireCompleteAnalysisCliIntegration:
         res = _scan(tmp_path, _elf_only_pair(), "--require-complete-analysis")
         assert res.exit_code == 1, res.output
 
+    def test_the_floor_diagnostic_is_echoed_to_stderr(self, tmp_path: Path) -> None:
+        """`compare`'s own `_exit_with_severity_or_verdict` echoes
+        `assurance_floor_diagnostic` to stderr unconditionally (regardless
+        of `--format`) whenever the flag floors the exit code -- the
+        composite Action's `_assurance_gated()` (`action/run.sh`) greps for
+        exactly this line, since the JSON `analysis_assurance` block alone
+        cannot tell "the flag was passed and gated" apart from "the
+        evidence merely happens to be partial" (Codex review, PR #780).
+        `scan` must echo the identical diagnostic, not just fold the exit
+        code silently."""
+        res = _scan(tmp_path, _elf_only_pair(), "--require-complete-analysis")
+        assert res.exit_code == 1, res.output
+        assert "Analysis assurance incomplete" in res.output, res.output
+        assert "--require-complete-analysis" in res.output, res.output
+
     def test_flag_never_lowers_a_real_abi_break_end_to_end(
         self, tmp_path: Path
     ) -> None:

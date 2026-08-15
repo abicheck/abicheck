@@ -382,3 +382,135 @@ class TestCompareMapsTheAssuranceExit:
             bindir,
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+
+class TestHostileReportContentCannotExecute:
+    """This diff touches the action/workflow trust boundary (``action/
+    run.sh``): the new ``_assurance_gated()`` stderr grep and the new
+    ``assurance_notes`` Python query both read content an ``abicheck``
+    invocation produced from its inputs, which can themselves come from a
+    PR (a header, a symbol name, a policy note) an attacker controls.
+    Asserting the *text* of the shell/Python changes does not prove a
+    hostile value can't cause a side effect when run.sh's own shell
+    interpolates it into a job-summary ``echo`` -- so these tests actually
+    execute ``run.sh`` against a report/stderr crafted to look like a shell
+    command substitution or an injection into the grep pattern, and assert
+    the attempted payload never ran (no marker file materializes) while the
+    run still reaches the correct, unspoofed verdict.
+    """
+
+    def test_a_command_substitution_in_assurance_notes_does_not_execute(
+        self, tmp_path: Path
+    ) -> None:
+        marker = tmp_path / "pwned"
+        payload = f"$(touch {marker})"
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "diff": {
+                    "analysis_assurance": {
+                        "schema_version": 1,
+                        "status": "partial",
+                        "notes": [payload],
+                    }
+                },
+            },
+            stderr=ASSURANCE_STDERR,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert not marker.exists(), (
+            "the crafted analysis_assurance note executed as a shell command"
+        )
+        # The verdict computation is unaffected by the hostile payload --
+        # it is carried through as inert text in the summary, not evaluated.
+        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
+        assert payload in outputs["_summary"], outputs["_summary"]
+
+    def test_a_forged_stderr_line_cannot_spoof_the_diagnostic_without_the_marker(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact substring `_assurance_gated()` requires
+        ("Analysis assurance incomplete ... under --require-complete-
+        analysis") must actually be present -- a stderr line that merely
+        *mentions* assurance/incompleteness, crafted by an attacker who
+        controls a symbol/header name embedded in some other diagnostic,
+        must not be mistaken for the real, code-emitted floor notice."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "diff": {
+                    "analysis_assurance": {
+                        "schema_version": 1,
+                        "status": "partial",
+                        "notes": ["unrelated"],
+                    }
+                },
+            },
+            stderr=(
+                "some unrelated warning mentioning analysis assurance "
+                "incomplete and require-complete-analysis but not the real "
+                "diagnostic shape"
+            ),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        # Falls through to the pre-existing catch-all, exactly as it does
+        # with no diagnostic at all -- not a spoofed ANALYSIS_INCOMPLETE.
+        assert outputs["verdict"] == "ERROR", outputs
+
+    def test_shell_metacharacters_in_the_stderr_diagnostic_do_not_execute(
+        self, tmp_path: Path
+    ) -> None:
+        marker = tmp_path / "pwned2"
+        hostile_stderr = (
+            f"Analysis assurance incomplete (status='partial') under "
+            f"--require-complete-analysis: `; touch {marker} ; ` "
+            f"$({marker}) header context asymmetric. Exit code floored to 1."
+        )
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+            },
+            stderr=hostile_stderr,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert not marker.exists(), (
+            "shell metacharacters in the captured stderr diagnostic executed"
+        )
+        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs

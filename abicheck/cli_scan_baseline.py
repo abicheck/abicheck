@@ -1214,8 +1214,22 @@ def _run_baseline_compare(
     # folds both immediately in sequence so a caller cannot pick up one
     # orthogonal axis and forget the other. `0` contribution, and this is a
     # pure no-op, whenever the flag was not passed (default False).
-    from .analysis_assurance import fold_analysis_assurance_exit
+    from .analysis_assurance import (
+        assurance_floor_diagnostic,
+        fold_analysis_assurance_exit,
+    )
 
+    # `compare`'s own `_exit_with_severity_or_verdict` echoes this same
+    # diagnostic to stderr unconditionally (Codex review, PR #780: without
+    # it, `action/run.sh`'s `_assurance_gated()` has nothing to grep for on
+    # the `scan` path -- it only reads stderr, since unlike the coverage
+    # ledger the JSON `analysis_assurance` block is not self-describing
+    # about whether `--require-complete-analysis` was even passed this run).
+    diagnostic = assurance_floor_diagnostic(
+        diff, require_complete=require_complete_analysis, base_exit=exit_code
+    )
+    if diagnostic is not None:
+        click.echo(diagnostic, err=True)
     exit_code = fold_analysis_assurance_exit(
         exit_code, diff, require_complete=require_complete_analysis
     )
