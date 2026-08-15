@@ -34,6 +34,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from abicheck._compiler_options import split_gcc_options
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
@@ -316,23 +318,31 @@ class TestCompileContextForwardingParity:
         assert cmd.count("--compiler-option") == 1
         assert "-DMSG=hello world" in cmd
 
-    def test_gcc_options_unquoted_windows_path_backslashes_survive(self) -> None:
-        """Third-round regression (Codex review, PR #774): a later revision
-        that reverted to plain shlex.split(text, posix=True) fixed the two
-        cases above but then corrupted an ordinary unquoted Windows path
-        (backslashes silently consumed as escape characters). run.sh now
-        delegates to the real abicheck._compiler_options.split_gcc_options
-        instead of reimplementing the tokenizer inline, so this is really a
-        regression test for that import wiring, not a second copy of the
-        tokenizer's own logic."""
-        env = {
-            **_FULL_ENV,
-            "INPUT_GCC_OPTIONS": r"-IC:\mypath\include -DFOO=bar",
-        }
+    def test_gcc_options_unquoted_backslash_matches_the_real_python_helper(
+        self,
+    ) -> None:
+        """Third- and fourth-round regression (Codex review, PR #774): an
+        unquoted backslash's correct handling is platform-dependent by
+        design (``abicheck._compiler_options.split_gcc_options`` dispatches
+        on ``os.name`` -- see that function's own docstring), so this test
+        cannot hardcode one platform's answer without failing on the other
+        CI lanes (a revision doing exactly that failed here on
+        ubuntu-latest/macos-latest for hardcoding the Windows answer).
+        Instead it asserts run.sh's forwarding stays in lockstep with
+        whatever the real Python helper actually resolves to on *this*
+        host -- proving the delegation (added specifically so run.sh
+        carries no second copy of the tokenizer to drift out of sync) is
+        faithful, independent of which platform runs the test. The
+        Windows-specific tokenizer behavior itself is covered directly,
+        regardless of host OS, by
+        ``tests/test_compiler_options.py::TestSplitGccOptionsWindows``."""
+        value = r"-IC:\mypath\include -DFOO=bar"
+        expected_tokens = split_gcc_options(value)
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
         cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
-        assert cmd.count("--compiler-option") == 2
-        assert r"-IC:\mypath\include" in cmd
-        assert "-DFOO=bar" in cmd
+        assert cmd.count("--compiler-option") == len(expected_tokens)
+        for token in expected_tokens:
+            assert token in cmd
 
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(

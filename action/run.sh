@@ -87,14 +87,24 @@ add_flag_shlex_split() {
     add_flag "$flag" "$value"
     return
   fi
-  split="$("$_PY_BIN" -c '
+  # $value is passed on stdin, not as a positional argv element (Codex
+  # review, fresh evidence: a value containing a POSIX-style path segment,
+  # e.g. -I/build/generated, triggered Git Bash/MSYS's automatic argv
+  # path-conversion on the windows-latest CI runner when forwarded as a
+  # positional arg to this native, non-MSYS python.exe -- silently
+  # rewriting it into a Windows path, e.g. inserting "Program Files" and
+  # its embedded space, before this script ever saw it. stdin content is
+  # never subject to that conversion (only actual argv strings are), so
+  # this sidesteps the whole class of corruption regardless of the exact
+  # value shape that triggers it -- not just the one case that surfaced it.
+  split="$(printf '%s' "$value" | "$_PY_BIN" -c '
 import sys
 
 from abicheck._compiler_options import split_gcc_options
 
-for tok in split_gcc_options(sys.argv[1]):
+for tok in split_gcc_options(sys.stdin.read()):
     print(tok)
-' "$value")"
+')"
   while IFS= read -r item; do
     [[ -n "$item" ]] && CMD+=("$flag" "$item")
   done <<< "$split"
