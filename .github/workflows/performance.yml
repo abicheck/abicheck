@@ -95,7 +95,17 @@ jobs:
         id: classify
         env:
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_LABEL: ${{ github.event.label.name }}
+          # The PR's *current* label set, not github.event.label.name --
+          # the latter is populated only on the one labeled/unlabeled event
+          # that added/removed a label and is empty on every other
+          # pull_request sub-event in this workflow's trigger list
+          # (opened/reopened/synchronize). Reading only that field meant a
+          # 'performance' label force-ran the lane on the labeling push
+          # itself, then silently stopped force-running on every later push
+          # to the same still-labeled PR (Codex review) --
+          # pull_request.labels always reflects the PR's current labels
+          # regardless of which sub-event delivered this run.
+          CURRENT_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -113,7 +123,7 @@ jobs:
             # a rename as a plain delete+add, so both paths always appear.
             git diff --no-renames --name-only "${BASE_SHA}...${HEAD_SHA}" \
               | python scripts/classify_perf_paths.py \
-                  --force-label performance --event-label "${EVENT_LABEL:-}"
+                  --force-label performance --current-labels "${CURRENT_LABELS:-}"
           else
             # schedule / workflow_dispatch: no PR base to diff against.
             python scripts/classify_perf_paths.py --always

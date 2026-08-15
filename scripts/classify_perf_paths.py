@@ -223,23 +223,37 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=(
             "The label name that force-runs the lane regardless of changed "
-            "paths (e.g. on a labeled-event trigger). If this matches "
-            "--event-label, run=true unconditionally -- this is the actual "
-            "fix for a pre-existing gap: the workflow's own comment claimed "
-            "adding a 'performance' label re-triggers the lane, but no "
-            "condition ever checked the label name, so a 'performance' "
-            "label on a PR touching no listed path silently did not force "
-            "a run."
+            "paths. If this name is present in --current-labels, run=true "
+            "unconditionally -- this is the actual fix for a pre-existing "
+            "gap: the workflow's own comment claimed adding a 'performance' "
+            "label re-triggers the lane, but no condition ever checked the "
+            "label name, so a 'performance' label on a PR touching no "
+            "listed path silently did not force a run."
         ),
     )
     parser.add_argument(
-        "--event-label",
+        "--current-labels",
         default=None,
-        help="The label name from the triggering event, if any.",
+        help=(
+            "Comma-separated label names currently attached to the PR (e.g. "
+            "github.event.pull_request.labels.*.name, joined). Deliberately "
+            "the PR's *current* label set, not github.event.label.name -- "
+            "the latter is populated only on the one labeled/unlabeled event "
+            "that added/removed a label and is empty on every other "
+            "pull_request sub-event (opened/reopened/synchronize), so a "
+            "later push to an already-'performance'-labeled PR would "
+            "silently stop force-running once the triggering event was no "
+            "longer the labeling itself (Codex review)."
+        ),
     )
     args = parser.parse_args(argv)
 
-    if args.force_label is not None and args.event_label == args.force_label:
+    current_labels = {
+        label.strip()
+        for label in (args.current_labels or "").split(",")
+        if label.strip()
+    }
+    if args.force_label is not None and args.force_label in current_labels:
         run = True
         changed: list[str] = []
     elif args.always:

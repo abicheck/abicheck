@@ -164,7 +164,7 @@ class TestMain:
         assert rc == 0
         assert gh_output.read_text() == "run=true\n"
 
-    def test_force_label_matching_event_label_forces_run_true(
+    def test_force_label_in_current_labels_forces_run_true(
         self, capsys, monkeypatch, tmp_path
     ) -> None:
         # The real bug this closes: the workflow's own comment claimed
@@ -173,7 +173,7 @@ class TestMain:
         # touching no listed path silently did not force a run.
         gh_output = tmp_path / "gh_output.txt"
         rc, _ = self._run(
-            ["--force-label", "performance", "--event-label", "performance"],
+            ["--force-label", "performance", "--current-labels", "performance"],
             stdin="README.md\n",
             env={"GITHUB_OUTPUT": str(gh_output)},
             capsys=capsys,
@@ -182,12 +182,34 @@ class TestMain:
         assert rc == 0
         assert gh_output.read_text() == "run=true\n"
 
-    def test_force_label_not_matching_event_label_falls_through_to_classification(
+    def test_force_label_among_several_current_labels_forces_run_true(
+        self, capsys, monkeypatch, tmp_path
+    ) -> None:
+        # --current-labels carries the PR's whole current label set (e.g.
+        # from github.event.pull_request.labels.*.name), comma-joined --
+        # the force label may be any one of several, not the only one.
+        gh_output = tmp_path / "gh_output.txt"
+        rc, _ = self._run(
+            [
+                "--force-label",
+                "performance",
+                "--current-labels",
+                "bug, performance ,needs-review",
+            ],
+            stdin="README.md\n",
+            env={"GITHUB_OUTPUT": str(gh_output)},
+            capsys=capsys,
+            monkeypatch=monkeypatch,
+        )
+        assert rc == 0
+        assert gh_output.read_text() == "run=true\n"
+
+    def test_force_label_not_in_current_labels_falls_through_to_classification(
         self, capsys, monkeypatch, tmp_path
     ) -> None:
         gh_output = tmp_path / "gh_output.txt"
         rc, _ = self._run(
-            ["--force-label", "performance", "--event-label", "bug"],
+            ["--force-label", "performance", "--current-labels", "bug"],
             stdin="README.md\n",
             env={"GITHUB_OUTPUT": str(gh_output)},
             capsys=capsys,
@@ -195,6 +217,26 @@ class TestMain:
         )
         assert rc == 0
         assert gh_output.read_text() == "run=false\n"
+
+    def test_force_label_survives_a_later_push_with_no_event_label(
+        self, capsys, monkeypatch, tmp_path
+    ) -> None:
+        # Regression guard for the actual Codex finding: a synchronize push
+        # to an already-'performance'-labeled PR carries no
+        # github.event.label (that field only exists on labeled/unlabeled
+        # events) but pull_request.labels still lists it -- the workflow
+        # now passes that current set unconditionally, so the force-run
+        # must still apply here, not just on the original labeling push.
+        gh_output = tmp_path / "gh_output.txt"
+        rc, _ = self._run(
+            ["--force-label", "performance", "--current-labels", "performance"],
+            stdin="README.md\n",
+            env={"GITHUB_OUTPUT": str(gh_output)},
+            capsys=capsys,
+            monkeypatch=monkeypatch,
+        )
+        assert rc == 0
+        assert gh_output.read_text() == "run=true\n"
 
     def test_files_from_file_is_read_instead_of_stdin(
         self, capsys, monkeypatch, tmp_path
