@@ -165,18 +165,32 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
 `compare()` scenario is linear, the lane is **gating**:
 
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
-  inputs), and **automatically on any PR that changes the detector core, the
-  L2/L3/L4/L5 build-source pipeline, or scan/compare/dump orchestration**
-  (`abicheck/diff_*.py`, `checker.py`, `post_processing.py`, `demangle.py`,
-  `binary_fingerprint.py`, `surface.py`, all of `abicheck/buildsource/**`,
-  `service_scan.py`/`service_input_resolution.py`/`scan_engine.py` and the
-  other `service_*`/cache modules, the benchmark scripts, or the perf tests —
-  the `paths` filter previously covered only the detector core, so a real,
-  perf-relevant `buildsource`/scan-orchestration change (e.g. the P0.2 Bazel
-  `aquery`/`cquery` root-target scoping or the P0.3 auto-applied-L3-context-to-
-  L2-headers change) could merge with **no Performance check run at all**).
-  Adding the **`performance`** label re-triggers the lane; for a PR that
-  touches neither, run it on demand with `workflow_dispatch`.
+  inputs), and every PR (`opened`/`reopened`/`synchronize`/`labeled`) — but
+  the four expensive jobs (`scaling`, `regression`, `header-graph-perf`,
+  `header-graph-regression`) only actually run when a `classify` job decides
+  the PR touches performance-sensitive code, the **classifier-job pattern**
+  (`scripts/classify_perf_paths.py`, `tests/test_classify_perf_paths.py`).
+  This replaced an earlier `pull_request.paths:` trigger-level filter, for a
+  real, not theoretical, reason: a trigger-level filter means the workflow's
+  check run never registers at all on a non-matching PR, and the pattern
+  list lived only in unversioned, untestable YAML glob strings — a real,
+  perf-relevant change (the P0.2 Bazel `aquery`/`cquery` root-target scoping,
+  the P0.3 auto-applied-L3-context-to-L2-headers change) merged with **no
+  Performance check run at all** because the list hadn't been updated to
+  cover it (see "Coverage gaps this workflow does not close" below). The
+  `classify` job always runs, diffs the PR's changed files against
+  `PERF_SENSITIVE_PATTERNS` — the detector core (`abicheck/diff_*.py`,
+  `checker.py`, `post_processing.py`, `demangle.py`, `binary_fingerprint.py`,
+  `surface.py`, ...), all of `abicheck/buildsource/**`, scan/compare/dump
+  orchestration (`service_scan.py`/`service_input_resolution.py`/
+  `scan_engine.py` and the other `service_*`/cache modules), the benchmark
+  scripts, and the perf tests — and reports a `run` output the four
+  downstream jobs each gate on (`if: needs.classify.outputs.run == 'true'`).
+  Adding the **`performance`** label force-runs the lane regardless of
+  changed paths (fixed alongside the classify job — the label previously
+  had no effect unless the changed paths also happened to match, despite an
+  existing comment claiming otherwise); for a PR that touches neither, run
+  it on demand with `workflow_dispatch`.
 - **Armed budgets:** the scaling step runs with `--max-exponent 1.4` (the tail,
   largest-two-size slope) and `--max-rss-mb 2048`; the `regression` job blocks
   on a PR-vs-base slowdown exceeding `max(15%, 100ms)` per (scenario, size)
@@ -304,9 +318,27 @@ convention — root `AGENTS.md`):
   up to three L3 collection passes per side for some input shapes. This is
   documented as an accepted, known cost in root `AGENTS.md`'s "Known gaps"
   entry for P0.3 (`abicheck/service_input_resolution.py`), not re-litigated
-  here; it is now at least in scope for `performance.yml`'s `paths` filter
-  (see "CI integration" above), so a change to it will run this workflow even
-  though no benchmark scenario targets its specific cost yet.
+  here; it is now at least in scope for the `classify` job's
+  `PERF_SENSITIVE_PATTERNS` (see "CI integration" above), so a change to it
+  will run this workflow even though no benchmark scenario targets its
+  specific cost yet.
+- **Per-job shard classification.** The `classify` job (see "CI integration"
+  above) reports one shared `run` output gating all four downstream jobs
+  uniformly — the exact same set of jobs a changed path used to trigger
+  together under the old `paths:` filter, just moved into tested code.
+  Splitting `PERF_SENSITIVE_PATTERNS` into separate shards (e.g. one gating
+  only `scaling`/`regression`, another gating only the two `header-graph-*`
+  jobs) would cut CI cost for a PR that only touches one area, but was
+  deliberately not attempted: `check_header_graph_perf.py` imports
+  `abicheck.buildsource.header_graph` (reached through
+  `service._attach_header_graph`), so even a directory as specifically-named
+  as `abicheck/buildsource/` is relevant to the header-graph jobs, not just
+  the compare()-scaling jobs its name suggests — a real per-job split needs a
+  verified transitive-import trace from each script's own entry point, not a
+  guess from a module's directory or filename. A wrong split would silently
+  under-cover one shard, exactly the failure mode the classify job exists to
+  close, so it's tracked here as future work rather than attempted
+  speculatively.
 
 ## Coverage gap analysis & remaining gaps
 

@@ -31,83 +31,20 @@ on:
     - cron: "42 6 * * 1"
   pull_request:
     types: [opened, reopened, synchronize, labeled]
-    paths:
-      - "abicheck/diff_*.py"
-      - "abicheck/checker.py"
-      - "abicheck/checker_policy.py"
-      - "abicheck/post_processing.py"
-      - "abicheck/internal_leak.py"
-      - "abicheck/demangle.py"
-      - "abicheck/binary_fingerprint.py"
-      - "abicheck/diff_namespaces.py"
-      - "abicheck/versioned_symbol_scheme.py"
-      - "abicheck/surface.py"
-      - "abicheck/suppression.py"
-      - "abicheck/html_report.py"
-      - "abicheck/sarif.py"
-      - "abicheck/junit_report.py"
-      - "abicheck/severity.py"
-      - "abicheck/serialization.py"
-      - "abicheck/pe_metadata.py"
-      - "abicheck/macho_metadata.py"
-      - "abicheck/cli_scan.py"
-      - "abicheck/dumper.py"
-      - "abicheck/dwarf_presence.py"
-      - "abicheck/service.py"
-      - "scripts/benchmark_scaling.py"
-      - "tests/test_performance.py"
-      - "tests/test_perf_binary_scan.py"
-      - "tests/test_perf_dump_scaling.py"
-      - "tests/test_benchmark_scaling.py"
-      # Every buildsource module (header/include/call/type graph, L3 build
-      # evidence collection, Bazel/CMake/Ninja/Make adapters, S1-S6 source
-      # replay, the preprocessor pre-scan, ...) — a single directory glob
-      # rather than an enumerated file list, since this tree gained real,
-      # previously-unguarded perf-sensitive changes the old per-file list
-      # missed entirely (P0.2 Bazel aquery/cquery scoping, P0.3 auto-applying
-      # L3 compiler context to every L2 header parse — both merged with no
-      # Performance check run at all; see docs/contribute/performance.md
-      # "Coverage gaps this workflow does not close").
-      - "abicheck/buildsource/**"
-      - "abicheck/provenance.py"
-      - "abicheck/dumper_cache.py"
-      - "abicheck/dumper_ast_config.py"
-      - "abicheck/dumper_sysinc.py"
-      - "abicheck/dumper_clang.py"
-      - "abicheck/dumper_clang_errors.py"
-      - "abicheck/dumper_toolchain.py"
-      - "abicheck/dumper_castxml.py"
-      - "abicheck/compile_context.py"
-      - "abicheck/castxml_policy.py"
-      - "abicheck/header_utils.py"
-      - "action/install-castxml.sh"
-      - "scripts/check_header_graph_perf.py"
-      - "tests/test_header_graph_perf_gate.py"
-      # scan()/dump()/compare() orchestration, resolution, and caching — the
-      # owners of scan latency the path filter above previously missed
-      # entirely (no scan-shaped scenario ran under this workflow at all for
-      # a change to any of these).
-      - "abicheck/service_input_resolution.py"
-      - "abicheck/service_scan.py"
-      - "abicheck/service_dump_pipeline.py"
-      - "abicheck/service_compare_pipeline.py"
-      - "abicheck/service_dump_cache.py"
-      - "abicheck/scan_engine.py"
-      - "abicheck/snapshot_cache.py"
-      - "abicheck/cli_buildsource.py"
-      - "abicheck/cli_buildsource_helpers.py"
-      - "abicheck/cli_dump_helpers.py"
-      - "abicheck/cli_resolve.py"
-      # The eval-suite scan-level scalability harness, and the shared
-      # measurement/threshold modules the two perf-gate scripts above both
-      # import — a change here that regresses the harness's own measurement
-      # (see eval/CLAUDE.md) should be caught the same way a change to
-      # benchmark_scaling.py/check_header_graph_perf.py already is.
-      - "eval/scan_level_scaling.py"
-      - "eval/scaling.py"
-      - "scripts/perf_measurement.py"
-      - "scripts/perf_baseline.py"
-      - ".github/workflows/performance.yml"
+    # No `paths:` filter here (deliberately removed — see the `classify` job
+    # below). A trigger-level `paths:` filter means the workflow itself never
+    # registers a check run on a non-matching PR, and the pattern list lived
+    # only in unversioned, untestable YAML glob strings, hand-maintained by
+    # inspection — both a real, not theoretical, cost: two genuinely
+    # perf-sensitive changes (Bazel/CMake aquery/cquery scoping, auto-applied
+    # L3 compiler context onto every L2 header parse) merged with no
+    # Performance check run at all because the list hadn't been updated (see
+    # docs/contribute/performance.md "Coverage gaps this workflow does not
+    # close"). The classify job below always runs and diffs changed files
+    # against scripts/classify_perf_paths.py's PERF_SENSITIVE_PATTERNS (the
+    # exact same file set this filter used to enumerate, now a tested Python
+    # module instead of inline YAML) to decide whether the expensive
+    # downstream jobs actually run.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -116,15 +53,71 @@ concurrency:
 permissions:
   contents: read
 
-# The PR lane runs whenever a PR changes the detector core (the `paths` filter
-# above), plus on the weekly schedule and on manual dispatch. It now gates on the
-# `--max-exponent` / `--max-rss-mb` budgets, so a catastrophic scaling regression
-# on such a PR blocks until the threshold is met or loosened. Adding the
-# `performance` label re-triggers the lane on a PR (the `labeled` event); for an
-# arbitrary PR that does not touch the detector core, use `workflow_dispatch`.
 jobs:
+  # Classifier-job pattern: this job always runs (no `paths:` gates the
+  # trigger itself), so the workflow's check run always registers on every
+  # qualifying PR event — closing the structural gap a trigger-level `paths:`
+  # filter has (a required check that may never appear for a given PR is a
+  # different, riskier failure mode than one that appears and reports
+  # "skipped"). `run` decides whether the four expensive downstream jobs
+  # actually execute:
+  #  - pull_request: diffs the PR's changed files against
+  #    scripts/classify_perf_paths.py's PERF_SENSITIVE_PATTERNS.
+  #  - labeled event with the `performance` label: force-runs regardless of
+  #    changed paths (this is the actual fix for a pre-existing gap — the
+  #    workflow used to claim in a comment that adding this label re-triggers
+  #    the lane, but nothing ever checked the label name, so it silently
+  #    didn't unless the changed paths also happened to match).
+  #  - schedule / workflow_dispatch: always runs (there is no PR base to diff
+  #    against, and `paths:` never applied to these triggers either — this
+  #    preserves that pre-existing behaviour).
+  classify:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.classify.outputs.run }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # fetch-depth 0: a shallow (default depth-1) checkout has no
+          # history to diff a PR's base against. This job does no other
+          # git-history-sensitive work, and a full clone is cheap next to the
+          # venv-install-and-benchmark cost the downstream jobs pay.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+
+      - name: Determine changed files and classify
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
+              | python scripts/classify_perf_paths.py \
+                  --force-label performance --event-label "${EVENT_LABEL:-}"
+          else
+            # schedule / workflow_dispatch: no PR base to diff against.
+            python scripts/classify_perf_paths.py --always
+          fi
+
+  # The PR lane runs whenever the `classify` job above decides the PR touches
+  # performance-sensitive code, plus on the weekly schedule and on manual
+  # dispatch. It gates on the `--max-exponent` / `--max-rss-mb` budgets, so a
+  # catastrophic scaling regression on such a PR blocks until the threshold
+  # is met or loosened.
   scaling:
     name: Comparison scaling benchmark
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Gating: every compare() scenario is linear (fixes #8/#9), so a generous
@@ -248,7 +241,8 @@ jobs:
   # this into a no-op comparison either.
   regression:
     name: Baseline regression (PR vs base)
-    if: github.event_name == 'pull_request'
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -343,6 +337,8 @@ jobs:
   # version gate rejects, silently narrowing every run to clang-only).
   header-graph-perf:
     name: Header-graph attach-cost (trend)
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
     # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
     # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
     # asset for. The floating alias silently moves between releases, so it
@@ -410,7 +406,8 @@ jobs:
   # needs no bootstrap period the way a committed number would.
   header-graph-regression:
     name: Header-graph attach-cost regression (PR vs base)
-    if: github.event_name == 'pull_request'
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.run == 'true'
     # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
     # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
     # asset for. The floating alias silently moves between releases, so it
