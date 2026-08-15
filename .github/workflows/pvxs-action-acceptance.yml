@@ -49,6 +49,7 @@ jobs:
             new_label: 'master@788f838'
 
     env:
+      ABICHECK_MAIN_SHA: '5b529896eff680203230ec1a635c669ee3334d6e'
       SETUP_PATH: .ci-local
       SET: defaults
       CMP: gcc
@@ -61,12 +62,18 @@ jobs:
       - name: Checkout abicheck Action under test
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Record abicheck revision
+      - name: Verify Action code is fresh main plus only this harness
         run: |
-          echo "abicheck=$(git rev-parse HEAD)"
-          test "$(git rev-parse HEAD)" = "5b529896eff680203230ec1a635c669ee3334d6e"
+          set -euxo pipefail
+          echo "acceptance_head=$(git rev-parse HEAD)"
+          echo "abicheck_main=$ABICHECK_MAIN_SHA"
+          mapfile -t changed < <(git diff --name-only "$ABICHECK_MAIN_SHA"...HEAD)
+          printf 'branch delta: %s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = '.github/workflows/pvxs-action-acceptance.yml'
 
       - name: Checkout pinned PVXS repository
         uses: actions/checkout@v6
@@ -348,7 +355,8 @@ jobs:
           {
             echo '## PVXS Action acceptance — ${{ matrix.old_label }} → ${{ matrix.new_label }}'
             echo
-            echo '- abicheck: `5b529896eff680203230ec1a635c669ee3334d6e`'
+            echo '- abicheck base main: `5b529896eff680203230ec1a635c669ee3334d6e`'
+            echo '- acceptance head: `${{ github.sha }}`'
             echo '- PVXS old: `${{ steps.build.outputs.old_sha }}`'
             echo '- PVXS new: `${{ steps.build.outputs.new_sha }}`'
             echo '- self libpvxs: `${{ steps.self_pvxs.outputs.verdict }}` / `${{ steps.self_pvxs.outputs.exit-code }}`'
