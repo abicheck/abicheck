@@ -107,8 +107,17 @@ for compact human output, and every machine consumer already has the full JSON
 `summary` block. So `--stat` is a third spelling of an answer the CLI gives
 twice already.
 
-- Remove `--stat` and its plumbing (`cli.py`'s `stat=` threading through
-  `_emit_report`/`announce_coverage_floor`).
+- Remove `--stat` and every path its `stat=` flag threads through — it is not
+  one chokepoint: `cli.py`'s `_render_output` → `service.render_output`;
+  `cli_compare_helpers._render_compare_report` and both of its call sites
+  (primary output, and the always-unfiltered secondary output, which already
+  passes `stat=False`); `_announce_exit_scheme` and
+  `_exit_with_severity_or_verdict`; `contract_coverage_exit.announce_coverage_floor`'s
+  own `stat=` parameter; and `cli.py`'s structured-format branch
+  (`if stat or fmt not in {"markdown", "html", "review"}`), which is where the
+  suppression of human-readable extras is actually decided. Removing the flag
+  without also collapsing that branch is how a structured or secondary-output
+  path gets left half-wired.
 - Any profile or docs snippet using `--stat` moves to `--format review`.
 - `--show-only` interactions documented against `--stat` are re-stated against
   `--format review`.
@@ -157,8 +166,16 @@ values; the annotation count cap; additions annotated only under an explicit
 Action input; suppressed and out-of-contract findings never becoming gating
 annotations; annotations reflecting the same scoped gate the report does.
 
-Action inputs `annotate` / `annotate-additions` are **kept** — only the CLI
-flags go away.
+**The Action inputs do not exist yet — they must be added, not "kept".**
+`action.yml` has no `annotate` or `annotate-additions` input today; a workflow
+that wants annotations passes the CLI flags through `extra-args`. So removing
+the CLI flags without the same PR introducing the inputs would leave published
+recipes forwarding a deleted option and exiting `64` before any renderer runs.
+PR 1 must therefore, in one change: define `annotate` / `annotate-additions`
+inputs in `action.yml`; implement the renderer over the report the Action
+already produces; update every first-party workflow, recipe and doc snippet
+that passes these through `extra-args`; and state the migration for external
+callers ("move `--annotate` out of `extra-args` into the `annotate` input").
 
 **Tests.** A saved report fixture must produce, through the Action's renderer,
 byte-identical annotations to what the CLI emitted for the same report before
@@ -298,8 +315,13 @@ The report keeps stating both halves explicitly, so the number is explainable:
           "reason": "addition configured as error"}}
 ```
 
-**Atomic change set:** remove the flag from `compare` and `scan`; remove the
-matching Action input; remove or replace `.abicheck.yml`'s `exit_code_scheme`;
+**Atomic change set:** remove the flag from `compare` and `scan`; migrate the
+Action side — there is **no** `exit-code-scheme` input in `action.yml` to
+remove, so the real work is auditing `extra-args` usage in first-party
+workflows, recipes and docs, and correcting `action.yml`'s own prose (its
+`verdict` output description names `--exit-code-scheme` today), with a
+policy-oriented input introduced only if a caller genuinely needs one; remove
+or replace `.abicheck.yml`'s `exit_code_scheme`;
 make packs state gate *policy* rather than select an algorithm
 (`pack_application.py` currently reads a resolved `gate.exit_code_scheme` —
 that read becomes a policy read); record the effective gate mode in
