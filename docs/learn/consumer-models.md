@@ -55,22 +55,27 @@ model — while the struct-layout question itself stayed exactly the same.
 | **Plugin implementation** (your library *is* the plugin, loaded by someone else's host) | The host's fixed entry-point symbols, callback signatures, and any host-defined struct it fills in | A changed/removed entry point the host still expects, an incompatible callback signature | [Plugin Systems](../use/plugin-systems.md), [Part 0 §5 — Plugin/SDK with `dlopen`](abi-series/00-product-contract.md#plugin-sdk-with-dlopen) |
 | **Host loading plugins** (your library loads *someone else's* code) | Its own advertised plugin ABI — the entry points and structs it promises to call correctly | Its own contract drifting out from under plugins that were built against an earlier version | [Plugin Systems](../use/plugin-systems.md) |
 | **FFI / language binding** | A hand-written or generated declaration of your C ABI in another language's own type system (ctypes, cffi, JNI, P/Invoke, …) — frozen at generation time, not re-derived from your headers automatically | A layout or signature change the binding's own frozen declarations don't reflect — the binding has no compiler to catch the drift for it | [Part 4 — C++ ABI](abi-series/04-cpp-abi.md) (for the C++-to-C-ABI boundary), [Behavioral & Semantic Compatibility](behavioral-compatibility.md) |
-| **Header-only consumer** | Nothing pre-baked at all — every consumer recompiles your *implementation*, not just your interface, on every build | A source-incompatible header change, *or* a behavioral/semantic change invisible to the compiler entirely | [Static & Header-Only Contracts](static-and-header-only.md) |
-| **Static-linked consumer** | Your object code, linked directly into its own binary at build time — no runtime symbol resolution, no SONAME | Nothing at *runtime* (there's no shared object left to swap) — the contract is entirely at build time: source + archive/object-format compatibility | [Static & Header-Only Contracts](static-and-header-only.md) |
+| **Header-only consumer** | Every consumer recompiles your *implementation*, not just your interface, on every build — but an already-built header-only consumer still has whatever it inlined/instantiated baked into its binary at that point, the same as any other compiled artifact | A source-incompatible header change, a behavioral/semantic change invisible to the compiler entirely, *or* — for two independently-built components (a host and a plugin, say) that pulled in different header revisions — an ODR/ABI mismatch between what each baked in | [Static & Header-Only Contracts](static-and-header-only.md) |
+| **Static-linked consumer** | Your object code, linked directly into its own binary at build time — no runtime symbol resolution, no SONAME | Ordinarily nothing at *runtime*, since the typical case rebuilds and relinks from source — but a consumer that keeps *precompiled* object files and only relinks them against a new archive still has the old layout baked into those objects, which is the same silent-corruption failure a dynamically-linked application has, just discovered at link time instead of load time | [Static & Header-Only Contracts](static-and-header-only.md) |
 | **Bundle / product-release component** | Not just your library's own contract, but the *intra-bundle* relationships — which other components provide symbols it needs, which SONAMEs/versions it was released alongside | A sibling component's change that breaks a relationship your library itself never touched | [Part 6 — Transitive Breaks](abi-series/06-transitive-breaks.md), [Multi-Binary Releases](../use/multi-binary.md) |
 
 Two of these are worth naming as the genuine edge cases they are:
 
-- **FFI bindings are structurally blind.** Every other row has *some*
-  mechanism that would at least fail loudly — a missing symbol at link time,
-  a compile error against changed headers. A hand-maintained language
-  binding has no such backstop: its own declarations are just data, frozen
-  the moment someone wrote or generated them, with nothing forcing them to
-  track your library's real ABI. A layout change here doesn't fail to
-  compile; it silently reads or writes the wrong bytes at runtime. This is
-  the single strongest argument for keeping a binding's declarations
-  machine-generated from the same headers/snapshot you already maintain,
-  rather than hand-transcribed once and left to drift.
+- **FFI bindings have no regeneration step at all — not even the silent one
+  every other shape gets.** A layout change silently corrupts an
+  already-built dynamically-linked application too (that's the whole
+  point of [Part 1](abi-series/01-foundations.md) — an ABI break is
+  silent, not a loud link error), so "loud vs. silent failure" isn't what
+  sets FFI bindings apart. What's missing is narrower and more specific: a
+  recompiled-source consumer's next build re-reads your real headers, and a
+  static-linked consumer's next relink re-reads your real object code —
+  both *automatically* pick up a change the next time they touch your
+  library at all. A hand-maintained language binding has no such step: its
+  declarations are just data, frozen the moment someone wrote or generated
+  them, with nothing that forces them to be regenerated when your ABI
+  changes. This is the single strongest argument for keeping a binding's
+  declarations machine-generated from the same headers/snapshot you already
+  maintain, rather than hand-transcribed once and left to drift.
 - **Header-only has no binary boundary to fall back on at all.** Every other
   row eventually reduces to "did the *interface* change" in some form abicheck
   can observe. A header-only library has no compiled artifact of its own to
@@ -95,9 +100,16 @@ resolves most real disagreements — two people can each be completely correct
 about a change's effect while silently assuming different consumer models.
 [abicheck's plugin/host-contract tooling](../use/plugin-systems.md) and
 [per-consumer application checks](../use/multi-binary.md) exist specifically
-because the library's own global verdict is the *dynamically-linked
-application* row's answer — informative, but not automatically the right
-answer for every other row a real product ships to.
+because a library's own global verdict answers "does this change violate the
+declared ABI/API policy for the whole public surface" — a real, useful
+question, but not automatically the same question any *one* real consumer
+needs answered. A dynamically-linked application, for instance, is
+unaffected by a policy-scored `API_BREAK` that's purely source-level (an
+already-built binary never recompiles), while a plugin evaluated only
+against its host's specific required entry points can pass even when the
+library's own global verdict is worse. Naming the actual consumer in front
+of you is what turns "the tool says X" into "X, and here's whether that
+matters for *this* audience."
 
 ---
 
