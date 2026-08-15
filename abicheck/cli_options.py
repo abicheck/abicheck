@@ -676,7 +676,7 @@ def compile_context_options(func: F) -> F:
     )(func)
     # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
     # The one spelling for the cross-toolchain family. The former
-    # --compiler/--compiler-prefix/--gcc-option names were always misleading (each
+    # --gcc-path/--gcc-prefix/--gcc-option names were always misleading (each
     # accepts a Clang cross-compiler binary just as well) and are removed
     # outright rather than kept as aliases -- carrying two spellings meant a
     # per-invocation conflict resolver whose only correct answer for the

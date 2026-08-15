@@ -534,7 +534,7 @@
       "roots": [
         ".agents/skills/native-api-evolution"
       ],
-      "tree": "sha256:38895d73652f1d9891d8b06a7da9565c8f9ce307c1a4293670134759b8f8c363"
+      "tree": "sha256:923023b7e940e24e5744065d6e96d09e7b7b97e104b014b3d7a5064d92b26bd3"
     },
     "native-binary-compatibility-review": {
       "affects": [
@@ -543,7 +543,7 @@
       "roots": [
         ".agents/skills/native-binary-compatibility-review"
       ],
-      "tree": "sha256:b3922a764441f92454e64c0eb5d2271a64d1f8ab4428ca09e137f3fe4e74bf59"
+      "tree": "sha256:2c9b67af53eee000dd7755ee614494b52005521e63b0c979e0cb23ae46ed437b"
     },
     "native-consumer-compatibility": {
       "affects": [
@@ -552,7 +552,7 @@
       "roots": [
         ".agents/skills/native-consumer-compatibility"
       ],
-      "tree": "sha256:487ed3e9e1d141ab1cd8e6fec50a8ef8f81c20d3b3356cad1496774fec33fc0e"
+      "tree": "sha256:46c7f2310633f62131038430d49e167a7fc25bf1b39834ae91a81cf294301d79"
     },
     "native-release-compatibility": {
       "affects": [
@@ -561,7 +561,7 @@
       "roots": [
         ".agents/skills/native-release-compatibility"
       ],
-      "tree": "sha256:60898ffce9730c9298be7c58da9a95fea79a73859f10d80a0d0a4e24d25ceabb"
+      "tree": "sha256:a15294e784b722771f810e11b50972aa3c7f4b3f34944cf994186f25569fc9b0"
     }
   }
 }

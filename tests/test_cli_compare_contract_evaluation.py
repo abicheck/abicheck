@@ -545,7 +545,7 @@ class TestShowFilteredAuditLedger:
 
 class TestReleaseFanOutContractParity:
     """CLI-audit P1 (release/package contract parity): the per-library
-    directory/package fan-out now threads --contract/--contract
+    directory/package fan-out now threads --contract
     straight into each pair's own service.run_compare() call, the exact
     same Tier-2 chokepoint a single-pair `compare` uses -- so a library
     compared through the fan-out gets the identical contract decision it
@@ -655,8 +655,8 @@ class TestReleaseFanOutContractParity:
         assert result.exit_code == 4, result.output
         lib_report = json.loads((out_dir / "libfoo.json").read_text())
         assert any("contract_relevance" in c for c in lib_report["changes"]), (
-            "--contract public alone must stamp contract_relevance, same as "
-            "--contract --contract public would"
+            "--contract public must stamp contract_relevance on a directory/"
+            "package compare, same as on a single pair"
         )
 
     def test_pack_still_rejected_on_directory_inputs(self, tmp_path):

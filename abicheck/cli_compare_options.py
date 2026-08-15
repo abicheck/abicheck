@@ -141,9 +141,9 @@ def _reject_set_input_flags(
             "hatch (a mismatch there still raises unhandled). Compare the "
             "specific library individually to use it."
         )
-    # --contract/--contract are deliberately NOT rejected here
+    # --contract is deliberately NOT rejected here
     # (CLI-audit P1, release/package contract parity): the per-library
-    # fan-out now threads both straight into each pair's own
+    # fan-out now threads it straight into each pair's own
     # service.run_compare(contract_evaluation=..., contract_mode=...) call
     # (compare_release_cmd), the exact same Tier-2 chokepoint a single-pair
     # `compare` uses -- so a library compared through the fan-out gets the
