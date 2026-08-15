@@ -114,6 +114,22 @@ jobs:
           # from "gating" to "crashing before the first mutant" without any
           # change to this repository.
           pip install -e ".[dev]" 'mutmut>=3.7,<4'
+      - name: Verify the parser against a real mutmut run
+        # This job is the only CI lane with mutmut installed, and every pytest
+        # selector in the repo (including this workflow's own
+        # pytest_add_cli_args) excludes `slow` — so without an explicit step
+        # the one test that validates the parser against mutmut's *actual*
+        # output never runs anywhere, and the parser's validation collapses
+        # back to hand-written fixtures. That is the failure AGENTS.md's
+        # third-party-boundary rule is about (Codex review).
+        #
+        # ABICHECK_MIN_EXECUTED is conftest.py's silent-skip guard: the session
+        # fails unless a test actually ran, so a skipif that starts matching
+        # cannot quietly turn this green with zero work done.
+        env:
+          ABICHECK_MIN_EXECUTED: '1'
+        run: python -m pytest tests/test_mutation_results.py -m slow -q
+
       - name: Restore mutmut cache
         # PR lane only, and deliberately so. mutmut skips a mutant whose
         # *source function hash* is unchanged, so a warm cache reuses verdicts

@@ -422,6 +422,23 @@ def main(argv: list[str] | None = None) -> int:
     unresolved = count_unresolved(text)
     by_module = survivors_by_module(records)
 
+    # Two independent sources must agree. `mutmut results`' per-mutant listing
+    # and `mutmut export-cicd-stats`' counters are produced by the same run, so
+    # a disagreement means this parser no longer understands the output — which
+    # a permitted `mutmut>=3.7,<4` update can cause. Without this check the
+    # unparsed output degrades to zero survivors while the stats report real
+    # ones, and `_measurement_is_complete` accepts the stats as proof the run
+    # happened, so every gate passes (Codex review).
+    if stats is not None and "survived" in stats and stats["survived"] != survivors:
+        print(
+            f"ERROR: parsed {survivors} surviving mutant(s) but "
+            f"mutants/mutmut-cicd-stats.json reports {stats['survived']}. The "
+            "two disagree, so this build's parser no longer matches mutmut's "
+            "output — refusing to gate on either number. Check whether mutmut "
+            "changed its `results` format."
+        )
+        return 1
+
     msg = f"mutation-score: {survivors} surviving mutant(s)"
     if stats:
         msg += f" of {stats.get('total', '?')} total"

@@ -565,3 +565,45 @@ def test_a_pure_deletion_still_gates_the_function_it_was_deleted_from(
     )
     assert rc == 1
     assert "abicheck/diff_types.py::alpha" in capsys.readouterr().out
+
+
+# --- Codex review: two independent sources must agree ------------------------
+
+
+def test_a_parser_stats_disagreement_fails_instead_of_gating(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The failure mode a permitted `mutmut>=3.7,<4` update can cause.
+
+    If mutmut changes its `results` format, the listing parses to nothing, the
+    summary fallback yields 0, and the exported stats still prove mutants ran —
+    so `_measurement_is_complete` is satisfied and every gate passes while real
+    survivors exist. Cross-checking the two sources is what makes that
+    detectable rather than silent.
+    """
+    results = _write(tmp_path, "r.txt", "some future format nobody parses\n")
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda d: {"total": 40, "survived": 7, "killed": 33}
+    )
+    rc = gate.main(["--results-file", results, "--baseline", "0"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "parsed 0 surviving mutant(s)" in out
+    assert "reports 7" in out
+
+
+def test_agreeing_sources_are_accepted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Negative control — the check must not fire on a healthy run."""
+    results = _write(tmp_path, "r.txt", _TWO_MODULES)
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda d: {"total": 40, "survived": 3, "killed": 37}
+    )
+    assert gate.main(["--results-file", results, "--baseline", "99"]) == 0
+
+
+def test_absent_stats_do_not_trigger_the_cross_check(tmp_path: Path) -> None:
+    """`--results-file` without a mutants/ directory is a legitimate mode."""
+    results = _write(tmp_path, "r.txt", _TWO_MODULES)
+    assert gate.main(["--results-file", results, "--baseline", "99"]) == 0

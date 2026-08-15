@@ -157,6 +157,36 @@ def test_checkout_is_unshallow_for_the_diff_scoped_lane() -> None:
     assert checkout.get("with", {}).get("fetch-depth") == 0
 
 
+def test_the_real_mutmut_parser_test_runs_in_this_lane() -> None:
+    """This is the only CI lane with mutmut installed, and every pytest
+    selector in the repo excludes `slow` — so without an explicit step the one
+    test that validates the parser against mutmut's *actual* output runs
+    nowhere, and the parser falls back to being checked only against
+    hand-written fixtures (Codex review)."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    step = next(
+        (s for s in steps if "test_mutation_results.py" in str(s.get("run", ""))), None
+    )
+    assert step is not None, (
+        "no step runs tests/test_mutation_results.py — the real-tool contract "
+        "would never execute in CI"
+    )
+    assert "-m slow" in step["run"], "the real-run test carries the slow marker"
+    assert step.get("env", {}).get("ABICHECK_MIN_EXECUTED") == "1", (
+        "without conftest.py's silent-skip guard, a skipif that starts "
+        "matching turns this step green with zero tests run"
+    )
+
+
+def test_that_step_precedes_the_mutation_run() -> None:
+    """Cheap check first: no point spending the mutation budget when the
+    parser that reads its output is already known to be wrong."""
+    names = [s.get("name", "") for s in _workflow()["jobs"]["mutmut"]["steps"]]
+    verify_idx = next(i for i, n in enumerate(names) if "parser against a real" in n)
+    run_idx = next(i for i, n in enumerate(names) if "Run mutation testing" in n)
+    assert verify_idx < run_idx
+
+
 def test_mutmut_is_version_pinned() -> None:
     """An unpinned install is how this lane silently changed behaviour before."""
     text = WORKFLOW.read_text(encoding="utf-8")
