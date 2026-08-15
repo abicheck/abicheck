@@ -284,8 +284,22 @@ jobs:
           # any real performance change (Codex review on PR #768). Running one
           # harness against both installs removes both problems at the root
           # instead of chasing them per-flag/per-methodology-change.
+          #
+          # --no-memory on BOTH sides (Codex review, fresh evidence after the
+          # median-statistic fix above): measure()'s memory pass isn't free
+          # timing-wise -- between each size's timed repeats and the next
+          # size's, it clears every live functools.lru_cache (including
+          # abicheck/demangle.py's) and runs one extra untimed "cold" call to
+          # trace peak heap. A scenario whose per-size inputs share cached
+          # state across sizes (e.g. overlapping demangled symbol names as n
+          # grows) would then start each next size's timed loop from a
+          # cache state base's own memory pass just cleared, while head (with
+          # --no-memory, no clear) carries that cache warmth forward -- a
+          # systematic timing bias between the two sides with nothing to do
+          # with any real product change. Timing-only on both sides removes
+          # this at the root instead of accepting it as comparison noise.
           ./base_env/bin/python head/scripts/benchmark_scaling.py \
-            --sizes 500 1000 2000 --repeat 5 \
+            --sizes 500 1000 2000 --repeat 5 --no-memory \
             --meta git_sha=${{ github.event.pull_request.base.sha }} \
             --meta side=base \
             --meta os_image=${ImageOS:-unknown} \

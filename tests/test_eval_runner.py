@@ -97,7 +97,11 @@ def test_drift_rows_flags_mismatch_and_error_only() -> None:
     payload = {
         "results": [
             {"lib": "ok", "verdict": "BREAKING", "verdict_matches_expected": True},
-            {"lib": "drift", "verdict": "COMPATIBLE", "verdict_matches_expected": False},
+            {
+                "lib": "drift",
+                "verdict": "COMPATIBLE",
+                "verdict_matches_expected": False,
+            },
             {"lib": "boom", "error": "dump failed"},
         ]
     }
@@ -136,6 +140,67 @@ def test_dump_sources_uses_depth_source_not_the_retired_full_rung(
     assert cmd[depth_index + 1] == "source"
 
 
+class TestSideHasLayerEvidence:
+    """Direct tests of the primitive `_row_has_full_evidence` builds on —
+    count AND status must both check out, independent of any one caller's
+    row-shaped context (mirrors this repo's own "primitive-level property
+    tests" convention for a reusable predicate)."""
+
+    def test_positive_count_and_present_status_is_evidence(self) -> None:
+        row = {
+            "old_coverage": {
+                "l5_nodes": 7,
+                "coverage_status": {"L5_source_graph": "present"},
+            }
+        }
+        assert runner._side_has_layer_evidence(
+            row, "old_coverage", "l5_nodes", "L5_source_graph"
+        )
+
+    def test_zero_count_is_not_evidence_even_if_status_present(self) -> None:
+        row = {
+            "old_coverage": {
+                "l5_nodes": 0,
+                "coverage_status": {"L5_source_graph": "present"},
+            }
+        }
+        assert not runner._side_has_layer_evidence(
+            row, "old_coverage", "l5_nodes", "L5_source_graph"
+        )
+
+    def test_positive_count_with_partial_status_is_not_evidence(self) -> None:
+        # The exact shape this fix closes: a positive count from fallback
+        # nodes folded in from L3, while the real L5 pass degraded.
+        row = {
+            "old_coverage": {
+                "l5_nodes": 7,
+                "coverage_status": {"L5_source_graph": "partial"},
+            }
+        }
+        assert not runner._side_has_layer_evidence(
+            row, "old_coverage", "l5_nodes", "L5_source_graph"
+        )
+
+    def test_positive_count_with_missing_status_key_is_not_evidence(self) -> None:
+        # No coverage_status entry for this layer at all -- conservative
+        # default (not "present" unless explicitly recorded as such).
+        row = {"old_coverage": {"l5_nodes": 7, "coverage_status": {}}}
+        assert not runner._side_has_layer_evidence(
+            row, "old_coverage", "l5_nodes", "L5_source_graph"
+        )
+
+    def test_missing_coverage_status_dict_entirely_is_not_evidence(self) -> None:
+        row = {"old_coverage": {"l5_nodes": 7}}
+        assert not runner._side_has_layer_evidence(
+            row, "old_coverage", "l5_nodes", "L5_source_graph"
+        )
+
+    def test_missing_side_entirely_is_not_evidence(self) -> None:
+        assert not runner._side_has_layer_evidence(
+            {}, "old_coverage", "l5_nodes", "L5_source_graph"
+        )
+
+
 class TestSourceTierBroken:
     def _row(
         self,
@@ -148,13 +213,21 @@ class TestSourceTierBroken:
         old_l3: int | None = None,
         old_l4: int | None = None,
         old_l5: int | None = None,
+        l3_status: str = "present",
+        l4_status: str = "present",
+        l5_status: str = "present",
+        old_l3_status: str | None = None,
+        old_l4_status: str | None = None,
+        old_l5_status: str | None = None,
     ) -> dict:
         """A source-tier row shaped like `scan_source_one()`'s real output —
         both `old_coverage` and `new_coverage` present, with all three
-        `_EVIDENCE_LAYERS` fact counts. Every `old_*` defaults to its `l3`/
-        `l4`/`l5` counterpart (both sides "healthy"); pass one explicitly to
-        build a one-sided row (only one snapshot actually captured that
-        layer's evidence).
+        `_EVIDENCE_LAYERS` fact counts *and* their `coverage_status` entries
+        (`abicheck.buildsource.model.CoverageStatus` — "present"/"partial"/
+        "not_collected"). Every `old_*` defaults to its `l3`/`l4`/`l5`
+        counterpart (both sides "healthy"); pass one explicitly to build a
+        one-sided row (only one snapshot actually captured that layer's
+        evidence, or only one side's status is degraded).
         """
         if error is not None:
             return {"lib": lib, "error": error}
@@ -165,11 +238,25 @@ class TestSourceTierBroken:
                 "l3_compile_units": l3 if old_l3 is None else old_l3,
                 "l4_declarations": l4 if old_l4 is None else old_l4,
                 "l5_nodes": l5 if old_l5 is None else old_l5,
+                "coverage_status": {
+                    "L3_build": l3_status if old_l3_status is None else old_l3_status,
+                    "L4_source_abi": l4_status
+                    if old_l4_status is None
+                    else old_l4_status,
+                    "L5_source_graph": l5_status
+                    if old_l5_status is None
+                    else old_l5_status,
+                },
             },
             "new_coverage": {
                 "l3_compile_units": l3,
                 "l4_declarations": l4,
                 "l5_nodes": l5,
+                "coverage_status": {
+                    "L3_build": l3_status,
+                    "L4_source_abi": l4_status,
+                    "L5_source_graph": l5_status,
+                },
             },
         }
 
@@ -252,6 +339,38 @@ class TestSourceTierBroken:
         assert reason is not None
         assert "1/1" in reason
 
+    def test_flags_partial_l5_status_despite_nonzero_node_count(self) -> None:
+        # Codex review, fresh evidence: when source replay's L5 call/type
+        # pass degrades, source_graph.nodes can still be populated by
+        # fallback nodes folded in from L3 targets/compile units/files, so
+        # l5_nodes stays positive while the manifest's own coverage table
+        # correctly records L5_source_graph: partial. A count-only check
+        # would misread this as full L5 evidence.
+        payload = {"source_results": [self._row("zlib", l5_status="partial")]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "1/1" in reason
+
+    def test_flags_not_collected_l3_status_despite_nonzero_count(self) -> None:
+        # The same reasoning applies to every layer, not just L5.
+        payload = {"source_results": [self._row("zlib", l3_status="not_collected")]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+
+    def test_flags_partial_status_on_only_one_side(self) -> None:
+        # A degraded status on just the OLD side (new side fully "present")
+        # must still fail -- both-sides-complete is required, mirroring the
+        # existing one-sided-count regression guard below.
+        payload = {"source_results": [self._row("zlib", old_l5_status="partial")]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+
+    def test_none_when_every_layer_status_is_present(self) -> None:
+        # Sanity check: the default _row() (all "present") must still pass,
+        # so this fix doesn't turn a genuinely healthy run into a false red.
+        payload = {"source_results": [self._row("zlib")]}
+        assert runner.source_tier_broken(payload) is None
+
     def test_flags_evidence_present_on_only_one_side(self) -> None:
         # Regression guard (Codex review): a row whose OLD snapshot silently
         # captured zero L3 units while the NEW one succeeded must NOT count
@@ -297,7 +416,10 @@ def test_source_entries_filters_to_source_blocks_and_only() -> None:
             {"lib": "zstd", "source": {"repo": "r2"}},
         ]
     }
-    assert [e["lib"] for e in runner._source_entries(manifest, None)] == ["zlib", "zstd"]
+    assert [e["lib"] for e in runner._source_entries(manifest, None)] == [
+        "zlib",
+        "zstd",
+    ]
     assert [e["lib"] for e in runner._source_entries(manifest, {"zstd"})] == ["zstd"]
 
 
@@ -321,12 +443,20 @@ def test_render_report_has_source_section_with_coverage() -> None:
         "tier": "source",
         "source_results": [
             {
-                "lib": "zlib", "old": "v1.2.13", "new": "v1.3.1",
+                "lib": "zlib",
+                "old": "v1.2.13",
+                "new": "v1.3.1",
                 "verdict": "COMPATIBLE",
                 "new_coverage": runner._source_coverage(_snap()),
-                "build_s": 5.0, "compare_s": 1.0,
+                "build_s": 5.0,
+                "compare_s": 1.0,
             },
-            {"lib": "broken", "old": "x", "new": "y", "error": "skipped: missing cmake"},
+            {
+                "lib": "broken",
+                "old": "x",
+                "new": "y",
+                "error": "skipped: missing cmake",
+            },
         ],
     }
     rep = runner.render_report(payload)
@@ -338,12 +468,22 @@ def test_render_report_has_source_section_with_coverage() -> None:
 
 def test_render_report_binary_section_shows_verdict_distribution() -> None:
     payload = {
-        "generated_utc": "t", "abicheck_version": "v",
-        "host": {"platform": "linux", "python": "3.13"}, "tier": "binary",
+        "generated_utc": "t",
+        "abicheck_version": "v",
+        "host": {"platform": "linux", "python": "3.13"},
+        "tier": "binary",
         "results": [
-            {"lib": "zstd", "old": "1.5.5", "new": "1.5.7", "verdict": "BREAKING",
-             "verdict_matches_expected": True, "breaking": 3, "risk_changes": 0,
-             "compatible_additions": 1, "total_changes": 4},
+            {
+                "lib": "zstd",
+                "old": "1.5.5",
+                "new": "1.5.7",
+                "verdict": "BREAKING",
+                "verdict_matches_expected": True,
+                "breaking": 3,
+                "risk_changes": 0,
+                "compatible_additions": 1,
+                "total_changes": 4,
+            },
         ],
     }
     rep = runner.render_report(payload)

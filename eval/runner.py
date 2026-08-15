@@ -372,35 +372,56 @@ def drift_rows(payload: dict) -> list[dict]:
 
 
 #: The evidence layers `source_scan_summary` requires -- (label, the
-#: `_source_coverage()` fact-count field that layer is "present" via). L3
-#: (compile units) / L4 (declarations) / L5 (graph nodes) are exactly the
-#: three layers `--depth source` promises to collect (see the `dump
-#: --sources` docstring in `abicheck.cli_options`), so this is "check the
-#: PROMISED L3/L4/L5 evidence actually showed up," not an arbitrary subset.
-#: L4/L5 checks are meaningful specifically because the eval-suite CI job
-#: always installs clang+cmake (see eval-suite.yml's source-tier job) -- a
-#: real `--depth source` run in that environment should reach every layer,
-#: so a captured-but-empty L4/L5 is exactly as informative a signal as an
-#: empty L3 already was, not a normal degraded-environment case to tolerate.
-_EVIDENCE_LAYERS: tuple[tuple[str, str], ...] = (
-    ("L3", "l3_compile_units"),
-    ("L4", "l4_declarations"),
-    ("L5", "l5_nodes"),
+#: `_source_coverage()` fact-count field that layer is "present" via, the
+#: `coverage_status` key `bs["manifest"]["coverage"]` records that layer
+#: under -- `abicheck/buildsource/cli_buildsource_helpers.py`'s
+#: `_LAYER_NAMES`/`CoverageStatus`). L3 (compile units) / L4 (declarations) /
+#: L5 (graph nodes) are exactly the three layers `--depth source` promises to
+#: collect (see the `dump --sources` docstring in `abicheck.cli_options`), so
+#: this is "check the PROMISED L3/L4/L5 evidence actually showed up," not an
+#: arbitrary subset. L4/L5 checks are meaningful specifically because the
+#: eval-suite CI job always installs clang+cmake (see eval-suite.yml's
+#: source-tier job) -- a real `--depth source` run in that environment should
+#: reach every layer, so a captured-but-empty L4/L5 is exactly as informative
+#: a signal as an empty L3 already was, not a normal degraded-environment
+#: case to tolerate.
+_EVIDENCE_LAYERS: tuple[tuple[str, str, str], ...] = (
+    ("L3", "l3_compile_units", "L3_build"),
+    ("L4", "l4_declarations", "L4_source_abi"),
+    ("L5", "l5_nodes", "L5_source_graph"),
 )
 
 
-def _side_has_layer_evidence(row: dict, side: str, field: str) -> bool:
-    return (row.get(side) or {}).get(field, 0) > 0
+def _side_has_layer_evidence(row: dict, side: str, field: str, status_key: str) -> bool:
+    """True only when *side* both has a positive `field` count AND the
+    manifest's own `coverage_status[status_key]` reads ``"present"`` --
+    a positive count alone is not proof of *complete* collection.
+
+    When source replay's L5 call/type pass degrades, `source_graph.nodes`
+    can still be populated by fallback nodes folded in from L3 targets,
+    compile units, and files, while the manifest's own coverage table
+    correctly records `L5_source_graph: partial` (Codex review, fresh
+    evidence) -- a count-only check would read that degraded row as full L5
+    evidence and let `--fail-on-empty-source` report success even though the
+    L5 extractor is systemically broken. The identical reasoning applies to
+    L3/L4: a subset-only collection (`CoverageStatus.PARTIAL`) can still
+    leave `l3_compile_units`/`l4_declarations` positive.
+    """
+    coverage = row.get(side) or {}
+    if coverage.get(field, 0) <= 0:
+        return False
+    status = (coverage.get("coverage_status") or {}).get(status_key)
+    return status == "present"
 
 
 def _row_has_full_evidence(row: dict) -> bool:
-    """True if *row* captured real evidence for every `_EVIDENCE_LAYERS`
-    layer, on **both** the old and new snapshot sides.
+    """True if *row* captured real, *complete* evidence for every
+    `_EVIDENCE_LAYERS` layer, on **both** the old and new snapshot sides.
     """
     return all(
-        _side_has_layer_evidence(row, side, field)
+        _side_has_layer_evidence(row, side, field, status_key)
         for side in ("old_coverage", "new_coverage")
-        for _label, field in _EVIDENCE_LAYERS
+        for _label, field, status_key in _EVIDENCE_LAYERS
     )
 
 
