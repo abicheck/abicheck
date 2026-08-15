@@ -197,8 +197,16 @@ nav:
       - "5. Linker & ELF": learn/abi-series/05-linker-elf.md
       - "6. Transitive Breaks": learn/abi-series/06-transitive-breaks.md
       - "7. Designing for Stability": learn/abi-series/07-designing-for-stability.md
-      - "8. Detecting Breaks": learn/abi-series/08-detection.md
       - "Glossary": learn/abi-series/glossary.md
+    # Verification & Assurance is deliberately its own group, not one more
+    # numbered Learning Series step: Parts 0-7 teach mechanisms (what a
+    # change does), this asks the categorically different "how do you catch
+    # it" question. The page itself stays at its original path/URL
+    # (learn/abi-series/08-detection.md) -- only its nav grouping moved, so
+    # no redirect entry is needed (see docs/AGENTS.md: nav position and file
+    # location are independent).
+    - Verification & Assurance:
+      - "Detecting Breaks": learn/abi-series/08-detection.md
   # The case catalog: every break scenario as a compilable fixture, browsable
   # by verdict (what abicheck reports) or by category (what kind of change).
   - Examples:

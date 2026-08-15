@@ -8,7 +8,7 @@
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
 > [7. Designing for Stability](07-designing-for-stability.md) ·
-> [8. Detecting Breaks](08-detection.md)
+> [Detecting Breaks](08-detection.md)
 
 **What you'll learn on this page**
 
@@ -356,7 +356,7 @@ The common thread: these layouts are computed from *the whole inheritance and
 member graph*, so the break surfaces in classes the author never edited.
 Detection therefore needs the compiler's own record of the final layout — DWARF
 sizes/offsets (L1) or the header AST (L2); see
-[Part 8](08-detection.md) for the full evidence story.
+[Detecting Breaks](08-detection.md) for the full evidence story.
 
 ---
 

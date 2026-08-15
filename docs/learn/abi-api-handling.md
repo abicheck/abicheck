@@ -103,7 +103,7 @@ here for a specific problem, jump straight to the relevant part.
 | **5** | [Linker & ELF](abi-series/05-linker-elf.md) | SONAME, visibility, versioning, calling conv., TLS, security metadata | …a load-time/linker contract changed |
 | **6** | [Transitive Breaks](abi-series/06-transitive-breaks.md) | Dependency leaks, anonymous structs, type-kind swaps, reserved fields | …the symbol table looks identical but consumers still break |
 | **7** | [Designing for Stability](abi-series/07-designing-for-stability.md) | Opaque handles, Pimpl, version scripts, CI gating — with full code | …you're designing an API to evolve safely |
-| **8** | [Detecting Breaks](abi-series/08-detection.md) | Tracking approaches, evidence each break family needs, why single-method checkers miss whole families | …you're deciding *how* to catch all of the above in CI |
+| **Capstone** | [Detecting Breaks](abi-series/08-detection.md) — grouped under **Verification & Assurance**, not the numbered series | Tracking approaches, evidence each break family needs, why single-method checkers miss whole families | …you're deciding *how* to catch all of the above in CI |
 
 ```mermaid
 flowchart LR
@@ -116,7 +116,7 @@ flowchart LR
     P3 --> P6["6 · Transitive<br/>Breaks"]
     P5 --> P7["7 · Designing<br/>for Stability"]
     P6 --> P7
-    P7 --> P8["8 · Detecting<br/>Breaks"]
+    P7 --> VA["Verification &<br/>Assurance"]
 ```
 
 > **Cross-cutting companion:** [Evidence & Detectability](evidence-and-detectability.md)
