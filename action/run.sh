@@ -75,11 +75,22 @@ add_flag_shlex_split() {
     return
   fi
   split="$("$_PY_BIN" -c '
-import os
 import shlex
 import sys
 
-for tok in shlex.split(sys.argv[1], posix=(os.name != "nt")):
+# Always POSIX-style quote/whitespace-splitting rules, with escaping
+# disabled -- a plain posix=True split would treat backslash as an escape
+# character and corrupt a literal Windows path; posix=False on Windows
+# (the previous choice, mirroring abicheck itself before this fix) kept
+# backslashes literal but never collapsed a quoted value with an embedded
+# space into one token, breaking e.g. -DMSG="hello world" into three
+# malformed tokens instead of two. Disabling escaping keeps both
+# properties on every platform (see abicheck._compiler_options.
+# split_gcc_options, the identical fix on the Python side).
+lexer = shlex.shlex(sys.argv[1], posix=True)
+lexer.whitespace_split = True
+lexer.escape = ""
+for tok in lexer:
     print(tok)
 ' "$value")"
   while IFS= read -r item; do

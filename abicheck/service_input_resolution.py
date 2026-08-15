@@ -43,10 +43,9 @@ function-local import also keeps this module out of ``service``'s import cycle
 from __future__ import annotations
 
 import dataclasses
-import os
-import shlex
 from typing import TYPE_CHECKING
 
+from ._compiler_options import split_gcc_options
 from .errors import SnapshotError, ValidationError
 
 if TYPE_CHECKING:
@@ -189,9 +188,7 @@ def _merge_l3_compile_context(
         explicit_tail.append(f"--sysroot={explicit.sysroot.as_posix()}")
     if explicit.gcc_options:
         try:
-            explicit_tail.extend(
-                shlex.split(explicit.gcc_options, posix=os.name != "nt")
-            )
+            explicit_tail.extend(split_gcc_options(explicit.gcc_options))
         except ValueError:
             # Malformed --gcc-options must not abort the merge (mirrors
             # _compiler_options.explicit_language_standard's own handling of

@@ -24,9 +24,10 @@ include-root derivation without an import cycle (``cli`` → ``cli_dump_helpers`
 from __future__ import annotations
 
 import os
-import shlex
 from collections.abc import Sequence
 from pathlib import Path
+
+from ._compiler_options import split_gcc_options
 
 #: Conventional include-root directory names. A ``-H`` umbrella that lives
 #: *under* such a directory (e.g. ``include/oneapi/tbb.h``) writes its own
@@ -179,7 +180,7 @@ def _context_tokens(
     toks: list[str] = list(gcc_option_tokens)
     if gcc_options:
         try:
-            toks += shlex.split(gcc_options, posix=os.name != "nt")
+            toks += split_gcc_options(gcc_options)
         except ValueError:
             toks += gcc_options.split()
     return toks

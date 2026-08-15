@@ -62,13 +62,12 @@ lives in :func:`abicheck.dumper._clang_header_dump`.
 
 from __future__ import annotations
 
-import os
 import re
-import shlex
 import shutil
 from pathlib import Path
 from typing import Any
 
+from ._compiler_options import split_gcc_options
 from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _canonical_expr,
@@ -259,9 +258,9 @@ def _resolve_dpcpp_multi_context(
             f"compiler (icx/icpx/dpcpp/dpcpp-cl); {clang_bin!r} is a plain "
             "clang/gcc invocation with no device AST context to select."
         )
-    user_tokens = (
-        shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
-    ) + list(gcc_option_tokens)
+    user_tokens = (split_gcc_options(gcc_options) if gcc_options else []) + list(
+        gcc_option_tokens
+    )
     sycl_explicitly_off = is_dpcpp and _user_explicitly_disabled_sycl(user_tokens)
     if frontend_context != "host" and sycl_explicitly_off:
         raise AstContextMissingError(

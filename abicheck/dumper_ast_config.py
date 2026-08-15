@@ -18,11 +18,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
-from ._compiler_options import has_explicit_std
+from ._compiler_options import has_explicit_std, split_gcc_options
 from .dumper_clang import _needs_sycl_host_only
 from .header_utils import iter_cache_header_files
 
@@ -251,7 +250,7 @@ def _build_castxml_command(
     if nostdinc:
         cmd += ["-nostdinc"]
     if gcc_options:
-        cmd += shlex.split(gcc_options, posix=os.name != "nt")
+        cmd += split_gcc_options(gcc_options)
     # Repeatable --gcc-option: each value is one literal compiler argument,
     # appended verbatim (no shlex split) so a flag whose value contains
     # whitespace survives intact and identically on POSIX and Windows.
@@ -330,7 +329,7 @@ def _build_clang_header_command(
     if nostdinc:
         cmd += ["-nostdinc"]
     if gcc_options:
-        cmd += shlex.split(gcc_options, posix=os.name != "nt")
+        cmd += split_gcc_options(gcc_options)
     # Repeatable --gcc-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
     if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):

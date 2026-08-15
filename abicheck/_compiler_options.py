@@ -3,8 +3,39 @@
 
 from __future__ import annotations
 
-import os
 import shlex
+
+
+def split_gcc_options(text: str) -> list[str]:
+    """Quote-aware split of a ``--gcc-options``-style compiler-flags string
+    (e.g. ``-DMSG="hello world" -DOK=1``).
+
+    Always uses POSIX-style quote/whitespace-splitting rules, on every
+    platform, but with backslash escaping disabled: a plain POSIX
+    ``shlex.split`` would otherwise consume a backslash as an escape
+    character, corrupting a literal Windows path (``-IC:\\mypath\\include``)
+    that never intended one. Disabling escaping (rather than the previous
+    ``shlex.split(text, posix=os.name != "nt")`` split, which picked
+    quote-collapsing behavior on POSIX and backslash-preserving behavior on
+    Windows -- but never both on the same platform) keeps both properties
+    intact everywhere: a quoted value with an embedded space stays one
+    token *and* a Windows path's backslashes survive, regardless of which
+    OS this process happens to be running on. The previous per-platform
+    split silently broke a quoted value with a space into malformed tokens
+    on Windows specifically (Codex review; see
+    ``tests/test_action_compile_context_parity.py::
+    TestCompileContextForwardingParity::test_gcc_options_quoted_value_stays_one_token``,
+    which exercises ``action/run.sh``'s own bash mirror of this identical
+    fix).
+
+    Raises ``ValueError`` the same way ``shlex.split`` does on malformed
+    input (e.g. an unbalanced quote) -- callers that need to tolerate that
+    already catch it.
+    """
+    lexer = shlex.shlex(text, posix=True)
+    lexer.whitespace_split = True
+    lexer.escape = ""
+    return list(lexer)
 
 
 def has_explicit_std(
@@ -22,7 +53,7 @@ def has_explicit_cpp_std(
     """Return whether forwarded options explicitly select a C++ dialect."""
     tokens = list(gcc_option_tokens)
     if gcc_options:
-        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+        tokens.extend(split_gcc_options(gcc_options))
     for token in tokens:
         normalized = token.lower()
         if normalized.startswith("--"):
@@ -58,7 +89,7 @@ def explicit_language_standard(
     tokens: list[str] = []
     if gcc_options:
         try:
-            tokens = shlex.split(gcc_options, posix=os.name != "nt")
+            tokens = split_gcc_options(gcc_options)
         except ValueError:
             # Malformed --gcc-options (e.g. an unbalanced quote) must not
             # abort the dump (Codex review, PR #624 follow-up, same rule
