@@ -105,6 +105,7 @@ def _check_manifest_version(raw: Any) -> None:
 
 def _parse_manifest_gate(
     data: Mapping[str, Any],
+    version_raw: Any = None,
 ) -> tuple[OnMissingRequired | None, OnUnexpectedTarget | None]:
     """Parse a manifest/run-plan-projected ``gate`` block (schema 2.0+).
 
@@ -114,10 +115,36 @@ def _parse_manifest_gate(
     the default (CLI cleanup phase two, PR 2 — this block replaces the
     removed ``--on-missing-required``/``--on-unexpected-target`` CLI flags,
     so a typo here has nowhere else to be caught).
+
+    A manifest that carries ``gate`` while *also* explicitly declaring a
+    pre-2.0 ``aggregate_manifest_version`` is rejected outright, rather than
+    the block being silently honored (Codex review, fresh evidence): the
+    whole reason ``gate`` shipped at a MAJOR bump is that a pre-2.0 *reader*
+    given such a manifest would ignore the unknown key and silently apply the
+    hard-coded default policy — a producer that stamps an old version number
+    on a manifest carrying a field that version predates is internally
+    inconsistent, and honoring ``gate`` here anyway (this reader is 2.0+ and
+    could) would recreate exactly the version-skew inversion the MAJOR bump
+    exists to prevent, just moved from "old reader, new manifest" to
+    "manifest lies about its own version". *version_raw* is the same
+    already-validated (by :func:`_check_manifest_version`) raw value; an
+    absent version is treated as "current MAJOR", same as everywhere else in
+    this module, so an unversioned manifest carrying ``gate`` is accepted.
     """
     gate_raw = data.get("gate")
     if gate_raw is None:
         return None, None
+    if isinstance(version_raw, str) and version_raw:
+        # Already validated as a well-formed MAJOR.MINOR string by
+        # _check_manifest_version before this function is ever called.
+        major = int(version_raw.split(".", 1)[0])
+        if major < 2:
+            raise AggregateError(
+                "manifest 'gate' requires 'aggregate_manifest_version' >= "
+                f"'2.0' (declared {version_raw!r}); a pre-2.0 reader would "
+                "silently ignore this block and apply the hard-coded "
+                "default policy instead of what it asked for"
+            )
     if not isinstance(gate_raw, dict):
         raise AggregateError("manifest 'gate' must be an object")
     unknown = sorted(set(gate_raw) - {"missing_required", "unexpected_target"})
@@ -199,7 +226,9 @@ class ExpectedTargets:
             # that would disable the commit-identity guard the manifest asked
             # for. Fail loud instead.
             raise AggregateError("manifest 'head_sha' must be a non-empty string")
-        gate_missing_required, gate_unexpected_target = _parse_manifest_gate(data)
+        gate_missing_required, gate_unexpected_target = _parse_manifest_gate(
+            data, data.get("aggregate_manifest_version")
+        )
         return cls(
             targets=targets,
             head_sha=head_sha,

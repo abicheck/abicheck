@@ -162,6 +162,25 @@ from .project_targets import (
 #: ``BUILD_OUTPUT_SCHEMA``'s naming convention).
 RUN_PLAN_SCHEMA = "abicheck.run-plan/v1"
 
+#: Schema discriminator stamped instead of :data:`RUN_PLAN_SCHEMA` whenever a
+#: plan carries a ``gate`` block (CLI cleanup phase two, PR 2 continuation).
+#: Mirrors ``AGGREGATE_MANIFEST_VERSION``'s MAJOR-bump reasoning exactly: a
+#: plan generated with an explicit gate policy must declare a schema an old,
+#: pre-gate reader is guaranteed to reject, rather than one it silently
+#: accepts and misreads (Codex review, fresh evidence -- an earlier revision
+#: left every plan stamped ``v1`` regardless of whether ``gate`` was
+#: present, so an old ``RunPlan.from_dict()`` would ignore the unknown key
+#: and project a ``1.0`` aggregate manifest applying the hard-coded default
+#: policy instead of what the plan actually asked for, silently). A plan
+#: with no gate policy keeps the unchanged ``v1`` spelling -- this bump is
+#: additive-only, scoped to the one new capability, not a blanket
+#: version-everything policy.
+RUN_PLAN_SCHEMA_GATE = "abicheck.run-plan/v2"
+
+#: Highest ``vN`` suffix this reader understands, parsed from either schema
+#: constant above.
+_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 2
+
 #: ``kind`` discriminator for a :class:`RunPlanCheck` cell.
 RUN_PLAN_KIND_TARGET = "target"
 RUN_PLAN_KIND_BUNDLE = "bundle"
@@ -169,6 +188,21 @@ RUN_PLAN_KIND_BUNDLE = "bundle"
 
 def _opt_str(value: Any, default: str = "") -> str:
     return str(value) if isinstance(value, str) and value else default
+
+
+def _run_plan_schema_version(schema: str) -> int | None:
+    """Parse the trailing ``vN`` off a ``run-plan.json`` ``schema`` string.
+
+    ``None`` for anything not of the ``"abicheck.run-plan/vN"`` shape --
+    callers treat that the same as "no version to check" (an unrecognized
+    schema string is a separate, pre-existing problem this function doesn't
+    try to diagnose).
+    """
+    prefix = "abicheck.run-plan/v"
+    if not schema.startswith(prefix):
+        return None
+    suffix = schema[len(prefix) :]
+    return int(suffix) if suffix.isdigit() else None
 
 
 def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
@@ -437,12 +471,20 @@ class RunPlan:
     gate_unexpected_target: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"schema": self.schema}
+        has_gate = (
+            self.gate_missing_required is not None
+            or self.gate_unexpected_target is not None
+        )
+        # The gate-bearing schema is always stamped when a gate policy is
+        # set, regardless of whatever self.schema was constructed with --
+        # this is a discriminator an old reader must see, not a caller-
+        # overridable label (see RUN_PLAN_SCHEMA_GATE's own docstring).
+        d: dict[str, Any] = {"schema": RUN_PLAN_SCHEMA_GATE if has_gate else self.schema}
         if self.project:
             d["project"] = self.project
         if self.head_sha:
             d["head_sha"] = self.head_sha
-        if self.gate_missing_required is not None or self.gate_unexpected_target is not None:
+        if has_gate:
             gate: dict[str, Any] = {}
             if self.gate_missing_required is not None:
                 gate["missing_required"] = self.gate_missing_required
@@ -460,10 +502,29 @@ class RunPlan:
             if isinstance(checks_raw, list)
             else []
         )
+        schema = _opt_str(d.get("schema"), RUN_PLAN_SCHEMA)
+        version = _run_plan_schema_version(schema)
+        if version is not None and version > _RUN_PLAN_SCHEMA_MAX_SUPPORTED:
+            from ..aggregate_manifest import AggregateError
+
+            raise AggregateError(
+                f"run-plan 'schema' {schema!r} is newer than this tool "
+                f"supports (max v{_RUN_PLAN_SCHEMA_MAX_SUPPORTED}); upgrade "
+                "abicheck"
+            )
         gate_raw = d.get("gate")
         gate = gate_raw if isinstance(gate_raw, dict) else {}
+        if gate and (version is None or version < 2):
+            from ..aggregate_manifest import AggregateError
+
+            raise AggregateError(
+                "run-plan 'gate' requires 'schema' >= 'abicheck.run-plan/v2' "
+                f"(got {schema!r}); a pre-v2 reader would silently ignore "
+                "this block and apply the hard-coded default policy instead "
+                "of what it asked for"
+            )
         return cls(
-            schema=_opt_str(d.get("schema"), RUN_PLAN_SCHEMA),
+            schema=schema,
             project=_opt_str(d.get("project")),
             head_sha=_opt_str(d.get("head_sha")),
             checks=checks,

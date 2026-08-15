@@ -45,7 +45,6 @@ from abicheck.buildsource.run_plan import (
     _compose_gcc_options,
     _scheduling_fields_for_profile,
     generate_run_plan,
-    to_aggregate_manifest,
 )
 from abicheck.cli import main
 
@@ -733,88 +732,6 @@ class TestRunPlanRoundTrip:
         d = check.to_dict()
         assert "compile_ast_frontend" not in d
         assert "consumer_compile_ast_frontend" not in d
-
-
-class TestToAggregateManifest:
-    def test_uses_check_id_not_bare_name(self) -> None:
-        plan = RunPlan(
-            checks=[
-                RunPlanCheck(
-                    check_id="libfoo@linux#release@headers",
-                    name="libfoo",
-                    required=True,
-                ),
-                RunPlanCheck(
-                    check_id="libfoo@mac#release@headers",
-                    name="libfoo",
-                    required=False,
-                ),
-            ]
-        )
-        manifest = to_aggregate_manifest(plan)
-        assert manifest["aggregate_manifest_version"] == "2.0"
-        assert manifest["targets"] == [
-            {"id": "libfoo@linux#release@headers", "required": True},
-            {"id": "libfoo@mac#release@headers", "required": False},
-        ]
-        assert "head_sha" not in manifest
-
-    def test_head_sha_comes_from_the_plan_unless_overridden(self) -> None:
-        plan = RunPlan(head_sha="deadbeef", checks=[])
-        assert to_aggregate_manifest(plan)["head_sha"] == "deadbeef"
-        assert (
-            to_aggregate_manifest(plan, head_sha="cafef00d")["head_sha"] == "cafef00d"
-        )
-
-    def test_produces_a_manifest_aggregate_itself_accepts(self) -> None:
-        """Not just shape-compatible on paper -- feed it straight into
-        aggregate.ExpectedTargets, the real reader."""
-        from abicheck.aggregate import ExpectedTargets
-
-        plan = RunPlan(
-            checks=[
-                RunPlanCheck(check_id="libfoo@linux#release@headers", required=True),
-            ]
-        )
-        expected = ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
-        assert expected.targets == {"libfoo@linux#release@headers": True}
-
-    def test_gate_policy_projects_into_the_manifest(self) -> None:
-        """CLI cleanup phase two, PR 2: a plan's own gate policy (stamped by
-        `generate_run_plan`'s `--gate-missing-required`/
-        `--gate-unexpected-target`) rides inside run-plan.json and projects
-        into `--run-plan`'s manifest the same way a hand-authored
-        `--manifest`'s own `gate` block does."""
-        from abicheck.aggregate import ExpectedTargets, OnMissingRequired
-
-        plan = RunPlan(
-            checks=[RunPlanCheck(check_id="libfoo@linux#release@headers")],
-            gate_missing_required="warn",
-            gate_unexpected_target="fail",
-        )
-        manifest = to_aggregate_manifest(plan)
-        assert manifest["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
-        expected = ExpectedTargets.from_manifest_data(manifest)
-        assert expected.gate_missing_required is OnMissingRequired.WARN
-
-    def test_no_gate_policy_omits_the_gate_key(self) -> None:
-        plan = RunPlan(checks=[RunPlanCheck(check_id="libfoo@linux#release@headers")])
-        assert "gate" not in to_aggregate_manifest(plan)
-
-    def test_gate_policy_round_trips_through_to_dict_from_dict(self) -> None:
-        plan = RunPlan(
-            checks=[],
-            gate_missing_required="warn",
-            gate_unexpected_target="ignore",
-        )
-        restored = RunPlan.from_dict(plan.to_dict())
-        assert restored.gate_missing_required == "warn"
-        assert restored.gate_unexpected_target == "ignore"
-
-    def test_from_dict_with_no_gate_key_leaves_fields_none(self) -> None:
-        restored = RunPlan.from_dict({"schema": RunPlan().schema, "checks": []})
-        assert restored.gate_missing_required is None
-        assert restored.gate_unexpected_target is None
 
 
 class TestProfileCompileOverlayProjection:

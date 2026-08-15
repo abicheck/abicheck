@@ -293,12 +293,16 @@ topics:
     canonical_page: use/aggregate-reports.md
     fact_sources:
       - abicheck/aggregate.py
+      - abicheck/aggregate_manifest.py
       - abicheck/aggregate_findings.py
       - abicheck/cli_aggregate.py
+      - abicheck/buildsource/run_plan.py
+      - abicheck/schemas/aggregate_report.schema.json
     reference_page: reference/exit-codes.md
     task_pages:
       - use/github-action-recipes.md
       - integration/scenarios/multi-platform.md
+      - reference/run-plan-schema.md
 
   suppressions:
     canonical_page: use/suppressions.md

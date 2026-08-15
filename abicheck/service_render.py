@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 from .errors import ValidationError
 from .model import AbiSnapshot
-from .reporter import to_json, to_markdown, to_stat
+from .reporter import to_json, to_markdown, to_stat, to_stat_json
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -79,16 +79,29 @@ def render_output(
     Tier-2 Python API callers (this function is exported via
     ``abicheck.service.__all__``) — the CLI's own ``--stat``/``--recommend``
     flags are gone, but a signature change here is a separate, unannounced
-    break this PR's own docs never claimed (Codex review). ``stat=True`` is
-    equivalent to passing ``fmt=ONELINE_FORMAT`` (and takes priority over
-    *fmt* itself, matching the old boolean's precedence); ``show_recommendation``
+    break this PR's own docs never claimed (Codex review). ``show_recommendation``
     is accepted but has no effect, since the recommendation the flag used to
     gate is now always included. Prefer ``fmt=ONELINE_FORMAT`` directly in
     new code.
 
+    ``stat=True`` reproduces the old ``--stat`` boolean's own format-dependent
+    dispatch, not a single fixed replacement — the pre-removal behaviour it
+    stands in for was itself two different payloads depending on *fmt*:
+    ``to_stat_json`` (a summary-only JSON object, no ``changes`` array) for
+    ``fmt="json"``, and ``to_stat`` (a human one-line string) for every other
+    *fmt*, matching plain ``fmt=ONELINE_FORMAT``. A caller doing
+    ``render_output("json", ..., stat=True)`` and feeding the result to
+    ``json.loads()`` must keep getting JSON back, not human text (Codex
+    review — an earlier revision of this shim collapsed both cases onto
+    ``to_stat``, silently breaking that caller). *fmt* values other than
+    ``"json"`` fall through to the one-line renderer, same as before.
+
     Raises:
         ValidationError: For unrecognised output format.
     """
+    if stat and fmt == "json":
+        return to_stat_json(result, severity_config=severity_config)
+
     if stat or fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 

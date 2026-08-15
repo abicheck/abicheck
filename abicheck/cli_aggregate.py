@@ -204,7 +204,10 @@ def _resolve_expected(
             raise click.UsageError(f"cannot read {run_plan_path}: {exc}") from exc
         if not isinstance(raw, dict):
             raise click.UsageError(f"{run_plan_path} must contain a JSON object.")
-        plan = RunPlan.from_dict(raw)
+        try:
+            plan = RunPlan.from_dict(raw)
+        except AggregateError as exc:
+            raise click.UsageError(f"{run_plan_path}: {exc}") from exc
         try:
             return (
                 ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan)),

@@ -3198,13 +3198,31 @@ class TestRenderOutput:
         `abicheck.service.__all__` (Tier-2 typed API), so an existing
         caller spelling the pre-PR-1 `render_output(..., stat=True)` must
         not get a bare `TypeError` -- only the CLI's own `--stat` flag was
-        announced as removed, not this function's signature. `stat=True`
-        is equivalent to `fmt=ONELINE_FORMAT`."""
+        announced as removed, not this function's signature. For a
+        non-``json`` *fmt*, `stat=True` is equivalent to
+        `fmt=ONELINE_FORMAT` (the human one-line renderer)."""
         from abicheck.service_render import ONELINE_FORMAT
 
-        assert render_output("json", diff_result, snap, stat=True) == render_output(
-            ONELINE_FORMAT, diff_result, snap
-        )
+        assert render_output(
+            "markdown", diff_result, snap, stat=True
+        ) == render_output(ONELINE_FORMAT, diff_result, snap)
+
+    def test_stat_kwarg_with_json_fmt_preserves_the_old_stat_json_shape(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: an earlier revision of this shim
+        collapsed `render_output("json", ..., stat=True)` onto the human
+        one-line renderer too, silently breaking a Tier-2 caller that fed
+        the pre-PR-1 `--stat --format json` shape to `json.loads()`. The
+        JSON case must keep returning `to_stat_json`'s summary-only JSON
+        object (no `changes` array), not human text."""
+        from abicheck.reporter import to_stat_json
+
+        out = render_output("json", diff_result, snap, stat=True)
+        assert json.loads(out) == json.loads(to_stat_json(diff_result))
+        d = json.loads(out)
+        assert "changes" not in d
+        assert d["verdict"] == diff_result.verdict.value
 
     def test_show_recommendation_kwarg_is_accepted_and_inert(self, diff_result, snap):
         """Same compatibility contract as `stat` above: `show_recommendation`

@@ -179,6 +179,37 @@ class TestGatePolicy:
         assert exp.gate_missing_required is None
         assert exp.gate_unexpected_target is None
 
+    def test_gate_block_with_declared_v1_version_is_rejected(self):
+        # Codex review, fresh evidence: a manifest that carries `gate` while
+        # ALSO explicitly declaring a pre-2.0 aggregate_manifest_version is
+        # internally inconsistent -- honoring `gate` here anyway (this
+        # reader supports 2.0 and could) would recreate the exact
+        # version-skew inversion the MAJOR bump exists to prevent, just
+        # moved from "old reader, new manifest" to "manifest lies about its
+        # own version". Must be a loud AggregateError, not a silent parse.
+        with pytest.raises(AggregateError, match="gate.*aggregate_manifest_version"):
+            ExpectedTargets.from_manifest_data(
+                {
+                    "aggregate_manifest_version": "1.0",
+                    "targets": [{"id": LINUX}],
+                    "gate": {"missing_required": "warn"},
+                }
+            )
+
+    def test_gate_block_with_no_declared_version_is_accepted(self):
+        # An absent aggregate_manifest_version is treated as "current MAJOR"
+        # everywhere else in this module (ExpectedTargets.from_manifest_data
+        # docstring) -- a gate block with no version stated at all is not
+        # the inconsistent case the fix above targets, only a gate paired
+        # with an explicit, contradicting old version is.
+        exp = ExpectedTargets.from_manifest_data(
+            {
+                "targets": [{"id": LINUX}],
+                "gate": {"missing_required": "warn"},
+            }
+        )
+        assert exp.gate_missing_required is OnMissingRequired.WARN
+
 
 class TestGatePolicyCLI:
     def _run(self, args):
