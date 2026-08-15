@@ -265,7 +265,7 @@ the [Platform Support reference](../../reference/platforms.md).
 | **Visibility** (`-fvisibility=hidden`) | Explicit **`__declspec(dllexport)`** / `.def` file — nothing is exported unless named. | `-fvisibility=hidden` + `__attribute__((visibility))`, same as ELF. |
 | **Mangling / decoration** | MSVC name **decoration** differs from Itanium; `extern "C"` still adds leading underscores / `@N` stdcall suffixes. | Itanium C++ ABI (same as Linux Clang). |
 | **Packaging unit** | The DLL, plus its **import library** and PDB for debug info. | The dylib, optionally inside a **framework** bundle, optionally a **universal (fat) binary** carrying multiple arch slices. |
-| **CRT / allocator boundary** | Each DLL may link its **own CRT**; `malloc` in one module must not be `free`d in another — a hard cross-module rule with no ELF analog. | Single system libc; less acute, but cross-dylib `delete` of a type with an inline destructor has the same Itanium pitfalls as Linux. |
+| **CRT / allocator boundary** | Modules can end up with **separate CRT copies** (any `/MT` module, or mismatched runtimes), and each copy has its own heap — so the portable rule is that an allocation is released by the module that made it. Modules sharing one compatible dynamic CRT/UCRT do share a heap, but a library cannot verify how its consumers were built. No ELF analog; see [MSVC/PE ABI Model](../msvc-pe-abi-model.md#the-dllcrt-boundary-rule-itanium-has-no-analog-for). | Single system libc; less acute, but cross-dylib `delete` of a type with an inline destructor has the same Itanium pitfalls as Linux. |
 
 !!! tip "Practical consequences for abicheck users"
     - On **Windows**, prefer exporting **by name** and keep a stable `.def` so a

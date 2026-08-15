@@ -86,10 +86,10 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 | Change alignment or packing | BREAKING | `type_alignment_changed`, `struct_packing_changed` | L1 | [case42](../reference/examples/case42_type_alignment_changed.md), [case56](../reference/examples/case56_struct_packing_changed.md) |
 | Reorder bases / insert a base / change virtual inheritance | BREAKING | `type_base_changed`, `base_class_position_changed`, `base_class_virtual_changed` | L1 | [case37](../reference/examples/case37_base_class.md), [case60](../reference/examples/case60_base_class_position_changed.md) |
 | **A base subobject *moves* (e.g. EBO lost)** | BREAKING | **`base_class_offset_changed`** | L1 | **[case140](../reference/examples/case140_empty_base_optimization_lost.md)** |
-| Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
+| Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L1 (DWARF) / L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
 | Add / remove / reorder a virtual function | BREAKING | `virtual_method_added`, `func_virtual_added`/`func_virtual_removed`, `type_vtable_changed` | L1 | [case38](../reference/examples/case38_virtual_methods.md), [case68](../reference/examples/case68_virtual_method_added.md) |
 | **Vtable slot count changes — from a *stripped* binary** | BREAKING | **`vtable_slot_count_changed`** | **L0 (ELF symbol size)** | **[case142](../reference/examples/case142_vtable_slot_count_binary_only.md)** |
-| Inheritance *shape* changes — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested (`test_diff_elf_layout.py`) |
+| Inheritance *shape* changes *by enough to resize `_ZTI`* — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested (`test_diff_elf_layout.py`) |
 | Type stops being trivially-copyable → by-value calling conv. flips | BREAKING | `trivially_copyable_lost`, `value_abi_trait_changed` | L2 *(descriptor)* / L1 | [case69](../reference/examples/case69_trivial_to_nontrivial.md) |
 | Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
 | `dsize` changes at stable `sizeof` (tail-padding reuse) | COMPATIBLE_WITH_RISK | `tail_padding_reuse_changed` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
@@ -100,11 +100,14 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 
 > **Why some rows say "L2 *(descriptor)*".** The fine-grained traits
 > `is_standard_layout`, `is_trivially_copyable`, `vptr_offset_bits` and
-> `data_size_bits` are only populated by the **header/AST (castxml)** dump path.
-> DWARF gives abicheck `base_offsets` (so `base_class_offset_changed` works at
-> L1) and `sizeof`/offsets, but not those C++-semantic flags. Feed headers to
-> reach them. This is why the evidence you provide changes what abicheck can
-> prove — see [Evidence & Detectability](evidence-and-detectability.md).
+> `data_size_bits` do **not** all come from the same place, so read the
+> producer column below rather than assuming "headers give you all four".
+> DWARF supplies `base_offsets` (so `base_class_offset_changed` works at L1),
+> `sizeof`, offsets, and a *measured* `vptr_offset_bits` — but not the
+> C++-semantic traits, which need the direct-clang AST path. `data_size_bits`
+> needs the optional layout-tool pass and nothing else provides it. This is why
+> the evidence you provide changes what abicheck can prove — see
+> [Evidence & Detectability](evidence-and-detectability.md).
 
 ---
 
@@ -125,11 +128,25 @@ A class has moving parts the coarse `sizeof` diff under-represents. The
 
 | Field | Meaning | Populated by |
 |-------|---------|--------------|
-| `base_offsets` | each base subobject's bit offset | DWARF + headers |
-| `vptr_offset_bits` | vtable-pointer offset (polymorphism witness) | headers |
-| `data_size_bits` | `dsize` — bytes the members occupy, excl. tail padding | headers |
-| `is_standard_layout` | standard-layout trait | headers |
-| `is_trivially_copyable` | trivially-copyable trait | headers |
+| `base_offsets` | each base subobject's bit offset | DWARF and castxml directly; **direct-clang only with** the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass (`dumper_clang.py` never populates it on its own) |
+| `vptr_offset_bits` | vtable-pointer offset | **DWARF: measured** — read from the artificial vptr member's own `DW_AT_data_member_location`, with inherited offsets propagated, and `0` used only as a last-resort fallback. **Both header backends: derived**, `0` whenever the class has a vtable — a polymorphism witness, not a measured offset |
+| `data_size_bits` | `dsize` — bytes the members occupy, excl. tail padding | only the optional `ABICHECK_CLANG_LAYOUT_TOOL` companion pass |
+| `is_standard_layout` | standard-layout trait | direct-clang AST only |
+| `is_trivially_copyable` | trivially-copyable trait | direct-clang AST only |
+
+The bottom three rows are the ones worth checking before you rely on them.
+For the two traits, **castxml deliberately leaves them `None`** rather than
+deriving them from polymorphism (which would be unsound and would emit a
+spurious `standard_layout_lost`), and DWARF exposes no equivalent attribute at
+all — so a castxml-only or DWARF-only run stays silent on
+`standard_layout_lost` / `trivially_copyable_lost`. Reach them with
+`--ast-frontend clang` (or `hybrid`, which backfills castxml's gaps from a
+clang sub-dump). `tail_padding_reuse_changed` is stricter still: `dsize` comes
+only from the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass, so without it that
+detector never fires at all. The DWARF-side
+counterpart of the triviality question is a *separate* finding on a separate
+path: `value_abi_trait_changed`, inferred from DIE structure rather than read
+from a trait (see [Part 4 §6](abi-series/04-cpp-abi.md#6-trivial-non-trivial-the-invisible-calling-convention-flip)).
 
 From these `diff_layout.py` emits `base_class_offset_changed` (a base moved),
 `vptr_introduced` (became polymorphic), `trivially_copyable_lost`,
@@ -144,24 +161,63 @@ has no layout evidence at all, abicheck emits the calm, non-escalating
 
 ### 3. Binary-only C++ layout — `diff_elf_layout.py` (L0)
 
-The most important closing of the symbol-only blind spot. The Itanium ABI fixes
-the on-disk size of two emitted objects for every polymorphic class, and both
-encode layout facts otherwise visible only in DWARF:
+The biggest *narrowing* of the symbol-only blind spot — narrowing, not closing;
+see the limits below. The Itanium ABI fixes the on-disk size of two emitted
+objects per polymorphic class, and both encode layout facts otherwise visible
+only in DWARF. Coverage is per *symbol*, not per class: the detector reads
+positive-size `_ZTV`/`_ZTI` entries and reports only keys present on **both**
+sides, so a class whose vtable or typeinfo was never emitted, was hidden, or
+appears on one side only contributes nothing here.
 
-- **`_ZTV<type>`** (the vtable): laid out as
-  `[offset-to-top, typeinfo*, slot0, slot1, …]`. Its `st_size` grows or shrinks
-  by one pointer for every virtual added/removed/reordered ⇒
-  **`vtable_slot_count_changed`**.
+- **`_ZTV<type>`** (the vtable): for the simple single-inheritance case, laid
+  out as `[offset-to-top, typeinfo*, slot0, slot1, …]`, so its `st_size`
+  changes by one pointer per vtable **entry** net added or removed. Count
+  entries, not source-level virtual functions — the two differ: a virtual
+  destructor occupies *two* entries (the complete-object and deleting
+  destructors), so adding one to a class grows `_ZTV` by 16 bytes on x86-64,
+  not 8 (verified against GCC: 24 → 40). In general
+  the symbol covers the whole **vtable group** — vcall/vbase offsets, and a
+  secondary table per polymorphic base beyond the primary — so its size also
+  moves when the *inheritance shape* changes with no virtual added at all
+  (`struct D : A` → `struct D : virtual A` is enough). Either way the finding
+  is **`vtable_slot_count_changed`**.
 - **`_ZTI<type>`** (the typeinfo): its concrete runtime class
   (`__class_type_info` / `__si_class_type_info` / `__vmi_class_type_info`)
-  encodes the inheritance shape, so a base-class change resizes it ⇒
+  encodes the inheritance shape, so a base-class change that moves the class
+  between those runtime classes — or changes the number of entries a
+  `__vmi_class_type_info` carries — resizes it ⇒
   **`rtti_inheritance_changed`**.
 
-This means a virtual-method change or a base-class change is observable from
-`.dynsym` **alone** — no debug info, no headers — which is exactly what
+So `.dynsym` **alone** — no debug info, no headers — can reveal that a class's
+emitted vtable or RTTI object changed *size*, which is exactly what
 [case142](../reference/examples/case142_vtable_slot_count_binary_only.md) demonstrates on
-a stripped `.so`. Because the slot count is *inferred* from size, these findings
-are labelled `MEDIUM` confidence.
+a stripped `.so`. Read the signal for what it is, and no further:
+
+| What L0 actually establishes | What it does **not** establish |
+|---|---|
+| The emitted vtable group changed size | *Why* — added/removed virtuals and an inheritance-shape change both do this |
+| The emitted RTTI object changed size | *Which* base changed, or how |
+| A structural signal worth investigating | That nothing changed when the size held still |
+
+Both columns matter. On the left, note that `vtable_slot_count_changed` is named
+for its commonest cause, not for something L0 can prove: a size delta on a class
+with virtual or multiple inheritance may be vcall/vbase offsets or a secondary
+table moving, not a slot count at all.
+
+On the right, the last row is the one that bites. A **pure reorder** of virtual
+functions leaves every emitted size identical, so it is invisible at L0
+entirely, even though it is a hard ABI break. A base-class **replacement or
+reorder** that keeps the same `type_info` runtime class and base count is
+invisible to the *RTTI* signal specifically — but not necessarily to L0 as a
+whole, since swapping in a base with a different virtual surface still resizes
+the derived class's `_ZTV` group. A change is only fully invisible here when
+**both** emitted symbols keep their size. Establishing
+*identity* (which slot, which base) needs L1/L2 evidence. Because the finding is
+*inferred* from size,
+these findings carry `MEDIUM` confidence; and as always, the finding is a
+detected fact, while the verdict it maps to is policy (an append-only virtual
+addition means something different for a closed hierarchy than for one consumers
+derive from).
 
 ---
 
@@ -175,11 +231,15 @@ are labelled `MEDIUM` confidence.
   encodes exactly this. (Note: on MSVC targets Clang ignores
   `[[no_unique_address]]` in favour of `[[msvc::no_unique_address]]`, and MSVC
   offers no ABI-stability guarantee for it.)
-- **The descriptor traits need headers.** Without the castxml header path,
-  `standard_layout_lost`, `trivially_copyable_lost`, `vptr_introduced`, and
-  `tail_padding_reuse_changed` cannot be proven (their inputs are `None`), so
-  abicheck stays silent rather than guessing. This is a property of the
-  *evidence*, not a detector bug — see [Limitations](limitations.md).
+- **The descriptor traits need the right header backend — not just "headers".**
+  Per the producer table above: `standard_layout_lost` and
+  `trivially_copyable_lost` need the **direct-clang** AST path (castxml leaves
+  both traits `None`); `tail_padding_reuse_changed` additionally needs the
+  optional `ABICHECK_CLANG_LAYOUT_TOOL` pass for `dsize`; `vptr_introduced`
+  is the exception, reachable from DWARF or either header backend. Where the
+  input is `None`, abicheck stays silent rather than guessing. This is a
+  property of the *evidence*, not a detector bug — see
+  [Limitations](limitations.md).
 - **Source-only contract changes leave no object trace.** Default-argument,
   inline-body, and uninstantiated-template changes are API events that only
   source replay (L4) can see; binary/DWARF comparison correctly reports
