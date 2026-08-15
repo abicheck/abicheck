@@ -456,6 +456,7 @@ topics:
     canonical_page: learn/build-profile-comparability.md
     fact_sources:
       - abicheck/comparability.py
+      - abicheck/checker.py
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md

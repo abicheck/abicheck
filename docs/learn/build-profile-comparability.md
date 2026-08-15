@@ -70,22 +70,23 @@ than no result, because it looks exactly like a clean, comparable pass in
 any pipeline that only checks the exit code.
 
 **This hard-fail promise is qualified, not absolute — it depends on both
-sides actually carrying the fingerprint being checked.** Each fingerprint
-axis (`profile_fingerprint`, `scope_fingerprint`) is only compared when
-**both** OLD and NEW carry it; a side that never went through an L2
-frontend at all (a symbols-only dump, or a pre-contract baseline) has no
-`profile_fingerprint` to disagree with, and the gate does not fail the
-comparison on that axis. When exactly one side is missing a fingerprint,
-the report is stamped `contract_coverage: partial` — an explicit signal
-that this axis was never actually checked, not silently treated as
-verified. When **both** sides are missing it, there's nothing to mark:
-neither side asserted a build context in the first place, so there's no
-disagreement to detect and no gap to flag beyond what a symbols-only or
-pre-contract comparison already implies. Don't read a clean
-`--depth`-limited or legacy-baseline comparison as having verified build
-profile at all — the hard-fail guarantee is real, but it's a guarantee
-about *comparable extractions*, not a guarantee that every comparison
-checked comparability.
+sides actually carrying the axis being checked.** Each of the three
+coverage axes — `profile_fingerprint`, `scope_fingerprint`, and
+`dependency_scope` (whether dependency-header scoping mode was tagged) —
+is only compared when **both** OLD and NEW carry it; a side that never
+went through an L2 frontend at all (a symbols-only dump, or a pre-contract
+baseline) has no `profile_fingerprint` to disagree with, and the gate does
+not fail the comparison on that axis. When exactly one side is missing any
+one of the three, the report is stamped `contract_coverage: partial`
+(`checker._contract_coverage_status`) — an explicit signal that axis was
+never actually checked, not silently treated as verified. When **both**
+sides are missing the same axis, there's nothing to mark: neither side
+asserted that fact in the first place, so there's no disagreement to
+detect and no gap to flag beyond what a symbols-only or pre-contract
+comparison already implies. Don't read a clean `--depth`-limited or
+legacy-baseline comparison as having verified build profile at all — the
+hard-fail guarantee is real, but it's a guarantee about *comparable
+extractions*, not a guarantee that every comparison checked comparability.
 
 ## What actually gets fingerprinted
 
