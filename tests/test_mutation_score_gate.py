@@ -495,6 +495,68 @@ class TestUngatedRun:
             == 1
         )
 
+    def test_require_baseline_is_not_satisfied_by_diff_scoped_alone(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The mixed diff: a changed production function *and* a weakened test.
+
+        --diff-scoped is a real gate, but it answers a narrower question —
+        only whether the functions this branch changed have survivors. The
+        survivors a weakened test allows in an *untouched* function are
+        outside its scope, so treating it as satisfying --require-baseline let
+        that diff exit 0 with no drift reference at all (Codex review).
+        """
+        diff, _ = _diff_scoped_env(tmp_path, monkeypatch)
+        results = _write(
+            tmp_path,
+            "r.txt",
+            "    abicheck.diff_types.x_untouched__mutmut_1: survived\n",
+        )
+        rc = gate.main(
+            [
+                "--results-file",
+                results,
+                "--baseline-file",
+                str(tmp_path / "absent.json"),
+                "--diff-scoped",
+                "--diff-file",
+                diff,
+                "--require-baseline",
+            ]
+        )
+        assert rc == 1
+        assert "--diff-scoped does not substitute" in capsys.readouterr().out
+
+    def test_require_baseline_is_satisfied_by_a_recorded_baseline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: the flag must not become unsatisfiable. With a
+        baseline recorded, the same mixed diff is checked and passes."""
+        diff, baseline = _diff_scoped_env(tmp_path, monkeypatch)
+        results = _write(
+            tmp_path,
+            "r.txt",
+            "    abicheck.diff_types.x_untouched__mutmut_1: survived\n",
+        )
+        assert (
+            gate.main(
+                [
+                    "--results-file",
+                    results,
+                    "--baseline-file",
+                    baseline,
+                    "--diff-scoped",
+                    "--diff-file",
+                    diff,
+                    "--require-baseline",
+                ]
+            )
+            == 0
+        )
+
     def test_the_receipt_records_whether_anything_was_gated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -650,7 +712,7 @@ def test_require_baseline_fails_when_no_baseline_exists(
         ]
     )
     assert rc == 1
-    assert "could only ever report, never gate" in capsys.readouterr().out
+    assert "no baseline is available" in capsys.readouterr().out
 
 
 def test_require_baseline_passes_once_a_baseline_exists(tmp_path: Path) -> None:

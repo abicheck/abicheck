@@ -483,22 +483,32 @@ def main(argv: list[str] | None = None) -> int:
     gated = True
     baseline_modules = load_baseline(Path(args.baseline_file))
     total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+    #: Is there a *drift* reference — the only thing that can answer "did the
+    #: survivor set grow", for any function, changed or not?
+    baseline_available = baseline_modules is not None or total_baseline is not None
     # "Report-only" means there is genuinely nothing to be measured against.
     # Once any gate is active, an unresolved run is a failed measurement.
-    gating_active = (
-        args.diff_scoped or baseline_modules is not None or total_baseline is not None
-    )
+    gating_active = args.diff_scoped or baseline_available
 
-    if args.require_baseline and not gating_active:
-        # Without this, a "baseline drift" lane with no baseline to compare
-        # against returns 0 no matter how many mutants survive — the exact
-        # can't-fail shape this whole gate exists to remove (Codex review).
+    if args.require_baseline and not baseline_available:
+        # Deliberately keyed on the baseline, not on `gating_active`, even
+        # though --diff-scoped is a real gate. It answers a different
+        # question: only whether the functions *this branch changed* have
+        # surviving mutants. A diff that changes one detector function and
+        # weakens a test covering another leaves the second one's new
+        # survivors entirely outside its scope, and counting --diff-scoped as
+        # satisfying --require-baseline let exactly that exit 0 (Codex
+        # review). Without this, a "baseline drift" lane with no baseline
+        # returns 0 no matter how many mutants survive — the can't-fail shape
+        # this whole gate exists to remove.
         print(
             "ERROR: --require-baseline was passed but no baseline is available "
             f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
-            "unset), so this run could only ever report, never gate. Establish "
-            "it once with the workflow_dispatch lane "
-            "(write_baseline: true), then re-enable this lane."
+            "unset), so nothing in this run can answer whether the survivor set "
+            "grew. --diff-scoped does not substitute: it only looks at the "
+            "functions this branch changed. Establish the baseline once with "
+            "the workflow_dispatch lane (write_baseline: true), then re-enable "
+            "this lane."
         )
         return 1
 
