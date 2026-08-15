@@ -302,11 +302,19 @@ def test_a_module_absent_from_the_baseline_is_treated_as_zero(tmp_path: Path) ->
     assert gate.main(["--results-file", results, "--baseline-file", baseline]) == 1
 
 
-def test_write_baseline_records_per_module_counts(tmp_path: Path) -> None:
+def test_write_baseline_records_per_module_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import json
 
     results = _write(tmp_path, "r.txt", _TWO_MODULES)
     out_file = str(tmp_path / "baseline.json")
+    # A real recording run exports stats; this fixture is a bare listing, so
+    # the completion witness has to come from somewhere (see
+    # test_write_baseline_refuses_a_capture_that_cannot_prove_completion).
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 10, "survived": 3}
+    )
     assert (
         gate.main(
             ["--results-file", results, "--baseline-file", out_file, "--write-baseline"]
@@ -319,6 +327,33 @@ def test_write_baseline_records_per_module_counts(tmp_path: Path) -> None:
     assert doc["modules"]["abicheck/diff_symbols.py"]["keys"] == [
         "abicheck.diff_symbols.x_beta__mutmut_1"
     ]
+
+
+def test_write_baseline_refuses_a_capture_that_cannot_prove_completion(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`mutmut results` prints no progress counter, so a listing truncated
+    after a few lines reads exactly like a whole one.
+
+    Tolerable for gating — a short capture can only under-report, and the
+    caller produced it — but not for *recording*: a partial survivor set
+    written as the baseline becomes what every later run is scored against,
+    silently and permanently (Codex review).
+    """
+    results = _write(tmp_path, "r.txt", _TWO_MODULES)
+    out_file = tmp_path / "baseline.json"
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            str(out_file),
+            "--write-baseline",
+        ]
+    )
+    assert rc == 1
+    assert "cannot prove it is complete" in capsys.readouterr().out
+    assert not out_file.exists()
 
 
 def test_write_baseline_refuses_an_unresolved_run(tmp_path: Path) -> None:

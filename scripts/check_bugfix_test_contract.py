@@ -610,10 +610,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: cannot diff {base}...{head}: {e}")
             return 1
         print(
-            f"bugfix-test-contract: cannot diff {base}...{head} — skipping. "
-            "Fetch the base branch to run this locally."
+            f"bugfix-test-contract: cannot diff {base}...{head} — nothing was "
+            f"checked (exit {EXIT_STRUCTURAL_ONLY}). Fetch the base branch to "
+            "run this locally."
         )
-        return 0
+        # Partial, not a pass: without a diff even the structural half cannot
+        # run, and returning 0 let `verify.py` record the step as passed and
+        # the pr profile as complete — the same over-claim as a missing PR
+        # body, from an input that is missing for a different reason (Codex
+        # review).
+        return EXIT_STRUCTURAL_ONLY
 
     if not is_bugfix(subjects, args.title):
         print("bugfix-test-contract: not a fix/perf/security change — not applicable")

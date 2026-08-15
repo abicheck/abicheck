@@ -24,6 +24,7 @@ would be a box to tick.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -715,6 +716,36 @@ class TestEmptyPrBody:
         rc = gate.main(["--base", "A", "--head", "B", "--body-file", str(empty)])
         assert rc == 1
         assert "PR description is empty" in capsys.readouterr().out
+
+    def test_an_unresolvable_local_base_is_partial_not_a_pass(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No diff means not even the structural half ran.
+
+        Returning 0 there let `verify.py` record the step as passed and the pr
+        profile as complete — the same over-claim as a missing PR body, from
+        an input missing for a different reason (Codex review).
+        """
+
+        def _boom(base: str, head: str) -> list[tuple[str, str]]:
+            raise subprocess.CalledProcessError(128, ["git", "diff"])
+
+        monkeypatch.setattr(gate, "changed_files", _boom)
+        assert gate.main([]) == gate.EXIT_STRUCTURAL_ONLY
+        assert "nothing was checked" in capsys.readouterr().out
+
+    def test_an_unresolvable_ref_named_by_ci_is_still_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: when CI names the refs, an unresolvable one is a
+        real failure, not a partial run — a gate that cannot run in CI has
+        nothing to be partial about."""
+
+        def _boom(base: str, head: str) -> list[tuple[str, str]]:
+            raise subprocess.CalledProcessError(128, ["git", "diff"])
+
+        monkeypatch.setattr(gate, "changed_files", _boom)
+        assert gate.main(["--base", "A", "--head", "B"]) == 1
 
     def test_a_structural_failure_outranks_the_partial_exit(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

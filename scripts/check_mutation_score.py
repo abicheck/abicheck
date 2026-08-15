@@ -333,6 +333,23 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
     return results_out, load_cicd_stats(Path(args.mutants_dir))
 
 
+def _run_reached_its_end(text: str, stats: dict[str, int] | None) -> bool:
+    """Is there positive evidence the run *finished*, not merely that it ran?
+
+    Two witnesses, both independent of the results text's own length: the
+    exported stats (`total > 0` with a survivor count), and a completed
+    progress render (`N/N`). A per-mutant listing is deliberately not one — it
+    carries no counter, so a truncated capture reads exactly like a whole one.
+    """
+    if (
+        stats is not None
+        and stats.get("total", 0) > 0
+        and isinstance(stats.get("survived"), int)
+    ):
+        return True
+    return summary_run_is_complete(text)
+
+
 def _measurement_is_complete(
     text: str, stats: dict[str, int] | None
 ) -> tuple[bool, str]:
@@ -558,6 +575,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"({args.baseline_file} left untouched)."
             )
             return 1
+
+    if args.write_baseline and not _run_reached_its_end(text, stats):
+        # `mutmut results` prints a plain listing with no progress counter, so
+        # a capture truncated after a few lines is indistinguishable from a
+        # complete one by its own content. That is tolerable for gating (a
+        # short capture can only under-report, and the run that produced it is
+        # the caller's own), but not for *recording* — a partial survivor set
+        # written as the baseline becomes the thing every later run is scored
+        # against, and the loss is silent and permanent (Codex review).
+        print(
+            "ERROR: refusing to write a baseline from a capture that cannot "
+            "prove it is complete. Record it from a real run (which exports "
+            "mutants/mutmut-cicd-stats.json), not from a saved `mutmut "
+            "results` listing."
+        )
+        return 1
 
     if args.write_baseline:
         doc = render_baseline(records)
