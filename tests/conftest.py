@@ -18,6 +18,39 @@ except ImportError:
     filelock = None  # type: ignore[assignment]
 
 
+def _relax_hypothesis_deadline_under_mutmut() -> None:
+    """Drop Hypothesis's per-example deadline when mutmut is driving the run.
+
+    Mutation testing routes every call to a mutated function through a
+    dispatcher, so the code under test is deliberately slower than it will
+    ever be in production — and slower still under the load of a full mutant
+    sweep. A 200ms wall-clock deadline then fails property tests for a reason
+    that has nothing to do with the property, which is how a Hypothesis test
+    that passes standalone aborted mutmut's clean-test phase and with it the
+    whole lane (observed once on
+    `test_ctor_dtor_key_drift.py::TestCanonicalizationProperties::test_idempotent`;
+    the same suite, same arguments, passed in isolation).
+
+    Keyed on the variable's *presence*: mutmut sets `MUTANT_UNDER_TEST` to the
+    empty string for the clean run and to a mutant name otherwise, so a
+    truthiness check would miss exactly the phase this was seen in. Nothing
+    changes for an ordinary pytest run, where deadlines stay on.
+    """
+    if "MUTANT_UNDER_TEST" not in os.environ:
+        return
+    try:
+        from hypothesis import HealthCheck, settings
+    except ImportError:  # hypothesis is a dev dependency, not a hard one
+        return
+    settings.register_profile(
+        "mutmut", deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
+    settings.load_profile("mutmut")
+
+
+_relax_hypothesis_deadline_under_mutmut()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
     """Redirect the whole-snapshot cache (``snapshot_cache.py``) to a fresh

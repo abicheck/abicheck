@@ -28,6 +28,7 @@ pixi/pre-commit/CI all route through `scripts/verify.py`'s step catalog.
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -149,6 +150,38 @@ def test_no_step_expands_a_github_expression_inside_its_script() -> None:
             if script and "${{" in script:
                 offenders.append((step.get("name", "?"), script))
     assert not offenders, f"expressions expanded inside run: {offenders}"
+
+
+def test_hypothesis_deadlines_are_relaxed_only_under_mutmut(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wall-clock deadline is not the property under test.
+
+    The trampoline makes every mutated call slower, so a 200ms per-example
+    deadline turns property tests into flaky ones for the whole lane — one
+    aborted mutmut's clean-test phase while passing standalone. The relaxation
+    is keyed on the variable's *presence*, because mutmut sets it to the empty
+    string for exactly that phase.
+    """
+    conftest = REPO_ROOT / "tests" / "conftest.py"
+    source = conftest.read_text(encoding="utf-8")
+    assert '"MUTANT_UNDER_TEST" not in os.environ' in source, (
+        "a truthiness check would miss the clean-test phase, where mutmut sets "
+        "the variable to an empty string"
+    )
+    assert "deadline=None" in source
+
+    spec = importlib.util.spec_from_file_location("_conftest_probe", conftest)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    from hypothesis import settings
+
+    before = settings.default.deadline
+    spec.loader.exec_module(module)
+    assert settings.default.deadline == before, (
+        "an ordinary pytest run must keep its deadlines"
+    )
 
 
 def test_the_lane_does_not_cache_mutmut_results() -> None:
