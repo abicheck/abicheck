@@ -118,14 +118,44 @@ class TestSplitGccOptionsWindows:
         ]
 
     def test_quoted_windows_path_still_uses_real_posix_escaping(self) -> None:
-        # A quoted value is a deliberate opt-in to POSIX quoting, so
-        # backslash-escaping inside quotes follows real shlex rules
-        # unconditionally, unlike the unquoted case above.
+        # A double-quoted value is a deliberate opt-in to POSIX double-
+        # quote semantics, so backslash-escaping inside it follows real
+        # shlex rules unconditionally, unlike the unquoted case above.
         assert _split_gcc_options_windows(r'-DPATH="C:\a\b"') == [r"-DPATH=C:\a\b"]
 
-    def test_single_quoted_value_is_fully_literal(self) -> None:
+    def test_single_quote_is_never_special(self) -> None:
+        # Codex review, sixth round: a bare `'` used to open real POSIX
+        # single-quote grouping here, matching plain shlex -- but unlike
+        # `"` (illegal in every Windows filename), `'` is an ordinary,
+        # legal Windows path/filename character (e.g. a surname like
+        # O'Brien) with no shell-special meaning on this platform at all.
+        # Treating it as a delimiter either silently dropped real quote
+        # characters from a value that needed them (-DCHAR='x') or raised
+        # ValueError on an unterminated "quote" that was really just a
+        # path containing an apostrophe -- see the two regression tests
+        # below. `'` now always falls through to the plain "ordinary
+        # character" branch, both inside and outside double quotes.
         assert _split_gcc_options_windows(r"-DMSG='a \ b \" c'") == [
-            r"-DMSG=a \ b \" c"
+            "-DMSG='a",
+            "\\",
+            "b",
+            '"',
+            "c'",
+        ]
+
+    def test_apostrophe_in_macro_value_is_preserved(self) -> None:
+        # A real, if unusual, C character-constant macro value -- the
+        # quotes are semantically part of the value, not POSIX shell
+        # quoting to be stripped.
+        assert _split_gcc_options_windows("-DCHAR='x'") == ["-DCHAR='x'"]
+
+    def test_apostrophe_in_windows_path_does_not_raise(self) -> None:
+        # The original bug report shape: a real Windows path/filename
+        # containing an apostrophe (a common surname) previously opened
+        # unterminated single-quote parsing and raised ValueError,
+        # aborting header extraction outright.
+        assert _split_gcc_options_windows(r"-IC:\Users\O'Brien\include") == [
+            r"-IC:\Users\O'Brien\include"
         ]
 
 

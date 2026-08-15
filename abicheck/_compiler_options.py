@@ -72,6 +72,25 @@ def split_gcc_options(text: str) -> list[str]:
        escapable at all -- only a quote character, which cannot be
        confused with a real, unescaped path component the way whitespace
        can.
+    6. The same tokenizer, still treating a bare ``'`` outside quotes as a
+       real POSIX single-quote grouping delimiter (matching item #3's
+       POSIX branch) -- but a Windows path or filename can legally contain
+       a literal apostrophe (e.g. ``O'Brien``), which POSIX single-quote
+       parsing is not: an unquoted ``-IC:\\Users\\O'Brien\\include`` opened
+       a quoted region at the apostrophe and then found no closing ``'``,
+       raising ``ValueError`` and aborting header extraction outright, and
+       a value like ``-DCHAR='x'`` (a real, if unusual, C character-
+       constant macro value) silently lost its quote characters, changing
+       the macro's meaning. Unlike ``"`` (illegal in every Windows
+       filename, so treating it as a real delimiter never conflicts with
+       genuine unescaped path content), ``'`` is an ordinary, legal
+       Windows path/filename character with no POSIX-shell-adjacent
+       meaning on Windows at all (``cmd.exe``/PowerShell don't treat it
+       specially either) -- so :func:`_split_gcc_options_windows` no
+       longer treats ``'`` as special in any way, outside or inside
+       double quotes: it is always literal, never a grouping delimiter
+       and never escapable (escaping it would be meaningless once it
+       carries no special meaning to escape).
 
     The fix is not a cleverer single grammar (#2-#4 each tried and
     regressed something with one) -- it's recognizing that #1's underlying
@@ -118,29 +137,36 @@ def _split_gcc_options_windows(text: str) -> list[str]:
     separator right before the next flag (``-IC:\\sdk\\ -DOK=1``) hits the
     identical backslash-before-whitespace shape, so the separator and the
     space were swallowed into one corrupted token instead of staying two.
-    Unlike that case, escaping a quote character is unambiguous with an
-    ordinary Windows path component -- a real path never legally contains
-    an unescaped/unquoted ``"``/``'`` to begin with, and a path never ends
-    in one the way it routinely ends in a directory separator. So outside
-    quotes, a backslash immediately followed by ``"`` or ``'`` escapes
-    exactly that one character (consumed together, dropping the backslash,
-    keeping the literal quote character as part of the current token); a
-    backslash followed by anything else -- an ordinary path character,
-    whitespace, end of string, or another backslash -- is left completely
-    untouched, both characters preserved literally one at a time (matching
-    the pre-existing, already-correct Windows behavior for this exact
-    shape, before this function existed to fix the actual quoted-value
-    bug). Verified against real ``shlex.split`` output where a comparison
-    applies: ``-DVERSION=\\"1.2\\"`` -> one token ``-DVERSION="1.2"``
-    (matches plain ``shlex``); ``-IC:\\mypath\\include`` and
-    ``-IC:\\sdk\\ -DOK=1`` -> unchanged, backslashes and trailing separators
-    intact, two tokens each where a space is a real separator (diverging
-    from plain ``shlex``, which would corrupt both -- the whole reason
-    this function exists). Inside quotes, escaping follows real POSIX
-    rules unconditionally (double quotes: ``\\"`` -> ``"``, ``\\\\`` ->
-    ``\\``, any other ``\\x`` stays literal; single quotes: no escaping at
-    all) -- matching plain ``shlex`` exactly, since a quoted Windows path
-    is already an explicit, deliberate opt-in to POSIX quoting semantics.
+    Unlike that case, escaping a double-quote character is unambiguous
+    with an ordinary Windows path component -- ``"`` is illegal in every
+    Windows filename, so a real path never legally contains an unescaped
+    one to begin with, and never ends in one the way it routinely ends in
+    a directory separator. A single quote (``'``) gets no such exception
+    at all (see item #6 above) -- it is a completely ordinary, legal path
+    character on Windows with no special meaning, unlike on POSIX. So
+    outside quotes, a backslash immediately followed by ``"`` escapes
+    exactly that one character (consumed together, dropping the
+    backslash, keeping the literal quote character as part of the current
+    token); a backslash followed by anything else -- an ordinary path
+    character, whitespace, ``'``, end of string, or another backslash --
+    is left completely untouched, both characters preserved literally one
+    at a time (matching the pre-existing, already-correct Windows behavior
+    for this exact shape, before this function existed to fix the actual
+    quoted-value bug). Verified against real ``shlex.split`` output where
+    a comparison applies: ``-DVERSION=\\"1.2\\"`` -> one token
+    ``-DVERSION="1.2"`` (matches plain ``shlex``); ``-IC:\\mypath\\include``
+    and ``-IC:\\sdk\\ -DOK=1`` -> unchanged, backslashes and trailing
+    separators intact, two tokens each where a space is a real separator
+    (diverging from plain ``shlex``, which would corrupt both -- the whole
+    reason this function exists); ``-IC:\\Users\\O'Brien\\include`` ->
+    unchanged, one token, apostrophe intact (also diverging from plain
+    ``shlex``, which would raise ``ValueError`` for an unterminated
+    quote). Inside double quotes, escaping follows real POSIX rules for
+    that quote kind unconditionally (``\\"`` -> ``"``, ``\\\\`` -> ``\\``,
+    any other ``\\x`` stays literal, ``'`` always literal) -- matching
+    plain ``shlex`` exactly, since an explicitly double-quoted Windows
+    path is a deliberate opt-in to POSIX double-quote semantics. There is
+    no equivalent single-quote opt-in on this platform.
     """
     tokens: list[str] = []
     current: list[str] = []
@@ -156,27 +182,25 @@ def _split_gcc_options_windows(text: str) -> list[str]:
                 have_current = False
             i += 1
             continue
-        # Outside any quote, a backslash escapes exactly a following quote
-        # character (dropping the backslash, keeping the literal quote
-        # character as part of the current token). Anything else after the
-        # backslash -- an ordinary path character, whitespace, another
-        # backslash, or end of string -- is left untouched, so an unquoted
-        # Windows path's backslashes (including a trailing directory
-        # separator right before the next flag) survive intact (see the
-        # docstring above for why whitespace is deliberately excluded here).
-        if ch == "\\" and i + 1 < n and text[i + 1] in ('"', "'"):
+        # Outside any quote, a backslash escapes exactly a following
+        # double-quote character (dropping the backslash, keeping the
+        # literal quote character as part of the current token). Anything
+        # else after the backslash -- an ordinary path character,
+        # whitespace, a single quote, another backslash, or end of string
+        # -- is left untouched, so an unquoted Windows path's backslashes
+        # (including a trailing directory separator right before the next
+        # flag) survive intact (see the docstring above for why whitespace
+        # and ``'`` are deliberately excluded here).
+        if ch == "\\" and i + 1 < n and text[i + 1] == '"':
             have_current = True
             current.append(text[i + 1])
             i += 2
             continue
         have_current = True
-        if ch == "'":
-            end = text.find("'", i + 1)
-            if end == -1:
-                raise ValueError("No closing quotation")
-            current.append(text[i + 1 : end])
-            i = end + 1
-            continue
+        # A bare single quote is never special on Windows -- unlike POSIX,
+        # it's an ordinary, legal path/filename character (see the
+        # docstring above), so it falls through to the plain "ordinary
+        # character" branch at the end of this loop, same as any letter.
         if ch == '"':
             i += 1
             while True:

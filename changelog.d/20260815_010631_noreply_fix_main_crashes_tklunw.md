@@ -7,17 +7,33 @@
   `shlex.split(..., posix=os.name != "nt")` traded quote-collapsing for
   backslash-preserving depending on the host OS instead of keeping both.
   A new shared helper, `abicheck._compiler_options.split_gcc_options`, now
-  handles a quoted value correctly on every platform (including one with
-  an escaped embedded quote, like `-DMSG="say \"hi\""`), while on Windows
-  specifically an *unquoted* backslash — including an ordinary path
-  (`-IC:\mypath\include`) or one ending in a trailing directory separator
-  right before the next flag (`-IC:\sdk\ -DOK=1`) — is left untouched
-  rather than corrupted, except when it immediately precedes a quote
-  character (`-DVERSION=\"1.2\"`), which it still escapes; POSIX platforms
-  keep their exact prior, unmodified `shlex.split(text, posix=True)`
-  behavior (including real POSIX escapes such as `-DVAR=\$HOME`). Fixes
-  the same class of bug in `action/run.sh`'s `add_flag_shlex_split`, which
-  now delegates to the real Python helper directly (via stdin, to also
-  avoid Git Bash/MSYS's automatic argv path-conversion mangling a value
-  containing a POSIX-style path segment) instead of carrying its own copy
-  of the tokenizer.
+  handles a double-quoted value correctly on every platform (including one
+  with an escaped embedded quote, like `-DMSG="say \"hi\""`), while on
+  Windows specifically an *unquoted* backslash — including an ordinary
+  path (`-IC:\mypath\include`), one ending in a trailing directory
+  separator right before the next flag (`-IC:\sdk\ -DOK=1`), or a literal
+  apostrophe in the path (`-IC:\Users\O'Brien\include`) — is left
+  untouched rather than corrupted, except when it immediately precedes a
+  double-quote character (`-DVERSION=\"1.2\"`), which it still escapes;
+  POSIX platforms keep their exact prior, unmodified
+  `shlex.split(text, posix=True)` behavior (including real POSIX escapes
+  such as `-DVAR=\$HOME`). Fixes the same class of bug in
+  `action/run.sh`'s `add_flag_shlex_split`, which now delegates to the
+  real Python helper directly (via stdin, to also avoid Git Bash/MSYS's
+  automatic argv path-conversion mangling a value containing a
+  POSIX-style path segment) instead of carrying its own copy of the
+  tokenizer.
+
+### Security
+
+- **`action/run.sh`'s inline Python invocations no longer let a checked-out
+  repository shadow the installed `abicheck` package.** `python -c`/`-m`
+  insert the current working directory into `sys.path[0]`, so on a
+  `pull_request`-triggered workflow — where the checkout is the PR
+  author's own, untrusted code — a PR that added a same-named module (e.g.
+  its own `abicheck/_compiler_options.py` or `abicheck/package.py`) could
+  make one of these inline scripts import and execute that code instead of
+  the real, pip-installed package. Every inline script that imports an
+  `abicheck` module now strips the CWD entry from `sys.path` before doing
+  so; the one `-m abicheck.cli_pr_comment` invocation was converted to the
+  equivalent `-c`-based form so it could receive the same fix.

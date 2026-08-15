@@ -97,7 +97,7 @@ add_flag_shlex_split() {
   # never subject to that conversion (only actual argv strings are), so
   # this sidesteps the whole class of corruption regardless of the exact
   # value shape that triggers it -- not just the one case that surfaced it.
-  split="$(printf '%s' "$value" | "$_PY_BIN" -c '
+  split="$(printf '%s' "$value" | "$_PY_BIN" -c "$_PY_SAFE_PATH"'
 import sys
 
 from abicheck._compiler_options import split_gcc_options
@@ -219,6 +219,32 @@ MODE="${INPUT_MODE:-compare}"
 # no single-snapshot asset would otherwise fail with "command not found"
 # on exactly the runners this fallback exists to serve (Codex review).
 _PY_BIN="$(command -v python3 || command -v python || true)"
+
+# ---------------------------------------------------------------------------
+# Security: `python -c`/`python -m` insert this process's current working
+# directory ('' in sys.path, i.e. wherever this script's caller checked out
+# code for abicheck to analyze -- untrusted on a `pull_request`-triggered
+# workflow, since a PR author controls the checked-out tree) as sys.path[0].
+# Any inline script below that imports a real `abicheck` submodule would,
+# without this, prefer a same-named module/package the checked-out tree
+# happens to contain (e.g. a malicious PR adding its own
+# `abicheck/_compiler_options.py`) over the actual, trusted, pip-installed
+# package -- executing attacker-controlled code inside this Action's own
+# process (Codex review, fresh evidence, empirically confirmed: a
+# fake `abicheck/_compiler_options.py` dropped into the CWD really does
+# shadow the installed one and run instead). Every inline script that
+# imports any `abicheck` module is prefixed with this snippet, which strips
+# just the CWD entry before that import -- deliberately not `python -I`
+# (also disables user site-packages and ignores PYTHONPATH/PYTHONHOME,
+# either of which a real, differently-configured CI environment could
+# legitimately need for `abicheck` to be importable at all) or `-P`
+# (identical, narrower isolation, but Python 3.11+ only -- this project
+# supports 3.10). A script with no `abicheck` import (e.g. the plain
+# `json`/`sys` JSON-parsing snippet elsewhere in this file) has nothing to
+# shadow and does not need this.
+_PY_SAFE_PATH='import sys
+sys.path = [p for p in sys.path if p not in ("", ".")]
+'
 
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
@@ -410,7 +436,7 @@ for asset in data.get("assets") or []:
   # extraction safety here.
   case "$asset_name" in
     *.tar.zst)
-      "$_PY_BIN" -c '
+      "$_PY_BIN" -c "$_PY_SAFE_PATH"'
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -420,7 +446,7 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
       ;;
     *.tar.gz | *.tgz | *.tar)
-      "$_PY_BIN" -c '
+      "$_PY_BIN" -c "$_PY_SAFE_PATH"'
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -466,7 +492,7 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
   fi
 
   local resolve_output
-  resolve_output=$("$_PY_BIN" -c '
+  resolve_output=$("$_PY_BIN" -c "$_PY_SAFE_PATH"'
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -2228,7 +2254,22 @@ _maybe_post_pr_comment() {
   # below), leaving PR_BODY empty and the comment skipped or an existing
   # sticky one deleted. `$_PY_BIN` is the same resolved interpreter every
   # other Python invocation in this script already uses.
-  "$_PY_BIN" -m abicheck.cli_pr_comment "$PR_JSON" \
+  #
+  # `-c '...runpy.run_module(...)...'` rather than the more obvious
+  # `-m abicheck.cli_pr_comment`, so `$_PY_SAFE_PATH` (see its own
+  # definition above) can strip the CWD-shadowing entry from sys.path
+  # before this module import too -- `-m` inserts the CWD into sys.path[0]
+  # exactly like `-c` does, and this is the one inline-Python invocation in
+  # this file that isn't already `-c`-shaped. Functionally identical to
+  # `-m abicheck.cli_pr_comment` from click's own perspective (it reads
+  # sys.argv[1:], unaffected by this); the only observable difference is
+  # the program name `--help`/usage text shows ("-c" instead of the
+  # resolved module path), which this Action does not depend on.
+  "$_PY_BIN" -c "$_PY_SAFE_PATH"'
+import runpy
+
+runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
+' "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
