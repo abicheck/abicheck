@@ -128,7 +128,7 @@ A class has moving parts the coarse `sizeof` diff under-represents. The
 
 | Field | Meaning | Populated by |
 |-------|---------|--------------|
-| `base_offsets` | each base subobject's bit offset | DWARF + both header backends |
+| `base_offsets` | each base subobject's bit offset | DWARF and castxml directly; **direct-clang only with** the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass (`dumper_clang.py` never populates it on its own) |
 | `vptr_offset_bits` | vtable-pointer offset | **DWARF: measured** — read from the artificial vptr member's own `DW_AT_data_member_location`, with inherited offsets propagated, and `0` used only as a last-resort fallback. **Both header backends: derived**, `0` whenever the class has a vtable — a polymorphism witness, not a measured offset |
 | `data_size_bits` | `dsize` — bytes the members occupy, excl. tail padding | only the optional `ABICHECK_CLANG_LAYOUT_TOOL` companion pass |
 | `is_standard_layout` | standard-layout trait | direct-clang AST only |
@@ -171,7 +171,11 @@ appears on one side only contributes nothing here.
 
 - **`_ZTV<type>`** (the vtable): for the simple single-inheritance case, laid
   out as `[offset-to-top, typeinfo*, slot0, slot1, …]`, so its `st_size`
-  changes by one pointer per virtual function net added or removed. In general
+  changes by one pointer per vtable **entry** net added or removed. Count
+  entries, not source-level virtual functions — the two differ: a virtual
+  destructor occupies *two* entries (the complete-object and deleting
+  destructors), so adding one to a class grows `_ZTV` by 16 bytes on x86-64,
+  not 8 (verified against GCC: 24 → 40). In general
   the symbol covers the whole **vtable group** — vcall/vbase offsets, and a
   secondary table per polymorphic base beyond the primary — so its size also
   moves when the *inheritance shape* changes with no virtual added at all

@@ -20,10 +20,15 @@ visible in DWARF debug info:
 
 * **vtable** (``_ZTV<type>``) — laid out as ``[offset-to-top, typeinfo*,
   slot0, slot1, …]`` in the simple single-inheritance case, so its ``st_size``
-  grows or shrinks by one pointer per virtual function net added or removed;
-  ``slots ≈ size/pointer_size - 2`` for the primary vtable.  Two caveats the
+  grows or shrinks by one pointer per vtable *entry* net added or removed;
+  ``slots ≈ size/pointer_size - 2`` for the primary vtable.  Three caveats the
   kind's name (``vtable_slot_count_changed``) does not carry:
 
+  * An entry is not a source-level virtual function.  A virtual destructor
+    occupies **two** entries (complete-object ``D1`` and deleting ``D0``), so
+    adding one grows ``_ZTV`` by two pointers — verified against GCC on
+    x86-64, 24 B to 40 B.  Read the delta as entries, never as a count of
+    declarations changed.
   * The symbol covers the whole vtable *group* — vcall/vbase offsets plus a
     secondary table per polymorphic base beyond the primary — so an
     inheritance-shape change alone can resize it with no virtual added or

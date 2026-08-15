@@ -258,8 +258,16 @@ the kind of change that merits review rather than a silent pass.
     **🔴 BREAKING** case is narrower — the function type has to be embedded in
     some *other* ABI-visible mangled entity, so that entity's own name moves:
     an exported function taking `void (*)() noexcept` as a parameter, or a
-    template specialization instantiated on the function type. There the `E`
-    tag participates in the mangled name and the old symbol disappears.
+    template specialization instantiated on the function type. The component
+    that encodes it is **`Do`**, not the `E` that terminates every function
+    type regardless:
+
+    ```text
+    void take(void (*)() noexcept);   →  _Z4takePDoFvvE
+    void take_plain(void (*)());      →  _Z10take_plainPFvvE
+    ```
+
+    The old symbol disappears and consumers of it fail to link.
 
 ---
 
