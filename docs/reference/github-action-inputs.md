@@ -24,7 +24,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `old-header` | no | — | Public header(s) for the old side only (overrides header for old). Space-separated. |
 | `new-header` | no | — | Public header(s) for the new side only (overrides header for new). Space-separated. |
 | `public-header-dir` | no | — | Directory whose headers are treated as public for provenance classification (repeatable, space-separated) — establishes the public/internal boundary so leakage/RTTI/exported-vs-public cross-checks run instead of skipping. dump and scan modes only (`--public-header-dir` on the CLI); compare has no equivalent flag. |
-| `include` | no | — | Extra include directories for castxml, applied to both sides. Space-separated. |
+| `include` | no | — | Extra include directories for header AST parsing (castxml or clang), applied to both sides. Space-separated. Required whenever a header passed via `header` itself `#include`s a *dependency's* header from a separate include root (e.g. a library's own `version.h` pulling in a base/platform library's header) -- `header`/`public-header-dir` only cover the library's own public headers, so the dependency's directory must be listed here or the parse aborts on the first such include with a "file not found" error. Found in a real PVXS Action acceptance run, where PVXS's `pvxs/version.h` includes EPICS Base's `epicsVersion.h`. |
 | `old-include` | no | — | Include directories for old side only. Space-separated. |
 | `new-include` | no | — | Include directories for new side only. Space-separated. |
 | `old-version` | no | old | Version label for the old library (embedded in reports). |
