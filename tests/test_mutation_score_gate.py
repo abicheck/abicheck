@@ -67,12 +67,46 @@ def test_parse_survivors_returns_none_when_unmeasurable(text: str) -> None:
     assert gate.parse_survivors(text) is None
 
 
-def test_gate_skips_when_unmeasurable(tmp_path: Path) -> None:
-    """Empty / unparseable results are non-fatal (matches the mypy-skip pattern)."""
+def test_stats_without_a_survivor_count_are_not_a_completion_witness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`total` alone is not proof the run finished.
+
+    The parsed-vs-exported cross-check is conditional on `survived`, so a
+    receipt carrying only `total` skipped it while still counting as proof —
+    and with an unrecognised results format alongside, the survivor count
+    defaulted to zero and passed a zero baseline unvalidated (Codex review).
+    """
+    results = _write(tmp_path, "r.txt", "nothing this parser understands")
+    monkeypatch.setattr(gate, "load_cicd_stats", lambda _dir: {"total": 100})
+    assert gate.main(["--results-file", results, "--baseline", "0"]) == 1
+    assert "unmeasurable" in capsys.readouterr().out
+
+
+def test_complete_stats_are_still_a_completion_witness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: a receipt with both keys still proves the run ran, so
+    an empty per-mutant listing really does mean every mutant was killed."""
+    results = _write(tmp_path, "r.txt", "")
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 100, "survived": 0}
+    )
+    assert gate.main(["--results-file", results, "--baseline", "0"]) == 0
+
+
+def test_an_explicit_but_unmeasurable_results_file_fails(tmp_path: Path) -> None:
+    """Empty results named explicitly are a failure, not a graceful skip.
+
+    This test previously asserted 0, on the analogy of the mypy-skip pattern.
+    The analogy does not hold: a missing *tool* is a reason to skip, but a
+    caller who named an input and asked for a verdict on it has been told
+    "cannot tell" — and a gate reporting success for that is the false green
+    this script exists to remove (Codex review).
+    """
     results = tmp_path / "empty.txt"
     results.write_text("", encoding="utf-8")
-    rc = gate.main(["--results-file", str(results), "--baseline", "5"])
-    assert rc == 0
+    assert gate.main(["--results-file", str(results), "--baseline", "5"]) == 1
 
 
 def test_gate_fails_when_survivors_exceed_baseline(tmp_path: Path) -> None:
@@ -190,11 +224,12 @@ def test_count_unresolved(text: str, expected: int) -> None:
     assert gate.count_unresolved(text) == expected
 
 
-def test_no_run_unparseable_is_still_a_skip(tmp_path: Path) -> None:
-    """Without --run, an unparseable/empty result stays a graceful skip."""
+def test_no_run_unparseable_still_fails(tmp_path: Path) -> None:
+    """Unparseable content is the same situation as empty content: the caller
+    supplied it and the gate cannot say anything about it."""
     results = tmp_path / "garbage.txt"
     results.write_text("nothing useful", encoding="utf-8")
-    assert gate.main(["--results-file", str(results), "--baseline", "0"]) == 0
+    assert gate.main(["--results-file", str(results), "--baseline", "0"]) == 1
 
 
 # --- Per-module baseline -----------------------------------------------------
@@ -417,7 +452,10 @@ def test_an_incomplete_summary_render_is_not_a_measurement(
     `🙁 0` passed a zero baseline — the false green this gate exists to remove.
     """
     results = _write(tmp_path, "r.txt", text)
-    assert gate.main(["--results-file", results, "--baseline", "0"]) == 0
+    # Exit 1, not 0: the caller named an input and asked for a verdict on it.
+    # The first version of this test asserted 0 and so encoded the very
+    # false-green it was written to prevent (Codex review).
+    assert gate.main(["--results-file", results, "--baseline", "0"]) == 1
     assert "unmeasurable" in capsys.readouterr().out
 
 
@@ -965,7 +1003,7 @@ def test_summary_only_survivors_still_serve_the_global_total_gate(
 
 def test_zero_survivors_from_a_summary_is_not_blocked(tmp_path: Path) -> None:
     """A clean summary carries no attribution either, but has nothing to lose."""
-    results = _write(tmp_path, "r.txt", "🎉 40  🙁 0")
+    results = _write(tmp_path, "r.txt", "40/40  🎉 40  🙁 0")
     baseline = _baseline(tmp_path, {"abicheck/diff_types.py": 0})
     assert gate.main(["--results-file", results, "--baseline-file", baseline]) == 0
 

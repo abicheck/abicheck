@@ -342,17 +342,30 @@ def _measurement_is_complete(
     A perfect run prints no per-mutant lines at all, so "empty results" is only
     trustworthy when the exported stats prove mutants ran (``total > 0``).
     Without that witness, empty is unmeasurable — never zero.
+
+    The stats witness needs ``survived`` as well as ``total``. The
+    parsed-vs-exported cross-check below is conditional on that key, so a
+    receipt carrying only ``total`` — a corrupt file, or a schema change in a
+    permitted future ``mutmut>=3.7,<4`` — silently skipped the cross-check
+    while still counting as proof the run finished; with an unrecognised
+    results format alongside it, the survivor count then defaulted to zero and
+    passed a zero baseline unvalidated (Codex review).
     """
-    if stats is not None and stats.get("total", 0) > 0:
+    if (
+        stats is not None
+        and stats.get("total", 0) > 0
+        and isinstance(stats.get("survived"), int)
+    ):
         return True, ""
     if parse_mutant_records(text):
         return True, ""
     if parse_survivors(text) is not None and summary_run_is_complete(text):
         return True, ""
     return False, (
-        "no per-mutant results, no mutants/mutmut-cicd-stats.json with "
-        "total > 0, and no completed progress render (N/N) — cannot tell "
-        "'all mutants killed' from 'mutmut never ran' or was interrupted"
+        "no per-mutant results, no mutants/mutmut-cicd-stats.json carrying "
+        "total > 0 and a survived count, and no completed progress render "
+        "(N/N) — cannot tell 'all mutants killed' from 'mutmut never ran' or "
+        "was interrupted"
     )
 
 
@@ -426,7 +439,11 @@ def main(argv: list[str] | None = None) -> int:
     complete, why = _measurement_is_complete(text, stats)
     if not complete:
         print(f"mutation-score: unmeasurable — {why}")
-        return 1 if args.run else 0
+        # An explicitly named input counts the same as --run: the caller
+        # supplied results and asked for a verdict on them, so "cannot tell"
+        # is a failure, not a skip. Only a bare invocation — no run, no input
+        # — has genuinely nothing to measure (Codex review).
+        return 1 if (args.run or args.results_file) else 0
 
     records = parse_mutant_records(text)
     # Per-mutant listings are the strong source; a summary-only text (an older
