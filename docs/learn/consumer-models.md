@@ -70,9 +70,13 @@ Two of these are worth naming as the genuine edge cases they are:
   ABI break is silent, not a loud link error), so "loud vs. silent
   failure" isn't what sets FFI bindings apart. What's missing is narrower
   and more specific: a recompiled-source consumer's next build re-reads
-  your real headers, and a static-linked consumer's next relink re-reads
-  your real object code — both *automatically* pick up a change the next
-  time they touch your library at all. A binding whose declarations were
+  your real headers, and a static-linked consumer's next *full rebuild*
+  (recompiling its own sources against your current headers, not merely
+  relinking already-compiled objects against a new archive — a bare relink
+  reads only what's already baked into those objects, nothing new) picks
+  up your current object code — both *automatically* pick up a change the
+  next time they touch your library that way. A binding whose declarations
+  were
   hand-written once, or generated once and then frozen/vendored, has no
   such step: its declarations are just data, sitting wherever they were
   last written, with nothing that forces them to be regenerated when your

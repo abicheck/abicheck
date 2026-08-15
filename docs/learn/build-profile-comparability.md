@@ -43,31 +43,39 @@ different macro/builtin sets. A checker that doesn't gate on this either (a)
 floods you with findings that are actually toolchain noise, or (b) — worse —
 one real regression drowns in that noise and gets missed.
 
-## Three outcomes, not one
+## A gate result, sitting in front of the ordinary verdict space
 
-A comparison that accounts for build profile has three possible outcomes,
-not the two you'd expect ("compatible" / "broken"):
+A comparison that accounts for build profile has one extra possible result
+sitting *in front of* the ordinary verdict space ("no change" / "compatible
+addition" / "broken"), not folded into it:
 
-1. **The library changed.** OLD and NEW were extracted under a comparable
-   profile, and the detected differences are attributable to real source/ABI
-   changes. This is the case every other page on this site is about.
-2. **The environment changed.** OLD and NEW disagree on compiler identity,
-   target triple, language standard, or another profile axis — the
-   comparison itself is not trustworthy, independent of whether the library's
-   own source changed at all. Reporting a verdict here would be answering a
-   question nobody asked ("is GCC's ABI compatible with Clang's ABI?")
-   instead of the one that was actually asked ("did *my* library change?").
-3. **The comparison is invalid and must not produce a verdict.** This is
+1. **The comparison is comparable — the ordinary verdict space applies.**
+   OLD and NEW were extracted under a comparable profile, and whatever
+   verdict comes out (including a clean `NO_CHANGE` when nothing actually
+   differs) reflects real source/ABI facts about the library. This is the
+   case every other page on this site is about.
+2. **The comparison is not comparable, and must not produce a verdict at
+   all.** OLD and NEW disagree on compiler identity, target triple,
+   language standard, or another profile axis the four carve-outs described
+   below don't explain — the comparison itself is not trustworthy, independent
+   of whether the library's own source changed at all. This is
    deliberately not "silently downgrade to a warning" — abicheck's stance
-   (ADR-050 D2) is that a genuinely incomparable pair is a **hard failure**:
-   no verdict, exit `16`/`not_comparable`, with a structured reason
-   explaining which axis disagreed. You can force a tentative diff anyway
-   with the explicit
+   (ADR-050 D2) is that a genuinely incomparable pair is a **hard
+   failure**: no verdict, exit `16`/`not_comparable`, with a structured
+   reason explaining which axis disagreed. Reporting an ordinary verdict
+   here would be answering a question nobody asked ("is GCC's ABI
+   compatible with Clang's ABI?") instead of the one that was actually
+   asked ("did *my* library change?"). You can force a tentative diff
+   anyway with the explicit
    [`--diagnostic-comparison`](../reference/cli-reference.md) opt-out, and
    the resulting report is stamped `assurance: none` everywhere so nobody
    downstream mistakes it for an ordinary, trustworthy result.
 
-The reason outcome 3 exists as a hard stop rather than a soft warning: a
+"The environment changed" is the *reason* outcome 2 fires, not a third
+outcome alongside it — the two are cause and effect of the same gate
+result, not independent branches.
+
+The reason outcome 2 exists as a hard stop rather than a soft warning: a
 "maybe compatible, maybe not, we compared apples to oranges" result is worse
 than no result, because it looks exactly like a clean, comparable pass in
 any pipeline that only checks the exit code.
@@ -108,9 +116,9 @@ the snapshot:
 | `compiler_version` | Toolchain version — builtin macro sets, default flag behavior can shift release to release |
 | `abi_dialect` | e.g. the libstdc++ dual-ABI flag ([case104](../reference/examples/case104_glibcxx_dual_abi_flip.md)) |
 | `language_standard` | `-std=c++17` vs. `-std=c++20` — different implicit behavior, different library surface |
-| `target_triple` | Architecture/OS/environment — pointer width, calling convention, struct packing |
-| `pointer_width` | 32-bit vs. 64-bit — every pointer-containing layout differs |
-| `endianness` | Byte order — layout and wire-format sensitive |
+| `target_triple` | Reserved for architecture/OS/environment. **Not populated by either production call site today** (`compute_extraction_contract()` defaults it to empty, and neither `dumper_contract.py`'s real-dump path nor the `--dump-manifest` dry-run path passes a value) — always empty on a real dump, so it never contributes a real mismatch on its own |
+| `pointer_width` | Reserved for 32-bit vs. 64-bit. Same unpopulated-today status as `target_triple` |
+| `endianness` | Reserved for byte order. Same unpopulated-today status as `target_triple` |
 | `macro_ops` | Which `-D`/`-U` macros were in effect — conditional compilation changes what's even declared |
 | `pass_through_flags` | ABI-relevant compiler flags forwarded as-is. Today `pass_through_flags_from_tokens()` recognizes only `-include <path>` — the one currently-known must-handle repeatable, order-sensitive frontend flag; other flags (e.g. `-fvisibility=`, `-fshort-enums`) are not yet classified into this field and are simply omitted rather than mis-hashed |
 | `include_sequence` / `header_sequence` | Order and *declared-slot* identity of the include directories/headers fed through the dedicated `extra_includes`/manifest `includes` mechanism (never absolute path shape for those, so a two-checkout compare's differently-nested old/new sides still fingerprint identically) — narrower than "every resolved `-I`/`-isystem`": a raw `-I`/`-isystem` token embedded in `gcc_options` rather than passed through the dedicated mechanism is not collected into this field today, so replacing what a raw compiler flag points at can leave it unchanged |
@@ -154,14 +162,18 @@ gate allows, never the set it silently trusts, and they compose (a release
 combining two independently-sanctioned deltas at once, e.g. a header
 addition *and* a corroborated C++-standard raise, is still accepted):
 
-- **Platform-identity carve-out.** If `target_triple`/`pointer_width`/
-  `endianness` differ, but both snapshots' own *binary-derived* platform
-  metadata (read from the ELF/PE/Mach-O headers themselves, not just the
-  compile invocation) confirms a genuine, deliberate architecture
-  difference — comparing an x86-64 build against an arm64 build of the same
-  release, say — the mismatch is corroborated rather than treated as an
-  extraction inconsistency. This is a *deliberate cross-architecture
-  comparison*, not drift.
+- **Platform-identity carve-out.** The mechanism: if `target_triple`/
+  `pointer_width`/`endianness` differ, but both snapshots' own
+  *binary-derived* platform metadata (read from the ELF/PE/Mach-O headers
+  themselves, not just the compile invocation) confirms a genuine,
+  deliberate architecture difference — comparing an x86-64 build against an
+  arm64 build of the same release, say — the mismatch is corroborated
+  rather than treated as an extraction inconsistency. In practice, since
+  all three profile fields are currently unpopulated on a real dump (see
+  the field table above), this carve-out has no live mismatch to
+  corroborate today — cross-architecture comparability currently rests
+  entirely on the binary-derived platform check elsewhere in the pipeline,
+  not on this fingerprint carve-out actually firing.
 - **Build-context carve-out.** If **`language_standard` or `macro_ops`**
   specifically differ (the only two fields this carve-out currently
   waives — not any arbitrary profile field), but both snapshots were parsed
