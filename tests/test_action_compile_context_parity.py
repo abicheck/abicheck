@@ -399,6 +399,67 @@ class TestCompileContextForwardingParity:
         for token in expected_tokens:
             assert token in cmd
 
+    def _env_with_unusable_python(self, tmp_path: Path) -> dict[str, str]:
+        """A fake ``python3`` on ``PATH`` that can run but can never import
+        ``abicheck`` -- makes ``$_PY_BIN_HAS_ABICHECK`` resolve ``false``
+        without needing a second, genuinely abicheck-less Python
+        installation."""
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        fake_python3 = fake_bin / "python3"
+        fake_python3.write_text("#!/bin/bash\nexit 1\n")
+        fake_python3.chmod(0o755)
+        return {"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    def test_gcc_options_needing_real_parser_fails_loud_without_one(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, second round: falling back to
+        add_flag()'s naive whitespace split when the real Python parser is
+        unavailable silently corrupted a quoted value
+        (``-DMSG="hello world"``) into malformed tokens under a wrong
+        compile context instead of failing. A value that actually needs
+        real quote-aware parsing must fail the Action loud."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_unusable_python(tmp_path),
+            "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1',
+        }
+        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "quoting/escaping" in result.stdout
+
+    def test_gcc_options_simple_value_still_falls_back_without_real_parser(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion to the test above: a value with no quoting/escaping at
+        all is provably identical whether split by the real parser or by
+        add_flag()'s naive whitespace split, so this must still succeed via
+        the plain-whitespace-split fallback rather than fail unnecessarily."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_unusable_python(tmp_path),
+            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+        }
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 2
+        assert "-DFOO=1" in cmd
+        assert "-DBAR=2" in cmd
+
+    def test_gcc_options_malformed_quoting_fails_loud(self) -> None:
+        """Codex review, fresh evidence, second round: split_gcc_options()
+        raises ValueError on malformed quoting (e.g. an unbalanced quote);
+        without checking the command substitution's exit status (this
+        script deliberately has no `set -e`), execution silently continued
+        with an empty $split, dropping every requested compiler option
+        instead of failing on the invalid input."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="unterminated'}
+        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "could not be parsed" in result.stdout
+
     def test_gcc_options_strips_crlf_from_windows_python_output(
         self, tmp_path: Path
     ) -> None:

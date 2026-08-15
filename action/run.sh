@@ -66,14 +66,23 @@ add_flag() {
 # (found via the same `command -v python3`/`python` PATH lookup pip itself
 # resolved against) already has it on its import path -- verified once, up
 # front, via `$_PY_BIN_HAS_ABICHECK` (see its own definition above), for the
-# self-hosted-runner case where that assumption doesn't hold. Falls back to
-# add_flag()'s plain whitespace split when no Python interpreter is on PATH
-# at all, or when one is but can't import `abicheck`.
+# self-hosted-runner case where that assumption doesn't hold.
+#
+# Falls back to add_flag()'s plain whitespace split ONLY when doing so is
+# provably equivalent to real quote-aware parsing -- the value contains
+# none of `"`/`'`/`\`, so there is nothing for real parsing to interpret
+# differently from bash's own unquoted word-splitting in the first place.
+# When the real parser is unavailable AND the value actually needs one
+# (Codex review, fresh evidence: an earlier revision fell back
+# unconditionally, silently corrupting a quoted value like
+# `-DMSG="hello world"` into malformed tokens under a different, wrong
+# compile context instead of failing), this fails the Action loud rather
+# than guess.
 # ---------------------------------------------------------------------------
 add_flag_shlex_split() {
   local flag="$1"
   local value="$2"
-  local item split
+  local item split py_exit
   if [[ -z "$value" ]]; then
     return
   fi
@@ -85,6 +94,10 @@ add_flag_shlex_split() {
     return
   fi
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* ]]; then
+      echo "::error::$flag value '$value' contains quoting/escaping that requires abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context."
+      exit 1
+    fi
     add_flag "$flag" "$value"
     return
   fi
@@ -106,6 +119,17 @@ from abicheck._compiler_options import split_gcc_options
 for tok in split_gcc_options(sys.stdin.read()):
     print(tok)
 '))"
+  py_exit=$?
+  # This script deliberately has no `set -e` (Codex review, fresh evidence):
+  # split_gcc_options() raises ValueError on malformed quoting (e.g. an
+  # unbalanced quote), which without this check would silently leave $split
+  # empty and every requested compiler option dropped instead of failing --
+  # an invalid configuration must not produce an apparently-successful
+  # comparison under the wrong macros/include paths.
+  if [[ $py_exit -ne 0 ]]; then
+    echo "::error::$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
+    exit 1
+  fi
   while IFS= read -r item; do
     # Codex review, fresh evidence: on windows-latest, $_PY_BIN resolves to
     # native python.exe, whose print() writes CRLF line endings by default
@@ -230,24 +254,6 @@ MODE="${INPUT_MODE:-compare}"
 # on exactly the runners this fallback exists to serve (Codex review).
 _PY_BIN="$(command -v python3 || command -v python || true)"
 
-# On most runners this is exactly the interpreter action.yml's own "Install
-# abicheck" step just `pip install`ed into, since `pip` itself resolves
-# against the same PATH lookup -- but a self-hosted runner can expose
-# `pip`/`abicheck` from one Python environment while `command -v python3`
-# above resolves a *different* one (e.g. a system Python ahead of a pyenv
-# shim on PATH, Codex review, fresh evidence). Checked once, up front,
-# rather than assumed: `add_flag_shlex_split` (below) falls back to its own
-# plain whitespace splitting -- the same degradation already used when no
-# Python interpreter is on PATH at all -- instead of silently invoking a
-# `$_PY_BIN` that can't import `abicheck` and dropping every requested
-# `--gcc-options` token into an empty, discarded pipeline result.
-_PY_BIN_HAS_ABICHECK="false"
-if [[ -n "$_PY_BIN" ]] && "$_PY_BIN" -c "import abicheck" >/dev/null 2>&1; then
-  _PY_BIN_HAS_ABICHECK="true"
-elif [[ -n "$_PY_BIN" ]]; then
-  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option will fall back to plain whitespace splitting, which does not honor quoting."
-fi
-
 # ---------------------------------------------------------------------------
 # Security: `python -c`/`python -m` insert this process's current working
 # directory ('' in sys.path, i.e. wherever this script's caller checked out
@@ -316,6 +322,30 @@ fi
 if ! _PY_SAFE_DIR="$(mktemp -d)"; then
   echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helpers without risking a checked-out repository shadowing the installed package."
   exit 1
+fi
+
+# On most runners this is exactly the interpreter action.yml's own "Install
+# abicheck" step just `pip install`ed into, since `pip` itself resolves
+# against the same PATH lookup -- but a self-hosted runner can expose
+# `pip`/`abicheck` from one Python environment while `command -v python3`
+# above resolves a *different* one (e.g. a system Python ahead of a pyenv
+# shim on PATH, Codex review, fresh evidence). Checked once, up front,
+# rather than assumed: `add_flag_shlex_split` (below) fails loud instead of
+# silently invoking a `$_PY_BIN` that can't import `abicheck` and dropping
+# or corrupting every requested `--gcc-options` token. Run through the same
+# `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other `abicheck`-
+# importing invocation in this file (Codex review, fresh evidence, second
+# round): this preflight itself imports `abicheck`, so running it from the
+# untrusted checkout with an inherited `PYTHONPATH` before `$_PY_SAFE_DIR`
+# existed would have reopened the exact code-execution path the isolation
+# elsewhere in this file exists to close -- `$_PY_SAFE_DIR` is therefore
+# created (immediately above) before this check ever runs, not after.
+_PY_BIN_HAS_ABICHECK="false"
+if [[ -n "$_PY_BIN" ]] \
+  && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c "import abicheck") >/dev/null 2>&1; then
+  _PY_BIN_HAS_ABICHECK="true"
+elif [[ -n "$_PY_BIN" ]]; then
+  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
 fi
 
 # ---------------------------------------------------------------------------

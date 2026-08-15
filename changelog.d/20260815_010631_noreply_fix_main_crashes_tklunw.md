@@ -52,12 +52,23 @@
   non-private one like `${TMPDIR:-/tmp}`) if it can't be created, since a
   shared fallback would reintroduce the same shadowing risk on a
   constrained or shared self-hosted runner; separately, the resolved
-  Python interpreter is now checked once, up front, for whether it can
-  actually import `abicheck` (a self-hosted runner can expose `pip`/
-  `abicheck` from one Python environment while a bare `python3` on `PATH`
-  resolves a different one), falling back to plain whitespace splitting
-  for `--gcc-options`/`--compiler-option` — with a clear warning — instead
-  of silently dropping every requested compiler option.
+  Python interpreter is now checked once, up front — itself run under the
+  same temporary-directory/cleared-`PYTHONPATH` isolation, so the check
+  can't reopen the checkout-shadowing vector it exists to guard against —
+  for whether it can actually import `abicheck` (a self-hosted runner can
+  expose `pip`/`abicheck` from one Python environment while a bare
+  `python3` on `PATH` resolves a different one). `--gcc-options`/
+  `--compiler-option` now fails the Action loud, rather than silently
+  falling back to plain whitespace splitting, whenever the value actually
+  needs real quote/escape-aware parsing to interpret correctly (contains
+  `"`, `'`, or `\`) and no working `abicheck`-capable interpreter is
+  available, or whenever the value's quoting is malformed (e.g. an
+  unbalanced quote) even when a working interpreter is available — both
+  previously produced an apparently-successful comparison silently run
+  under a different, wrong compile context instead of failing on the
+  invalid configuration. A value with no quoting/escaping at all still
+  falls back to plain whitespace splitting, since that's provably
+  identical to real parsing for that shape.
 - **The Windows-only compiler-flags tokenizer (`--gcc-options`/
   `--compiler-option`) now follows the standard Windows command-line
   backslash/quote parsing rule** (the same one `CommandLineToArgvW` and
