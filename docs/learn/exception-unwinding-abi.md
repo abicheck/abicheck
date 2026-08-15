@@ -92,9 +92,11 @@ real trap is narrower than "hidden visibility breaks the catch":
 > alone doesn't remove exception `type_info`). In either case the exception
 > unwinds past the intended handler and `std::terminate()` fires.
 
-**Default visibility on a thrown type's `type_info`** (in practice: a
-polymorphic type with a key function, or an explicitly exported RTTI
-symbol — see
+**Default visibility on a thrown type's `type_info`** (in practice: an
+export/default-visibility annotation on the class itself, or an explicitly
+exported RTTI symbol — a key function is *not* sufficient under
+`-fvisibility=hidden`, since it only decides which translation unit owns
+the vtable/RTTI emission, not what visibility those symbols get — see
 [Part 5 §Symbol visibility](abi-series/05-linker-elf.md#2-symbol-visibility))
 is still the right default to design for: it lets the dynamic linker merge
 the copies into one true pointer identity, which is faster and more robust
@@ -145,12 +147,15 @@ remains.) We do not repeat that analysis here.
       the [modern hazards](modern-cpp-toolchain-hazards.md) table);
     - the presence/removal or visibility change of RTTI symbols
       (`_ZTI…`/`_ZTS…`) and vtables (`_ZTV…`) at the ELF level. Read these
-      the way the section above qualifies them: an RTTI symbol genuinely
-      *removed* or stripped is what makes a cross-DSO `catch` stop matching,
-      while a *visibility* change alone is a risk finding — on the common
-      GCC/libstdc++ configuration the `type_info` name-string fallback still
-      matches, and only a pointer-identity-only runtime turns it into a real
-      failure;
+      as *risk*, not as a proven catch failure. What abicheck observes is
+      the **export table**, and a hidden/internal symbol is excluded from it
+      (`elf_metadata`'s `.dynsym` parse drops `STV_HIDDEN`/`STV_INTERNAL`),
+      so a default→hidden visibility flip presents identically to a genuine
+      removal — while the local RTTI object and its type-name string are
+      still there, and GNU libstdc++'s name fallback still matches. A
+      cross-DSO `catch` only genuinely stops matching when the RTTI is truly
+      unavailable *and* the runtime compares by pointer identity without
+      merged copies (see the section above);
     - the `noexcept`-driven library version requirement from
       [case15](../reference/examples/case15_noexcept_change.md).
 

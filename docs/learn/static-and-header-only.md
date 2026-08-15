@@ -160,7 +160,16 @@ subset of the header a given consumer's own code actually reaches:
   and dumping/comparing *that* — an ordinary binary+headers comparison, on
   an artifact that exists only to give the header-only API something to
   attach evidence to — rather than relying on any no-binary snapshot
-  comparison this tool doesn't yet fully support. See
+  comparison this tool doesn't yet fully support. The stub carries the same
+  export-visibility caveat as the static-library surrogate above, and one
+  extra: it must both *force emission of* and *default-export* every
+  representative entry point (explicit instantiation plus an export
+  annotation; note `-fvisibility-inlines-hidden`, common in real builds,
+  hides instantiated inline/template functions by default). Once a binary
+  carries any ELF exports at all, the header-declared surface is narrowed
+  to that export set — so a stub whose instantiations stay hidden yields a
+  clean comparison of almost nothing. Keep source/consumer compile tests as
+  an independent second check either way. See
   [Producing Source Facts](../use/producing-source-facts.md) and
   [Dump/Compare Flags](../use/dump-compare-flags.md) for how the supported
   binary+headers path works; every mechanism in
