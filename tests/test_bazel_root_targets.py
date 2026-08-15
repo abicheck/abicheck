@@ -154,6 +154,34 @@ def test_adapter_targets_without_cquery_evidence_leaves_transitive_count_none():
     assert ev.target_scope.transitive_count is None
 
 
+def test_plural_targets_only_still_runs_live_bazel_query(tmp_path: Path, monkeypatch):
+    # Review finding: a caller using ONLY the new plural `targets=[...]`
+    # interface (no legacy singular `target=`) must still trigger the live
+    # cquery/aquery path -- `_resolve()`'s gate must key off `self.targets`,
+    # not `self.target`, or the documented multi-root interface silently
+    # collects nothing.
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[1] == "cquery":
+            return _FakeProc(0, stdout=_CQUERY)
+        return _FakeProc(0, stdout=json.dumps({"actions": []}))
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.adapters.bazel.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name == "bazel" else None,
+    )
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
+    ev = BazelAdapter(workspace=tmp_path, targets=["//foo:foo", "//bar:bar"]).collect()
+    assert len(calls) == 2
+    assert any(c[1] == "cquery" for c in calls)
+    assert any(c[1] == "aquery" for c in calls)
+    assert ev.target_scope is not None
+    assert ev.target_scope.requested == ["//foo:foo", "//bar:bar"]
+    assert ev.target_scope.resolved == ["//foo:foo"]
+
+
 def test_target_scope_round_trips_through_build_evidence_json():
     ev = BuildEvidence(
         target_scope=TargetScope(
@@ -268,6 +296,38 @@ def test_run_inferred_build_query_unscoped_leaves_target_scope_none(
         tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
     )
     assert merged.target_scope is None
+
+
+def test_run_inferred_build_query_typo_target_still_records_requested_roots(
+    tmp_path: Path, monkeypatch
+):
+    # Review finding: a misspelled/nonexistent root target makes the aquery
+    # itself exit nonzero, so `_merge_query_result` returns before
+    # `_ingest_query_output` (the only path that otherwise stamps
+    # `target_scope`) ever runs. The requested label must still be recorded,
+    # with an empty `resolved` set, rather than omitting `requested_roots`
+    # entirely -- that's the whole point of the typo-detection accounting.
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n", encoding="utf-8")
+
+    def fake_run(cmd, **kw):
+        return _FakeProc(1, stdout="", stderr="ERROR: no such target '//:typo'")
+
+    from abicheck.buildsource import build_query as _bq
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path,
+        merged,
+        ext,
+        which=lambda tool: f"/usr/bin/{tool}",
+        bazel_targets=("//:typo",),
+    )
+    assert out is None
+    assert merged.target_scope is not None
+    assert merged.target_scope.requested == ["//:typo"]
+    assert merged.target_scope.resolved == []
+    assert merged.target_scope.transitive_count is None
 
 
 # ── .abicheck.yml `build.targets` ─────────────────────────────────────────
