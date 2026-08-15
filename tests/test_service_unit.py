@@ -3193,6 +3193,27 @@ class TestRenderOutput:
         assert isinstance(out, str)
         assert "\n" not in out.strip()
 
+    def test_stat_kwarg_is_a_compatibility_shim_for_oneline(self, diff_result, snap):
+        """CodeRabbit review: `render_output` is exported via
+        `abicheck.service.__all__` (Tier-2 typed API), so an existing
+        caller spelling the pre-PR-1 `render_output(..., stat=True)` must
+        not get a bare `TypeError` -- only the CLI's own `--stat` flag was
+        announced as removed, not this function's signature. `stat=True`
+        is equivalent to `fmt=ONELINE_FORMAT`."""
+        from abicheck.service_render import ONELINE_FORMAT
+
+        assert render_output("json", diff_result, snap, stat=True) == render_output(
+            ONELINE_FORMAT, diff_result, snap
+        )
+
+    def test_show_recommendation_kwarg_is_accepted_and_inert(self, diff_result, snap):
+        """Same compatibility contract as `stat` above: `show_recommendation`
+        is accepted (never a TypeError) but has no effect, since the
+        recommendation it used to gate is now unconditional."""
+        assert render_output(
+            "markdown", diff_result, snap, show_recommendation=False
+        ) == render_output("markdown", diff_result, snap, show_recommendation=True)
+
     def test_json_follow_deps(self, snap):
         snap.dependency_info = DependencyInfo(
             nodes=[{"soname": "libc.so.6", "depth": 0}],

@@ -57,6 +57,8 @@ def render_output(
     severity_config: SeverityConfig | None = None,
     demangle: bool = False,
     contract_evaluation: bool = False,
+    stat: bool = False,
+    show_recommendation: bool = True,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -71,12 +73,23 @@ def render_output(
     The release recommendation is unconditionally included in every
     human-facing format (markdown/review) and in JSON's own ``summary``
     block — there is no longer a flag suppressing it (CLI cleanup phase two,
-    PR 1: ``--recommend`` removed as a no-op-by-default opt-in).
+    PR 1: ``--recommend`` removed as a no-op-by-default CLI opt-in).
+
+    ``stat``/``show_recommendation`` are compatibility shims for existing
+    Tier-2 Python API callers (this function is exported via
+    ``abicheck.service.__all__``) — the CLI's own ``--stat``/``--recommend``
+    flags are gone, but a signature change here is a separate, unannounced
+    break this PR's own docs never claimed (Codex review). ``stat=True`` is
+    equivalent to passing ``fmt=ONELINE_FORMAT`` (and takes priority over
+    *fmt* itself, matching the old boolean's precedence); ``show_recommendation``
+    is accepted but has no effect, since the recommendation the flag used to
+    gate is now always included. Prefer ``fmt=ONELINE_FORMAT`` directly in
+    new code.
 
     Raises:
         ValidationError: For unrecognised output format.
     """
-    if fmt == ONELINE_FORMAT:
+    if stat or fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
     if fmt == "json":

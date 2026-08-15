@@ -200,7 +200,11 @@ user-facing capability. Change the defaults first, then delete the flag:
 
 - `review`: always shows the recommendation.
 - `markdown`: always shows it (own section).
-- `html`: shown in the summary block.
+- `html`: **unchanged** — `generate_html_report()` never computed a
+  recommendation section, `--recommend` never reached it, and this PR did not
+  add one. Implemented this way deliberately (Codex review): adding an HTML
+  recommendation section is a real, separate feature, not part of removing a
+  flag that never touched HTML in the first place.
 - `json`: unchanged — `reporter.py` already writes `release_recommendation`
   unconditionally on all three of its JSON paths, independent of `--recommend`.
 - `sarif`/`junit`: unchanged, and deliberately *without* the recommendation —
