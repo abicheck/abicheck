@@ -264,8 +264,12 @@ the kind of change that merits review rather than a silent pass.
 
     ```text
     void take(void (*)() noexcept);   →  _Z4takePDoFvvE
-    void take_plain(void (*)());      →  _Z10take_plainPFvvE
+    void take(void (*)());            →  _Z4takePFvvE
     ```
+
+    Same function name, same everything else — `Do` is the only difference,
+    and dropping `noexcept` from the parameter type is what makes the old
+    symbol vanish.
 
     The old symbol disappears and consumers of it fail to link.
 

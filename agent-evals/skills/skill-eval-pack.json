@@ -458,7 +458,7 @@
         "native-binary-compatibility-review"
       ],
       "category": "A",
-      "digest": "sha256:6a4fb7949bbbb7e7a04f93833615332f79d62e33364bb792136afbbc6c28e15c",
+      "digest": "sha256:842f644006b407b332d895d844f3e7a51e8ced0c922e568536a2756f8d9e55e4",
       "expected": {
         "kinds": [
           "type_vtable_changed"

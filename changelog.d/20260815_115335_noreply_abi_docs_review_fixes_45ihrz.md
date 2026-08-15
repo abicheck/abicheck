@@ -33,9 +33,12 @@
   inheritance the derived figure exceeded the class's virtual count — the
   catalog's own `case174_secondary_vtable_group_changed` read
   `~3 -> ~8 virtual slots` for a `Derived` declaring no virtuals of its own.
-  The finding's detail now reads `~N -> ~M vtable-group entries`; the byte
-  sizes it reports were already exact and are unchanged, as are the
-  `ChangeKind`, verdict, and exit code.
+  The finding's detail now reads `~N -> ~M vtable-group entries`, and the
+  `change_registry.py` `impact`/`description_template` that wrap it no longer
+  append "A virtual method was added, removed, or reordered" unconditionally —
+  they state that the symbol size cannot distinguish a net virtual change from
+  an inheritance-shape change. The byte sizes reported were already exact and
+  are unchanged, as are the `ChangeKind`, verdict, and exit code.
 
 ### Changed
 
