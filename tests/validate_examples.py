@@ -599,15 +599,23 @@ def _build_dump_cmd(
 
     *compile_db* is the side-specific compile_commands.json path (may not
     exist yet); it is only appended when *build_source* is set and the file
-    actually exists.
+    actually exists. It rides on ``--build-info`` -- the one flag that takes
+    a build dir / compile_commands.json / pack, since the ``-p/--build-dir``
+    and ``--compile-db`` spellings were removed -- so an explicit
+    *build_info* wins over it rather than both being passed.
     """
     cmd = [sys.executable, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap)]
+    effective_build_info = build_info
     if hdr and Path(hdr).exists():
         cmd += ["-H", str(hdr)]
-        if build_source is not None and compile_db.exists():
-            cmd += ["-p", str(compile_db)]
-    if build_info is not None:
-        cmd += ["--build-info", str(build_info)]
+        if (
+            build_source is not None
+            and compile_db.exists()
+            and effective_build_info is None
+        ):
+            effective_build_info = compile_db
+    if effective_build_info is not None:
+        cmd += ["--build-info", str(effective_build_info)]
     if sources_path is not None:
         cmd += ["--sources", str(sources_path)]
     return cmd
