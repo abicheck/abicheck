@@ -55,12 +55,18 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
+
+#: Used when neither the flag nor the environment names a ref — the local
+#: convenience path.
+_DEFAULT_BASE = "origin/main"
+_DEFAULT_HEAD = "HEAD"
 
 #: Conventional-Commit subjects that mean "this is a correctness fix".
 #: `feat:`/`refactor:`/`docs:` are deliberately out of scope — the contract is
@@ -314,10 +320,23 @@ def missing_requirements(body: str, paths: list[str]) -> list[Requirement]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", required=True)
-    parser.add_argument("--head", required=True)
-    parser.add_argument("--title", default=None, help="PR title.")
-    parser.add_argument("--body-file", help="File holding the PR description.")
+    # Optional so this can run with fixed argv as a `scripts/verify.py` step
+    # (AGENTS.md "M0-3": one verification contract, not a CI-only check that a
+    # local `--profile pr` cannot reproduce). CI supplies the real PR refs and
+    # body through the environment; a local run falls back to origin/main..HEAD
+    # with no body, which exercises the structural half.
+    parser.add_argument("--base", default=os.environ.get("BUGFIX_CONTRACT_BASE"))
+    parser.add_argument("--head", default=os.environ.get("BUGFIX_CONTRACT_HEAD"))
+    parser.add_argument(
+        "--title",
+        default=os.environ.get("BUGFIX_CONTRACT_TITLE"),
+        help="PR title. A PR titled `fix:` is in scope even when no commit subject is.",
+    )
+    parser.add_argument(
+        "--body-file",
+        default=os.environ.get("BUGFIX_CONTRACT_BODY_FILE"),
+        help="File holding the PR description.",
+    )
     parser.add_argument(
         "--skip-label",
         action="store_true",
@@ -329,8 +348,25 @@ def main(argv: list[str] | None = None) -> int:
         print("bugfix-test-contract: skipped via the skip-test-contract label")
         return 0
 
-    paths = changed_paths(args.base, args.head)
-    subjects = commit_subjects(args.base, args.head)
+    explicit_refs = args.base is not None and args.head is not None
+    base = args.base or _DEFAULT_BASE
+    head = args.head or _DEFAULT_HEAD
+    try:
+        paths = changed_paths(base, head)
+        subjects = commit_subjects(base, head)
+    except subprocess.CalledProcessError as e:
+        # An unresolvable ref is a real failure when CI named the refs, and an
+        # ordinary local condition otherwise (no origin/main in a fresh clone).
+        # Deliberately not one branch: swallowing it in CI would make this a
+        # gate that passes because it could not run.
+        if explicit_refs:
+            print(f"ERROR: cannot diff {base}...{head}: {e}")
+            return 1
+        print(
+            f"bugfix-test-contract: cannot diff {base}...{head} — skipping. "
+            "Fetch the base branch to run this locally."
+        )
+        return 0
 
     if not is_bugfix(subjects, args.title):
         print("bugfix-test-contract: not a fix/perf/security change — not applicable")

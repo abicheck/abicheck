@@ -265,6 +265,18 @@ STEPS: tuple[Step, ...] = (
         description="Canonical Linux/3.13 unit-tests CI lane, incl. golden + 95% coverage floor",
     ),
     Step(
+        "bugfix-test-contract",
+        # Fixed argv on purpose: CI passes the real PR refs and body through
+        # BUGFIX_CONTRACT_{BASE,HEAD,BODY_FILE}, and a local run falls back to
+        # origin/main..HEAD with no body, exercising the structural half. Both
+        # go through this one step rather than the workflow calling the script
+        # directly, so `--profile pr` locally cannot pass while the CI-only
+        # contract fails later (AGENTS.md "M0-3", Codex review).
+        _pyscript("scripts/check_bugfix_test_contract.py"),
+        frozenset({PR, FULL}),
+        description="Bug-fix test contract (structural half locally, declared half in CI)",
+    ),
+    Step(
         "fp-rate",
         _pyscript("scripts/check_fp_rate.py"),
         frozenset({PR, FULL}),

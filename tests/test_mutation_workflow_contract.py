@@ -52,12 +52,65 @@ def _source_paths() -> list[str]:
         return tomllib.load(fh)["tool"]["mutmut"]["source_paths"]
 
 
-def test_pull_request_paths_match_mutated_source_paths() -> None:
-    triggers = _on_block(_workflow())["pull_request"]["paths"]
-    assert sorted(triggers) == sorted(_source_paths()), (
-        "mutation.yml's pull_request paths and [tool.mutmut].source_paths have "
+def _paths_filter() -> list[str]:
+    """The dorny/paths-filter list in the `resolve` job."""
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    step = next(s for s in steps if "paths-filter" in str(s.get("uses", "")))
+    return yaml.safe_load(step["with"]["filters"])["mutated"]
+
+
+def test_paths_filter_matches_mutated_source_paths() -> None:
+    assert sorted(_paths_filter()) == sorted(_source_paths()), (
+        "mutation.yml's paths filter and [tool.mutmut].source_paths have "
         "drifted — a mutated module with no trigger is only checked weekly."
     )
+
+
+def test_the_trigger_has_no_workflow_level_paths_filter() -> None:
+    """A workflow-level `paths:` is ANDed with `types:`, so labelling a PR that
+    touches none of those files would not start the workflow — the documented
+    `mutation` label override could never fire. The decision is made at job
+    level instead, so path-match and label can be ORed."""
+    pull_request = _on_block(_workflow())["pull_request"]
+    assert "paths" not in pull_request
+    assert "labeled" in pull_request["types"]
+
+
+def test_the_run_decision_is_path_match_or_label() -> None:
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    decide = next(s for s in steps if s.get("id") == "decide")
+    script = decide["run"]
+    assert '"$MATCHED" = "true" ] || [ "$LABELLED" = "true"' in script, (
+        "the run decision must OR the path match with the label"
+    )
+    # A non-PR event (schedule / dispatch) must always run.
+    assert 'if [ "$GITHUB_EVENT_NAME" != "pull_request" ]' in script
+
+
+def test_the_mutmut_job_is_gated_on_that_decision() -> None:
+    job = _workflow()["jobs"]["mutmut"]
+    assert job["needs"] == "resolve"
+    assert "needs.resolve.outputs.run == 'true'" in job["if"]
+
+
+def test_the_cache_is_restored_only_on_the_pr_lane() -> None:
+    """mutmut skips a mutant whose source function hash is unchanged, so a warm
+    cache reuses verdicts computed against the *old* tests. That is sound for
+    `--diff-scoped` (changed functions re-run) and unsound for the scheduled
+    drift lane, where weakening only assertions would leave every source hash
+    untouched and the stale "killed" outcomes would be reused."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    cache = next(s for s in steps if str(s.get("uses", "")).startswith("actions/cache"))
+    assert cache.get("if") == "github.event_name == 'pull_request'"
+
+
+def test_the_scheduled_lane_requires_a_baseline() -> None:
+    """Otherwise a completed weekly run returns 0 however many mutants survive."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    scheduled = next(
+        s for s in steps if "schedule" in str(s.get("if", "")) and "run" in s
+    )
+    assert "--require-baseline" in scheduled["run"]
 
 
 def test_every_mutated_module_exists() -> None:

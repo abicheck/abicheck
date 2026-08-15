@@ -32,23 +32,6 @@ on:
     - cron: "11 6 * * 1"
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    # Keep in sync with [tool.mutmut] source_paths in pyproject.toml —
-    # tests/test_mutation_workflow_contract.py asserts the two agree.
-    paths:
-      - 'abicheck/diff_symbols.py'
-      - 'abicheck/diff_types.py'
-      - 'abicheck/diff_platform.py'
-      - 'abicheck/diff_vtable_layout.py'
-      - 'abicheck/diff_filtering.py'
-      - 'abicheck/checker_policy.py'
-      - 'abicheck/idioms.py'
-      - 'abicheck/pattern_verdicts.py'
-      - 'abicheck/surface_graph.py'
-      - 'abicheck/finding_identity.py'
-      - 'abicheck/name_classification.py'
-      - 'abicheck/suppression.py'
-      - 'abicheck/snapshot_io.py'
-      - 'abicheck/serialization.py'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -58,8 +41,58 @@ permissions:
   contents: read
 
 jobs:
+  # Path-match OR label, resolved at job level. A workflow-level `paths:`
+  # filter is ANDed with the activity `types:`, so applying the `mutation`
+  # label to a PR that touches none of these files would not start the
+  # workflow at all — the documented label override could never fire
+  # (Codex review). Same dorny/paths-filter shape as ci.yml's
+  # heavy-parity-gate.
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Detect changes to mutated modules (PR only)
+        id: changed
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4
+        with:
+          filters: |
+            mutated:
+              - 'abicheck/diff_symbols.py'
+              - 'abicheck/diff_types.py'
+              - 'abicheck/diff_platform.py'
+              - 'abicheck/diff_vtable_layout.py'
+              - 'abicheck/diff_filtering.py'
+              - 'abicheck/checker_policy.py'
+              - 'abicheck/idioms.py'
+              - 'abicheck/pattern_verdicts.py'
+              - 'abicheck/surface_graph.py'
+              - 'abicheck/finding_identity.py'
+              - 'abicheck/name_classification.py'
+              - 'abicheck/suppression.py'
+              - 'abicheck/snapshot_io.py'
+              - 'abicheck/serialization.py'
+      - name: Decide whether to run
+        id: decide
+        env:
+          MATCHED: ${{ steps.changed.outputs.mutated }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'mutation') }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$MATCHED" = "true" ] || [ "$LABELLED" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   mutmut:
     name: mutmut (detector core)
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -82,6 +115,15 @@ jobs:
           # change to this repository.
           pip install -e ".[dev]" 'mutmut>=3.7,<4'
       - name: Restore mutmut cache
+        # PR lane only, and deliberately so. mutmut skips a mutant whose
+        # *source function hash* is unchanged, so a warm cache reuses verdicts
+        # computed against the tests as they were — fine for `--diff-scoped`
+        # (the functions this branch changed have new hashes and re-run), but
+        # unsound for the scheduled drift lane and for recording a baseline: a
+        # commit that weakens only test assertions leaves every source hash
+        # untouched, so the stale "killed" outcomes would be reused and the
+        # regression would go unreported (Codex review).
+        if: github.event_name == 'pull_request'
         uses: actions/cache@v4
         with:
           # mutmut skips a mutant whose function hash is unchanged, so a warm

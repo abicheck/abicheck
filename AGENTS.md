@@ -1442,7 +1442,11 @@ Once a root command genuinely clears the bar above, pick the right home:
   `pr` profile, and `pre-commit` is not run in CI at all. So the one consumer
   that would catch it is `pixi run check` (which *does* run the whole `pr`
   profile) — i.e. a pixi contributor's local gate is currently stricter than
-  CI. **Not fixed here**: making `fmt-check` real requires the ~56.5k-line
+  CI. That much was **already known and deliberately tracked**, in
+  `tests/test_verify_profiles.py`'s `_PR_STEPS_NOT_IN_A_CI_ONLY_LIST`
+  (`"fmt-check": "NOT RUN IN CI — pre-existing gap, tracked here"`); what this
+  entry adds is the *measurement* of what enabling it would cost, and the
+  finding that the gap is not version skew. **Not fixed here**: making `fmt-check` real requires the ~56.5k-line
   mechanical reformat first, which would drown this change's review and
   conflict with every in-flight branch, so it belongs in its own PR that does
   nothing else. Until then, treat a green CI run as saying nothing about

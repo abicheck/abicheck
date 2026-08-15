@@ -43,12 +43,18 @@ jobs:
         run: printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
 
       - name: Check the bug-fix test contract
+        # Routed through scripts/verify.py's step catalog (CLAUDE.md "M0-3")
+        # rather than invoking the script directly, so `verify.py --profile pr`
+        # locally runs the same check. The PR-specific inputs arrive by
+        # environment because a catalog step has fixed argv.
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          BUGFIX_CONTRACT_TITLE: ${{ github.event.pull_request.title }}
+          BUGFIX_CONTRACT_BASE: ${{ github.event.pull_request.base.sha }}
+          BUGFIX_CONTRACT_HEAD: ${{ github.event.pull_request.head.sha }}
+          BUGFIX_CONTRACT_BODY_FILE: ${{ runner.temp }}/pr-body.md
         run: |
-          python3 scripts/check_bugfix_test_contract.py \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --title "$PR_TITLE" \
-            --body-file "$RUNNER_TEMP/pr-body.md" \
-            ${{ contains(github.event.pull_request.labels.*.name, 'skip-test-contract') && '--skip-label' || '' }}
+          if ${{ contains(github.event.pull_request.labels.*.name, 'skip-test-contract') }}; then
+            echo "bugfix-test-contract: skipped via the skip-test-contract label"
+            exit 0
+          fi
+          python3 scripts/verify.py --profile pr --only bugfix-test-contract

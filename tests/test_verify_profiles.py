@@ -439,13 +439,23 @@ _PR_STEPS_NOT_IN_A_CI_ONLY_LIST = {
 
 
 def _ci_only_step_names() -> set[str]:
-    """Every step name CI passes to `verify.py --only`, across all jobs."""
+    """Every step name CI passes to `verify.py --only`, across all workflows.
+
+    Scans every workflow file, not just ci.yml: a gate can legitimately live in
+    its own workflow (bugfix-test-contract.yml does), and reading only ci.yml
+    would report such a step as unreachable and push it into the exemption
+    list — which is meant for steps CI genuinely does not run.
+    """
     import re
 
-    ci = _read(".github/workflows/ci.yml")
     names: set[str] = set()
-    for match in re.finditer(r"verify\.py\s+--profile\s+\w+\s+--only\s+([\w,-]+)", ci):
-        names.update(match.group(1).split(","))
+    workflow_dir = ROOT / ".github" / "workflows"
+    for path in sorted(workflow_dir.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(
+            r"verify\.py\s+--profile\s+\w+\s+--only\s+([\w,-]+)", text
+        ):
+            names.update(match.group(1).split(","))
     return names
 
 
