@@ -395,6 +395,13 @@ jobs:
   heavy-parity-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # Same dorny/paths-filter requirement as mutation.yml's resolve job —
+      # fixed in both places rather than only where it was reported, since
+      # one job silently losing its filter would skip the parity lanes it
+      # gates.
+      pull-requests: read
     outputs:
       run-heavy: ${{ steps.resolve.outputs.run-heavy }}
       reason: ${{ steps.resolve.outputs.reason }}

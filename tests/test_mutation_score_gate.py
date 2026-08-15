@@ -811,11 +811,12 @@ def test_diff_scoped_ignores_survivors_in_untouched_functions(
         ("@@ -1,0 +2,1 @@", {2}),
         ("@@ -5,2 +5,3 @@", {5, 6, 7}),
         ("@@ -1 +1 @@", {1}),  # no count => 1 line
-        # A pure deletion contributes no new-side line, but deleting a guard
-        # is a real way to weaken a detector, so it is attributed to the
-        # surrounding function rather than skipped. This fixture previously
-        # asserted `set()`, which pinned the hole rather than the behaviour.
-        ("@@ -3,1 +3,0 @@", {3, 4}),
+        # A pure deletion contributes no new-side line at all. It is not
+        # skipped — `parse_removed_lines` answers it against the base, where
+        # those lines actually exist (see the pair below). Attributing it here
+        # meant inventing a new-side number, and every such guess named the
+        # wrong function for at least one real diff shape.
+        ("@@ -3,1 +3,0 @@", set()),
     ],
 )
 def test_parse_changed_lines_hunk_shapes(hunk: str, expected: set[int]) -> None:
@@ -957,14 +958,64 @@ def test_require_baseline_is_satisfied_by_the_global_baseline_too(
 # --- Codex review: deleting a guard must be attributed to its function --------
 
 
+#: A base revision with a function between two others — the shape that tells
+#: "deleted a line *inside* a function" apart from "deleted a whole function".
+_BASE_THREE = """\
+def before():
+    return 1
+
+
+def removed():
+    return 2
+
+
+def after():
+    return 3
+"""
+
+#: The same file after `removed()` is deleted outright (base lines 5-8).
+_NEW_TWO = """\
+def before():
+    return 1
+
+
+def after():
+    return 3
+"""
+
+
+def _with_base(
+    monkeypatch: pytest.MonkeyPatch, sources: dict[str, str]
+) -> list[str | None]:
+    """Give `main()` a base revision to resolve removed lines against.
+
+    `_base_reader` shells out to `git merge-base`/`git show`, which cannot
+    work in a `tmp_path` that is not a repository — so the reader is injected
+    here. `TestAgainstRealGit` covers the git plumbing itself.
+    """
+    asked: list[str | None] = []
+
+    def _reader(base_ref: str) -> object:
+        def _read(path: str) -> str | None:
+            asked.append(path)
+            return sources.get(path)
+
+        return _read
+
+    monkeypatch.setattr(gate, "_base_reader", _reader)
+    return asked
+
+
 def test_a_pure_deletion_still_gates_the_function_it_was_deleted_from(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Deleting a condition is the most direct way to weaken a detector, and it
-    produces a hunk with no added lines at all."""
+    produces a hunk with no added lines at all. Base line 2 is inside
+    `alpha()`, so `alpha` is what the branch touched."""
     (tmp_path / "abicheck").mkdir()
     (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
     monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    _with_base(monkeypatch, {"abicheck/diff_types.py": _SOURCE})
     deletion_diff = _write(
         tmp_path,
         "d.diff",
@@ -986,6 +1037,117 @@ def test_a_pure_deletion_still_gates_the_function_it_was_deleted_from(
     )
     assert rc == 1
     assert "abicheck/diff_types.py::alpha" in capsys.readouterr().out
+
+
+def test_deleting_a_whole_function_does_not_gate_its_neighbour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The false positive the previous new-side guess produced (Codex review).
+
+    Deleting `removed()` leaves a hunk anchored at the blank line before
+    `after()`, so attributing "the anchor and its successor" marked `after()`
+    as edited — and any *pre-existing* survivor in `after()` then failed the
+    branch that never touched it. Resolved against the base, those lines
+    belong to `removed()`, which no longer exists and therefore matches no
+    mutant.
+    """
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_NEW_TWO, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    _with_base(monkeypatch, {"abicheck/diff_types.py": _BASE_THREE})
+    deletion_diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -5,4 +4,0 @@\n-def removed():\n-    return 2\n-\n-\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_after__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            deletion_diff,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "diff_types.py::after" not in out
+
+
+def test_removed_lines_are_read_from_the_merge_base_not_the_new_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resolving base-side numbers against the *new* file is the same class of
+    error as guessing a new-side number: line 6 of the new file is inside
+    `after()`, line 6 of the base is inside `removed()`."""
+    asked = _with_base(monkeypatch, {"abicheck/diff_types.py": _BASE_THREE})
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_NEW_TWO, encoding="utf-8")
+    touched = gate.changed_functions(
+        {},
+        tmp_path,
+        {"abicheck/diff_types.py": {5, 6}},
+        gate._base_reader("origin/main"),
+    )
+    assert touched == {"abicheck/diff_types.py": {"removed"}}
+    assert asked == ["abicheck/diff_types.py"]
+
+
+def test_an_unreadable_base_says_so_instead_of_guessing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A branch whose only edit is a deletion has all of its evidence on the
+    removed side, so an unresolvable base must not print the same OK line as a
+    fully resolved run."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_base_reader", lambda base_ref: None)
+    deletion_diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -2,1 +1,0 @@\n-    return 1\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+    )
+    gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            deletion_diff,
+        ]
+    )
+    assert "WARNING" in capsys.readouterr().out
+
+
+def test_parse_removed_lines_reads_the_base_side_of_every_hunk() -> None:
+    """Modified lines appear on both sides; only the base side can name the
+    function a *removed* line lived in."""
+    diff = (
+        "--- a/x.py\n+++ b/x.py\n"
+        "@@ -5,4 +4,0 @@\n-a\n-b\n-c\n-d\n"
+        "@@ -20,1 +17,1 @@\n-old\n+new\n"
+    )
+    assert gate.parse_removed_lines(diff) == {"x.py": {5, 6, 7, 8, 20}}
+
+
+def test_parse_removed_lines_ignores_pure_additions() -> None:
+    """Negative control: an added line has no base-side existence at all."""
+    assert (
+        gate.parse_removed_lines("--- a/x.py\n+++ b/x.py\n@@ -3,0 +4,2 @@\n+a\n+b\n")
+        == {}
+    )
 
 
 # --- Codex review: two independent sources must agree ------------------------

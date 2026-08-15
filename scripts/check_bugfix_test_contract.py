@@ -637,6 +637,12 @@ def removed_content_paths(diff_text: str) -> set[str]:
 
     Deliberately not applied to `.py` test modules: deleting lines there is
     how a test gets weakened, which is the thing the gate exists to catch.
+
+    The same per-format comment rule as `added_content_paths` applies here,
+    for the same reason and in both directions: deleting a YAML comment from
+    a fixture changes no expected value, so accepting it as regression
+    evidence let a shipped-code fix pass the structural gate with no assertion
+    or fixture value touched at all (Codex review).
     """
     out: set[str] = set()
     current: str | None = None
@@ -650,8 +656,13 @@ def removed_content_paths(diff_text: str) -> set[str]:
             continue
         if current is None or not line.startswith("-") or line.startswith("---"):
             continue
-        if line[1:].strip():
-            out.add(current)
+        body = line[1:].strip()
+        if not body:
+            continue
+        comments = _comment_prefixes(current)
+        if comments and body.startswith(comments):
+            continue
+        out.add(current)
     return out
 
 

@@ -70,6 +70,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -106,7 +107,7 @@ SURVIVOR_BASELINE: int | None = None
 DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
-_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
@@ -199,46 +200,85 @@ def check_per_module(
 
 
 def parse_changed_lines(diff_text: str) -> dict[str, set[int]]:
-    """Map ``path -> changed line numbers`` from ``git diff --unified=0``."""
+    """Map ``path -> changed line numbers`` from ``git diff --unified=0``.
+
+    New-side numbers only. Removed lines have no new-side number at all and
+    are answered separately by `parse_removed_lines`, against the base.
+    """
     changed: dict[str, set[int]] = {}
+    for path, _old, new in _hunks(diff_text):
+        start, count = new
+        if count:
+            changed.setdefault(path, set()).update(range(start, start + count))
+    return changed
+
+
+def parse_removed_lines(diff_text: str) -> dict[str, set[int]]:
+    """Map ``path -> *base-side* line numbers this diff removes.
+
+    Deleting a guard is one of the most direct ways to weaken a detector, so
+    the removed lines have to reach the gate somehow — but they exist only in
+    the base, and every attempt to express them as new-side numbers is a
+    guess. The previous one (attribute the new-side anchor and its successor)
+    was wrong in both directions: for a deleted *function* the successor is
+    the first line of the next, surviving function, so the gate failed on
+    pre-existing survivors in code the branch never touched (Codex review).
+
+    Base-side numbers are not a guess — they are what the hunk header says —
+    and resolving them against the base file's own AST answers exactly "which
+    function did this line live in". A deleted function resolves to its own
+    name, which no longer exists in the new tree and therefore matches no
+    mutant; a deleted line inside a surviving function resolves to that
+    function, which is the case worth catching.
+    """
+    removed: dict[str, set[int]] = {}
+    for path, old, _new in _hunks(diff_text):
+        start, count = old
+        if count:
+            removed.setdefault(path, set()).update(range(start, start + count))
+    return removed
+
+
+def _hunks(diff_text: str) -> Iterator[tuple[str, tuple[int, int], tuple[int, int]]]:
+    """`(path, (old_start, old_count), (new_start, new_count))` per hunk."""
     current: str | None = None
     for line in diff_text.splitlines():
         if line.startswith("+++ "):
             target = line[4:].strip()
             # A deleted file's header is `+++ /dev/null`, which does not match
             # `+++ b/` — so `current` kept pointing at the *previous* file and
-            # the deletion's `@@ -1,5 +0,0 @@` hunk was recorded against it
-            # through the count == 0 branch below. The diff-scoped gate then
-            # failed on a function the branch never touched (CodeRabbit
-            # review). The old `/dev/null` guard could never fire: it ran
-            # after the `b/` prefix had already been stripped.
+            # the deletion's `@@ -1,5 +0,0 @@` hunk was recorded against it.
+            # The diff-scoped gate then failed on a function the branch never
+            # touched (CodeRabbit review). The old `/dev/null` guard could
+            # never fire: it ran after the `b/` prefix had already been
+            # stripped.
             current = target[2:] if target.startswith("b/") else None
             continue
         if current is None:
             continue
         m = _HUNK.match(line)
         if m:
-            start = int(m.group(1))
-            count = int(m.group(2)) if m.group(2) is not None else 1
-            if count:
-                changed.setdefault(current, set()).update(range(start, start + count))
-            else:
-                # A pure deletion (`@@ -3,1 +3,0 @@`) contributes no new-side
-                # line, but deleting a guard is one of the most direct ways to
-                # weaken a detector — and skipping it made the diff-scoped gate
-                # ignore every survivor in the function that lost the check
-                # (Codex review). Git reports the deletion as having happened
-                # *after* new-side line `start`, so attribute both `start` and
-                # its successor, which is the surrounding function either way.
-                anchor = max(1, start)
-                changed.setdefault(current, set()).update({anchor, anchor + 1})
-    return changed
+            yield (
+                current,
+                (int(m.group(1)), int(m.group(2)) if m.group(2) is not None else 1),
+                (int(m.group(3)), int(m.group(4)) if m.group(4) is not None else 1),
+            )
 
 
 def changed_functions(
-    changed: dict[str, set[int]], repo_root: Path
+    changed: dict[str, set[int]],
+    repo_root: Path,
+    removed: dict[str, set[int]] | None = None,
+    read_base: Callable[[str], str | None] | None = None,
 ) -> dict[str, set[str]]:
-    """Map ``path -> qualnames of functions this diff touched``."""
+    """Map ``path -> qualnames of functions this diff touched``.
+
+    Two resolutions, against two different revisions: added and modified lines
+    against the working tree, removed lines against *the base*, since that is
+    the only revision in which they exist. Without *read_base* the removed
+    half is simply not resolved — an honest gap the caller reports, rather
+    than a new-side guess that names the wrong function.
+    """
     out: dict[str, set[str]] = {}
     for path, lines in changed.items():
         if not path.endswith(".py"):
@@ -250,7 +290,51 @@ def changed_functions(
         funcs = functions_covering_lines(source, lines)
         if funcs:
             out[path] = funcs
+    if removed and read_base is not None:
+        for path, lines in removed.items():
+            if not path.endswith(".py"):
+                continue
+            base_source = read_base(path)
+            if base_source is None:
+                continue
+            funcs = functions_covering_lines(base_source, lines)
+            if funcs:
+                out.setdefault(path, set()).update(funcs)
     return out
+
+
+def _base_reader(base_ref: str) -> Callable[[str], str | None] | None:
+    """A reader for file contents *as of the merge base*, or None.
+
+    The merge base, not `base_ref` itself: `git diff base...HEAD` is defined
+    against it, so its line numbers are the ones the removed-side hunk headers
+    carry. Reading `base_ref`'s own tip would silently resolve them against a
+    different file.
+    """
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["git", "merge-base", base_ref, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        return None
+    base_sha = proc.stdout.strip()
+
+    def _read(path: str) -> str | None:
+        shown = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            ["git", "show", f"{base_sha}:{path}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        # A path absent from the base is an added file; its lines are all on
+        # the new side, so there is nothing here to resolve.
+        return shown.stdout if shown.returncode == 0 else None
+
+    return _read
 
 
 def check_diff_scoped(
@@ -637,7 +721,22 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 1
             diff_text = proc.stdout
-        touched = changed_functions(parse_changed_lines(diff_text), REPO_ROOT)
+        removed = parse_removed_lines(diff_text)
+        read_base = _base_reader(args.base_ref)
+        touched = changed_functions(
+            parse_changed_lines(diff_text), REPO_ROOT, removed, read_base
+        )
+        if removed and read_base is None:
+            # Not a warning about a corner case: a branch whose only edit is a
+            # deleted guard has *all* of its evidence in the removed half, so
+            # saying nothing here would let a gate that resolved none of it
+            # print the same "OK" line as one that resolved all of it.
+            print(
+                "mutation-score: WARNING — could not read the base revision "
+                f"({args.base_ref}), so lines this branch *removed* were not "
+                "attributed to any function. The diff-scoped result below "
+                "covers added and modified lines only."
+            )
         n_funcs = sum(len(v) for v in touched.values())
         print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
         if n_funcs:

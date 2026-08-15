@@ -152,6 +152,10 @@ def _git_repo_with(tmp_path: Path, *, second_commit: dict[str, str]) -> Path:
     (repo / "tests" / "golden" / "report.md").write_text(
         "line one\nspurious line\nline three\n", encoding="utf-8"
     )
+    (repo / "tests" / "data").mkdir(parents=True)
+    (repo / "tests" / "data" / "policy.yml").write_text(
+        "# tighten this later\noverrides:\n  func_removed: ok\n", encoding="utf-8"
+    )
 
     def _git(*args: str) -> None:
         subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
@@ -230,6 +234,41 @@ class TestAgainstRealGit:
             second_commit={
                 "scripts/thing.py": "x = 2\n",
                 "tests/golden/report.md": "line one\nline three\n",
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == (
+            gate.EXIT_STRUCTURAL_ONLY
+        )
+
+    def test_deleting_only_a_fixture_comment_is_not_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The removal path had no comment rule at all, so the added-line
+        filter could be sidestepped by *deleting* a comment instead of adding
+        one — a shipped-code fix then passed the structural gate with no
+        assertion and no fixture value changed (Codex review)."""
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/data/policy.yml": "overrides:\n  func_removed: ok\n",
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == 1
+
+    def test_deleting_a_real_fixture_value_is_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control for the pair: the rule must reject the comment,
+        not the removal path — dropping an expected value is exactly how a
+        fixture proves a fix."""
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/data/policy.yml": "# tighten this later\noverrides:\n",
             },
         )
         monkeypatch.setattr(gate, "ROOT", repo)

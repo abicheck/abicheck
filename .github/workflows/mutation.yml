@@ -50,6 +50,18 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # dorny/paths-filter reads the changed-file list from the pull-requests
+      # REST API, which its own documented requirements list as needing
+      # `pull-requests: read`; naming any `permissions:` block sets every
+      # unlisted scope to none. Precautionary rather than a repair: the step
+      # is currently succeeding on this public repository with `contents:
+      # read` alone (run 31865060159's resolve job emitted `MATCHED: true`),
+      # so this is here for the cases that evidence does not cover — a fork
+      # PR, or this repository becoming private — not for one that is broken
+      # today (Codex review).
+      pull-requests: read
     outputs:
       run: ${{ steps.decide.outputs.run }}
       require_baseline: ${{ steps.decide.outputs.require_baseline }}
