@@ -263,6 +263,21 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # empty-string entry -c itself inserts to that same real CWD too, so one
 # check covers both shapes without a separate special case for "".
 #
+# Removes any entry located *anywhere inside* the checkout, not just an
+# entry equal to it (Codex review, fresh evidence, on top of the above): a
+# workflow using a common src-layout `PYTHONPATH=src` resolves to
+# `<checkout>/src` before this snippet ever runs -- a strict equality
+# check leaves that descendant path (and any `sitecustomize.py`/malicious
+# `abicheck` package placed there) importable, confirmed empirically
+# (`PYTHONPATH=src` reproduces sitecustomize execution against the
+# equality-only filter). The real, pip-installed `abicheck` package is
+# never located inside the analyzed repository's own checkout -- even
+# this action's own self-referential dogfooding CI installs it via a
+# plain, non-editable `pip install <path>` (action.yml's "Install
+# abicheck" step), which copies into site-packages rather than keeping
+# sys.path pointed at the checkout -- so excluding every path under the
+# checkout cannot remove the real package, only untrusted content.
+#
 # Every call site pairs this with the interpreter's own `-S` flag (Codex
 # review, fresh evidence, on top of the filter above): a checked-out PR
 # adding a top-level `sitecustomize.py` gets it auto-imported by the `site`
@@ -282,7 +297,11 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 _PY_SAFE_PATH='import os
 import sys
 _cwd = os.path.realpath(os.getcwd())
-sys.path = [p for p in sys.path if os.path.realpath(p) != _cwd]
+_cwd_prefix = _cwd + os.sep
+def _is_checkout_path(p):
+    rp = os.path.realpath(p) if p else _cwd
+    return rp == _cwd or rp.startswith(_cwd_prefix)
+sys.path = [p for p in sys.path if not _is_checkout_path(p)]
 import site
 site.main()
 '

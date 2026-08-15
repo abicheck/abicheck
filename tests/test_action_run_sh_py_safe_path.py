@@ -148,6 +148,79 @@ class TestPySafePathPreventsCheckoutShadowing:
         assert _MALICIOUS_MARKER in result.stderr
 
 
+#: The pre-fix, equality-only filter (Codex review, fresh evidence,
+#: fourth round on this same fix): removes only an entry equal to the
+#: resolved CWD, not a descendant of it -- used below to prove the
+#: descendant-path vector genuinely reproduces against the *old* filter,
+#: not just against no filter at all.
+_EQUALITY_ONLY_PY_SAFE_PATH = (
+    "import os\n"
+    "import sys\n"
+    "_cwd = os.path.realpath(os.getcwd())\n"
+    "sys.path = [p for p in sys.path if os.path.realpath(p) != _cwd]\n"
+    "import site\n"
+    "site.main()\n"
+)
+
+
+class TestPySafePathPreventsDescendantCheckoutShadowing:
+    """Codex review, fourth round on this same fix: a common src-layout
+    ``PYTHONPATH=src`` resolves to ``<checkout>/src`` before this snippet
+    ever runs -- a strict ``resolved-path == cwd`` equality check (the
+    filter every earlier round in this history used) leaves that
+    descendant path, and anything placed under it by a malicious PR,
+    importable. ``$_PY_SAFE_PATH`` now excludes any path located anywhere
+    inside the checkout, not just the checkout root itself.
+    """
+
+    def test_pythonpath_descendant_shadowing_is_blocked(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_fake_abicheck_package(src)
+        result = _run_import_under_safe_path(tmp_path, extra_env={"PYTHONPATH": "src"})
+        assert result.returncode == 0, result.stderr
+        assert _MALICIOUS_MARKER not in result.stderr
+        assert "['-DFOO=1']" in result.stdout
+
+    def test_pythonpath_descendant_sitecustomize_is_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_fake_sitecustomize(src)
+        result = _run_import_under_safe_path(
+            tmp_path, extra_env={"PYTHONPATH": "src"}, use_dash_s=True
+        )
+        assert result.returncode == 0, result.stderr
+        assert _MALICIOUS_MARKER not in result.stderr
+
+    def test_without_the_fix_descendant_shadowing_actually_reproduces(
+        self, tmp_path: Path
+    ) -> None:
+        """Proves the two tests above aren't vacuously passing -- the
+        identical PYTHONPATH=src setup, filtered by the earlier
+        equality-only predicate instead of the real fix, really does let
+        the descendant path shadow the installed package."""
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_fake_abicheck_package(src)
+        script = (
+            _EQUALITY_ONLY_PY_SAFE_PATH
+            + "from abicheck._compiler_options import split_gcc_options\n"
+            "print(split_gcc_options('-DFOO=1'))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": "src"},
+            timeout=30,
+        )
+        assert result.returncode != 0
+        assert _MALICIOUS_MARKER in result.stderr
+
+
 class TestPySafePathPreventsSitecustomizeExecution:
     """Codex review, third round on this same fix: ``site.py`` auto-imports
     a ``sitecustomize.py`` it finds on ``sys.path`` as part of ordinary

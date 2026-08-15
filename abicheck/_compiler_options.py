@@ -135,115 +135,122 @@ def _split_gcc_options_windows(text: str) -> list[str]:
     function's docstring (item #4) for why this exists as a separate,
     platform-gated branch rather than applying everywhere.
 
-    The general case is genuinely ambiguous: an unquoted ``\\`` immediately
-    before an ARBITRARY character could mean "Windows path separator" or
-    "POSIX escape of the next character," and no rule can read both from
-    the character alone. An earlier revision of this function also treated
-    a backslash before whitespace as an escape (keeping the space as part
-    of the current token, matching real ``shlex``'s ``-DMSG=hello\\
-    world`` -> ``-DMSG=hello world``) -- but real POSIX usage of that idiom
-    is already fully handled by :func:`split_gcc_options`'s separate POSIX
-    branch (this function is only ever reached when ``os.name == "nt"``),
-    so nothing depends on this function replicating it, and doing so
-    created a real, common Windows-specific ambiguity a review round
-    caught: an ordinary Windows path ending in a trailing directory
-    separator right before the next flag (``-IC:\\sdk\\ -DOK=1``) hits the
-    identical backslash-before-whitespace shape, so the separator and the
-    space were swallowed into one corrupted token instead of staying two.
-    Unlike that case, escaping a double-quote character is unambiguous
-    with an ordinary Windows path component -- ``"`` is illegal in every
-    Windows filename, so a real path never legally contains an unescaped
-    one to begin with, and never ends in one the way it routinely ends in
-    a directory separator. A single quote (``'``) gets no such exception
-    at all (see item #6 above) -- it is a completely ordinary, legal path
-    character on Windows with no special meaning, unlike on POSIX. So
-    outside quotes, a backslash immediately followed by ``"`` escapes
-    exactly that one character (consumed together, dropping the
-    backslash, keeping the literal quote character as part of the current
-    token); a backslash followed by anything else -- an ordinary path
-    character, whitespace, ``'``, end of string, or another backslash --
-    is left completely untouched, both characters preserved literally one
-    at a time (matching the pre-existing, already-correct Windows behavior
-    for this exact shape, before this function existed to fix the actual
-    quoted-value bug). Verified against real ``shlex.split`` output where
-    a comparison applies: ``-DVERSION=\\"1.2\\"`` -> one token
-    ``-DVERSION="1.2"`` (matches plain ``shlex``); ``-IC:\\mypath\\include``
-    and ``-IC:\\sdk\\ -DOK=1`` -> unchanged, backslashes and trailing
-    separators intact, two tokens each where a space is a real separator
-    (diverging from plain ``shlex``, which would corrupt both -- the whole
-    reason this function exists); ``-IC:\\Users\\O'Brien\\include`` ->
-    unchanged, one token, apostrophe intact (also diverging from plain
-    ``shlex``, which would raise ``ValueError`` for an unterminated
-    quote). Inside double quotes, only a backslash immediately escaping
-    the closing quote character is special (``\\"`` -> ``"``); any other
-    backslash -- including a doubled one, e.g. a quoted UNC path's
-    ``\\\\server\\share`` prefix -- is left completely literal rather than
-    collapsed the way real POSIX double-quote rules would (``'`` still
-    always literal, matching the unquoted case). This is a deliberate
-    divergence from plain ``shlex`` (see item #7 above) precisely because
-    a quoted Windows path is still a Windows path, not an opt-in to POSIX
-    backslash-collapsing semantics the way it would be on a POSIX shell.
+    Implements the standard Windows command-line backslash/quote parsing
+    rule (the same one ``CommandLineToArgvW`` and real MSVC-family command
+    lines use, not a bespoke grammar): backslashes are literal unless they
+    immediately precede a double-quote character, in which case a *run* of
+    ``k`` consecutive backslashes followed by ``"`` contributes ``k // 2``
+    literal backslashes, and then:
+
+    - if ``k`` is even, the ``"`` is a real delimiter (toggles whether the
+      parser is currently "inside quotes");
+    - if ``k`` is odd, the trailing backslash escapes the ``"``, which is
+      appended as a literal character instead of toggling anything.
+
+    A single, unified "in quotes" boolean governs the whole string (not a
+    separate outside-quotes/inside-quotes code path, unlike this
+    function's earlier item #4-#7 revisions) -- a bare ``"`` with no
+    preceding backslash is just the ``k == 0`` case of the same rule, and
+    always toggles. Whitespace is a token separator only while not inside
+    quotes; a bare ``'`` is never special anywhere (see item #6 below) --
+    it always falls through to the plain "ordinary character" case, so an
+    apostrophe in a path or macro value survives unchanged either way.
+
+    Six earlier revisions of this function (and, before it existed, of
+    :func:`split_gcc_options` applying one grammar to every platform) each
+    traded away a real, independently-confirmed case -- see that
+    function's own docstring for the full history through item #7. This
+    revision (item #8) is not one more hand-patch on top of that history;
+    it replaces the whole hand-rolled "outside quotes: only a
+    backslash-before-quote is special; inside quotes: only a
+    backslash-before-quote is special, but as a *separate* code path with
+    its own rules" design with the one real rule Windows command lines
+    actually use, closing an entire remaining class of bug at once: item
+    #7's separate inside-quotes handling could not correctly *close* a
+    quoted region that ends in an even run of backslashes right before the
+    closing quote (e.g. a quoted Windows path ending in a directory
+    separator, ``-I"C:\\Program Files\\SDK\\\\"``) -- it treated the final
+    backslash as escaping the quote regardless of parity, consuming what
+    should have been the closing delimiter and raising ``ValueError`` on
+    the resulting unterminated quote. Under the real parity rule, ``k=2``
+    (even) contributes one literal backslash and closes the quote, exactly
+    matching what a real Windows compiler driver would parse.
+
+    Verified against every case the earlier revisions were built for,
+    confirming none regressed under the unified rule: a quoted value with
+    an embedded space (``-DMSG="hello world"``) stays one token; an
+    unquoted backslash before whitespace or end of string is preserved
+    literally, keeping a trailing directory separator right before the
+    next flag as two tokens (``-IC:\\sdk\\ -DOK=1``); a single backslash
+    before a quote character, quoted or not, escapes exactly that quote
+    (``-DVERSION=\\"1.2\\"`` -> one token ``-DVERSION="1.2"``, matching
+    plain POSIX ``shlex``); an ordinary unquoted Windows path's
+    backslashes survive untouched (``-IC:\\mypath\\include``); a quoted
+    value's *interior* single backslashes (not immediately before the
+    closing quote) also survive untouched, matching item #7
+    (``-DPATH="C:\\a\\b"`` -> ``-DPATH=C:\\a\\b``, and a quoted UNC path's
+    leading ``\\\\server\\share`` prefix survives intact); an apostrophe
+    never raises or opens grouping, quoted or not
+    (``-DCHAR='x'``, ``-IC:\\Users\\O'Brien\\include``); and a genuinely
+    unterminated quote (an odd, unresolved "still inside quotes" state at
+    end of string) still raises ``ValueError``, the same way plain
+    ``shlex.split`` does.
     """
     tokens: list[str] = []
     current: list[str] = []
     have_current = False
+    in_quotes = False
     i = 0
     n = len(text)
     while i < n:
         ch = text[i]
-        if ch in _WHITESPACE:
+        if ch == "\\":
+            # A run of consecutive backslashes is only special when
+            # followed by a quote character -- otherwise every backslash
+            # in the run is literal, regardless of quoting state (see the
+            # docstring above).
+            j = i
+            while j < n and text[j] == "\\":
+                j += 1
+            run_length = j - i
+            if j < n and text[j] == '"':
+                have_current = True
+                current.append("\\" * (run_length // 2))
+                if run_length % 2 == 1:
+                    # Odd run: the trailing backslash escapes the quote --
+                    # a literal `"` character, quoting state unchanged.
+                    current.append('"')
+                else:
+                    # Even run: the quote is a real delimiter.
+                    in_quotes = not in_quotes
+                i = j + 1
+            else:
+                current.append("\\" * run_length)
+                have_current = True
+                i = j
+            continue
+        if ch == '"':
+            # k == 0 case of the same rule above: an unescaped quote is
+            # always a real delimiter.
+            in_quotes = not in_quotes
+            have_current = True
+            i += 1
+            continue
+        if ch in _WHITESPACE and not in_quotes:
             if have_current:
                 tokens.append("".join(current))
                 current = []
                 have_current = False
             i += 1
             continue
-        # Outside any quote, a backslash escapes exactly a following
-        # double-quote character (dropping the backslash, keeping the
-        # literal quote character as part of the current token). Anything
-        # else after the backslash -- an ordinary path character,
-        # whitespace, a single quote, another backslash, or end of string
-        # -- is left untouched, so an unquoted Windows path's backslashes
-        # (including a trailing directory separator right before the next
-        # flag) survive intact (see the docstring above for why whitespace
-        # and ``'`` are deliberately excluded here).
-        if ch == "\\" and i + 1 < n and text[i + 1] == '"':
-            have_current = True
-            current.append(text[i + 1])
-            i += 2
-            continue
-        have_current = True
-        # A bare single quote is never special on Windows -- unlike POSIX,
-        # it's an ordinary, legal path/filename character (see the
-        # docstring above), so it falls through to the plain "ordinary
-        # character" branch at the end of this loop, same as any letter.
-        if ch == '"':
-            i += 1
-            while True:
-                if i >= n:
-                    raise ValueError("No closing quotation")
-                c2 = text[i]
-                if c2 == '"':
-                    i += 1
-                    break
-                # Only a backslash immediately escaping the closing-quote
-                # character itself is special here -- a bare `\\` (e.g. the
-                # leading pair of a UNC path, `\\server\share`) is left as
-                # two literal backslashes rather than collapsed to one (see
-                # item #7 in the docstring above for why this diverges from
-                # plain shlex's real POSIX double-quote rule, which treats
-                # `\\` -> `\` unconditionally).
-                if c2 == "\\" and i + 1 < n and text[i + 1] == '"':
-                    current.append(text[i + 1])
-                    i += 2
-                    continue
-                current.append(c2)
-                i += 1
-            continue
-        # Ordinary character outside any quote, backslash included -- always
-        # literal, so an unquoted Windows path's backslashes survive intact.
+        # Ordinary character (a bare `'` included -- see the docstring
+        # above for why it's never special on this platform), literal
+        # whether inside or outside quotes.
         current.append(ch)
+        have_current = True
         i += 1
+    if in_quotes:
+        raise ValueError("No closing quotation")
     if have_current:
         tokens.append("".join(current))
     return tokens

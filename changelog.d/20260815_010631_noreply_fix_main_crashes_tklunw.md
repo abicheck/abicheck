@@ -49,12 +49,22 @@
   `sys.path`-filtering snippet above ever gets a chance to run a single
   line — with `site.main()` called manually right after the filter to
   restore normal site-packages access for the real, pip-installed package.
-- **A quoted Windows UNC path forwarded via `--gcc-options`/
-  `--compiler-option` no longer loses its leading double backslash.** The
-  Windows-only tokenizer's double-quote handling followed real POSIX
-  double-quote escaping unconditionally, which collapses `\\` to a single
-  `\` — corrupting a value like `-I"\\server\share path\include"` into a
-  single-backslash, non-UNC path the compiler can't resolve. Only a
-  backslash immediately escaping the closing quote character is treated
-  as an escape now; any other backslash inside quotes, including a
-  doubled one, is left completely literal.
+- **`action/run.sh`'s checkout-shadowing filter now excludes every path
+  located anywhere inside the checkout, not just the checkout root
+  itself.** A common src-layout `PYTHONPATH=src` resolves to
+  `<checkout>/src` before the filter ever runs, so the earlier
+  resolved-path *equality* check left that descendant path — and any
+  `sitecustomize.py`/malicious `abicheck` package placed there —
+  importable.
+- **The Windows-only compiler-flags tokenizer (`--gcc-options`/
+  `--compiler-option`) now follows the standard Windows command-line
+  backslash/quote parsing rule** (the same one `CommandLineToArgvW` and
+  real MSVC-family command lines use) instead of a hand-rolled grammar
+  with separate, ad hoc rules for inside vs. outside quotes. This closes
+  the last two gaps in that hand-rolled grammar at once: a quoted Windows
+  UNC path no longer loses its leading double backslash (`-I"\\server\share
+  path\include"` used to collapse to a single, non-UNC backslash), and a
+  quoted path ending in a directory separator right before the closing
+  quote (`-I"C:\Program Files\SDK\\"`) no longer fails to close the quoted
+  region and raise a spurious error — both now resolved correctly by the
+  same backslash-run-parity rule real Windows tooling uses.

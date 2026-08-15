@@ -159,6 +159,21 @@ class TestSplitGccOptionsWindows:
             r"-I\\server\share path\include"
         ]
 
+    def test_quoted_path_ending_in_trailing_separator_closes_properly(self) -> None:
+        # Codex review, eighth round: item #7's separate inside-quotes
+        # backslash handling treated the final backslash before a closing
+        # quote as always escaping it, regardless of how many backslashes
+        # preceded it -- so a quoted path ending in a directory separator
+        # (an even, two-backslash run right before the closing quote)
+        # consumed the quote as literal instead of closing the quoted
+        # region, eventually raising ValueError instead of producing two
+        # tokens. The real Windows backslash-run-parity rule (even count ->
+        # literal backslashes, quote is a real delimiter) resolves it.
+        assert _split_gcc_options_windows('-I"C:\\Program Files\\SDK\\\\" -DOK=1') == [
+            "-IC:\\Program Files\\SDK\\",
+            "-DOK=1",
+        ]
+
     def test_apostrophe_in_windows_path_does_not_raise(self) -> None:
         # The original bug report shape: a real Windows path/filename
         # containing an apostrophe (a common surname) previously opened
