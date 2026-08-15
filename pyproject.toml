@@ -343,6 +343,13 @@ also_copy = [
     "pixi.lock",
     "scripts",
     "skills-src",
+    # The three committed publication trees `scripts/gen_agent_skills.py`
+    # generates from `skills-src/`. `test_gen_agent_skills.py` compares them
+    # against it, so copying only the source reports every generated file as
+    # missing (Codex review).
+    ".agents",
+    ".claude",
+    ".gemini",
     "validation",
 ]
 only_mutate = [
@@ -386,6 +393,7 @@ pytest_add_cli_args = [
     "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
     "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
     "--ignore=tests/test_action_check_target.py",
+    "--ignore=tests/test_action_collect_facts.py",
     "--ignore=tests/test_publish_baseline_upload_step.py",
     "--ignore=tests/test_publish_baseline_upload_step_evidence.py",
     "--ignore=tests/test_publish_baseline_upload_step_generation.py",

@@ -292,6 +292,12 @@ def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
         "repo_facts.json",
         "scripts",
         "skills-src",
+        # `test_gen_agent_skills.py` compares the committed publication trees
+        # against `skills-src/`, so copying only the source reports every
+        # generated file as missing (Codex review).
+        ".agents",
+        ".claude",
+        ".gemini",
     }
     missing = required - also_copy
     assert not missing, (
@@ -441,6 +447,11 @@ _ACCEPTED_KILL_LOSS = {
     # from a subprocess that has no mutmut config, so the import of any
     # mutated module raises there. Reaches checker_policy via
     # abicheck.aggregate.
+    # Drives `actions/collect-facts`'s scripts the same way, and hits the same
+    # subprocess re-entry.
+    "tests/test_action_collect_facts.py": frozenset(
+        {"abicheck.checker_policy", "abicheck.name_classification"}
+    ),
     "tests/test_action_check_target.py": frozenset(
         {
             "abicheck.checker_policy",

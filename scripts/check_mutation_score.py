@@ -407,6 +407,18 @@ def main(argv: list[str] | None = None) -> int:
                 "not a silent no-op."
             )
             return 1
+        if args.results_file:
+            # An explicitly named input that could not be read is a failed
+            # invocation, not an optional one. Sharing the "no tool, nothing
+            # to do" exit meant a scripted offline check reported success
+            # having processed no results at all (Codex review) — the same
+            # can't-fail shape as the --run branch above, reached from the
+            # other direction.
+            print(
+                f"ERROR: --results-file {args.results_file} could not be read, "
+                "so there are no mutation results to gate on."
+            )
+            return 1
         return 0
 
     complete, why = _measurement_is_complete(text, stats)

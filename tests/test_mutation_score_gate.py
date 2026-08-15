@@ -371,6 +371,29 @@ _TEST_ONLY_DIFF = """diff --git a/tests/test_diff_types.py b/tests/test_diff_typ
 """
 
 
+def test_an_unreadable_results_file_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An explicitly named input that cannot be read is a failed invocation.
+
+    It shared the "no tool, nothing to do" exit, so a scripted offline check
+    reported success having processed no results at all (Codex review) — the
+    same can't-fail shape as a --run that produced nothing, reached from the
+    other direction.
+    """
+    rc = gate.main(["--results-file", str(tmp_path / "nope.txt")])
+    assert rc == 1
+    assert "could not be read" in capsys.readouterr().out
+
+
+def test_no_results_file_and_no_run_is_still_a_clean_skip(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Negative control: the optional path stays optional. Without --run and
+    without an explicit input there is genuinely nothing to do."""
+    assert gate.main([]) == 0
+
+
 class TestUngatedRun:
     """A run that examined nothing must not report a pass.
 
