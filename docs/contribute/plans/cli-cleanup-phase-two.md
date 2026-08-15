@@ -16,8 +16,9 @@ interface contract), [ADR-043](../adr/043-cli-pre-1.0-surface-reset.md) /
 (root-surface admission),
 [ADR-047](../adr/047-github-actions-integration-model.md) (Action model),
 [ADR-056](../adr/056-multi-artifact-library-set-scan.md) (`scan --artifact-set`).
-**Effort:** L (six independent PRs) · **Risk:** mixed — PR 1 is
-presentation-only, PR 4 changes what a CI job's exit code means.
+**Effort:** L (seven independent PRs) · **Risk:** mixed — PR 1 is
+presentation-only, PR 1b is gated on new persisted-report schema work, PR 4
+changes what a CI job's exit code means.
 
 ## Problem
 
@@ -43,7 +44,7 @@ simplification).
 | `--exit-code-scheme` (compare, scan) | Remove, but reworked | Own ADR + semantics PR: keep two orthogonal axes, drop the *manual algorithm selector* |
 | `compare --stat`, `compare --recommend` | Remove | `--format review` replaces `--stat`; recommendation becomes an unconditional renderer output |
 | `scan --artifact-set` | **Keep** | Refine the value syntax only (repeatable option / manifest); do not overload positional `DIRECTORY` |
-| `--annotate`, `--annotate-additions` | Remove from CLI for single-library `compare`; **defer** for the directory/package release fan-out | Render annotations in the composite Action from an existing report — release-operand annotations need a persistence prerequisite first (see PR 1) |
+| `--annotate`, `--annotate-additions` | Remove from CLI (PR 1b, not PR 1) | Options on `compare` alone, shared by both operand shapes (no CLI-level split is possible) — blocked on a release-report persistence prerequisite; see PR 1b |
 | `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to explicitly-trusted `.abicheck.yml`, with a real trust + dry-run contract |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
 
@@ -94,13 +95,12 @@ standing red lane, not #770's regression.
 **Done when** a full `ci.yml` run on `main` is green on Linux, macOS and
 Windows, and a red required check demonstrably blocks a merge.
 
-## PR 1 — presentation and GitHub transport
+## PR 1 — presentation
 
-Removes `compare --stat`, `compare --recommend`, `compare --annotate`,
-`compare --annotate-additions`. The same two annotate flags exist on the
-directory/package release fan-out (`cli_compare_release.py`) but are **not**
-removed by this PR — see "Annotations move to the Action" below for why that
-path needs its own persistence prerequisite first.
+Removes `compare --stat` and `compare --recommend` only. `--annotate` /
+`--annotate-additions` are **not** in this PR — see PR 1b below for why they
+cannot be split off by operand type the way this plan's first two drafts
+assumed.
 
 ### `--stat`
 
@@ -149,75 +149,81 @@ ground for renderer switches. A genuine `release` mode may be added later if it
 describes a whole coherent report shape — but not merely to justify deleting a
 boolean.
 
-### Annotations move to the Action
+**Tests.** `compare --stat` exits `64` with `No such option`; `--format review`
+output contains the recommendation.
+
+**Risk:** low — no analysis, verdict, or exit code changes.
+
+## PR 1b — annotations move to the Action (blocked on a persistence prerequisite)
 
 `--annotate`/`--annotate-additions` only do anything when `GITHUB_ACTIONS=true`;
 they emit `::error`/`::warning`/`::notice` workflow commands and are inert in an
-ordinary shell. That is transport, not comparison semantics.
+ordinary shell. That is transport, not comparison semantics — but this PR
+cannot be scoped as cleanly as PR 1, for a reason two earlier drafts of this
+plan got wrong in two different ways, so both are recorded here.
 
-Target shape:
+**First wrong idea: split the flag removal by operand type.** `--annotate` /
+`--annotate-additions` are **not** two independent flags, one per operand
+shape — they are options on the single registered `compare` command
+(`cli.py`). A directory/package operand is dispatched to the unregistered
+`compare_release_cmd` fan-out engine *after* `compare`'s own options are
+parsed (`cli.py`'s `_dispatch_release_compare`, called from the same
+`compare` invocation, `cli.py:1202-1207`), reusing the identical
+`annotate`/`annotate_additions` values. So "remove `--annotate` from `compare`
+for single-library operands only, keep it for release operands" is not
+achievable with the current CLI surface: removing the flag from `compare`
+removes the *only* way a release operand can request annotations too. Do not
+attempt that split; either flag stays on `compare` for both operand shapes, or
+it goes for both at once.
 
-```text
-abicheck compare … → JSON / SARIF / typed CompareResult
-composite Action   → reads that result → emits ::error / ::warning / ::notice
-```
-
-The Action must **not** re-run the comparison to produce annotations — for a
-**single-library** operand. For a **directory/package (release-style)**
-operand this does not hold today, and the plan must say so rather than assume
-it: `cli_compare_release._strip_diff_results_and_adjust_verdict` discards each
+**Second wrong idea (from the same section, one draft earlier): the Action
+can render from "the report it already produces," full stop.** True for a
+single-library operand's JSON/SARIF report. False for a directory/package
+(release-style) operand's summary report:
+`cli_compare_release._strip_diff_results_and_adjust_verdict` discards each
 library's `DiffResult` after projecting only a capped
 (`_MAX_RELEASE_FINDINGS_PER_LIBRARY = 10`) `findings` list
-(`bucket`/`kind`/`symbol`/`description`/`source_location`) into the JSON
-summary — no severity/contract-evaluation classification, and truncated past
-the cap. Today's `--annotate` on a release operand does not read that
-projection; it goes through `_collect_release_extras`, which **re-runs every
-library's comparison independently** specifically to recover a full
-`DiffResult` for `annotations.collect_annotations`. Separately,
-`action/run.sh`'s `_is_release_style_operand` skips the internal `--write`
-JSON sidecar entirely for a directory/package operand (the release engine
-rejects `--write`), so for that shape the Action does not even have a
-persisted machine report to read annotations from in the first place.
+(`bucket`/`kind`/`symbol`/`description`/`source_location`) — no
+severity/contract-evaluation classification, truncated past the cap. Today's
+`--annotate` on a release operand doesn't even read that projection; it goes
+through `_collect_release_extras`, which **re-runs every library's comparison
+independently** to recover a full `DiffResult` for
+`annotations.collect_annotations`. Separately, `action/run.sh`'s
+`_is_release_style_operand` skips the internal `--write` JSON sidecar entirely
+for a directory/package operand (the release engine rejects `--write`), so for
+that shape the Action does not even have a persisted machine report to read
+from.
 
-So PR 1 cannot uniformly move annotation rendering onto "the report already
-produced" — that is true for `compare`'s single-library JSON/SARIF report, and
-false for the release fan-out's summary report. Two consequences follow:
+**What this means for sequencing:** since the flag cannot be split by
+operand and the report cannot yet serve both operand shapes, `--annotate` /
+`--annotate-additions` stay on `compare`, unchanged, through PR 1 (and every
+PR up to this one). PR 1b is real work in its own right, gated on a
+persistence prerequisite completing first:
 
-1. **Do not remove `--annotate`/`--annotate-additions` for the release path in
-   this PR.** Either scope PR 1 to single-library `compare` only (leave the
-   release fan-out's annotation flags in place, tracked as a follow-up), or —
-   if release-operand annotations must move too — make that its own
-   prerequisite slice: have the primary release pass persist a real,
-   uncapped, un-stripped per-finding machine report (schema work: what today
-   collapses to `findings`/`findings_truncated` needs the same detail
+1. The primary release pass persists a real, uncapped, un-stripped per-finding
+   machine report — schema work: what today collapses to
+   `findings`/`findings_truncated` needs the same detail
    `collect_annotations` reads from a live `DiffResult`, including the
-   severity/contract classification the capped projection currently drops),
-   and give `action/run.sh` a `--write`-equivalent path for a release operand
-   before removing the flags that currently work around both gaps by
-   re-running.
-2. **`action.yml` inputs are not pre-existing to "keep" either way.**
-   `action.yml` has no `annotate`/`annotate-additions` input today; a workflow
-   that wants annotations passes the CLI flags through `extra-args`. PR 1
-   must, in one change, for whichever scope it actually covers: define
-   `annotate` / `annotate-additions` inputs in `action.yml`; implement the
-   renderer over a persisted report; update every first-party workflow,
-   recipe and doc snippet passing these through `extra-args`; and state the
-   migration for external callers ("move `--annotate` out of `extra-args`
-   into the `annotate` input").
+   severity/contract classification the capped projection currently drops.
+2. `action/run.sh` gains a `--write`-equivalent path for a release operand, so
+   the Action has something to read for that shape too.
+3. Only once both of those land: remove `--annotate`/`--annotate-additions`
+   from `compare` (covering both operand shapes at once, since they share one
+   flag), define `annotate`/`annotate-additions` inputs in `action.yml`
+   (neither exists today — a workflow currently passes these through
+   `extra-args`), implement the Action's renderer over the now-uniformly-
+   persisted report for both operand shapes, update every first-party
+   workflow/recipe/doc snippet using `extra-args` for this, and state the
+   `extra-args` → `annotate` input migration for external callers.
 
-**Tests.** A saved single-library report fixture must produce, through the
-Action's renderer, byte-identical annotations to what the CLI emitted for the
-same report before the move. Plus: `compare --stat` and `compare --annotate`
-exit `64` with `No such option`; `--format review` output contains the
-recommendation; `compare-release`'s (the directory/package fan-out's)
-`--annotate`/`--annotate-additions` continue to work unchanged, proving they
-were genuinely untouched rather than silently broken by the single-library
-removal.
+**Tests.** A saved report fixture (both a single-library and a release-style
+report) must produce, through the Action's renderer, byte-identical
+annotations to what the CLI emitted for the same report before the move.
+`compare --annotate` exits `64` with `No such option` only once step 3 lands —
+not before.
 
-**Risk:** low for the single-library flags — no analysis, verdict, or exit
-code changes. The release-operand annotation move is out of this PR's scope
-precisely because it is not low-risk: it needs new persisted-report schema
-work, not a renderer move.
+**Risk:** medium — gated on new persisted-report schema work, not a pure
+renderer move, and it changes what a release-operand Action run can observe.
 
 ## PR 2 — aggregate policy into the manifest schema
 
@@ -232,7 +238,7 @@ contract:
 
 ```json
 {
-  "aggregate_manifest_version": "1.1",
+  "aggregate_manifest_version": "2.0",
   "targets": [
     {"id": "linux-gcc", "required": true},
     {"id": "windows-msvc", "required": true}
@@ -243,6 +249,23 @@ contract:
   }
 }
 ```
+
+**This must be a MAJOR bump (`2.0`), not an additive `1.1`.**
+`aggregate.py`'s `_check_manifest_version` only rejects a MAJOR component
+*newer* than `AGGREGATE_MANIFEST_VERSION` (currently `"1.0"`) — it accepts any
+`1.x`, on the stated assumption that a MINOR bump is additive-only within a
+MAJOR. `ExpectedTargets.from_manifest_data` bears that assumption out today:
+it reads `targets`/`head_sha` and silently ignores any other key. Put `gate`
+in at `1.1` and an old `1.0`-vintage `aggregate` binary reading the new
+manifest passes the version check (`1 <= 1`), never reads `gate` at all, and
+silently falls back to the hardcoded defaults (`missing_required: fail`,
+`unexpected_target: include`) — which can be exactly the wrong policy the
+manifest asked for, misapplied with no error. Since a *silently wrong gate
+decision* is worse than a *loud rejection*, the new field must ship at a
+MAJOR an old reader is guaranteed to reject: `major > supported` raises
+`AggregateError` instead of falling through. Publish `gate` at
+`aggregate_manifest_version: "2.0"` and bump `AGGREGATE_MANIFEST_VERSION`
+accordingly, so an old reader fails loud rather than misapplying policy.
 
 `project plan` emits the same fields into `run-plan.json` from `.abicheck.yml`.
 
@@ -447,10 +470,11 @@ docs/schema gates all green.
 ## Ordering
 
 ```text
-PR 0  green CI + required checks     (prerequisite)
-PR 1  presentation / transport       (low risk)
-PR 2  aggregate policy schema        (schema)
-PR 3  build execution → trusted config (trust)
-PR 4  gate semantics + ADR           (behavioural, highest risk)
-PR 5  artifact-set syntax refinement (optional, after set-mode semantics)
+PR 0   green CI + required checks     (prerequisite)
+PR 1   presentation                   (low risk)
+PR 1b  annotations → Action           (medium risk, needs the persistence prerequisite first)
+PR 2   aggregate policy schema        (schema, MAJOR version bump)
+PR 3   build execution → trusted config (trust)
+PR 4   gate semantics + ADR           (behavioural, highest risk)
+PR 5   artifact-set syntax refinement (optional, after set-mode semantics)
 ```
