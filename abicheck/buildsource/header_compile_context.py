@@ -69,15 +69,13 @@ pick one" heuristic.
 
 from __future__ import annotations
 
-import os
 import re
-import shlex
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .._compiler_options import explicit_language_standard
+from .._compiler_options import explicit_language_standard, split_gcc_options
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import iter_directory_headers
@@ -230,7 +228,7 @@ def _explicit_pin_tokens(explicit: CompileContext | None) -> list[str]:
     tokens: list[str] = []
     if explicit.gcc_options:
         try:
-            tokens.extend(shlex.split(explicit.gcc_options, posix=os.name != "nt"))
+            tokens.extend(split_gcc_options(explicit.gcc_options))
         except ValueError:
             pass
     tokens.extend(explicit.gcc_option_tokens)

@@ -87,7 +87,6 @@ localize, or add a RISK/API_BREAK finding — never a shipped-ABI verdict.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -712,16 +711,13 @@ class ClangHeaderIncludeExtractor:
         ``COMPILE_UNIT_INCLUDES_FILE`` edges for the same headers the AST
         pass parsed correctly (Codex review).
         """
-        import shlex
-
+        from .._compiler_options import split_gcc_options
         from .build_evidence import BuildEvidence, CompileUnit
         from .include_graph import ClangIncludeExtractor
 
         if not self.available():
             return {}, [f"{self.clang_bin} not found in PATH"]
-        extra_tokens = (
-            shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
-        )
+        extra_tokens = split_gcc_options(gcc_options) if gcc_options else []
         toolchain_tokens: list[str] = []
         if sysroot:
             toolchain_tokens.append(f"--sysroot={sysroot}")

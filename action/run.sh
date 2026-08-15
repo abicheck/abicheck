@@ -4,6 +4,45 @@
 # runs abicheck, captures the exit code, and sets outputs.
 set -uo pipefail
 
+# `$OSTYPE` is a bash builtin, always set, no external command needed --
+# Git Bash on GitHub's windows-latest runners reports "msys" (Cygwin
+# reports "cygwin"), every other supported runner reports something else
+# ("linux-gnu", "darwin*", ...). Computed once, used below by
+# `_is_path_already_qualified` to gate Windows-only path forms (a
+# drive-letter prefix, a leading backslash) behind actually running on
+# Windows -- see that function's own docstring for why (Codex review,
+# fresh evidence: a POSIX relative filename that happens to start with a
+# single character followed by a literal `:`, e.g. `a:baseline.json`,
+# would otherwise be misrecognized as an already-qualified Windows path on
+# every platform, not just Windows).
+case "$OSTYPE" in
+  msys* | cygwin* | win32*) _RUNNING_ON_WINDOWS=true ;;
+  *) _RUNNING_ON_WINDOWS=false ;;
+esac
+
+# Shared by every `$PWD`-anchoring decision below ($_PY_BIN canonicalization,
+# `_report_query`'s report-path anchoring): a path is "already qualified" --
+# must NOT get a `$PWD/` prefix -- when it's POSIX-absolute on any platform,
+# or (Windows only) drive-absolute (`C:\...`), drive-relative (`C:foo`, no
+# separator after the drive letter -- relative to that drive's own current
+# directory, a distinct real Windows path form this script has no way to
+# resolve either way, so a `$PWD/` prefix would be unconditionally wrong),
+# UNC (`\\server\share\...`), or root-relative (`\foo`). Gated on
+# `$_RUNNING_ON_WINDOWS` rather than applied unconditionally, since a bare
+# `?:*`/`\\*` pattern would otherwise also match a genuine POSIX relative
+# filename that happens to start with that shape (e.g. `a:baseline.json`).
+_is_path_already_qualified() {
+  case "$1" in
+    /*) return 0 ;;
+  esac
+  if [[ "$_RUNNING_ON_WINDOWS" == "true" ]]; then
+    case "$1" in
+      ?:* | \\*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Helper: append a flag with value(s) to the command array.
 # Prefer one item per line (a YAML block scalar, e.g. `headers: |`) — that
@@ -38,28 +77,51 @@ add_flag() {
 
 # ---------------------------------------------------------------------------
 # Helper: like add_flag(), but a single-line value is split the way
-# abicheck's own shlex.split() splits a compiler-flags string server-side
-# (quote-aware -- a value like -DMSG="hello world" stays one token), not
-# add_flag()'s plain bash word-splitting (Codex review, PR #757: routing
-# gcc-options through add_flag()'s unquoted `for item in $value` broke a
-# quoted value into malformed tokens, since bash word-splitting treats `"`
-# as a literal character once the string is already sitting in a variable,
-# unlike a real shell command line). Used only for the gcc-options ->
-# --compiler-option conversion, where the CLI flag it now maps to used to
-# be one scalar --gcc-options string abicheck itself shlex-split.
+# abicheck's own compiler-flags string splitting works server-side
+# (quote-aware -- a value like -DMSG="hello world" stays one token, and an
+# unquoted Windows path's backslashes survive intact), not add_flag()'s
+# plain bash word-splitting (Codex review, PR #757: routing gcc-options
+# through add_flag()'s unquoted `for item in $value` broke a quoted value
+# into malformed tokens, since bash word-splitting treats `"` as a literal
+# character once the string is already sitting in a variable, unlike a
+# real shell command line). Used only for the gcc-options -> --compiler-
+# -option conversion, where the CLI flag it now maps to used to be one
+# scalar --gcc-options string abicheck itself shlex-split.
 #
-# Delegates to `python3`/`python` (`_PY_BIN`, resolved once above) rather
-# than `eval`: xargs-style or eval-based quote parsing would either use its
-# own, different quoting dialect or -- for eval -- actually execute a
-# `$(...)`/backtick command substitution embedded in untrusted Action input,
-# which this must not do. Falls back to add_flag()'s plain whitespace split
-# only if no Python interpreter is on PATH, which should not happen in this
-# Action's own runtime (it needs one to run abicheck itself).
+# Delegates to the real `abicheck._compiler_options.split_gcc_options`
+# (imported, not reimplemented) via `python3`/`python` (`_PY_BIN`, resolved
+# once above) rather than `eval`: xargs-style or eval-based quote parsing
+# would either use its own, different quoting dialect or -- for eval --
+# actually execute a `$(...)`/backtick command substitution embedded in
+# untrusted Action input, which this must not do. Importing the real
+# function (rather than an inline reimplementation) is deliberate: three
+# earlier revisions of an inline copy each independently regressed a real
+# case a review round caught (real POSIX escape sequences, `#`-as-comment
+# truncation, unquoted Windows-path corruption -- see that function's own
+# docstring for the full history) precisely because there were two copies
+# of the same non-trivial tokenizer to keep in sync. `abicheck` is always
+# importable here in the common case: action.yml's "Install abicheck" step
+# runs `pip install` before "Run abicheck" invokes this script, so `_PY_BIN`
+# (found via the same `command -v python3`/`python` PATH lookup pip itself
+# resolved against) already has it on its import path -- verified once, up
+# front, via `$_PY_BIN_HAS_ABICHECK` (see its own definition above), for the
+# self-hosted-runner case where that assumption doesn't hold.
+#
+# Falls back to add_flag()'s plain whitespace split ONLY when doing so is
+# provably equivalent to real quote-aware parsing -- the value contains
+# none of `"`/`'`/`\`, so there is nothing for real parsing to interpret
+# differently from bash's own unquoted word-splitting in the first place.
+# When the real parser is unavailable AND the value actually needs one
+# (Codex review, fresh evidence: an earlier revision fell back
+# unconditionally, silently corrupting a quoted value like
+# `-DMSG="hello world"` into malformed tokens under a different, wrong
+# compile context instead of failing), this fails the Action loud rather
+# than guess.
 # ---------------------------------------------------------------------------
 add_flag_shlex_split() {
   local flag="$1"
   local value="$2"
-  local item split
+  local item split py_exit
   if [[ -z "$value" ]]; then
     return
   fi
@@ -70,19 +132,64 @@ add_flag_shlex_split() {
     add_flag "$flag" "$value"
     return
   fi
-  if [[ -z "$_PY_BIN" ]]; then
+  if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    # add_flag()'s own `for item in $value` is unquoted, so beyond just
+    # whitespace-splitting it also performs pathname (glob) EXPANSION --
+    # `*`/`?`/`[` are not provably safe to fall back on the same way
+    # quote/backslash characters aren't (Codex review, fresh evidence): a
+    # configured value like `-DPATTERN=*` would silently rewrite to
+    # whatever filenames exist in the current directory at the time this
+    # runs (the analyzed, potentially PR-controlled checkout -- unlike the
+    # real parser's own invocation, this naive fallback never `cd`s
+    # anywhere), letting untrusted checkout content influence the compile
+    # context.
+    if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* \
+          || "$value" == *'*'* || "$value" == *'?'* || "$value" == *'['* ]]; then
+      echo "::error::$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
+      exit 1
+    fi
     add_flag "$flag" "$value"
     return
   fi
-  split="$("$_PY_BIN" -c '
-import os
-import shlex
+  # $value is passed on stdin, not as a positional argv element (Codex
+  # review, fresh evidence: a value containing a POSIX-style path segment,
+  # e.g. -I/build/generated, triggered Git Bash/MSYS's automatic argv
+  # path-conversion on the windows-latest CI runner when forwarded as a
+  # positional arg to this native, non-MSYS python.exe -- silently
+  # rewriting it into a Windows path, e.g. inserting "Program Files" and
+  # its embedded space, before this script ever saw it. stdin content is
+  # never subject to that conversion (only actual argv strings are), so
+  # this sidesteps the whole class of corruption regardless of the exact
+  # value shape that triggers it -- not just the one case that surfaced it.
+  split="$(printf '%s' "$value" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 
-for tok in shlex.split(sys.argv[1], posix=(os.name != "nt")):
+from abicheck._compiler_options import split_gcc_options
+
+for tok in split_gcc_options(sys.stdin.read()):
     print(tok)
-' "$value")"
+'))"
+  py_exit=$?
+  # This script deliberately has no `set -e` (Codex review, fresh evidence):
+  # split_gcc_options() raises ValueError on malformed quoting (e.g. an
+  # unbalanced quote), which without this check would silently leave $split
+  # empty and every requested compiler option dropped instead of failing --
+  # an invalid configuration must not produce an apparently-successful
+  # comparison under the wrong macros/include paths.
+  if [[ $py_exit -ne 0 ]]; then
+    echo "::error::$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
+    exit 1
+  fi
   while IFS= read -r item; do
+    # Codex review, fresh evidence: on windows-latest, $_PY_BIN resolves to
+    # native python.exe, whose print() writes CRLF line endings by default
+    # (Python's text-mode stdout translates "\n" to os.linesep on write,
+    # regardless of whether stdout is a console or -- as here -- a pipe).
+    # bash's `read` only splits on LF, so it would otherwise leave a
+    # trailing \r glued onto every token, corrupting each forwarded flag
+    # (e.g. -DFOO=1 arrives as -DFOO=1\r). Harmless no-op on POSIX, where
+    # this never appears in the first place.
+    item="${item%$'\r'}"
     [[ -n "$item" ]] && CMD+=("$flag" "$item")
   done <<< "$split"
 }
@@ -196,6 +303,124 @@ MODE="${INPUT_MODE:-compare}"
 # no single-snapshot asset would otherwise fail with "command not found"
 # on exactly the runners this fallback exists to serve (Codex review).
 _PY_BIN="$(command -v python3 || command -v python || true)"
+# `command -v` can return a path relative to the CURRENT working directory
+# when PATH itself contains a relative entry (e.g. a self-hosted runner
+# configured with PATH=tools:$PATH) -- a real, if unusual, configuration.
+# Every inline Python invocation below runs as `(cd "$_PY_SAFE_DIR" && ...
+# "$_PY_BIN" ...)`, so a relative $_PY_BIN would resolve against the new
+# CWD after that `cd`, not the directory it was actually found relative to,
+# making a genuinely working, abicheck-capable interpreter falsely resolve
+# as unusable (Codex review, fresh evidence). Anchored to $PWD here, before
+# any `cd` happens, using the same portable absolute-path check
+# (`_report_query` below) already uses for the identical reason.
+if [[ -n "$_PY_BIN" ]] && ! _is_path_already_qualified "$_PY_BIN"; then
+  _PY_BIN="$PWD/$_PY_BIN"
+fi
+
+# ---------------------------------------------------------------------------
+# Security: `python -c`/`python -m` insert this process's current working
+# directory ('' in sys.path, i.e. wherever this script's caller checked out
+# code for abicheck to analyze -- untrusted on a `pull_request`-triggered
+# workflow, since a PR author controls the checked-out tree) as sys.path[0],
+# and Python's automatic `site` module processing (which runs during
+# interpreter *startup*, before any `-c` script body gets to run a single
+# line of its own) auto-imports a discoverable `sitecustomize.py`/
+# `usercustomize.py` from anywhere on the resulting `sys.path` -- including
+# a `PYTHONPATH` entry resolved relative to that same untrusted checkout.
+# Any inline script below that imports a real `abicheck` submodule would,
+# without mitigation, prefer a same-named module/package the checked-out
+# tree happens to contain (e.g. a malicious PR adding its own
+# `abicheck/_compiler_options.py`, or a top-level `sitecustomize.py`) over
+# the actual, trusted, pip-installed package -- executing attacker-
+# controlled code inside this Action's own process (Codex review, fresh
+# evidence, empirically confirmed for both shapes).
+#
+# Three earlier revisions of this mitigation each tried to *filter*
+# sys.path from *inside* the `-c` script body after the fact (strip the
+# resolved CWD; strip a resolved PYTHONPATH=. entry; strip any descendant
+# path, not just an exact match; pair every call site with `-S` plus a
+# manual `site.main()` re-run to also outrun the sitecustomize auto-import
+# window) -- each fixed a real, independently-confirmed gap the previous
+# one left open, but the cumulative `-S` + manual `site.main()` re-
+# processing broke real `abicheck` importability on a `windows-latest` CI
+# runner for reasons that could not be fully root-caused remotely (exit
+# code 2 from the wrapping bash invocation, no further diagnostic
+# available). Rather than a fourth patch on the same fragile foundation,
+# this revision removes the foundation's own premise: instead of trying to
+# clean up `sys.path` *after* Python has already started resolving it
+# (racing `site`'s own automatic sitecustomize import), every inline script
+# that imports an `abicheck` module now runs from a freshly created, empty
+# temporary directory with `PYTHONPATH` cleared for that one invocation --
+# so the untrusted checkout is never on `sys.path` in the first place, at
+# any point during interpreter startup or after. `-S` and the whole
+# `sys.path`-filtering script are no longer needed: normal, unmodified
+# `site` processing runs, and it can only ever find a *real*
+# `sitecustomize.py` (if any) from actual site-packages, never one placed
+# in the checkout. A script with no `abicheck` import (e.g. the plain
+# `json`/`sys` JSON-parsing snippet elsewhere in this file) has nothing to
+# shadow and does not need this.
+#
+# The real, pip-installed `abicheck` package is never located inside the
+# analyzed repository's own checkout, so neither the temp-directory CWD nor
+# the cleared `PYTHONPATH` can remove it -- even this action's own self-
+# referential dogfooding CI installs it via a plain, non-editable
+# `pip install <path>` (action.yml's "Install abicheck" step), which
+# copies into site-packages, and a `pip install -e .` (editable) install's
+# own import-hook mechanism (a `.pth` file registering a `sys.meta_path`
+# finder, confirmed directly against a real editable install) is likewise
+# unaffected by either change -- neither depends on `sys.path` carrying
+# the checkout, or on `PYTHONPATH` being set, to resolve `abicheck`.
+#
+# Fails the Action outright if a fresh, private directory can't be created
+# (Codex review, fresh evidence) -- falling back to a pre-existing shared
+# directory (e.g. bare `${TMPDIR:-/tmp}`) would silently reintroduce the
+# exact risk this mechanism exists to close: on a constrained or shared
+# self-hosted runner, that directory is neither guaranteed empty nor
+# private, so a same-named `abicheck` package or `sitecustomize.py`
+# planted (or left over) there could shadow the real package again. A
+# `mktemp -d` failure is rare enough, and this variable is needed by every
+# `--gcc-options`-forwarding and baseline-set-archive-extraction code path
+# below, that failing loud here is strictly better than silently degrading
+# the one guarantee this whole mechanism provides.
+if ! _PY_SAFE_DIR="$(mktemp -d)"; then
+  echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helpers without risking a checked-out repository shadowing the installed package."
+  exit 1
+fi
+# Registered immediately, not left to the main EXIT trap much further down
+# this script (Codex review, fresh evidence): an early exit -- argument
+# validation, a no-baseline dry-run success, any error path before this
+# script reaches that later trap -- would otherwise leave $_PY_SAFE_DIR
+# behind uncleaned, accumulating private temporary directories across
+# repeated invocations on a persistent self-hosted runner. A later `trap
+# ... EXIT` (this script's main one) replaces this handler outright rather
+# than chaining it, which is fine here: that later trap already includes
+# `${_PY_SAFE_DIR:-}` in its own cleanup, so nothing is lost when it
+# installs -- this one only needs to cover the gap before it does.
+trap 'rm -rf "$_PY_SAFE_DIR"' EXIT
+
+# On most runners this is exactly the interpreter action.yml's own "Install
+# abicheck" step just `pip install`ed into, since `pip` itself resolves
+# against the same PATH lookup -- but a self-hosted runner can expose
+# `pip`/`abicheck` from one Python environment while `command -v python3`
+# above resolves a *different* one (e.g. a system Python ahead of a pyenv
+# shim on PATH, Codex review, fresh evidence). Checked once, up front,
+# rather than assumed: `add_flag_shlex_split` (below) fails loud instead of
+# silently invoking a `$_PY_BIN` that can't import `abicheck` and dropping
+# or corrupting every requested `--gcc-options` token. Run through the same
+# `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other `abicheck`-
+# importing invocation in this file (Codex review, fresh evidence, second
+# round): this preflight itself imports `abicheck`, so running it from the
+# untrusted checkout with an inherited `PYTHONPATH` before `$_PY_SAFE_DIR`
+# existed would have reopened the exact code-execution path the isolation
+# elsewhere in this file exists to close -- `$_PY_SAFE_DIR` is therefore
+# created (immediately above) before this check ever runs, not after.
+_PY_BIN_HAS_ABICHECK="false"
+if [[ -n "$_PY_BIN" ]] \
+  && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c "import abicheck") >/dev/null 2>&1; then
+  _PY_BIN_HAS_ABICHECK="true"
+elif [[ -n "$_PY_BIN" ]]; then
+  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
+fi
 
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
@@ -334,7 +559,14 @@ _try_baseline_set_fallback() {
   fi
   local existing_url=""
   if [[ -n "$assets_json" ]]; then
-    existing_url=$(printf '%s' "$assets_json" | "$_PY_BIN" -c '
+    # Isolated the same way as every abicheck-importing invocation, even
+    # though this one only uses stdlib `json`/`sys` (Codex review, fresh
+    # evidence): the sitecustomize.py auto-import vector this mechanism
+    # guards against fires during interpreter *startup*, before a single
+    # line of this script body runs -- it doesn't depend on what (if
+    # anything) the body itself imports, so "no abicheck import" was never
+    # a reason to skip the isolation.
+    existing_url=$(printf '%s' "$assets_json" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import json
 import sys
 
@@ -347,7 +579,7 @@ for asset in data.get("assets") or []:
     if asset.get("name") == name:
         print(asset.get("apiUrl") or "")
         break
-' "$asset_name")
+' "$asset_name"))
   fi
 
   # A fixed, platform-safe local filename, NOT "$set_download_dir/$asset_name"
@@ -387,23 +619,23 @@ for asset in data.get("assets") or []:
   # extraction safety here.
   case "$asset_name" in
     *.tar.zst)
-      "$_PY_BIN" -c '
+      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
 
 TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir" \
+' "$archive_path" "$extracted_dir") \
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
       ;;
     *.tar.gz | *.tgz | *.tar)
-      "$_PY_BIN" -c '
+      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
 
 TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir" \
+' "$archive_path" "$extracted_dir") \
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' -- it is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."; return 1; }
       ;;
     *)
@@ -443,7 +675,7 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
   fi
 
   local resolve_output
-  resolve_output=$("$_PY_BIN" -c '
+  resolve_output=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -530,6 +762,23 @@ if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
    && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
   BASELINE_DIR=$(mktemp -d)
+  # Canonicalized to an absolute path immediately (Codex review, fresh
+  # evidence): `mktemp -d` returns a path relative to `$TMPDIR` when that
+  # variable itself holds a relative value (a real, if unusual, self-hosted
+  # runner configuration -- confirmed directly: `TMPDIR=relbase mktemp -d`
+  # really does emit a relative path). Every path derived from
+  # `$BASELINE_DIR` by string concatenation below (`set_download_dir`,
+  # `extracted_dir`, `archive_path`, `manifest_root`) is passed as a
+  # positional argument into a `(cd "$_PY_SAFE_DIR" && ...)`-wrapped Python
+  # invocation elsewhere in this function -- a relative path there resolves
+  # against the *new* CWD instead of the original one, making an otherwise
+  # valid baseline-set archive read as corrupt or missing. Resolving once
+  # here, at the source, fixes every path derived from it without touching
+  # each call site individually.
+  if ! BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd); then
+    echo "::error::failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
+    exit 1
+  fi
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
   BASELINE_FILE=""
@@ -1204,7 +1453,7 @@ STDERR_FILE=$(mktemp)
 #: a non-PR-comment run or `pr-comment-on: never` where the temp file was
 #: still created but never posted. Without this, a persistent self-hosted
 #: runner accumulates one JSON report per scan run indefinitely.
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
@@ -1300,7 +1549,26 @@ _report_query() {
   # be read or parsed, which every caller treats as "cannot tell" rather than
   # as an answer.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
-  "$_PY_BIN" - "$1" "$2" <<'PYQUERY' 2>/dev/null
+  # Isolated the same way as every other Python invocation in this file
+  # (Codex review, fresh evidence): the sitecustomize.py auto-import vector
+  # fires during interpreter *startup*, before this heredoc body ever runs
+  # a single line -- it doesn't depend on what the body imports, only on
+  # where the interpreter starts.
+  #
+  # $1 is NOT reliably absolute -- unlike $_STDOUT_JSON_FILE (mktemp-
+  # rooted), $OUTPUT_FILE (this function's other caller shape, via
+  # $_json_report_src) can be a bare user-supplied INPUT_OUTPUT_FILE value
+  # or a relative default (e.g. "abicheck-baseline.json"), relative to the
+  # workflow's own working directory -- which the `cd "$_PY_SAFE_DIR"`
+  # below would otherwise resolve it against instead (the identical class
+  # of bug this same pass already fixed for $BASELINE_DIR). Anchored to
+  # $PWD *before* that cd, since that's the correct base directory at this
+  # point in the script.
+  local report_path="$1"
+  if ! _is_path_already_qualified "$report_path"; then
+    report_path="$PWD/$report_path"
+  fi
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null
 import json
 import sys
 
@@ -2205,7 +2473,22 @@ _maybe_post_pr_comment() {
   # below), leaving PR_BODY empty and the comment skipped or an existing
   # sticky one deleted. `$_PY_BIN` is the same resolved interpreter every
   # other Python invocation in this script already uses.
-  "$_PY_BIN" -m abicheck.cli_pr_comment "$PR_JSON" \
+  #
+  # `-c '...runpy.run_module(...)...'` rather than the more obvious
+  # `-m abicheck.cli_pr_comment`, so this can run from `$_PY_SAFE_DIR` (see
+  # its own definition above) the same way every other `abicheck`-importing
+  # invocation in this file does -- `-m` inserts the CWD into sys.path[0]
+  # exactly like `-c` does, and this is the one inline-Python invocation in
+  # this file that isn't already `-c`-shaped. Functionally identical to
+  # `-m abicheck.cli_pr_comment` from click's own perspective (it reads
+  # sys.argv[1:], unaffected by this); the only observable difference is
+  # the program name `--help`/usage text shows ("-c" instead of the
+  # resolved module path), which this Action does not depend on.
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import runpy
+
+runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
+' "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
@@ -2213,7 +2496,7 @@ _maybe_post_pr_comment() {
     ${run_url:+--report-url "$run_url"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
-    -o "$PR_BODY" || true
+    -o "$PR_BODY") || true
 
   if [[ ! -s "$PR_BODY" ]]; then
     echo "abicheck: no comment to post (no changes / --on=${INPUT_PR_COMMENT_ON:-changes})."

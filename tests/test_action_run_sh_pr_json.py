@@ -29,6 +29,7 @@ the real file, don't hand-copy it" discipline as
   --secondary-format), the original reuse-if-json-else-rerun logic applies
   unchanged.
 """
+
 from __future__ import annotations
 
 import os
@@ -41,7 +42,12 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 #: The EXIT-trap line that cleans up STDERR_FILE/_STDOUT_JSON_FILE/PR_JSON/
 #: _BASELINE_CLEANUP -- extracted via regex (not hand-copied) so a future
 #: edit to the real trap is exercised here rather than silently drifting.
-_EXIT_TRAP_LINE = re.compile(r"^trap '.*' EXIT$", re.MULTILINE)
+#: Anchored on STDERR_FILE specifically (not just "the first `trap ... EXIT`
+#: line"): a separate, earlier `trap 'rm -rf "$_PY_SAFE_DIR"' EXIT` now
+#: exists too, covering only the checkout-isolation temp directory until
+#: this, the script's main trap, replaces it further down (Codex review,
+#: PR #774) -- a plain "first match" regex would find that one instead.
+_EXIT_TRAP_LINE = re.compile(r"^trap '.*STDERR_FILE.*' EXIT$", re.MULTILINE)
 _JSON_REPORT_SRC_START_MARKER = "_json_report_src() {"
 _JSON_REPORT_SRC_END_MARKER = "\n}\n"
 _FUNCS_START_MARKER = "_can_reuse_primary_json() {"
@@ -58,7 +64,9 @@ def _json_report_src_region() -> str:
     the ``_funcs_region`` below."""
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_JSON_REPORT_SRC_START_MARKER)
-    end = text.index(_JSON_REPORT_SRC_END_MARKER, start) + len(_JSON_REPORT_SRC_END_MARKER)
+    end = text.index(_JSON_REPORT_SRC_END_MARKER, start) + len(
+        _JSON_REPORT_SRC_END_MARKER
+    )
     return text[start:end]
 
 
@@ -69,7 +77,7 @@ def _funcs_region() -> str:
     return (
         _json_report_src_region()
         + "\n"
-        + text[text.index(_FUNCS_START_MARKER):text.index(_FUNCS_END_MARKER)]
+        + text[text.index(_FUNCS_START_MARKER) : text.index(_FUNCS_END_MARKER)]
     )
 
 
@@ -117,7 +125,11 @@ def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
     """
     script = _funcs_region() + "\n" + harness + "\n" + _fragment_region()
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
@@ -125,7 +137,10 @@ def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -152,7 +167,10 @@ FORMAT=markdown
 OUTPUT_FILE="$TEST_OUTPUT_FILE"
 CMD=(abicheck compare old.json new.json --format markdown -o "$TEST_OUTPUT_FILE")
 """
-        _run(harness, {"TEST_PR_JSON": str(pr_json), "TEST_OUTPUT_FILE": str(output_file)})
+        _run(
+            harness,
+            {"TEST_PR_JSON": str(pr_json), "TEST_OUTPUT_FILE": str(output_file)},
+        )
         assert pr_json.read_text(encoding="utf-8") == '{"source": "secondary-format"}'
 
     def test_falls_back_to_reuse_when_pr_json_empty_and_format_json(self, tmp_path):
@@ -170,8 +188,13 @@ FORMAT=json
 OUTPUT_FILE="$TEST_OUTPUT_FILE"
 CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
 """
-        _run(harness, {"TEST_PR_JSON": str(pr_json), "TEST_OUTPUT_FILE": str(output_file)})
-        assert pr_json.read_text(encoding="utf-8") == '{"source": "primary-output-file"}'
+        _run(
+            harness,
+            {"TEST_PR_JSON": str(pr_json), "TEST_OUTPUT_FILE": str(output_file)},
+        )
+        assert (
+            pr_json.read_text(encoding="utf-8") == '{"source": "primary-output-file"}'
+        )
 
     def test_falls_back_to_rerun_when_pr_json_empty_and_not_reusable(self, tmp_path):
         # FORMAT isn't json (or --show-only/--stat is present) and PR_JSON
@@ -192,11 +215,14 @@ FORMAT=markdown
 OUTPUT_FILE=
 CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --show-only added --format markdown)
 """
-        _run(harness, {
-            "TEST_PR_JSON": str(pr_json),
-            "TEST_STUB": str(stub),
-            "TEST_BASH": _bash_executable(),
-        })
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_STUB": str(stub),
+                "TEST_BASH": _bash_executable(),
+            },
+        )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
 
     def test_reuses_stdout_json_when_no_output_file(self, tmp_path):
@@ -217,10 +243,13 @@ OUTPUT_FILE=
 _STDOUT_JSON_FILE="$TEST_STDOUT_JSON"
 CMD=(abicheck scan liblib.so --format json)
 """
-        _run(harness, {
-            "TEST_PR_JSON": str(pr_json),
-            "TEST_STDOUT_JSON": str(stdout_json),
-        })
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_STDOUT_JSON": str(stdout_json),
+            },
+        )
         assert pr_json.read_text(encoding="utf-8") == '{"source": "stdout-json"}'
 
 

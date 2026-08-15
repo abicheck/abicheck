@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -25,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import click
 
 from . import dumper_cache
+from ._compiler_options import split_gcc_options
 from .dumper import dump
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
@@ -102,12 +102,19 @@ def _user_define_flags(
     excluded (it must not be unioned snapshot-wide).
 
     A malformed ``--gcc-options`` (e.g. an unbalanced quote) must not abort the
-    dump — ``shlex.split`` errors are swallowed and only the tokens are used
-    (CodeRabbit review)."""
+    dump — ``split_gcc_options`` errors are swallowed and only the tokens are
+    used (CodeRabbit review). ``split_gcc_options`` (not a bare
+    ``shlex.split``) so this collector tokenizes ``user_gcc_options``
+    identically to the real header-AST parse on every platform — a plain
+    POSIX ``shlex.split`` would silently disagree with the Windows tokenizer
+    on an unquoted Windows path (e.g. combining ``-IC:\\sdk\\ -UKEEP`` into
+    one token instead of two), which could make the harvested define set
+    diverge from what the real parse actually saw (Codex review, PR #774
+    follow-up)."""
     flags: list[str] = []
     if user_gcc_options:
         try:
-            flags += shlex.split(user_gcc_options)
+            flags += split_gcc_options(user_gcc_options)
         except ValueError:
             pass  # bad optional define flags are skipped, not fatal
     flags += list(gcc_option_tokens)

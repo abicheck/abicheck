@@ -933,6 +933,23 @@ def test_user_define_flags_combines_tokens_and_gcc_options():
     assert _user_define_flags(("-DA",), '"oops') == ["-DA"]
 
 
+def test_user_define_flags_uses_the_shared_platform_tokenizer(monkeypatch):
+    """Codex review, PR #774 follow-up: this collector must tokenize
+    ``user_gcc_options`` identically to the real header-AST parse on every
+    platform. A bare ``shlex.split`` (POSIX-only) would silently disagree
+    with the Windows tokenizer on an unquoted Windows path -- e.g. combining
+    ``-IC:\\sdk\\ -UKEEP`` into one corrupted token instead of two -- letting
+    the harvested define set diverge from what the real parse actually saw."""
+    from abicheck import _compiler_options
+    from abicheck.cli_dump_helpers import _user_define_flags
+
+    monkeypatch.setattr(_compiler_options.os, "name", "nt")
+    assert _user_define_flags((), r"-IC:\sdk\ -UKEEP") == [
+        "-IC:\\sdk\\",
+        "-UKEEP",
+    ]
+
+
 def test_user_gcc_options_override_db_define_end_to_end(tmp_path):
     """A user ``--gcc-options=-UKEEP`` reaches the collector and overrides a
     compile-DB ``-DKEEP``, so KEEP is inactive in ``build_context_defines``."""

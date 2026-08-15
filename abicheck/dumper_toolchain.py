@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
 import shutil
 import signal
 import stat as stat_module
@@ -28,7 +27,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ._compiler_options import has_explicit_std
+from ._compiler_options import has_explicit_std, split_gcc_options
 from .buildsource.redaction import DEFAULT_REDACTION
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
@@ -348,10 +347,12 @@ def _combined_option_tokens(
     """``gcc_option_tokens`` followed by a shlex-split ``gcc_options`` string
     (snapshot provenance, schema v15) — the one place both forwarded-option
     spellings are merged into a single ordered token list, shared by every
-    caller below so the Windows ``posix=`` heuristic can't drift between them."""
+    caller below so the split behavior can't drift between them (see
+    :func:`abicheck._compiler_options.split_gcc_options` for its platform
+    dispatch on ``os.name``)."""
     tokens = list(gcc_option_tokens)
     if gcc_options:
-        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+        tokens.extend(split_gcc_options(gcc_options))
     return tokens
 
 

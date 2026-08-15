@@ -633,7 +633,10 @@ def _reject_dangerous_arg(where: str, key: str, value: str) -> None:
 #: every ``compile.*`` field (``standard``/``stdlib``/``target``/
 #: ``abi_macros``/``args``) into ONE string, and the eventual consumer
 #: (``dumper.py``'s ``--gcc-options`` handling) re-splits that whole string
-#: with ``shlex.split(gcc_options, posix=os.name != "nt")`` to recover argv.
+#: with ``abicheck._compiler_options.split_gcc_options`` (plain
+#: ``shlex.split(text, posix=True)`` on POSIX, real quote/backslash-run
+#: parity on Windows — quote removal AND backslash escaping both apply on
+#: either platform) to recover argv.
 #: An atom containing a quote or backslash survives every check above
 #: unchanged (neither is whitespace, and a quote-wrapped dangerous flag like
 #: ``"'-fplugin=./evil.so'"`` does not start with a bare ``-fplugin=``) but

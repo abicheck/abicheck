@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -87,14 +88,32 @@ def _bash_executable() -> str:
     return "bash"
 
 
+def _run_bash_script(
+    script: str, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run ``script`` via a real bash, from a temp file rather than an
+    inline ``-c`` argument -- see ``test_action_run_sh_helpers._run_harness``
+    for the full rationale (Windows argv-reconstruction/console-encoding
+    mangling of a complex inline script)."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True, text=True, env=env, check=True,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 class TestEstimateAliasesDryRun:
     def _run(self, env_extra: dict[str, str]) -> str:
         script = _alias_region() + "\necho \"DRY_RUN=$INPUT_DRY_RUN\"\n"
         env = {**os.environ, **env_extra}
-        out = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=True,
-        )
+        out = _run_bash_script(script, env)
         return out.stdout
 
     def test_estimate_true_forces_dry_run_in_scan_mode(self) -> None:
@@ -132,10 +151,7 @@ class TestAuditAliasSkipsAgainst:
         )
         script = harness + _against_region() + '\nprintf \'%s\\n\' "${CMD[@]}"\n'
         env = {**os.environ, **env_extra}
-        out = subprocess.run(
-            [_bash_executable(), "-c", script],
-            capture_output=True, text=True, env=env, check=True,
-        )
+        out = _run_bash_script(script, env)
         return out.stdout.splitlines()
 
     def test_audit_true_skips_against_even_when_configured(self) -> None:

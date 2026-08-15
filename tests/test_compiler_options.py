@@ -1,12 +1,246 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for forwarded compiler dialect option predicates."""
 
+import pytest
+
+from abicheck import _compiler_options
 from abicheck._compiler_options import (
+    _split_gcc_options_windows,
     explicit_language_standard,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
+    split_gcc_options,
 )
+
+
+class TestSplitGccOptionsDispatch:
+    """``split_gcc_options`` itself is a thin platform dispatch (Codex
+    review, fourth round -- see the function's own docstring for the full
+    four-revision history of why a single grammar can't serve both
+    platforms). These tests pin the dispatch, monkeypatching ``os.name``
+    so both branches are exercised regardless of which OS actually runs
+    the test suite."""
+
+    def test_dispatches_to_windows_tokenizer_when_os_name_is_nt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_compiler_options.os, "name", "nt")
+        assert split_gcc_options(
+            r"-IC:\mypath\include -DFOO=bar"
+        ) == _split_gcc_options_windows(r"-IC:\mypath\include -DFOO=bar")
+        # Confirms the branch actually ran (not silently falling through to
+        # plain shlex, which would corrupt this input -- see
+        # TestSplitGccOptionsPosix.test_unquoted_windows_path_backslashes_are_consumed).
+        assert split_gcc_options(r"-IC:\mypath\include") == [r"-IC:\mypath\include"]
+
+    def test_dispatches_to_plain_shlex_on_posix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_compiler_options.os, "name", "posix")
+        assert split_gcc_options(r"-DVAR=\$HOME") == ["-DVAR=$HOME"]
+
+
+class TestSplitGccOptionsWindows:
+    """Direct coverage of :func:`_split_gcc_options_windows`, the Windows-
+    only tokenizer -- independent of the host OS actually running this
+    suite. Each case below caught a real regression in some earlier
+    revision of ``split_gcc_options`` back when it applied one grammar to
+    every platform (see that function's docstring for the full history):
+    a hand-rolled ``shlex.shlex`` with ``escape=""`` broke both real POSIX
+    escape sequences and comment-character handling; reverting to plain
+    ``shlex.split(text, posix=True)`` fixed those but then corrupted an
+    ordinary unquoted Windows path's backslashes. This tokenizer satisfies
+    every one of these simultaneously."""
+
+    def test_quoted_value_with_embedded_space_stays_one_token(self) -> None:
+        # The original CI failure: shlex.split(..., posix=False) (the old
+        # Windows-only behavior) split this into three malformed tokens
+        # instead of two.
+        assert _split_gcc_options_windows('-DMSG="hello world" -DOK=1') == [
+            "-DMSG=hello world",
+            "-DOK=1",
+        ]
+
+    def test_backslash_before_whitespace_is_not_escaped(self) -> None:
+        # Codex review, fifth round: an earlier revision also escaped
+        # backslash-before-whitespace (to satisfy real POSIX's
+        # -DMSG=hello\ world idiom, even though the separate POSIX branch
+        # already handles real POSIX input on its own) -- this created a
+        # genuine Windows-specific ambiguity with the far more common shape
+        # of a path ending in a trailing directory separator right before
+        # the next flag, corrupting it into one token instead of two (see
+        # test_trailing_directory_separator_before_next_flag_stays_two_tokens).
+        # The backslash and the space are both left untouched here, unlike
+        # plain shlex (which would collapse them into one token).
+        assert _split_gcc_options_windows(r"-DMSG=hello\ world") == [
+            "-DMSG=hello\\",
+            "world",
+        ]
+
+    def test_trailing_directory_separator_before_next_flag_stays_two_tokens(
+        self,
+    ) -> None:
+        # Codex review, fifth round: the exact regression this class exists
+        # to pin -- an unquoted Windows path ending in a trailing directory
+        # separator immediately before the next flag must not be merged
+        # with it into one corrupted token.
+        assert _split_gcc_options_windows(r"-IC:\sdk\ -DOK=1") == [
+            "-IC:\\sdk\\",
+            "-DOK=1",
+        ]
+
+    def test_backslash_escaped_quote_is_honored(self) -> None:
+        assert _split_gcc_options_windows(r"-DVERSION=\"1.2\"") == ['-DVERSION="1.2"']
+
+    def test_hash_character_is_not_treated_as_a_comment(self) -> None:
+        # Codex review (P2): an escape=""-disabled shlex.shlex left the
+        # default #-starts-a-comment behavior active, silently truncating
+        # this token and dropping -DOK=1 entirely.
+        assert _split_gcc_options_windows("-I/build/#generated -DOK=1") == [
+            "-I/build/#generated",
+            "-DOK=1",
+        ]
+
+    def test_malformed_quoting_raises_value_error(self) -> None:
+        with pytest.raises(ValueError):
+            _split_gcc_options_windows('-DMSG="unterminated')
+
+    def test_unquoted_windows_path_backslashes_survive(self) -> None:
+        # Codex review, third round: plain shlex.split(text, posix=True)
+        # treats every unquoted backslash as an escape character, silently
+        # corrupting an ordinary Windows include path with no quotes and no
+        # escape intent at all -- the single most common real shape this
+        # flag carries on Windows.
+        assert _split_gcc_options_windows(r"-IC:\mypath\include -DFOO=bar") == [
+            r"-IC:\mypath\include",
+            "-DFOO=bar",
+        ]
+
+    def test_quoted_windows_path_keeps_interior_backslashes_literal(self) -> None:
+        # A double-quoted value opens real Windows quote-grouping, but a
+        # backslash only carries special meaning immediately before a `"`
+        # (the backslash-run-parity rule real Windows tooling uses, not
+        # POSIX shlex escaping) -- an interior backslash not followed by a
+        # quote, like the two here, stays exactly as written, quoted or not.
+        assert _split_gcc_options_windows(r'-DPATH="C:\a\b"') == [r"-DPATH=C:\a\b"]
+
+    def test_single_quote_is_never_special(self) -> None:
+        # Codex review, sixth round: a bare `'` used to open real POSIX
+        # single-quote grouping here, matching plain shlex -- but unlike
+        # `"` (illegal in every Windows filename), `'` is an ordinary,
+        # legal Windows path/filename character (e.g. a surname like
+        # O'Brien) with no shell-special meaning on this platform at all.
+        # Treating it as a delimiter either silently dropped real quote
+        # characters from a value that needed them (-DCHAR='x') or raised
+        # ValueError on an unterminated "quote" that was really just a
+        # path containing an apostrophe -- see the two regression tests
+        # below. `'` now always falls through to the plain "ordinary
+        # character" branch, both inside and outside double quotes.
+        assert _split_gcc_options_windows(r"-DMSG='a \ b \" c'") == [
+            "-DMSG='a",
+            "\\",
+            "b",
+            '"',
+            "c'",
+        ]
+
+    def test_apostrophe_in_macro_value_is_preserved(self) -> None:
+        # A real, if unusual, C character-constant macro value -- the
+        # quotes are semantically part of the value, not POSIX shell
+        # quoting to be stripped.
+        assert _split_gcc_options_windows("-DCHAR='x'") == ["-DCHAR='x'"]
+
+    def test_quoted_unc_path_prefix_survives(self) -> None:
+        # Codex review, seventh round: the double-quote branch previously
+        # followed real POSIX double-quote escaping unconditionally, which
+        # collapses `\\` -> `\` -- corrupting a quoted UNC path's leading
+        # two-backslash prefix into a single, non-UNC backslash the
+        # compiler can't resolve.
+        assert _split_gcc_options_windows(r'-I"\\server\share path\include"') == [
+            r"-I\\server\share path\include"
+        ]
+
+    def test_quoted_path_ending_in_trailing_separator_closes_properly(self) -> None:
+        # Codex review, eighth round: item #7's separate inside-quotes
+        # backslash handling treated the final backslash before a closing
+        # quote as always escaping it, regardless of how many backslashes
+        # preceded it -- so a quoted path ending in a directory separator
+        # (an even, two-backslash run right before the closing quote)
+        # consumed the quote as literal instead of closing the quoted
+        # region, eventually raising ValueError instead of producing two
+        # tokens. The real Windows backslash-run-parity rule (even count ->
+        # literal backslashes, quote is a real delimiter) resolves it.
+        assert _split_gcc_options_windows('-I"C:\\Program Files\\SDK\\\\" -DOK=1') == [
+            "-IC:\\Program Files\\SDK\\",
+            "-DOK=1",
+        ]
+
+    def test_apostrophe_in_windows_path_does_not_raise(self) -> None:
+        # The original bug report shape: a real Windows path/filename
+        # containing an apostrophe (a common surname) previously opened
+        # unterminated single-quote parsing and raised ValueError,
+        # aborting header extraction outright.
+        assert _split_gcc_options_windows(r"-IC:\Users\O'Brien\include") == [
+            r"-IC:\Users\O'Brien\include"
+        ]
+
+
+class TestSplitGccOptionsPosix:
+    """``split_gcc_options`` on POSIX is plain, unmodified
+    ``shlex.split(text, posix=True)`` -- identical to every
+    ``gcc_options``-consuming call site's historical behavior on
+    Linux/macOS. Codex review, fourth round: a revision that applied the
+    Windows-only tokenizer everywhere silently changed this real, working
+    POSIX behavior (e.g. ``-DVAR=\\$HOME`` keeping its backslash instead of
+    resolving to ``-DVAR=$HOME``) even though POSIX was never the platform
+    with a bug to fix.
+
+    ``os.name`` is monkeypatched to ``"posix"`` for every test here (fresh
+    CI evidence: this whole class runs on ``windows-latest`` too, where
+    real ``os.name`` is ``"nt"`` -- without forcing it, ``split_gcc_options``
+    silently took the *Windows* branch here and every assertion below,
+    which specifically pins the POSIX branch's real shlex semantics, failed
+    against the wrong tokenizer instead of testing what it says it tests),
+    mirroring :class:`TestSplitGccOptionsDispatch`'s own established
+    pattern for exercising one branch regardless of the host OS."""
+
+    @pytest.fixture(autouse=True)
+    def _force_posix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_compiler_options.os, "name", "posix")
+
+    def test_quoted_value_with_embedded_space_stays_one_token(self) -> None:
+        assert split_gcc_options('-DMSG="hello world" -DOK=1') == [
+            "-DMSG=hello world",
+            "-DOK=1",
+        ]
+
+    def test_hash_character_is_not_treated_as_a_comment(self) -> None:
+        # shlex.split's own comments=False default already sets
+        # commenters="" -- verifies split_gcc_options doesn't override that.
+        assert split_gcc_options("-I/build/#generated -DOK=1") == [
+            "-I/build/#generated",
+            "-DOK=1",
+        ]
+
+    def test_every_backslash_escape_is_honored(self) -> None:
+        # Real POSIX shlex semantics: a backslash escapes the character
+        # immediately following it, regardless of what that character is.
+        assert split_gcc_options(r"-DVAR=\$HOME") == ["-DVAR=$HOME"]
+        assert split_gcc_options(r"-DREGEX=a\*b") == ["-DREGEX=a*b"]
+        assert split_gcc_options(r"-Ifoo\#bar") == ["-Ifoo#bar"]
+
+    def test_unquoted_windows_path_backslashes_are_consumed(self) -> None:
+        # Not a bug on POSIX: this is real shlex.split's own behavior,
+        # unchanged from every gcc_options-consuming call site's history on
+        # Linux/macOS (the Windows-specific fix lives in
+        # _split_gcc_options_windows, dispatched to only when os.name ==
+        # "nt" -- see TestSplitGccOptionsDispatch).
+        assert split_gcc_options(r"-IC:\mypath\include") == ["-IC:mypathinclude"]
+
+    def test_malformed_quoting_raises_value_error(self) -> None:
+        with pytest.raises(ValueError):
+            split_gcc_options('-DMSG="unterminated')
 
 
 def test_has_explicit_std_accepts_string_and_tokens() -> None:
