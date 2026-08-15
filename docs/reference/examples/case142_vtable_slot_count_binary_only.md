@@ -49,9 +49,10 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 Verdict: BREAKING (exit 4)
 
 - vtable_slot_count_changed: Vtable for 'Shape' changed size: 48 -> 56
-  bytes (~4 -> ~5 vtable-group entries). A virtual method was added, removed, or
-  reordered; existing binaries dispatch through fixed vtable offsets and
-  will call the wrong slot. Detected from the ELF symbol size without
+  bytes (+1 pointer-sized word). Virtual functions were net added or removed, or
+  the inheritance shape changed — the symbol size cannot distinguish them;
+  existing binaries dispatch through fixed vtable offsets and may call the
+  wrong slot. Detected from the ELF symbol size without
   debug info.
 
 Additions:

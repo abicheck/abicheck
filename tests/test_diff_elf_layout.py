@@ -35,8 +35,8 @@ from abicheck.diff_elf_layout import (
     _class_name,
     _diff_elf_layout,
     _inheritance_shape,
+    _pointer_words_delta,
     _sized_rtti,
-    _vtable_group_entries,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model import AbiSnapshot
@@ -63,13 +63,16 @@ def _kinds(changes: list) -> list[ChangeKind]:
 # Pure helpers
 # ---------------------------------------------------------------------------
 class TestHelpers:
-    def test_vtable_group_entries_lp64(self) -> None:
-        # [offset-to-top, typeinfo, slot0, slot1] = 4 words → 2 slots
-        assert _vtable_group_entries(32, 8) == 2
-        assert _vtable_group_entries(48, 8) == 4
+    def test_pointer_words_delta_is_exact_and_signed(self) -> None:
+        assert _pointer_words_delta(32, 40, 8) == 1
+        assert _pointer_words_delta(48, 40, 8) == -1
+        assert _pointer_words_delta(40, 40, 8) == 0
+        # case174's real sizes: a secondary table joined the group.
+        assert _pointer_words_delta(40, 80, 8) == 5
 
-    def test_vtable_group_entries_floor_at_zero(self) -> None:
-        assert _vtable_group_entries(8, 8) == 0
+    def test_pointer_words_delta_declines_a_ragged_size(self) -> None:
+        """Not a clean multiple → no derived count, rather than a rounded one."""
+        assert _pointer_words_delta(40, 45, 8) is None
 
     def test_inheritance_shape_categories(self) -> None:
         assert "no base" in _inheritance_shape(16, 8)
@@ -83,8 +86,8 @@ class TestHelpers:
 
     def test_slot_and_shape_fall_back_on_bad_pointer_size(self) -> None:
         # A zero/negative pointer width must not divide-by-zero; fall back to 8.
-        assert _vtable_group_entries(48, 0) == 4
-        assert _vtable_group_entries(48, -1) == 4
+        assert _pointer_words_delta(40, 48, 0) == 1
+        assert _pointer_words_delta(40, 48, -1) == 1
         assert "no base" in _inheritance_shape(16, 0)
 
     # The demangler is monkeypatched so these branch tests are deterministic
@@ -155,7 +158,11 @@ class TestVtableSlotCount:
         new = _snap(_obj("_ZTV7Derived", 80))
         (change,) = _diff_elf_layout(old, new)
         assert "virtual slots" not in change.description
-        assert "vtable-group entries" in change.description
+        # +5 pointer-sized words is exact; an absolute entry count is not
+        # derivable, since a group with secondary tables carries one
+        # [offset-to-top, typeinfo] header per table.
+        assert "+5 pointer-sized words" in change.description
+        assert "entries" not in change.description
         # The byte sizes are the fact actually established; keep them exact.
         assert change.old_value == "40" and change.new_value == "80"
 

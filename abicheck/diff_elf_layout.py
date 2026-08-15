@@ -160,19 +160,31 @@ def _sized_rtti(
     return out
 
 
-def _vtable_group_entries(size_bytes: int, pointer_size: int) -> int:
-    """Approximate entry count of the whole vtable *group* (``size/ptr - 2``).
+def _pointer_words_delta(
+    old_size: int, new_size: int, pointer_size: int
+) -> int | None:
+    """Signed change in pointer-sized words, or ``None`` if not a clean multiple.
 
-    Deliberately not called a slot count.  The ``_ZTV`` symbol spans the
-    primary table plus any vcall/vbase offsets and secondary tables, so for
-    multiple or virtual inheritance this figure exceeds the class's virtual
-    count — ``case174_secondary_vtable_group_changed`` reports ~8 entries for
-    a ``Derived`` with nothing like eight virtuals.  Only the *delta* is
-    meaningful at L0; identity needs L1/L2.  Floored at 0.
+    This is the only count L0 can state without inventing structure.  An
+    *absolute* entry count cannot be derived from the symbol size: the earlier
+    ``size/ptr - 2`` form subtracted exactly one table's ``[offset-to-top,
+    typeinfo]`` header, but a group carrying secondary tables has one such
+    header per table (plus any vcall/vbase offsets), so the subtraction is
+    right only for the single-table case and silently wrong elsewhere.  An
+    80-byte LP64 group holds 10 pointer-sized components, not 8, and how many
+    of those are dispatch slots depends on structure the symbol size does not
+    carry.
+
+    The *difference* between two sizes needs none of that: it is exact
+    whenever both sides share a pointer width, which is what makes it safe to
+    report.  Identity — which slot or base moved — still needs L1/L2.
     """
     if pointer_size <= 0:
         pointer_size = 8
-    return max(0, size_bytes // pointer_size - 2)
+    delta = new_size - old_size
+    if delta % pointer_size:
+        return None
+    return delta // pointer_size
 
 
 def _inheritance_shape(size_bytes: int, pointer_size: int) -> str:
@@ -349,14 +361,18 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         sym = "_ZTV" + key
         cls = _class_name(sym)
-        o_entries = _vtable_group_entries(o_size, pointer_size)
-        n_entries = _vtable_group_entries(n_size, pointer_size)
+        words = _pointer_words_delta(o_size, n_size, pointer_size)
+        detail = (
+            f"{words:+d} pointer-sized word{'' if abs(words) == 1 else 's'}"
+            if words is not None
+            else f"{n_size - o_size:+d} bytes"
+        )
         changes.append(
             make_change(
                 ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
                 symbol=sym,
                 name=cls,
-                detail=f"~{o_entries} → ~{n_entries} vtable-group entries",
+                detail=detail,
                 old=str(o_size),
                 new=str(n_size),
                 # Derived from symbol size alone (no DWARF/headers): the slot

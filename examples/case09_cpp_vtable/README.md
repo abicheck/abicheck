@@ -34,7 +34,7 @@ Verdict: BREAKING (exit 4)
   (Widget::draw(), Widget::resize() -> Widget::draw(), Widget::recolor(), Widget::resize())
   > Vtable slot reordering; virtual dispatch calls wrong method.
   Affected symbols: make_widget
-- vtable_slot_count_changed: Vtable for 'Widget' changed size: 32 -> 40 bytes (~2 -> ~3 vtable-group entries)
+- vtable_slot_count_changed: Vtable for 'Widget' changed size: 32 -> 40 bytes (+1 pointer-sized word)
   > Virtual functions were net added or removed, or the inheritance shape
     changed — the symbol size cannot distinguish them; existing binaries
     dispatch through fixed vtable offsets and may call the wrong slot.

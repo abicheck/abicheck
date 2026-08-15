@@ -38,7 +38,7 @@ Verdict: BREAKING (exit 4)
   (~Codec, encode(int), flush(), reset() -> ~Codec, encode(int), reset())
   > Vtable slot reordering; virtual dispatch calls wrong method.
 - vtable_slot_count_changed: Vtable for 'Codec' changed size: 56 -> 48 bytes
-  (~5 -> ~4 vtable-group entries)
+  (-1 pointer-sized word)
 - func_virtual_removed: Function is no longer virtual: flush
   > Vtable entry removed; old binaries that dispatch through the vtable
     call the wrong slot.
