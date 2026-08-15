@@ -30,7 +30,7 @@ jobs:
       PVXS_LOG: 'pvxs.*=WARN'
 
     steps:
-      - name: Checkout abicheck under test
+      - name: Checkout abicheck Action under test
         uses: actions/checkout@v6
 
       - name: Checkout PVXS
@@ -41,19 +41,11 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - name: Install PVXS and legacy ABI dependencies
+      - name: Install PVXS build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get -y install build-essential cmake libreadline-dev libevent-dev \
-            abi-dumper vtable-dumper abi-compliance-checker universal-ctags jq time
-          abi-dumper --version || true
-          abi-compliance-checker --version || true
+          sudo apt-get -y install build-essential cmake libreadline-dev libevent-dev jq time
           gcc --version | head -1
-
-      - name: Install current abicheck
-        run: |
-          python -m pip install .
-          abicheck --version
 
       - name: Prepare pinned EPICS Base
         working-directory: pvxs
@@ -94,16 +86,27 @@ jobs:
             echo "old_headers=$WORK/old/include"; echo "new_headers=$WORK/new/include"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Binary self-compare invariant
-        env:
-          LIB: ${{ steps.build.outputs.new_pvxs }}
-        run: |
-          /usr/bin/time -v -o self-binary.time abicheck compare "$LIB" "$LIB" --format json -o self-binary.json
-          jq '{verdict, change_count: (.changes | length?)}' self-binary.json
-          test "$(jq -r '.verdict' self-binary.json)" = COMPATIBLE
+      - name: Action self-compare invariant
+        id: self
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: compare
+          old-library: ${{ steps.build.outputs.new_pvxs }}
+          new-library: ${{ steps.build.outputs.new_pvxs }}
+          old-header: ${{ steps.build.outputs.new_headers }}
+          new-header: ${{ steps.build.outputs.new_headers }}
+          dependency-source: conda-forge
+          format: json
+          output-file: self-libpvxs.json
+          pr-comment: false
+          github-token: ''
+          fail-on-breaking: false
+          fail-on-api-break: false
+          add-job-summary: true
 
-      - name: Full Action compare libpvxs with supported toolchain
-        id: action_pvxs
+      - name: Action compare libpvxs
+        id: pvxs
         continue-on-error: true
         uses: ./
         with:
@@ -121,9 +124,10 @@ jobs:
           github-token: ''
           fail-on-breaking: false
           fail-on-api-break: false
+          add-job-summary: true
 
-      - name: Full Action compare libpvxsIoc with supported toolchain
-        id: action_ioc
+      - name: Action compare libpvxsIoc
+        id: ioc
         continue-on-error: true
         uses: ./
         with:
@@ -141,42 +145,25 @@ jobs:
           github-token: ''
           fail-on-breaking: false
           fail-on-api-break: false
+          add-job-summary: true
 
-      - name: Header-aware self-compare through current CLI
-        env:
-          LIB: ${{ steps.build.outputs.new_pvxs }}
-          HDR: ${{ steps.build.outputs.new_headers }}
+      - name: Validate Action-only results
         run: |
-          set +e
-          /usr/bin/time -v -o self-header.time abicheck compare "$LIB" "$LIB" \
-            --header "old=$HDR" --header "new=$HDR" --format json -o self-header.json
-          rc=$?
-          set -e
-          echo "rc=$rc"
-          test -s self-header.json && jq '{verdict, change_count: (.changes | length?)}' self-header.json || true
-          test "$rc" -eq 0
-
-      - name: Existing PVXS ABI checker side-by-side
-        working-directory: pvxs
-        run: |
-          set +e
-          ./abi-diff.sh '${{ matrix.old }}' '${{ matrix.new }}' > "$RUNNER_TEMP/abicc.log" 2>&1
-          rc=$?
-          set -e
-          echo "legacy rc=$rc"
-          tail -100 "$RUNNER_TEMP/abicc.log"
-          cp "$RUNNER_TEMP/abicc.log" ../abicc.log
-
-      - name: Validate Action transport
-        run: |
-          echo "libpvxs: outcome=${{ steps.action_pvxs.outcome }} verdict=${{ steps.action_pvxs.outputs.verdict }} exit=${{ steps.action_pvxs.outputs.exit-code }}"
-          echo "ioc: outcome=${{ steps.action_ioc.outcome }} verdict=${{ steps.action_ioc.outputs.verdict }} exit=${{ steps.action_ioc.outputs.exit-code }}"
+          echo "self: outcome=${{ steps.self.outcome }} verdict=${{ steps.self.outputs.verdict }} exit=${{ steps.self.outputs.exit-code }}"
+          echo "pvxs: outcome=${{ steps.pvxs.outcome }} verdict=${{ steps.pvxs.outputs.verdict }} exit=${{ steps.pvxs.outputs.exit-code }}"
+          echo "ioc:  outcome=${{ steps.ioc.outcome }} verdict=${{ steps.ioc.outputs.verdict }} exit=${{ steps.ioc.outputs.exit-code }}"
+          test -s self-libpvxs.json
           test -s libpvxs.json
           test -s libpvxsIoc.json
+          jq '{verdict, change_count: (.changes | length?)}' self-libpvxs.json
           jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' libpvxs.json
           jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' libpvxsIoc.json
+          test "$(jq '.changes | length' self-libpvxs.json)" -eq 0
+          test '${{ steps.self.outputs.exit-code }}' = '0'
+          case '${{ steps.pvxs.outputs.exit-code }}' in 0|1|2|4) ;; *) exit 1 ;; esac
+          case '${{ steps.ioc.outputs.exit-code }}' in 0|1|2|4) ;; *) exit 1 ;; esac
 
-      - name: Upload acceptance artifacts
+      - name: Upload Action reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -184,12 +171,8 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
           path: |
-            self-binary.json
-            self-header.json
+            self-libpvxs.json
             libpvxs.json
             libpvxsIoc.json
-            self-binary.time
-            self-header.time
-            abicc.log
             ${{ steps.build.outputs.work }}/build-old.time
             ${{ steps.build.outputs.work }}/build-new.time
