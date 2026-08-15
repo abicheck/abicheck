@@ -197,6 +197,25 @@ def _merge_l3_compile_context(
     default). A caller's own explicit ``--gcc-path`` was always going to be
     the correct choice regardless of what the matched compile unit used, so
     this can only ever fill in a gap, never override an explicit choice.
+
+    **``gcc_path``/``gcc_prefix`` are one logical compiler-selector, not two
+    independent fields (P2 review, ``discussion_r3788073754``, fresh
+    evidence).** ``dumper_clang._resolve_clang_bin`` always checks
+    ``gcc_path`` before ``gcc_prefix`` (a resolvable ``gcc_path`` wins
+    outright; ``gcc_prefix`` is only ever consulted when ``gcc_path`` is
+    absent or not clang-family) — so treating the two fields as
+    independently "derived fills an unset explicit field" broke a caller who
+    explicitly set *only* ``gcc_prefix`` (meaning "use this prefix, no
+    literal-path override"): a *different* ``derived.gcc_path`` from the
+    matched compile unit would still get merged in for the unset
+    ``explicit.gcc_path`` slot, and since ``_resolve_clang_bin`` checks
+    ``gcc_path`` first, the caller's actual intent (the explicit prefix) was
+    silently overridden by the derived path instead of winning. Fixed by
+    resolving both fields together as a single unit: if the caller
+    explicitly set *either* one, neither is inherited from ``derived`` (even
+    when the caller's own other field is unset) — only when the caller set
+    *neither* is ``derived``'s own ``(gcc_path, gcc_prefix)`` pair adopted,
+    together, from the same source.
     """
     if derived is None:
         return explicit
@@ -217,6 +236,15 @@ def _merge_l3_compile_context(
             # verbatim as one token so it is at least still present, rather
             # than silently dropped.
             explicit_tail.append(explicit.gcc_options)
+    explicit_selector_set = (
+        explicit.gcc_path is not None or explicit.gcc_prefix is not None
+    )
+    if explicit_selector_set:
+        gcc_path = explicit.gcc_path
+        gcc_prefix = explicit.gcc_prefix
+    else:
+        gcc_path = derived.gcc_path
+        gcc_prefix = derived.gcc_prefix
     return dataclasses.replace(
         explicit,
         sysroot=None,
@@ -226,14 +254,8 @@ def _merge_l3_compile_context(
             *explicit_tail,
             *explicit.gcc_option_tokens,
         ),
-        gcc_path=explicit.gcc_path
-        if explicit.gcc_path is not None
-        else derived.gcc_path,
-        gcc_prefix=(
-            explicit.gcc_prefix
-            if explicit.gcc_prefix is not None
-            else derived.gcc_prefix
-        ),
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
     )
 
 

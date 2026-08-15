@@ -233,6 +233,27 @@ _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
 #: context._split_operand_survivor` (the one consumer that replays this into
 #: a real command) splits the encoding back into the two literal argv tokens
 #: a real compiler invocation needs.
+#:
+#: **Every one of these four is a cc1-only flag, and a normal Clang** *driver*
+#: **invocation never passes one bare -- each is individually wrapped in its
+#: own ``-Xclang``, not just written after a single leading ``-Xclang``**
+#: (P2 review, ``discussion_r3788073752``, fresh evidence): confirmed with the
+#: installed CLI that ``clang -cc1 --help`` documents ``-target-abi <value>``,
+#: while ``clang -target-abi aapcs`` is rejected outright ("unknown argument
+#: '-target-abi'; did you mean '-Xclang -target-abi'"), and the real,
+#: supported spelling is ``-Xclang -target-abi -Xclang aapcs`` -- each token
+#: individually prefixed. :func:`extract_abi_relevant_flags` recognizes this
+#: ``-Xclang <flag> -Xclang <value>`` wrapping explicitly (checked *before*
+#: the bare two-token branch below, since a bare-form match would otherwise
+#: consume the second ``-Xclang`` token itself as the operand and silently
+#: drop the real value one token later) and normalizes it into a second,
+#: distinct internal encoding, ``-Xclang <flag>=<value>`` (a literal space
+#: after ``-Xclang``, never colliding with a real flag spelling since nothing
+#: in this codebase ever emits a bare ``-Xclang`` token from this function on
+#: its own) -- so :func:`~abicheck.buildsource.header_compile_context.
+#: _split_operand_survivor` can tell which of the two real argv shapes
+#: (``["-target-abi", "<value>"]`` vs. ``["-Xclang", "-target-abi", "-Xclang",
+#: "<value>"]``) to reconstruct at replay time.
 _SPLIT_OPERAND_ABI_FLAGS = frozenset(
     {
         "-target-abi",
@@ -473,16 +494,28 @@ _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
 )
 
 
-def _is_msvc_command(argv: list[str]) -> bool:
-    """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
+def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
+    """Shared scan behind :func:`_is_msvc_command` and :func:`msvc_driver_token`.
 
-    Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
-    ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
-    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's
-    explicit ``--driver-mode=cl`` spelling.
+    Returns ``(is_msvc, driver_token)``: *is_msvc* is the same True/False
+    :func:`_is_msvc_command` has always returned; *driver_token* is the
+    literal argv token whose basename matched :data:`_MSVC_DRIVERS`
+    (``cl``/``cl.exe``/``clang-cl``/``clang-cl.exe``, possibly a full path),
+    or ``None`` when MSVC dialect was detected some other way (a bare ``/c``
+    marker with no such token anywhere in argv, or an explicit
+    ``--driver-mode=cl`` naming no ``cl``/``clang-cl``-basename token) --
+    both of which leave the caller with no more specific token to prefer
+    over ``argv[0]``.
+
+    Split out (P2 review, ``discussion_r3788073756``, fresh evidence) so a
+    caller needing the actual driver *token* -- not merely whether the
+    command is MSVC-dialect -- doesn't have to assume ``argv[0]`` is it: a
+    compiler-cache/launcher wrapper (``sccache``, ``ccache``, ``distcc``, ...)
+    commonly precedes the real driver, e.g. ``sccache clang-cl /std:c++20
+    ...``, where ``argv[0]`` is the launcher, not the compiler.
     """
-    if "/c" in argv:
-        return True
+    is_msvc = "/c" in argv
+    driver_token: str | None = None
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -493,16 +526,47 @@ def _is_msvc_command(argv: list[str]) -> bool:
             continue
         if arg == "--driver-mode" and i + 1 < len(argv):
             if argv[i + 1].lower() == "cl":
-                return True
+                is_msvc = True
             i += 2
             continue
         if arg.lower() == "--driver-mode=cl":
-            return True
+            is_msvc = True
+            i += 1
+            continue
         base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
         if base in _MSVC_DRIVERS:
-            return True
+            is_msvc = True
+            if driver_token is None:
+                driver_token = arg
         i += 1
-    return False
+    return is_msvc, driver_token
+
+
+def _is_msvc_command(argv: list[str]) -> bool:
+    """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
+
+    Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
+    ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
+    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's
+    explicit ``--driver-mode=cl`` spelling.
+    """
+    return _msvc_driver_scan(argv)[0]
+
+
+def msvc_driver_token(argv: list[str]) -> str | None:
+    """The literal argv token identified as the MSVC/clang-cl driver, if any.
+
+    ``None`` when *argv* is not MSVC-dialect at all, or when it is (a bare
+    ``/c``/``--driver-mode=cl`` with no ``cl``/``clang-cl``-basename token
+    present) but no single token can be pointed to as "the driver" more
+    specifically than ``argv[0]`` -- see :func:`_msvc_driver_scan`'s own
+    docstring. A caller wanting "the compiler to invoke, if this is an
+    MSVC-dialect command, falling back to ``argv[0]`` when nothing more
+    specific was found" should check :func:`_is_msvc_command` separately,
+    the same pattern :func:`~abicheck.buildsource.header_compile_context.
+    _derived_gcc_path` uses.
+    """
+    return _msvc_driver_scan(argv)[1]
 
 
 def _is_source_token(arg: str, msvc: bool) -> bool:
@@ -571,6 +635,16 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     ``-target-linker-version``) is normalized the same way, into one
     internal ``<flag>=<value>`` token -- see that set's own docstring for
     why this differs from the ``-D`` combined-form concatenation just below.
+
+    Each of those four is also individually recognized in its real-world
+    ``-Xclang <flag> -Xclang <value>``-wrapped spelling (P2 review,
+    ``discussion_r3788073752`` -- see :data:`_SPLIT_OPERAND_ABI_FLAGS`'s own
+    docstring for why a normal Clang driver invocation always wraps a
+    cc1-only flag like this rather than passing it bare), normalized into a
+    distinct ``-Xclang <flag>=<value>`` internal token so the two real argv
+    shapes stay distinguishable for replay. Checked before the bare
+    two-token branch, which would otherwise consume the second ``-Xclang``
+    token as the operand and silently drop the real value one token later.
     """
     out: list[str] = []
     i = 0
@@ -580,6 +654,24 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
             # LTO backend-tuning flag (not enabling): not ABI-relevant, though it
             # shares the -flto prefix. Skip so it never reaches option derivation.
             pass
+        elif (
+            arg == "-Xclang"
+            and i + 3 < len(argv)
+            and argv[i + 1] in _SPLIT_OPERAND_ABI_FLAGS
+            and argv[i + 2] == "-Xclang"
+        ):
+            # -Xclang-wrapped split two-token cc1 flag pair (`-Xclang
+            # -target-abi -Xclang aapcs`): this branch matches on the
+            # leading `-Xclang` token, one position before the flag itself,
+            # so the bare `arg in _SPLIT_OPERAND_ABI_FLAGS` branch below
+            # never gets a chance to misfire on `-target-abi` here -- without
+            # this branch, the bare one would fire on the *next* iteration
+            # and treat the second `-Xclang` as the operand, dropping the
+            # real value one token later (the bug this branch exists to
+            # fix).
+            out.append(f"-Xclang {argv[i + 1]}={argv[i + 3]}")
+            i += 4
+            continue
         elif arg in _SPLIT_OPERAND_ABI_FLAGS and i + 1 < len(argv):
             # Split two-token form (`-target-abi <value>`): must be checked
             # *before* the generic ABI_RELEVANT_FLAG_PREFIXES prefix match

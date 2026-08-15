@@ -81,7 +81,11 @@ from .._compiler_options import explicit_language_standard
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import iter_directory_headers
-from .adapters.base import _SPLIT_OPERAND_ABI_FLAGS, _is_msvc_command
+from .adapters.base import (
+    _SPLIT_OPERAND_ABI_FLAGS,
+    _is_msvc_command,
+    msvc_driver_token,
+)
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
 if TYPE_CHECKING:
@@ -862,6 +866,14 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
     return flags
 
 
+#: The literal marker :func:`extract_abi_relevant_flags` prepends to a
+#: ``-Xclang``-wrapped split-operand flag's internal encoding (see that
+#: function's and ``_SPLIT_OPERAND_ABI_FLAGS``'s own docstrings) -- a
+#: trailing space, never colliding with a real flag spelling since nothing
+#: in this codebase emits a bare ``-Xclang`` token from that function.
+_XCLANG_WRAPPED_MARKER = "-Xclang "
+
+
 def _split_operand_survivor(flag: str) -> list[str]:
     """Expand one ``cu.abi_relevant_flags`` survivor into its literal argv token(s).
 
@@ -875,7 +887,26 @@ def _split_operand_survivor(flag: str) -> list[str]:
     (``["-target-abi", "<value>"]``) a real compiler invocation needs (P2
     review, ``discussion_r3787772666``) -- every other flag is returned
     unchanged as a single-element list.
+
+    A cc1-only split-operand flag is, in real usage, always individually
+    wrapped in ``-Xclang`` on both sides (``-Xclang -target-abi -Xclang
+    aapcs``, never the bare two-token form -- P2 review,
+    ``discussion_r3788073752``, confirmed against a real ``clang -cc1
+    --help``/driver error). ``extract_abi_relevant_flags`` normalizes that
+    wrapped shape into a second, distinct internal encoding (a leading
+    ``-Xclang `` marker, see :data:`_XCLANG_WRAPPED_MARKER`), which this
+    function reconstructs into the full four-token ``["-Xclang", "<flag>",
+    "-Xclang", "<value>"]`` form -- a bare, unwrapped ``-target-abi
+    aapcs`` is not valid on a normal ``clang`` driver invocation (rejected
+    with "unknown argument"), so replaying the wrapped survivor without its
+    ``-Xclang`` forwarding would produce an invalid command.
     """
+    if flag.startswith(_XCLANG_WRAPPED_MARKER):
+        remainder = flag[len(_XCLANG_WRAPPED_MARKER) :]
+        name, sep, value = remainder.partition("=")
+        if sep and name in _SPLIT_OPERAND_ABI_FLAGS:
+            return ["-Xclang", name, "-Xclang", value]
+        return [flag]
     name, sep, value = flag.partition("=")
     if sep and name in _SPLIT_OPERAND_ABI_FLAGS:
         return [name, value]
@@ -1044,11 +1075,28 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     otherwise-working header parse into a hard failure for evidence that
     was, until this point, resolved and applied correctly.
 
-    Returns ``cu.argv[0]`` -- the exact compiler this compile unit was
-    itself invoked with -- only when *cu* is genuinely MSVC/clang-cl-dialect
+    Returns the driver token this compile unit was itself invoked with --
+    only when *cu* is genuinely MSVC/clang-cl-dialect
     (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`). ``None``
     otherwise -- a complete no-op for every non-MSVC unit, unchanged from
     this module's pre-Finding-3 behavior.
+
+    **Not unconditionally ``cu.argv[0]`` (P2 review,
+    ``discussion_r3788073756``, fresh evidence): a compiler-cache/launcher
+    wrapper commonly precedes the real driver.** For ``sccache clang-cl
+    /std:c++20 ...``, ``_is_msvc_command`` correctly recognizes ``clang-cl``
+    later in the leading tokens, but ``argv[0]`` is ``sccache`` -- not a
+    clang-family binary, so ``dumper_clang._resolve_clang_bin`` rejects it
+    and falls back to plain ``clang++``, which cannot parse the retained
+    ``/std:`` survivor at all (the exact failure this whole function exists
+    to prevent). Uses :func:`~abicheck.buildsource.adapters.base.
+    msvc_driver_token` -- the same scan ``_is_msvc_command`` runs, refactored
+    to also report which token it matched -- to locate the actual
+    ``cl``/``clang-cl``-basename token wherever it sits in argv, falling back
+    to ``cu.argv[0]`` (the pre-fix behavior) only for the narrower case where
+    MSVC-dialect was detected some other way (a bare ``/c`` marker or an
+    explicit ``--driver-mode=cl`` naming no such token) and no more specific
+    token exists to prefer.
 
     Deliberately unconditional on any caller-supplied ``explicit`` context
     -- mirrors ``_context_flags`` itself, which always renders *cu*'s own
@@ -1099,7 +1147,8 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     """
     if not cu.argv or not _is_msvc_command(cu.argv):
         return None
-    return cu.argv[0]
+    driver = msvc_driver_token(cu.argv)
+    return driver if driver is not None else cu.argv[0]
 
 
 def _ambiguity_message(

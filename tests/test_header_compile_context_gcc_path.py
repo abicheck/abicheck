@@ -89,6 +89,29 @@ def test_resolve_derives_gcc_path_for_clang_cl_unit(tmp_path: Path) -> None:
     assert result.context.gcc_path == "clang-cl"
 
 
+def test_resolve_derives_gcc_path_behind_launcher_wrapper(tmp_path: Path) -> None:
+    """P2 review finding (``discussion_r3788073756``): a compiler-cache/
+    launcher wrapper (``sccache``, ``ccache``, ``distcc``, ...) commonly
+    precedes the real driver in argv. Before the fix, ``_derived_gcc_path``
+    blindly returned ``cu.argv[0]`` (the launcher, ``sccache``) -- not a
+    clang-family binary, so ``_resolve_clang_bin`` rejected it and fell back
+    to plain ``clang++``, which cannot consume the retained ``/std:`` flags."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["sccache", "clang-cl", "/std:c++20", "/c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "clang-cl"
+
+
 def test_resolve_does_not_derive_gcc_path_for_non_msvc_unit(tmp_path: Path) -> None:
     """A no-op for the common, non-MSVC case: a plain gcc/clang compile unit
     must not have any gcc_path fabricated for it."""
@@ -131,6 +154,64 @@ def test_merge_l3_compile_context_explicit_gcc_path_wins_over_derived() -> None:
     merged = _merge_l3_compile_context(explicit, derived)
     assert merged is not None
     assert merged.gcc_path == "/opt/custom/clang-cl"
+
+
+def test_merge_l3_compile_context_explicit_prefix_only_not_overridden_by_derived_path() -> (
+    None
+):
+    """P2 review finding (``discussion_r3788073754``): ``gcc_path``/
+    ``gcc_prefix`` are one logical compiler selector, not two independent
+    fields -- ``_resolve_clang_bin`` always checks ``gcc_path`` first. A
+    caller who explicitly set ONLY ``gcc_prefix`` (meaning "use this prefix,
+    no path override") must not have a *different* derived ``gcc_path``
+    merged in for the unset explicit slot, since that derived path would then
+    silently win over the caller's actual intent."""
+    from abicheck.service_input_resolution import _merge_l3_compile_context
+
+    derived = CompileContext(gcc_option_tokens=("/std:c++20",), gcc_path="clang-cl")
+    explicit = CompileContext(gcc_prefix="/opt/llvm/bin/")
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    assert merged.gcc_prefix == "/opt/llvm/bin/"
+    assert merged.gcc_path is None
+
+
+def test_merge_l3_compile_context_explicit_path_only_not_paired_with_derived_prefix() -> (
+    None
+):
+    """Companion, opposite direction: an explicit ``gcc_path`` alone must not
+    pick up a derived ``gcc_prefix`` either -- the pair is adopted from
+    ``derived`` together, or not at all."""
+    from abicheck.service_input_resolution import _merge_l3_compile_context
+
+    derived = CompileContext(
+        gcc_option_tokens=("/std:c++20",), gcc_prefix="/opt/derived/bin/"
+    )
+    explicit = CompileContext(gcc_path="/opt/custom/clang-cl")
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    assert merged.gcc_path == "/opt/custom/clang-cl"
+    assert merged.gcc_prefix is None
+
+
+def test_merge_l3_compile_context_neither_explicit_adopts_derived_pair_together() -> (
+    None
+):
+    """Companion positive case: when the caller set neither field, the
+    derived ``(gcc_path, gcc_prefix)`` pair is adopted together, from the
+    same source -- unchanged from the pre-fix behavior for this case."""
+    from abicheck.service_input_resolution import _merge_l3_compile_context
+
+    derived = CompileContext(
+        gcc_option_tokens=("/std:c++20",),
+        gcc_path="clang-cl",
+        gcc_prefix="/opt/derived/bin/",
+    )
+    explicit = CompileContext(gcc_option_tokens=("-DFOO=1",))
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    assert merged.gcc_path == "clang-cl"
+    assert merged.gcc_prefix == "/opt/derived/bin/"
 
 
 def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(

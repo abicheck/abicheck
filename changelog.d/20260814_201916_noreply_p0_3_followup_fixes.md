@@ -203,3 +203,52 @@
   explicit wins" precedence already used for `sysroot`/`gcc_options` —
   extended to two new fields, `gcc_path`/`gcc_prefix` — so a caller's own
   explicit `--gcc-path` is never overridden.
+- **A twelfth review round found three more gaps in the same
+  `-Xclang`/compiler-selector/launcher-wrapper areas, all in this PR's own
+  latest commit.** (1) `adapters.base.extract_abi_relevant_flags()`'s
+  split-operand normalization (`-target-abi aapcs` → one internal
+  `-target-abi=aapcs` token) handled only the *bare* two-token spelling —
+  but a real Clang driver invocation never passes a cc1-only flag like
+  `-target-abi` bare at all; each token is individually wrapped in its own
+  `-Xclang` (`-Xclang -target-abi -Xclang aapcs`), confirmed against a real
+  `clang -cc1 --help` (documents `-target-abi <value>`) versus the plain
+  driver rejecting the bare form outright ("unknown argument '-target-abi';
+  did you mean '-Xclang -target-abi'"). The bare-form branch, reached one
+  token early on `-target-abi`, silently consumed the *second* `-Xclang` as
+  the value, producing the corrupted `-target-abi=-Xclang` and dropping the
+  real value (`aapcs`) one token later. Fixed by recognizing the
+  `-Xclang <flag> -Xclang <value>` wrapped shape explicitly (checked before
+  the bare branch, for all four flags in `_SPLIT_OPERAND_ABI_FLAGS`, since
+  each is equally cc1-only) and normalizing it into a distinct internal
+  `-Xclang <flag>=<value>` encoding;
+  `header_compile_context._split_operand_survivor()` reconstructs it back
+  into the full, real four-token `["-Xclang", "<flag>", "-Xclang",
+  "<value>"]` form at replay time, never the bare unwrapped form a normal
+  `clang` driver invocation rejects. (2) `service_input_resolution.
+  _merge_l3_compile_context()` treated `gcc_path`/`gcc_prefix` as two
+  independent "derived fills an unset explicit field" slots, but
+  `dumper_clang._resolve_clang_bin()` always checks `gcc_path` before
+  `gcc_prefix` — so a caller who explicitly set *only* `gcc_prefix`
+  ("use this prefix, no path override") could still have a *different*
+  derived `gcc_path` merged into the unset slot and silently win over the
+  caller's actual intent, since `gcc_path` is checked first. Fixed by
+  resolving the two fields together as one logical compiler-selector: if
+  the caller explicitly set *either* one, neither is inherited from
+  `derived`; only when the caller set *neither* is `derived`'s own
+  `(gcc_path, gcc_prefix)` pair adopted together. (3)
+  `header_compile_context._derived_gcc_path()` returned `cu.argv[0]`
+  unconditionally for an MSVC-dialect compile unit, assuming the compiler
+  is always the first token — but a compiler-cache/launcher wrapper
+  (`sccache`, `ccache`, `distcc`, ...) commonly precedes the real driver
+  (`sccache clang-cl /std:c++20 ...`), and `argv[0]` in that case is the
+  launcher, not a clang-family binary, so `_resolve_clang_bin()` rejected it
+  and silently fell back to plain `clang++`, which cannot parse the
+  retained `/std:` survivor at all. `adapters.base._is_msvc_command()` was
+  refactored (additively — a new `_msvc_driver_scan()` shared internal, a
+  new public `msvc_driver_token()`, `_is_msvc_command()`'s own signature and
+  behavior unchanged) to also report which literal argv token it matched as
+  the driver, and `_derived_gcc_path()` now uses that token — falling back
+  to `cu.argv[0]` (the pre-fix behavior) only for the narrower case where
+  MSVC dialect was detected some other way (a bare `/c` marker or an
+  explicit `--driver-mode=cl` naming no `cl`/`clang-cl`-basename token) and
+  no more specific token exists to prefer.

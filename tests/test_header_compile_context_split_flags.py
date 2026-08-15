@@ -30,6 +30,7 @@ import pytest
 from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_compile_context import (
+    _split_operand_survivor,
     resolve_header_compile_context,
 )
 from abicheck.errors import HeaderCompileContextAmbiguousError
@@ -109,6 +110,110 @@ def test_extract_abi_relevant_flags_does_not_combine_bare_target_operand() -> No
     exactly the pre-existing (still correct) behavior."""
     out = extract_abi_relevant_flags(["clang", "-target", "aarch64-linux-gnu", "-c"])
     assert out == ["-target"]
+
+
+def test_extract_abi_relevant_flags_preserves_xclang_wrapped_target_abi() -> None:
+    """P2 review finding (``discussion_r3788073752``): a real Clang driver
+    invocation never passes a cc1-only split-operand flag bare -- each token
+    is individually wrapped, ``-Xclang -target-abi -Xclang aapcs``. Before
+    the fix, the bare two-token branch fired on ``-target-abi`` and consumed
+    the *second* ``-Xclang`` as if it were the value, producing the corrupted
+    ``-target-abi=-Xclang`` and silently dropping the real value (``aapcs``)
+    one token later."""
+    out = extract_abi_relevant_flags(
+        ["clang", "-Xclang", "-target-abi", "-Xclang", "aapcs", "-c", "t.c"]
+    )
+    assert out == ["-Xclang -target-abi=aapcs"]
+    assert "-target-abi=-Xclang" not in out
+
+
+def test_extract_abi_relevant_flags_xclang_wrapping_covers_sibling_flags() -> None:
+    """The same ``-Xclang``-wrapped shape for the sibling split-operand cc1
+    flags named in the finding's own follow-up question."""
+    out = extract_abi_relevant_flags(
+        [
+            "clang",
+            "-Xclang",
+            "-target-cpu",
+            "-Xclang",
+            "cortex-a72",
+            "-Xclang",
+            "-target-feature",
+            "-Xclang",
+            "+neon",
+            "-c",
+            "t.c",
+        ]
+    )
+    assert out == [
+        "-Xclang -target-cpu=cortex-a72",
+        "-Xclang -target-feature=+neon",
+    ]
+
+
+def test_extract_abi_relevant_flags_xclang_wrapped_operand_missing_falls_back() -> None:
+    """A dangling ``-Xclang -target-abi`` with no second ``-Xclang``/value
+    wrapping following it (end of argv) must not consume tokens
+    speculatively -- degrades to the bare-token capture on the next
+    iteration instead, the same fallback the pre-existing bare two-token
+    form already uses when its own operand is missing."""
+    out = extract_abi_relevant_flags(["clang", "-c", "t.c", "-Xclang", "-target-abi"])
+    assert out == ["-target-abi"]
+
+
+def test_split_operand_survivor_reconstructs_xclang_wrapped_pair() -> None:
+    """``_split_operand_survivor`` reconstructs the internal ``-Xclang
+    -target-abi=aapcs`` encoding back into the full, real four-token argv
+    form a compiler invocation actually needs -- never the bare unwrapped
+    form, which a normal ``clang`` driver invocation rejects outright."""
+    assert _split_operand_survivor("-Xclang -target-abi=aapcs") == [
+        "-Xclang",
+        "-target-abi",
+        "-Xclang",
+        "aapcs",
+    ]
+
+
+def test_split_operand_survivor_returns_unmodified_for_unrecognized_xclang_marker() -> (
+    None
+):
+    """A flag carrying the internal ``-Xclang `` marker but not naming a
+    recognized :data:`_SPLIT_OPERAND_ABI_FLAGS` member (which
+    ``extract_abi_relevant_flags`` never actually produces, since it always
+    checks membership before emitting the marker) is returned unmodified
+    rather than mis-expanded -- a defensive fallback, not a reachable
+    real-world input."""
+    assert _split_operand_survivor("-Xclang -not-a-real-flag=x") == [
+        "-Xclang -not-a-real-flag=x"
+    ]
+
+
+def test_resolve_renders_xclang_wrapped_survivor_as_four_complete_argv_tokens(
+    tmp_path: Path,
+) -> None:
+    """End-to-end through ``resolve_header_compile_context``: the internal
+    ``-Xclang -target-abi=aapcs`` encoding produced by
+    ``extract_abi_relevant_flags`` on a real ``-Xclang``-wrapped compile unit
+    argv is reconstructed into the correct, replayable four-token form."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["-Xclang -target-abi=aapcs"],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    tokens = list(result.context.gcc_option_tokens)
+    assert "-Xclang -target-abi=aapcs" not in tokens
+    assert tokens.count("-Xclang") == 2
+    idx = tokens.index("-target-abi")
+    assert tokens[idx - 1] == "-Xclang"
+    assert tokens[idx + 1] == "-Xclang"
+    assert tokens[idx + 2] == "aapcs"
 
 
 def test_resolve_renders_split_operand_survivor_as_two_complete_argv_tokens(

@@ -13,10 +13,12 @@
 # limitations under the License.
 
 """Shared adapter helpers — dialect-aware source detection (ADR-029)."""
+
 from __future__ import annotations
 
 from abicheck.buildsource.adapters.base import (
     _is_msvc_command,
+    msvc_driver_token,
     source_from_argv,
 )
 
@@ -38,6 +40,41 @@ def test_msvc_command_scan_stops_at_shell_separator():
     assert _is_msvc_command(["cd", "sub", "&&", "gcc", "-c", "x.c"]) is False
 
 
+def test_msvc_driver_token_finds_driver_behind_launcher():
+    # P2 review finding (discussion_r3788073756): a compiler-cache/launcher
+    # wrapper (sccache/ccache/distcc/...) commonly precedes the real driver,
+    # so the matched MSVC driver token must not be assumed to be argv[0].
+    argv = ["sccache", "clang-cl", "/std:c++20", "-c", "foo.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
+def test_msvc_driver_token_is_argv0_when_no_launcher():
+    assert msvc_driver_token(["clang-cl", "/std:c++20", "foo.cc"]) == "clang-cl"
+
+
+def test_msvc_driver_token_full_path_returned_verbatim():
+    assert msvc_driver_token([r"C:\VS\bin\cl.exe", "foo.cc"]) == r"C:\VS\bin\cl.exe"
+
+
+def test_msvc_driver_token_none_when_only_slash_c_marker():
+    # A bare `/c` marks MSVC dialect but names no cl/clang-cl-basename token
+    # anywhere in argv, so there is nothing more specific than argv[0] to
+    # point to -- the caller falls back to argv[0] itself in that case.
+    assert msvc_driver_token(["/c", "foo.cc"]) is None
+
+
+def test_msvc_driver_token_none_for_non_msvc_command():
+    assert msvc_driver_token(["gcc", "-c", "foo.c"]) is None
+
+
+def test_msvc_driver_token_keeps_first_match_when_argv_names_two():
+    # An unusual argv naming a cl/clang-cl-basename token twice (e.g. a
+    # wrapper re-invoking itself) must keep the first match, not the last.
+    argv = ["clang-cl", "cl.exe", "/std:c++20", "foo.cc"]
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
 def test_source_from_argv_msvc_combined_forced_include_rejected():
     # /FIconfig.hpp is a combined forced-include option, never the TU.
     assert source_from_argv(["clang-cl", "/FIconfig.hpp", "foo.cc"]) == "foo.cc"
@@ -57,7 +94,10 @@ def test_source_from_argv_tp_without_valid_operand_is_skipped():
 def test_source_from_argv_gnu_absolute_path_kept_behind_cd_prefix():
     # source_from_argv tolerates a `cd dir && cc …` argv: the GNU absolute path
     # is still recovered and the `&&` does not flip the command to MSVC dialect.
-    assert source_from_argv(["cd", "sub", "&&", "gcc", "-c", "/work/src/x.c"]) == "/work/src/x.c"
+    assert (
+        source_from_argv(["cd", "sub", "&&", "gcc", "-c", "/work/src/x.c"])
+        == "/work/src/x.c"
+    )
 
 
 def test_sources_from_argv_returns_every_tu():
@@ -65,7 +105,13 @@ def test_sources_from_argv_returns_every_tu():
 
     # A multi-source compile yields all TU operands, in order; forced-include
     # operands and the output are not mistaken for sources.
-    assert sources_from_argv(["g++", "-std=c++17", "-c", "a.cpp", "b.cpp"]) == ["a.cpp", "b.cpp"]
-    assert sources_from_argv(["gcc", "-include", "cfg.h", "-c", "a.c", "b.c"]) == ["a.c", "b.c"]
+    assert sources_from_argv(["g++", "-std=c++17", "-c", "a.cpp", "b.cpp"]) == [
+        "a.cpp",
+        "b.cpp",
+    ]
+    assert sources_from_argv(["gcc", "-include", "cfg.h", "-c", "a.c", "b.c"]) == [
+        "a.c",
+        "b.c",
+    ]
     # source_from_argv stays the first element.
     assert source_from_argv(["g++", "-c", "a.cpp", "b.cpp"]) == "a.cpp"
