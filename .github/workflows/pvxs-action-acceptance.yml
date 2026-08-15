@@ -1,0 +1,373 @@
+name: PVXS Action acceptance (fresh main)
+
+on:
+  push:
+    branches: [validation/pvxs-action-main-20260815]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pvxs-action-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pvxs-matrix:
+    name: PVXS ${{ matrix.old_label }} -> ${{ matrix.new_label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - id: 1.4.0-to-1.4.1
+            old: '1.4.0'
+            new: '1.4.1'
+            old_label: '1.4.0'
+            new_label: '1.4.1'
+          - id: 1.4.1-to-1.5.0
+            old: '1.4.1'
+            new: '1.5.0'
+            old_label: '1.4.1'
+            new_label: '1.5.0'
+          - id: 1.5.0-to-1.5.1
+            old: '1.5.0'
+            new: '1.5.1'
+            old_label: '1.5.0'
+            new_label: '1.5.1'
+          - id: 1.5.1-to-1.5.2
+            old: '1.5.1'
+            new: '1.5.2'
+            old_label: '1.5.1'
+            new_label: '1.5.2'
+          - id: 1.5.2-to-master
+            old: '1.5.2'
+            new: '788f838dfcaffaf1306355179c179dea1158b9a5'
+            old_label: '1.5.2'
+            new_label: 'master@788f838'
+
+    env:
+      SETUP_PATH: .ci-local
+      SET: defaults
+      CMP: gcc
+      BCFG: default
+      BASE: 'R7.0.10'
+      _PVXS_ABORT_ON_CRIT: '1'
+      PVXS_LOG: 'pvxs.*=WARN'
+
+    steps:
+      - name: Checkout abicheck Action under test
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Record abicheck revision
+        run: |
+          echo "abicheck=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "5b529896eff680203230ec1a635c669ee3334d6e"
+
+      - name: Checkout pinned PVXS repository
+        uses: actions/checkout@v6
+        with:
+          repository: epics-base/pvxs
+          ref: 788f838dfcaffaf1306355179c179dea1158b9a5
+          path: pvxs
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: true
+          persist-credentials: false
+
+      - name: Install PVXS build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential cmake libreadline-dev libevent-dev jq time
+          gcc --version | head -1
+          g++ --version | head -1
+
+      - name: Prepare pinned EPICS Base
+        working-directory: pvxs
+        run: |
+          python .ci/cue.py prepare
+          base_dir="$(sed -n 's/^EPICS_BASE=//p' configure/RELEASE.local)"
+          test -n "$base_dir"
+          test -f "$base_dir/include/epicsTime.h"
+          test -f "$base_dir/include/epicsVersion.h"
+          echo "EPICS_BASE=$base_dir"
+          git -C "$base_dir" describe --tags --always
+
+      - name: Build both PVXS revisions and resolve Action inputs
+        id: build
+        working-directory: pvxs
+        env:
+          OLD_REF: ${{ matrix.old }}
+          NEW_REF: ${{ matrix.new }}
+        run: |
+          set -euxo pipefail
+          ROOT="$PWD"
+          WORK="$RUNNER_TEMP/pvxs-${{ matrix.id }}"
+          BASE_DIR="$(sed -n 's/^EPICS_BASE=//p' configure/RELEASE.local)"
+          rm -rf "$WORK"
+          mkdir -p "$WORK/old" "$WORK/new"
+
+          prepare_tree() {
+            git archive "$1" | tar -C "$2" -x
+            cp "$ROOT/configure/RELEASE.local" "$2/configure/"
+            if [ -f "$ROOT/configure/CONFIG_SITE.local" ]; then
+              cp "$ROOT/configure/CONFIG_SITE.local" "$2/configure/"
+            fi
+            for f in "$2"/configure/*.local; do
+              [ ! -f "$f" ] || sed -i -e "s|\$(TOP)|$ROOT|g" -e 's|-Werror||g' "$f"
+            done
+          }
+
+          prepare_tree "$OLD_REF" "$WORK/old"
+          prepare_tree "$NEW_REF" "$WORK/new"
+
+          /usr/bin/time -v -o "$WORK/build-old.time" \
+            make -C "$WORK/old" CROSS_COMPILER_TARGET_ARCHS= \
+              OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j2
+          /usr/bin/time -v -o "$WORK/build-new.time" \
+            make -C "$WORK/new" CROSS_COMPILER_TARGET_ARCHS= \
+              OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j2
+
+          old_pvxs="$(readlink -f "$(ls "$WORK"/old/lib/linux-*/libpvxs.so.* | head -1)")"
+          new_pvxs="$(readlink -f "$(ls "$WORK"/new/lib/linux-*/libpvxs.so.* | head -1)")"
+          old_ioc="$(readlink -f "$(ls "$WORK"/old/lib/linux-*/libpvxsIoc.so.* | head -1)")"
+          new_ioc="$(readlink -f "$(ls "$WORK"/new/lib/linux-*/libpvxsIoc.so.* | head -1)")"
+
+          old_pvxs_headers="$(find "$WORK/old/include/pvxs" -maxdepth 1 -type f -name '*.h' ! -name 'iochooks.h' -print | sort | tr '\n' ' ')"
+          new_pvxs_headers="$(find "$WORK/new/include/pvxs" -maxdepth 1 -type f -name '*.h' ! -name 'iochooks.h' -print | sort | tr '\n' ' ')"
+          old_ioc_header="$WORK/old/include/pvxs/iochooks.h"
+          new_ioc_header="$WORK/new/include/pvxs/iochooks.h"
+
+          old_include_dirs="$WORK/old/include $BASE_DIR/include $BASE_DIR/include/os/Linux $BASE_DIR/include/compiler/gcc"
+          new_include_dirs="$WORK/new/include $BASE_DIR/include $BASE_DIR/include/os/Linux $BASE_DIR/include/compiler/gcc"
+
+          test -n "$old_pvxs_headers"
+          test -n "$new_pvxs_headers"
+          test -f "$old_ioc_header"
+          test -f "$new_ioc_header"
+          file "$old_pvxs" "$new_pvxs" "$old_ioc" "$new_ioc"
+
+          {
+            echo "work=$WORK"
+            echo "old_pvxs=$old_pvxs"
+            echo "new_pvxs=$new_pvxs"
+            echo "old_ioc=$old_ioc"
+            echo "new_ioc=$new_ioc"
+            echo "old_pvxs_headers=$old_pvxs_headers"
+            echo "new_pvxs_headers=$new_pvxs_headers"
+            echo "old_ioc_header=$old_ioc_header"
+            echo "new_ioc_header=$new_ioc_header"
+            echo "old_include_dirs=$old_include_dirs"
+            echo "new_include_dirs=$new_include_dirs"
+            echo "old_sha=$(git rev-parse "$OLD_REF^{commit}")"
+            echo "new_sha=$(git rev-parse "$NEW_REF^{commit}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Action self-compare invariant — libpvxs
+        id: self_pvxs
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: compare
+          old-library: ${{ steps.build.outputs.new_pvxs }}
+          new-library: ${{ steps.build.outputs.new_pvxs }}
+          old-header: ${{ steps.build.outputs.new_pvxs_headers }}
+          new-header: ${{ steps.build.outputs.new_pvxs_headers }}
+          old-include: ${{ steps.build.outputs.new_include_dirs }}
+          new-include: ${{ steps.build.outputs.new_include_dirs }}
+          old-version: self
+          new-version: self
+          ast-frontend: castxml
+          gcc-path: /usr/bin/g++
+          gcc-options: |
+            -std=c++11
+            -D_GNU_SOURCE
+            -D_DEFAULT_SOURCE
+            -DUSE_TYPED_RSET
+            -D_X86_64_
+            -DUNIX
+            -Dlinux
+            -DPVXS_ENABLE_EXPERT_API
+          dependency-source: conda-forge
+          format: json
+          output-file: self-libpvxs.json
+          policy: strict_abi
+          pr-comment: false
+          github-token: ''
+          fail-on-breaking: false
+          fail-on-api-break: false
+          add-job-summary: true
+
+      - name: Action self-compare invariant — libpvxsIoc
+        id: self_ioc
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: compare
+          old-library: ${{ steps.build.outputs.new_ioc }}
+          new-library: ${{ steps.build.outputs.new_ioc }}
+          old-header: ${{ steps.build.outputs.new_ioc_header }}
+          new-header: ${{ steps.build.outputs.new_ioc_header }}
+          old-include: ${{ steps.build.outputs.new_include_dirs }}
+          new-include: ${{ steps.build.outputs.new_include_dirs }}
+          old-version: self
+          new-version: self
+          ast-frontend: castxml
+          gcc-path: /usr/bin/g++
+          gcc-options: |
+            -std=c++11
+            -D_GNU_SOURCE
+            -D_DEFAULT_SOURCE
+            -DUSE_TYPED_RSET
+            -D_X86_64_
+            -DUNIX
+            -Dlinux
+          dependency-source: none
+          format: json
+          output-file: self-libpvxsIoc.json
+          policy: strict_abi
+          pr-comment: false
+          github-token: ''
+          fail-on-breaking: false
+          fail-on-api-break: false
+          add-job-summary: true
+
+      - name: Action compare — libpvxs
+        id: pvxs
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: compare
+          old-library: ${{ steps.build.outputs.old_pvxs }}
+          new-library: ${{ steps.build.outputs.new_pvxs }}
+          old-header: ${{ steps.build.outputs.old_pvxs_headers }}
+          new-header: ${{ steps.build.outputs.new_pvxs_headers }}
+          old-include: ${{ steps.build.outputs.old_include_dirs }}
+          new-include: ${{ steps.build.outputs.new_include_dirs }}
+          old-version: ${{ matrix.old_label }}
+          new-version: ${{ matrix.new_label }}
+          ast-frontend: castxml
+          gcc-path: /usr/bin/g++
+          gcc-options: |
+            -std=c++11
+            -D_GNU_SOURCE
+            -D_DEFAULT_SOURCE
+            -DUSE_TYPED_RSET
+            -D_X86_64_
+            -DUNIX
+            -Dlinux
+            -DPVXS_ENABLE_EXPERT_API
+          dependency-source: none
+          format: json
+          output-file: libpvxs.json
+          policy: strict_abi
+          pr-comment: false
+          github-token: ''
+          fail-on-breaking: false
+          fail-on-api-break: false
+          add-job-summary: true
+
+      - name: Action compare — libpvxsIoc
+        id: ioc
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: compare
+          old-library: ${{ steps.build.outputs.old_ioc }}
+          new-library: ${{ steps.build.outputs.new_ioc }}
+          old-header: ${{ steps.build.outputs.old_ioc_header }}
+          new-header: ${{ steps.build.outputs.new_ioc_header }}
+          old-include: ${{ steps.build.outputs.old_include_dirs }}
+          new-include: ${{ steps.build.outputs.new_include_dirs }}
+          old-version: ${{ matrix.old_label }}
+          new-version: ${{ matrix.new_label }}
+          ast-frontend: castxml
+          gcc-path: /usr/bin/g++
+          gcc-options: |
+            -std=c++11
+            -D_GNU_SOURCE
+            -D_DEFAULT_SOURCE
+            -DUSE_TYPED_RSET
+            -D_X86_64_
+            -DUNIX
+            -Dlinux
+          dependency-source: none
+          format: json
+          output-file: libpvxsIoc.json
+          policy: strict_abi
+          pr-comment: false
+          github-token: ''
+          fail-on-breaking: false
+          fail-on-api-break: false
+          add-job-summary: true
+
+      - name: Validate Action-only results
+        env:
+          SELF_PVXS_EXIT: ${{ steps.self_pvxs.outputs.exit-code }}
+          SELF_IOC_EXIT: ${{ steps.self_ioc.outputs.exit-code }}
+          PVXS_EXIT: ${{ steps.pvxs.outputs.exit-code }}
+          IOC_EXIT: ${{ steps.ioc.outputs.exit-code }}
+          SELF_PVXS_VERDICT: ${{ steps.self_pvxs.outputs.verdict }}
+          SELF_IOC_VERDICT: ${{ steps.self_ioc.outputs.verdict }}
+          PVXS_VERDICT: ${{ steps.pvxs.outputs.verdict }}
+          IOC_VERDICT: ${{ steps.ioc.outputs.verdict }}
+        run: |
+          set -euxo pipefail
+          printf 'self libpvxs:    verdict=%s exit=%s\n' "$SELF_PVXS_VERDICT" "$SELF_PVXS_EXIT"
+          printf 'self libpvxsIoc: verdict=%s exit=%s\n' "$SELF_IOC_VERDICT" "$SELF_IOC_EXIT"
+          printf 'libpvxs:         verdict=%s exit=%s\n' "$PVXS_VERDICT" "$PVXS_EXIT"
+          printf 'libpvxsIoc:      verdict=%s exit=%s\n' "$IOC_VERDICT" "$IOC_EXIT"
+
+          for report in self-libpvxs.json self-libpvxsIoc.json libpvxs.json libpvxsIoc.json; do
+            test -s "$report"
+            jq -e . "$report" >/dev/null
+            jq '{verdict, summary, evidence_tiers, change_count: ((.changes // []) | length)}' "$report"
+          done
+
+          test "$SELF_PVXS_EXIT" = '0'
+          test "$SELF_IOC_EXIT" = '0'
+          test "$SELF_PVXS_VERDICT" = 'COMPATIBLE'
+          test "$SELF_IOC_VERDICT" = 'COMPATIBLE'
+          test "$(jq '(.changes // []) | length' self-libpvxs.json)" -eq 0
+          test "$(jq '(.changes // []) | length' self-libpvxsIoc.json)" -eq 0
+
+          case "$PVXS_EXIT" in 0|1|2|4) ;; *) exit 1 ;; esac
+          case "$IOC_EXIT" in 0|1|2|4) ;; *) exit 1 ;; esac
+          test "$PVXS_VERDICT" != 'ERROR'
+          test "$PVXS_VERDICT" != 'NOT_COMPARABLE'
+          test "$IOC_VERDICT" != 'ERROR'
+          test "$IOC_VERDICT" != 'NOT_COMPARABLE'
+
+      - name: Write compact acceptance summary
+        if: always()
+        run: |
+          {
+            echo '## PVXS Action acceptance — ${{ matrix.old_label }} → ${{ matrix.new_label }}'
+            echo
+            echo '- abicheck: `5b529896eff680203230ec1a635c669ee3334d6e`'
+            echo '- PVXS old: `${{ steps.build.outputs.old_sha }}`'
+            echo '- PVXS new: `${{ steps.build.outputs.new_sha }}`'
+            echo '- self libpvxs: `${{ steps.self_pvxs.outputs.verdict }}` / `${{ steps.self_pvxs.outputs.exit-code }}`'
+            echo '- self libpvxsIoc: `${{ steps.self_ioc.outputs.verdict }}` / `${{ steps.self_ioc.outputs.exit-code }}`'
+            echo '- libpvxs: `${{ steps.pvxs.outputs.verdict }}` / `${{ steps.pvxs.outputs.exit-code }}`'
+            echo '- libpvxsIoc: `${{ steps.ioc.outputs.verdict }}` / `${{ steps.ioc.outputs.exit-code }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Action reports and build measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pvxs-${{ matrix.id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            self-libpvxs.json
+            self-libpvxsIoc.json
+            libpvxs.json
+            libpvxsIoc.json
+            ${{ steps.build.outputs.work }}/build-old.time
+            ${{ steps.build.outputs.work }}/build-new.time
