@@ -198,6 +198,69 @@ def test_source_from_argv_gnu_absolute_path_kept_behind_cd_prefix():
     )
 
 
+def test_msvc_driver_token_finds_driver_behind_env_prefix():
+    # Codex review finding (round 18, "Unwrap environment prefixes before
+    # locating clang-cl"): a compile unit recorded as
+    # `env SDKROOT=... /opt/llvm/bin/clang-cl /c ...` must resolve
+    # `clang-cl` as the driver, not `env` -- source_extractors._argv.
+    # strip_launchers (which _executable_token_positions/_msvc_driver_scan
+    # both go through) now unwraps a leading `env` invocation and its
+    # `NAME=VALUE` assignments ahead of locating the real driver token.
+    argv = ["env", "SDKROOT=/opt/sdk", "/opt/llvm/bin/clang-cl", "/c", "x.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "/opt/llvm/bin/clang-cl"
+
+
+def test_msvc_driver_token_finds_driver_behind_env_with_multiple_assignments():
+    argv = ["env", "FOO=1", "BAR=2", "clang-cl", "/c", "x.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
+def test_msvc_driver_token_finds_driver_behind_env_chained_with_launcher():
+    # env's own prefix precedes a compiler-cache launcher, which in turn
+    # precedes the real driver -- both prefix kinds must unwrap together.
+    argv = ["env", "FOO=1", "sccache", "clang-cl", "/c", "x.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
+def test_msvc_driver_token_none_for_env_wrapped_gnu_command():
+    # Companion negative case: env-wrapping an ordinary GNU command must not
+    # spuriously flip it to MSVC dialect.
+    argv = ["env", "FOO=1", "gcc", "-c", "foo.c"]
+    assert _is_msvc_command(argv) is False
+    assert msvc_driver_token(argv) is None
+
+
+def test_derived_gcc_path_resolves_driver_behind_env_prefix():
+    # End-to-end: header_compile_context._derived_gcc_path (the consumer
+    # msvc_driver_token exists for) must resolve the real clang-cl driver,
+    # not "env", for an env-wrapped MSVC-dialect compile unit -- otherwise
+    # dumper_clang._resolve_clang_bin rejects "env" as not clang-family and
+    # silently falls back to plain clang++, losing the recorded toolchain's
+    # built-ins, default headers, and target defaults.
+    from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.header_compile_context import _derived_gcc_path
+
+    cu = CompileUnit(
+        id="cu://x.cc#cfg:test",
+        source="x.cc",
+        language="CXX",
+        directory="/work",
+        output="x.obj",
+        argv=[
+            "env",
+            "SDKROOT=/opt/sdk",
+            "/opt/llvm/bin/clang-cl",
+            "/std:c++20",
+            "/c",
+            "x.cc",
+        ],
+    )
+    assert _derived_gcc_path(cu) == "/opt/llvm/bin/clang-cl"
+
+
 def test_sources_from_argv_returns_every_tu():
     from abicheck.buildsource.adapters.base import sources_from_argv
 

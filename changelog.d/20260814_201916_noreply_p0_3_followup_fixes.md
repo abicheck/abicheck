@@ -464,3 +464,28 @@
   revision. A genuine value disagreement (`aapcs` vs. `aapcs16`) still
   produces two distinct encodings either way, since the value stays part
   of the canonical token regardless of which capture form was seen.
+- **An eighteenth review round found the launcher-recognition machinery
+  never unwrapped a leading POSIX `env` invocation.** A compile unit
+  recorded as `env SDKROOT=... /opt/llvm/bin/clang-cl /c ...` — an
+  environment-scoped invocation or wrapper script, POSIX `env` syntax being
+  `env [-i] [-u NAME]... [NAME=VALUE]... command [args]` — computed driver
+  index 0 (`env` itself): `source_extractors._argv.strip_launchers()`
+  recognized only the six compiler-cache/distribution launcher names, so
+  `adapters.base._msvc_driver_scan()` found no `cl`/`clang-cl`-basename
+  token at any recognized executable position, `msvc_driver_token()`
+  returned `None`, `header_compile_context._derived_gcc_path()` fell back to
+  `argv[0]` (`"env"`), and `dumper_clang._resolve_clang_bin()` rejected that
+  name and silently substituted plain `clang++` — losing the recorded
+  toolchain's built-ins, default headers, and target defaults.
+  `strip_launchers()` now unwraps a leading `env` invocation (bare `env` or
+  a path ending in `/env`, its own no-operand/operand-taking flags, and any
+  `NAME=VALUE` assignments — reusing the existing ccache-style config-
+  override regex, since it's the identical shape) via a new
+  `_skip_env_prefix()` helper, looped together with the existing
+  launcher-chain stripping so `env` and a compiler-cache launcher can
+  precede one another in either order (`env FOO=1 sccache clang-cl ...`).
+  Since `strip_launchers()` is the shared primitive behind
+  `_executable_token_positions()`/`_msvc_driver_scan()`,
+  `pick_compiler_binary()`, `include_graph.py`, `build_context.py`, and
+  `cc_wrapper.py`, every caller benefits from this fix, not just the L2
+  clang-cl driver-selection path the finding was reported against.

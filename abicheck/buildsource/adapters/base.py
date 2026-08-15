@@ -567,6 +567,13 @@ def _executable_token_positions(argv: list[str]) -> frozenset[int]:
     ``buildcache clang-cl /std:c++20 /c x.cc`` command left ``/std:c++20``
     unconsumed by any recognized CL-style driver, since
     :func:`_msvc_driver_scan` never looked past position 1.
+
+    ``strip_launchers`` also unwraps a leading POSIX ``env`` invocation (bare
+    ``env``, its own flags, and any ``NAME=VALUE`` assignments) ahead of a
+    launcher chain (P2 review, "Unwrap environment prefixes before locating
+    clang-cl", fresh evidence) -- e.g. ``{2}`` for ``env SDKROOT=/sdk
+    clang-cl ...`` -- so this function's returned position(s) already reflect
+    that too, with no separate handling needed here.
     """
     if not argv:
         return frozenset()

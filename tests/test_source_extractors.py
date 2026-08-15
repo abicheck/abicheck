@@ -1681,6 +1681,116 @@ def test_strip_launchers_no_config_overrides_for_non_launcher_command() -> None:
     assert strip_launchers(argv) == argv
 
 
+# -- strip_launchers: leading `env` prefix (Codex review, round 18) ----------
+#
+# For a compile unit recorded as `env SDKROOT=... /opt/llvm/bin/clang-cl /c
+# ...`, POSIX `env` syntax is `env [-i] [-u NAME]... [NAME=VALUE]... command
+# [args]` -- the driver follows the leading `env` token, its own flags, and
+# any environment assignments. strip_launchers must unwrap that prefix before
+# (or interleaved with) recognizing a compiler-cache/distribution launcher.
+
+
+def test_strip_launchers_unwraps_bare_env_with_assignment() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(
+        ["env", "SDKROOT=/opt/sdk", "/opt/llvm/bin/clang-cl", "/c", "x.cc"]
+    ) == ["/opt/llvm/bin/clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_bare_env_with_no_command_at_all() -> None:
+    # Degenerate case: `env` names no command whatsoever -- the scan runs off
+    # the end of argv without matching any flag/assignment shape, leaving
+    # nothing behind (there is no compiler token to find).
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env"]) == []
+
+
+def test_strip_launchers_unwraps_env_with_multiple_assignments() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "FOO=1", "BAR=2", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+
+
+def test_strip_launchers_unwraps_env_with_no_operand_flags() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "-i", "FOO=1", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+
+
+def test_strip_launchers_unwraps_env_with_unset_flag() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "-u", "LD_PRELOAD", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+    assert strip_launchers(["env", "--unset=LD_PRELOAD", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+
+
+def test_strip_launchers_env_chained_with_compiler_cache_launcher() -> None:
+    # `env FOO=1 sccache clang-cl ...` — env's own prefix precedes a
+    # compiler-cache launcher, which in turn precedes the real driver; both
+    # kinds must be unwrapped together.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "FOO=1", "sccache", "clang-cl", "/c", "x.cc"]) == [
+        "clang-cl",
+        "/c",
+        "x.cc",
+    ]
+
+
+def test_strip_launchers_bare_env_with_no_assignments() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "gcc", "-c", "foo.c"]) == ["gcc", "-c", "foo.c"]
+
+
+def test_strip_launchers_env_exe_variant() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(
+        [r"C:\Windows\System32\env.exe", "FOO=1", "cl.exe", "/c", "x.cc"]
+    ) == ["cl.exe", "/c", "x.cc"]
+
+
+def test_strip_launchers_ordinary_command_unaffected_by_env_handling() -> None:
+    # No `env` prefix at all — ordinary non-env-prefixed commands, with or
+    # without a launcher, must behave exactly as before.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["gcc", "-c", "foo.c"]) == ["gcc", "-c", "foo.c"]
+    assert strip_launchers(["sccache", "clang-cl", "/c", "x.cc"]) == [
+        "clang-cl",
+        "/c",
+        "x.cc",
+    ]
+
+
+def test_strip_launchers_env_looking_token_not_named_env_is_untouched() -> None:
+    # A real compiler/source token that merely contains "env" as a substring
+    # (not its own basename) must never be mistaken for the env wrapper.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    argv = ["envoy-cc", "-c", "foo.c"]
+    assert strip_launchers(argv) == argv
+
+
 # -- strip_launchers property test (generalizes past the hand-picked cases) --
 #
 # Per AGENTS.md's own guidance on reusable primitives: a fixed example list
@@ -1700,15 +1810,21 @@ _OVERRIDE_TOKEN = st.builds(
     st.text(alphabet=st.characters(blacklist_characters="\x00"), max_size=8),
 )
 _LAUNCHER_NAME = st.sampled_from(sorted(_LAUNCHERS))
-#: A plain token that can never be confused for a launcher name or a
-#: KEY=VALUE override (no ``=`` at all, so the override regex can't match).
+#: A plain token that can never be confused for a launcher name, an ``env``
+#: invocation, or a KEY=VALUE override (no ``=`` at all, so the override
+#: regex can't match).
 _PLAIN_TOKEN = st.text(
     alphabet=st.characters(
         min_codepoint=33, max_codepoint=126, blacklist_characters="="
     ),
     min_size=1,
     max_size=10,
-).filter(lambda t: t.lower().removesuffix(".exe") not in _LAUNCHERS)
+).filter(
+    lambda t: (
+        t.lower().removesuffix(".exe") not in _LAUNCHERS
+        and t.lower() not in ("env", "env.exe")
+    )
+)
 
 
 @given(

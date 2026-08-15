@@ -18,7 +18,7 @@ Every extractor backend must replay a translation unit under the *same* compile
 context the real build used — same compiler emulation, language standard,
 defines, include paths, forced includes, sysroot/target, and ABI-relevant flags
 (ADR-030 D2). castxml (phase 2) and clang (phase 5) need identical logic for the
-fiddly parts — unwrapping ``ccache``/``sccache`` launchers, detecting MSVC mode
+fiddly parts — unwrapping ``env``/``ccache``/``sccache`` launchers, detecting MSVC mode
 from a (possibly Windows, possibly cross) compiler path, carrying argv-only
 forced includes, and reversing the redaction policy's ``~`` home placeholder for
 the replay only (ADR-032 D7). Keeping that here means one tested implementation,
@@ -71,7 +71,29 @@ COMPILER_LAUNCHERS = frozenset(
 #: without touching ``ccache.conf``/env vars. A bare ``KEY=VALUE`` token here
 #: is never a flag (it never starts with ``-``), so it is unambiguous against
 #: real compiler argv.
+#:
+#: Also reused, unchanged, by :func:`_skip_env_prefix` below for POSIX
+#: ``env``'s own ``NAME=VALUE`` environment-assignment operands (P2 review,
+#: "Unwrap environment prefixes before locating clang-cl", fresh evidence) --
+#: it is the identical ``NAME=VALUE`` shape either tool accepts, so one
+#: compiled pattern serves both.
 _LAUNCHER_CONFIG_OVERRIDE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: The basename(s) that mean "this token is the POSIX ``env`` utility", the
+#: same ``.exe``-suffix-tolerant convention :data:`COMPILER_LAUNCHERS`
+#: matching already uses.
+_ENV_BASENAMES = frozenset({"env", "env.exe"})
+#: ``env`` flags that stand alone -- no operand of their own follows.
+#: ``-i``/``--ignore-environment`` clears the inherited environment before
+#: applying any ``NAME=VALUE`` assignments; the others are cosmetic/output
+#: modifiers. None of these change which *token* is the real driver, only
+#: how ``env`` itself behaves, so they are skipped rather than parsed.
+_ENV_NO_OPERAND_FLAGS = frozenset(
+    {"-i", "--ignore-environment", "-0", "--null", "-v", "--verbose"}
+)
+#: ``env`` flags that take a following, separate-token operand: POSIX
+#: ``-u NAME`` (unset one variable) and GNU's ``-C``/``--chdir DIR``
+#: extension (change directory before running the command).
+_ENV_OPERAND_FLAGS = frozenset({"-u", "--unset", "-C", "--chdir"})
 #: Preprocessor macro define/undef option prefixes. Their *values* reach the
 #: compiler verbatim (argv, no shell expansion), so a literal ``~`` in e.g.
 #: ``-DDEFAULT_DIR=~/app`` must NOT be home-expanded during replay — unlike the
@@ -392,22 +414,86 @@ def basename(path: str) -> str:
     return re.split(r"[\\/]", path)[-1]
 
 
+def _skip_env_prefix(argv: list[str], i: int) -> int:
+    """Skip a leading POSIX ``env`` invocation and its flags/assignments.
+
+    A real build recipe recorded via an environment-scoped invocation or
+    wrapper script commonly looks like ``env SDKROOT=/sdk clang-cl /c
+    foo.cc`` (P2 review, "Unwrap environment prefixes before locating
+    clang-cl", fresh evidence): ``env --help``/POSIX confirm the executable
+    always follows the leading ``env`` token, its own flags, and any
+    ``NAME=VALUE`` assignments -- ``env [-i] [-u NAME]... [NAME=VALUE]...
+    command [args]``. Before this, :func:`strip_launchers` recognized only
+    the six compiler-cache/distribution launcher names, so an
+    ``env``-prefixed command computed driver index 0 (``env`` itself) and
+    never examined the actual compiler: ``_msvc_driver_scan`` found no
+    ``cl``/``clang-cl``-basename token at any recognized executable
+    position, ``msvc_driver_token`` returned ``None``, ``_derived_gcc_path``
+    fell back to ``argv[0]`` (``"env"``), and ``dumper_clang._resolve_clang_bin``
+    rejected that name and silently substituted plain ``clang++`` -- losing
+    the recorded toolchain's built-ins, default headers, and target
+    defaults.
+
+    Returns *i* unchanged when ``argv[i]`` does not name ``env`` itself, so
+    a caller can call this unconditionally ahead of launcher-prefix
+    stripping. Reuses :data:`_LAUNCHER_CONFIG_OVERRIDE_RE` for the
+    ``NAME=VALUE`` assignments -- the identical shape ccache's own
+    config-override tokens already use, see that pattern's docstring.
+    """
+    if i >= len(argv) or basename(argv[i]).lower() not in _ENV_BASENAMES:
+        return i
+    i += 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg in _ENV_NO_OPERAND_FLAGS:
+            i += 1
+            continue
+        if arg in _ENV_OPERAND_FLAGS and i + 1 < len(argv):
+            i += 2
+            continue
+        if arg.startswith("--unset=") or arg.startswith("--chdir="):
+            i += 1
+            continue
+        if _LAUNCHER_CONFIG_OVERRIDE_RE.match(arg):
+            i += 1
+            continue
+        break
+    return i
+
+
 def strip_launchers(argv: list[str]) -> list[str]:
-    """Drop leading compiler-launcher tokens (``ccache``/``sccache``/…).
+    """Drop leading ``env``/compiler-launcher tokens (``ccache``/``sccache``/…).
 
     Also skips any ``KEY=VALUE`` per-invocation config-override tokens ccache
     accepts immediately after its own name (``ccache compiler_check=content
     gcc -c foo.c``) — otherwise the override token, not the real compiler, is
     left as the new ``argv[0]``.
+
+    A leading POSIX ``env`` invocation (bare ``env``, or a path ending in
+    ``/env``) is unwrapped first, along with any ``env``-specific flags and
+    ``NAME=VALUE`` environment assignments that follow it (see
+    :func:`_skip_env_prefix`) — and a compiler-cache/distribution launcher
+    may itself follow ``env`` (``env FOO=1 sccache clang-cl ...``), or an
+    ``env`` invocation may appear between launchers, so the two prefix kinds
+    are unwrapped in a loop until neither can strip anything further, rather
+    than each running only once.
     """
     i = 0
-    while (
-        i < len(argv)
-        and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
-    ):
-        i += 1
-        while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
+    progressed = True
+    while progressed:
+        progressed = False
+        new_i = _skip_env_prefix(argv, i)
+        if new_i != i:
+            i = new_i
+            progressed = True
+        while (
+            i < len(argv)
+            and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
+        ):
             i += 1
+            while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
+                i += 1
+            progressed = True
     return argv[i:]
 
 
