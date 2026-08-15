@@ -1458,6 +1458,19 @@ def run_compare(
     # single-pair one would (ADR-037 D4).
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
 
+    # --stat promises one shape and one shape only ("With --format json, emits
+    # only the summary object"), which a use-case attribution block would
+    # break for every CI consumer parsing it. Rejected rather than silently
+    # dropped: a manifest that quietly attributes nothing is the same failure
+    # --use-cases is rejected for set inputs to avoid (Codex review).
+    if stat and use_cases_manifest is not None:
+        raise click.UsageError(
+            "--use-cases is not supported with --stat: --stat emits only the "
+            "summary object (and one line of text), which the attribution "
+            "block would not fit. Drop --stat to get the use-case section, "
+            "or drop --use-cases to keep the summary-only shape."
+        )
+
     if {old_kind, new_kind} & {"directory", "package"}:
         _reject_flags_unsupported_for_set_inputs(
             ctx, project_cfg,

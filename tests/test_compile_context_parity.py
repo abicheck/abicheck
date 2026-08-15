@@ -1111,6 +1111,63 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
     assert calls[1]["header_backend"] == "clang"
 
 
+def test_a_one_sided_frontend_keeps_the_configured_frontend_for_the_other_side(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A side-qualified ``--ast-frontend`` must not discard ``compile.frontend``.
+
+    Click reports one parameter source for the whole ``--ast-frontend``
+    parameter, so ``new=castxml`` alone marks it COMMANDLINE while the shared
+    value is the synthesized ``"auto"`` nobody typed. Reading the parameter
+    source alone handed that default to ``merge_compile_config`` as an explicit
+    override, so the old side -- which the user never mentioned -- was parsed
+    with ``auto`` instead of the project's configured ``clang`` (Codex review).
+    """
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        ["--config", str(cfg), "--ast-frontend", "new=castxml"],
+    )
+    # The unqualified side inherits the config; the named side overrides it.
+    assert calls[0]["header_backend"] == "clang"
+    assert calls[1]["header_backend"] == "castxml"
+
+
+def test_a_shared_frontend_still_beats_the_configured_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The other direction of the same rule, so the fix above cannot be
+    satisfied by simply never treating ``--ast-frontend`` as explicit: a
+    stated shared value must still win over ``compile.frontend``."""
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        ["--config", str(cfg), "--ast-frontend", "castxml"],
+    )
+    assert all(c["header_backend"] == "castxml" for c in calls)
+
+
+def test_an_explicit_auto_still_beats_the_configured_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`resolve_compile_context`'s own documented contract: "an
+    explicitly-typed value -- even a default-looking ``auto`` -- beats a
+    pinned config one". The fix must keep that true for a value the user
+    really did type, and only stop claiming it for the synthesized one."""
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        ["--config", str(cfg), "--ast-frontend", "auto"],
+    )
+    assert all(c["header_backend"] == "auto" for c in calls)
+
+
 def test_compare_reads_compile_block_from_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

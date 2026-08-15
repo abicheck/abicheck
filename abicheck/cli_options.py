@@ -1022,6 +1022,37 @@ def resolve_contract_domain(
     return None
 
 
+def _shared_frontend_explicit(ctx: click.Context) -> bool:
+    """Did the command line state a *shared* ``--ast-frontend`` value?
+
+    Click reports one parameter source for the whole ``--ast-frontend``
+    parameter, so a side-aware command marks it ``COMMANDLINE`` as soon as
+    *any* occurrence is given -- including a purely side-qualified
+    ``new=castxml``, for which :func:`_split_sided_frontend` then synthesizes
+    the shared value ``"auto"`` that nobody typed. Reading the parameter
+    source alone would hand that synthesized default to
+    :func:`merge_compile_config` as an explicit override and suppress a
+    configured ``compile.frontend`` for the side the user never mentioned --
+    so a one-sided override would silently discard the project's setting for
+    the other side (Codex review). The raw pairs are still on ``ctx.params``
+    here (``normalize_sided_options`` rewrites the command's own kwargs, not
+    the context), so the shared value's own explicitness is recoverable:
+    it was stated exactly when some pair carries the ``both`` side.
+
+    A command composing the unsided ``@compile_context_options()`` has a
+    plain string here and keeps the parameter-source answer unchanged.
+    """
+    if ctx.get_parameter_source("header_backend") != click.core.ParameterSource.COMMANDLINE:
+        return False
+    raw = ctx.params.get("header_backend")
+    if isinstance(raw, (tuple, list)):
+        return any(
+            isinstance(pair, tuple) and len(pair) == 2 and pair[0] == "both"
+            for pair in raw
+        )
+    return True
+
+
 def resolve_compile_context(
     ctx: click.Context,
     *,
@@ -1089,7 +1120,7 @@ def resolve_compile_context(
         tuple(includes),
         build_config,
         sources=sources,
-        frontend_explicit=_explicit("header_backend"),
+        frontend_explicit=_shared_frontend_explicit(ctx),
         nostdinc_explicit=_explicit("nostdinc"),
     )
 

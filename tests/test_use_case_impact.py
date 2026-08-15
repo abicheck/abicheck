@@ -293,3 +293,94 @@ class TestSetInputsAreRejected:
             ["compare", str(old_dir), str(new_dir), "--use-cases", str(manifest), *extra],
         )
         assert result.exit_code == 64, result.output
+
+
+class TestStatKeepsItsSummaryOnlyShape:
+    """``--stat``'s documented contract is one shape: "With --format json,
+    emits only the summary object". A use-case attribution block is the
+    opposite of a summary, so the combination is rejected rather than
+    silently dropping the manifest — the same reasoning as the set-input
+    rejection above (Codex review)."""
+
+    @staticmethod
+    def _pair(tmp_path: Path) -> tuple[Path, Path]:
+        from abicheck.model import Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        paths = []
+        for name, version, funcs in (("old", "1", ["a", "b"]), ("new", "2", ["a"])):
+            snap = AbiSnapshot(
+                library="libfoo.so",
+                version=version,
+                functions=[
+                    Function(
+                        name=f,
+                        mangled=f,
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    )
+                    for f in funcs
+                ],
+            )
+            path = tmp_path / f"{name}.json"
+            path.write_text(snapshot_to_json(snap), encoding="utf-8")
+            paths.append(path)
+        return paths[0], paths[1]
+
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "review"])
+    def test_stat_with_use_cases_is_a_usage_error(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        # Every format, not just json: the rendered-text paths appended the
+        # detailed section after the one-line stat output for the same reason.
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--stat", "--format", fmt, "--use-cases", str(manifest),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "--use-cases is not supported with --stat" in result.output
+
+    def test_stat_without_the_manifest_still_emits_the_summary(
+        self, tmp_path: Path
+    ) -> None:
+        # The rejection must not have narrowed --stat itself.
+        import json
+
+        old, new = self._pair(tmp_path)
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "--stat", "--format", "json"]
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output[result.output.find("{"):])
+        assert "use_case_impact" not in doc
+        assert "changes" not in doc
+
+    def test_the_renderer_itself_never_adds_the_block(self) -> None:
+        """The CLI rejection is a guard, not the contract's only enforcement:
+        a direct caller of the summary-only renderer must get the same shape
+        even when the result carries an attribution."""
+        import json
+
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.reporter import to_stat_json
+
+        result = DiffResult(
+            old_version="1", new_version="2", library="libfoo.so",
+            changes=[_change("train")], verdict=Verdict.BREAKING,
+        )
+        result.use_case_impact = build_use_case_impact(
+            [UseCaseDefinition(use_case="uc", entrypoints=("train",))],
+            _snapshot(_graph("train"), "1"),
+            _snapshot(_graph("train"), "2"),
+            [_change("train")],
+            manifest="uc.yaml",
+        )
+        assert result.use_case_impact is not None  # the block really exists
+        assert "use_case_impact" not in json.loads(to_stat_json(result))

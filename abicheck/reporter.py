@@ -39,7 +39,6 @@ from .checker_policy import (
 )
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
-from .impact.use_case_impact import add_use_case_impact
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -211,7 +210,12 @@ def to_stat_json(
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
-    add_use_case_impact(d, result)
+    # Deliberately NOT `add_use_case_impact` here, unlike the full JSON path
+    # (`reporter_contract_blocks`): this function's contract is the summary
+    # object alone, and a per-finding attribution block is the opposite of a
+    # summary. `compare` rejects `--stat --use-cases` outright rather than
+    # dropping the manifest silently; this keeps the same promise for a
+    # direct caller of the renderer (Codex review).
     return json.dumps(d, indent=indent)
 
 
