@@ -225,30 +225,58 @@ class Requirement:
         return _admits_a_gap(answer)
 
 
-#: Phrases that mean "there is no general invariant here". Deliberately a
-#: short, explicit vocabulary rather than sentiment analysis: this only has to
-#: recognise the admission the repository's own convention asks an author to
-#: make ("generalize, or record the gap"), and a phrase it misses simply
-#: leaves the follow-up row unrequested, which is where things stood before.
-_GAP_ADMISSIONS = (
-    "none",
-    "n/a not general",
-    "no general",
-    "not general",
-    "known gap",
-    "documented as a gap",
-    "documented gap",
-    "could not generalise",
-    "could not generalize",
-    "instance only",
+#: Bare answers that mean "there is no general invariant here" — recognised
+#: only when they are the *whole* answer.
+#:
+#: This is the half that has to be anchored. Matched as substrings, "none"
+#: read an ordinary universal invariant — "None of the malformed archive
+#: members escape the root" — as an admission that the fix is narrow, and then
+#: made a required PR check demand a gap row for a fix with no gap to record
+#: (Codex review). A universal claim very often *starts* with the same word a
+#: refusal does, so position is not enough either: only the complete answer
+#: distinguishes "None." from "None of ...".
+_GAP_ADMISSION_ANSWERS = frozenset({"n/a", "na", "no", "none", "nothing"})
+
+#: Phrases that carry the admission wherever they appear in a sentence, so
+#: they are matched anywhere — but as whole phrases, not substrings.
+#:
+#: Deliberately a short, explicit vocabulary rather than sentiment analysis:
+#: this only has to recognise the admission the repository's own convention
+#: asks an author to make ("generalize, or record the gap"). The trailing
+#: ``\w*`` on the generali[sz]e forms is what lets one entry cover
+#: "generalisable"/"generalizable"/"generally"; the bare "no general" that
+#: used to be here is gone, because "no generalization was needed" says the
+#: opposite of what the others say. A phrase this misses simply leaves the
+#: follow-up row unrequested, which is where things stood before it existed —
+#: a false *positive* is the expensive direction, since it blocks a PR on a
+#: row its author has nothing true to write in.
+_GAP_ADMISSION_PHRASES = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\bnot general\w*",
+        r"\bno general invariant\b",
+        r"\bcould not generali[sz]\w*",
+        r"\bcannot be generali[sz]\w*",
+        r"\bknown gap\b",
+        r"\bdocumented (?:as )?(?:a )?gap\b",
+        r"\bthis instance only\b",
+        r"\binstance[- ]only\b",
+    )
 )
+
+#: Everything that is not a letter, a digit or a slash — so "None." and
+#: "**none**" normalise onto "none", while "n/a" keeps the slash that
+#: distinguishes it from an ordinary word.
+_ANSWER_NOISE = re.compile(r"[^a-z0-9/]+")
 
 
 def _admits_a_gap(answer: str) -> bool:
     text = answer.strip().lower()
     if not text:
         return False
-    return any(phrase in text for phrase in _GAP_ADMISSIONS)
+    if _ANSWER_NOISE.sub("", text) in _GAP_ADMISSION_ANSWERS:
+        return True
+    return any(pattern.search(text) for pattern in _GAP_ADMISSION_PHRASES)
 
 
 #: The four always-required answers, then the conditional ones. Each
@@ -663,6 +691,38 @@ def _docstring_lines(source: str) -> set[int]:
     return lines
 
 
+def _comment_prefixes(path: str) -> tuple[str, ...]:
+    """The comment markers of *path*'s format, or `()` if it has none.
+
+    Per format, not "`#` everywhere" and not "`.py` only". Both extremes are
+    wrong in the same way — they answer a question about one language with a
+    fact about another:
+
+    * `#` everywhere discards a real Markdown heading and a real `#include`
+      line in a C fixture, i.e. genuine test-data content.
+    * `.py` only counts a comment-only edit to a YAML or shell fixture as
+      substantive test evidence, which is exactly what this whole function
+      exists to reject — a comment asserts nothing in any language (Codex
+      review).
+
+    `.json` is deliberately absent: JSON has no comments, so a line starting
+    with `//` in one is content (or a syntax error), never a comment.
+    """
+    for suffixes, prefixes in _COMMENT_SYNTAX:
+        if path.endswith(suffixes):
+            return prefixes
+    return ()
+
+
+#: Ordered so the first match wins; the entries are disjoint today, but the
+#: order makes that explicit rather than incidental.
+_COMMENT_SYNTAX: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    ((".py", ".pyi"), ("#",)),
+    ((".yml", ".yaml", ".toml", ".cfg", ".ini", ".sh", ".bash", ".conf"), ("#",)),
+    ((".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"), ("//",)),
+)
+
+
 def added_content_paths(
     diff_text: str, read_new: Callable[[str], str | None] | None = None
 ) -> set[str]:
@@ -672,15 +732,15 @@ def added_content_paths(
     or copy (no added lines at all), a blank or comment-only line, and — when
     *read_new* can supply the new file — a line inside a docstring.
 
-    The comment and docstring rules are `.py`-only on purpose: `#` starts a
-    heading in a golden Markdown snapshot and is ordinary content in most
-    fixture formats, so applying either everywhere would discard real
-    test-data changes. Without *read_new* the docstring rule simply does not
-    apply; the blank/comment rule still does, since it needs only the diff.
+    The comment rule is per format (`_comment_prefixes`); the docstring rule
+    is `.py`-only because only Python has docstrings. Without *read_new* the
+    docstring rule simply does not apply; the comment rule still does, since
+    it needs only the diff.
     """
     out: set[str] = set()
     for path, added in added_lines_by_path(diff_text).items():
         is_python = path.endswith(".py")
+        comments = _comment_prefixes(path)
         docstrings: set[int] = set()
         if is_python and read_new is not None:
             source = read_new(path)
@@ -690,7 +750,7 @@ def added_content_paths(
             body = text.strip()
             if not body:
                 continue
-            if is_python and body.startswith("#"):
+            if comments and body.startswith(comments):
                 continue
             if number in docstrings:
                 continue

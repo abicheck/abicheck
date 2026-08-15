@@ -373,11 +373,54 @@ class TestContentEvidence:
         diff = _content_diff("tests/test_x.py", added)
         assert not gate.adds_or_modifies_a_test([("M", "tests/test_x.py")], diff)
 
-    def test_a_hash_line_in_test_data_is_still_evidence(self) -> None:
-        """The comment rule is `.py`-only: `#` is a heading in a golden
-        Markdown snapshot and ordinary content in most fixture formats."""
-        diff = _content_diff("tests/golden/report.md", "# Summary")
-        assert gate.adds_or_modifies_a_test([("M", "tests/golden/report.md")], diff)
+    @pytest.mark.parametrize(
+        "path, added",
+        [
+            # `#` is a heading here, not a comment.
+            ("tests/golden/report.md", "# Summary"),
+            # JSON has no comment syntax at all, so this is content (or a
+            # syntax error) — either way not something to discard.
+            ("tests/data/expected.json", '{"//": 1}'),
+            # C fixtures: `#include` is a directive, and `#` is not a comment
+            # marker in C at all.
+            ("tests/data/widget.h", "#include <stddef.h>"),
+        ],
+    )
+    def test_a_hash_line_in_test_data_is_still_evidence(
+        self, path: str, added: str
+    ) -> None:
+        """The comment rule is per format. `#` starts a heading in a golden
+        Markdown snapshot and a preprocessor directive in a C fixture, so
+        applying Python's comment syntax everywhere would discard real
+        test-data changes."""
+        assert gate.adds_or_modifies_a_test([("M", path)], _content_diff(path, added))
+
+    @pytest.mark.parametrize(
+        "path, added",
+        [
+            ("tests/data/policy.yml", "# tighten this later"),
+            ("tests/data/policy.yaml", "  # tighten this later"),
+            ("tests/data/config.toml", "# see AGENTS.md"),
+            ("tests/data/run.sh", "# shellcheck disable=SC2086"),
+            ("tests/data/widget.h", "// a note about the fix"),
+        ],
+    )
+    def test_comment_only_fixture_lines_are_not_evidence(
+        self, path: str, added: str
+    ) -> None:
+        """The other half of the same rule, and the reason it is per format
+        rather than `.py`-only: a comment asserts nothing in *any* language,
+        so a comment-only edit to a YAML or shell fixture is no more evidence
+        of a regression test than the Python case above (Codex review)."""
+        assert not gate.adds_or_modifies_a_test(
+            [("M", path)], _content_diff(path, added)
+        )
+
+    def test_a_real_line_in_the_same_fixture_is_evidence(self) -> None:
+        """Negative control for the pair above: the comment rule must reject
+        the comment, not the file type."""
+        diff = _content_diff("tests/data/policy.yml", "  overrides: {func_removed: ok}")
+        assert gate.adds_or_modifies_a_test([("M", "tests/data/policy.yml")], diff)
 
     def test_the_content_diff_is_taken_with_rename_detection(
         self, monkeypatch: pytest.MonkeyPatch
@@ -701,6 +744,54 @@ class TestGapAdmission:
             r.key for r in gate.missing_requirements(COMPLETE_BODY, ["abicheck/x.py"])
         }
         assert "known-unsupported-cases" not in missing
+
+    @pytest.mark.parametrize(
+        "invariant",
+        [
+            # The reported false positive: an ordinary universal claim that
+            # happens to open with the same word a refusal does. Read as a
+            # substring, "none" turned a fully general fix into a required
+            # "Known unsupported cases" row its author had nothing true to
+            # write in (Codex review).
+            "None of the malformed archive members escape the root",
+            "Every reader normalises the path, so none of the callers can bypass it",
+            # "no general" as a substring: this says the opposite of the
+            # phrase it used to match.
+            "No generalization was needed — the helper already covers every backend",
+            "Nothing that reaches the parser can escape the sandbox",
+        ],
+    )
+    def test_a_universal_invariant_is_not_an_admission(self, invariant: str) -> None:
+        """Negative control against the vocabulary itself, not just the gate:
+        these are the shapes a real, general invariant takes, and every one of
+        them contains a gap-vocabulary word somewhere inside it."""
+        body = COMPLETE_BODY.replace(
+            "- General invariant: every supported algorithm round-trips at production scale",
+            f"- General invariant: {invariant}",
+        )
+        assert f"- General invariant: {invariant}" in body, "fixture must be edited"
+        missing = {r.key for r in gate.missing_requirements(body, ["abicheck/x.py"])}
+        assert "known-unsupported-cases" not in missing
+
+    @pytest.mark.parametrize(
+        "answer, admits",
+        [
+            # Anchored: only the *complete* answer means the bare refusal.
+            ("None.", True),
+            ("**none**", True),
+            ("n/a", True),
+            ("None of the callers can reach it", False),
+            # Whole-phrase matches, anywhere in the sentence.
+            ("The fix is not generalisable beyond ELF", True),
+            ("There is no general invariant here", True),
+            ("Known gap: Mach-O export tries are untouched", True),
+            ("no generalization was needed", False),
+        ],
+    )
+    def test_the_vocabulary_is_anchored_or_whole_phrase(
+        self, answer: str, admits: bool
+    ) -> None:
+        assert gate._admits_a_gap(answer) is admits
 
     def test_answering_it_satisfies_the_gate(self) -> None:
         body = (

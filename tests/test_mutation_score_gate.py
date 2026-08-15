@@ -731,6 +731,55 @@ class TestUngatedRun:
         )
         assert json.loads(receipt.read_text())["gated"] is False
 
+    def test_a_report_only_run_does_not_claim_to_have_gated(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No --diff-scoped and no baseline of either kind: nothing in this
+        invocation can fail, so the receipt must not say it gated. The flag
+        used to default to True and was only cleared inside the diff-scoped
+        arm, so precisely the run that checks nothing at all reported
+        ``"gated": true`` (Codex review)."""
+        results = _write(
+            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+        )
+        receipt = tmp_path / "receipt.json"
+        rc = gate.main(
+            [
+                "--results-file",
+                results,
+                "--baseline-file",
+                str(tmp_path / "absent.json"),
+                "--json",
+                str(receipt),
+            ]
+        )
+        assert rc == 0
+        assert json.loads(receipt.read_text())["gated"] is False
+
+    def test_a_global_baseline_alone_counts_as_gated(self, tmp_path: Path) -> None:
+        """Negative control for the above: SURVIVOR_BASELINE is a real gate on
+        its own (the survivors-vs-total comparison below runs and can fail),
+        so a run carrying one must not be reported as having gated nothing —
+        which is what a `gated = False` default would have done."""
+        results = _write(
+            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+        )
+        receipt = tmp_path / "receipt.json"
+        rc = gate.main(
+            [
+                "--results-file",
+                results,
+                "--baseline-file",
+                str(tmp_path / "absent.json"),
+                "--baseline",
+                "1",
+                "--json",
+                str(receipt),
+            ]
+        )
+        assert rc == 0
+        assert json.loads(receipt.read_text())["gated"] is True
+
 
 def test_diff_scoped_ignores_survivors_in_untouched_functions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

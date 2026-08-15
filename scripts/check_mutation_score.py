@@ -525,14 +525,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {module}: {len(keys)}")
 
     exit_code = 0
-    #: Did any check in this run actually have something to compare against?
-    #: A run that gated nothing must never be reported as a pass.
-    gated = True
     baseline_modules = load_baseline(Path(args.baseline_file))
     total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
     #: Is there a *drift* reference — the only thing that can answer "did the
     #: survivor set grow", for any function, changed or not?
     baseline_available = baseline_modules is not None or total_baseline is not None
+    #: Did any check in this run actually have something to compare against?
+    #: A run that gated nothing must never be reported as a pass. Derived
+    #: rather than defaulted to True: a plain report-only invocation (no
+    #: --diff-scoped, no baseline of either kind) passes through none of the
+    #: branches below, so a `True` default made its receipt claim a gate that
+    #: never ran — exactly the "green for a run that checked nothing" shape
+    #: this flag exists to expose (Codex review). A baseline is a real gate on
+    #: its own; --diff-scoped only becomes one once it has a changed function
+    #: to scope to, which is decided below.
+    gated = baseline_available
     # "Report-only" means there is genuinely nothing to be measured against.
     # Once any gate is active, an unresolved run is a failed measurement.
     gating_active = args.diff_scoped or baseline_available
@@ -548,6 +555,11 @@ def main(argv: list[str] | None = None) -> int:
         # review). Without this, a "baseline drift" lane with no baseline
         # returns 0 no matter how many mutants survive — the can't-fail shape
         # this whole gate exists to remove.
+        #
+        # This is the *only* --require-baseline check: once a baseline of
+        # either kind exists, its own gate below always runs, so `gated` is
+        # already True and a second, later "nothing was gated" check could
+        # never fire. A trailing copy of it existed and was unreachable.
         print(
             "ERROR: --require-baseline was passed but no baseline is available "
             f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
@@ -628,6 +640,12 @@ def main(argv: list[str] | None = None) -> int:
         touched = changed_functions(parse_changed_lines(diff_text), REPO_ROOT)
         n_funcs = sum(len(v) for v in touched.values())
         print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
+        if n_funcs:
+            # --diff-scoped is a real gate exactly when it has a changed
+            # function to scope to, whether or not that function has
+            # survivors — so this is set before the pass/fail split, not
+            # inside the "no survivors" arm.
+            gated = True
         failures = check_diff_scoped(records, touched)
         if failures:
             print(
@@ -637,20 +655,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("\n".join(failures))
             exit_code = 1
-        elif n_funcs == 0 and baseline_modules is None:
+        elif n_funcs == 0 and not baseline_available:
             # The test-only diff. This gate is attribution-based, so a branch
             # that weakens assertions without touching a production function
             # gives it nothing to scope to — and "OK" for a run that examined
             # zero functions reads as a pass it never made (Codex review). The
             # survivors such a branch creates are only visible as *drift*,
-            # which needs the baseline file.
-            gated = False
+            # which needs a baseline.
             print(
                 "mutation-score: diff-scoped examined 0 changed functions and "
-                f"there is no per-module baseline at {args.baseline_file}, so "
-                "this run GATED NOTHING. A test-only change can only be "
-                "checked as drift; record the baseline once with the "
-                "workflow_dispatch lane (write_baseline: true)."
+                f"there is no baseline ({args.baseline_file} is absent and "
+                "SURVIVOR_BASELINE is unset), so this run GATED NOTHING. A "
+                "test-only change can only be checked as drift; record the "
+                "baseline once with the workflow_dispatch lane "
+                "(write_baseline: true)."
             )
         else:
             print("mutation-score: diff-scoped OK (no survivors in changed functions)")
@@ -687,13 +705,6 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print(f"mutation-score: OK ({survivors} == baseline {total_baseline})")
-
-    if args.require_baseline and not gated:
-        print(
-            "ERROR: --require-baseline was passed but this run had nothing to "
-            "gate against (no changed production function, no baseline)."
-        )
-        exit_code = 1
 
     if args.json:
         Path(args.json).write_text(
