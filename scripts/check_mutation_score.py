@@ -72,8 +72,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import tomllib
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutation_results import (  # noqa: E402
@@ -356,84 +354,6 @@ def _measurement_is_complete(
     )
 
 
-def mutated_modules() -> set[str]:
-    """`[tool.mutmut].source_paths` — the only modules whose staleness matters."""
-    try:
-        with open(REPO_ROOT / "pyproject.toml", "rb") as fh:
-            return set(tomllib.load(fh)["tool"]["mutmut"]["source_paths"])
-    except (OSError, KeyError, tomllib.TOMLDecodeError):
-        return set()
-
-
-def deletion_only_paths(diff_text: str) -> set[str]:
-    """Paths with at least one hunk that removes lines and adds none.
-
-    Such a hunk cannot be scoped from the *post-change* AST: the new-side
-    anchor lands on whatever now occupies that position, so deleting a
-    module-level statement immediately above a `def` attributes to that
-    function instead of module scope (Codex review). What was deleted is only
-    knowable from the old side, so the honest answer is "cannot tell".
-    """
-    paths: set[str] = set()
-    current: str | None = None
-    for line in diff_text.splitlines():
-        if line.startswith("+++ b/"):
-            current = line[6:].strip()
-            if current == "/dev/null":
-                current = None
-            continue
-        if current is None:
-            continue
-        m = _HUNK.match(line)
-        if m and m.group(2) is not None and int(m.group(2)) == 0:
-            paths.add(current)
-    return paths
-
-
-def _changed_scope(args: argparse.Namespace) -> str:
-    """``"module"`` when a mutated module has a module-scope change.
-
-    mutmut skips a mutant whose *source function hash* is unchanged, and a
-    module-level constant is not part of any function's hash — so a warm cache
-    reuses verdicts computed before the constant changed, silently defeating
-    the module-scope attribution added for exactly this case (Codex review).
-    Answering "module" tells mutation.yml not to restore the cache.
-
-    Fails safe: any error answers "module", i.e. do not reuse the cache.
-    """
-    try:
-        if args.diff_file:
-            diff_text = Path(args.diff_file).read_text(encoding="utf-8")
-        else:
-            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-                ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if proc.returncode != 0:
-                return "module"
-            diff_text = proc.stdout
-        mutated = mutated_modules()
-        # "Cannot tell" must not be reported as "function" — that would let the
-        # cache serve verdicts computed before a deleted global changed those
-        # functions' behaviour.
-        if deletion_only_paths(diff_text) & mutated:
-            return "module"
-        changed = {
-            path: lines
-            for path, lines in parse_changed_lines(diff_text).items()
-            if path in mutated
-        }
-        for functions in changed_functions(changed, REPO_ROOT).values():
-            if MODULE_SCOPE in functions:
-                return "module"
-    except Exception:  # noqa: BLE001 — any failure means "do not trust the cache"
-        return "module"
-    return "function"
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="Run `mutmut run` first.")
@@ -468,15 +388,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--diff-file", help="Read the diff from a file instead of git.")
     parser.add_argument(
-        "--print-changed-scope",
-        action="store_true",
-        help=(
-            "Print 'module' if this branch changes module-scope code in any "
-            "mutated module, else 'function'. Used by mutation.yml to decide "
-            "whether the mutmut cache is safe to restore."
-        ),
-    )
-    parser.add_argument(
         "--require-baseline",
         action="store_true",
         help=(
@@ -486,10 +397,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", help="Write a machine-readable receipt here.")
     args = parser.parse_args(argv)
-
-    if args.print_changed_scope:
-        print(_changed_scope(args))
-        return 0
 
     text, stats = _gather(args)
     if text is None:

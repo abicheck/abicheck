@@ -59,10 +59,55 @@ def _paths_filter() -> list[str]:
     return yaml.safe_load(step["with"]["filters"])["mutated"]
 
 
-def test_paths_filter_matches_mutated_source_paths() -> None:
-    assert sorted(_paths_filter()) == sorted(_source_paths()), (
-        "mutation.yml's paths filter and [tool.mutmut].source_paths have "
-        "drifted — a mutated module with no trigger is only checked weekly."
+#: The lane's own infrastructure. A change to any of these must start the
+#: lane, because the real-mutmut test is `slow` and runs in no other selector.
+_INFRASTRUCTURE_PATHS = {
+    "scripts/mutation_results.py",
+    "scripts/check_mutation_score.py",
+    "tests/test_mutation_results.py",
+    ".github/workflows/mutation.yml",
+    "pyproject.toml",
+}
+
+
+def test_paths_filter_covers_every_mutated_source_path() -> None:
+    missing = set(_source_paths()) - set(_paths_filter())
+    assert not missing, (
+        f"mutated module(s) {sorted(missing)} have no trigger — they would be "
+        "checked only on the weekly run."
+    )
+
+
+def test_paths_filter_covers_the_lanes_own_infrastructure() -> None:
+    """Otherwise a change to the parser, its config or this workflow does not
+    start the lane, and the real-mutmut test runs nowhere at all."""
+    missing = _INFRASTRUCTURE_PATHS - set(_paths_filter())
+    assert not missing, f"untriggered mutation-lane infrastructure: {sorted(missing)}"
+
+
+def test_the_filter_is_exactly_sources_plus_infrastructure() -> None:
+    """No stray entries — the filter is a contract, not a wishlist."""
+    assert set(_paths_filter()) == set(_source_paths()) | _INFRASTRUCTURE_PATHS
+
+
+def test_the_lane_does_not_cache_mutmut_results() -> None:
+    """Removed deliberately, and pinned so it cannot return unnoticed.
+
+    mutmut skips a mutant whose *source function hash* is unchanged, so reuse
+    is sound only if nothing outside those functions changed. Three review
+    rounds found ways that breaks — a test-only commit, a module-level
+    constant, a deletion-only hunk — and the conservative rule covering the
+    last one (any hunk containing a removal) matches essentially every edit,
+    since a modification *is* a removal plus an addition. At that point the
+    cache never hits and only carries risk, so the lane does a full run.
+    Reinstating it needs a design that consults the removed side of the diff,
+    not another new-side heuristic.
+    """
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    caches = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache")]
+    assert not caches, (
+        "a mutmut cache was reintroduced — see this test's docstring for why "
+        "new-side heuristics cannot make it safe"
     )
 
 
@@ -91,21 +136,6 @@ def test_the_mutmut_job_is_gated_on_that_decision() -> None:
     job = _workflow()["jobs"]["mutmut"]
     assert job["needs"] == "resolve"
     assert "needs.resolve.outputs.run == 'true'" in job["if"]
-
-
-def test_the_cache_is_restored_only_on_the_pr_lane() -> None:
-    """mutmut skips a mutant whose source function hash is unchanged, so a warm
-    cache reuses verdicts computed against the *old* tests. That is sound for
-    `--diff-scoped` (changed functions re-run) and unsound for the scheduled
-    drift lane, where weakening only assertions would leave every source hash
-    untouched and the stale "killed" outcomes would be reused."""
-    steps = _workflow()["jobs"]["mutmut"]["steps"]
-    cache = next(s for s in steps if str(s.get("uses", "")).startswith("actions/cache"))
-    # Asserted as a clause rather than by exact string: the condition gained a
-    # second guard (module-scope changes also skip the cache), and pinning the
-    # whole expression would make this test fail on any further, correct
-    # tightening.
-    assert "github.event_name == 'pull_request'" in cache.get("if", "")
 
 
 def test_the_scheduled_lane_requires_a_baseline() -> None:
@@ -195,24 +225,3 @@ def test_mutmut_is_version_pinned() -> None:
     """An unpinned install is how this lane silently changed behaviour before."""
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "mutmut>=3.7,<4" in text
-
-
-def test_the_cache_is_skipped_for_a_module_scope_change() -> None:
-    """The module-scope attribution added for the diff-scoped gate is defeated
-    by a warm cache: mutmut skips a mutant whose *function* hash is unchanged,
-    and a module-level constant belongs to no function's hash, so the gate
-    would compare against verdicts computed before the constant changed
-    (Codex review)."""
-    steps = _workflow()["jobs"]["mutmut"]["steps"]
-    scope = next(s for s in steps if s.get("id") == "scope")
-    assert "--print-changed-scope" in scope["run"]
-
-    cache = next(s for s in steps if str(s.get("uses", "")).startswith("actions/cache"))
-    condition = cache["if"]
-    assert "steps.scope.outputs.changed != 'module'" in condition
-    assert "github.event_name == 'pull_request'" in condition
-
-    names = [s.get("name", "") for s in steps]
-    assert names.index("Decide whether the cache is safe to reuse") < names.index(
-        "Restore mutmut cache"
-    )

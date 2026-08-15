@@ -75,6 +75,16 @@ jobs:
               - 'abicheck/suppression.py'
               - 'abicheck/snapshot_io.py'
               - 'abicheck/serialization.py'
+              # The lane's own infrastructure. Without these a change to
+              # the parser, its config, or this workflow does not start
+              # the lane — and the real-mutmut test is `slow`, excluded
+              # from every other selector, so it would run nowhere at
+              # all (Codex review).
+              - 'scripts/mutation_results.py'
+              - 'scripts/check_mutation_score.py'
+              - 'tests/test_mutation_results.py'
+              - '.github/workflows/mutation.yml'
+              - 'pyproject.toml'
       - name: Decide whether to run
         id: decide
         env:
@@ -130,41 +140,6 @@ jobs:
           ABICHECK_MIN_EXECUTED: '1'
         run: python -m pytest tests/test_mutation_results.py -m slow -q
 
-      - name: Decide whether the cache is safe to reuse
-        id: scope
-        if: github.event_name == 'pull_request'
-        # mutmut skips a mutant whose *source function hash* is unchanged, and
-        # a module-level constant is not part of any function's hash. So a warm
-        # cache reuses verdicts computed before the constant changed, which
-        # silently defeats the module-scope attribution the gate now does
-        # (Codex review). A module-scope change means: do a full run.
-        run: |
-          scope=$(python scripts/check_mutation_score.py --print-changed-scope \
-            --base-ref "origin/${{ github.base_ref }}")
-          echo "changed=$scope" >> "$GITHUB_OUTPUT"
-          echo "changed scope: $scope"
-
-      - name: Restore mutmut cache
-        # PR lane only, and deliberately so. mutmut skips a mutant whose
-        # *source function hash* is unchanged, so a warm cache reuses verdicts
-        # computed against the tests as they were — fine for `--diff-scoped`
-        # (the functions this branch changed have new hashes and re-run), but
-        # unsound for the scheduled drift lane and for recording a baseline: a
-        # commit that weakens only test assertions leaves every source hash
-        # untouched, so the stale "killed" outcomes would be reused and the
-        # regression would go unreported (Codex review).
-        if: >-
-          github.event_name == 'pull_request' &&
-          steps.scope.outputs.changed != 'module'
-        uses: actions/cache@v4
-        with:
-          # mutmut skips a mutant whose function hash is unchanged, so a warm
-          # `mutants/` directory makes the PR lane incremental rather than a
-          # full re-run of the whole detector core.
-          path: mutants
-          key: mutmut-${{ runner.os }}-py3.13-${{ github.sha }}
-          restore-keys: |
-            mutmut-${{ runner.os }}-py3.13-
       - name: Run mutation testing (diff-scoped)
         if: github.event_name == 'pull_request'
         run: |
