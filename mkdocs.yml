@@ -187,6 +187,7 @@ nav:
       - Exception Unwinding: learn/exception-unwinding-abi.md
       - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
       - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
+      - The MSVC/PE ABI Model: learn/msvc-pe-abi-model.md
     - Learning Series:
       - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md
       - "0. Compatibility as a Product Contract": learn/abi-series/00-product-contract.md

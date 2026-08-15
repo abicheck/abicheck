@@ -478,3 +478,17 @@ topics:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
       - use/plugin-systems.md
+
+  # Parts 3-5 build their mental model from the Itanium C++ ABI, which
+  # Windows/MSVC does not use (docs/AGENTS.md criterion 2: a genuinely
+  # different mental model, not another Itanium variant). The exact
+  # capability facts stay owned by reference/platforms.md and Part 5's
+  # PE/COFF parallels table; this page is the narrative "why" companion.
+  msvc-pe-abi-model:
+    canonical_page: learn/msvc-pe-abi-model.md
+    fact_sources:
+      - abicheck/diff_cxx_rules.py
+      - abicheck/pdb_metadata.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/abi-series/05-linker-elf.md
