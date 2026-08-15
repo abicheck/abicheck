@@ -1131,6 +1131,31 @@ def test_an_unreadable_base_says_so_instead_of_guessing(
     assert "WARNING" in capsys.readouterr().out
 
 
+def test_a_deleted_module_level_constant_keeps_module_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting a global is a module-scope edit, and only the base says so.
+
+    The new-side guess resolved such a deletion against the *post*-change
+    file, where the anchor can land on the following `def` — so a deleted
+    global reported `function` scope and the gate then matched only that one
+    function instead of every mutant in the module (Codex review).
+    """
+    base = "X = 1\n\n\ndef f():\n    return X\n"
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(
+        "def f():\n    return 1\n", encoding="utf-8"
+    )
+    _with_base(monkeypatch, {"abicheck/diff_types.py": base})
+    touched = gate.changed_functions(
+        {},
+        tmp_path,
+        {"abicheck/diff_types.py": {1}},
+        gate._base_reader("origin/main"),
+    )
+    assert touched == {"abicheck/diff_types.py": {gate.MODULE_SCOPE}}
+
+
 def test_parse_removed_lines_reads_the_base_side_of_every_hunk() -> None:
     """Modified lines appear on both sides; only the base side can name the
     function a *removed* line lived in."""
