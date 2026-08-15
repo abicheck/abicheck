@@ -73,7 +73,7 @@ def _write_fake_abicheck_package(root: Path) -> None:
 
 
 def _run_import_under_safe_path(
-    cwd: Path, extra_env: dict[str, str] | None = None
+    cwd: Path, extra_env: dict[str, str] | None = None, *, use_dash_s: bool = True
 ) -> subprocess.CompletedProcess[str]:
     script = (
         _py_safe_path_source()
@@ -81,13 +81,20 @@ def _run_import_under_safe_path(
         "print(split_gcc_options('-DFOO=1'))\n"
     )
     env = {**os.environ, **(extra_env or {})}
+    argv = [sys.executable, *(["-S"] if use_dash_s else []), "-c", script]
     return subprocess.run(
-        [sys.executable, "-c", script],
+        argv,
         capture_output=True,
         text=True,
         cwd=cwd,
         env=env,
         timeout=30,
+    )
+
+
+def _write_fake_sitecustomize(root: Path) -> None:
+    (root / "sitecustomize.py").write_text(
+        f'import sys\nprint("{_MALICIOUS_MARKER}", file=sys.stderr)\n'
     )
 
 
@@ -138,4 +145,73 @@ class TestPySafePathPreventsCheckoutShadowing:
             timeout=30,
         )
         assert result.returncode != 0
+        assert _MALICIOUS_MARKER in result.stderr
+
+
+class TestPySafePathPreventsSitecustomizeExecution:
+    """Codex review, third round on this same fix: ``site.py`` auto-imports
+    a ``sitecustomize.py`` it finds on ``sys.path`` as part of ordinary
+    interpreter *startup* -- before a single line of ``$_PY_SAFE_PATH``'s
+    own ``-c`` script body ever runs, since that startup processing happens
+    before the script body is executed at all. A checked-out PR's own
+    top-level ``sitecustomize.py`` therefore ran regardless of the filter,
+    with no import statement of ours even involved. Every real
+    ``"$_PY_BIN" -c "$_PY_SAFE_PATH"...`` call site in ``run.sh`` now also
+    passes ``-S`` (skip automatic site processing, including
+    sitecustomize/usercustomize) so nothing checkout-derived can execute
+    before the filter has a chance to run; ``$_PY_SAFE_PATH`` itself then
+    calls ``site.main()`` manually, once the checkout is already gone from
+    ``sys.path``, to restore normal site-packages access for the real
+    ``import abicheck...`` that follows.
+
+    The control test below deliberately reproduces via ``PYTHONPATH=.``
+    (matching the reviewer's own reported scenario -- "a calling workflow
+    has PYTHONPATH=."), not via a bare CWD entry: empirically, on the
+    Python build this test suite actually runs under, the *implicit*
+    startup ``site.main()`` call resolves its own ``sys.path`` snapshot
+    before the ``-c`` command's own ``""`` (CWD) entry is appended to it,
+    so a bare-CWD ``sitecustomize.py`` with no ``PYTHONPATH`` set never
+    reliably wins the module-cache race against this build's own
+    ``/usr/lib/python3*/sitecustomize.py`` stub during that implicit call
+    (verified directly: even an explicit, later ``import sitecustomize``
+    from *inside* the running script -- well after "" is confirmed present
+    in ``sys.path`` -- still resolves to the cached stdlib stub, not a
+    same-named file placed in the CWD). A ``PYTHONPATH`` entry, by
+    contrast, is part of ``sys.path`` from before interpreter startup even
+    begins, so it reliably wins that race and reproduces the vulnerability
+    -- this is also the literal scenario named in the finding. The fix
+    itself (``-S`` before site ever runs) is not specific to either
+    vector; it is verified here against the one that actually reproduces
+    in this environment.
+    """
+
+    def test_sitecustomize_is_not_executed_with_the_real_fix(
+        self, tmp_path: Path
+    ) -> None:
+        _write_fake_sitecustomize(tmp_path)
+        result = _run_import_under_safe_path(tmp_path, use_dash_s=True)
+        assert result.returncode == 0, result.stderr
+        assert _MALICIOUS_MARKER not in result.stderr
+
+    def test_sitecustomize_is_not_executed_with_pythonpath_dot(
+        self, tmp_path: Path
+    ) -> None:
+        _write_fake_sitecustomize(tmp_path)
+        result = _run_import_under_safe_path(
+            tmp_path, extra_env={"PYTHONPATH": "."}, use_dash_s=True
+        )
+        assert result.returncode == 0, result.stderr
+        assert _MALICIOUS_MARKER not in result.stderr
+
+    def test_without_dash_s_pythonpath_dot_sitecustomize_actually_reproduces(
+        self, tmp_path: Path
+    ) -> None:
+        """Proves the two tests above aren't vacuously passing -- the
+        identical filter script and PYTHONPATH=. setup, minus only the
+        real fix's own ``-S`` flag, really does let the checkout's
+        sitecustomize.py run before the filter gets a chance to matter."""
+        _write_fake_sitecustomize(tmp_path)
+        result = _run_import_under_safe_path(
+            tmp_path, extra_env={"PYTHONPATH": "."}, use_dash_s=False
+        )
         assert _MALICIOUS_MARKER in result.stderr

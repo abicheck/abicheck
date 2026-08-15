@@ -91,6 +91,19 @@ def split_gcc_options(text: str) -> list[str]:
        double quotes: it is always literal, never a grouping delimiter
        and never escapable (escaping it would be meaningless once it
        carries no special meaning to escape).
+    7. The double-quote branch still followed real POSIX double-quote
+       escaping unconditionally, which collapses ``\\\\`` to a single
+       ``\\`` -- but a quoted Windows UNC path (``-I"\\\\server\\share
+       path\\include"``) legitimately starts with a literal two-backslash
+       prefix, and that collapse silently turned it into a single-slash,
+       non-UNC path the compiler can't resolve. Since real POSIX escaping
+       inside quotes is not something anything on this Windows-only branch
+       needs to replicate for its own sake (the same reasoning item #5
+       already applied to backslash-before-whitespace), only a backslash
+       immediately escaping the closing quote character itself is treated
+       as an escape now; any other backslash inside quotes -- including a
+       doubled one -- is left completely literal, so ``\\\\server\\share``
+       survives intact.
 
     The fix is not a cleverer single grammar (#2-#4 each tried and
     regressed something with one) -- it's recognizing that #1's underlying
@@ -161,12 +174,15 @@ def _split_gcc_options_windows(text: str) -> list[str]:
     reason this function exists); ``-IC:\\Users\\O'Brien\\include`` ->
     unchanged, one token, apostrophe intact (also diverging from plain
     ``shlex``, which would raise ``ValueError`` for an unterminated
-    quote). Inside double quotes, escaping follows real POSIX rules for
-    that quote kind unconditionally (``\\"`` -> ``"``, ``\\\\`` -> ``\\``,
-    any other ``\\x`` stays literal, ``'`` always literal) -- matching
-    plain ``shlex`` exactly, since an explicitly double-quoted Windows
-    path is a deliberate opt-in to POSIX double-quote semantics. There is
-    no equivalent single-quote opt-in on this platform.
+    quote). Inside double quotes, only a backslash immediately escaping
+    the closing quote character is special (``\\"`` -> ``"``); any other
+    backslash -- including a doubled one, e.g. a quoted UNC path's
+    ``\\\\server\\share`` prefix -- is left completely literal rather than
+    collapsed the way real POSIX double-quote rules would (``'`` still
+    always literal, matching the unquoted case). This is a deliberate
+    divergence from plain ``shlex`` (see item #7 above) precisely because
+    a quoted Windows path is still a Windows path, not an opt-in to POSIX
+    backslash-collapsing semantics the way it would be on a POSIX shell.
     """
     tokens: list[str] = []
     current: list[str] = []
@@ -210,11 +226,14 @@ def _split_gcc_options_windows(text: str) -> list[str]:
                 if c2 == '"':
                     i += 1
                     break
-                # POSIX double-quote rule: only a backslash escaping the
-                # quote itself or another backslash is special; any other
-                # `\x` (e.g. the literal-path case) is kept as-is, matching
-                # plain shlex exactly (see the docstring above).
-                if c2 == "\\" and i + 1 < n and text[i + 1] in ('"', "\\"):
+                # Only a backslash immediately escaping the closing-quote
+                # character itself is special here -- a bare `\\` (e.g. the
+                # leading pair of a UNC path, `\\server\share`) is left as
+                # two literal backslashes rather than collapsed to one (see
+                # item #7 in the docstring above for why this diverges from
+                # plain shlex's real POSIX double-quote rule, which treats
+                # `\\` -> `\` unconditionally).
+                if c2 == "\\" and i + 1 < n and text[i + 1] == '"':
                     current.append(text[i + 1])
                     i += 2
                     continue

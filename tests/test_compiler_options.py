@@ -149,6 +149,16 @@ class TestSplitGccOptionsWindows:
         # quoting to be stripped.
         assert _split_gcc_options_windows("-DCHAR='x'") == ["-DCHAR='x'"]
 
+    def test_quoted_unc_path_prefix_survives(self) -> None:
+        # Codex review, seventh round: the double-quote branch previously
+        # followed real POSIX double-quote escaping unconditionally, which
+        # collapses `\\` -> `\` -- corrupting a quoted UNC path's leading
+        # two-backslash prefix into a single, non-UNC backslash the
+        # compiler can't resolve.
+        assert _split_gcc_options_windows(r'-I"\\server\share path\include"') == [
+            r"-I\\server\share path\include"
+        ]
+
     def test_apostrophe_in_windows_path_does_not_raise(self) -> None:
         # The original bug report shape: a real Windows path/filename
         # containing an apostrophe (a common surname) previously opened

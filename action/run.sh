@@ -97,7 +97,7 @@ add_flag_shlex_split() {
   # never subject to that conversion (only actual argv strings are), so
   # this sidesteps the whole class of corruption regardless of the exact
   # value shape that triggers it -- not just the one case that surfaced it.
-  split="$(printf '%s' "$value" | "$_PY_BIN" -c "$_PY_SAFE_PATH"'
+  split="$(printf '%s' "$value" | "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
 import sys
 
 from abicheck._compiler_options import split_gcc_options
@@ -262,10 +262,29 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # checkout root to the same real CWD, and (verified) resolves the bare
 # empty-string entry -c itself inserts to that same real CWD too, so one
 # check covers both shapes without a separate special case for "".
+#
+# Every call site pairs this with the interpreter's own `-S` flag (Codex
+# review, fresh evidence, on top of the filter above): a checked-out PR
+# adding a top-level `sitecustomize.py` gets it auto-imported by the `site`
+# module during normal interpreter startup -- BEFORE this `-c` script body
+# ever runs a single line of its own filtering, since site processing
+# happens as part of interpreter initialization itself. `-S` skips that
+# automatic site processing (including sitecustomize/usercustomize) so
+# nothing checkout-derived can execute before the filter below has a chance
+# to strip the checkout out of sys.path; `import site; site.main()` then
+# re-runs site processing manually, but only once the checkout entry is
+# already gone from sys.path, so the real, pip-installed site-packages
+# (needed for the following `import abicheck...`) get added back exactly
+# as normal while sitecustomize/usercustomize can no longer be found there.
+# Verified empirically both ways: a fake sitecustomize.py in the CWD
+# executes under `-S` + `site.main()` with no filtering (confirming the
+# vector is real), and does not execute once the filter runs first.
 _PY_SAFE_PATH='import os
 import sys
 _cwd = os.path.realpath(os.getcwd())
 sys.path = [p for p in sys.path if os.path.realpath(p) != _cwd]
+import site
+site.main()
 '
 
 # ---------------------------------------------------------------------------
@@ -458,7 +477,7 @@ for asset in data.get("assets") or []:
   # extraction safety here.
   case "$asset_name" in
     *.tar.zst)
-      "$_PY_BIN" -c "$_PY_SAFE_PATH"'
+      "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -468,7 +487,7 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
       ;;
     *.tar.gz | *.tgz | *.tar)
-      "$_PY_BIN" -c "$_PY_SAFE_PATH"'
+      "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
@@ -514,7 +533,7 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
   fi
 
   local resolve_output
-  resolve_output=$("$_PY_BIN" -c "$_PY_SAFE_PATH"'
+  resolve_output=$("$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -2287,7 +2306,7 @@ _maybe_post_pr_comment() {
   # sys.argv[1:], unaffected by this); the only observable difference is
   # the program name `--help`/usage text shows ("-c" instead of the
   # resolved module path), which this Action does not depend on.
-  "$_PY_BIN" -c "$_PY_SAFE_PATH"'
+  "$_PY_BIN" -S -c "$_PY_SAFE_PATH"'
 import runpy
 
 runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")

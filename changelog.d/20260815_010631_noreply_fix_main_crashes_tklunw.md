@@ -42,4 +42,19 @@
   `PYTHONPATH=.` set already has Python resolve that `.` into the
   checkout's own absolute path before the filter ever runs — and the one
   `-m abicheck.cli_pr_comment` invocation was converted to the equivalent
-  `-c`-based form so it could receive the same fix.
+  `-c`-based form so it could receive the same fix. Every one of these
+  invocations also now passes `-S` (skip automatic `site` processing) so
+  a checked-out PR's own top-level `sitecustomize.py`/`usercustomize.py`
+  can no longer execute during interpreter *startup* — before the
+  `sys.path`-filtering snippet above ever gets a chance to run a single
+  line — with `site.main()` called manually right after the filter to
+  restore normal site-packages access for the real, pip-installed package.
+- **A quoted Windows UNC path forwarded via `--gcc-options`/
+  `--compiler-option` no longer loses its leading double backslash.** The
+  Windows-only tokenizer's double-quote handling followed real POSIX
+  double-quote escaping unconditionally, which collapses `\\` to a single
+  `\` — corrupting a value like `-I"\\server\share path\include"` into a
+  single-backslash, non-UNC path the compiler can't resolve. Only a
+  backslash immediately escaping the closing quote character is treated
+  as an escape now; any other backslash inside quotes, including a
+  doubled one, is left completely literal.
