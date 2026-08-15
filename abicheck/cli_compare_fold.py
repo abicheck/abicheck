@@ -224,26 +224,34 @@ class _ScopedFold:
         removing an irrelevant symbol while breaking a required one could
         print "BREAKING: 1 breaking" while exiting 0, or the reverse.
 
-        Rather than re-deriving scoped counts from scratch, this reuses
-        :meth:`into_json` over a `to_stat_json`-shaped payload -- the exact
-        same scoped-verdict-swap and count-recompute logic the JSON path
-        already uses and this module's own tests already cover -- and
-        re-renders the result through the identical one-line format
-        :func:`reporter_markdown.to_stat` uses, via the shared
-        `format_stat_line` helper (`stat_line.py`) both now call. This
-        guarantees the one-line output and a `--format json` run of the
-        same scoped invocation can never disagree about the verdict or
-        counts, since both are read from the one already-reviewed fold.
+        The verdict/exit-code halves reuse :meth:`into_json` over a
+        `to_stat_json`-shaped payload -- the exact same scoped-verdict-swap
+        and severity-recompute logic the JSON path already uses and this
+        module's own tests already cover. The *counts* are deliberately
+        NOT read from that payload's `summary`, though (Codex review, fresh
+        evidence, second round): JSON's own `_fold_findings_into_stat_summary`
+        ADDS scoped-only contributions on top of the full-library counts
+        rather than replacing them -- correct for JSON, which also carries
+        `changes`/`full_summary` so a reader can see *why* an unrelated
+        full-library finding is still counted despite a COMPATIBLE scoped
+        verdict. The one-line format has no such context: a bare
+        "COMPATIBLE: 1 breaking" with nothing explaining the 1 reads as a
+        genuine contradiction, not a nuance. So the counts here are
+        recomputed from scratch out of *only* the findings that actually
+        decide the scoped verdict/exit code -- `_scoped_gate_findings()`'s
+        `scoped_only` changes and `missing_labels` -- mirroring
+        `_fold_findings_into_stat_summary`'s own per-finding severity-bucket
+        tally, just without the full-library base it adds onto.
         """
         import json
 
-        from .reporter import to_stat_json
+        from .checker_policy import EvidenceStatus
+        from .reporter import _change_to_dict, to_stat_json
         from .reporter_markdown import _VERDICT_LABEL
         from .stat_line import format_stat_line
 
         base = to_stat_json(self.result, severity_config=self.severity_config)
         folded = json.loads(self.into_json(base))
-        summary = folded.get("summary") or {}
         verdict_value = folded.get("verdict") or _VERDICT_LABEL[self.result.verdict]
         gate_note = ""
         severity_block = folded.get("severity")
@@ -259,14 +267,45 @@ class _ScopedFold:
             gate_note = (
                 f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
             )
+
+        scoped_only, missing_labels, blocks, _missing_kind = (
+            self._scoped_gate_findings()
+        )
+        counts = {
+            "breaking": 0,
+            "source_breaks": 0,
+            "risk_changes": 0,
+            "compatible_additions": 0,
+        }
+        eff_sets = self.result._effective_kind_sets()
+        for c in scoped_only:
+            entry = _change_to_dict(
+                c,
+                policy=self.result.policy or "strict_abi",
+                kind_sets=eff_sets,
+                policy_file=self.result.policy_file,
+                severity_config=self.severity_config,
+                evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+            )
+            severity = entry.get("severity")
+            bucket = (
+                _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
+                if isinstance(severity, str)
+                else None
+            )
+            if bucket:
+                counts[bucket] += 1
+        for _label in missing_labels:
+            bucket = _SEVERITY_TO_SUMMARY_BUCKET["breaking" if blocks else "compatible"]
+            counts[bucket] += 1
         return format_stat_line(
             str(verdict_value),
-            breaking=summary.get("breaking", 0),
-            source_breaks=summary.get("source_breaks", 0),
-            risk_count=summary.get("risk_changes", 0),
-            compatible_additions=summary.get("compatible_additions", 0),
-            total_changes=summary.get("total_changes", 0),
-            redundant_count=self.result.redundant_count,
+            breaking=counts["breaking"],
+            source_breaks=counts["source_breaks"],
+            risk_count=counts["risk_changes"],
+            compatible_additions=counts["compatible_additions"],
+            total_changes=sum(counts.values()),
+            redundant_count=0,
             gate_note=gate_note,
         )
 

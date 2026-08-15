@@ -1749,15 +1749,43 @@ class TestUsedByScoping:
         assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
         # The verdict label leads with the scoped result (COMPATIBLE), the
         # same swap `into_json`'s `payload["verdict"]` makes -- not the
-        # full-library BREAKING that would exit 4. The counts after the
-        # colon still describe the full library's findings ("1 breaking",
-        # from the real removed-symbol diff below): that mirrors
-        # `--format json`'s own `summary`/`changes` in this identical
-        # scenario (see test_json_severity_block_reflects_scoped_gate_not_
-        # full_library above) -- the scoped gate decides pass/fail, it does
-        # not filter which findings are shown, so this is consistency with
-        # JSON, not a leftover full-library verdict.
-        assert result.stdout.strip() == "COMPATIBLE: 1 breaking (1 total)"
+        # full-library BREAKING that would exit 4. Unlike `--format json`
+        # (which keeps the full-library "1 breaking" count alongside a
+        # `changes` array a reader can inspect for context -- see
+        # test_json_severity_block_reflects_scoped_gate_not_full_library
+        # above), the one-line format has no room for that context, so its
+        # counts are recomputed from only what the scoped gate actually
+        # rests on (Codex review, fresh evidence): the removed symbol isn't
+        # one of the app's required symbols, so there are no scoped-only
+        # findings and no missing-contract labels, and the one-liner
+        # correctly shows "no changes" instead of an unexplained "1
+        # breaking" next to a COMPATIBLE verdict.
+        assert result.stdout.strip() == "COMPATIBLE: no changes (0 total)"
+
+    def test_quick_profile_one_liner_counts_the_scoped_only_finding(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The mirror case of the test above: a scoped-only finding (one with
+        no backing full-library `Change`, e.g. a synthesized
+        `PE_ORDINAL_RETARGETED`) is the *only* thing making this run
+        BREAKING -- the full library itself is unchanged (`NO_CHANGE`).
+        The one-liner must count it, not print "no changes" just because
+        `result.changes` is empty (Codex review, fresh evidence)."""
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick",
+        )
+        assert result.exit_code == 4
+        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch
