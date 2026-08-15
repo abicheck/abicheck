@@ -64,7 +64,19 @@ dev = [
     "pytest-xdist>=3.0",
     "filelock>=3.0",
     "hypothesis>=6.0",
-    "ruff>=0.3",
+    # Pinned exactly, and kept in lockstep with .pre-commit-config.yaml's
+    # `rev:` — tests/test_toolchain_pins.py asserts the two agree.
+    #
+    # `ruff>=0.3` meant CI resolved whatever was newest on the day it ran while
+    # pre-commit pinned v0.9.0, so the lint gate's *rules* differed by entry
+    # point: 0.9.0 flags a pre-existing F811 in cli_buildsource_helpers.py that
+    # current ruff does not. A lint gate whose verdict depends on when it ran
+    # is not a gate. Pinned forward rather than back for that reason — moving
+    # to 0.9.0 would red the lint lane on existing code.
+    #
+    # Bumping is a deliberate, reviewable change: update both files together
+    # and run `python scripts/verify.py --profile fast --only lint,fmt-check`.
+    "ruff==0.16.3",
     # Pinned exact: an unpinned mypy (`mypy>=1.0` + `pip install mypy` in CI) made the
     # type gate non-reproducible — 2 errors slipped onto a branch and only surfaced on a
     # newer mypy (field-eval CI gap). Bump deliberately when adopting a new mypy.
@@ -275,21 +287,127 @@ version = "literal: pyproject.toml: project.version"
 #   mutmut results                   # view surviving mutants
 #   mutmut show <id>                 # show a specific mutant
 #
+# NOTE on key names: mutmut 3.x renamed these. The v2 spellings this file used
+# to carry (`paths_to_mutate`, `tests_dir`, `runner`) are not merely deprecated
+# — `tests_dir = "tests/"` (a string, where 3.x wants a list) makes `mutmut run`
+# abort with a TypeError before generating a single mutant, and `runner` is not
+# a recognised key at all in 3.x, so the marker exclusion below was being
+# silently dropped and every mutant would have re-run the integration and slow
+# lanes. Both confirmed against mutmut 3.7.0. Keep these 3.x spellings.
+#
 # Focus on the core detection modules where surviving mutants indicate
 # test gaps that could allow regressions:
-paths_to_mutate = [
-    "abicheck/diff_symbols.py",      # function/variable/parameter detectors
-    "abicheck/diff_types.py",        # type/enum/union/typedef detectors
-    "abicheck/diff_platform.py",     # ELF/DWARF/PE/Mach-O detectors
-    "abicheck/diff_vtable_layout.py",  # G23 B2 vtable-group reconstruction
-    "abicheck/diff_filtering.py",    # deduplication and redundancy logic
-    "abicheck/checker_policy.py",    # verdict classification
-    "abicheck/idioms.py",            # ADR-027 idiom & anti-pattern recognisers
-    "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
-    "abicheck/surface_graph.py",     # ADR-027 declaration-graph substrate
+# `source_paths` is what gets **copied** into `mutants/`, and mutmut runs the
+# suite from inside that directory — so it has to be the whole importable
+# package. Listing individual files here produced a `mutants/abicheck/` with
+# no `__init__.py` and 14 of 272 modules, which shadows the real package as a
+# namespace package: `import abicheck` resolved to that partial copy and
+# `abicheck.__version__` / `abicheck.compat` were simply absent, so mutmut
+# aborted at "failed to collect stats" before generating a single result.
+# (The editable install cannot save it — its finder is *appended* to
+# sys.meta_path, so the path finder reaches `mutants/` first.)
+#
+# `only_mutate` is the actual scope: the core detector logic where a
+# surviving mutant means a test gap. Everything else is copied verbatim so
+# imports resolve, and is never mutated.
+source_paths = ["abicheck"]
+# mutmut runs the suite with `mutants/` as the working directory, so a test
+# that reads a repository file (`examples/ground_truth.json`,
+# `.github/workflows/*.yml`, `scripts/*.py`, `docs/**`) resolves it relative to
+# that copy and fails at collection — 37 collection errors on the first run
+# that got this far, each of them a `FileNotFoundError`, and any one of them
+# aborts the whole lane before a single mutant is measured. These are
+# copy-only: nothing here is walked for mutation. Listing a path that does not
+# exist is harmless (mutmut skips it), so this is deliberately generous rather
+# than minimal — the failure mode of a missing entry is a dead lane.
+also_copy = [
+    ".github",
+    ".pre-commit-config.yaml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    # Real repository inputs that tests read directly, not just directories.
+    "repo_facts.json",
+    "action",
+    "action.yml",
+    "actions",
+    "agent-evals",
+    "changelog.d",
+    "contrib",
+    "docs",
+    "eval",
+    "examples",
+    "mkdocs.yml",
+    "pixi.lock",
+    "scripts",
+    "skills-src",
+    # The three committed publication trees `scripts/gen_agent_skills.py`
+    # generates from `skills-src/`. `test_gen_agent_skills.py` compares them
+    # against it, so copying only the source reports every generated file as
+    # missing (Codex review).
+    ".agents",
+    ".claude",
+    ".gemini",
+    "validation",
 ]
-tests_dir = "tests/"
-runner = "python -m pytest -x -q --tb=no -m 'not integration and not libabigail and not abicc and not slow'"
+only_mutate = [
+    "abicheck/diff_symbols.py",  # function/variable/parameter detectors
+    "abicheck/diff_types.py",  # type/enum/union/typedef detectors
+    "abicheck/diff_platform.py",  # ELF/DWARF/PE/Mach-O detectors
+    "abicheck/diff_vtable_layout.py",  # G23 B2 vtable-group reconstruction
+    "abicheck/diff_filtering.py",  # deduplication and redundancy logic
+    "abicheck/checker_policy.py",  # verdict classification
+    "abicheck/idioms.py",  # ADR-027 idiom & anti-pattern recognisers
+    "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
+    "abicheck/surface_graph.py",  # ADR-027 declaration-graph substrate
+    "abicheck/finding_identity.py",  # canonical/normalized finding identity
+    "abicheck/name_classification.py",  # internal/public name classification
+    "abicheck/suppression.py",  # suppression rule matching
+    "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
+    "abicheck/serialization.py",  # snapshot (de)serialization
+]
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = [
+    "-x",
+    "-q",
+    # `--tb=line`, not `--tb=no`: with `-x`, the first failure ends the whole
+    # lane, and "failed to collect stats" with no traceback says nothing about
+    # which assertion broke. One line per failure costs nothing on the mutant
+    # runs (where failures are the expected outcome and are counted, not read)
+    # and is the difference between a diagnosable lane and a guess.
+    "--tb=line",
+    "-m",
+    "not integration and not libabigail and not abicc and not slow",
+    # Repository-structure tests, excluded because they cannot run from
+    # `mutants/` at all: they read the real repository — its git history, the
+    # generated agent-skill trees, the vendor instruction adapters — and the
+    # copy is not a git repo and does not carry those paths. `-x` means any
+    # one of them aborts the whole lane before a mutant is measured.
+    #
+    # Excluding them costs no measurement: none imports a mutated module, so
+    # none can kill a detector mutant, and
+    # tests/test_mutation_workflow_contract.py keeps that true — if one of
+    # these ever starts importing one, the exclusion stops being free and
+    # that test says so.
+    # Two AI-readiness tests validate the tree they run in, and a mutants
+    # tree is by construction full of 1M-line generated files — they cannot
+    # pass there and are not about the detector core. Deselected rather than
+    # ignored, so the rest of that file still runs.
+    "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
+    "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
+    "--ignore=tests/test_action_check_target.py",
+    "--ignore=tests/test_action_collect_facts.py",
+    "--ignore=tests/test_publish_baseline_upload_step.py",
+    "--ignore=tests/test_publish_baseline_upload_step_evidence.py",
+    "--ignore=tests/test_publish_baseline_upload_step_generation.py",
+    "--ignore=tests/test_restore_git_mtimes.py",
+    "--ignore=tests/test_reusable_workflows.py",
+    "--ignore=tests/test_skill_eval_pack.py",
+    "--ignore=tests/test_skill_eval_scenarios.py",
+    "--ignore=tests/test_verify_profiles.py",
+]
 
 # ---------------------------------------------------------------------------
 # pixi (https://pixi.sh) — conda-forge-based dev environments.

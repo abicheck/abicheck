@@ -1,0 +1,60 @@
+name: Bug-fix test contract
+
+# A `fix:` PR has to say which invariant it restores and which neighbouring
+# inputs it covers — see scripts/check_bugfix_test_contract.py for the three
+# merged-fix escapes that motivated each question. Structural half (a fix that
+# changes shipped code must change a test) is objective; the declared half is
+# the contract block in the PR body.
+#
+# Bypass with the `skip-test-contract` label, matching `skip-changelog`.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch PR base ref
+        # Same reasoning as changelog-check.yml: a --depth=1 fetch can graft a
+        # shallow boundary that breaks the base...head merge-base walk.
+        run: git fetch origin "${{ github.event.pull_request.base.sha }}"
+
+      - name: Write PR body to a file
+        # Via the environment, never interpolated into the shell — a PR body is
+        # attacker-controlled text.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+
+      - name: Check the bug-fix test contract
+        # Routed through scripts/verify.py's step catalog (CLAUDE.md "M0-3")
+        # rather than invoking the script directly, so `verify.py --profile pr`
+        # locally runs the same check. The PR-specific inputs arrive by
+        # environment because a catalog step has fixed argv.
+        env:
+          BUGFIX_CONTRACT_TITLE: ${{ github.event.pull_request.title }}
+          BUGFIX_CONTRACT_BASE: ${{ github.event.pull_request.base.sha }}
+          BUGFIX_CONTRACT_HEAD: ${{ github.event.pull_request.head.sha }}
+          BUGFIX_CONTRACT_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        run: |
+          if ${{ contains(github.event.pull_request.labels.*.name, 'skip-test-contract') }}; then
+            echo "bugfix-test-contract: skipped via the skip-test-contract label"
+            exit 0
+          fi
+          python3 scripts/verify.py --profile pr --only bugfix-test-contract

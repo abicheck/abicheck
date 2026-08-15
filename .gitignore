@@ -19,3 +19,9 @@ site/
 .claude/worktrees/
 /results/
 .pixi/
+
+# mutmut working directory and per-run receipt (the committed baseline,
+# mutation-baseline.json, is deliberately NOT ignored).
+mutants/
+mutation-receipt.json
+mutmut-results.txt

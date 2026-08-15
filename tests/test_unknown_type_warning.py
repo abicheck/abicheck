@@ -17,6 +17,7 @@ import logging
 
 import pytest
 
+from abicheck import dwarf_metadata
 from abicheck.dwarf_metadata import _compute_fallback_type_info
 
 
@@ -31,6 +32,22 @@ class _MockDie:
 
 class TestUnknownTypeWarning:
     """Verify _compute_fallback_type_info emits a warning for unknown tags."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_seen_tags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Give each test its own first-sighting state.
+
+        `_SEEN_UNKNOWN_DWARF_TAGS` is a process-wide set that makes the
+        warning fire once per tag, so a test asserting the warning *happens*
+        depends on nothing having warned for that tag earlier in the same
+        process. That held only because no other test used this tag string —
+        an accident of ordering, not isolation, and it broke the moment the
+        suite was run twice in one process (mutmut runs it once to collect
+        stats and again as the clean baseline, and the second run saw the tag
+        already recorded). `test_dwarf_metadata_coverage.py` already resets
+        the set the same way for the same reason.
+        """
+        monkeypatch.setattr(dwarf_metadata, "_SEEN_UNKNOWN_DWARF_TAGS", set())
 
     def test_unknown_tag_no_name_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         """Unknown DWARF tag with no name attribute must emit a WARNING.

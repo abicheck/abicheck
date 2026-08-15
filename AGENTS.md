@@ -83,6 +83,15 @@ the identical command) — not just the fast command above.**
 these commands; if you change a check, change it in `scripts/verify.py` and
 let that test tell you what else needs updating.
 
+The `bugfix-test-contract` step is the one gate CI can run more of than a
+local shell can: its declared half reads the pull request's body. A local run
+without `BUGFIX_CONTRACT_BODY_FILE` set still performs the structural half and
+then exits **2**, which `verify.py` records as a skip — so the `pr` profile
+marks the run incomplete rather than letting it claim parity with a CI job
+that can still fail on the body afterwards. A real structural finding is
+still exit 1, so it can never be laundered into "partial". Point that variable at a file holding the PR
+description to run the whole gate locally.
+
 **`pip install -e ".[dev]"` alone is not full `pr`-profile parity.** The
 `docs-build` step needs `mkdocs` (`pip install -e ".[dev,docs]"`) and the
 `distribution-build` step needs `build`/`twine` (`pip install -e ".[dev,dist]"`)
@@ -517,6 +526,22 @@ cover the surrounding first-party trees this file doesn't detail.
    `@registry.detector("...")` (`detector_registry.py`) the way the
    neighboring detectors in that file are.
 4. Add unit test.
+5. **Classify the kind for canonical identity** in
+   `tests/canonical_identity_contract.py` — put it in exactly one of
+   `TYPE_BEARING` (its `old_value`/`new_value` hold C/C++ type spellings, so
+   they must be canonicalized, which also means adding it to
+   `finding_identity._TYPE_BEARING_DISCRIMINATOR_KINDS`),
+   `VALUE_INSENSITIVE` (identity does not vary with value spelling because the
+   kind resolves through an `_EQUIVALENT_CHANGE_CATEGORIES` entry), or
+   `UNVERIFIED` (the call site has not been read yet — an explicit backlog
+   entry, not a verdict). `tests/test_canonical_finding_id_completeness.py`
+   fails until the kind is in a bucket. This step exists because PR #753
+   shipped `canonical_finding_id` with three type-slot kinds silently omitted
+   from that set and PR #759 had to add them hours later: a *missing* entry
+   produced no failure anywhere, so 12 targeted tests and a 26k-test suite all
+   passed against the gap. The judgement stays manual (an automatic
+   classification was proposed and rejected — see the set's own comment); only
+   the exhaustiveness is mechanical.
 
 ## Conventions
 
@@ -615,10 +640,30 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   top-tier correctness + under-call monotonicity (more evidence never hides a break an
   earlier tier caught — authority rule). CI posts the matrix to the step summary. User
   docs: `docs/learn/evidence-and-detectability.md` § "What each layer buys".
-- **Mutation testing** — `scripts/check_mutation_score.py` + `.github/workflows/mutation.yml`.
-  `mutmut` mutates the detector core (`diff_*`, `checker_policy`); a *surviving* mutant
-  is a covered-but-unverified line. Runs weekly / on the `mutation` PR label, gating on a
-  survivor baseline (`SURVIVOR_BASELINE`) once the first run establishes it.
+- **Mutation testing** — `scripts/mutation_results.py` (parser/attribution) +
+  `scripts/check_mutation_score.py` (gate) + `.github/workflows/mutation.yml`.
+  `mutmut` mutates the detector core; `[tool.mutmut].only_mutate` is the list, and it
+  now covers identity, suppression and serialization alongside `diff_*`/`checker_policy`.
+  A *surviving* mutant is a covered-but-unverified line. **Three lanes, because one
+  cannot serve both purposes:**
+  - **PR** — auto-runs on a diff touching a mutated module *or* that module's own tests
+    (path-filtered; the `mutation` label still forces a run the filter misses), gating
+    `--diff-scoped`: any survivor in a function this branch changed fails. Absolute —
+    there is no baseline to be under. Lines the branch *removed* are resolved against
+    the merge base, since that is the only revision they exist in.
+  - **Weekly** — per-module drift against the committed `mutation-baseline.json`, so one
+    module's regression cannot be paid for by an unrelated module's improvement.
+  - **Dispatch** (`write_baseline: true`) — records that file. Deliberately manual:
+    accepting the current survivor set is a review decision, not something a cron does
+    silently.
+
+  `SURVIVOR_BASELINE` (one global total) remains as a fallback and is the weaker gate —
+  it cannot express the per-module invariant. `--require-baseline` is what stops a run
+  that gated nothing from exiting 0, and an unresolved run (timeout/suspicious/no-tests)
+  is a *failed measurement*, not zero survivors. **`mutation-baseline.json` is not
+  recorded yet**; until a dispatch run writes it, the drift lanes fail closed rather
+  than passing vacuously. Per-lane trigger detail lives in `.github/AGENTS.md`'s
+  workflow table rather than being copied here.
 - **Metamorphic property tests** — `tests/test_detector_properties.py` (`slow`).
   Hypothesis-generated snapshot pairs checked against invariants that hold for *any*
   input (idempotence, determinism, direction-symmetry of touched symbols, emitted-kind
@@ -1403,6 +1448,39 @@ Once a root command genuinely clears the bar above, pick the right home:
   in particular MSVC `/std:`/`/D` spellings, which this fix does not
   attempt (no `compiler_family: msvc` caller/test exists yet to validate
   against, and a wrong guess here is worse than the pre-existing gap).
+- **`ruff format` has never gated anything, and the tree has never been
+  formatted — pins fixed, the reformat itself deliberately not attempted.**
+  Two separate problems were tangled here. (1) `ruff` was pinned in two places
+  that disagreed: `.pre-commit-config.yaml` at `rev: v0.9.0`, and
+  `pyproject.toml`'s `[dev]` at `ruff>=0.3` — a floor, so CI and
+  `pip install -e ".[dev]"` resolved whatever was newest on the day they ran.
+  That is not cosmetic: 0.9.0 reports an `F811` in
+  `abicheck/cli_buildsource_helpers.py` that current ruff does not, so a
+  contributor's `pre-commit` run and CI reached different *lint* verdicts on
+  unmodified code. Fixed by pinning both to the same exact version, forward
+  rather than back (pinning to 0.9.0 would red the lint lane on existing
+  code), with `tests/test_toolchain_pins.py` asserting the two stay in
+  lockstep. (2) Separately — and *not* caused by the version skew — the tree is
+  not `ruff format`-clean under **any** version: 488 files under 0.9.0, 486
+  under 0.16.3, ~56.5k changed lines, and the diffs are near-identical across
+  versions (checked), i.e. the formatter has simply never been applied
+  repo-wide. It went unnoticed because the `fmt-check` step, though present in
+  `scripts/verify.py`'s `fast`/`pr`/`full` profiles, **is not run by any CI
+  job**: `ci.yml`'s `lint-and-types` invokes
+  `--profile pr --only lint,typecheck,docs-build`, no workflow runs the full
+  `pr` profile, and `pre-commit` is not run in CI at all. So the one consumer
+  that would catch it is `pixi run check` (which *does* run the whole `pr`
+  profile) — i.e. a pixi contributor's local gate is currently stricter than
+  CI. That much was **already known and deliberately tracked**, in
+  `tests/test_verify_profiles.py`'s `_PR_STEPS_NOT_IN_A_CI_ONLY_LIST`
+  (`"fmt-check": "NOT RUN IN CI — pre-existing gap, tracked here"`); what this
+  entry adds is the *measurement* of what enabling it would cost, and the
+  finding that the gap is not version skew. **Not fixed here**: making `fmt-check` real requires the ~56.5k-line
+  mechanical reformat first, which would drown this change's review and
+  conflict with every in-flight branch, so it belongs in its own PR that does
+  nothing else. Until then, treat a green CI run as saying nothing about
+  formatting.
+
 - **Deferred entirely, not attempted this pass** (heavier structural
   changes, each needing its own scoped design rather than a drive-by
   addition):

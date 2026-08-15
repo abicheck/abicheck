@@ -193,6 +193,27 @@ def _pyscript(path: str, *args: str) -> tuple[str, ...]:
     return (sys.executable, path, *args)
 
 
+#: `check_bugfix_test_contract.py` exits 2 when its structural half passed but
+#: no PR body was available, so the declared half never ran. Mapping that to a
+#: skip is what keeps a local `--profile pr` from claiming CI parity over half
+#: a gate, while still running the half that does not need a body.
+_BUGFIX_CONTRACT_PARTIAL = {
+    2: (
+        "BUGFIX_CONTRACT_BODY_FILE is unset, so the declared half could not "
+        "run (the structural half did) — set it to a file holding the PR "
+        "description"
+    ),
+    # A second code, because the two situations need different remediation
+    # and checked different amounts. Reporting the body-file reason for a
+    # missing base ref sent the reader to the wrong fix and claimed the
+    # structural half had run when nothing had (Codex review).
+    3: (
+        "the base ref could not be resolved, so nothing was checked — fetch "
+        "the base branch (`git fetch origin main`)"
+    ),
+}
+
+
 @dataclass(frozen=True)
 class Step:
     name: str
@@ -200,6 +221,13 @@ class Step:
     profiles: frozenset[str]
     env: dict[str, str] = field(default_factory=dict)
     precondition: Callable[[], str | None] | None = None
+    #: ``{returncode: reason}``: a step that ran but could only do part of its
+    #: job reports one of these codes, and this maps it to a skip so the
+    #: profile-level completeness contract sees it. A mapping rather than one
+    #: pair because a step can be partial for more than one reason, and the
+    #: receipt has to name the right one. Distinct from `precondition`, which
+    #: decides *before* running and therefore runs nothing at all.
+    partial: dict[int, str] | None = None
     description: str = ""
 
 
@@ -263,6 +291,19 @@ STEPS: tuple[Step, ...] = (
         frozenset({PR, FULL}),
         env={"COVERAGE_CORE": "sysmon"},
         description="Canonical Linux/3.13 unit-tests CI lane, incl. golden + 95% coverage floor",
+    ),
+    Step(
+        "bugfix-test-contract",
+        # Fixed argv on purpose: CI passes the real PR refs and body through
+        # BUGFIX_CONTRACT_{BASE,HEAD,BODY_FILE}, and a local run falls back to
+        # origin/main..HEAD with no body, exercising the structural half. Both
+        # go through this one step rather than the workflow calling the script
+        # directly, so `--profile pr` locally cannot pass while the CI-only
+        # contract fails later (AGENTS.md "M0-3", Codex review).
+        _pyscript("scripts/check_bugfix_test_contract.py"),
+        frozenset({PR, FULL}),
+        partial=_BUGFIX_CONTRACT_PARTIAL,
+        description="Bug-fix test contract (structural half locally, declared half in CI)",
     ),
     Step(
         "fp-rate",
@@ -530,6 +571,16 @@ def run_step(step: Step) -> dict[str, object]:
     env = {**os.environ, **step.env}
     proc = subprocess.run(step.cmd, cwd=ROOT, env=env)
     duration = time.time() - start
+    if step.partial is not None and proc.returncode in step.partial:
+        reason = step.partial[proc.returncode]
+        print(f"=== {step.name}: PARTIAL ({duration:.1f}s) — {reason} ===")
+        return {
+            "name": step.name,
+            "status": "skipped",
+            "reason": reason,
+            "duration_s": round(duration, 1),
+            "returncode": proc.returncode,
+        }
     status = "passed" if proc.returncode == 0 else "failed"
     print(f"=== {step.name}: {status} ({duration:.1f}s) ===")
     return {
