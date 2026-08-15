@@ -35,7 +35,10 @@ executing the attack).
 - Axes covered:
 - General invariant:
 
-<!-- Conditional — answer the ones the checker asks for:
+<!-- Conditional — a menu, not a place to answer. GitHub hides comment
+regions from the rendered description, and the checker ignores them for
+exactly that reason: an answer nobody can see is not evidence. Copy the
+rows the checker asks for OUT of this comment, above it:
 - Real-dependency test:
 - Malicious fixture + side-effect absence:
 - Must-merge / must-not-merge pair:

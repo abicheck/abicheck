@@ -404,3 +404,53 @@ class TestSkipLabel:
         rc = gate.main(["--base", "HEAD", "--head", "HEAD", "--skip-label"])
         assert rc == 0
         assert "skipped via the skip-test-contract label" in capsys.readouterr().out
+
+
+class TestHiddenAnswersDoNotCount:
+    """The declared half exists to put evidence in front of a reviewer.
+
+    GitHub hides `<!-- ... -->` regions from the rendered description, so an
+    answer written inside the template's own conditional block satisfied the
+    parser while being invisible to every human who opened the PR (Codex
+    review).
+    """
+
+    def test_an_answer_inside_a_comment_is_ignored(self) -> None:
+        body = "- Bug class: x\n<!--\n- Real-dependency test: yes\n-->\n"
+        assert "real-dependency-test" not in gate.parse_answers(body)
+        missing = {
+            r.key for r in gate.missing_requirements(body, ["abicheck/snapshot_io.py"])
+        }
+        assert "real-dependency-test" in missing
+
+    def test_the_same_answer_outside_the_comment_counts(self) -> None:
+        body = COMPLETE_BODY + "- Real-dependency test: real zstd at 8 MiB\n"
+        assert gate.missing_requirements(body, ["abicheck/snapshot_io.py"]) == []
+
+    def test_a_multiline_comment_region_is_stripped_whole(self) -> None:
+        body = "<!--\n- Bug class: hidden\n- Negative control: hidden\n-->\n"
+        assert gate.parse_answers(body) == {}
+
+    def test_text_after_a_comment_still_parses(self) -> None:
+        body = "<!-- hint -->\n- Bug class: visible\n"
+        assert gate.parse_answers(body)["bug-class"] == "visible"
+
+
+class TestPublishedActionsTree:
+    """`actions/` (plural) holds five composite actions consumed directly as
+    `uses: abicheck/abicheck/actions/...`; the predicate only knew `action/`."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "actions/check-target/run.sh",
+            "actions/resolve-baseline/resolve_baseline.py",
+            "actions/baseline/action.yml",
+            "actions/collect-facts/run.sh",
+        ],
+    )
+    def test_published_actions_are_shipped_code(self, path: str) -> None:
+        assert gate.touches_shipped_code([path])
+
+    def test_prose_in_that_tree_is_not_shipped_code(self) -> None:
+        assert not gate.touches_shipped_code(["actions/check-target/README.md"])

@@ -84,6 +84,12 @@ _SHIPPED_SUFFIXES_BY_PREFIX = {
     "abicheck/": (".py",),
     "scripts/": (".py",),
     "action/": (".py", ".sh"),
+    # The plural tree: five published composite actions, consumed directly as
+    # `uses: abicheck/abicheck/actions/...` (see docs/reference/check-target.md
+    # and resolve-baseline.md) and each with dedicated tests. `.yml` counts
+    # here because an action's manifest *is* its interface, unlike a workflow
+    # (Codex review).
+    "actions/": (".py", ".sh", ".yml"),
 }
 _SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 
@@ -234,6 +240,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
 
 _MARKER = "<!-- bugfix-test-contract -->"
 
+#: `<!-- ... -->`, including multi-line regions.
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
 #: A line in the body answering a requirement: `- Negative control: <text>`.
 #: Tolerant of `*`/`-` bullets, bold, and a trailing checkbox.
 _ANSWER = re.compile(
@@ -314,10 +323,23 @@ def touches_tests(paths: list[str]) -> bool:
     return any(is_test_path(p) for p in paths)
 
 
+def strip_html_comments(text: str) -> str:
+    """Remove `<!-- ... -->` regions.
+
+    The declared half exists to put evidence *in front of a reviewer*. GitHub
+    hides comment regions from the rendered description, so an answer written
+    inside the template's own `<!-- Conditional ... -->` block satisfies a
+    parser while being invisible to every human who opens the PR — which
+    defeats the point entirely (Codex review). The conditional rows ship inside
+    that comment as a menu to copy out, not as a place to answer.
+    """
+    return _HTML_COMMENT.sub("", text)
+
+
 def parse_answers(body: str) -> dict[str, str]:
-    """Map a normalized label -> answer text, for every `Label: value` line."""
+    """Map a normalized label -> answer text, for every visible `Label: value`."""
     answers: dict[str, str] = {}
-    for line in body.splitlines():
+    for line in strip_html_comments(body).splitlines():
         m = _ANSWER.match(line)
         if not m:
             continue

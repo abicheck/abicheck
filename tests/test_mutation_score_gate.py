@@ -686,3 +686,32 @@ def test_zero_survivors_from_a_summary_is_not_blocked(tmp_path: Path) -> None:
     results = _write(tmp_path, "r.txt", "🎉 40  🙁 0")
     baseline = _baseline(tmp_path, {"abicheck/diff_types.py": 0})
     assert gate.main(["--results-file", results, "--baseline-file", baseline]) == 0
+
+
+def test_an_unresolvable_base_ref_fails_the_diff_scoped_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`git diff` against a bad ref exits nonzero and prints to stderr. Reading
+    that as a diff yields zero changed functions, so the gate reported OK with
+    survivors present — a typo in --base-ref silently disabled it."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--base-ref",
+            "definitely-not-a-ref",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "would pass vacuously" in out
+    assert "diff-scoped OK" not in out

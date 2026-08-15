@@ -522,10 +522,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.diff_file:
             diff_text = Path(args.diff_file).read_text(encoding="utf-8")
         else:
-            diff_text = _run(
+            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
                 ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
                 cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
+            if proc.returncode != 0:
+                # Without this the fatal stderr is parsed as a diff, yielding
+                # zero changed functions — so the diff-scoped gate reports OK
+                # with survivors present. A typo in --base-ref silently
+                # disables the gate (reproduced with `--base-ref
+                # does-not-exist`, Codex review).
+                print(
+                    f"ERROR: `git diff {args.base_ref}...HEAD` failed "
+                    f"(exit {proc.returncode}): {proc.stderr.strip()}\n"
+                    "Cannot determine which functions this branch changed, so "
+                    "the diff-scoped gate would pass vacuously."
+                )
+                return 1
+            diff_text = proc.stdout
         touched = changed_functions(parse_changed_lines(diff_text), REPO_ROOT)
         n_funcs = sum(len(v) for v in touched.values())
         print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
