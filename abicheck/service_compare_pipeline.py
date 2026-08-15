@@ -494,8 +494,23 @@ def classify_compare_pair(
     # are embedded into `old`/`new` before `resolve_compare_request` ever
     # returns), so `layer_coverage`/`requested_depth` -- both only known
     # after `compare_snapshots` returns -- are reflected too.
+    #
+    # P0.4 follow-up (P2 review): `CompareRequest.validation_errors()`
+    # (`_depth_errors` in `api_types.py`) accepts `depth` case-insensitively
+    # (`depth.lower() in USER_DEPTHS`), and every consumer of the *value*
+    # (`enforce_requested_depth`'s own `depth.lower()` lookup into
+    # `_DEPTH_RANK` above, line 194's `request.depth.lower() == "binary"`
+    # check) normalizes case before using it -- so a valid, successfully
+    # validated request like `depth="HEADERS"` reached this assignment with
+    # its original casing preserved. That un-normalized string then broke
+    # every downstream reader that expects the lowercase
+    # `EVIDENCE_DEPTH_VALUES` spelling: `compute_analysis_assurance()`'s
+    # depth-rank lookup silently missed (falling back to a wrong default),
+    # and `validate_evidence_depth()` (every JSON reporter) raised
+    # `ValueError` outright. Stamp the same lowercased form the rest of this
+    # module already normalizes to, not the raw request string.
     if request.depth is not None:
-        result.requested_depth = request.depth
+        result.requested_depth = request.depth.lower()
     from .analysis_assurance import compute_analysis_assurance
 
     result.analysis_assurance = compute_analysis_assurance(

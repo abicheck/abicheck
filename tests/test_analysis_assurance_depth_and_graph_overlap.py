@@ -241,6 +241,41 @@ class TestRequestedDepthPropagationSharedPipeline:
         assert aa.depth_satisfied is True, aa
         assert aa.status == "complete", aa
 
+    def test_direct_api_uppercase_depth_is_normalized(self, tmp_path: Path) -> None:
+        """PR #767 follow-up (P2 review, ``service_compare_pipeline.py:476``):
+        ``CompareRequest.validation_errors()`` (``_depth_errors`` in
+        ``api_types.py``) accepts ``depth`` case-insensitively
+        (``depth.lower() in USER_DEPTHS``), so a direct caller passing
+        ``depth="HEADERS"`` reaches classification successfully. Before this
+        fix, ``classify_compare_pair`` stamped the raw, un-normalized
+        ``request.depth`` onto ``DiffResult.requested_depth``, which broke
+        every downstream reader expecting the lowercase
+        ``EVIDENCE_DEPTH_VALUES`` spelling -- most visibly,
+        ``validate_evidence_depth()`` (every JSON reporter) raised
+        ``ValueError`` outright. This must fail against the pre-fix code."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.checker_types import validate_evidence_depth
+        from abicheck.reporter import to_json
+        from abicheck.service import run_compare_request
+
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="HEADERS"
+        )
+        result = run_compare_request(request).diff
+
+        assert result.requested_depth == "headers", result
+        aa = result.analysis_assurance
+        assert aa.requested_depth == "headers", aa
+        assert aa.effective_depth == "headers", aa
+        assert aa.depth_satisfied is True, aa
+        assert aa.status == "complete", aa
+
+        # Does not raise -- pre-fix, the uppercase requested_depth crashed
+        # validate_evidence_depth() / every JSON reporter.
+        validate_evidence_depth("requested_depth", result.requested_depth)
+        to_json(result)
+
     def test_direct_api_no_depth_leaves_requested_depth_none(
         self, tmp_path: Path
     ) -> None:
@@ -572,3 +607,171 @@ class TestExportAccountingDedupsLegacyPersistedOverlap:
         assert aa.export_accounting.internal == 2
         assert aa.export_accounting.unaccounted == 0
         assert aa.export_accounting.source_linked == 2
+class TestGraphCompletenessConditionallyApplicableFamily:
+    """PR #767 follow-up (P2 review): the round-9 ``!=`` fix above (Finding 2
+    in that round) is too aggressive for a *conditionally applicable* pass
+    family. ``fold_archive_graph`` (``inline_graph_fold.py``) only ever
+    records ``archive_graph`` when the graph carries at least one
+    ``static_library`` node -- it returns silently, with no
+    ``ExtractorRecord`` at all, when there is nothing to introspect. A
+    release that drops its last static-library link input entirely (old side
+    confirmed ``archive_graph``, new side genuinely has no
+    ``static_library`` node to examine) is a legitimate difference between
+    the two builds, not evidence asymmetry, and must not read as
+    ``graph_completeness == "unknown"``.
+    """
+
+    def _pack_with_graph(self, tmp_path: Path, name: str, graph) -> object:
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        return BuildSourcePack(root=tmp_path / name, source_graph=graph)
+
+    def test_archive_graph_correctly_inapplicable_on_one_side_is_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact repro from the review finding: old confirms
+        ``archive_graph`` because it linked a static library; new links no
+        static library at all, so the pass correctly never ran there. This
+        must read as complete, not unknown."""
+        from abicheck.analysis_assurance import _graph_completeness
+        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old_pack = BuildSourcePack(
+            root=tmp_path / "old",
+            source_graph=SourceGraphSummary(
+                nodes=[
+                    GraphNode(id="static_library://libfoo.a", kind="static_library")
+                ],
+                extractor_passes={"archive_graph": True, "call_graph": True},
+            ),
+        )
+        new_pack = BuildSourcePack(
+            root=tmp_path / "new",
+            source_graph=SourceGraphSummary(
+                nodes=[], extractor_passes={"call_graph": True}
+            ),
+        )
+        status, notes = _graph_completeness(old_pack, new_pack)
+        assert status == "complete", notes
+
+    def test_archive_graph_correctly_inapplicable_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        """Same repro through the full ``checker.compare()`` rollup, not just
+        the unit-level ``_graph_completeness`` call."""
+        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                nodes=[
+                    GraphNode(id="static_library://libfoo.a", kind="static_library")
+                ],
+                extractor_passes={"archive_graph": True, "call_graph": True},
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(nodes=[], extractor_passes={"call_graph": True}),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "complete", aa
+        assert aa.status == "complete", aa
+
+    def test_archive_graph_genuine_asymmetry_still_detected(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion: BOTH sides have a static_library link input (so the
+        pass is applicable on both), but only one side actually confirmed
+        the pass ran. This is a real evidence gap and must still read as
+        unknown/asymmetric -- the conditional-applicability exemption must
+        not over-correct into silencing a genuine shortfall for this
+        family."""
+        from abicheck.analysis_assurance import _graph_completeness
+        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old_pack = BuildSourcePack(
+            root=tmp_path / "old",
+            source_graph=SourceGraphSummary(
+                nodes=[
+                    GraphNode(id="static_library://libfoo.a", kind="static_library")
+                ],
+                extractor_passes={"archive_graph": True},
+            ),
+        )
+        new_pack = BuildSourcePack(
+            root=tmp_path / "new",
+            source_graph=SourceGraphSummary(
+                nodes=[
+                    GraphNode(id="static_library://libfoo.a", kind="static_library")
+                ],
+                extractor_passes={},
+            ),
+        )
+        status, notes = _graph_completeness(old_pack, new_pack)
+        assert status == "unknown", notes
+        assert any("archive_graph" in n for n in notes), notes
+
+    def test_archive_graph_genuine_asymmetry_end_to_end(self, tmp_path: Path) -> None:
+        """End-to-end companion to the genuine-asymmetry unit test above."""
+        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old, new = _header_pair()
+        old.build_source = self._pack_with_graph(
+            tmp_path,
+            "old_pack",
+            SourceGraphSummary(
+                nodes=[
+                    GraphNode(id="static_library://libfoo.a", kind="static_library")
+                ],
+                extractor_passes={"archive_graph": True},
+            ),
+        )
+        new.build_source = self._pack_with_graph(
+            tmp_path,
+            "new_pack",
+            SourceGraphSummary(
+                nodes=[
+                    GraphNode(id="static_library://libfoo.a", kind="static_library")
+                ],
+                extractor_passes={},
+            ),
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.graph_completeness == "unknown", aa
+        assert aa.status == "partial", aa
+
+    def test_unconditional_family_absent_on_both_sides_still_asymmetric(
+        self, tmp_path: Path
+    ) -> None:
+        """Sanity check that the exemption is scoped to
+        conditionally-applicable families only: an ordinary,
+        unconditionally-attempted family (``call_graph``) confirmed on one
+        side and not the other must still read as asymmetric -- there is no
+        node-presence signal that could ever exempt it."""
+        from abicheck.analysis_assurance import _graph_completeness
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import SourceGraphSummary
+
+        old_pack = BuildSourcePack(
+            root=tmp_path / "old",
+            source_graph=SourceGraphSummary(extractor_passes={"call_graph": True}),
+        )
+        new_pack = BuildSourcePack(
+            root=tmp_path / "new",
+            source_graph=SourceGraphSummary(extractor_passes={}),
+        )
+        status, notes = _graph_completeness(old_pack, new_pack)
+        assert status == "unknown", notes
+        assert any("call_graph" in n for n in notes), notes
