@@ -275,7 +275,12 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # any `cd` happens, using the same portable absolute-path check
 # (`_report_query` below) already uses for the identical reason.
 case "$_PY_BIN" in
-  /* | ?:[/\\]* | \\*) ;; # already absolute: POSIX, Windows drive-letter, or UNC/root-relative (\\server\share\..., \foo)
+  /* | ?:* | \\*) ;; # already qualified: POSIX absolute, Windows drive-absolute
+    # (C:\...) or drive-relative (C:report.json -- relative to drive C's own
+    # current directory, a distinct real Windows path form this bash script
+    # has no way to correctly resolve against $PWD either way, so it is left
+    # alone rather than unconditionally, and definitely wrongly, prefixed),
+    # or UNC/root-relative (\\server\share\..., \foo)
   "") ;; # not found at all -- leave empty, existing fallbacks handle this
   *) _PY_BIN="$PWD/$_PY_BIN" ;;
 esac
@@ -1529,7 +1534,12 @@ _report_query() {
   # point in the script.
   local report_path="$1"
   case "$report_path" in
-    /* | ?:[/\\]* | \\*) ;; # already absolute: POSIX, Windows drive-letter, or UNC/root-relative (\\server\share\..., \foo)
+    /* | ?:* | \\*) ;; # already qualified: POSIX absolute, Windows drive-absolute
+    # (C:\...) or drive-relative (C:report.json -- relative to drive C's own
+    # current directory, a distinct real Windows path form this bash script
+    # has no way to correctly resolve against $PWD either way, so it is left
+    # alone rather than unconditionally, and definitely wrongly, prefixed),
+    # or UNC/root-relative (\\server\share\..., \foo)
     *) report_path="$PWD/$report_path" ;;
   esac
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null

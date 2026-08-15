@@ -373,5 +373,14 @@ class TestReportPathAnchoring:
     def test_windows_root_relative_path_is_unchanged(self, tmp_path: Path) -> None:
         assert self._anchor("\\report.json", tmp_path) == "\\report.json"
 
+    def test_windows_drive_relative_path_is_unchanged(self, tmp_path: Path) -> None:
+        """`C:report.json` (no separator after the drive letter) is a
+        distinct, real Windows path form -- relative to drive C's own
+        current directory, not drive C's root. This bash script has no way
+        to correctly resolve it against $PWD either way, so a `$PWD/`
+        prefix would be unconditionally wrong, not just "some other
+        wrong" -- left alone instead (Codex review, fresh evidence)."""
+        assert self._anchor("C:report.json", tmp_path) == "C:report.json"
+
     def test_genuinely_relative_path_is_anchored_to_pwd(self, tmp_path: Path) -> None:
         assert self._anchor("report.json", tmp_path) == f"{tmp_path}/report.json"

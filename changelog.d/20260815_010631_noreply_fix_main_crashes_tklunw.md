@@ -126,14 +126,17 @@
   `$_PY_SAFE_DIR` instead of the directory it was actually found relative
   to, making a genuinely working, abicheck-capable interpreter falsely
   resolve as unusable (Codex review).
-- **`_report_query`'s report-path anchoring now also recognizes a Windows
-  UNC path (`\\server\share\report.json`) and a root-relative path
-  (`\report.json`) as already absolute**, not just a POSIX absolute path or
-  a drive-letter path — the previous check matched neither, so a UNC report
-  path was wrongly rewritten with a `$PWD/` prefix, making a real report
-  silently unreadable and the Job Summary/PR-comment severity lookups fall
-  back to their generic "no report available" message instead of the
-  report's actual verdict (Codex review).
+- **`_report_query`'s report-path anchoring (and the same-shaped `$_PY_BIN`
+  canonicalization) now also recognize a Windows UNC path
+  (`\\server\share\report.json`), a root-relative path (`\report.json`),
+  and a drive-relative path (`C:report.json`, no separator after the drive
+  letter — relative to that drive's own current directory, a distinct real
+  Windows path form) as already qualified**, not just a POSIX absolute path
+  or a drive-absolute path — the previous check matched none of these, so
+  such a report path was wrongly rewritten with a `$PWD/` prefix, making a
+  real report silently unreadable and the Job Summary/PR-comment severity
+  lookups fall back to their generic "no report available" message instead
+  of the report's actual verdict (Codex review).
 - **`_user_define_flags` (the ADR-039 build-context collector's global
   `-D`/`-U` harvester, `cli_dump_helpers.py`) now tokenizes its
   `--gcc-options` string with the shared `split_gcc_options`, not a bare
