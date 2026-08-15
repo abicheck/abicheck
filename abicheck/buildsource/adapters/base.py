@@ -254,14 +254,30 @@ _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
 #: ``-Xclang <flag> -Xclang <value>`` wrapping explicitly (checked *before*
 #: the bare two-token branch below, since a bare-form match would otherwise
 #: consume the second ``-Xclang`` token itself as the operand and silently
-#: drop the real value one token later) and normalizes it into a second,
-#: distinct internal encoding, ``-Xclang <flag>=<value>`` (a literal space
-#: after ``-Xclang``, never colliding with a real flag spelling since nothing
-#: in this codebase ever emits a bare ``-Xclang`` token from this function on
-#: its own) -- so :func:`~abicheck.buildsource.source_extractors._argv.
-#: split_operand_survivor` can tell which of the two real argv shapes
-#: (``["-target-abi", "<value>"]`` vs. ``["-Xclang", "-target-abi", "-Xclang",
-#: "<value>"]``) to reconstruct at replay time.
+#: drop the real value one token later).
+#:
+#: **Both real argv shapes normalize to the SAME internal ``<flag>=<value>``
+#: encoding, with no ``-Xclang`` marker** (P2 review, "Canonicalize
+#: equivalent cc1 survivor spellings", fresh evidence). An earlier revision
+#: encoded the ``-Xclang``-wrapped shape as a visually distinct ``-Xclang
+#: <flag>=<value>`` token so :func:`~abicheck.buildsource.
+#: source_extractors._argv.split_operand_survivor` could tell which of the
+#: two real argv shapes (``["-target-abi", "<value>"]`` vs. ``["-Xclang",
+#: "-target-abi", "-Xclang", "<value>"]``) to reconstruct at replay time --
+#: but :func:`split_operand_survivor` reconstructs the identical
+#: ``-Xclang``-wrapped four-token form from *either* encoding regardless
+#: (every replay target is an ordinary Clang driver, which rejects the flag
+#: bare no matter how it was originally captured), so the distinction was
+#: never actually needed downstream of decode. It was actively harmful for
+#: two consumers that compare/key on this raw string *without* going
+#: through :func:`split_operand_survivor` at all --
+#: ``header_compile_context._EffectiveContextSignature`` (ambiguity
+#: grouping) and :func:`derive_build_options` (build-option drift) -- for
+#: which two semantically-identical units capturing the same value through
+#: different argv shapes compared as different signatures/options. A
+#: genuine value difference (``aapcs`` vs. ``aapcs16``) still yields two
+#: distinct encodings either way, since the value stays part of the token
+#: regardless of capture shape.
 #:
 #: Lives in :mod:`~abicheck.buildsource.source_extractors._argv`, not here,
 #: even though :func:`extract_abi_relevant_flags` below is what *produces*
@@ -740,10 +756,37 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     ``-Xclang <flag> -Xclang <value>``-wrapped spelling (P2 review,
     ``discussion_r3788073752`` -- see :data:`_SPLIT_OPERAND_ABI_FLAGS`'s own
     docstring for why a normal Clang driver invocation always wraps a
-    cc1-only flag like this rather than passing it bare), normalized into a
-    distinct ``-Xclang <flag>=<value>`` internal token so the two real argv
-    shapes stay distinguishable for replay. Checked before the bare
-    two-token branch, which would otherwise consume the second ``-Xclang``
+    cc1-only flag like this rather than passing it bare). **Both capture
+    forms converge on the identical internal ``<flag>=<value>`` encoding, with
+    no ``-Xclang`` marker at all** (P2 review, "Canonicalize equivalent cc1
+    survivor spellings", fresh evidence): an earlier revision encoded the
+    ``-Xclang``-wrapped capture as a visually distinct ``-Xclang
+    <flag>=<value>`` token, reasoning that
+    :func:`~abicheck.buildsource.source_extractors._argv.
+    split_operand_survivor` needed the two shapes told apart at decode time.
+    That reasoning no longer applies: :func:`split_operand_survivor` already
+    reconstructs the identical ``-Xclang``-wrapped four-token replay form
+    from *either* encoding (every replay consumer targets an ordinary Clang
+    driver, which rejects the flag bare regardless of how it was originally
+    captured), so nothing downstream of decode needs the capture forms
+    distinguished at the encoding level. But two consumers compare or key on
+    the *raw* encoded string directly, never going through
+    :func:`split_operand_survivor`:
+    :class:`~abicheck.buildsource.header_compile_context.
+    _EffectiveContextSignature` (ambiguity grouping) and
+    :func:`derive_build_options` (build-option drift). Encoding the two
+    capture forms differently made a unit that captured ``-target-abi
+    aapcs`` via a bare ``-cc1`` invocation and a semantically identical unit
+    that captured the same value via an ordinary driver's
+    ``-Xclang``-wrapped spelling compare as two different signatures / two
+    different build-option values for those two consumers, even though they
+    mean exactly the same thing -- the false-ambiguity / false-drift risk
+    this fix eliminates by making both capture forms encode identically. A
+    genuine difference in *value* (``aapcs`` vs. ``aapcs16``) still produces
+    two distinct encodings either way, since the value remains part of the
+    canonical token regardless of which capture form was seen. The
+    ``-Xclang``-wrapped branch is still checked before the bare two-token
+    branch below, which would otherwise consume the second ``-Xclang``
     token as the operand and silently drop the real value one token later.
     """
     out: list[str] = []
@@ -768,8 +811,13 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
             # this branch, the bare one would fire on the *next* iteration
             # and treat the second `-Xclang` as the operand, dropping the
             # real value one token later (the bug this branch exists to
-            # fix).
-            out.append(f"-Xclang {argv[i + 1]}={argv[i + 3]}")
+            # fix). Encoded WITHOUT the `-Xclang ` marker -- the same
+            # canonical `<flag>=<value>` token the bare two-token branch
+            # below produces -- so the two equivalent capture forms compare
+            # equal for `_EffectiveContextSignature`/`derive_build_options`,
+            # which read this raw string directly rather than through
+            # `split_operand_survivor` (see this function's own docstring).
+            out.append(f"{argv[i + 1]}={argv[i + 3]}")
             i += 4
             continue
         elif arg in _SPLIT_OPERAND_ABI_FLAGS and i + 1 < len(argv):

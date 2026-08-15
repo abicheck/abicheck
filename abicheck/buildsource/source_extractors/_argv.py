@@ -130,12 +130,26 @@ STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-ta
 #: while ``clang -target-abi aapcs`` is rejected outright ("unknown argument
 #: '-target-abi'; did you mean '-Xclang -target-abi'"), and the real,
 #: supported spelling is ``-Xclang -target-abi -Xclang aapcs`` -- each token
-#: individually prefixed. ``extract_abi_relevant_flags`` normalizes that
-#: wrapped shape into a second, distinct internal encoding, ``-Xclang
-#: <flag>=<value>`` (see :data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`), so
-#: :func:`split_operand_survivor` can tell which of the two real argv shapes
-#: (``["-target-abi", "<value>"]`` vs. ``["-Xclang", "-target-abi", "-Xclang",
-#: "<value>"]``) to reconstruct at replay time.
+#: individually prefixed. **Both real argv shapes now normalize to the SAME
+#: internal ``<flag>=<value>`` encoding** (P2 review, "Canonicalize
+#: equivalent cc1 survivor spellings", fresh evidence): an earlier revision
+#: had ``extract_abi_relevant_flags`` distinguish the wrapped shape with a
+#: leading ``-Xclang `` marker (see :data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`)
+#: so :func:`split_operand_survivor` could tell which of the two real argv
+#: shapes (``["-target-abi", "<value>"]`` vs. ``["-Xclang", "-target-abi",
+#: "-Xclang", "<value>"]``) to reconstruct at replay time -- but
+#: :func:`split_operand_survivor` reconstructs the identical
+#: ``-Xclang``-wrapped output for either encoding regardless (see its own
+#: docstring), so the distinction bought nothing at decode time while
+#: actively breaking two consumers that compare/key on this raw string
+#: *without* decoding it first (``header_compile_context.
+#: _EffectiveContextSignature``, :func:`~abicheck.buildsource.adapters.base.
+#: derive_build_options`) -- two semantically-equivalent units captured via
+#: different argv shapes compared unequal for those. The marker is still
+#: recognized on *decode* (:data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`,
+#: :func:`split_operand_survivor`, :func:`is_split_operand_abi_flag_survivor`)
+#: purely for backward compatibility with evidence packs persisted by an
+#: earlier revision that did emit it; the producer never emits it now.
 #:
 #: Lives here rather than in ``adapters.base`` -- where it is *produced*, by
 #: ``extract_abi_relevant_flags`` -- because :func:`_carry_abi_relevant_flags`
@@ -161,8 +175,15 @@ SPLIT_OPERAND_ABI_FLAGS = frozenset(
     }
 )
 
-#: The literal marker ``adapters.base.extract_abi_relevant_flags`` prepends
-#: to a ``-Xclang``-wrapped split-operand flag's internal encoding.
+#: The literal marker an earlier revision of
+#: ``adapters.base.extract_abi_relevant_flags`` used to prepend to a
+#: ``-Xclang``-wrapped split-operand flag's internal encoding, before both
+#: capture forms were canonicalized onto one identical encoding (see
+#: :data:`SPLIT_OPERAND_ABI_FLAGS`'s own docstring, "Canonicalize
+#: equivalent cc1 survivor spellings"). The producer never emits it now;
+#: kept here purely so :func:`split_operand_survivor`/
+#: :func:`is_split_operand_abi_flag_survivor` still decode it correctly if
+#: it appears in an evidence pack persisted by an earlier revision.
 _XCLANG_WRAPPED_ABI_FLAG_MARKER = "-Xclang "
 
 

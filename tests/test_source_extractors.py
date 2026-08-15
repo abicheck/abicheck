@@ -341,13 +341,18 @@ def test_build_command_decodes_split_operand_abi_flag_survivor() -> None:
 
 
 def test_build_command_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> None:
-    # Companion case: the real-world -Xclang-wrapped spelling (a normal
-    # Clang driver invocation always wraps a cc1-only flag like this --
-    # `-Xclang -target-abi -Xclang aapcs`, never the bare two-token form) is
-    # normalized into a distinct `-Xclang -target-abi=aapcs` internal
-    # survivor, which must decode back into the full four real argv tokens
-    # rather than reaching castxml as one malformed `-Xclang
-    # -target-abi=aapcs` token.
+    # Companion case: the LEGACY `-Xclang -target-abi=aapcs` marker
+    # encoding -- what a pre-canonicalization revision of
+    # `extract_abi_relevant_flags` used to produce for the real-world
+    # -Xclang-wrapped spelling (`-Xclang -target-abi -Xclang aapcs`), and
+    # what could still appear in an evidence pack persisted by that earlier
+    # revision -- must still decode back into the full four real argv
+    # tokens rather than reaching castxml as one malformed `-Xclang
+    # -target-abi=aapcs` token. `extract_abi_relevant_flags` no longer
+    # produces this marker itself (P2 review, "Canonicalize equivalent cc1
+    # survivor spellings" -- see the sibling `-target-abi=aapcs` case above,
+    # which is what it now emits for both capture forms); this test only
+    # pins backward-compatible decoding of the old marker.
     cmd = build_castxml_command(
         _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"]),
         Path("a.cpp"),

@@ -719,15 +719,22 @@ def test_replay_extra_flags_decodes_split_operand_abi_flag_survivor() -> None:
 def test_replay_extra_flags_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> (
     None
 ):
-    """Companion case: the real-world ``-Xclang``-wrapped spelling (a
-    normal Clang driver invocation always wraps a cc1-only flag like this --
-    ``-Xclang -target-abi -Xclang aapcs``, never the bare two-token form) is
-    normalized into a distinct ``-Xclang -target-abi=aapcs`` internal
-    survivor. Before this fix it reached the replay command as ONE
-    malformed argv token (Clang would see a single string containing
-    literal spaces/an ``=`` instead of four real tokens) since it does not
-    start with any ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` entry and so was
-    never filtered, but also never decoded."""
+    """Companion case: the LEGACY ``-Xclang -target-abi=aapcs`` marker
+    encoding -- what a pre-canonicalization revision of
+    ``extract_abi_relevant_flags`` produced for the real-world
+    ``-Xclang``-wrapped spelling (a normal Clang driver invocation always
+    wraps a cc1-only flag like this -- ``-Xclang -target-abi -Xclang
+    aapcs``, never the bare two-token form). Before the original fix it
+    reached the replay command as ONE malformed argv token (Clang would see
+    a single string containing literal spaces/an ``=`` instead of four real
+    tokens) since it does not start with any
+    ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` entry and so was never filtered,
+    but also never decoded. ``extract_abi_relevant_flags`` no longer
+    produces this marker itself (P2 review, "Canonicalize equivalent cc1
+    survivor spellings" -- both capture forms now encode identically to the
+    bare ``-target-abi=aapcs`` form above); this test only pins
+    backward-compatible decoding of the old marker, in case it survives in
+    an evidence pack persisted by an earlier revision."""
     from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
     cu = _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"])

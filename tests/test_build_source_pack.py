@@ -705,19 +705,91 @@ def test_split_target_abi_flag_survivor_produces_build_option():
 
 def test_split_target_abi_flag_xclang_wrapped_survivor_produces_build_option():
     # Sibling case: the real-world -Xclang-wrapped spelling
-    # (`-Xclang -target-abi -Xclang aapcs`) must produce a BuildOption too.
+    # (`-Xclang -target-abi -Xclang aapcs`) must produce a BuildOption too --
+    # keyed and valued identically to the bare-captured form (P2 review,
+    # "Canonicalize equivalent cc1 survivor spellings", fresh evidence): both
+    # capture forms encode to the same canonical `-target-abi=aapcs` token,
+    # with no `-Xclang` marker, so `derive_build_options`'s raw-string key
+    # derivation (`flag.split("=", 1)[0]`) produces the same `-target-abi`
+    # key for either capture form instead of visibly disagreeing.
     from abicheck.buildsource.adapters.base import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     abi_relevant_flags = extract_abi_relevant_flags(
         ["clang", "-Xclang", "-target-abi", "-Xclang", "aapcs", "-c", "t.c"]
     )
-    assert abi_relevant_flags == ["-Xclang -target-abi=aapcs"]
+    assert abi_relevant_flags == ["-target-abi=aapcs"]
     cu = CompileUnit(
         id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags
     )
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
-    assert ("-Xclang -target-abi", "-Xclang -target-abi=aapcs") in opts
+    assert ("-target-abi", "-target-abi=aapcs") in opts
+
+
+def test_split_target_abi_flag_bare_and_xclang_wrapped_captures_produce_one_option():
+    # Regression test for the P2 review finding "Canonicalize equivalent cc1
+    # survivor spellings" (abicheck/buildsource/adapters/base.py:772): two
+    # compile units capturing the SAME -target-abi value through different
+    # real argv shapes (bare -cc1 invocation vs. an ordinary driver's
+    # -Xclang-wrapped forwarding) must project to the SAME BuildOption --
+    # not two different (key, value) pairs for what is semantically one
+    # unchanged option, which used to read as spurious build-option drift.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu_bare = CompileUnit(
+        id="cu://bare",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(
+            ["clang", "-cc1", "-target-abi", "aapcs", "-c", "a.c"]
+        ),
+    )
+    cu_wrapped = CompileUnit(
+        id="cu://wrapped",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(
+            ["clang", "-Xclang", "-target-abi", "-Xclang", "aapcs", "-c", "b.c"]
+        ),
+    )
+    opts = {
+        (o.key, o.value)
+        for o in derive_build_options([cu_bare, cu_wrapped])
+        if o.key == "-target-abi"
+    }
+    # Exactly one option: the two units' identical encodings de-duplicate
+    # via derive_build_options's own (key, value) `seen` set.
+    assert opts == {("-target-abi", "-target-abi=aapcs")}
+
+
+def test_split_target_abi_flag_disagreement_across_capture_forms_still_diffable():
+    # Companion negative case: a genuine value disagreement must still
+    # produce two distinct BuildOption values even when the two units
+    # captured it through different argv shapes -- canonicalizing the
+    # capture-form encoding must not also canonicalize away a real value
+    # difference.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu_bare = CompileUnit(
+        id="cu://bare",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(
+            ["clang", "-cc1", "-target-abi", "aapcs", "-c", "a.c"]
+        ),
+    )
+    cu_wrapped = CompileUnit(
+        id="cu://wrapped",
+        language="CXX",
+        abi_relevant_flags=extract_abi_relevant_flags(
+            ["clang", "-Xclang", "-target-abi", "-Xclang", "aapcs16", "-c", "b.c"]
+        ),
+    )
+    values = {
+        o.value
+        for o in derive_build_options([cu_bare, cu_wrapped])
+        if o.key == "-target-abi"
+    }
+    assert values == {"-target-abi=aapcs", "-target-abi=aapcs16"}
 
 
 def test_split_target_abi_flag_disagreement_still_diffable_across_units():

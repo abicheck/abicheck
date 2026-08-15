@@ -437,3 +437,30 @@
   shape. Both branches now converge on the identical `-Xclang`-wrapped
   reconstruction, computed from whichever internal encoding matched (the
   `-Xclang ` marker is stripped first, if present, before parsing).
+- **A seventeenth review round found the sixteenth round's own
+  `split_operand_survivor()` unification fixed *decode* but not *encode*.**
+  `adapters.base.extract_abi_relevant_flags()` — the function that
+  *produces* the internal `abi_relevant_flags` survivor in the first
+  place, before it ever reaches `split_operand_survivor()` — still encoded
+  a bare-captured `-target-abi aapcs` (`"-target-abi=aapcs"`) and its
+  `-Xclang`-wrapped-captured equivalent (`"-Xclang -target-abi=aapcs"`) as
+  two visually different strings for the same semantic value. That
+  mattered because two consumers compare/key on this raw encoded string
+  *directly*, never through `split_operand_survivor()`:
+  `header_compile_context._EffectiveContextSignature` (ambiguity grouping)
+  and `derive_build_options()` (build-option drift) — so a compile unit
+  that captured `-target-abi aapcs` via a bare `-cc1` invocation and a
+  semantically identical unit that captured the same value via an
+  ordinary driver's `-Xclang`-wrapped spelling could spuriously raise
+  `HeaderCompileContextAmbiguousError`, or report as build-option drift,
+  even though they mean exactly the same thing. Fixed by having
+  `extract_abi_relevant_flags()`'s `-Xclang`-wrapped branch encode to the
+  same canonical `<flag>=<value>` token as the bare branch, with no
+  `-Xclang` marker at all — `split_operand_survivor()` already reconstructs
+  the identical `-Xclang`-wrapped replay form from either encoding, so
+  nothing downstream of decode needed the two capture forms distinguished
+  at the encoding level, and the marker's only remaining purpose is
+  backward-compatible decoding of an evidence pack persisted by an earlier
+  revision. A genuine value disagreement (`aapcs` vs. `aapcs16`) still
+  produces two distinct encodings either way, since the value stays part
+  of the canonical token regardless of which capture form was seen.

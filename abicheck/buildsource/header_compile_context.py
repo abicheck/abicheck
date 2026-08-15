@@ -578,6 +578,19 @@ class _EffectiveContextSignature:
     macro *is* pinned (``pin.defines``) is excluded too (Finding 1,
     ``discussion_r3787772663``) — genuinely conditional on ``pin``, unlike
     the structured-field exclusion above.
+
+    This tuple compares ``cu.abi_relevant_flags`` entries verbatim as
+    strings, never through :func:`~abicheck.buildsource.source_extractors.
+    _argv.split_operand_survivor` — which is exactly why
+    ``adapters.base.extract_abi_relevant_flags`` must itself encode two
+    argv shapes that mean the same thing identically (P2 review,
+    "Canonicalize equivalent cc1 survivor spellings", fresh evidence): a
+    ``-target-abi``/``-target-cpu``/``-target-feature``/
+    ``-target-linker-version`` survivor captured bare (direct ``-cc1``) vs.
+    ``-Xclang``-wrapped (an ordinary driver invocation) used to encode as
+    two visually different strings for the same value, which made this
+    signature spuriously disagree between two otherwise-identical compile
+    units — see that function's own docstring for the full history.
     """
 
     language: str
