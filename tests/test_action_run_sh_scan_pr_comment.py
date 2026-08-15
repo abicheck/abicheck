@@ -186,7 +186,7 @@ def _run_verdict_guards(verdict: str) -> subprocess.CompletedProcess:
 def test_budget_overflow_verdict_skips_the_comment():
     # Codex review: scan's own `_BudgetOverflow` handler
     # (`abicheck/cli_scan.py`) exits 5 before `_emit_scan_report` ever runs,
-    # so there is no `--secondary-output`/primary JSON to reuse -- letting
+    # so there is no `--write`/primary JSON to reuse -- letting
     # this VERDICT through re-runs the identical budget-limited scan a
     # second time only to hit the same overflow again.
     result = _run_verdict_guards("BUDGET_OVERFLOW")

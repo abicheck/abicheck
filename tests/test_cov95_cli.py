@@ -81,6 +81,25 @@ def _snap(version: str = "1.0", funcs=None, library: str = "libfoo.so") -> AbiSn
     return AbiSnapshot(library=library, version=version, functions=funcs)
 
 
+def _severity_config(tmp_path: Path, **levels: str) -> Path:
+    """A project config setting per-category severity levels.
+
+    The four ``--severity-<category>`` flags were hidden CLI duplicates of
+    this block and were removed, so a config file is how a run states one.
+    """
+    cfg = tmp_path / "severity.abicheck.yml"
+    body = "".join(f"  {k}: {v}\n" for k, v in levels.items())
+    cfg.write_text(f"severity:\n{body}", encoding="utf-8")
+    return cfg
+
+
+def _suppression_strict_config(tmp_path: Path) -> Path:
+    """A project config setting ``suppression.strict`` (was ``--strict-suppressions``)."""
+    cfg = tmp_path / "strict.abicheck.yml"
+    cfg.write_text("suppression:\n  strict: true\n", encoding="utf-8")
+    return cfg
+
+
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
     path.write_text(snapshot_to_json(snap), encoding="utf-8")
     return path
@@ -383,11 +402,13 @@ class TestSmallHelpers:
     def test_dump_compile_db_flags_and_match_threaded_to_non_elf(
         self, tmp_path, monkeypatch
     ) -> None:
-        """Codex review: -p/--compile-db was resolved for ELF only -- a PE/
-        Mach-O dump silently dropped the compile database's castxml/clang
-        flags entirely, and never threaded the matched signal through to
-        handle_non_elf_dump either (so snap.parsed_with_build_context could
-        never be set, wrongly rejecting a --depth build backed only by -p).
+        """Codex review: the compile database was resolved for ELF only -- a
+        PE/Mach-O dump silently dropped its castxml/clang flags entirely, and
+        never threaded the matched signal through to handle_non_elf_dump
+        either (so snap.parsed_with_build_context could never be set, wrongly
+        rejecting a --depth build backed only by that database). It arrives
+        via --build-info now; the -p/--build-dir + --compile-db pair folded
+        into it.
         """
         import json
         import struct
@@ -419,7 +440,7 @@ class TestSmallHelpers:
             cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
         )
         result = CliRunner().invoke(
-            main, ["dump", str(dylib), "-H", str(header), "-p", str(db)]
+            main, ["dump", str(dylib), "-H", str(header), "--build-info", str(db)]
         )
         assert result.exit_code == 0, result.output
         assert captured["compile_db_context_matched"] is True
@@ -512,14 +533,20 @@ class TestLoadSuppressionAndPolicy:
         assert suppression is not None
         assert pf is None
 
-    def test_policy_file_warns_when_policy_overridden(
+    def test_a_policy_document_no_longer_warns_about_the_profile(
         self, tmp_path: Path, capsys
     ) -> None:
+        """One ``--policy`` cannot disagree with itself.
+
+        The flag takes a profile *or* a document, so the "``--policy`` is
+        ignored when ``--policy-file`` is given" warning had nothing left to
+        warn about and is gone.
+        """
         pol = tmp_path / "policy.yaml"
         pol.write_text("base_policy: strict_abi\n")
         _, pf = _load_suppression_and_policy(None, "sdk_vendor", pol)
         assert pf is not None
-        assert "is ignored when --policy is given" in capsys.readouterr().err
+        assert "ignored" not in capsys.readouterr().err
 
     def test_policy_file_surfaces_validate_overrides_warnings(
         self, tmp_path: Path, capsys
@@ -720,17 +747,19 @@ class TestCompareCommand:
         )
         assert result.exit_code == 0
 
-    def test_public_symbol_without_scope_warns(self, tmp_path: Path) -> None:
+    def test_config_public_symbols_without_scope_warns(self, tmp_path: Path) -> None:
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [foo]\n", encoding="utf-8")
         result = _invoke(
             "compare",
             str(old_f),
             str(new_f),
             "--no-scope-public-headers",
-            "--public-symbol",
-            "foo",
+            "--config",
+            str(cfg),
         )
         assert result.exit_code == 0
         assert "only take effect with" in result.output
@@ -2069,8 +2098,8 @@ class TestUsedByScoping:
             str(app),
             "--report-mode",
             "root-cause",
-            "--severity-abi-breaking",
-            "error",
+            "--config",
+            str(_severity_config(tmp_path, abi_breaking="error")),
         )
         assert result.exit_code == 4
         assert "### `ordinal:5` (1 finding)" in result.output
@@ -2092,7 +2121,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--severity-abi-breaking", "warning",
+            "--config", str(_severity_config(tmp_path, abi_breaking="warning")),
         )
         data = json.loads(result.stdout)
         entry = next(
@@ -2722,7 +2751,8 @@ class TestCompareReleaseExtraFlows:
             str(new_dir),
             "--suppress",
             str(sup),
-            "--strict-suppressions",
+            "--config",
+            str(_suppression_strict_config(tmp_path)),
         )
         assert result.exit_code != 0
         assert "expired" in result.output.lower()

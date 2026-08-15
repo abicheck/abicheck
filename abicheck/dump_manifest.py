@@ -45,11 +45,11 @@ note)**::
 ``roots`` is the manifest-mode equivalent of ``--header``/``-H`` (what's
 being *compared* — feeds ``scope_fingerprint``'s ``declared_headers``).
 ``public_header_paths``/``public_header_dirs`` is the separate, optional
-ADR-015 *provenance*-classification input (``--public-header``/
+ADR-015 *provenance*-classification input (public-header inputs/
 ``--public-header-dir``'s manifest equivalent) — a different concept D1
 already keeps distinct from scope declaration; a manifest with public
 headers but no separate provenance fields behaves exactly like a legacy
-``dump -H foo.h`` invocation with no ``--public-header`` (every declaration
+``dump -H foo.h`` invocation naming a lone file (every declaration
 stays ``UNKNOWN`` origin). A TU's ``forced_includes`` is what that TU
 actually compiles (the manifest equivalent of a single named ``--header``,
 typically drawn from ``roots`` but not required to be — a TU may force-include

@@ -39,8 +39,10 @@ from .checker_policy import (
 )
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
+from .impact.use_case_impact import add_use_case_impact
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
+from .reporter_contract_blocks import add_contract_context as _add_contract_context
 
 # Markdown rendering + the shared --show-only filter and verdict-label maps now
 # live in the leaf module reporter_markdown (it imports nothing from here). Kept
@@ -209,7 +211,7 @@ def to_stat_json(
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
-    _add_use_case_impact(d, result)
+    add_use_case_impact(d, result)
     return json.dumps(d, indent=indent)
 
 
@@ -284,75 +286,6 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
         "count": result.reconciled_count,
         "changes": entries,
     }
-
-
-def _add_use_case_impact(d: dict[str, object], result: DiffResult) -> None:
-    """``compare --use-cases``'s attribution block, when the run produced one.
-
-    Omitted entirely without the flag rather than emitted empty: an empty
-    block would read as "no use case is affected" for a run that never
-    resolved a manifest.
-    """
-    from .impact.use_case_impact import UseCaseImpact
-
-    impact = result.use_case_impact
-    if isinstance(impact, UseCaseImpact):
-        d["use_case_impact"] = impact.to_dict()
-
-
-def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
-    """ADR-049 Phase 4's persisted contract blocks, plus P0.4's unconditional
-    ``analysis_assurance`` (piggybacked here, unguarded below, to stay under
-    the file-size cap). ``contract_context`` itself stays opt-in
-    (``compare(..., contract_evaluation=True)``), serialized via
-    :mod:`abicheck.contract_context_io` to match
-    :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
-    all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
-    """
-    from .analysis_assurance import analysis_assurance_report_dict
-
-    if (block := analysis_assurance_report_dict(result)) is not None:
-        d["analysis_assurance"] = block
-
-    _add_use_case_impact(d, result)
-
-    ctx = result.contract_context
-    if ctx is None:
-        return
-    from .contract_context_io import persisted_context_to_dict
-    from .contract_evidence import PersistedContractContext
-
-    # `DiffResult.contract_context` is typed `object` (its real type reaches
-    # `compatibility_evaluation_config` -> `checker_policy`, which every
-    # consumer of `DiffResult` would then import), so narrow it here rather
-    # than suppressing the argument type -- an `isinstance` check is also a
-    # real guard against a caller having stuffed something else into an
-    # untyped field (CodeRabbit review).
-    if not isinstance(ctx, PersistedContractContext):
-        return
-    d["contract_context"] = persisted_context_to_dict(ctx)
-    # ADR-049 Phase 5's *sibling* ledger (plan Section 6.1). It sits beside
-    # the findings, not among them, because that is what makes it
-    # unsuppressible: a coverage failure is not a `Change`, so
-    # `checker._filter_suppressed_changes` -- the one place suppression is
-    # applied -- can never see one, and "ordinary change suppressions ...
-    # cannot suppress a provider/domain coverage failure" (Section 6.2) is a
-    # structural fact rather than a rule something has to remember to
-    # enforce. Emitted as `[]` rather than omitted when there are none: an
-    # empty ledger is the real, checkable answer "this domain closed", which
-    # an absent key could not distinguish from "not computed".
-    from .contract_coverage_exit import coverage_exit_for_context
-    from .contract_coverage_ledger import coverage_failures_for_context
-
-    failures = coverage_failures_for_context(ctx)
-    d["contract_coverage_failures"] = [f.to_dict() for f in failures]
-    # ADR-049 Phase 7: what the ledger contributes to the exit code, now
-    # actually applied rather than merely stated. Derived by the same
-    # function the exit path uses, so the number a user reads is the one
-    # that gated them -- including `contract.unresolved=warn` zeroing it
-    # while the failures above stay listed, which is what accepting
-    # incomplete assurance means as opposed to hiding it.
-    d["contract_coverage_exit_contribution"] = coverage_exit_for_context(ctx)
 
 
 def _to_json_leaf(
@@ -833,10 +766,11 @@ def _filtered_internal_entry(c: Change) -> dict[str, object]:
     # ADR-049 Phase 3 (Codex review, fresh evidence): result.out_of_surface_changes
     # is the same list _apply_contract_evaluation_shadow already stamps
     # (folded into all_changes alongside `kept`) -- this second, independent
-    # serialization of the identical Change objects (scope.filtered_internal_changes,
-    # distinct from surface_scope.out_of_surface_changes above) never read the
-    # fields, so a --contract consumer of this established ledger
-    # missed the decision even though the sibling ledger already carried it.
+    # serialization of the identical Change objects
+    # (scope.filtered_internal_changes, distinct from
+    # surface_scope.out_of_surface_changes above) never read the fields, so a
+    # --contract consumer of this established ledger missed the decision even
+    # though the sibling ledger already carried it.
     _add_contract_evaluation_fields(entry, c)
     return entry
 
@@ -1047,9 +981,9 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
     # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
-    # Change/ChangeKind finding, so it stays unreachable by severity
-    # promotion. Omitted entirely (not emitted as null) when unset, matching
-    # every other optional field in this builder.
+    # Change/ChangeKind finding, so it stays unreachable by severity promotion.
+    # Omitted entirely (not emitted as null) when unset, matching every other
+    # optional field in this builder.
     if result.contract_coverage is not None:
         d["contract_coverage"] = result.contract_coverage
     if result.assurance is not None:
@@ -1359,10 +1293,10 @@ def _add_contract_evaluation_fields(
     # consumer can't join a demoted/suppressed/reconciled finding to its
     # decision. Stamped here, only when absent -- and unconditionally,
     # ahead of the contract_relevance early return below: an ordinary run
-    # without `--contract` still calls this on every one of
-    # those entries and still needs a joinable id (Codex review: an
-    # earlier revision stamped this after the early return instead,
-    # silently skipping it on every default-run audit-ledger entry).
+    # without `--contract` still calls this on every one of those entries and
+    # still needs a joinable id (Codex review: an earlier revision stamped
+    # this after the early return instead, silently skipping it on every
+    # default-run audit-ledger entry).
     if "finding_id" not in d:
         from .finding_identity import report_finding_id
 

@@ -95,7 +95,7 @@ def test_dump_tags_public_and_private_origin(tmp_path: Path) -> None:
 
 @pytest.mark.integration
 def test_dump_without_public_set_leaves_origin_unknown(tmp_path: Path) -> None:
-    # D4: omitting --public-header keeps every origin UNKNOWN, but source_header
+    # D4: omitting -H/--header keeps every origin UNKNOWN, but source_header
     # is still populated descriptively from the parsed source location.
     from abicheck.dumper import dump
 

@@ -16,8 +16,8 @@
 """Behavioral tests for ``action/run.sh``'s sticky-PR-comment JSON acquisition.
 
 ``compare`` mode now renders its PR-comment JSON as a second format from the
-*same* comparison run (``--secondary-format json --secondary-output``,
-abicheck's own ``--secondary-format`` CLI feature) instead of re-invoking
+*same* comparison run (``--write json=``,
+abicheck's own ``--write`` CLI feature) instead of re-invoking
 abicheck a second time. This exercises the acquisition decision in
 ``_maybe_post_pr_comment`` (extracted verbatim from run.sh, the same "parse
 the real file, don't hand-copy it" discipline as
@@ -26,7 +26,7 @@ the real file, don't hand-copy it" discipline as
 - If ``PR_JSON`` was already populated by the primary run (compare mode, a
   non-json primary format), it's used as-is — no copy, no rerun.
 - Otherwise (compare-release, which doesn't build CMD with
-  --secondary-format), the original reuse-if-json-else-rerun logic applies
+  --write), the original reuse-if-json-else-rerun logic applies
   unchanged.
 """
 
@@ -155,7 +155,7 @@ def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
 class TestPrJsonAcquisition:
     def test_prepopulated_pr_json_is_left_untouched(self, tmp_path):
         # Simulates compare mode with a non-json primary format: PR_JSON was
-        # already written by the primary run's --secondary-format, so the
+        # already written by the primary run's --write, so the
         # acquisition block must not overwrite it via cp or a rerun.
         pr_json = tmp_path / "pr.json"
         pr_json.write_text('{"source": "secondary-format"}', encoding="utf-8")
@@ -255,7 +255,7 @@ CMD=(abicheck scan liblib.so --format json)
 
 class TestExitTrapCleansUpPrJson:
     def test_pr_json_removed_by_the_exit_trap(self, tmp_path):
-        # Codex review: PR_JSON (created by --secondary-format/--secondary-
+        # Codex review: PR_JSON (created by --write/--
         # output, or _maybe_post_pr_comment's own fallback mktemp) was never
         # added to the script's cleanup trap -- only STDERR_FILE/
         # _STDOUT_JSON_FILE/_BASELINE_CLEANUP were. On a persistent

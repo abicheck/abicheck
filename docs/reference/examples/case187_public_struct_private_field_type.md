@@ -17,7 +17,7 @@
 
 `demo::Public::reserved` is retyped from an opaque `void*` to
 `detail::PrivateType*` — a type declared only in an internal, non-public
-header (`detail_private.h`, never passed as `--public-header`). Old code
+header (`detail_private.h`, never named as a public header). Old code
 that reads or writes `reserved` as a `void*` now misinterprets the pointee.
 Any consumer touching that field must recompile against v2 and, worse, has
 no documented way to know what the new pointee type actually is — it's
@@ -121,7 +121,7 @@ indirection instead of embedding the internal type directly.
 
 ## Ground-truth provenance
 
-**Known kind gap:** public_api_internal_dependency_added needs `--public-header` set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not set --public-header in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
+**Known kind gap:** public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 

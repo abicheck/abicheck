@@ -77,7 +77,7 @@ def test_dump_manifest_and_public_header_rejected(tmp_path, runner):
         [
             "dump",
             str(so),
-            "--public-header",
+            "-H",
             str(pub),
             "--dump-manifest",
             str(manifest),

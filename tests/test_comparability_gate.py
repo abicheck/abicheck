@@ -1077,7 +1077,7 @@ def test_gate_diagnostic_mode_returns_none_when_comparable(tmp_path):
 
 def test_gate_header_sequence_carve_out_declines_without_scope_corroboration(tmp_path):
     # A header already declared identically on both sides via
-    # --public-header (so scope's "headers" field -- and therefore
+    # -H/--header (so scope's "headers" field -- and therefore
     # scope_fingerprint -- is completely UNCHANGED), but fed to the L2
     # frontend via -H only on the new side, produces the identical
     # additive-growth SHAPE in header_sequence that the real F8 scenario
@@ -1120,7 +1120,7 @@ def test_gate_include_sequence_carve_out_declines_without_scope_corroboration(
 ):
     # Same shape as the header-sequence case above, but for include_sequence:
     # x.h is already declared identically on both sides (old via
-    # --public-header, new via -H), so scope_fingerprint is completely
+    # the removed --public-header, new via -H), so scope_fingerprint is completely
     # unchanged, but the auto-added header-owning directory's "hdrs:..."
     # owned-token (resolve_inferred_header_roots) grows from {a,b} to
     # {a,b,x} purely because x is now fed to the L2 frontend on the new
@@ -1178,7 +1178,7 @@ def test_gate_header_sequence_carve_out_declines_when_only_public_header_dirs_gr
     # above already guards against, just reached via a different route
     # (public_header_dirs instead of scope_fingerprint being unchanged
     # entirely). x.h is declared identically on both sides (old via
-    # --public-header, new via -H) so this is a real, previously-silent
+    # the removed --public-header, new via -H) so this is a real, previously-silent
     # false negative: a real removal inside x.h between old and new would
     # be invisible, not reported.
     a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")

@@ -1231,7 +1231,7 @@ def dump(
             live side's scope contract this way (``cli_resolve.
             _resolve_compare_snapshots``); without an equivalent here, a
             snapshot `dump`-produced from a bare ``-H <dir>`` (with no
-            ``--public-header-dir``) always carries an empty
+            the public-header set) always carries an empty
             ``public_header_dirs`` scope field, so comparing it against a
             live `compare`-side extraction of the identical header set
             spuriously raises ``ScopeMismatchError`` (found during the G30
@@ -1377,7 +1377,7 @@ def dump(
     # gains the same scope-comparability identity `compare`'s own `--header
     # <dir>` already has, without silently opting a `dump`-only invocation
     # into declaration-provenance tagging (ADR-015 stays opt-in via the
-    # separate --public-header/--public-header-dir flags, unchanged).
+    # separate public-header inputs, unchanged).
     _attach_extraction_contract(
         snapshot,
         headers=list(dump_manifest.roots) if dump_manifest is not None else headers,

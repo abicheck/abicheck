@@ -373,10 +373,13 @@ class TestCompareErrorDisplay:
 
 
 class TestShowRedundant:
-    """Test --show-redundant flag for merging redundant changes."""
+    """``scope.show_redundant`` merges redundant changes back into the list.
 
-    def test_show_redundant_flag(self, tmp_path: Path) -> None:
-        """--show-redundant merges redundant changes back into main list."""
+    Config-only: the hidden ``--show-redundant`` CLI flag that duplicated
+    this key was removed.
+    """
+
+    def test_show_redundant_config_key(self, tmp_path: Path) -> None:
         from abicheck.model import (
             AbiSnapshot,
             Function,
@@ -420,9 +423,11 @@ class TestShowRedundant:
         hidden = runner.invoke(main, ["compare", str(old_file), str(new_file)])
         assert hidden.exit_code == 4
 
-        # With --show-redundant the hidden derived change is restored
+        # With scope.show_redundant the hidden derived change is restored
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  show_redundant: true\n", encoding="utf-8")
         result = runner.invoke(main, [
-            "compare", str(old_file), str(new_file), "--show-redundant",
+            "compare", str(old_file), str(new_file), "--config", str(cfg),
         ])
         assert result.exit_code == 4
         assert "init" in result.output  # derived change now visible

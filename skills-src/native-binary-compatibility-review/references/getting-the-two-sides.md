@@ -111,7 +111,7 @@ inputs resolve first.
 - [ ] Same compiler family, version, `-std=`, target, and ABI-relevant flags.
 - [ ] Same public headers in view on both sides.
 - [ ] Same dependency-scoping choice on both sides (both default, or both
-      `--include-dependencies`).
+      `--include-system-declarations`).
 - [ ] The old side is the baseline the user's question actually implies.
 
 Failing any of these, fix it before reading findings. Findings produced from

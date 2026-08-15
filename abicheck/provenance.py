@@ -182,7 +182,7 @@ def is_system_header(source_header: str | None) -> bool:
     (``/usr/include``, MSVC ``VC/Tools``, the Xcode/macOS SDK, ...).
 
     Public wrapper around the segment-based heuristic, usable independent of
-    a ``--public-header`` set (unlike :func:`classify_origin`, which gates
+    a public-header set (unlike :func:`classify_origin`, which gates
     *all* classification, including this check, behind ``have_public_set`` —
     D4's "opt-in" only applies to the PUBLIC_HEADER/PRIVATE_HEADER split;
     "is this a system header at all" is a pure function of the path and

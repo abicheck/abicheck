@@ -6,7 +6,7 @@
 
 `demo::configure()`'s opaque `void*` parameter is retyped to
 `detail::Options*` — a type declared only in an internal, non-public header
-(`detail_private.h`, never passed as `--public-header`). Changing a
+(`detail_private.h`, never named as a public header). Changing a
 parameter's type changes the function's mangled name in C++: the old
 exported symbol (`configure(void*, Meta)`) genuinely disappears and a
 different one (`configure(detail::Options*, Meta)`) appears. Any binary

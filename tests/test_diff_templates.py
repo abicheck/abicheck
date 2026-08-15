@@ -909,14 +909,14 @@ class TestMandatoryTemplateParamAdded:
         changes = detect_mandatory_template_param_added(old, new)
         assert len(changes) == 1
         # RecordType carries no visibility field, and this type's origin
-        # defaults to ScopeOrigin.UNKNOWN (no --public-header scoping used)
+        # defaults to ScopeOrigin.UNKNOWN (no -H/--header scoping used)
         # — no reliable signal in that (common) case.
         assert changes[0].public_reachable is False
         assert changes[0].reachability_kind is None
 
     def test_public_header_type_is_reachable(self) -> None:
         """Codex review: RecordType.origin == ScopeOrigin.PUBLIC_HEADER (set
-        only under ADR-024's opt-in --public-header scoping) IS a reliable
+        only under ADR-024's opt-in -H/--header scoping) IS a reliable
         public-reachability signal, unlike the default ScopeOrigin.UNKNOWN
         case above."""
         old = _snap(types=[_rec_public("Bar<int>")])

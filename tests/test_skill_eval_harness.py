@@ -76,8 +76,15 @@ class TestShim:
         """`--output-dir` must not be read as `-o` plus `utput-dir`."""
         assert shim._declared_outputs(["compare", "--output-dir", "out"]) == ["out"]
 
+    def test_write_declares_the_path_half_of_its_operand(self):
+        """``--write`` is ``FORMAT=PATH``: only the second half is a path."""
+        assert shim._declared_outputs(["compare", "--write", "json=r.json"]) == [
+            "r.json"
+        ]
+        assert shim._declared_outputs(["compare", "--write=json=r.json"]) == ["r.json"]
+
     def test_same_named_outputs_do_not_overwrite_each_other(self, tmp_path):
-        """`-o human/report.json --secondary-output machine/report.json`."""
+        """`-o human/report.json --write json=machine/report.json`."""
         cwd = tmp_path / "cwd"
         (cwd / "human").mkdir(parents=True)
         (cwd / "machine").mkdir(parents=True)
@@ -89,8 +96,8 @@ class TestShim:
             "compare",
             "-o",
             "human/report.json",
-            "--secondary-output",
-            "machine/report.json",
+            "--write",
+            "json=machine/report.json",
         ]
         snaps = shim._snapshot_outputs(argv, cwd, dest, tmp_path / "run")
         paths = [s["path"] for s in snaps]

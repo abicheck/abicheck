@@ -17,9 +17,9 @@ not make it public, is owned by
 |---|---|
 | `--scope-public-headers` / `--no-scope-public-headers` | restrict the surface to declarations reachable from the public headers |
 | `--header` / `-H` | name the public headers explicitly |
-| `--public-symbol` (repeatable), `--public-symbols-list FILE` | pin an explicit public symbol set when headers cannot express it |
+| a `.abicheck.yml` `scope:` map's public-symbols key | pin an explicit public symbol set when headers cannot express it (config-only; no CLI flag) |
 | `--contract public\|exports\|all\|auto` | ask for contract-relevance decisions, and choose the evidence domain they are judged against |
-| `--include-dependencies` | opt **out** of the default dependency-header scoping and keep the full transitive surface |
+| `--include-system-declarations` | opt **out** of the default dependency-header scoping and keep the declarations system/toolchain headers contributed |
 
 `dump` and `compare` scope out declarations whose own defining header is a
 toolchain or system header by default. That is a header-*origin* filter, not

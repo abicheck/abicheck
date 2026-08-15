@@ -151,7 +151,7 @@ class TestCompareHelpAllDisclosure:
             "--compiler",
             "--ast-frontend",
             "--jobs",
-            "--severity-abi-breaking",
+            "--write",
             "--report-mode",
             "--pdb-path",
         ):
@@ -230,7 +230,7 @@ class TestCompareHelpAllDisclosure:
             "--sysroot",
             "--ast-frontend",
             "--jobs",
-            "--severity-abi-breaking",
+            "--write",
             "--report-mode",
             "--pdb-path",
         ):
@@ -296,16 +296,16 @@ _HELP_ALL_COMMANDS: list[
     (
         "scan",
         cli_help.SCAN_COMMON_OPTION_NAMES,
-        # --strict-suppressions/--public-symbol are hidden too (CLI audit
+        # the strict-suppressions/public-symbol family is gone (CLI audit
         # PR 4/5) but genuinely render in --help-all via their new "Policy &
         # severity"/"Public-surface scoping" panel membership (cli_help.py),
         # so they stay valid examples here.
         (
             "--sysroot",
             "--ast-frontend",
-            "--strict-suppressions",
+            "--write",
             "--pattern-verdicts",
-            "--public-symbol",
+            "--risk-rules",
         ),
         (
             "--header",

@@ -334,21 +334,28 @@ class TestGateParityWithTheLiveRun:
     """
 
     @pytest.mark.parametrize(
-        "params,typed",
+        "params,typed,config_severity",
         [
-            ({}, set()),
-            ({"exit_code_scheme": "severity"}, set()),
-            ({"severity_abi_breaking": "warning"}, set()),
-            ({"severity_preset": "strict"}, set()),
+            ({}, set(), {}),
+            ({"exit_code_scheme": "severity"}, set(), {}),
+            # The per-category levels have no CLI flag any more, so the tier
+            # that can still state them is the project config -- and the
+            # parity claim has to hold through it just the same.
+            ({}, set(), {"severity_abi_breaking": "warning"}),
+            ({"severity_preset": "strict"}, set(), {}),
             (
-                {"severity_preset": "info-only", "severity_addition": "error"},
+                {"severity_preset": "info-only"},
                 set(),
+                {"severity_addition": "error"},
             ),
-            ({"policy": "sdk_vendor"}, {"policy"}),
-            ({"scope_public_headers": False}, {"scope_public_headers"}),
+            ({"policy": "sdk_vendor"}, {"policy"}, {}),
+            ({"scope_public_headers": False}, {"scope_public_headers"}, {}),
         ],
     )
-    def test_resolver_gate_matches_resolve_compare_config(self, params, typed):
+    def test_resolver_gate_matches_resolve_compare_config(
+        self, params, typed, config_severity
+    ):
+        from abicheck.buildsource.inline import BuildConfig
         from abicheck.cli_compare_receipt import resolve_cli_config
         from abicheck.cli_helpers_compare import resolve_compare_config
 
@@ -357,36 +364,26 @@ class TestGateParityWithTheLiveRun:
             "scope_public_headers": True,
             "policy": "strict_abi",
             "policy_file_path": None,
-            "public_symbols": (),
-            "public_symbols_list": None,
             "suppress": None,
             "require_justification": False,
             "exit_code_scheme": None,
             "severity_preset": None,
-            "severity_abi_breaking": None,
-            "severity_potential_breaking": None,
-            "severity_quality_issues": None,
-            "severity_addition": None,
             "pack_paths": (),
             **params,
         }
+        project_cfg = BuildConfig(**config_severity) if config_severity else None
         live = resolve_compare_config(
-            None,
+            project_cfg,
             cli_severity_preset=full["severity_preset"],
-            cli_severity_abi_breaking=full["severity_abi_breaking"],
-            cli_severity_potential_breaking=full["severity_potential_breaking"],
-            cli_severity_quality_issues=full["severity_quality_issues"],
-            cli_severity_addition=full["severity_addition"],
             cli_scope_public=(
                 full["scope_public_headers"]
                 if "scope_public_headers" in typed
                 else None
             ),
-            cli_collapse_versioned_symbols=None,
             cli_exit_code_scheme=full["exit_code_scheme"],
         )
         resolved = resolve_cli_config(
-            full, typed=typed, project_cfg=None, project_path=None
+            full, typed=typed, project_cfg=project_cfg, project_path=None
         )
 
         assert resolved.gate.exit_code_scheme == live.exit_code_scheme
@@ -403,71 +400,43 @@ class TestGateParityWithTheLiveRun:
 
 class TestObservedOverlaysSurvive:
     def test_forced_public_scope_still_comes_from_the_evidence_ledger(self, tmp_path):
-        """``--public-symbol`` is both a stated input and an applied overlay.
+        """``scope.public_symbols`` is both a stated input and an applied overlay.
 
         ``overlay_selection`` recovers what actually applied from the run's own
         ledger, including sources (``--post-manifest``) the resolver has no
         input model for at all, so installing the resolver's object must not
         blank either field.
+
+        Stated through the project config now: the ``--public-symbol``/
+        ``--public-symbols-list`` pair were hidden CLI duplicates of this key
+        and were removed, so ``project_config`` is the tier that states it.
         """
-        ctx = _context(tmp_path, "--public-symbol", "api_b")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [api_b]\n", encoding="utf-8")
+        ctx = _context(tmp_path, "--config", str(cfg))
         surface = ctx["resolved_config"]["surface"]
         assert ctx["resolved_config"]["contract"]["overlays"]
         assert surface["explicit_scope"] is not None
         assert surface["explicit_scope"]["sha256"]
 
-    def test_a_symbols_list_file_is_still_named_in_the_receipt(self, tmp_path):
+    def test_the_config_that_forced_the_scope_is_still_named(self, tmp_path):
         """The observed value must not cost the receipt its identification.
 
         The ledger's own entry for `surface.explicit_scope` is a contentless
         `api_request` hop; taking it wholesale dropped the layer, option,
-        path, and digest of the file that selected the scope, leaving a
+        path, and digest of the source that selected the scope, leaving a
         replay unable to find it (Codex review, fresh evidence).
         """
-        listed = tmp_path / "public.txt"
-        listed.write_text("api_b\n", encoding="utf-8")
-        ctx = _context(tmp_path, "--public-symbols-list", str(listed))
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [api_b]\n", encoding="utf-8")
+        ctx = _context(tmp_path, "--config", str(cfg))
 
         prov = ctx["field_provenance"]["surface.explicit_scope"]
-        assert prov["layer"] == "explicit_cli"
         options = [hop.get("option") for hop in prov["selected_by"]]
-        paths = [hop.get("path") for hop in prov["selected_by"]]
-        assert "--public-symbols-list" in options
-        assert str(listed) in paths
-        # ...and the observed overlay hop is still recorded alongside it.
+        # ...and the observed overlay hop is still recorded.
         assert "overlays" in options
         # The value stays the ledger's: it is what actually applied.
         assert ctx["resolved_config"]["surface"]["explicit_scope"]["items"] == ["api_b"]
-
-    def test_a_symbols_list_deleted_mid_run_does_not_fail_the_comparison(
-        self, tmp_path, monkeypatch
-    ):
-        """The receipt must reuse the read that built the live force-public
-        set, not re-read the path.
-
-        A second read pairs the persisted digest with content that may not
-        have scored the run, and — worse — a file removed after the
-        comparison started would fail an otherwise-finished run during
-        receipt generation (Codex review, fresh evidence). Simulated by
-        deleting the file at the moment the configuration is resolved.
-        """
-        import abicheck.cli_compare_receipt as receipt
-
-        listed = tmp_path / "public.txt"
-        listed.write_text("api_b\n", encoding="utf-8")
-        real = receipt.resolve_and_apply
-
-        def _delete_then_resolve(
-            params: dict, **kwargs: Any
-        ) -> tuple[Any, Any, Any]:
-            listed.unlink()
-            return real(params, **kwargs)
-
-        monkeypatch.setattr(receipt, "resolve_and_apply", _delete_then_resolve)
-        ctx = _context(tmp_path, "--public-symbols-list", str(listed))
-
-        prov = ctx["field_provenance"]["surface.explicit_scope"]
-        assert str(listed) in [hop.get("path") for hop in prov["selected_by"]]
 
     def test_no_overlay_leaves_the_resolved_scope_alone(self, tmp_path):
         ctx = _context(tmp_path)

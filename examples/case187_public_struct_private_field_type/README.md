@@ -6,7 +6,7 @@
 
 `demo::Public::reserved` is retyped from an opaque `void*` to
 `detail::PrivateType*` — a type declared only in an internal, non-public
-header (`detail_private.h`, never passed as `--public-header`). Old code
+header (`detail_private.h`, never named as a public header). Old code
 that reads or writes `reserved` as a `void*` now misinterprets the pointee.
 Any consumer touching that field must recompile against v2 and, worse, has
 no documented way to know what the new pointee type actually is — it's

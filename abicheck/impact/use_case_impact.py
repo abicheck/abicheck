@@ -192,3 +192,18 @@ def render_use_case_impact_lines(impact: UseCaseImpact) -> list[str]:
         "absence)."
     )
     return lines
+
+
+def add_use_case_impact(d: dict[str, Any], result: Any) -> None:
+    """Emit ``compare --use-cases``'s block into a JSON report dict.
+
+    Lives here rather than in ``reporter.py`` for the ordinary reason that
+    module's helpers keep moving out: it is at the 2000-line hard cap.
+
+    Omitted entirely without the flag rather than emitted empty: an empty
+    block would read as "no use case is affected" for a run that never
+    resolved a manifest.
+    """
+    impact = getattr(result, "use_case_impact", None)
+    if isinstance(impact, UseCaseImpact):
+        d["use_case_impact"] = impact.to_dict()

@@ -192,7 +192,7 @@ def test_release_stderr_announces_contract_coverage_for_non_json_format(capsys) 
     # back to grepping stderr for "Contract coverage incomplete" whenever no
     # JSON report exists -- exactly the shape of a directory/package
     # (release) `compare` outside a `pull_request` event, since the release
-    # fan-out rejects `--secondary-format` and the Action's PR-comment JSON
+    # fan-out rejects `--write` and the Action's PR-comment JSON
     # rerun only fires on `pull_request`/`pull_request_target`. A markdown
     # (or any non-json) release format must announce the same notice
     # single-pair `compare` already does via `announce_coverage_floor`.

@@ -78,9 +78,9 @@ compatible branch — [safety-invariants.md](safety-invariants.md) item 2.
    That is a weaker guarantee than a full match; say so rather than
    reporting a clean result.
 4. Dependency scoping must also match: a snapshot dumped with
-   `--include-dependencies` and one dumped with the default scoping do not
+   `--include-system-declarations` and one dumped with the default scoping do not
    describe the same surface. Prefer either both scoped or both
-   `--include-dependencies`, and prefer comparing two persisted snapshots
+   `--include-system-declarations`, and prefer comparing two persisted snapshots
    over mixing a persisted baseline with a live binary when the toolchain is
    in question.
 

@@ -146,7 +146,8 @@ class ScopeOrigin(str, Enum):
     Linkage × Origin surface model (ADR-024 D1, ADR-015 schema v6).
 
     Classification is opt-in: it is only meaningful when the caller
-    supplies a public-header set (``--public-header`` / ``--public-header-dir``).
+    supplies a public-header set (``-H``/``--header``; ``scan`` also takes
+    ``--public-header-dir``).
     Without one, every declaration is ``UNKNOWN`` and downstream behaviour
     is unchanged.
     """
@@ -500,7 +501,7 @@ class ExtractionContract:
     Built by ``abicheck.comparability.compute_extraction_contract`` — never
     constructed by hand outside tests. Both fingerprints are independently
     optional: a symbols-only dump with no header-AST inputs but a real
-    ``--public-header``/``--public-header-dir`` still attaches a
+    a public-header set still attaches a
     ``scope_fingerprint`` with ``profile_fingerprint=None`` (see that
     module's docstring for the full rationale).
     """

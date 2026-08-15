@@ -169,7 +169,7 @@ class TestPerSideHeaderBackend:
         return old_so, new_so, header
 
     def test_per_side_backend_routed_independently(self, tmp_path, monkeypatch):
-        """--ast-frontend old= castxml + --ast-frontend new= clang reach each side."""
+        """--ast-frontend old=castxml + new=clang reach each side."""
         old_so, new_so, header = self._two_elf(tmp_path)
         calls = []
 
@@ -180,7 +180,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend old=", "castxml", "--ast-frontend new=", "clang",
+            "--ast-frontend", "old=castxml", "--ast-frontend", "new=clang",
         ])
         assert result.exit_code == 0
         # The L0 hard-removal fold-in (case97 fix) would add two more calls,
@@ -225,7 +225,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "castxml", "--ast-frontend new=", "clang",
+            "--ast-frontend", "castxml", "--ast-frontend", "new=clang",
         ])
         assert result.exit_code == 0
         assert calls[0].get("header_backend") == "castxml"
@@ -355,11 +355,12 @@ class TestDumpLang:
         # root rides in gcc_option_tokens as an -isystem entry — searched
         # after the build-context -I/-isystem dirs but above the standard
         # system dirs — so the build context always wins. Build context now
-        # arrives only via -p/--compile-db (CLI audit PR 5/5 removed the
-        # --gcc-options flag this test previously drove it through directly;
-        # a real compile_commands.json is the one remaining CLI-reachable
-        # way to populate the scalar gcc_options field the ordering guard
-        # actually cares about).
+        # arrives only via --build-info (CLI audit PR 5/5 removed the
+        # --gcc-options flag this test previously drove it through directly,
+        # and the -p/--build-dir + --compile-db pair folded into
+        # --build-info; a real compile_commands.json is the one remaining
+        # CLI-reachable way to populate the scalar gcc_options field the
+        # ordering guard actually cares about).
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -394,7 +395,7 @@ class TestDumpLang:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "-p", str(compile_db),
+            "dump", str(so_path), "-H", str(header), "--build-info", str(compile_db),
         ])
         assert result.exit_code == 0, result.output
         # build context stays in effective_gcc_options (emitted first);

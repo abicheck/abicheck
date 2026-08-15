@@ -26,7 +26,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import click
 
@@ -788,21 +788,19 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
             "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
             "has no device concept either) still rejects it.",
         )(func)
+        frontend_kwargs: dict[str, Any] = (
+            {"multiple": True, "type": SidedChoiceParam(AST_FRONTENDS)}
+            if sided_frontend
+            else {
+                "default": "auto",
+                "show_default": True,
+                "type": click.Choice(AST_FRONTENDS, case_sensitive=False),
+            }
+        )
         func = click.option(
             "--ast-frontend",
             "header_backend",
-            **(
-                {
-                    "multiple": True,
-                    "type": SidedChoiceParam(AST_FRONTENDS),
-                }
-                if sided_frontend
-                else {
-                    "default": "auto",
-                    "show_default": True,
-                    "type": click.Choice(AST_FRONTENDS, case_sensitive=False),
-                }
-            ),
+            **frontend_kwargs,
             help=("Scope to one side with an 'old='/'new=' prefix, repeating the "
             "flag per side (e.g. --ast-frontend old=castxml --ast-frontend "
             "new=clang) when the old release parses on one frontend and the new "

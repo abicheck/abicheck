@@ -373,7 +373,7 @@ class TestResolveInput:
         # public_headers / public_header_dirs into dumper.dump, which runs
         # apply_provenance. Without this the ELF origins stay UNKNOWN and the
         # provenance-gated cross-checks silently skip — even with
-        # --public-header-dir given. The `dump` CLI always forwarded them; this
+        # public-header set given. The `dump` CLI always forwarded them; this
         # path did not.
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF" + b"\x00" * 100)

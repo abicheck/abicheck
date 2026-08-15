@@ -208,7 +208,7 @@ distinguish "this target passed" from "this target never ran" — so use it
 only when there is genuinely no declared target set, and say so in the
 report.
 
-Gate configuration — `--policy`/`--policy-file`, `--severity-*`,
+Gate configuration — `--policy`, `--severity-preset`,
 `--exit-code-scheme` — belongs here rather than in review runs; see
 [policies and suppressions](references/shared/policies-and-suppressions.md).
 

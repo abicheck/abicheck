@@ -1455,7 +1455,7 @@ def _dump_pe(
     # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
     # castxml could not resolve a surface (commonly the MSVC C++-mangling gap),
     # recover declared types — *with their defining source header* — from the
-    # PDB debug info so that --public-header scoping still has a provenance
+    # PDB debug info so that public-header scoping still has a provenance
     # signal to classify against. Bounded to this fallback branch so default
     # PE diffs (no --header) are unaffected.
     pdb_types: list[RecordType] = []

@@ -177,27 +177,43 @@ class TestCompareIgnoredFlagsWarnings:
         assert expected_warning in result.output
 
 
-# ── compare_cmd policy-file warning ────────────────────────────────────
+# ── compare_cmd --policy NAME|PATH ─────────────────────────────────────
 
-class TestComparePolicyFileWarning:
-    def test_policy_ignored_when_policy_file_given(self, tmp_path):
-        """When --policy is given, --policy is warned as ignored."""
+class TestComparePolicyOperand:
+    """``--policy`` takes a profile name or a policy document.
+
+    The separate ``--policy-file`` is gone, and with it the "``--policy`` is
+    ignored when ``--policy-file`` is given" warning: one flag cannot
+    disagree with itself, so there is nothing left to warn about.
+    """
+
+    def test_a_document_operand_is_accepted(self, tmp_path):
         old_p, new_p = _make_snapshots(tmp_path)
-
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
-            "base_policy: strict_abi\noverrides: {}\n",
-            encoding="utf-8",
+            "base_policy: strict_abi\noverrides: {}\n", encoding="utf-8"
         )
 
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p),
-            "--policy", "sdk_vendor",
-            "--policy", str(policy_file),
+        result = CliRunner().invoke(main, [
+            "compare", str(old_p), str(new_p), "--policy", str(policy_file),
         ])
-        assert result.exit_code == 0
-        assert "ignored" in result.output.lower()
+        assert result.exit_code == 0, result.output
+        assert "ignored" not in result.output.lower()
+
+    def test_a_profile_name_is_accepted(self, tmp_path):
+        old_p, new_p = _make_snapshots(tmp_path)
+        result = CliRunner().invoke(main, [
+            "compare", str(old_p), str(new_p), "--policy", "sdk_vendor",
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_neither_a_profile_nor_a_document_is_a_usage_error(self, tmp_path):
+        old_p, new_p = _make_snapshots(tmp_path)
+        result = CliRunner().invoke(main, [
+            "compare", str(old_p), str(new_p), "--policy", "no-such-thing",
+        ])
+        assert result.exit_code == 64, result.output
+        assert "not a built-in profile" in result.output
 
 
 # ── compare_cmd policy-file error paths ────────────────────────────────

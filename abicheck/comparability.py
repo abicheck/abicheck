@@ -615,10 +615,10 @@ def _scope_growth_corroborated(
     profile-level "sequence grew" shape on its own (Codex review, PR #641
     follow-up): ``scope_fields["headers"]`` treats a file reaching it via
     ``declared_headers`` (fed to the L2 frontend via ``-H``) and via
-    ``public_header_paths`` (bare ``--public-header`` provenance, never
+    ``public_header_paths`` (bare public-header provenance, never
     actually parsed) as the *same* declared-surface membership — see
     :func:`compute_extraction_contract`'s docstring — so a header already
-    declared identically on both sides via ``--public-header``, but fed to
+    declared identically on both sides as public headers, but fed to
     the L2 frontend only on the new side, leaves ``scope_fingerprint``
     completely UNCHANGED while ``profile_fields["header_sequence"]`` still
     grows additively, purely from which mechanism happened to feed the
@@ -1052,7 +1052,7 @@ def _unexplained_profile_fields(
     # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):
     # an additive-shaped header_sequence/include_sequence on its own is
     # not sufficient evidence -- a header already declared identically
-    # on both sides via --public-header, but fed to the L2 frontend via
+    # on both sides as public headers, but fed to the L2 frontend via
     # -H only on the new side, produces the identical additive-growth
     # SHAPE with scope_fingerprint completely UNCHANGED, even though the
     # old snapshot never actually parsed that header's content at all
@@ -1336,7 +1336,7 @@ def check_contracts_comparable(
     :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
     P1):** an additive-shaped ``header_sequence`` on its own is not
     sufficient — a header already declared identically on both sides via
-    ``--public-header``, but fed to the L2 frontend via ``-H`` only on the
+    as a public header, but fed to the L2 frontend via ``-H`` only on the
     new side, produces the identical shape with ``scope_fingerprint``
     completely unchanged, even though the old snapshot never actually
     parsed that header's content (a real removal inside it would then be

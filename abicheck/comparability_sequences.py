@@ -63,7 +63,7 @@ def _scope_newly_added_headers(
     ninth P1): ``_scope_growth_corroborated`` alone only proves the scope
     grew by *some* header, not that it grew by the *same* header the
     sequence carve-out is waiving. For example, old scope ``{a, b, d}``
-    (``d`` declared via ``--public-header`` only, never parsed) with
+    (``d`` declared public only, never parsed) with
     sequence ``[a, b]``, growing to new scope ``{a, b, c, d}`` (``c`` newly
     declared) with sequence ``[a, b, d]`` (``d`` now fed to the L2 frontend)
     satisfies scope-growth corroboration (``c`` is new) and the trailing-

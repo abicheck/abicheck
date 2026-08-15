@@ -803,7 +803,7 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # A named enum whose declaration textually came from a parsed header
     # (``source_header`` set — populated whenever castxml parsed it from a
     # ``-H``/``--header`` input, independent of the separate opt-in
-    # ``--public-header`` provenance classification) is part of the public
+    # public-header provenance classification) is part of the public
     # surface even when no function/variable signature references the enum
     # type by name. Unlike a struct's layout (only observable by a caller
     # that actually names the type), an enum's members are consumer-visible
@@ -814,7 +814,7 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # and is the wrong model for enums (ADR-024; case20 regression).
     #
     # Excludes an enum whose *own* origin is confidently private/system
-    # (``--public-header`` was given and this enum came from outside that
+    # (a public-header set was given and this enum came from outside that
     # boundary, or from a system header): seeding it into public_types would
     # make `known & public_types` short-circuit _classify_type_level before
     # _confident_header_reason ever gets to demote it via provenance, so a

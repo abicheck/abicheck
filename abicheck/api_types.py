@@ -155,7 +155,7 @@ class InputSpec:
     compile: CompileContext | None = None
     # ADR-055 D1: additional public-header *directories* beyond what's
     # already inferred by splitting `headers` into files/dirs
-    # (`split_public_header_inputs`) -- mirrors `--public-header-dir`.
+    # (`split_public_header_inputs`) -- mirrors `scan --public-header-dir`.
     public_header_dirs: tuple[Path, ...] = ()
     # ADR-055 D4: whether resolving `path` may follow a GNU ld linker script's
     # INPUT()/GROUP() target to the real library. Default True matches

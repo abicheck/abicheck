@@ -277,7 +277,7 @@ class TestSeverityErrorSummaryLine:
         # action default) with PR comments on, where the compare-mode
         # command setup already asks the same abicheck invocation to write
         # an always-unfiltered secondary JSON report to $PR_JSON (via
-        # --secondary-format/--secondary-output) before this Job Summary
+        # --write/--output) before this Job Summary
         # code runs -- that must be read too, not just a FORMAT=json
         # primary output, or the common default-config case never gets the
         # category-aware message.

@@ -395,7 +395,7 @@ def build_contract_stage(
     # *committed* export references that type at all (Codex review, fresh
     # evidence; see `_is_public_non_stdlib_declaration`'s own docstring).
     #
-    # A forced-public symbol (`--public-symbol`) must widen this same
+    # A forced-public symbol (`scope.public_symbols`) must widen this same
     # allowlist, not just `post_processing._run_allowlist`'s own filter pass
     # (Codex review, fresh evidence): `--post-manifest --public-symbol api`
     # with header scoping also on keeps a `Change` on the forced symbol as a

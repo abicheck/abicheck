@@ -87,7 +87,7 @@ Add as the situation requires:
   on both sides and cancels out, reporting compatible
   ([getting the two sides](references/getting-the-two-sides.md)). Use the bare
   form only when one set of paths genuinely describes both sides.
-- `--policy plugin_abi` / `--policy sdk_vendor`, or `--policy-file`, when the
+- `--policy plugin_abi` / `--policy sdk_vendor`, or `--policy <document>`, when the
   project has its own view of what a given change kind means
   ([policies and suppressions](../shared/policies-and-suppressions.md)).
 - `--contract public` when you need per-finding

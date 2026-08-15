@@ -322,7 +322,7 @@ class TestEndToEndJsonReport:
         assert legacy.exit_code == 4, legacy.output
         ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
-        # No --severity-* flag and no config: `auto` resolved to `legacy`.
+        # No severity setting anywhere: `auto` resolved to `legacy`.
         assert gate["exit_code_scheme"] == "legacy"
         assert gate["severity"]["abi_breaking"] == "error"
         assert (
@@ -335,6 +335,13 @@ class TestEndToEndJsonReport:
                 == "built_in_default"
             )
 
+        # The per-category levels are config-only now (the hidden
+        # `--severity-<category>` flags were removed), so the tier that can
+        # state one is the project config.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "severity:\n  abi_breaking: warning\n", encoding="utf-8"
+        )
         scored = CliRunner().invoke(
             main,
             [
@@ -345,23 +352,22 @@ class TestEndToEndJsonReport:
                 "public",
                 "--format",
                 "json",
-                "--severity-abi-breaking",
-                "warning",
+                "--config",
+                str(cfg),
             ],
         )
         ctx = json.loads(scored.output)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
         # A severity setting flips `auto` to the severity-aware scheme, and the
-        # typed flag is what selected the level.
+        # config is what selected the level.
         assert gate["exit_code_scheme"] == "severity"
         assert gate["severity"]["abi_breaking"] == "warning"
         prov = ctx["field_provenance"]
-        assert prov["gate.severity.abi_breaking"]["layer"] == "explicit_cli"
-        # ...and only that category. The other three were not typed *and* no
-        # project config supplied them, so they are the built-in defaults --
-        # `severity_active` is run-wide ("set anywhere"), and using it per
-        # category named a `.abicheck.yml` that does not exist here (Codex
-        # review).
+        assert prov["gate.severity.abi_breaking"]["layer"] == "project_config"
+        # ...and only that category. The config supplied no other level, so
+        # the rest are the built-in defaults -- `severity_active` is run-wide
+        # ("set anywhere"), and using it per category named the config for a
+        # value it never stated (Codex review).
         assert prov["gate.severity.addition"]["layer"] == "built_in_default"
 
     def test_explicit_exit_code_scheme_records_its_own_provenance(self, tmp_path):
