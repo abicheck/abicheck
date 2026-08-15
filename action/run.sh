@@ -1684,6 +1684,9 @@ elif query == "assurance_notes":
     aa = _either("analysis_assurance", {})
     notes = aa.get("notes") if isinstance(aa, dict) else None
     print("; ".join(str(n) for n in (notes or [])))
+elif query == "assurance_status":
+    aa = _either("analysis_assurance", {})
+    print(aa.get("status", "") if isinstance(aa, dict) else "")
 else:
     raise SystemExit(2)
 PYQUERY
@@ -1749,14 +1752,44 @@ _coverage_gated() {
 # (status included) regardless of whether `--require-complete-analysis` was
 # ever passed, so a present, non-"complete" status alone cannot tell "this
 # run asked to gate on it" apart from "this run's evidence happens to be
-# partial and nobody asked". The one place that distinction is actually made
-# is `assurance_floor_diagnostic` (analysis_assurance.py), which only prints
-# when *both* the flag was set *and* the status fell short of "complete" --
-# unconditionally on stderr, regardless of --format, exactly like every
-# other diagnostic this file greps for. That stderr line is therefore the
-# authoritative (only) signal, not a fallback the way the JSON-first
-# coverage check above uses one.
+# partial and nobody asked".
+#
+# The FIRST, load-bearing check is therefore not the report or stderr at
+# all -- it is `$CMD`, the exact argv this step actually ran (built earlier
+# in this script, `extra-args` included): the flag can only have gated this
+# run if it is literally present there. An earlier revision trusted an
+# unanchored stderr grep as the sole signal, which a hostile input (a
+# header/symbol name, or any other value an `abicheck` diagnostic echoes
+# back) could forge to spoof the whole match string and fail an otherwise
+# clean, flag-less run through this axis's own unconditional gate (Codex
+# review, fresh evidence) -- `$CMD` is this script's own constructed
+# argument list, not attacker-controlled report/stderr content, so it
+# cannot be spoofed the same way.
+#
+# Once the flag is confirmed present, the JSON report's own
+# `analysis_assurance.status` is the authoritative answer (mirroring
+# `_coverage_gated`'s JSON-first preference) -- `assurance_floor_
+# diagnostic`'s stderr line is only the fallback for when there is no
+# readable JSON report at all (a non-JSON-format run, or the report file
+# is otherwise unreadable), the same "genuine cannot-tell" shape
+# `_coverage_gated`'s own stderr fallback exists for.
 _assurance_gated() {
+  local _flag_passed=false _arg
+  for _arg in "${CMD[@]}"; do
+    if [[ "$_arg" == "--require-complete-analysis" ]]; then
+      _flag_passed=true
+      break
+    fi
+  done
+  [[ "$_flag_passed" == true ]] || return 1
+
+  local _src _status
+  _src=$(_json_report_src)
+  _status=$(_report_query "$_src" assurance_status)
+  if [[ -n "$_status" ]]; then
+    [[ "$_status" != "complete" ]]
+    return
+  fi
   echo "$STDERR_CONTENT" \
     | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
 }

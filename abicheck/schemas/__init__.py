@@ -725,7 +725,21 @@ REPORT_SCHEMA_VERSION = "2.39"
 #:        2.36's identical addition to ``compare``'s ``changes[]`` -- the two
 #:        bump together since ``finding_id``/``canonical_finding_id`` are
 #:        joinable across both report shapes by design). Additive key.
-SCAN_SCHEMA_VERSION = "1.15"
+#: 1.16 -- P0.4: the ``diff`` block gains ``analysis_assurance`` (the same
+#:        shape ``compare``'s own top-level ``analysis_assurance`` key
+#:        already carries, via the identical ``analysis_assurance_report_
+#:        dict`` narrowing helper), always present on a real ``--against``
+#:        comparison regardless of whether ``--require-complete-analysis``
+#:        was passed (Codex review: a consumer dispatching on
+#:        ``scan_schema_version`` had no way to detect this additive
+#:        contract change). Reports how complete/trustworthy the run's own
+#:        evidence was -- depth, TU/export accounting, fact-set
+#:        comparability, header-context drift, source-graph completeness --
+#:        independently of the compatibility verdict; the flag only
+#:        controls whether an incomplete status additionally floors the
+#:        exit code. Additive key, absent only for the ``NOT_COMPARABLE``/
+#:        audit-only ``diff`` shapes that never reach a real comparison.
+SCAN_SCHEMA_VERSION = "1.16"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

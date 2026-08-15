@@ -855,6 +855,52 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
+- **The native `abicheck dump` CLI never applies L3 build context to its own
+  L2 header parse, and this is now confirmed by an external end-to-end
+  reproduction, not only by the pre-existing module-map note about the
+  `DumpRequest` migration (2026-08-15, `napetrov/abicheck-bazel-lab` audit
+  against `5b52989`).** The "Module map"'s `service_dump_pipeline.py` entry
+  above already named the cause — "the native `dump` CLI does not build a
+  `DumpRequest` yet" — but that note described a *migration gap*, not a
+  concrete, reproduced *symptom*. Traced here to the exact call graph: P0.3's
+  L3→L2 fold (`service_input_resolution._seeded_compile_context`, wired via
+  `buildsource/l2_seed.derive_l2_compile_context` and
+  `buildsource/header_compile_context.resolve_header_compile_context`) is
+  real and already correct — `resolve_side_snapshot()`, the function that
+  calls it, is shared by *both* `service_compare_pipeline.
+  resolve_compare_request` (the path `compare`'s own implicit-dump operand
+  takes) *and* `service_dump_pipeline.run_dump_request`. But
+  `cli.py`'s `dump_cmd` (the ELF path) never calls `run_dump_request` at
+  all — it calls `cli_dump_helpers.perform_elf_dump()` directly, a separate,
+  older code path whose `CompileContext` is built only from explicit
+  `--ast-frontend`/`--compiler*`/`--sysroot`/`--nostdinc` flags (confirmed by
+  grep: `cli_dump_helpers.py` contains no reference to
+  `resolve_side_snapshot`, `_seeded_compile_context`, or
+  `derive_l2_compile_context` anywhere). The external repro: a fresh
+  `abicheck dump lib.so --sources . --build-info compile_commands.json
+  --depth source` snapshot's own `parsed_with_build_context` reads `false`
+  and `language_standard` reads `""` even though real L3 evidence was
+  supplied and is embedded in the snapshot — the evidence is collected and
+  stored, but never routed to the L2 header-AST invocation, because that
+  invocation runs through a path P0.3's fold was never wired into.
+  Consequence: a `dump`-produced baseline and a `scan --against`
+  live-binary comparison of the *same* project, given the *same* L3
+  evidence, resolve to genuinely different `CompileContext`s
+  (`profile_fingerprint` mismatch on `include_sequence`/
+  `language_standard`), so `scan` correctly (per ADR-050 D2) refuses the
+  comparison as `NOT_COMPARABLE` — not because the evidence was
+  insufficient, but because the two commands extracted under
+  non-comparable recipes for reasons neither command's own diagnostics
+  name. **Not fixed here**: migrating `dump_cmd`/`perform_elf_dump`
+  (`cli_dump_helpers.py` is already at 1914 of its 2000-line hard cap —
+  real headroom for an inline fix is tight) to route through
+  `run_dump_request` the way `compare`'s implicit-dump path already does
+  is a genuine, cross-cutting architecture change — the "what that
+  migration needs first" the module-map note already flags — not a
+  same-pass reactive patch. The PE/Mach-O `dump` paths (`service.py`'s
+  `_dump_pe`/`_dump_macho` mirrors) were not independently checked for the
+  identical gap in this pass.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

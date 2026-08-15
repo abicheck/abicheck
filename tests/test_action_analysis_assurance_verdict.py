@@ -75,6 +75,14 @@ ASSURANCE_BLOCK = {
     "notes": ["header context asymmetric between old and new"],
 }
 
+#: `_assurance_gated()` requires this literal token in `$CMD` (the actual
+#: invocation argv, extra-args included) before it will even look at the
+#: report or stderr -- the load-bearing anti-spoofing check (Codex
+#: review). Every test below that expects the axis to actually gate must
+#: pass this via `INPUT_EXTRA_ARGS`, mirroring how a real caller supplies
+#: the flag today (neither command has a dedicated Action input for it).
+EXTRA_ARGS_WITH_FLAG = {"INPUT_EXTRA_ARGS": "--require-complete-analysis"}
+
 
 def _stub_abicheck(
     tmp_path: Path,
@@ -170,6 +178,7 @@ class TestScanMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
@@ -202,15 +211,17 @@ class TestScanMapsTheAssuranceExit:
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
                 "INPUT_FAIL_ON_BREAKING": "false",
                 "INPUT_FAIL_ON_API_BREAK": "false",
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
         assert outputs["_exit"] == 1, outputs
 
     def test_a_run_without_the_flag_is_unaffected(self, tmp_path: Path) -> None:
-        """No stderr diagnostic (the flag wasn't passed) -> exit 1 with
+        """The flag is absent from `$CMD` (no `extra-args`) -> exit 1 with
         neither coverage nor assurance signal stays a plain ERROR, exactly
-        as it always did."""
+        as it always did -- regardless of the stderr diagnostic being
+        absent too in this particular fixture."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -251,6 +262,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
@@ -289,6 +301,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
@@ -331,6 +344,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
@@ -359,6 +373,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
                 "INPUT_FAIL_ON_BREAKING": "false",
                 "INPUT_FAIL_ON_API_BREAK": "false",
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
@@ -427,6 +442,7 @@ class TestHostileReportContentCannotExecute:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
@@ -438,29 +454,61 @@ class TestHostileReportContentCannotExecute:
         assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
         assert payload in outputs["_summary"], outputs["_summary"]
 
-    def test_a_forged_stderr_line_cannot_spoof_the_diagnostic_without_the_marker(
+    def test_the_real_diagnostic_text_cannot_spoof_the_gate_without_the_flag_in_cmd(
         self, tmp_path: Path
     ) -> None:
-        """The exact substring `_assurance_gated()` requires
-        ("Analysis assurance incomplete ... under --require-complete-
-        analysis") must actually be present -- a stderr line that merely
-        *mentions* assurance/incompleteness, crafted by an attacker who
-        controls a symbol/header name embedded in some other diagnostic,
-        must not be mistaken for the real, code-emitted floor notice."""
+        """The core anti-spoofing property (Codex review, P1): stderr can
+        contain content an attacker influences (a header/symbol name
+        echoed back into some *other*, unrelated diagnostic), so
+        `_assurance_gated()` must not trust stderr as its sole signal --
+        it first requires `--require-complete-analysis` to be literally
+        present in `$CMD`, this script's own constructed argv, which
+        attacker-controlled report/stderr content cannot forge. Here the
+        stderr line is the *exact* real diagnostic text (not a
+        near-miss/mention) and the report's own status is genuinely
+        `partial` -- everything a real gated run would show -- except the
+        flag was never in `$CMD`. Must still resolve to the pre-existing
+        catch-all, not a spoofed ANALYSIS_INCOMPLETE."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
             report={
                 "verdict": "COMPATIBLE",
                 "exit_code": 0,
-                "diff": {
-                    "analysis_assurance": {
-                        "schema_version": 1,
-                        "status": "partial",
-                        "notes": ["unrelated"],
-                    }
-                },
+                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
             },
+            stderr=ASSURANCE_STDERR,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                # Deliberately no EXTRA_ARGS_WITH_FLAG here.
+            },
+            bindir,
+        )
+        # Falls through to the pre-existing catch-all, exactly as it does
+        # with no diagnostic at all -- not a spoofed ANALYSIS_INCOMPLETE.
+        assert outputs["verdict"] == "ERROR", outputs
+
+    def test_a_forged_stderr_line_cannot_spoof_the_diagnostic_either(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact substring `_assurance_gated()`'s stderr fallback
+        requires ("Analysis assurance incomplete ... under
+        --require-complete-analysis") must actually be present -- a
+        stderr line that merely *mentions* assurance/incompleteness must
+        not be mistaken for the real, code-emitted floor notice, even
+        when the flag genuinely was passed and there is no JSON report to
+        answer from instead (the one case where this fallback is
+        actually reached)."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=None,
             stderr=(
                 "some unrelated warning mentioning analysis assurance "
                 "incomplete and require-complete-analysis but not the real "
@@ -472,13 +520,10 @@ class TestHostileReportContentCannotExecute:
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
-        # Falls through to the pre-existing catch-all, exactly as it does
-        # with no diagnostic at all -- not a spoofed ANALYSIS_INCOMPLETE.
         assert outputs["verdict"] == "ERROR", outputs
 
     def test_shell_metacharacters_in_the_stderr_diagnostic_do_not_execute(
@@ -507,6 +552,7 @@ class TestHostileReportContentCannotExecute:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
             },
             bindir,
         )
