@@ -382,6 +382,50 @@ def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[n
     }
 
 
+def test_dump_depth_binary_ignores_headers_for_the_scope_contract(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """``--depth binary`` must ignore ``-H`` in the *scope contract* too.
+
+    `resolve_dump_collect_context` clears the header-AST inputs at this
+    depth, but the public-header provenance roots were split off the raw
+    ``-H`` list *before* that call, so they survived the clear and were
+    stamped into the snapshot's `ExtractionContract`. Two binary-depth
+    snapshots taken with different ``-H`` sets then carried different
+    `scope_fingerprint`s and `compare` rejected the pair with
+    `ScopeMismatchError` (exit 16) -- at the one depth that is supposed to
+    ignore headers entirely (Codex review).
+    """
+    import json
+
+    from abicheck.cli import main
+
+    so = tmp_path / "libfoo.so"
+    so.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+    first = tmp_path / "a.h"
+    first.write_text("int foo(void);\n", encoding="utf-8")
+    second = tmp_path / "b.h"
+    second.write_text("int bar(void);\n", encoding="utf-8")
+
+    outputs = []
+    for name, headers in (("one", [first]), ("two", [first, second])):
+        out = tmp_path / f"{name}.json"
+        args = ["dump", str(so), "--depth", "binary", "-o", str(out)]
+        for h in headers:
+            args += ["-H", str(h)]
+        res = CliRunner().invoke(main, args)
+        assert res.exit_code == 0, _all_output(res)
+        outputs.append(json.loads(out.read_text(encoding="utf-8")))
+
+    contracts = [(d.get("contract") or {}) for d in outputs]
+    # The headers differ; the scope contract must not.
+    assert contracts[0].get("scope_fingerprint") == contracts[1].get(
+        "scope_fingerprint"
+    ), contracts
+    for contract in contracts:
+        scope = contract.get("scope") or {}
+        assert not scope.get("public_headers"), scope
+        assert not scope.get("public_header_dirs"), scope
+
+
 def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """``dump --depth binary`` discards a -H + --build-info invocation's L2 inputs:
     it must NOT abort on the compile-DB header requirement just because binary depth

@@ -550,15 +550,24 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # public surface rather than two.
     from .header_utils import split_public_header_inputs
 
-    _public_header_files, _public_header_dirs = split_public_header_inputs(headers)
-    public_headers = tuple(_public_header_files)
-    public_header_dirs = tuple(_public_header_dirs)
-
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
     collect_mode, headers = resolve_dump_collect_context(
         depth, _resolved_collect_mode, sources, build_info, headers,
     )
+
+    # Derived from the *post-suppression* headers, not the raw ones: at
+    # --depth binary `resolve_dump_collect_context` clears the header-AST
+    # inputs, and provenance roots split off beforehand survived that and were
+    # still stamped into the snapshot's scope contract. Two binary-depth
+    # snapshots taken with different -H sets then carried different scope
+    # fingerprints and `compare` rejected the pair with ScopeMismatchError --
+    # at the one depth that is supposed to ignore headers entirely (Codex
+    # review). Deriving after the clear makes them empty exactly when the
+    # headers they describe are.
+    _public_header_files, _public_header_dirs = split_public_header_inputs(headers)
+    public_headers = tuple(_public_header_files)
+    public_header_dirs = tuple(_public_header_dirs)
     # The L2 compile database is whatever --build-info names, read back after
     # --depth binary has had its say about the headers (a headerless dump has
     # no header AST for a database to parameterize).

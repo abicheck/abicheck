@@ -50,6 +50,11 @@ import click
 F = TypeVar("F", bound=Callable[..., object])
 
 
+#: The validator the removed ``--secondary-output`` option used, kept as the
+#: destination half of ``--write FORMAT=PATH``.
+_WRITE_PATH = click.Path(dir_okay=False, path_type=Path)
+
+
 def _parse_write_operand(
     value: str, formats: Sequence[str], param: click.Parameter | None
 ) -> tuple[str, Path]:
@@ -67,7 +72,18 @@ def _parse_write_operand(
             f"(choose from {', '.join(formats)}).",
             param=param,
         )
-    return fmt, Path(raw_path)
+    # Through Click's own path validator, not a bare `Path`: the replaced
+    # `--secondary-output` was a `click.Path(dir_okay=False)`, so naming an
+    # existing directory was a parse-time usage error. Constructing the Path
+    # directly let it through, and the failure moved to the secondary write
+    # -- after the whole comparison and the primary render had already run,
+    # leaving a partial report behind (Codex review).
+    # `click.Path.convert` is typed as returning its generic value union;
+    # `path_type=Path` is what actually makes it a `Path`, so narrow it here
+    # rather than widening this function's own return type.
+    converted = _WRITE_PATH.convert(raw_path, param, None)
+    assert isinstance(converted, Path)
+    return fmt, converted
 
 
 def secondary_output_options(

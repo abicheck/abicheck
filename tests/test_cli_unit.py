@@ -386,6 +386,29 @@ class TestCompareWrite:
             assert result.exit_code == 64, operand
             assert "FORMAT=PATH" in result.output, operand
 
+    def test_write_rejects_a_directory_destination_at_parse_time(self, tmp_path):
+        """A directory destination is a *parse* error, not a late write error.
+
+        The replaced ``--secondary-output`` was a ``click.Path(dir_okay=
+        False)``, so this failed before any analysis ran. Building the path
+        from the operand directly let it through, moving the failure to the
+        secondary write -- after the whole comparison and the primary render
+        had already completed, leaving a partial report behind (Codex
+        review). The primary report not existing is what proves it is still
+        a parse error rather than a tidier late one.
+        """
+        old_p, new_p = _write_snapshots(tmp_path)
+        destination = tmp_path / "adir"
+        destination.mkdir()
+        primary = tmp_path / "primary.md"
+        result = CliRunner().invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "-o", str(primary), "--write", f"json={destination}",
+        ])
+        assert result.exit_code == 64, result.output
+        assert "is a directory" in result.output
+        assert not primary.exists(), "the comparison ran before rejecting"
+
     def test_write_rejects_an_unrenderable_format(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         result = CliRunner().invoke(main, [
