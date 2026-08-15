@@ -146,9 +146,12 @@ Two lessons hide in this table:
 - **Evidence runs in both directions.** More input doesn't just find more breaks —
   it *dismisses* false alarms. Header scoping is what lets a checker say
   "that struct changed, but it was never part of the public surface."
-- **The staircase is real and measurable.** Over the example catalog, correct-
-  verdict coverage rises at every step from a stripped binary up to full source
-  evidence, and the false-negative count falls with it. This page deliberately
+- **The staircase is real and measurable.** Over the example catalog,
+  correct-verdict coverage improves substantially from a stripped binary up to
+  full source evidence, and the false-negative count falls with it. The climb is
+  **non-decreasing, not strictly rising at every rung** — in the current
+  measurement `headers` and `build` score identically, because that step adds
+  context a verdict does not always need. This page deliberately
   quotes **no percentages**: there is exactly one measured table, it carries its
   own freshness caveat and denominator definition, and a second hand-copied set
   of numbers here would go stale silently. Read it at

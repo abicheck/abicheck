@@ -205,9 +205,13 @@ with virtual or multiple inheritance may be vcall/vbase offsets or a secondary
 table moving, not a slot count at all.
 
 On the right, the last row is the one that bites. A **pure reorder** of virtual
-functions, and a base-class **replacement or reorder** that keeps the same
-runtime class and entry count, both leave the object size identical — and are
-therefore invisible at L0, even though both are hard ABI breaks. Establishing
+functions leaves every emitted size identical, so it is invisible at L0
+entirely, even though it is a hard ABI break. A base-class **replacement or
+reorder** that keeps the same `type_info` runtime class and base count is
+invisible to the *RTTI* signal specifically — but not necessarily to L0 as a
+whole, since swapping in a base with a different virtual surface still resizes
+the derived class's `_ZTV` group. A change is only fully invisible here when
+**both** emitted symbols keep their size. Establishing
 *identity* (which slot, which base) needs L1/L2 evidence. Because the finding is
 *inferred* from size,
 these findings carry `MEDIUM` confidence; and as always, the finding is a
