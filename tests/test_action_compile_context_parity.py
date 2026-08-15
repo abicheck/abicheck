@@ -112,14 +112,32 @@ def _add_flag_source() -> str:
 # it unset would make every "(cd \"$_PY_SAFE_DIR\" && ...)" wrapper `cd` into
 # an empty string, i.e. a no-op staying in the untrusted checkout, exercising
 # *none* of the CWD-shadowing fix that variable exists for, while every test
-# here kept passing regardless).
-_PY_SAFE_DIR_START = '_PY_SAFE_DIR="$(mktemp'
+# here kept passing regardless). Fails loud (exit 1) rather than falling
+# back to a shared directory, so the extracted block is the whole
+# if/fi -- not a single line.
+_PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
+_PY_SAFE_DIR_END = "\nfi\n"
+
+# $_PY_BIN_HAS_ABICHECK is referenced (not redefined) inside
+# add_flag_shlex_split's real guard -- extracted verbatim for the identical
+# reason as $_PY_SAFE_DIR above (Codex review: a harness silently leaving it
+# unset/empty would always take the plain-whitespace-split fallback branch,
+# exercising none of the real shlex-aware splitting any test here checks).
+_PY_BIN_HAS_ABICHECK_START = '_PY_BIN_HAS_ABICHECK="false"'
+_PY_BIN_HAS_ABICHECK_END = "\nfi\n"
 
 
 def _py_safe_dir_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_PY_SAFE_DIR_START)
-    end = text.index("\n", start) + 1
+    end = text.index(_PY_SAFE_DIR_END, start) + len(_PY_SAFE_DIR_END)
+    return text[start:end]
+
+
+def _py_bin_has_abicheck_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PY_BIN_HAS_ABICHECK_START)
+    end = text.index(_PY_BIN_HAS_ABICHECK_END, start) + len(_PY_BIN_HAS_ABICHECK_END)
     return text[start:end]
 
 
@@ -189,6 +207,7 @@ def _run_region(
         # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -227,6 +246,7 @@ def _run_region_raw(
         # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -419,6 +439,7 @@ class TestCompileContextForwardingParity:
             'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
             '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
             + _py_safe_dir_source()
+            + _py_bin_has_abicheck_source()
             + _add_flag_source()
             + _is_release_style_operand_source()
             + "\nCMD=()\n"

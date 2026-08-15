@@ -60,17 +60,20 @@ from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
-_PY_SAFE_DIR_START = '_PY_SAFE_DIR="$(mktemp'
+_PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
+_PY_SAFE_DIR_END = "\nfi\n"
 
 _MALICIOUS_MARKER = "MALICIOUS CODE EXECUTED"
 
 
 def _py_safe_dir_source() -> str:
     """Extract the real ``_PY_SAFE_DIR=...`` assignment verbatim from
-    run.sh -- one line, up to and including its trailing newline."""
+    run.sh -- the whole fail-loud if/fi block, not a single line (a
+    ``mktemp -d`` failure exits the Action rather than falling back to a
+    shared, non-private directory)."""
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_PY_SAFE_DIR_START)
-    end = text.index("\n", start) + 1
+    end = text.index(_PY_SAFE_DIR_END, start) + len(_PY_SAFE_DIR_END)
     return text[start:end]
 
 
@@ -278,3 +281,123 @@ class TestPySafeDirPreventsSitecustomizeExecution:
             tmp_path, extra_env={"PYTHONPATH": "."}, use_the_fix=False
         )
         assert _MALICIOUS_MARKER in result.stderr
+
+
+class TestPySafeDirFailsClosedWhenMktempFails:
+    """Codex review, fresh evidence: falling back to a pre-existing shared
+    directory (e.g. bare ``${TMPDIR:-/tmp}``) when ``mktemp -d`` fails would
+    silently reintroduce the exact risk ``$_PY_SAFE_DIR`` exists to close --
+    that directory is neither guaranteed empty nor private on a constrained
+    or shared self-hosted runner. run.sh now fails the Action outright
+    (``exit 1``) instead.
+    """
+
+    def test_mktemp_failure_exits_nonzero_with_a_clear_error(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        fake_mktemp = fake_bin / "mktemp"
+        fake_mktemp.write_text("#!/bin/bash\nexit 1\n")
+        fake_mktemp.chmod(0o755)
+
+        script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
+        env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 1
+        assert "UNREACHABLE" not in result.stdout
+        assert "::error::" in result.stdout
+        assert "mktemp" in result.stdout
+
+    def test_mktemp_success_is_unaffected(self, tmp_path: Path) -> None:
+        """Proves the test above isn't vacuously passing (e.g. because the
+        real if/fi block is malformed regardless of mktemp's outcome) --
+        the identical block, with a real working mktemp, still resolves
+        $_PY_SAFE_DIR normally."""
+        script = _py_safe_dir_source() + 'echo "DIR: $_PY_SAFE_DIR"\n'
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ),
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "DIR: " in result.stdout
+        assert "UNREACHABLE" not in result.stdout
+
+
+class TestPyBinHasAbicheckFallback:
+    """Codex review, fresh evidence: a self-hosted runner can expose
+    ``pip``/``abicheck`` from one Python environment while ``command -v
+    python3`` resolves a *different* one (e.g. a system Python ahead of a
+    pyenv shim on PATH) -- without this check, ``add_flag_shlex_split``
+    would invoke a ``$_PY_BIN`` that can't import ``abicheck`` and silently
+    drop every requested ``--gcc-options`` token (no ``set -e`` in this
+    script), rather than falling back to plain whitespace splitting the
+    way it already does when no Python interpreter is on PATH at all.
+    """
+
+    @staticmethod
+    def _py_bin_has_abicheck_source() -> str:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index('_PY_BIN_HAS_ABICHECK="false"')
+        end = text.index("\nfi\n", start) + len("\nfi\n")
+        return text[start:end]
+
+    def test_interpreter_without_abicheck_falls_back_to_whitespace_split(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        # A python3 stand-in that can run -c scripts but genuinely cannot
+        # import abicheck -- reproducing "a different interpreter than the
+        # one abicheck was pip-installed into" without needing a second
+        # real Python installation.
+        fake_python3 = fake_bin / "python3"
+        fake_python3.write_text(
+            '#!/bin/bash\nexec "$(command -v python3.11 || command -v python3)" '
+            '-S -c \'raise SystemExit("no abicheck here")\' "$@"\n'
+        )
+        fake_python3.chmod(0o755)
+        script = (
+            '_PY_BIN="'
+            + str(fake_python3)
+            + '"\n'
+            + self._py_bin_has_abicheck_source()
+            + 'echo "HAS_ABICHECK=$_PY_BIN_HAS_ABICHECK"\n'
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "HAS_ABICHECK=false" in result.stdout
+        assert "::warning::" in result.stdout
+        assert "cannot import abicheck" in result.stdout
+
+    def test_real_interpreter_has_abicheck(self) -> None:
+        """Proves the test above isn't vacuously passing -- the identical
+        check, run against the real, ambient python3 (which does have
+        abicheck importable in this test environment), resolves true."""
+        script = (
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + self._py_bin_has_abicheck_source()
+            + 'echo "HAS_ABICHECK=$_PY_BIN_HAS_ABICHECK"\n'
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "HAS_ABICHECK=true" in result.stdout

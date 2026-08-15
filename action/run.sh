@@ -61,13 +61,14 @@ add_flag() {
 # truncation, unquoted Windows-path corruption -- see that function's own
 # docstring for the full history) precisely because there were two copies
 # of the same non-trivial tokenizer to keep in sync. `abicheck` is always
-# importable here: action.yml's "Install abicheck" step runs `pip install`
-# before "Run abicheck" invokes this script, so `_PY_BIN` (found via the
-# same `command -v python3`/`python` PATH lookup pip itself resolved
-# against) already has it on its import path. Falls back to add_flag()'s
-# plain whitespace split only if no Python interpreter is on PATH at all,
-# which should not happen in this Action's own runtime (it needs one to
-# run abicheck itself).
+# importable here in the common case: action.yml's "Install abicheck" step
+# runs `pip install` before "Run abicheck" invokes this script, so `_PY_BIN`
+# (found via the same `command -v python3`/`python` PATH lookup pip itself
+# resolved against) already has it on its import path -- verified once, up
+# front, via `$_PY_BIN_HAS_ABICHECK` (see its own definition above), for the
+# self-hosted-runner case where that assumption doesn't hold. Falls back to
+# add_flag()'s plain whitespace split when no Python interpreter is on PATH
+# at all, or when one is but can't import `abicheck`.
 # ---------------------------------------------------------------------------
 add_flag_shlex_split() {
   local flag="$1"
@@ -83,7 +84,7 @@ add_flag_shlex_split() {
     add_flag "$flag" "$value"
     return
   fi
-  if [[ -z "$_PY_BIN" ]]; then
+  if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
     add_flag "$flag" "$value"
     return
   fi
@@ -229,6 +230,24 @@ MODE="${INPUT_MODE:-compare}"
 # on exactly the runners this fallback exists to serve (Codex review).
 _PY_BIN="$(command -v python3 || command -v python || true)"
 
+# On most runners this is exactly the interpreter action.yml's own "Install
+# abicheck" step just `pip install`ed into, since `pip` itself resolves
+# against the same PATH lookup -- but a self-hosted runner can expose
+# `pip`/`abicheck` from one Python environment while `command -v python3`
+# above resolves a *different* one (e.g. a system Python ahead of a pyenv
+# shim on PATH, Codex review, fresh evidence). Checked once, up front,
+# rather than assumed: `add_flag_shlex_split` (below) falls back to its own
+# plain whitespace splitting -- the same degradation already used when no
+# Python interpreter is on PATH at all -- instead of silently invoking a
+# `$_PY_BIN` that can't import `abicheck` and dropping every requested
+# `--gcc-options` token into an empty, discarded pipeline result.
+_PY_BIN_HAS_ABICHECK="false"
+if [[ -n "$_PY_BIN" ]] && "$_PY_BIN" -c "import abicheck" >/dev/null 2>&1; then
+  _PY_BIN_HAS_ABICHECK="true"
+elif [[ -n "$_PY_BIN" ]]; then
+  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option will fall back to plain whitespace splitting, which does not honor quoting."
+fi
+
 # ---------------------------------------------------------------------------
 # Security: `python -c`/`python -m` insert this process's current working
 # directory ('' in sys.path, i.e. wherever this script's caller checked out
@@ -282,7 +301,22 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # finder, confirmed directly against a real editable install) is likewise
 # unaffected by either change -- neither depends on `sys.path` carrying
 # the checkout, or on `PYTHONPATH` being set, to resolve `abicheck`.
-_PY_SAFE_DIR="$(mktemp -d 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}")"
+#
+# Fails the Action outright if a fresh, private directory can't be created
+# (Codex review, fresh evidence) -- falling back to a pre-existing shared
+# directory (e.g. bare `${TMPDIR:-/tmp}`) would silently reintroduce the
+# exact risk this mechanism exists to close: on a constrained or shared
+# self-hosted runner, that directory is neither guaranteed empty nor
+# private, so a same-named `abicheck` package or `sitecustomize.py`
+# planted (or left over) there could shadow the real package again. A
+# `mktemp -d` failure is rare enough, and this variable is needed by every
+# `--gcc-options`-forwarding and baseline-set-archive-extraction code path
+# below, that failing loud here is strictly better than silently degrading
+# the one guarantee this whole mechanism provides.
+if ! _PY_SAFE_DIR="$(mktemp -d)"; then
+  echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helpers without risking a checked-out repository shadowing the installed package."
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,

@@ -47,7 +47,17 @@
   entry, a `PYTHONPATH=.`-style entry, or a `PYTHONPATH=src`-style
   descendant entry alike — and the one `-m abicheck.cli_pr_comment`
   invocation was converted to the equivalent `-c`-based form so it could
-  receive the same fix.
+  receive the same fix. Creating that temporary directory now fails the
+  Action outright (rather than silently falling back to a shared,
+  non-private one like `${TMPDIR:-/tmp}`) if it can't be created, since a
+  shared fallback would reintroduce the same shadowing risk on a
+  constrained or shared self-hosted runner; separately, the resolved
+  Python interpreter is now checked once, up front, for whether it can
+  actually import `abicheck` (a self-hosted runner can expose `pip`/
+  `abicheck` from one Python environment while a bare `python3` on `PATH`
+  resolves a different one), falling back to plain whitespace splitting
+  for `--gcc-options`/`--compiler-option` — with a clear warning — instead
+  of silently dropping every requested compiler option.
 - **The Windows-only compiler-flags tokenizer (`--gcc-options`/
   `--compiler-option`) now follows the standard Windows command-line
   backslash/quote parsing rule** (the same one `CommandLineToArgvW` and
