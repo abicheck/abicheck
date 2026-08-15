@@ -65,6 +65,7 @@ witness; see ``scripts/mutation_results.py``.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import shutil
@@ -206,15 +207,15 @@ def parse_changed_lines(diff_text: str) -> dict[str, set[int]]:
     are answered separately by `parse_removed_lines`, against the base.
     """
     changed: dict[str, set[int]] = {}
-    for path, _old, new in _hunks(diff_text):
+    for _old_path, new_path, _old, new in _hunks(diff_text):
         start, count = new
-        if count:
-            changed.setdefault(path, set()).update(range(start, start + count))
+        if count and new_path is not None:
+            changed.setdefault(new_path, set()).update(range(start, start + count))
     return changed
 
 
-def parse_removed_lines(diff_text: str) -> dict[str, set[int]]:
-    """Map ``path -> *base-side* line numbers this diff removes.
+def parse_removed_lines(diff_text: str) -> dict[str, tuple[str, set[int]]]:
+    """Map ``key path -> (base-side path, base-side line numbers removed)``.
 
     Deleting a guard is one of the most direct ways to weaken a detector, so
     the removed lines have to reach the gate somehow — but they exist only in
@@ -226,40 +227,102 @@ def parse_removed_lines(diff_text: str) -> dict[str, set[int]]:
 
     Base-side numbers are not a guess — they are what the hunk header says —
     and resolving them against the base file's own AST answers exactly "which
-    function did this line live in". A deleted function resolves to its own
-    name, which no longer exists in the new tree and therefore matches no
-    mutant; a deleted line inside a surviving function resolves to that
-    function, which is the case worth catching.
+    function did this line live in".
+
+    Two paths, because a hunk can name two. The *base* path is the one to
+    read the removed lines out of (`--- a/...`, which git still emits for a
+    rename or a whole-file deletion, where the new side is a different name
+    or `/dev/null`). The *key* path is the one to attribute the result to —
+    the new name, because that is what a mutant key carries. Conflating them
+    meant a renamed module's removals were looked up under a name the base
+    does not have, answered `None`, and silently dropped (Codex, CodeRabbit).
     """
-    removed: dict[str, set[int]] = {}
-    for path, old, _new in _hunks(diff_text):
+    removed: dict[str, tuple[str, set[int]]] = {}
+    for old_path, new_path, old, _new in _hunks(diff_text):
         start, count = old
-        if count:
-            removed.setdefault(path, set()).update(range(start, start + count))
+        if not count or old_path is None:
+            continue
+        # A deleted file has no new name; key it by its old one. Nothing in
+        # the new tree carries mutants for it, so this normally matches
+        # nothing — but a `--results-file` saved from an earlier revision can
+        # still name it, and a whole deleted module having no entry at all is
+        # the one shape nothing downstream can notice (CodeRabbit).
+        key = new_path or old_path
+        removed.setdefault(key, (old_path, set()))[1].update(
+            range(start, start + count)
+        )
     return removed
 
 
-def _hunks(diff_text: str) -> Iterator[tuple[str, tuple[int, int], tuple[int, int]]]:
-    """`(path, (old_start, old_count), (new_start, new_count))` per hunk."""
-    current: str | None = None
+def pure_deletion_paths(diff_text: str) -> set[str]:
+    """Key paths with at least one hunk that removes lines and adds none.
+
+    The narrower question behind "can an unresolvable base hide a failure".
+    A *modification* removes and adds in the same hunk, so its new side is
+    already attributed and the removed side adds nothing the gate needs. Only
+    a hunk with no new side at all has its evidence exclusively in the base.
+    """
+    return {
+        (new_path or old_path)
+        for old_path, new_path, old, new in _hunks(diff_text)
+        if old[1] and not new[1] and (new_path or old_path)
+    }
+
+
+def unresolved_removals(
+    removed: dict[str, tuple[str, set[int]]],
+    read_base: Callable[[str], str | None] | None,
+) -> set[str]:
+    """Key paths whose removed lines could not be read out of the base.
+
+    Per path, not "is there a reader at all". A reader can exist and still
+    answer `None` for one path — a file absent from the merge base, an
+    unreadable blob — and keying the risk check on the reader alone let
+    exactly that case through as a silent skip (Codex, CodeRabbit).
+    """
+    return {
+        key
+        for key, (base_path, _lines) in removed.items()
+        if key.endswith(".py") and (read_base is None or read_base(base_path) is None)
+    }
+
+
+def _hunks(
+    diff_text: str,
+) -> Iterator[tuple[str | None, str | None, tuple[int, int], tuple[int, int]]]:
+    """`(old_path, new_path, (old_start, old_count), (new_start, new_count))`.
+
+    Either path is `None` when its side is `/dev/null` — an added file has no
+    old side, a deleted file no new side. Both are tracked because the two
+    sides answer different questions: the new path is what a mutant key
+    carries, the old path is where the removed lines can actually be read.
+
+    A deleted file's `+++ /dev/null` used to leave the *previous* file's name
+    in scope, so its `@@ -1,5 +0,0 @@` hunk was recorded against a file the
+    branch never touched (CodeRabbit review); resetting on `diff --git` and
+    tracking both sides explicitly removes that whole class.
+    """
+    old_path: str | None = None
+    new_path: str | None = None
     for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            old_path = new_path = None
+            continue
+        if line.startswith("--- "):
+            target = line[4:].strip()
+            old_path = target[2:] if target.startswith("a/") else None
+            continue
         if line.startswith("+++ "):
             target = line[4:].strip()
-            # A deleted file's header is `+++ /dev/null`, which does not match
-            # `+++ b/` — so `current` kept pointing at the *previous* file and
-            # the deletion's `@@ -1,5 +0,0 @@` hunk was recorded against it.
-            # The diff-scoped gate then failed on a function the branch never
-            # touched (CodeRabbit review). The old `/dev/null` guard could
-            # never fire: it ran after the `b/` prefix had already been
-            # stripped.
-            current = target[2:] if target.startswith("b/") else None
+            new_path = target[2:] if target.startswith("b/") else None
             continue
-        if current is None:
+        if old_path is None and new_path is None:
             continue
         m = _HUNK.match(line)
         if m:
             yield (
-                current,
+                old_path,
+                new_path,
                 (int(m.group(1)), int(m.group(2)) if m.group(2) is not None else 1),
                 (int(m.group(3)), int(m.group(4)) if m.group(4) is not None else 1),
             )
@@ -268,16 +331,19 @@ def _hunks(diff_text: str) -> Iterator[tuple[str, tuple[int, int], tuple[int, in
 def changed_functions(
     changed: dict[str, set[int]],
     repo_root: Path,
-    removed: dict[str, set[int]] | None = None,
+    removed: dict[str, tuple[str, set[int]]] | None = None,
     read_base: Callable[[str], str | None] | None = None,
 ) -> dict[str, set[str]]:
     """Map ``path -> qualnames of functions this diff touched``.
 
     Two resolutions, against two different revisions: added and modified lines
     against the working tree, removed lines against *the base*, since that is
-    the only revision in which they exist. Without *read_base* the removed
-    half is simply not resolved — an honest gap the caller reports, rather
-    than a new-side guess that names the wrong function.
+    the only revision in which they exist. Which path each is read from and
+    which it is filed under can differ — see `parse_removed_lines`. Without
+    *read_base*, or for a path the base cannot answer for, the removed half
+    is simply not resolved — an honest gap the caller reports through
+    `unresolved_removals`, rather than a new-side guess naming the wrong
+    function.
     """
     out: dict[str, set[str]] = {}
     for path, lines in changed.items():
@@ -291,15 +357,17 @@ def changed_functions(
         if funcs:
             out[path] = funcs
     if removed and read_base is not None:
-        for path, lines in removed.items():
-            if not path.endswith(".py"):
+        for key_path, (base_path, lines) in removed.items():
+            if not key_path.endswith(".py"):
                 continue
-            base_source = read_base(path)
+            base_source = read_base(base_path)
             if base_source is None:
                 continue
             funcs = functions_covering_lines(base_source, lines)
             if funcs:
-                out.setdefault(path, set()).update(funcs)
+                # Filed under the *new* name: that is what a mutant key
+                # carries, even though the lines were read from the old one.
+                out.setdefault(key_path, set()).update(funcs)
     return out
 
 
@@ -322,6 +390,7 @@ def _base_reader(base_ref: str) -> Callable[[str], str | None] | None:
         return None
     base_sha = proc.stdout.strip()
 
+    @functools.cache
     def _read(path: str) -> str | None:
         shown = subprocess.run(  # noqa: S603 — fixed argv, no shell
             ["git", "show", f"{base_sha}:{path}"],
@@ -726,17 +795,47 @@ def main(argv: list[str] | None = None) -> int:
         touched = changed_functions(
             parse_changed_lines(diff_text), REPO_ROOT, removed, read_base
         )
-        if removed and read_base is None:
+        # Not `unresolved`: that name already holds the count of mutants
+        # that did not resolve, and it is written to the receipt further
+        # down. Shadowing it put a set of paths in that field (caught by the
+        # receipt's own test).
+        unresolved_paths = unresolved_removals(removed, read_base)
+        if unresolved_paths:
             # Not a warning about a corner case: a branch whose only edit is a
             # deleted guard has *all* of its evidence in the removed half, so
             # saying nothing here would let a gate that resolved none of it
             # print the same "OK" line as one that resolved all of it.
-            print(
-                "mutation-score: WARNING — could not read the base revision "
-                f"({args.base_ref}), so lines this branch *removed* were not "
-                "attributed to any function. The diff-scoped result below "
-                "covers added and modified lines only."
+            #
+            # Whether that is fatal depends on what the unresolved removals
+            # could have hidden. A removal in a module with no surviving
+            # mutant cannot hide a diff-scoped failure — there is no survivor
+            # to attribute — so warning is the honest answer. A removal in a
+            # module that *does* carry a survivor is a failed measurement:
+            # exiting 0 there is a pass the run never earned, whatever the
+            # warning says (Codex review).
+            at_risk = sorted(
+                {r.module_path for r in records if r.is_survivor}
+                & unresolved_paths
+                & pure_deletion_paths(diff_text)
             )
+            print(
+                "mutation-score: WARNING — could not read "
+                + ", ".join(sorted(unresolved_paths))
+                + f" out of the base revision ({args.base_ref}), so lines "
+                "this branch *removed* from them were not attributed to any "
+                "function. The diff-scoped result below covers added and "
+                "modified lines only for those paths."
+            )
+            if at_risk:
+                print(
+                    "ERROR: those unattributed removals are in module(s) that "
+                    "carry surviving mutants, so a survivor in a function this "
+                    "branch gutted would go unreported: "
+                    + ", ".join(at_risk)
+                    + ". Fetch the base revision (the PR lane checks out with "
+                    "fetch-depth: 0) and re-run."
+                )
+                return 1
         n_funcs = sum(len(v) for v in touched.values())
         print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
         if n_funcs:
