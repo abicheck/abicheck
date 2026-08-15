@@ -38,10 +38,12 @@ prove it actually exits.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START = "  # Rejected rather than resolved by the fallback below when both are set,"
@@ -56,12 +58,21 @@ def _guard() -> str:
 
 
 def _run(build_info: str, compile_db: str) -> subprocess.CompletedProcess[str]:
+    # A resolved bash, not a bare "bash": on windows-latest that name can
+    # reach WSL's launcher stub instead, which prints its own UTF-16 "no
+    # installed distributions" text and exits 1 -- indistinguishable from the
+    # guard firing, and how this file first reddened the Windows lane.
+    #
+    # The environment is inherited rather than replaced for the same reason:
+    # a hand-built {"PATH": "/usr/bin:/bin"} is a POSIX assumption, and bash
+    # on Windows needs its own. Both INPUT_ vars are set explicitly, so an
+    # ambient one cannot leak in.
     return subprocess.run(
-        ["bash", "-c", _guard() + "\necho REACHED_END"],
+        [bash_executable(), "-c", _guard() + "\necho REACHED_END"],
         capture_output=True,
         text=True,
         env={
-            "PATH": "/usr/bin:/bin",
+            **os.environ,
             "INPUT_BUILD_INFO": build_info,
             "INPUT_COMPILE_DB": compile_db,
         },
@@ -127,7 +138,8 @@ def test_a_real_scan_mode_run_hits_the_guard(tmp_path: Path) -> None:
     lib.write_bytes(b"\x7fELF" + b"\x00" * 60)
 
     env = {
-        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        **os.environ,
+        "PATH": os.pathsep.join([str(fake_bin), os.environ.get("PATH", "")]),
         "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
         "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
         "INPUT_MODE": "scan",
@@ -136,7 +148,8 @@ def test_a_real_scan_mode_run_hits_the_guard(tmp_path: Path) -> None:
         "INPUT_COMPILE_DB": "/compile_commands.json",
     }
     res = subprocess.run(
-        ["bash", str(RUN_SH)], capture_output=True, text=True, env=env, cwd=tmp_path
+        [bash_executable(), str(RUN_SH)],
+        capture_output=True, text=True, env=env, cwd=tmp_path,
     )
     assert res.returncode == 1, res.stdout + res.stderr
     assert "are both set for mode: scan" in res.stdout

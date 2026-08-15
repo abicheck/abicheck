@@ -109,6 +109,15 @@
   structural tests check that a flow has an automated counterpart, not that
   the command it prints still parses.
 
+- **The Action's scan-mode `build-info`/`compile-db` conflict test resolves a
+  real bash.** It passed a bare `"bash"`, which on `windows-latest` can reach
+  WSL's launcher stub instead of Git for Windows' bash; with no distro
+  installed the stub prints its own UTF-16 "no installed distributions" text
+  and exits 1, which is indistinguishable from the guard under test firing.
+  `tests/_workflow_exec.bash_executable()` is now the canonical resolver a new
+  module imports (the ~24 `test_action_*` modules carrying private copies
+  predate it and are unchanged).
+
 ### Changed
 
 - **`--policy-file` is folded into `--policy`, which now takes `NAME|PATH`.**
