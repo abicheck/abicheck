@@ -214,14 +214,27 @@ class TestGatePolicy:
                 }
             )
 
-    def test_gate_block_with_no_declared_version_is_accepted(self):
-        # An absent aggregate_manifest_version is treated as "current MAJOR"
-        # everywhere else in this module (ExpectedTargets.from_manifest_data
-        # docstring) -- a gate block with no version stated at all is not
-        # the inconsistent case the fix above targets, only a gate paired
-        # with an explicit, contradicting old version is.
+    def test_gate_block_with_no_declared_version_is_rejected(self):
+        # Codex review, fresh evidence, second round: "absent version =
+        # current MAJOR" is reader-relative, so it can never safely signal
+        # that a pre-2.0 reader would also understand `gate` -- a genuinely
+        # old reader given the SAME unversioned manifest applies its own
+        # "absent = my current major" rule too and silently ignores `gate`
+        # regardless of what this (2.0+) reader does with it. `gate`
+        # therefore requires an *explicit* >= 2.0 declaration, not merely
+        # the lack of a contradicting old one.
+        with pytest.raises(AggregateError, match="explicit"):
+            ExpectedTargets.from_manifest_data(
+                {
+                    "targets": [{"id": LINUX}],
+                    "gate": {"missing_required": "warn"},
+                }
+            )
+
+    def test_gate_block_with_explicit_v2_version_is_accepted(self):
         exp = ExpectedTargets.from_manifest_data(
             {
+                "aggregate_manifest_version": "2.0",
                 "targets": [{"id": LINUX}],
                 "gate": {"missing_required": "warn"},
             }

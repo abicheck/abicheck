@@ -3255,15 +3255,41 @@ class TestRenderOutput:
         )
         assert with_rec != without_rec
 
-    def test_show_recommendation_default_matches_the_cli_wrapper(
+    def test_show_recommendation_default_matches_pre_removal_api(
         self, diff_result, snap
     ):
-        """The CLI's own `cli._render_output` never passes this keyword, so
-        its default must keep matching the CLI's unconditional-inclusion
-        behaviour."""
+        """Codex review, fresh evidence, second round: the default must stay
+        `False` -- the exact pre-removal Tier-2 Python API default -- not
+        `True`. An earlier revision changed the default to match the CLI's
+        own unconditional-inclusion behaviour, which silently changed what
+        an existing direct caller gets when it omits this keyword entirely
+        (a public-API default change this PR's docs never announced). The
+        CLI achieves its own unconditional inclusion by having its wrapper
+        (`cli._render_output`) pass `show_recommendation=True` explicitly,
+        not by changing this function's default -- see
+        `test_cli_recommendation_is_unconditional_despite_the_false_default`
+        below for that half of the contract."""
         assert render_output(
             "markdown", diff_result, snap
-        ) == render_output("markdown", diff_result, snap, show_recommendation=True)
+        ) == render_output("markdown", diff_result, snap, show_recommendation=False)
+
+    def test_cli_recommendation_is_unconditional_despite_the_false_default(
+        self, diff_result, snap
+    ):
+        """The CLI's own `cli._render_output` wrapper explicitly passes
+        `show_recommendation=True` to `render_output` (it never relies on
+        the library default), so its own markdown output stays
+        unconditional even though `render_output`'s own default flipped
+        back to `False` in this round's fix."""
+        from abicheck.cli import _render_output
+
+        cli_markdown = _render_output("markdown", diff_result, snap)
+        default_markdown = render_output("markdown", diff_result, snap)
+        explicit_true_markdown = render_output(
+            "markdown", diff_result, snap, show_recommendation=True
+        )
+        assert cli_markdown == explicit_true_markdown
+        assert cli_markdown != default_markdown
 
     def test_json_follow_deps(self, snap):
         snap.dependency_info = DependencyInfo(

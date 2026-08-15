@@ -877,8 +877,12 @@ def _render_output(
     No ``stat``/``show_recommendation`` parameters (CLI cleanup phase two,
     PR 1): the one-line summary is reached only via ``fmt ==
     service_render.ONELINE_FORMAT`` (the built-in ``quick`` --profile's own
-    injection), and the release recommendation is unconditionally included
-    by :func:`service.render_output` itself.
+    injection). The release recommendation is unconditional for every CLI
+    invocation -- achieved by explicitly passing ``show_recommendation=True``
+    below, not by changing :func:`service.render_output`'s own default
+    (which stays ``False``, the pre-removal Tier-2 Python API default, per
+    Codex review, fresh evidence -- a direct caller that omits the keyword
+    must keep getting the behaviour it always got).
     """
     from .service import render_output
     return render_output(
@@ -888,6 +892,7 @@ def _render_output(
         severity_config=severity_config,
         demangle=demangle,
         contract_evaluation=contract_evaluation,
+        show_recommendation=True,
     )
 
 

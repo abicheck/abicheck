@@ -58,7 +58,7 @@ def render_output(
     demangle: bool = False,
     contract_evaluation: bool = False,
     stat: bool = False,
-    show_recommendation: bool = True,
+    show_recommendation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -81,18 +81,23 @@ def render_output(
     flags are gone, but a signature change here is a separate, unannounced
     break this PR's own docs never claimed (Codex review). ``show_recommendation``
     stays a real, effective toggle for the markdown renderer, default
-    ``True`` — matching the "unconditional in every human-facing format"
-    behaviour this function's own CLI-facing wrapper (``cli._render_output``,
-    which never passes it) relies on by default, while still honoring an
-    explicit ``show_recommendation=False`` from a direct Tier-2 caller who
-    relied on the pre-removal default (Codex review, fresh evidence — an
-    earlier revision hard-coded ``True`` into the ``to_markdown`` call below
-    regardless of what the caller passed, silently reintroducing the
-    recommendation section for a caller that explicitly asked it be
-    suppressed). Only ``review``'s own unconditional inclusion (above) and
-    JSON's unconditional ``release_recommendation`` field are unaffected by
-    this parameter — those never had a suppressing flag to restore. Prefer
-    ``fmt=ONELINE_FORMAT`` directly in new code.
+    ``False`` — the exact pre-removal default (Codex review, fresh evidence,
+    second round: an earlier revision changed this default to ``True`` to
+    match the CLI's new unconditional-inclusion behaviour, but that silently
+    changed what an *existing* Tier-2 caller gets when it omits this keyword
+    entirely, which is a public-API default change this PR's docs never
+    announced either — only the CLI flag removal was). The CLI's own
+    unconditional inclusion is instead achieved by its wrapper
+    (``cli._render_output``) passing ``show_recommendation=True`` explicitly,
+    not by changing this function's default. A yet-earlier revision also
+    hard-coded ``True`` into the ``to_markdown`` call below regardless of
+    what the caller passed, silently reintroducing the recommendation
+    section for a caller that explicitly asked it be suppressed — fixed
+    first, and unaffected by this default-value correction. Only
+    ``review``'s own unconditional inclusion (above) and JSON's unconditional
+    ``release_recommendation`` field are unaffected by this parameter — those
+    never had a suppressing flag to restore. Prefer ``fmt=ONELINE_FORMAT``
+    directly in new code.
 
     ``stat=True`` reproduces the old ``--stat`` boolean's own format-dependent
     dispatch, not a single fixed replacement — the pre-removal behaviour it

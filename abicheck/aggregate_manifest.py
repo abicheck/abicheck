@@ -136,37 +136,55 @@ def _parse_manifest_gate(
     ``fail``/``include`` defaults instead of failing closed on the malformed
     input.
 
-    A manifest that carries ``gate`` while *also* explicitly declaring a
-    pre-2.0 ``aggregate_manifest_version`` is rejected outright, rather than
-    the block being silently honored (Codex review, fresh evidence): the
-    whole reason ``gate`` shipped at a MAJOR bump is that a pre-2.0 *reader*
-    given such a manifest would ignore the unknown key and silently apply the
-    hard-coded default policy — a producer that stamps an old version number
-    on a manifest carrying a field that version predates is internally
+    A manifest that carries ``gate`` must *explicitly* declare
+    ``aggregate_manifest_version`` at major ``2`` or newer — an absent
+    version is rejected too, not just a declared pre-2.0 one (Codex review,
+    fresh evidence, second round): "absent version = treat as this reader's
+    own current MAJOR" is inherently reader-relative, so it can never be a
+    safe signal that *every* reader understands ``gate`` — a genuinely old,
+    pre-gate reader given the identical unversioned manifest applies its
+    *own* "absent = my current major" rule too, and its major has no notion
+    of ``gate`` at all, so it silently ignores the block and applies the
+    hard-coded default policy regardless of what this (2.0+) reader would
+    have done with the same input. The whole reason ``gate`` shipped at a
+    MAJOR bump is to give a pre-2.0 reader something concrete to reject; an
+    absent version gives it nothing to reject on. A manifest with a declared
+    pre-2.0 version is rejected for the same reason and was already covered
+    before this round: a producer that stamps an old version number on a
+    manifest carrying a field that version predates is internally
     inconsistent, and honoring ``gate`` here anyway (this reader is 2.0+ and
     could) would recreate exactly the version-skew inversion the MAJOR bump
     exists to prevent, just moved from "old reader, new manifest" to
     "manifest lies about its own version". *version_raw* is the same
-    already-validated (by :func:`_check_manifest_version`) raw value; an
-    absent version is treated as "current MAJOR", same as everywhere else in
-    this module, so an unversioned manifest carrying ``gate`` is accepted.
+    already-validated (by :func:`_check_manifest_version`) raw value.
+    Absent version stays accepted for every *other* manifest field, per
+    :func:`_check_manifest_version`'s own "absent = current MAJOR" rule —
+    only a manifest that also carries ``gate`` needs the explicit
+    declaration.
     """
     if "gate" not in data:
         return None, None
     gate_raw = data["gate"]
     if gate_raw is None:
         raise AggregateError("manifest 'gate' must not be null")
-    if isinstance(version_raw, str) and version_raw:
-        # Already validated as a well-formed MAJOR.MINOR string by
-        # _check_manifest_version before this function is ever called.
-        major = int(version_raw.split(".", 1)[0])
-        if major < 2:
-            raise AggregateError(
-                "manifest 'gate' requires 'aggregate_manifest_version' >= "
-                f"'2.0' (declared {version_raw!r}); a pre-2.0 reader would "
-                "silently ignore this block and apply the hard-coded "
-                "default policy instead of what it asked for"
-            )
+    if not (isinstance(version_raw, str) and version_raw):
+        raise AggregateError(
+            "manifest 'gate' requires an explicit 'aggregate_manifest_version' "
+            ">= '2.0' (none was given); a pre-2.0 reader given the same "
+            "unversioned manifest would apply its own 'absent = current "
+            "major' rule and silently ignore this block, applying the "
+            "hard-coded default policy instead of what it asked for"
+        )
+    # Already validated as a well-formed MAJOR.MINOR string by
+    # _check_manifest_version before this function is ever called.
+    major = int(version_raw.split(".", 1)[0])
+    if major < 2:
+        raise AggregateError(
+            "manifest 'gate' requires 'aggregate_manifest_version' >= "
+            f"'2.0' (declared {version_raw!r}); a pre-2.0 reader would "
+            "silently ignore this block and apply the hard-coded "
+            "default policy instead of what it asked for"
+        )
     if not isinstance(gate_raw, dict):
         raise AggregateError("manifest 'gate' must be an object")
     unknown = sorted(set(gate_raw) - {"missing_required", "unexpected_target"})
