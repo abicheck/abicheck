@@ -640,10 +640,30 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   top-tier correctness + under-call monotonicity (more evidence never hides a break an
   earlier tier caught — authority rule). CI posts the matrix to the step summary. User
   docs: `docs/learn/evidence-and-detectability.md` § "What each layer buys".
-- **Mutation testing** — `scripts/check_mutation_score.py` + `.github/workflows/mutation.yml`.
-  `mutmut` mutates the detector core (`diff_*`, `checker_policy`); a *surviving* mutant
-  is a covered-but-unverified line. Runs weekly / on the `mutation` PR label, gating on a
-  survivor baseline (`SURVIVOR_BASELINE`) once the first run establishes it.
+- **Mutation testing** — `scripts/mutation_results.py` (parser/attribution) +
+  `scripts/check_mutation_score.py` (gate) + `.github/workflows/mutation.yml`.
+  `mutmut` mutates the detector core; `[tool.mutmut].only_mutate` is the list, and it
+  now covers identity, suppression and serialization alongside `diff_*`/`checker_policy`.
+  A *surviving* mutant is a covered-but-unverified line. **Three lanes, because one
+  cannot serve both purposes:**
+  - **PR** — auto-runs on a diff touching a mutated module *or* that module's own tests
+    (path-filtered; the `mutation` label still forces a run the filter misses), gating
+    `--diff-scoped`: any survivor in a function this branch changed fails. Absolute —
+    there is no baseline to be under. Lines the branch *removed* are resolved against
+    the merge base, since that is the only revision they exist in.
+  - **Weekly** — per-module drift against the committed `mutation-baseline.json`, so one
+    module's regression cannot be paid for by an unrelated module's improvement.
+  - **Dispatch** (`write_baseline: true`) — records that file. Deliberately manual:
+    accepting the current survivor set is a review decision, not something a cron does
+    silently.
+
+  `SURVIVOR_BASELINE` (one global total) remains as a fallback and is the weaker gate —
+  it cannot express the per-module invariant. `--require-baseline` is what stops a run
+  that gated nothing from exiting 0, and an unresolved run (timeout/suspicious/no-tests)
+  is a *failed measurement*, not zero survivors. **`mutation-baseline.json` is not
+  recorded yet**; until a dispatch run writes it, the drift lanes fail closed rather
+  than passing vacuously. Per-lane trigger detail lives in `.github/AGENTS.md`'s
+  workflow table rather than being copied here.
 - **Metamorphic property tests** — `tests/test_detector_properties.py` (`slow`).
   Hypothesis-generated snapshot pairs checked against invariants that hold for *any*
   input (idempotence, determinism, direction-symmetry of touched symbols, emitted-kind
