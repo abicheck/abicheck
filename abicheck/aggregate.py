@@ -630,6 +630,10 @@ class ProfileMatrixEntry:
     #: Declared last, with a default, so adding it cannot break a positional
     #: construction of this public dataclass (CodeRabbit review).
     contract_incomplete_profiles: tuple[str, ...] = ()
+    #: Sibling of ``contract_incomplete_profiles`` for P0.4's own
+    #: analysis-assurance axis; same predicate, same positional-safety
+    #: reason for being declared last.
+    analysis_incomplete_profiles: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -639,6 +643,7 @@ class ProfileMatrixEntry:
             "incomplete_profiles": list(self.incomplete_profiles),
             "unanalyzed_profiles": list(self.unanalyzed_profiles),
             "contract_incomplete_profiles": list(self.contract_incomplete_profiles),
+            "analysis_incomplete_profiles": list(self.analysis_incomplete_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 
@@ -791,20 +796,17 @@ class AggregateResult:
 
     @property
     def analysis_assurance_exit(self) -> int:
-        """P0.4's analysis-assurance contribution for the whole set -- the
-        exact sibling of :attr:`contract_coverage_exit`. Without this, a
-        target whose ``--require-complete-analysis`` gate raised its own
-        exit from ``0`` to ``1`` fed this aggregate a green ``0`` (Codex
-        review)."""
+        """P0.4's analysis-assurance contribution -- sibling of
+        :attr:`contract_coverage_exit`. Without this a target whose
+        ``--require-complete-analysis`` gate raised its own exit to ``1``
+        fed this aggregate a green ``0`` (Codex review)."""
         gated = list(self.analyzed) + list(self._gated_unexpected)
         return max((t.analysis_assurance_exit for t in gated), default=0)
 
     @property
     def analysis_assurance_targets(self) -> tuple[str, ...]:
-        """Targets whose analysis assurance was incomplete under
-        ``--require-complete-analysis`` -- the *why* behind
-        :attr:`analysis_assurance_exit`, mirroring
-        :attr:`contract_coverage_targets`."""
+        """Targets short of analysis assurance -- the *why* behind
+        :attr:`analysis_assurance_exit`."""
         gated = list(self.analyzed) + list(self._gated_unexpected)
         return tuple(
             sorted(t.target_id for t in gated if t.analysis_assurance_exit > 0)
@@ -896,6 +898,7 @@ class AggregateResult:
             incomplete = []
             unanalyzed = []
             contract_incomplete = []
+            analysis_incomplete = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
@@ -910,6 +913,11 @@ class AggregateResult:
                     for r in reports
                 ):
                     contract_incomplete.append(pid)
+                # Sibling check for P0.4's own orthogonal axis (Codex
+                # review): a COMPATIBLE profile short on analysis-assurance
+                # evidence still needs profile-level attribution here.
+                if any(r.analysis_assurance_exit > 0 for r in reports):
+                    analysis_incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
                     for r in reports
@@ -934,6 +942,7 @@ class AggregateResult:
                     incomplete_profiles=tuple(incomplete),
                     unanalyzed_profiles=tuple(unanalyzed),
                     contract_incomplete_profiles=tuple(contract_incomplete),
+                    analysis_incomplete_profiles=tuple(analysis_incomplete),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -1174,6 +1183,14 @@ class AggregateResult:
             line += (
                 f" [contract evidence incomplete on "
                 f"{', '.join(entry.contract_incomplete_profiles)}]"
+            )
+        if entry.analysis_incomplete_profiles:
+            # The exact sibling suffix, for the exact sibling reason (Codex
+            # review): a profile that raised the exit to 1 purely on the
+            # analysis-assurance axis must not read as flatly clean either.
+            line += (
+                f" [analysis assurance incomplete on "
+                f"{', '.join(entry.analysis_incomplete_profiles)}]"
             )
         return line
 
@@ -1456,16 +1473,10 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
 def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
     """The report's own P0.4 analysis-assurance contribution (``0``/``1``).
 
-    The exact sibling of :func:`_contract_coverage_exit`: read, not
-    recomputed, since this aggregate holds none of the evidence needed to
-    answer it again. Without this, a target whose severity gate
-    demoted/omitted its own contribution but whose analysis-assurance axis
-    independently floored the exit to ``1`` fed this aggregate a green
-    ``0`` -- ``GateInfo.from_scan_report`` reads only the nested
-    compatibility gate, never this orthogonal axis (Codex review). Fails
-    open like its sibling, and reuses :func:`contract_coverage_blocks`'
-    document-shape traversal -- the nesting is about where a scan report
-    keeps its summary, not about contract coverage specifically.
+    Sibling of :func:`_contract_coverage_exit`: read, not recomputed, since
+    ``GateInfo.from_scan_report`` reads only the nested compatibility gate,
+    never this orthogonal axis (Codex review). Fails open like its sibling,
+    reusing :func:`contract_coverage_blocks`' document-shape traversal.
     """
     for block in contract_coverage_blocks(data):
         raw = block.get("analysis_assurance_exit_contribution")

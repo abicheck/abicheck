@@ -48,8 +48,9 @@
   `run.sh` read it as `false` regardless of what the workflow requested
   (the existing tests missed this because they inject the env var
   directly rather than going through `action.yml`'s own wiring — closed
-  by the pre-existing, now-passing `test_every_action_input_is_wired_to_
-  run_sh` contract test, not a new one-off check); and a directory/package
+  by the pre-existing, now-passing
+  `test_every_action_input_is_wired_to_run_sh` contract test, not a new
+  one-off check); and a directory/package
   `compare` operand with the flag explicitly set used to silently drop it
   rather than reject the unsupported combination, running a release
   compare ungated despite the caller's explicit request — `run.sh` now
@@ -91,8 +92,9 @@
   it the identical way: a new `analysis_assurance_exit`/
   `analysis_assurance_targets` axis on `TargetReport`/`AggregateResult`,
   folded into `exit_code()` with `max` (never lowers a real break), a
-  top-level `analysis_assurance` summary block (`aggregate_report.schema.
-  json` and its published mirror), a `render_text()` block, and
+  top-level `analysis_assurance` summary block
+  (`aggregate_report.schema.json` and its published mirror), a
+  `render_text()` block, and
   `buildsource.check_report._neutralize_gate` zeroing it for
   `gate-mode: advisory` alongside the coverage axis it mirrors.
 
@@ -112,9 +114,10 @@
   applied before the stamp, plus a primitive-level property test covering
   every `EvidenceDepth` member.
 
-- **`compare`'s own JSON report now persists `analysis_assurance_exit_
-  contribution` too (report schema 2.40), closing the identical gap on
-  the other front end (Codex review).** The `aggregate` fix above closed
+- **`compare`'s own JSON report now persists
+  `analysis_assurance_exit_contribution` too (report schema 2.40),
+  closing the identical gap on the other front end (Codex review).** The
+  `aggregate` fix above closed
   this for `scan --against`; `compare --require-complete-analysis` had
   the same hole — it computed and folded its own exit-code floor but
   never wrote the contribution into the report `reporter.py` builds,
@@ -134,3 +137,20 @@
   unconditional version breaking it. `compare_report.schema.json` (and
   its published mirror) documents the new key as the exact sibling of
   `contract_coverage_exit_contribution`.
+
+- **`abicheck aggregate`'s profile matrix now attributes P0.4's own
+  analysis-assurance gaps too (aggregate schema 1.5), the exact sibling of
+  `contract_incomplete_profiles` (Codex review).** A check-id-shaped
+  target whose compatibility verdict was `COMPATIBLE` but whose analysis
+  evidence was incomplete under `--require-complete-analysis` already
+  raised the aggregate exit code and listed the target under the top-level
+  `analysis_assurance` block — but `profile_matrix` had no counterpart, so
+  its text read "clean on all checked profiles" and the JSON matrix gave
+  no profile-level indication of which axis actually failed. A new
+  `analysis_incomplete_profiles` field on `ProfileMatrixEntry`
+  (`aggregate_report.schema.json` and its published mirror) projects
+  `analysis_assurance_exit` per profile using the identical predicate the
+  top-level block uses, and `render_text()` appends a `[analysis
+  assurance incomplete on ...]` suffix alongside the pre-existing
+  contract-evidence one — orthogonal to `affected_profiles`, same as its
+  sibling.

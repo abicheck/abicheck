@@ -220,3 +220,53 @@ class TestAnalysisAssuranceAxis:
         result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert result.analysis_assurance_exit == 0
         assert result.exit_code() == 0
+
+
+class TestAnalysisAssuranceProfileMatrix:
+    """Sibling of ``test_aggregate.py``'s own
+    ``TestContractCoverageProfileMatrix`` (Codex review): a COMPATIBLE
+    profile whose evidence was incomplete under
+    ``--require-complete-analysis`` must be named in the profile matrix
+    directly, not just fold into a bare exit code of 1 with nothing
+    attributing it. A sibling file rather than a class in
+    ``test_aggregate.py``, for the same 2000-line-cap reason this whole
+    module already exists."""
+
+    CHECK = "libfoo@linux-gcc14#release@headers"
+
+    def _result(self, tmp_path: Path, **extra):
+        _write_report(tmp_path, self.CHECK, "COMPATIBLE", **extra)
+        return aggregate_reports_dir(tmp_path, expected=_expect(self.CHECK))
+
+    def test_an_analysis_incomplete_profile_is_named(self, tmp_path: Path):
+        res = self._result(tmp_path, analysis_assurance_exit_contribution=1)
+        assert res.exit_code() == 1
+        (entry,) = res.profile_matrix
+        assert entry.analysis_incomplete_profiles == ("linux-gcc14",)
+
+    def test_it_does_not_become_affected(self, tmp_path: Path):
+        # ADR-049 §7-style orthogonality: a clean verdict with a clean gate
+        # is not "affected" just because its analysis evidence never closed.
+        res = self._result(tmp_path, analysis_assurance_exit_contribution=1)
+        (entry,) = res.profile_matrix
+        assert entry.affected_profiles == ()
+        assert entry.incomplete_profiles == ()
+        assert entry.unanalyzed_profiles == ()
+
+    def test_a_clean_profile_is_not_listed(self, tmp_path: Path):
+        res = self._result(tmp_path, analysis_assurance_exit_contribution=0)
+        (entry,) = res.profile_matrix
+        assert entry.analysis_incomplete_profiles == ()
+        assert res.exit_code() == 0
+
+    def test_it_agrees_with_the_top_level_block(self, tmp_path: Path):
+        res = self._result(tmp_path, analysis_assurance_exit_contribution=1)
+        (entry,) = res.profile_matrix
+        assert bool(entry.analysis_incomplete_profiles) is bool(
+            res.analysis_assurance_targets
+        )
+
+    def test_it_renders_in_the_profile_matrix_text(self, tmp_path: Path):
+        res = self._result(tmp_path, analysis_assurance_exit_contribution=1)
+        text = res.render_text()
+        assert "analysis assurance incomplete on linux-gcc14" in text

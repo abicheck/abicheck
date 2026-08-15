@@ -619,12 +619,14 @@ inputs:
       (old-library/new-library are individual files, not a directory or
       package) and scan (--against) modes only -- rejected outright
       (step fails) for a directory/package compare's per-library release
-      fan-out, which has no single analysis_assurance result to gate on,
-      and silently has no effect for an audit-only scan (no baseline),
-      same as --policy/--suppress. A dedicated input rather than routing
-      through extra-args, so this Action's own detection of whether the
-      flag was requested is never ambiguous with a value some other
-      option in extra-args happens to spell the same way.
+      fan-out, which has no single analysis_assurance result to gate on.
+      Has no effect for an audit-only scan (new-library with no
+      against/abi-baseline): the CLI itself rejects this flag without a
+      baseline, so run.sh never forwards it in that shape. A dedicated
+      input rather than routing through extra-args, so this Action's own
+      detection of whether the flag was requested is never ambiguous
+      with a value some other option in extra-args happens to spell the
+      same way.
     required: false
     default: 'false'
   jobs:
@@ -695,11 +697,12 @@ outputs:
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
-      compatibility verdict unchanged), ANALYSIS_INCOMPLETE (with the
-      require-complete-analysis input, when
+      compatibility verdict unchanged), ANALYSIS_INCOMPLETE (single-pair
+      operands only, with the require-complete-analysis input, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict
-      unchanged), API_BREAK,
+      unchanged; rejected outright for a directory/package operand, so
+      this verdict never applies there), API_BREAK,
       BREAKING, REMOVED_LIBRARY (directory/package operands with
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.

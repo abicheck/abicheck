@@ -196,6 +196,25 @@ class TestAnalysisAssuranceExitContributionPersistence:
         d = json.loads(to_json(r, stat=True, severity_config=PRESET_DEFAULT))
         assert "severity" in d
 
+    def test_stat_forwards_require_complete_analysis(self):
+        """Codex/CodeRabbit review: `to_json(stat=True)`'s early return
+        dropped `require_complete_analysis` entirely, so `compare --stat
+        --format json --require-complete-analysis` exited 1 for incomplete
+        analysis while the stat report itself carried no
+        `analysis_assurance_exit_contribution` (or a stale `0`) --
+        `abicheck aggregate` read the missing/wrong value as a pass."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 1
+
+    def test_stat_omits_the_contribution_without_a_real_assurance_object(self):
+        r = _result(Verdict.COMPATIBLE)
+        d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
+        assert "analysis_assurance_exit_contribution" not in d
+
 
 class TestEvidenceStatusInJson:
     """The per-finding `evidence_status` field (schema 2.2): the epistemic

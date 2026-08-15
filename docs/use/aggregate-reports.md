@@ -51,8 +51,11 @@ folded into the result as compatible.**
 
 ## The five orthogonal axes
 
-Every aggregate run answers five independent questions, and the exit code is
-the worst contribution across all five (`max`, never additive):
+Every aggregate run answers five independent questions. `compatibility` is
+reporting-only — the worst ABI verdict, shown for context, never itself an
+input to the exit code. The exit code is the worst contribution across the
+other four (`gate`/`coverage`/`contract_coverage`/`analysis_assurance`,
+`max`, never additive):
 
 ```mermaid
 flowchart TD

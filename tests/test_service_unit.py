@@ -3190,6 +3190,22 @@ class TestRenderOutput:
         out = render_output("markdown", diff_result, snap, stat=True)
         assert isinstance(out, str)
 
+    def test_stat_json_forwards_require_complete_analysis(self, diff_result, snap):
+        """Codex/CodeRabbit review: `render_output`'s own `stat`
+        short-circuit (before format dispatch) bypassed
+        `require_complete_analysis` entirely, independent of the identical
+        `to_json`-level gap already covered in test_reporter.py -- this is
+        the service-level entry point `compare --stat --format json
+        --require-complete-analysis` actually goes through."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        diff_result.analysis_assurance = AnalysisAssurance(status="partial")
+        out = render_output(
+            "json", diff_result, snap, stat=True, require_complete_analysis=True
+        )
+        d = json.loads(out)
+        assert d["analysis_assurance_exit_contribution"] == 1
+
     def test_json_follow_deps(self, snap):
         snap.dependency_info = DependencyInfo(
             nodes=[{"soname": "libc.so.6", "depth": 0}],

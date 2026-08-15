@@ -64,7 +64,11 @@ def render_output(
     """
     if stat and fmt != "junit":
         if fmt == "json":
-            return to_stat_json(result, severity_config=severity_config)
+            return to_stat_json(
+                result,
+                severity_config=severity_config,
+                require_complete_analysis=require_complete_analysis,
+            )
         return to_stat(result, severity_config=severity_config)
 
     if fmt == "json":
