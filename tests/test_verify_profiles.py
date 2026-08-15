@@ -438,32 +438,53 @@ _PR_STEPS_NOT_IN_A_CI_ONLY_LIST = {
 }
 
 
-def test_the_bugfix_contract_step_skips_without_a_pr_body(
+def test_the_bugfix_contract_step_reports_a_partial_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The one gate CI can run more of than a local shell can.
 
-    Its declared half reads the PR body, so a local run that silently passed
-    let `--profile pr` claim CI parity having checked only the structural half
-    — while the CI job could still fail on the body afterwards (Codex review).
-    Routing it through the skip contract makes the run incomplete instead.
+    Its declared half reads the PR body, so a local run that simply passed let
+    `--profile pr` claim CI parity having checked half the gate. The first fix
+    used a precondition, which skipped the step entirely and threw away the
+    structural half's local coverage as well (Codex review). It now runs, and
+    its distinct exit code maps to a skip.
     """
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
-    assert step.precondition is not None
-    monkeypatch.delenv("BUGFIX_CONTRACT_BODY_FILE", raising=False)
-    reason = step.precondition()
-    assert reason is not None and "BUGFIX_CONTRACT_BODY_FILE" in reason
+    assert step.partial is not None
+    assert step.precondition is None, (
+        "a precondition would skip the step before its structural half ran"
+    )
+    code, reason = step.partial
+    assert code == 2
+    assert "BUGFIX_CONTRACT_BODY_FILE" in reason
 
 
-def test_the_bugfix_contract_step_runs_when_a_pr_body_is_given(
+def test_a_partial_returncode_becomes_a_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mapping itself: a partial exit is not a pass, because the
+    profile-level completeness contract only counts skips."""
+
+    class _Proc:
+        returncode = 2
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    result = verify.run_step(step)
+    assert result["status"] == "skipped"
+    assert result["returncode"] == 2
+
+
+def test_an_ordinary_failure_is_still_a_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Negative control: the skip must be about the missing body, not about
-    the step — CI sets this variable and gets the whole gate."""
+    """Negative control: only the one distinguished code maps to a skip, so a
+    real finding cannot be laundered into an incomplete run."""
+
+    class _Proc:
+        returncode = 1
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
-    assert step.precondition is not None
-    monkeypatch.setenv("BUGFIX_CONTRACT_BODY_FILE", "/tmp/pr-body.md")
-    assert step.precondition() is None
+    assert verify.run_step(step)["status"] == "failed"
 
 
 def _ci_only_step_names() -> set[str]:

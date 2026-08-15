@@ -193,23 +193,15 @@ def _pyscript(path: str, *args: str) -> tuple[str, ...]:
     return (sys.executable, path, *args)
 
 
-def _bugfix_contract_body_precondition() -> str | None:
-    """The declared half needs the PR body, which only CI has.
-
-    Reported as a *skip* rather than a pass, because a pass would let a local
-    `--profile pr` run claim CI parity having checked only the structural half
-    — and the CI workflow can still fail on the body afterwards. Routing it
-    through the skip contract makes the receipt say `complete: false` and
-    print the INCOMPLETE warning, which is exactly what that mechanism is for
-    (Codex review). Set BUGFIX_CONTRACT_BODY_FILE to a file holding the PR
-    description to run the whole gate locally.
-    """
-    if os.environ.get("BUGFIX_CONTRACT_BODY_FILE"):
-        return None
-    return (
-        "BUGFIX_CONTRACT_BODY_FILE is unset, so only the structural half "
-        "could run — set it to a file holding the PR description"
-    )
+#: `check_bugfix_test_contract.py` exits 2 when its structural half passed but
+#: no PR body was available, so the declared half never ran. Mapping that to a
+#: skip is what keeps a local `--profile pr` from claiming CI parity over half
+#: a gate, while still running the half that does not need a body.
+_BUGFIX_CONTRACT_PARTIAL = (
+    2,
+    "BUGFIX_CONTRACT_BODY_FILE is unset, so the declared half could not run "
+    "(the structural half did) — set it to a file holding the PR description",
+)
 
 
 @dataclass(frozen=True)
@@ -219,6 +211,11 @@ class Step:
     profiles: frozenset[str]
     env: dict[str, str] = field(default_factory=dict)
     precondition: Callable[[], str | None] | None = None
+    #: ``(returncode, reason)``: a step that ran but could only do part of its
+    #: job reports that code, and this maps it to a skip so the profile-level
+    #: completeness contract sees it. Distinct from `precondition`, which
+    #: decides *before* running and therefore runs nothing at all.
+    partial: tuple[int, str] | None = None
     description: str = ""
 
 
@@ -293,7 +290,7 @@ STEPS: tuple[Step, ...] = (
         # contract fails later (AGENTS.md "M0-3", Codex review).
         _pyscript("scripts/check_bugfix_test_contract.py"),
         frozenset({PR, FULL}),
-        precondition=_bugfix_contract_body_precondition,
+        partial=_BUGFIX_CONTRACT_PARTIAL,
         description="Bug-fix test contract (structural half locally, declared half in CI)",
     ),
     Step(
@@ -562,6 +559,15 @@ def run_step(step: Step) -> dict[str, object]:
     env = {**os.environ, **step.env}
     proc = subprocess.run(step.cmd, cwd=ROOT, env=env)
     duration = time.time() - start
+    if step.partial is not None and proc.returncode == step.partial[0]:
+        print(f"=== {step.name}: PARTIAL ({duration:.1f}s) — {step.partial[1]} ===")
+        return {
+            "name": step.name,
+            "status": "skipped",
+            "reason": step.partial[1],
+            "duration_s": round(duration, 1),
+            "returncode": proc.returncode,
+        }
     status = "passed" if proc.returncode == 0 else "failed"
     print(f"=== {step.name}: {status} ({duration:.1f}s) ===")
     return {

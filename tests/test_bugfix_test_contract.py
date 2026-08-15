@@ -674,6 +674,23 @@ class TestEmptyPrBody:
         assert rc == 1
         assert "PR description is empty" in capsys.readouterr().out
 
+    def test_a_structural_failure_outranks_the_partial_exit(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A real finding must not be laundered into "partial".
+
+        Without a body file the run is partial, but a fix that changes shipped
+        code with no test is a genuine failure the structural half found on
+        its own — it exits 1, which no caller maps to a skip.
+        """
+        monkeypatch.setattr(
+            gate, "changed_files", lambda b, h: [("M", "abicheck/x.py")]
+        )
+        monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        monkeypatch.setattr(gate, "unified_diff", lambda b, h: "")
+        assert gate.main(["--base", "A", "--head", "B"]) == 1
+        assert "changes shipped code but no test" in capsys.readouterr().out
+
     def test_an_absent_body_file_is_structural_only(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -688,8 +705,13 @@ class TestEmptyPrBody:
             gate, "unified_diff", lambda b, h: _content_diff("tests/test_x.py")
         )
         rc = gate.main(["--base", "A", "--head", "B"])
-        assert rc == 0
-        assert "no --body-file given" in capsys.readouterr().out
+        # Exit 2, not 0: the structural half ran and passed, the declared half
+        # could not run at all. `verify.py` maps this to a skip so a local
+        # `--profile pr` cannot claim parity over half a gate (Codex review).
+        assert rc == gate.EXIT_STRUCTURAL_ONLY
+        out = capsys.readouterr().out
+        assert "no --body-file given" in out
+        assert "the declared half did not run" in out
 
     def test_a_populated_body_is_still_evaluated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

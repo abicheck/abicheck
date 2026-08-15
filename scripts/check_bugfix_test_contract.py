@@ -63,6 +63,12 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 
+#: Returned when the structural half passed but no PR body was available, so
+#: the declared half never ran. Callers that bundle this gate (verify.py) map
+#: it to a partial/skipped result rather than a pass; a real failure is still
+#: 1, so this can never mask one.
+EXIT_STRUCTURAL_ONLY = 2
+
 #: Used when neither the flag nor the environment names a ref — the local
 #: convenience path.
 _DEFAULT_BASE = "origin/main"
@@ -657,6 +663,20 @@ def main(argv: list[str] | None = None) -> int:
             "is for."
         )
         return 1
+
+    if args.body_file is None:
+        # Everything that could run, ran and passed — but the declared half
+        # needs a PR body this invocation was not given. Distinct from both
+        # outcomes: a plain 0 let `verify.py --profile pr` claim CI parity
+        # having checked half the gate, and skipping the step outright (the
+        # first attempt at this) threw away the structural half's local
+        # coverage instead (Codex review). A structural *failure* above still
+        # returns 1: a real finding outranks a partial run.
+        print(
+            "bugfix-test-contract: structural checks passed; the declared "
+            f"half did not run (exit {EXIT_STRUCTURAL_ONLY})."
+        )
+        return EXIT_STRUCTURAL_ONLY
 
     print("bugfix-test-contract: OK")
     return 0
