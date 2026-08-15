@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -108,19 +109,31 @@ def test_drift_rows_empty_when_all_match() -> None:
     assert runner.drift_rows(payload) == []
 
 
-def test_dump_sources_uses_depth_source_not_the_retired_full_rung() -> None:
+def test_dump_sources_uses_depth_source_not_the_retired_full_rung(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Regression guard for the P0 false-green incident: `--depth full` was
     retired (ADR-043 D2, collapsed into `source`) and is now a hard CLI
     error, so every source-tier scan failed identically while the scheduled
     workflow still reported success (0/N scanned, tolerated as "some
-    libraries failed to build"). Pin the exact argv this runner shells out
-    with, not just that it doesn't crash.
+    libraries failed to build"). Asserts the actual argv `_dump_sources()`
+    shells out with (via `runner._run`), not its source text (CodeRabbit
+    review — a source-text match passes even on unreachable/dead code).
     """
-    import inspect
+    captured: list[list[str]] = []
 
-    src = inspect.getsource(runner._dump_sources)
-    assert '"--depth", "source"' in src
-    assert '"--depth", "full"' not in src
+    def fake_run(cmd: list[str]) -> tuple[float, object]:
+        captured.append(cmd)
+        return 0.1, SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_run", fake_run)
+    runner._dump_sources(tmp_path / "tree", tmp_path / "build", tmp_path / "out.json")
+
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert "full" not in cmd
+    depth_index = cmd.index("--depth")
+    assert cmd[depth_index + 1] == "source"
 
 
 class TestSourceTierBroken:
@@ -130,20 +143,34 @@ class TestSourceTierBroken:
         *,
         error: str | None = None,
         l3: int = 3,
+        l4: int = 5,
+        l5: int = 7,
         old_l3: int | None = None,
+        old_l4: int | None = None,
+        old_l5: int | None = None,
     ) -> dict:
         """A source-tier row shaped like `scan_source_one()`'s real output —
-        both `old_coverage` and `new_coverage` present. `old_l3` defaults to
-        the same value as `l3` (both sides "healthy"); pass it explicitly to
-        build a one-sided row (only one snapshot actually captured evidence).
+        both `old_coverage` and `new_coverage` present, with all three
+        `_EVIDENCE_LAYERS` fact counts. Every `old_*` defaults to its `l3`/
+        `l4`/`l5` counterpart (both sides "healthy"); pass one explicitly to
+        build a one-sided row (only one snapshot actually captured that
+        layer's evidence).
         """
         if error is not None:
             return {"lib": lib, "error": error}
         return {
             "lib": lib,
             "verdict": "COMPATIBLE",
-            "old_coverage": {"l3_compile_units": l3 if old_l3 is None else old_l3},
-            "new_coverage": {"l3_compile_units": l3},
+            "old_coverage": {
+                "l3_compile_units": l3 if old_l3 is None else old_l3,
+                "l4_declarations": l4 if old_l4 is None else old_l4,
+                "l5_nodes": l5 if old_l5 is None else old_l5,
+            },
+            "new_coverage": {
+                "l3_compile_units": l3,
+                "l4_declarations": l4,
+                "l5_nodes": l5,
+            },
         }
 
     def test_none_when_no_source_entries_requested(self) -> None:
@@ -208,7 +235,22 @@ class TestSourceTierBroken:
         reason = runner.source_tier_broken(payload)
         assert reason is not None
         assert "2/2" in reason
-        assert "l3_compile_units" in reason
+        assert "L3" in reason
+
+    def test_flags_zero_l4_evidence_despite_success(self) -> None:
+        # The L3/L4/L5 check is real for every layer, not just L3 -- a scan
+        # that captured compile units but zero declarations (e.g. a clang
+        # invocation that silently failed mid-replay) must gate the same way.
+        payload = {"source_results": [self._row("zlib", l4=0)]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "1/1" in reason
+
+    def test_flags_zero_l5_evidence_despite_success(self) -> None:
+        payload = {"source_results": [self._row("zlib", l5=0)]}
+        reason = runner.source_tier_broken(payload)
+        assert reason is not None
+        assert "1/1" in reason
 
     def test_flags_evidence_present_on_only_one_side(self) -> None:
         # Regression guard (Codex review): a row whose OLD snapshot silently

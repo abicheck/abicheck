@@ -371,18 +371,48 @@ def drift_rows(payload: dict) -> list[dict]:
     ]
 
 
-def _side_has_l3_evidence(row: dict, side: str) -> bool:
-    return (row.get(side) or {}).get("l3_compile_units", 0) > 0
+#: The evidence layers `source_scan_summary` requires -- (label, the
+#: `_source_coverage()` fact-count field that layer is "present" via). L3
+#: (compile units) / L4 (declarations) / L5 (graph nodes) are exactly the
+#: three layers `--depth source` promises to collect (see the `dump
+#: --sources` docstring in `abicheck.cli_options`), so this is "check the
+#: PROMISED L3/L4/L5 evidence actually showed up," not an arbitrary subset.
+#: L4/L5 checks are meaningful specifically because the eval-suite CI job
+#: always installs clang+cmake (see eval-suite.yml's source-tier job) -- a
+#: real `--depth source` run in that environment should reach every layer,
+#: so a captured-but-empty L4/L5 is exactly as informative a signal as an
+#: empty L3 already was, not a normal degraded-environment case to tolerate.
+_EVIDENCE_LAYERS: tuple[tuple[str, str], ...] = (
+    ("L3", "l3_compile_units"),
+    ("L4", "l4_declarations"),
+    ("L5", "l5_nodes"),
+)
+
+
+def _side_has_layer_evidence(row: dict, side: str, field: str) -> bool:
+    return (row.get(side) or {}).get(field, 0) > 0
+
+
+def _row_has_full_evidence(row: dict) -> bool:
+    """True if *row* captured real evidence for every `_EVIDENCE_LAYERS`
+    layer, on **both** the old and new snapshot sides.
+    """
+    return all(
+        _side_has_layer_evidence(row, side, field)
+        for side in ("old_coverage", "new_coverage")
+        for _label, field in _EVIDENCE_LAYERS
+    )
 
 
 def source_scan_summary(payload: dict) -> dict:
     """Pure counts over the source-tier rows: total entries, how many actually
-    scanned (no `error`), and how many of *those* captured any real L3 build
-    evidence **on both sides**. The single source of truth `source_tier_broken()`
-    (the CI gate) and any caller inspecting a results file share.
+    scanned (no `error`), and how many of *those* captured real L3/L4/L5
+    evidence **on both sides** (`_row_has_full_evidence`). The single source
+    of truth `source_tier_broken()` (the CI gate) and any caller inspecting a
+    results file share.
 
     Both `old_coverage` and `new_coverage` are checked (Codex review, fresh
-    evidence) — a row whose *old* snapshot silently captured zero L3 units
+    evidence) — a row whose *old* snapshot silently captured zero evidence
     while the *new* one succeeded previously counted as "with evidence"
     because only `new_coverage` was examined, which would pass this gate
     while publishing a one-sided (and therefore already-misleading)
@@ -390,10 +420,7 @@ def source_scan_summary(payload: dict) -> dict:
     """
     rows = payload.get("source_results", [])
     scanned = [r for r in rows if "error" not in r]
-    with_evidence = [
-        r for r in scanned
-        if _side_has_l3_evidence(r, "old_coverage") and _side_has_l3_evidence(r, "new_coverage")
-    ]
+    with_evidence = [r for r in scanned if _row_has_full_evidence(r)]
     return {"total": len(rows), "scanned": len(scanned), "with_evidence": len(with_evidence)}
 
 
@@ -423,12 +450,14 @@ def source_tier_broken(payload: dict) -> str | None:
     ERR row in REPORT.md, it just doesn't fail this specific gate.
 
     The second condition — every scan reports success but *none* captured
-    real L3 evidence — has no such ambiguity even at `total == 1`: a
-    successful configure/build step that still produced zero L3 compile
-    units is an internal inconsistency in that one row already, not a
-    cross-entry comparison, so it catches the quieter failure mode (the tool
-    runs without erroring but the build/compile-DB step silently produced
-    nothing to analyze) regardless of how many libraries were scanned.
+    real evidence for every promised layer (`_EVIDENCE_LAYERS`: L3 compile
+    units, L4 declarations, L5 graph nodes) — has no such ambiguity even at
+    `total == 1`: a successful configure/build step that still produced zero
+    facts for a layer it claims coverage for is an internal inconsistency in
+    that one row already, not a cross-entry comparison, so it catches the
+    quieter failure mode (the tool runs without erroring but a
+    compile-DB/source-replay/graph-fold step silently produced nothing to
+    analyze) regardless of how many libraries were scanned.
 
     Pure (no I/O): mirrors `drift_rows()`'s own "one shared definition of
     failure" design for the binary tier.
@@ -447,10 +476,11 @@ def source_tier_broken(payload: dict) -> str | None:
     if summary["scanned"] > 0 and summary["with_evidence"] == 0:
         return (
             f"{summary['scanned']}/{summary['total']} source-tier scans "
-            "reported success but NONE captured any L3 build evidence "
-            "(l3_compile_units == 0 for every successful scan) — the source "
-            "tier is not actually collecting the L3/L4/L5 evidence it claims "
-            "coverage for."
+            "reported success but NONE captured real evidence for every "
+            "promised layer (L3 compile units / L4 declarations / L5 graph "
+            "nodes, both old and new sides) — the source tier is not "
+            "actually collecting the L3/L4/L5 evidence it claims coverage "
+            "for."
         )
     return None
 
