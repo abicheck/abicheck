@@ -669,3 +669,68 @@ class TestTheDryRunValidatesTheManifest:
             ["compare", str(old), str(new), "--use-cases", str(manifest), "--dry-run"],
         )
         assert result.exit_code == 0, result.output
+
+
+class TestScopedOnlyFindingsAreAttributed:
+    """``--used-by``/``--required-symbol`` scoping synthesizes fresh findings
+    onto ``result.scoped_only_changes`` (e.g. ``PE_ORDINAL_RETARGETED``), and
+    ``_fold_scoped_compat_into_text`` appends them to the rendered report's
+    own findings list. Attribution built from ``result.changes`` alone made
+    ``total_changes`` smaller than the list beside it, and the synthesized
+    findings were neither attributed to a use case nor counted as
+    unattributed -- so the block quietly described a smaller report than the
+    reader sees (Codex review).
+    """
+
+    @staticmethod
+    def _result(changes, scoped_only):  # type: ignore[no-untyped-def]
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import DiffResult
+
+        res = DiffResult(
+            verdict=Verdict.COMPATIBLE,
+            old_version="1",
+            new_version="2",
+            library="libfoo.so",
+            changes=list(changes),
+        )
+        res.scoped_only_changes = tuple(scoped_only)  # type: ignore[attr-defined]
+        return res
+
+    def _attach(self, tmp_path: Path, changes, scoped_only):  # type: ignore[no-untyped-def]
+        from abicheck.cli_compare_helpers import _attach_use_case_impact
+
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
+        res = self._result(changes, scoped_only)
+        _attach_use_case_impact(
+            res,
+            _snapshot(_graph("train"), "1"),
+            _snapshot(_graph("train"), "2"),
+            manifest,
+        )
+        return res.use_case_impact
+
+    def test_a_scoped_only_finding_is_counted(self, tmp_path: Path) -> None:
+        impact = self._attach(tmp_path, [_change("train")], [_change("orphan")])
+        assert impact is not None
+        # Both the attributed one and the synthesized one.
+        assert impact.total_changes == 2
+        assert impact.unattributed_changes == 1
+
+    def test_a_scoped_only_finding_can_itself_be_attributed(
+        self, tmp_path: Path
+    ) -> None:
+        # Not merely counted: a synthesized finding on a declared entrypoint
+        # is exactly the kind a use-case owner most needs to see.
+        impact = self._attach(tmp_path, [], [_change("train")])
+        assert impact is not None
+        assert [c.symbol for c in impact.by_use_case["uc"]] == ["train"]
+        assert impact.unattributed_changes == 0
+
+    def test_no_scoped_only_findings_is_unchanged(self, tmp_path: Path) -> None:
+        # The ordinary, unscoped run must count exactly what it always did.
+        impact = self._attach(tmp_path, [_change("train")], [])
+        assert impact is not None
+        assert impact.total_changes == 1
+        assert impact.unattributed_changes == 0

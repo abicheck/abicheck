@@ -129,6 +129,21 @@
   suppressed and frozen at `auto`. Both now route through one helper, which
   is the only place that parameter source is read.
 
+- **`compare --use-cases` now attributes scoped-only findings too.**
+  `--used-by`/`--required-symbol` scoping synthesizes fresh findings onto
+  `scoped_only_changes`, which the renderer appends to the report's own
+  findings list; building the attribution from `result.changes` alone left
+  `use_case_impact.total_changes` smaller than the list beside it, with those
+  findings neither attributed nor counted as unattributed. Both the JSON and
+  text `--show-only` projections include them through the same shared filter,
+  so the two lists cannot be filtered differently.
+
+- **The Action's input validator rejects the scan-mode
+  `build-info` + `compile-db` conflict.** Only `run.sh` carried the check, so
+  an invocation already known to be invalid ran through Python setup,
+  dependency install and toolchain provisioning before failing — the opposite
+  of what `validate-inputs.sh` exists for.
+
 ### Changed
 
 - **`--policy-file` is folded into `--policy`, which now takes `NAME|PATH`.**

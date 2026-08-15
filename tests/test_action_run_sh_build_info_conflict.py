@@ -154,3 +154,68 @@ def test_a_real_scan_mode_run_hits_the_guard(tmp_path: Path) -> None:
     assert res.returncode == 1, res.stdout + res.stderr
     assert "are both set for mode: scan" in res.stdout
     assert "STUB_RAN" not in res.stdout
+
+
+VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.sh"
+
+
+def _validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ}
+    for name in ("INPUT_MODE", "INPUT_BUILD_INFO", "INPUT_COMPILE_DB"):
+        env.pop(name, None)
+    env.update(env_extra)
+    return subprocess.run(
+        [bash_executable(), str(VALIDATE_SH)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+
+class TestTheValidatorRejectsItToo:
+    """`validate-inputs.sh` exists to fail before Python setup, dependency
+    install and toolchain provisioning. Only `run.sh` carried this conflict
+    check, so an invocation already known to be invalid paid for all of that
+    first (Codex review)."""
+
+    def test_both_set_in_scan_mode_fails_the_validator(self) -> None:
+        res = _validate({
+            "INPUT_MODE": "scan",
+            "INPUT_BUILD_INFO": "build/",
+            "INPUT_COMPILE_DB": "compile_commands.json",
+        })
+        assert res.returncode != 0, res.stdout + res.stderr
+        assert "are both set for mode: scan" in res.stdout + res.stderr
+
+    @pytest.mark.parametrize("mode", ["compare", "dump"])
+    def test_other_modes_are_left_alone(self, mode: str) -> None:
+        # Scan is the only mode whose behavior changed; compare and dump have
+        # always resolved this pair by the build-info-wins fallback, so
+        # rejecting them here would break workflows that were never wrong.
+        res = _validate({
+            "INPUT_MODE": mode,
+            "INPUT_BUILD_INFO": "build/",
+            "INPUT_COMPILE_DB": "compile_commands.json",
+        })
+        assert "are both set for mode" not in res.stdout + res.stderr
+
+    @pytest.mark.parametrize(
+        ("build_info", "compile_db"),
+        [("build/", ""), ("", "compile_commands.json"), ("", "")],
+    )
+    def test_one_or_neither_passes_the_validator(
+        self, build_info: str, compile_db: str
+    ) -> None:
+        res = _validate({
+            "INPUT_MODE": "scan",
+            "INPUT_BUILD_INFO": build_info,
+            "INPUT_COMPILE_DB": compile_db,
+        })
+        assert "are both set for mode: scan" not in res.stdout + res.stderr
+
+    def test_both_scripts_state_the_same_conflict(self) -> None:
+        """The two guards must not drift into disagreeing about what is
+        invalid -- a validator that passes what run.sh then rejects is worse
+        than no validator, since it moves the failure back past the setup it
+        was meant to skip."""
+        marker = "are both set for mode: scan"
+        assert marker in RUN_SH.read_text(encoding="utf-8")
+        assert marker in VALIDATE_SH.read_text(encoding="utf-8")

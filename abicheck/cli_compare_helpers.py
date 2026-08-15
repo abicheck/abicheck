@@ -980,8 +980,21 @@ def _attach_use_case_impact(
         # traceback instead of the documented usage-error path.
         raise click.UsageError(str(exc)) from exc
 
+    # Scoped-only findings included, for the same reason
+    # `_attach_suppression_audit` below includes them: this runs *after*
+    # --used-by/--required-symbol scoping, which synthesizes fresh Change
+    # objects onto `scoped_only_changes` (e.g. PE_ORDINAL_RETARGETED) that
+    # `_fold_scoped_compat_into_text` then appends to the rendered report's
+    # own findings list. Attributing only `result.changes` left
+    # `total_changes` smaller than the list beside it, with the synthesized
+    # findings neither attributed to a use case nor counted as unattributed
+    # (Codex review).
     impact = build_use_case_impact(
-        definitions, old, new, list(result.changes), manifest=str(manifest)
+        definitions,
+        old,
+        new,
+        list(result.changes) + list(getattr(result, "scoped_only_changes", ()) or ()),
+        manifest=str(manifest),
     )
     if impact is None:
         raise click.UsageError(

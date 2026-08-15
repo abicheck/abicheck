@@ -292,6 +292,27 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
     }
 
 
+def _displayed_with_scoped_only(
+    result: Any, changes: list[Change], show_only: str | None
+) -> list[Change]:
+    """The findings this report will actually list, scoped-only ones included.
+
+    `--used-by`/`--required-symbol` scoping synthesizes fresh `Change`
+    objects onto `result.scoped_only_changes` (e.g. `PE_ORDINAL_RETARGETED`),
+    and `_fold_scoped_compat_into_text` appends them to the rendered report's
+    own `changes` array afterwards. Any block projected onto "what is
+    displayed" therefore has to count them too, or it silently describes a
+    smaller report than the reader sees -- which is how `use_case_impact`'s
+    `total_changes` came out below the adjacent findings list, attributing
+    and counting neither (Codex review).
+
+    Filtered through the shared `scoped_only_changes_filtered` rather than a
+    local `apply_show_only`, so the two lists can never be filtered
+    differently.
+    """
+    return changes + scoped_only_changes_filtered(result, show_only)
+
+
 def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
@@ -515,7 +536,7 @@ def _to_json_leaf(
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result, changes)
+    _add_contract_context(d, result, _displayed_with_scoped_only(result, changes, show_only))
     # Codex review: full/root-cause mode call this; leaf mode never did,
     # silently dropping policy_overrides/policy_reclassify here.
     _add_policy_overrides(d, result)
@@ -713,7 +734,7 @@ def _to_json_root_cause(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result, changes)
+    _add_contract_context(d, result, _displayed_with_scoped_only(result, changes, show_only))
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1157,7 +1178,7 @@ def to_json(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result, changes)
+    _add_contract_context(d, result, _displayed_with_scoped_only(result, changes, show_only))
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)

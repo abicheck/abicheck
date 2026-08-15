@@ -867,10 +867,16 @@ def _fold_use_case_impact_into_text(
         return text
     if show_only:
         from .reporter import apply_show_only
+        from .root_cause_evidence import scoped_only_changes_filtered
 
         # Every argument the JSON paths pass, so a policy-sensitive token
         # ("breaking") filters identically in both renders rather than
-        # against the default policy here.
+        # against the default policy here. Scoped-only findings are appended
+        # through the shared filter for the same reason the JSON paths' own
+        # `_displayed_with_scoped_only` does: this fold runs alongside
+        # `_fold_scoped_compat_into_text`, which puts them in the findings
+        # list above, so projecting onto `result.changes` alone would drop
+        # every attribution that landed on one.
         impact = impact.restricted_to(
             apply_show_only(
                 list(result.changes),
@@ -879,6 +885,7 @@ def _fold_use_case_impact_into_text(
                 kind_sets=result._effective_kind_sets(),
                 policy_file=result.policy_file,
             )
+            + scoped_only_changes_filtered(result, show_only)
         )
     return "\n".join([text, *render_use_case_impact_lines(impact)])
 
