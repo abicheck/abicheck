@@ -152,6 +152,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from perf_measurement import (  # noqa: E402
     combined_regression_threshold,
+    positive_int_arg,
     summarize_samples,
 )
 
@@ -601,19 +602,12 @@ def _print_markdown(points: list[dict[str, Any]]) -> None:
         )
 
 
-def _positive_int(value: str) -> int:
-    """``argparse`` ``type=`` for ``--sizes``/``--repeat``: reject <= 0.
-
-    A ``--repeat 0`` left ``baseline_samples``/``attach_samples`` empty,
-    so ``min()`` inside ``_measure_one`` raised an unhandled ``ValueError``;
-    a ``--sizes 0`` entry built a fixture with no declarations at all and
-    recorded a meaningless baseline point (CodeRabbit review). Rejecting at
-    parse time gives a clear ``argparse`` usage error instead of either.
-    """
-    parsed = int(value)
-    if parsed < 1:
-        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
-    return parsed
+#: ``argparse`` ``type=`` for ``--sizes``/``--repeat``: reject <= 0. Now
+#: shared with benchmark_scaling.py via perf_measurement.positive_int_arg
+#: (the two scripts' identical --repeat-must-be-positive concern can't
+#: independently drift); kept under this module's own historical name since
+#: tests/test_header_graph_perf_gate.py references it directly.
+_positive_int = positive_int_arg
 
 
 def _finite_nonnegative_float(value: str) -> float:

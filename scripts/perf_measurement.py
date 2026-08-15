@@ -49,6 +49,7 @@ once, not a per-call cost a benchmark should keep re-measuring.
 
 from __future__ import annotations
 
+import argparse
 import math
 import statistics
 from dataclasses import dataclass
@@ -110,3 +111,24 @@ def combined_regression_threshold(
     (see ``docs/contribute/performance.md`` "Baseline regression").
     """
     return max(tolerance * base, min_delta)
+
+
+def positive_int_arg(value: str) -> int:
+    """``argparse`` ``type=`` for a ``--repeat``/``--sizes``-shaped option:
+    reject <= 0.
+
+    Both perf-gate scripts sweep a list of sizes and time a number of
+    repeats; either accepting a plain ``type=int`` lets ``0`` or a negative
+    value through, which is not merely a *meaningless* measurement but an
+    actual crash for ``--repeat`` specifically -- zero timed repeats leaves
+    :func:`summarize_samples` an empty list, and it raises ``ValueError``
+    rather than degrading (CodeRabbit review; this generalizes
+    ``check_header_graph_perf.py``'s own originally-local ``_positive_int``,
+    now shared here so the two scripts' validation can't independently
+    drift). Rejecting at parse time gives a clear ``argparse`` usage error
+    instead of either failure mode.
+    """
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
+    return parsed

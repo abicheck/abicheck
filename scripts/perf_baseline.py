@@ -27,16 +27,20 @@ the parent module.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
-_SCRIPTS_DIR = Path(__file__).resolve().parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-
-from perf_measurement import combined_regression_threshold  # noqa: E402
+# No sys.path mutation here (CodeRabbit review): this is an imported helper
+# module, not a script entry point, so it must not have global side effects
+# merely from being imported (scripts/CLAUDE.md's own "No global side effects
+# at import time" convention). Its only current caller, benchmark_scaling.py,
+# already puts this file's own directory on sys.path before importing it, so
+# `perf_measurement` is importable by the time this module loads; a future
+# caller that doesn't go through benchmark_scaling.py first would need to do
+# the same setup itself (the same pattern tests/test_perf_measurement.py
+# already uses to load perf_measurement.py standalone).
+from perf_measurement import combined_regression_threshold
 
 
 class _TimedPoint(Protocol):

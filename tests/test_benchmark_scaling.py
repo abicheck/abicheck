@@ -249,3 +249,20 @@ def test_check_rss_gate_flags_over_budget() -> None:
     assert bench._check_rss_gate("s", under, 512.0) == []
     # No RSS data (e.g. Windows) → never gates.
     assert bench._check_rss_gate("s", [bench.Point(1000, 0.1, 1000)], 1.0) == []
+
+
+def test_sizes_and_repeat_reject_non_positive_values() -> None:
+    # CodeRabbit review: a plain `type=int` let --repeat 0 through, leaving
+    # measure() an empty samples list and crashing with an unhandled
+    # ValueError from summarize_samples() instead of a clean argparse usage
+    # error. --sizes shares the same positive_int_arg validator for the
+    # identical reason check_header_graph_perf.py's own --sizes already had.
+    for bad_args in (["--sizes", "0"], ["--repeat", "0"], ["--sizes", "-5"], ["--repeat", "-1"]):
+        with pytest.raises(SystemExit):
+            bench.parse_args(bad_args)
+
+
+def test_sizes_and_repeat_accept_positive_values() -> None:
+    args = bench.parse_args(["--sizes", "10", "20", "--repeat", "3"])
+    assert args.sizes == [10, 20]
+    assert args.repeat == 3

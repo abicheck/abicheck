@@ -144,7 +144,11 @@ from perf_baseline import (  # noqa: E402
     load_baseline as _load_baseline,
     matched_baseline_points,
 )
-from perf_measurement import SampleStats, summarize_samples  # noqa: E402
+from perf_measurement import (  # noqa: E402
+    SampleStats,
+    positive_int_arg,
+    summarize_samples,
+)
 
 from abicheck.checker import (  # noqa: E402
     Change,
@@ -1615,7 +1619,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--sizes",
-        type=int,
+        type=positive_int_arg,
         nargs="+",
         default=None,
         help="Sizes to sweep, overriding each scenario's tuned default "
@@ -1623,7 +1627,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--repeat",
-        type=int,
+        type=positive_int_arg,
         default=1,
         help="Timed repetitions per size (plus one untimed warmup); the "
         "MEDIAN is reported/gated, with min/max/p95/coefficient-of-variation "

@@ -100,3 +100,21 @@ class TestCombinedRegressionThreshold:
         # Back-compat shape: a caller that never asks for an absolute floor
         # gets exactly the old pure-relative-tolerance behaviour.
         assert pm.combined_regression_threshold(2.0, 0.5, 0.0) == pytest.approx(1.0)
+
+
+class TestPositiveIntArg:
+    def test_accepts_positive_values(self) -> None:
+        assert pm.positive_int_arg("1") == 1
+        assert pm.positive_int_arg("5") == 5
+
+    def test_rejects_zero(self) -> None:
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            pm.positive_int_arg("0")
+
+    def test_rejects_negative(self) -> None:
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            pm.positive_int_arg("-1")
