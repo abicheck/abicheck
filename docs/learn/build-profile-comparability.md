@@ -69,6 +69,24 @@ The reason outcome 3 exists as a hard stop rather than a soft warning: a
 than no result, because it looks exactly like a clean, comparable pass in
 any pipeline that only checks the exit code.
 
+**This hard-fail promise is qualified, not absolute — it depends on both
+sides actually carrying the fingerprint being checked.** Each fingerprint
+axis (`profile_fingerprint`, `scope_fingerprint`) is only compared when
+**both** OLD and NEW carry it; a side that never went through an L2
+frontend at all (a symbols-only dump, or a pre-contract baseline) has no
+`profile_fingerprint` to disagree with, and the gate does not fail the
+comparison on that axis. When exactly one side is missing a fingerprint,
+the report is stamped `contract_coverage: partial` — an explicit signal
+that this axis was never actually checked, not silently treated as
+verified. When **both** sides are missing it, there's nothing to mark:
+neither side asserted a build context in the first place, so there's no
+disagreement to detect and no gap to flag beyond what a symbols-only or
+pre-contract comparison already implies. Don't read a clean
+`--depth`-limited or legacy-baseline comparison as having verified build
+profile at all — the hard-fail guarantee is real, but it's a guarantee
+about *comparable extractions*, not a guarantee that every comparison
+checked comparability.
+
 ## What actually gets fingerprinted
 
 abicheck's comparability gate (`comparability.py`, ADR-050 D1/D2) doesn't
@@ -90,8 +108,14 @@ the snapshot:
 | `pointer_width` | 32-bit vs. 64-bit — every pointer-containing layout differs |
 | `endianness` | Byte order — layout and wire-format sensitive |
 | `macro_ops` | Which `-D`/`-U` macros were in effect — conditional compilation changes what's even declared |
-| `pass_through_flags` | ABI-relevant compiler flags forwarded as-is (e.g. `-fvisibility=`, `-fshort-enums`) |
+| `pass_through_flags` | ABI-relevant compiler flags forwarded as-is. Today `pass_through_flags_from_tokens()` recognizes only `-include <path>` — the one currently-known must-handle repeatable, order-sensitive frontend flag; other flags (e.g. `-fvisibility=`, `-fshort-enums`) are not yet classified into this field and are simply omitted rather than mis-hashed |
 | `include_sequence` / `header_sequence` | *Content* of the resolved `-I` search path and header set — never absolute path shape, since a two-checkout compare's old/new sides necessarily resolve to different paths for what may be an identical logical surface |
+| `frontend_context_kind` | Appended only for a DPC++-capable frontend (a SYCL host/device split); absent from the fingerprint on an ordinary clang/castxml dump |
+
+This table is a narrative summary, not the field list's fact owner — the
+exact, current set is `abicheck/comparability.py`'s `PROFILE_FIELD_KEYS`
+(plus the conditional `frontend_context_kind` addition); check there directly
+before relying on which flags are actually pinned today.
 
 **`scope_fingerprint`** — the *declared surface* being compared (header/TU
 names, never absolute paths): which public headers and header directories
@@ -122,15 +146,19 @@ of comparisons the gate allows, never the set it silently trusts):
   release, say — the mismatch is corroborated rather than treated as an
   extraction inconsistency. This is a *deliberate cross-architecture
   comparison*, not drift.
-- **Build-context carve-out.** If a profile field differs but both snapshots
-  were parsed against *real build-system evidence* — a genuine, recorded
-  build (not an inferred/guessed compile line) on both sides — a change
-  like a raised C++-standard floor or a build-derived macro delta is treated
+- **Build-context carve-out.** If **`language_standard` or `macro_ops`**
+  specifically differ (the only two fields this carve-out currently
+  waives — not any arbitrary profile field), but both snapshots were parsed
+  against *real build-system evidence* — a genuine, recorded build (not an
+  inferred/guessed compile line) on both sides — the difference is treated
   as a real, corroborated fact about the build, not noise. This is exactly
   the shape [`case98`](../reference/examples/case98_cxx_standard_floor_raised.md)
-  covers: a *deliberately* raised toolchain floor is a real, reportable
+  covers: a *deliberately* raised C++-standard floor is a real, reportable
   change (`CXX_STANDARD_FLOOR_RAISED`/`ABI_RELEVANT_BUILD_FLAG_CHANGED`),
-  not a reason to refuse the whole comparison.
+  not a reason to refuse the whole comparison. A difference on any other
+  profile field — compiler family/version, ABI dialect, pass-through flags,
+  frontend context — still hard-fails even with build-context evidence on
+  both sides.
 
 Everything else — an uncorroborated compiler-family swap, an uncorroborated
 target-triple change, any profile mismatch neither carve-out can explain —
