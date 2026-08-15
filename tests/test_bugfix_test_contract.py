@@ -125,6 +125,18 @@ class TestStructuralRequirement:
     def test_a_modified_non_test_is_not_evidence(self) -> None:
         assert not gate.adds_or_modifies_a_test([("M", "abicheck/diff_types.py")])
 
+    def test_a_type_change_is_not_test_evidence(self) -> None:
+        """Retyping a test file is not writing one."""
+        assert not gate.adds_or_modifies_a_test([("T", "tests/test_x.py")])
+
+    def test_the_diff_filter_keeps_type_changes(self) -> None:
+        """Replacing a shipped script with a symlink is a real behavioural
+        change; excluding `T` made the path vanish from the diff entirely,
+        taking shipped-code detection and the conditionals with it (Codex
+        review)."""
+        source = Path(gate.__file__).read_text(encoding="utf-8")
+        assert '"--diff-filter=ACDMT"' in source
+
     def test_a_plugin_subtree_test_counts(self) -> None:
         assert gate.touches_tests(["contrib/abicheck-clang-plugin/tests/test_x.py"])
 
@@ -331,6 +343,58 @@ class TestConditionalRequirements:
             ["tests/test_finding_identity.py", "tests/canonical_identity_contract.py"],
         )
         assert missing == []
+
+    @pytest.mark.parametrize(
+        "path, key",
+        [
+            # `actions/` does not contain the substring `action/` — an `s`
+            # follows `action` — so the plural tree was recognised as shipped
+            # code without ever being asked for hostile-input evidence
+            # (Codex review).
+            ("actions/check-target/run.sh", "malicious-fixture"),
+            ("actions/resolve-baseline/resolve_baseline.py", "malicious-fixture"),
+        ],
+    )
+    def test_the_plural_actions_tree_shares_the_trust_boundary(
+        self, path: str, key: str
+    ) -> None:
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == key)
+        assert requirement.applies_to([path])
+
+    @pytest.mark.parametrize(
+        "path, key",
+        [
+            ("docs/reference/snapshot_io.md", "real-dependency-test"),
+            ("docs/guide/suppression.md", "fp-fn-pair"),
+            ("docs/contribute/finding_identity.md", "merge-pair"),
+        ],
+    )
+    def test_documentation_does_not_trigger_runtime_questions(
+        self, path: str, key: str
+    ) -> None:
+        """A docs-only fix was being asked for real-dependency or FP/FN
+        evidence because the path merely contained the module's name. A
+        conditional that fires on prose is boilerplate, not a signal
+        (Codex review)."""
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == key)
+        assert not requirement.applies_to([path])
+
+    @pytest.mark.parametrize(
+        "path, key",
+        [
+            ("abicheck/snapshot_io.py", "real-dependency-test"),
+            ("abicheck/suppression.py", "fp-fn-pair"),
+            (".github/workflows/publish.yml", "malicious-fixture"),
+        ],
+    )
+    def test_the_real_runtime_surfaces_still_trigger(self, path: str, key: str) -> None:
+        """Negative control: narrowing must not switch the conditionals off.
+
+        `.github/workflows/` is not shipped code by the suffix map, but it is
+        exactly the surface the malicious-fixture question exists for, so it is
+        an explicit trust-boundary exception."""
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == key)
+        assert requirement.applies_to([path])
 
     def test_an_unrelated_diff_does_not_ask_conditional_questions(self) -> None:
         """Conditionals must not degrade into always-on boilerplate."""

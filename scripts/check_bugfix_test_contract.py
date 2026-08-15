@@ -111,6 +111,10 @@ _SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 #: to it can and should carry a test (Codex review).
 _SHIPPED_FILES = frozenset({"action.yml"})
 
+#: Not shipped code, but the surface the malicious-fixture requirement is
+#: about: a workflow runs with the repository's permissions.
+_TRUST_BOUNDARY_PREFIXES = (".github/workflows/",)
+
 #: Directory component that marks a test tree.
 _TEST_DIR = "tests"
 #: Basename shapes that mark a test module.
@@ -127,6 +131,20 @@ _DOC_SUFFIXES = (".md", ".rst")
 _TEST_DATA_DIR = "golden"
 
 
+def _is_conditional_subject(path: str) -> bool:
+    """Can this path carry the runtime behaviour a conditional asks about?
+
+    Shipped code, plus the workflow trust boundary — the latter is not
+    "shipped" by the map above but is exactly what the malicious-fixture
+    requirement exists for.
+    """
+    if is_test_path(path):
+        return False
+    if path.startswith(_TRUST_BOUNDARY_PREFIXES):
+        return True
+    return touches_shipped_code([path])
+
+
 @dataclass(frozen=True)
 class Requirement:
     """One question the PR body must answer."""
@@ -141,11 +159,13 @@ class Requirement:
     def applies_to(self, paths: list[str]) -> bool:
         if self.triggers is None:
             return True
-        # Only *shipped* paths trigger a conditional. A test file named after
-        # the area it covers (tests/test_finding_identity.py) would otherwise
-        # ask its question on every test-only change, and a conditional that
-        # fires on everything is boilerplate rather than a signal.
-        subject = [p for p in paths if not is_test_path(p)]
+        # Only paths that carry *runtime* behaviour trigger a conditional.
+        # Filtering merely on "not a test" was too wide in both directions: a
+        # test named after its subject fired the conditional on a test-only
+        # change, and `docs/reference/snapshot_io.md` fired the
+        # real-dependency question on a documentation-only fix (Codex review).
+        # A conditional that fires on prose is boilerplate, not a signal.
+        subject = [p for p in paths if _is_conditional_subject(p)]
         return any(t in p for p in subject for t in self.triggers)
 
 
@@ -221,7 +241,18 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         # "action.yml" also matches `.github/workflows/test-action.yml`, which
         # is the Action's own test workflow — the same boundary, and already
         # matched by the `.github/workflows/` entry anyway.
-        triggers=("action/", "action.yml", ".github/workflows/", "security"),
+        triggers=(
+            "action/",
+            # The plural tree is the same trust boundary: `actions/` does not
+            # contain the substring `action/` (an `s` follows `action`), so
+            # published composite-action scripts were recognised as shipped
+            # code without ever being asked for hostile-input evidence
+            # (Codex review).
+            "actions/",
+            "action.yml",
+            ".github/workflows/",
+            "security",
+        ),
     ),
     Requirement(
         "merge-pair",
@@ -283,13 +314,19 @@ def changed_files(base: str, head: str) -> list[tuple[str, str]]:
     changed a test" let a fix that only removes a test satisfy the structural
     requirement (Codex review). Only an added or modified test is evidence
     that a regression test exists.
+
+    ``T`` (type change) is included in the filter: replacing a shipped script
+    with a symlink is a real behavioural change that was disappearing from the
+    diff entirely, taking both shipped-code detection and the conditionals
+    with it. It is deliberately *not* accepted as test evidence — retyping a
+    test file is not writing one.
     """
     out = _git(
         [
             "diff",
             "--no-renames",
             "--name-status",
-            "--diff-filter=ACDM",
+            "--diff-filter=ACDMT",
             f"{base}...{head}",
         ]
     )
