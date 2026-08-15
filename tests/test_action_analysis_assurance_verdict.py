@@ -560,3 +560,101 @@ class TestHostileReportContentCannotExecute:
             "shell metacharacters in the captured stderr diagnostic executed"
         )
         assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
+
+
+class TestOptionValueDoesNotSpoofTheFlag:
+    """Codex review, second finding beyond the stderr-spoof issue: scanning
+    the fully-built `$CMD` array for the literal `--require-complete-
+    analysis` token is not equivalent to "the flag was passed", because
+    `$CMD` also carries values a *different*, structured Action input
+    supplied. `output-file: --require-complete-analysis` is exactly such a
+    case -- it legitimately produces the adjacent tokens `-o
+    --require-complete-analysis` in `$CMD`, with the real CLI's own option
+    parser consuming the second token as `-o`'s filename argument, never
+    parsing it as a flag. `_extra_args_has_assurance_flag()` (scoped to
+    `extra-args`'s own split tokens, the only path this flag can actually
+    reach `abicheck` through) must not be spoofed by this."""
+
+    def test_an_output_file_named_like_the_flag_does_not_gate(
+        self, tmp_path: Path
+    ) -> None:
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+            },
+            stderr=ASSURANCE_STDERR,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                # The collision Codex described: this is a plain path value
+                # for a structured, unrelated input -- not the flag.
+                "INPUT_OUTPUT_FILE": "--require-complete-analysis",
+                # Deliberately no EXTRA_ARGS_WITH_FLAG: the flag was never
+                # actually requested this run.
+            },
+            bindir,
+        )
+        # Falls through to the pre-existing catch-all, exactly as it does
+        # with no diagnostic and no flag at all -- not a spoofed
+        # ANALYSIS_INCOMPLETE from the -o value alone.
+        assert outputs["verdict"] == "ERROR", outputs
+
+
+class TestEscalatedAssuranceGateIsNamedCorrectly:
+    """Codex review: when a BREAKING/API_BREAK finding is demoted to
+    compatibility exit 0 by severity policy but incomplete assurance
+    raises the *actual* exit to 1, `_escalate_verdict_to_report()` leaves
+    `GATE_TIER=ANALYSIS_INCOMPLETE`. `_blocking_gate_note()` (the helper
+    that explains an escalated verdict in the job summary) had no
+    assurance case before this fix, so it fell through to the generic
+    "the severity policy gated this run" branch -- false, since severity
+    demoted the finding rather than gating it, and the axis that actually
+    produced the exit is orthogonal to severity entirely."""
+
+    def test_an_escalated_breaking_report_names_assurance_not_severity(
+        self, tmp_path: Path
+    ) -> None:
+        # A BREAKING report whose severity block resolves to exit 0 (the
+        # finding was demoted), but analysis_assurance is incomplete under
+        # the flag -- the real exit-1 cause is assurance alone.
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "BREAKING",
+                "analysis_assurance": ASSURANCE_BLOCK,
+                "severity": {
+                    "config": {},
+                    "categories": {},
+                    "exit_code": 0,
+                    "blocking": False,
+                    "blocking_categories": [],
+                },
+            },
+            stderr=ASSURANCE_STDERR,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **EXTRA_ARGS_WITH_FLAG,
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "BREAKING", outputs
+        assert "analysis-assurance axis" in outputs["_summary"], outputs["_summary"]
+        assert (
+            "severity policy gated this run" not in outputs["_summary"]
+        ), outputs["_summary"]

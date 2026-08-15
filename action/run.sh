@@ -301,6 +301,32 @@ _extra_args_has_write_flag() {
   return 1
 }
 
+# Same shape as `_extra_args_has_write_flag` above, and for the same reason
+# (Codex review, P0.4 follow-up): `--require-complete-analysis` has no
+# dedicated Action input, so `extra-args` is the *only* place it can appear
+# -- but scanning the fully-built `$CMD` array for this literal token (an
+# earlier revision of this fix) is not equivalent to that. `$CMD` also
+# carries values a *different*, structured Action input supplied (e.g.
+# `output-file: --require-complete-analysis` legitimately produces the
+# adjacent tokens `-o --require-complete-analysis`, with Click consuming the
+# second one as `-o`'s filename argument, never parsing it as a flag), so a
+# bare token scan over the merged array can true-positive on a value that
+# was never parsed as this flag at all. Restricting the scan to
+# `extra-args`'s own split tokens (the one and only path this flag can
+# reach `abicheck` through) sidesteps the collision entirely, rather than
+# trying to reconstruct argv parsing/option-arity rules here.
+_extra_args_has_assurance_flag() {
+  local _arg
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ "$_arg" == "--require-complete-analysis" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1755,16 +1781,31 @@ _coverage_gated() {
 # partial and nobody asked".
 #
 # The FIRST, load-bearing check is therefore not the report or stderr at
-# all -- it is `$CMD`, the exact argv this step actually ran (built earlier
-# in this script, `extra-args` included): the flag can only have gated this
-# run if it is literally present there. An earlier revision trusted an
-# unanchored stderr grep as the sole signal, which a hostile input (a
-# header/symbol name, or any other value an `abicheck` diagnostic echoes
-# back) could forge to spoof the whole match string and fail an otherwise
-# clean, flag-less run through this axis's own unconditional gate (Codex
-# review, fresh evidence) -- `$CMD` is this script's own constructed
-# argument list, not attacker-controlled report/stderr content, so it
-# cannot be spoofed the same way.
+# all -- it is `_extra_args_has_assurance_flag()`: the flag has no
+# dedicated Action input, so `extra-args` is the only path it can reach
+# `abicheck` through, and the flag can only have gated this run if it is
+# literally one of that value's own split tokens. Two revisions, two
+# distinct Codex findings:
+#
+#   1. An unanchored stderr grep as the sole signal, which a hostile input
+#      (a header/symbol name, or any other value an `abicheck` diagnostic
+#      echoes back) could forge to spoof the whole match string and fail
+#      an otherwise clean, flag-less run through this axis's own
+#      unconditional gate.
+#   2. The first fix for (1) scanned the fully-built `$CMD` array instead
+#      -- safe from (1)'s forgery, but `$CMD` also carries values a
+#      *different*, structured Action input supplied (e.g. `output-file:
+#      --require-complete-analysis` legitimately produces the adjacent
+#      tokens `-o --require-complete-analysis`, with Click consuming the
+#      second one as `-o`'s filename argument, never parsing it as a
+#      flag), so a bare token scan over the merged array could
+#      true-positive on a value that was never parsed as this flag at
+#      all and fail an ungated, exit-0 run.
+#
+# `_extra_args_has_assurance_flag()` closes both: it reads only
+# `extra-args`'s own tokens (attacker-controlled report/stderr content
+# never reaches it, closing (1)) and never the tokens a different,
+# structured input contributed to `$CMD` (closing (2)).
 #
 # Once the flag is confirmed present, the JSON report's own
 # `analysis_assurance.status` is the authoritative answer (mirroring
@@ -1774,14 +1815,7 @@ _coverage_gated() {
 # is otherwise unreadable), the same "genuine cannot-tell" shape
 # `_coverage_gated`'s own stderr fallback exists for.
 _assurance_gated() {
-  local _flag_passed=false _arg
-  for _arg in "${CMD[@]}"; do
-    if [[ "$_arg" == "--require-complete-analysis" ]]; then
-      _flag_passed=true
-      break
-    fi
-  done
-  [[ "$_flag_passed" == true ]] || return 1
+  _extra_args_has_assurance_flag || return 1
 
   local _src _status
   _src=$(_json_report_src)
@@ -1993,6 +2027,15 @@ _blocking_gate_note() {
     echo ">"
     echo "> ⚠️ Contract coverage also contributed to this run's exit$(_coverage_where_suffix). Orthogonal to the compatibility verdict and to the severity policy — see \`contract_coverage_failures\` in the JSON report."
   fi
+  # P0.4's analysis-assurance axis, mirroring the coverage block immediately
+  # above and for the identical reason (Codex review): orthogonal, so it is
+  # reported on its own terms rather than only when it happens to own
+  # GATE_TIER -- with a coincident severity/coverage tier winning the slot,
+  # the assurance gap would otherwise go unmentioned entirely.
+  if _assurance_gated && [[ "$GATE_TIER" != "ANALYSIS_INCOMPLETE" ]]; then
+    echo ">"
+    echo "> ⚠️ Analysis assurance also contributed to this run's exit. Orthogonal to the compatibility verdict and to the severity policy — see \`analysis_assurance\` in the JSON report."
+  fi
   [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
   echo ">"
   if [[ "$GATE_TIER" == "COVERAGE_INCOMPLETE" ]]; then
@@ -2003,6 +2046,12 @@ _blocking_gate_note() {
     # missing-provider explanation with it -- so render that here rather than
     # leave the reader with a bare tier name (Codex review).
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal contract-coverage axis$(_coverage_where_suffix). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\`."
+  elif [[ "$GATE_TIER" == "ANALYSIS_INCOMPLETE" ]]; then
+    # P0.4's assurance axis, mirroring the COVERAGE_INCOMPLETE branch
+    # immediately above -- same orthogonal-axis shape, different evidence
+    # question (completeness of this run's own evidence, not closure of a
+    # selected --contract domain).
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
   elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
     # A promoted `--crosscheck KEY=error` raises the published gate the same
     # way a severity category does, but it is not one: `_severity_gate_
