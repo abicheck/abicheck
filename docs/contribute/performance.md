@@ -313,39 +313,31 @@ convention — root `AGENTS.md`):
   from one run's own output instead of only from a before/after harness
   comparison.
 - **Repeated L3 collection under `dump --sources`/`--build-info` (P0.3) —
-  partially closed.** Include seeding and compile-context derivation each
-  used to independently trigger a full L3 collection
+  open, accepted cost, not this PR's to close.** Include seeding and
+  compile-context derivation (`derive_l2_include_dirs`/
+  `derive_l2_compile_context`, `abicheck/buildsource/l2_seed.py`) each
+  independently trigger a full L3 collection
   (`collect_inline_pack(layers=("L3",))`) for the exact same
   `(sources, build_info)` inputs — up to three L3 collection passes per side
   for some input shapes, counting the embed step's own separate collection.
-  `resolve_side_snapshot` (`abicheck/service_input_resolution.py`) now
-  collects that L3-only evidence **once** via
-  `buildsource.l2_seed.collect_l2_seed_evidence()` and shares it between the
-  two L2-seeding calls (`derive_l2_include_dirs`/`derive_l2_compile_context`,
-  both via a new `evidence=` parameter with a sentinel default distinguishing
-  "no shared evidence given" from "shared evidence is `None`" — see
-  `l2_seed.py`'s own `_Uncollected` docstring), cutting the redundant count
-  from up to three collections to at most two. The embed step's own
-  collection (`embed_build_source`) is **deliberately left unmerged**: unlike
-  the two opportunistic L2-parse improvements (which must never execute a
-  build system as a side effect of merely resolving an input — Tier-2 API
-  safety, `allow_inferred_build_query=False`), embed is the caller's explicit
-  request for L3+ evidence and always permits the inferred build query
-  (`cmake`/`bazel`/`make`) — folding it into the shared, restricted result
-  would either silently narrow embed's own permission (a real coverage
-  regression: a genuine `--sources` tree with no existing compile DB would
-  stop triggering the zero-config inferred query) or silently widen the two
-  L2-seeding calls' permission to run one when the caller asked for no build
-  evidence at all. Closing that third collection needs `collect_mode`-aware
-  gating of the shared call's own `allow_inferred_build_query`, verified
-  against real `--sources`-with-no-compile-DB and `depth="headers"`
-  scenarios — deliberately not attempted in the same pass as the two
-  unconditionally-safe merges (see
-  `buildsource.l2_seed.derive_l2_compile_context`'s own docstring for the
-  full reasoning). This is now in scope for the `classify` job's
-  `PERF_SENSITIVE_PATTERNS` (see "CI integration" above), so a change to it
-  will run this workflow even though no benchmark scenario targets its
-  specific cost yet.
+  A sentinel-based `evidence=` sharing mechanism was prototyped in an earlier
+  revision of this PR, then dropped: `main` had independently landed a
+  parallel, far more heavily reviewed P0.3 pass in the interim (10+ review
+  rounds on `derive_l2_compile_context` alone — forced-language interaction
+  with a matched compile unit's derived `-std=`, MSVC `/std:`-vs-`-std=`
+  precedence, ambiguity-signature narrowing order, ...) whose own
+  `_L2SeedPackArgs` docstring already considered and explicitly declined
+  folding these two calls into one, calling the double collection "an
+  accepted, documented cost" so each `derive_l2_*` function's return shape
+  stays independently additive. Re-litigating that call from inside a
+  merge-conflict resolution, in code this delicate and this recently
+  stabilized, was judged the wrong place to relitigate it — see this
+  repository's own "known gaps over risky reactive patches" convention.
+  This is now in scope for the `classify` job's `PERF_SENSITIVE_PATTERNS`
+  (see "CI integration" above), so a change to it will run this workflow
+  even though no benchmark scenario targets its specific cost yet. Closing
+  it for real needs its own dedicated pass, reviewed on its own terms rather
+  than folded into an unrelated CI-tooling PR.
 - **Per-job shard classification.** The `classify` job (see "CI integration"
   above) reports one shared `run` output gating all four downstream jobs
   uniformly — the exact same set of jobs a changed path used to trigger

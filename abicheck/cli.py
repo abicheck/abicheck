@@ -1058,8 +1058,9 @@ def _announce_exit_scheme(
     else:
         click.echo(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
-            "with --contract-evaluation, 1=incomplete contract coverage, an "
-            "orthogonal axis that never lowers a 2/4). "
+            "with --contract-evaluation, 1=incomplete contract coverage; with "
+            "--require-complete-analysis, 1=incomplete analysis assurance -- both "
+            "orthogonal axes that never lower a 2/4). "
             "Pass --exit-code-scheme severity (or a --severity-* setting) for the "
             "severity-aware scheme.",
             err=True,
@@ -1069,6 +1070,7 @@ def _announce_exit_scheme(
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
     fmt: str | None = None, stat: bool = False, secondary_fmt: str | None = None,
+    *, require_complete_analysis: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
@@ -1076,7 +1078,18 @@ def _exit_with_severity_or_verdict(
     at each call site, so a command cannot acquire a compatibility exit and
     forget the orthogonal one. `fold_coverage_exit` reads the floor off
     *result*'s own persisted context and is `0` when the run recorded none.
+
+    P0.4: the analysis-assurance axis (`--require-complete-analysis`) is
+    folded the same way, immediately after -- both are `max`-based orthogonal
+    floors, and folding this one here too means a caller cannot pick up one
+    axis's exit contribution and forget the other's, the same reasoning
+    ADR-049 Phase 7's docstring above already gives for its own axis. `0`
+    contribution, and this is a pure no-op, whenever the flag was not passed.
     """
+    from .analysis_assurance import (
+        assurance_floor_diagnostic,
+        fold_analysis_assurance_exit,
+    )
     from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
     from .severity import compute_exit_code, legacy_exit_code
     if scheme == "severity":
@@ -1093,6 +1106,14 @@ def _exit_with_severity_or_verdict(
         exit_code = legacy_exit_code(result.verdict)
     announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
     exit_code = fold_coverage_exit(exit_code, result)
+    diagnostic = assurance_floor_diagnostic(
+        result, require_complete=require_complete_analysis, base_exit=exit_code
+    )
+    if diagnostic is not None:
+        click.echo(diagnostic, err=True)
+    exit_code = fold_analysis_assurance_exit(
+        exit_code, result, require_complete=require_complete_analysis
+    )
     if exit_code != 0:
         sys.exit(exit_code)
 
@@ -1722,6 +1743,15 @@ def _embed_inline_source_side(
                    "comparable pair.")
 @contract_options  # ADR-049: --contract-evaluation/--contract/--audit-suppressions
 @pack_option  # ADR-049 D8: --pack
+@click.option("--require-complete-analysis", "require_complete_analysis",
+              is_flag=True, default=False,
+              help="P0.4: fail the build when analysis_assurance.status is not "
+                   "'complete', independent of the compatibility verdict. "
+                   "Contributes exit 1, folded with max the same way "
+                   "--contract-evaluation's coverage axis is (ADR-049 Phase 7): "
+                   "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
+                   "compares only, not the directory/package release fan-out. "
+                   "See docs/reference/exit-codes.md.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -1754,6 +1784,15 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     Without --contract-evaluation there is no domain to be short of evidence
     for and the tables above are exhaustive. Set contract.unresolved=warn
     (via a `kind: contract` --pack) to accept incomplete coverage.
+    \b
+    A second, independent orthogonal axis (P0.4): with
+    --require-complete-analysis, an analysis_assurance.status other than
+    "complete" (how complete/trustworthy the evidence itself was — depth,
+    TU/export accounting, fact-set comparability, header-context drift,
+    source-graph completeness — independent of what the verdict says)
+    contributes exit 1 the same way, folded with the same max discipline.
+    Without the flag, analysis_assurance is still always computed and
+    reported in --format json, it just never affects the exit code.
     \b
     Invalid invocation (bad arguments/options, unreadable or unrecognised
     input) exits 64, outside the result space above, so it is never mistaken

@@ -238,101 +238,24 @@ kind of change that merits review rather than a silent pass.
 
 ## Exception unwinding: the machinery behind `noexcept`
 
-The `noexcept` section above turned on the caller's **unwinding assumption**
-without saying what that machinery *is*. It is a full ABI in its own right, and
-the Itanium C++ ABI freezes it as part of your binary contract.
+Removing `noexcept` turns on the caller's **unwinding assumption** — but
+that assumption rests on a full ABI in its own right, one the Itanium C++
+ABI freezes as part of your binary contract. Two compiler-emitted tables
+(`.eh_frame`, `.gcc_except_table`) and a per-frame **personality routine**
+(`__gxx_personality_v0`) let the runtime unwind the stack and run
+destructors on the way to a matching handler; a caller compiled expecting a
+landing pad relies on them existing and being correct. Crossing a DSO
+boundary adds a second hazard: catch matching is RTTI-based, and a type
+thrown across a library boundary can, on some runtime/toolchain
+configurations, make the `catch` fail to match — the exact conditions are
+narrower than "hidden visibility" alone (GNU libstdc++'s default string-name
+fallback usually still catches correctly even then). Toolchain flags
+(`-fno-exceptions` mixed with `-fexceptions` across a call chain, changing
+an exception specification) are the same class of hazard again.
 
-### The unwinding tables and the personality routine
-
-When you throw, control does not "return" — the runtime **unwinds** the stack,
-running each frame's destructors on the way out until it finds a matching
-handler. To do that without any source, it reads two compiler-emitted tables
-baked into the binary:
-
-- **`.eh_frame`** — call-frame information (CFI): for every code address, how to
-  restore registers and find the caller's frame. This is what lets the unwinder
-  walk frames it has never seen.
-- **`.gcc_except_table`** — the *language-specific data area* (LSDA): per
-  function, which address ranges are covered by which `catch` clauses and which
-  cleanups (destructors) must run.
-
-Each frame that participates names a **personality routine** — for GCC/Clang
-C++ this is `__gxx_personality_v0`. The generic unwinder (`_Unwind_RaiseException`
-in libgcc/libunwind) walks frames using `.eh_frame`, and at each frame calls the
-personality routine, which reads that frame's LSDA to answer "does this frame
-catch this exception, or does it just have cleanups to run?" The throw itself
-goes through the ABI's `__cxa_allocate_exception` / `__cxa_throw` entry points.
-
-The consequence: **these tables and the `__gxx_personality_v0` reference are part
-of the artifact's ABI**, exactly like the vtable or a mangled symbol. A caller
-compiled expecting a landing pad relies on them existing and being correct — the
-same dependency that makes a silent `noexcept` removal (section 5) dangerous.
-
-### Throwing across a DSO boundary
-
-An exception thrown in `libfoo.so` and caught in the main program (or another
-`.so`) has to cross a module boundary — and catch matching is **RTTI-based**.
-`__cxa_throw` carries a pointer to the exception type's `std::type_info`, and the
-personality routine matches it against each `catch`'s `type_info`. This is the
-same RTTI/`type_info` object that backs the vtable in [section 1](#1-vtables-and-virtual-methods)
-and that `-fno-rtti` strips (see the [modern-hazards table](#modern-cc-and-toolchain-abi-hazards)).
-
-Matching *ideally* compares `type_info` by pointer identity — but each DSO can
-emit its **own copy** of a type's `type_info`. The GNU runtime therefore falls
-back to comparing the mangled **type-name string** when the pointers differ, and
-relies on the dynamic linker to **merge** the copies to one when the `type_info`
-has default visibility. That is the trap:
-
-> If a type used in a cross-DSO exception has **hidden visibility** (or its
-> `type_info` is otherwise not exported/merged — see
-> [Part 5 §Symbol visibility](05-linker-elf.md#2-symbol-visibility)), the two
-> modules can hold `type_info` copies the runtime refuses to equate. The `catch`
-> then **does not match**, the exception unwinds past the intended handler, and
-> `std::terminate()` fires.
-
-The rule that follows: any type thrown across a library boundary must have
-**default visibility on its `type_info`** (in practice: a polymorphic type with
-a key function, or an explicitly exported RTTI symbol), so both sides share one
-identity.
-
-### Mixing `-fexceptions` and `-fno-exceptions`, and changing throw specs
-
-`-fno-exceptions` tells the compiler *no exception will ever pass through this
-code*, so it omits landing pads, cleanups, and often the `.eh_frame`/LSDA
-detail those need. A translation unit built that way becomes a **no-throw
-barrier**: if an exception is unwound *through* one of its frames, there is no
-metadata to run destructors or continue — the runtime calls `std::terminate()`.
-Building half a call chain `-fno-exceptions` and half `-fexceptions` is therefore
-an ABI decision, not just an optimization flag, and flipping a shipped library
-between the two changes what every caller can assume.
-
-Changing a function's **exception specification** is the same hazard the
-`noexcept` section already dissects — pre-C++17 it is invisible to the mangled
-name, so it links fine but silently alters the caller's unwinding contract. (C++17
-removed dynamic `throw(T)` specifications entirely; only `noexcept` remains.) We
-do not repeat that analysis here — see [section 5](#5-noexcept-why-this-is-risk-not-a-hard-break).
-
-!!! note "How abicheck sees it"
-    Be honest about the boundary: **whether a given throw is actually caught
-    across a DSO is not decidable from the artifacts** — it depends on runtime
-    control flow abicheck does not simulate, and on which `type_info` copies the
-    loader merges in a particular process. abicheck does **not** try to prove
-    exception-safety end-to-end.
-
-    What it *can* observe is structural and symbol-level:
-
-    - the `-fno-exceptions` / `-fno-rtti` **build flags**, surfaced as
-      toolchain/deployment risk when build context is captured (same row as the
-      [modern hazards](#modern-cc-and-toolchain-abi-hazards) above);
-    - the presence/removal or visibility change of RTTI symbols (`_ZTI…`/`_ZTS…`)
-      and vtables (`_ZTV…`) at the ELF level — which is exactly what lets a
-      cross-DSO `catch` stop matching;
-    - the `noexcept`-driven library version requirement from
-      [case15](../../reference/examples/case15_noexcept_change.md).
-
-    The end-to-end *"will this exception escape?"* question is a genuine
-    artifact-level limitation; see [Limitations](../limitations.md) for the full
-    catalog of what binary/header analysis cannot recover.
+➡️ **[Exception Unwinding: The Machinery Behind `noexcept`](../exception-unwinding-abi.md)**
+covers the full mechanics — the unwind tables, the personality routine, the
+cross-DSO RTTI trap, and what abicheck can and cannot observe about it.
 
 ---
 
@@ -442,32 +365,16 @@ sizes/offsets (L1) or the header AST (L2); see
 The break families above predate C++11. Newer language features and toolchain
 *flags* introduce a second class of hazard: the **declaration looks unchanged in
 the header, but the bytes the compiler emits move** because a type's size,
-mangling, or passing rule shifted under it. These are the cases reviewers miss
-most often, because nothing in the diff "looks like" an ABI change.
+mangling, or passing rule shifted under it — the `_GLIBCXX_USE_CXX11_ABI` dual-ABI
+flip, `[[gnu::abi_tag]]`, `char8_t`, `_BitInt(N)`, `_Atomic`,
+`[[no_unique_address]]`, C++20 concept tightening, and LP64→ILP64 data-model
+drift are the recurring offenders, alongside build-flag-only hazards like
+`-fno-exceptions`/`-fno-rtti` and CPU-dispatch/IFUNC selection. These are the
+cases reviewers miss most often, because nothing in the diff "looks like" an
+ABI change.
 
-| Hazard | What silently changes | abicheck case |
-|--------|----------------------|---------------|
-| **`_GLIBCXX_USE_CXX11_ABI` flip** | libstdc++ ships *two* `std::string`/`std::list` ABIs in parallel behind the `__cxx11` inline namespace; flipping the macro re-mangles every symbol that touches those types. | [case104](../../reference/examples/case104_glibcxx_dual_abi_flip.md) |
-| **ABI tags (`[[gnu::abi_tag]]`)** | A tag is mangled into the symbol name; adding/removing one renames the symbol with no source-visible signature change. | [case113](../../reference/examples/case113_abi_tag_changed.md) |
-| **`char8_t` (C++20)** | `const char*` → `const char8_t*` is a *distinct type*: different mangling, and a new overload-resolution result. | [case114](../../reference/examples/case114_char8t_migration.md) |
-| **`_BitInt(N)` width** | Changing `N` changes size/alignment and the register/stack class the value is passed in. | [case115](../../reference/examples/case115_bit_int_width_changed.md) |
-| **`_Atomic` qualifier** | Adding/removing `_Atomic` can change size, alignment, and whether the object is passed by lock-free path. | [case116](../../reference/examples/case116_atomic_qualifier_changed.md) |
-| **`[[no_unique_address]]`** | Lets an empty member overlap the next field; adding it shrinks the struct and shifts every following offset. | [case117](../../reference/examples/case117_no_unique_address.md) |
-| **Concept tightening (C++20)** | Narrowing a constraint removes instantiations the consumer relied on — a *source* break with no symbol-table change for already-emitted instantiations. | [case105](../../reference/examples/case105_concept_tightening.md) |
-| **LP64 → ILP64 / data-model drift** | `long`/pointer widths change out from under every struct and signature — a whole-ABI shift driven by the target, not the source. | [case112](../../reference/examples/case112_lp64_ilp64.md) |
-
-Several more live only in the **build flags**, not the source, and abicheck
-surfaces them as toolchain/deployment risk when build context is captured:
-`-fno-exceptions` / `-fno-rtti` (drop EH/RTTI machinery callers may rely on),
-`-fshort-enums` (changes enum underlying size — see
-[Part 3](03-type-layout.md)), packing/alignment flags, vector-ABI flags, and
-CPU-dispatch/IFUNC selection ([case83](../../reference/examples/case83_cpu_dispatch_isa_dropped.md),
-[case29](../../reference/examples/case29_ifunc_transition.md)).
-
-!!! warning "Why these need debug info or headers"
-    Like the rest of Part 4, every hazard above is recoverable only when DWARF/PDB
-    *or* headers are supplied — and the dual-ABI and ABI-tag cases need the
-    *mangled* symbol names, so a stripped, name-demangled view can hide them.
+➡️ **[Modern C/C++ and Toolchain ABI Hazards](../modern-cpp-toolchain-hazards.md)**
+has the full case-by-case table and the build-flag hazards in detail.
 
 ---
 
@@ -505,4 +412,6 @@ conventions, and TLS models — all recorded in the `.so` itself.
 ➡️ **[Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md)**
 
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
-[Risk examples](../../reference/examples/by-verdict/compatible-risk.md)
+[Risk examples](../../reference/examples/by-verdict/compatible-risk.md) ·
+[Exception Unwinding](../exception-unwinding-abi.md) ·
+[Modern C/C++ and Toolchain ABI Hazards](../modern-cpp-toolchain-hazards.md)

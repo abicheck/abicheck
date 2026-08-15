@@ -83,7 +83,6 @@ from .diff_symbols_variables import (
     var_access_changes,
 )
 from .dumper_castxml import (
-    SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
@@ -99,6 +98,12 @@ from .fact_provenance import (
     var_fact_key,
 )
 from .finding_identity import SymbolIdentityIndex
+from .finding_identity_ctor_dtor import (
+    ctor_dtor_drift_old_by_new_key,
+    iter_matched_function_pairs,
+    reconcile_ctor_dtor_key_drift,
+    synthetic_ctor_scope as _synthetic_ctor_scope,
+)
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -714,11 +719,12 @@ def _check_inline_transitions(
     new_map: Mapping[str, Function],
     new_snapshot: AbiSnapshot,
 ) -> list[Change]:
-    """Detect inline/non-inline transitions for functions present in both snapshots."""
+    """Detect inline/non-inline transitions for functions present in both
+    snapshots -- including a ctor/dtor pair only visible via synthetic-key
+    format-drift reconciliation (``iter_matched_function_pairs``, PR #761
+    finding 2)."""
     changes: list[Change] = []
-    for mangled in set(old_map) & set(new_map):
-        f_old = old_map[mangled]
-        f_new = new_map[mangled]
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if not f_old.is_inline and f_new.is_inline:
             new_elf = new_snapshot.elf
             still_exported = new_elf is not None and any(
@@ -845,9 +851,11 @@ def _detect_newly_deleted_functions(
 
     Only ABI-visible (PUBLIC / ELF_ONLY) functions are reported; hidden or
     internal functions are not part of the public ABI surface and must not
-    produce spurious BREAKING findings.
+    produce spurious BREAKING findings. ``drift_old_by_new_key`` covers a
+    reconciled ctor/dtor pair (PR #761 finding 2).
     """
     changes: list[Change] = []
+    drift_old_by_new_key = ctor_dtor_drift_old_by_new_key(old_all, new_all)
     new_elf = getattr(new_snapshot, "elf", None)
     exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
     old_exported = exported_symbol_names(
@@ -880,7 +888,7 @@ def _detect_newly_deleted_functions(
         # Skip functions that are not part of the public ABI surface.
         if f_new.visibility not in _PUBLIC_VIS:
             continue
-        f_old_any = old_all.get(mangled)
+        f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
         if f_old_any is not None and not f_old_any.is_deleted:
             kind = (
                 ChangeKind.FUNC_DELETED_DWARF
@@ -937,7 +945,16 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     matched_by_name: set[str] = set()
 
+    ctor_dtor_consumed_old, ctor_dtor_consumed_new, ctor_dtor_changes = (
+        reconcile_ctor_dtor_key_drift(
+            old_map, new_map, _check_function_signature, params_unconfirmed, is_llp64
+        )
+    )
+    changes.extend(ctor_dtor_changes)
+
     for mangled, f_old in old_map.items():
+        if mangled in ctor_dtor_consumed_old:
+            continue
         changes.extend(
             _match_old_function(
                 mangled,
@@ -952,6 +969,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
 
     for mangled, f_new in new_map.items():
+        if mangled in ctor_dtor_consumed_new:
+            continue
         if mangled not in old_map and f_new.name not in matched_by_name:
             virtual_break = virtual_method_addition(
                 f_new, old_owner_classes, old_types, new_types, old_virtual_sigs
@@ -989,17 +1008,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 # substring .replace() previously turned ``myconst`` into ``my`` and made the
 # copy/move constructor look like a converting overload (Codex review).
 _CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
-
-
-def _synthetic_ctor_scope(mangled: str) -> str | None:
-    """Qualified scope in a castxml synthetic-ctor key (``SYNTHETIC_CTOR_KEY_PREFIX
-    + "scope(params)"``), or ``None`` (Codex review, PR #608 follow-up).
-    """
-    if not is_synthetic_ctor_key(mangled):
-        return None
-    body = mangled[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
-    paren = body.find("(")
-    return body[:paren] if paren != -1 else None
 
 
 def _converting_ctors_by_class(
@@ -1290,13 +1298,12 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
-        key = func_fact_key(mangled, "param_defaults")
-        old_producer = fact_producer(old, key)
-        new_producer = fact_producer(new, key)
+    def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
+        return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
+
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+        old_producer = _param_defaults_producer(old, f_old)
+        new_producer = _param_defaults_producer(new, f_new)
         if (
             old_producer is not None
             and new_producer is not None
@@ -1354,10 +1361,7 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if (
                 p_old.type == p_new.type
@@ -1392,11 +1396,7 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new
     )
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
-
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         return_known = not (
             _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type)
         )
@@ -1446,12 +1446,11 @@ def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
 ) -> list[Change]:
-    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions."""
+    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions,
+    including a ctor/dtor pair only visible via synthetic-key format-drift
+    reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
     changes: list[Change] = []
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
-            continue
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if f_old.access != f_new.access and _is_access_narrowing(
             f_old.access, f_new.access
         ):
@@ -1753,17 +1752,18 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     A per-pair check (rather than a whole-snapshot gate) also correctly
     handles a ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this
     fact's producer is recorded per *declaration*, not uniformly across the
-    whole snapshot.
+    whole snapshot. Looks each side up under ITS OWN ``mangled`` (PR #761
+    finding 3): a reconciled ctor/dtor pair's provenance lives under two
+    different keys.
     """
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    for mangled, f_old in old_map.items():
-        f_new = new_map.get(mangled)
-        if f_new is None:
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+        if fact_producer(old, func_fact_key(f_old.mangled, "deprecated")) is None:
             continue
-        if not both_known_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
+        if fact_producer(new, func_fact_key(f_new.mangled, "deprecated")) is None:
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
             changes.append(

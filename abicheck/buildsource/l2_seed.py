@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any
 
 from ..compile_context import CompileContext
-from .build_evidence import BuildEvidence
 from .inline import (
     BuildConfig,
     _run_cleanups,
@@ -48,20 +47,6 @@ from .inline import (
 from .pack import BuildSourcePack
 
 logger = logging.getLogger(__name__)
-
-
-class _Uncollected:
-    """Sentinel default for ``evidence=`` (P0.3), distinguishing "no shared
-    evidence was given -- collect your own" from "a caller already collected
-    and is sharing an explicit ``None`` (found nothing)" -- a bare ``None``
-    default could not tell these apart, and treating a shared "found
-    nothing" as "not given" would silently trigger the exact redundant
-    second collection this parameter exists to avoid. Never instantiated
-    more than once; see :data:`_UNCOLLECTED`.
-    """
-
-
-_UNCOLLECTED = _Uncollected()
 
 
 def _l2_seed_config(
@@ -125,6 +110,59 @@ def _l2_seed_pack_inputs(
     return base_build, raw_build_info, raw_sources
 
 
+@dataclasses.dataclass(frozen=True)
+class _L2SeedPackArgs:
+    """Everything :func:`derive_l2_include_dirs` and :func:`derive_l2_compile_context`
+    need to make their own, independent ``collect_inline_pack(..., layers=("L3",))``
+    call, resolved identically for both.
+
+    Config resolution (:func:`_l2_seed_config`), the trust flags derived from
+    it, and the pack/build-info precedence (:func:`_l2_seed_pack_inputs`) were
+    previously duplicated verbatim between the two ``derive_l2_*`` functions;
+    this bundles that shared argument-*building* step into one helper both
+    consume. Deliberately does **not** call ``collect_inline_pack`` itself —
+    each ``derive_l2_*`` function keeps its own independent call (see
+    :func:`derive_l2_compile_context`'s own docstring for why: an accepted,
+    documented double-collection cost, not a duplication to also fold away
+    here), so this only removes the genuinely-identical setup work ahead of
+    that call.
+    """
+
+    sources: Path | None
+    build_info: Path | None
+    build_config: BuildConfig
+    build_config_trusted_for_query: bool
+    compile_db_explicit: bool
+    base_build: Any
+
+
+def _resolve_l2_seed_pack_args(
+    build_config: Path | None,
+    sources: Path | None,
+    build_info: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+) -> _L2SeedPackArgs | None:
+    """Resolve *build_config*/*sources*/*build_info* into ``collect_inline_pack``
+    call arguments, or ``None`` when there is no config to seed from (the
+    caller's existing "nothing to apply" degrade).
+    """
+    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
+    if cfg is None:
+        return None
+    base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(build_info, sources)
+    return _L2SeedPackArgs(
+        sources=raw_sources,
+        build_info=raw_build_info,
+        build_config=cfg,
+        build_config_trusted_for_query=(
+            build_config is not None or build_query is not None
+        ),
+        compile_db_explicit=build_compile_db is not None or build_config is not None,
+        base_build=base_build,
+    )
+
+
 def _unit_include_dirs(cu: Any) -> list[str]:
     """One compile unit's normal-priority include dirs, structured + argv.
 
@@ -179,96 +217,6 @@ def _existing_include_dirs(units: Iterable[Any]) -> list[str]:
     return out
 
 
-def _collect_l2_seed_build_evidence(
-    build_info: Path | None,
-    sources: Path | None,
-    build_config: Path | None,
-    build_query: str | None,
-    build_compile_db: str | None,
-    allow_inferred_build_query: bool,
-) -> tuple[BuildEvidence | None, list[Callable[[], None]]]:
-    """The L3-only collection :func:`derive_l2_include_dirs` and
-    :func:`derive_l2_compile_context` each used to run independently (P0.3) —
-    factored out so a caller needing both (``resolve_side_snapshot``) can pay
-    for it once via :func:`collect_l2_seed_evidence` instead of twice.
-
-    Best-effort: any failure drains the cleanups already accumulated and
-    returns ``(None, [])``, same as each sibling function's own former
-    inline copy of this logic.
-    """
-    if sources is None and build_info is None:
-        return None, []
-    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
-    if cfg is None:
-        return None, []
-    cfg_trusted_for_query = build_config is not None or build_query is not None
-    compile_db_explicit = build_compile_db is not None or build_config is not None
-    cleanups: list[Callable[[], None]] = []
-    try:
-        base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(
-            build_info, sources
-        )
-        # Reuse the same L3-collection path embed_build_source drives, restricted
-        # to build context only (no L4/L5), so every supported build-info form —
-        # a collected pack, a Bazel aquery/cquery, an explicit/auto-discovered/
-        # config-located compile DB, or the inferred build-system query — yields
-        # the same CompileUnit include dirs the L4 replay would use. Re-deriving
-        # this by hand kept missing input forms (packs, bazel); collect_inline_pack
-        # owns them, plus the temp-build-dir cleanup lifecycle via defer_cleanup.
-        pack = collect_inline_pack(
-            sources=raw_sources,
-            build_info=raw_build_info,
-            build_config=cfg,
-            build_config_trusted_for_query=cfg_trusted_for_query,
-            compile_db_explicit=compile_db_explicit,
-            allow_inferred_build_query=allow_inferred_build_query,
-            base_build=base_build,
-            layers=("L3",),
-            defer_cleanup=cleanups,
-        )
-        return (pack.build_evidence if pack is not None else None), cleanups
-    except Exception:  # noqa: BLE001 — best-effort, never fatal
-        _run_cleanups(cleanups)
-        return None, []
-
-
-def collect_l2_seed_evidence(
-    build_info: Path | None,
-    sources: Path | None,
-    build_config: Path | None = None,
-    *,
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    allow_inferred_build_query: bool = False,
-) -> tuple[BuildEvidence | None, list[Callable[[], None]]]:
-    """Collect once the L3 evidence :func:`derive_l2_include_dirs` and
-    :func:`derive_l2_compile_context` would otherwise each independently
-    re-derive for the same side (P0.3) — call this once per side and pass
-    the result to both via their ``evidence=`` parameter.
-
-    ``allow_inferred_build_query`` defaults to ``False`` here, unlike the two
-    functions above's own ``True`` default: this is the entry point a Tier-2
-    API caller (``service_input_resolution.resolve_side_snapshot``) uses, and
-    per :func:`seed_l2_includes`'s own docstring, "a Tier-2 API call must
-    never execute a build system (cmake/make/bazel) as a side effect of
-    resolving an input." Pass ``True`` explicitly only once it's established
-    that running an inferred query for this side is appropriate.
-
-    Returns ``(evidence, cleanups)`` — the *cleanups* are the temp-build-dir
-    thunks an inferred build query may have appended, to be run only after
-    every consumer of *evidence* (the L2 parse, and anything else fed this
-    result) has finished with it.
-    """
-    return _collect_l2_seed_build_evidence(
-        build_info,
-        sources,
-        build_config,
-        build_query,
-        build_compile_db,
-        allow_inferred_build_query,
-    )
-
-
 def derive_l2_include_dirs(
     build_info: Path | None,
     sources: Path | None,
@@ -277,7 +225,6 @@ def derive_l2_include_dirs(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     allow_inferred_build_query: bool = True,
-    evidence: BuildEvidence | None | _Uncollected = _UNCOLLECTED,
 ) -> tuple[list[str], list[Callable[[], None]]]:
     """Best-effort ``-I``/``-isystem`` dirs from the build's compile DB, + cleanups.
 
@@ -293,15 +240,6 @@ def derive_l2_include_dirs(
     include dirs so the caller can feed them to L2 as a **fallback** (only when the
     user gave no ``-I``).
 
-    *evidence* (P0.3): a caller that already collected L3 evidence for this
-    exact ``(sources, build_info, ...)`` request via
-    :func:`collect_l2_seed_evidence` passes it here to skip a second,
-    redundant collection — including an explicit ``None`` (collection ran and
-    found nothing), which must still short-circuit rather than silently
-    triggering a repeat attempt; the default sentinel :data:`_UNCOLLECTED`
-    means "no shared evidence given," preserving today's behaviour for every
-    other caller (``cli_dump_helpers.py``, ``scan_engine.py``).
-
     Returns ``(include_dirs, cleanups)``. The *cleanups* are the temp-build-dir
     thunks an inferred CMake query appends — an inferred CMake build dir can hold
     generated headers that the returned include dirs point into, so the caller
@@ -312,24 +250,51 @@ def derive_l2_include_dirs(
     """
     if sources is None and build_info is None:
         return [], []
-    if not isinstance(evidence, _Uncollected):
-        units = evidence.compile_units if evidence is not None else []
-        return _existing_include_dirs(units), []
-    build_evidence, cleanups = _collect_l2_seed_build_evidence(
-        build_info,
-        sources,
-        build_config,
-        build_query,
-        build_compile_db,
-        allow_inferred_build_query,
-    )
-    units = build_evidence.compile_units if build_evidence is not None else []
-    out = _existing_include_dirs(units)
-    if not out:
-        # Nothing to preserve — release any temp build dir now.
+    cleanups: list[Callable[[], None]] = []
+    try:
+        # Pack resolution (config load + any --sources/--build-info pack load)
+        # happens inside this same protected section: a corrupt/unreadable
+        # pack (bad manifest.json/build_evidence.json) must degrade to "no
+        # seeded dirs" like every other failure mode here, not raise through
+        # (Codex review — this call used to live inside this try before the
+        # shared-helper extraction, and moved ahead of it by mistake).
+        args = _resolve_l2_seed_pack_args(
+            build_config, sources, build_info, build_query, build_compile_db
+        )
+        if args is None:
+            return [], []
+        # Reuse the same L3-collection path embed_build_source drives, restricted
+        # to build context only (no L4/L5), so every supported build-info form —
+        # a collected pack, a Bazel aquery/cquery, an explicit/auto-discovered/
+        # config-located compile DB, or the inferred build-system query — yields
+        # the same CompileUnit include dirs the L4 replay would use. Re-deriving
+        # this by hand kept missing input forms (packs, bazel); collect_inline_pack
+        # owns them, plus the temp-build-dir cleanup lifecycle via defer_cleanup.
+        pack = collect_inline_pack(
+            sources=args.sources,
+            build_info=args.build_info,
+            build_config=args.build_config,
+            build_config_trusted_for_query=args.build_config_trusted_for_query,
+            compile_db_explicit=args.compile_db_explicit,
+            allow_inferred_build_query=allow_inferred_build_query,
+            base_build=args.base_build,
+            layers=("L3",),
+            defer_cleanup=cleanups,
+        )
+        units = (
+            pack.build_evidence.compile_units
+            if pack is not None and pack.build_evidence is not None
+            else []
+        )
+        out = _existing_include_dirs(units)
+        if not out:
+            # Nothing to preserve — release any temp build dir now.
+            _run_cleanups(cleanups)
+            return [], []
+        return out, cleanups
+    except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
         _run_cleanups(cleanups)
         return [], []
-    return out, cleanups
 
 
 def derive_l2_compile_context(
@@ -342,43 +307,44 @@ def derive_l2_compile_context(
     build_compile_db: str | None = None,
     allow_inferred_build_query: bool = True,
     explicit: CompileContext | None = None,
-    evidence: BuildEvidence | None | _Uncollected = _UNCOLLECTED,
+    lang: str | None = None,
+    lang_explicit: bool = False,
 ) -> tuple[CompileContext | None, list[Callable[[], None]]]:
     """Best-effort L2 :class:`CompileContext` derived from the build's L3
     ``CompileUnit`` facts (P0.3).
 
     *explicit* is the caller's own already-supplied L2 context (typically
-    ``evidence.compile`` on the caller's own ``SideEvidence`` — a different
-    object from this function's own *evidence* parameter below, despite the
-    name collision) — forwarded to :func:`~abicheck.buildsource.
+    ``evidence.compile``) — forwarded to :func:`~abicheck.buildsource.
     header_compile_context.resolve_header_compile_context` unchanged, so a
     field it already pins (e.g. an explicit ``-std=c++20``) excuses a
     same-field-only disagreement across the matched compile units instead of
     failing closed on it (Finding 3; see that function's own docstring).
 
-    *evidence*: a caller that already collected L3 evidence for this exact
-    ``(sources, build_info, ...)`` request via :func:`collect_l2_seed_evidence`
-    passes it here to skip :func:`derive_l2_include_dirs`'s sibling collection
-    — see that function's own *evidence* docstring for the sentinel/``None``
-    distinction, identical here.
+    *lang*/*lang_explicit* (``discussion_r3787398644``, Codex review):
+    forwarded unchanged to :func:`~abicheck.buildsource.
+    header_compile_context.resolve_header_compile_context` — the same
+    additive, default-``None``/``False`` threading pattern as *explicit*
+    above, so a caller's explicitly-forced parse language (e.g.
+    ``DumpRequest(lang="c++", lang_explicit=True)``) suppresses a matched
+    compile unit's own derived ``-std=`` when its language family conflicts,
+    rather than forwarding a C-family standard into a forced-C++ parse (see
+    that function's own docstring for the confirmed repro).
 
     Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
     resolution precedence (explicit ``--build-info``/``--sources`` pack ->
     trusted ``--config``/``--build-query`` -> ``build.compile_db`` ->
     auto-discovered ``compile_commands.json`` -> the inferred build-system
     query) via the same :func:`abicheck.buildsource.inline.collect_inline_pack`
-    call. A caller that needs both this function's and
-    :func:`derive_l2_include_dirs`'s result for the same side should collect
-    once via :func:`collect_l2_seed_evidence` and pass it to both — see
-    ``service_input_resolution.resolve_side_snapshot``, the one caller doing
-    so today. The embed step later in the same pipeline
-    (``embed_build_source``) still runs its own, separate collection: unlike
-    these two opportunistic L2-parse improvements it is the caller's explicit
-    request for L3+ evidence and (unlike them) always permits the inferred
-    build query, so merging it into this shared result would either narrow
-    its own permission or widen these two functions' — deliberately left
-    unmerged (see docs/contribute/performance.md "Coverage gaps this
-    workflow does not close").
+    call — kept as an independent call (rather than folded into
+    :func:`derive_l2_include_dirs`'s own single call) so this function's
+    return shape stays additive and every existing
+    ``derive_l2_include_dirs``/``seed_l2_includes`` caller and test is
+    unaffected; ``derive_l2_include_dirs`` already runs the identical
+    collection once per side for its own include-dir seeding, so a caller
+    using both pays for the L3 collection twice per side — an accepted,
+    documented cost (the collection itself is already re-run a third time by
+    ``embed_build_source`` later in the same pipeline for L3-L5 embedding, so
+    this is not a new class of repeated work).
 
     Returns ``(context, cleanups)`` — ``context`` is ``None`` when there is
     nothing to apply (mirrors :func:`derive_l2_include_dirs`'s ``[]``
@@ -391,34 +357,46 @@ def derive_l2_compile_context(
     every other failure mode here (missing/malformed compile DB, no build
     system, ...), which stays best-effort and degrades silently, a genuine
     ABI-relevant disagreement across compile units must never be resolved by
-    silently guessing. This holds regardless of whether *evidence* was freshly
-    collected here or shared in — the ambiguity is a property of the evidence
-    itself, not of how it was obtained. The caller is responsible for running
-    any accumulated *cleanups* before letting the exception propagate
-    further, since this function's own ``except`` cannot both re-raise and
-    return them.
+    silently guessing. This function drains any accumulated *cleanups* itself
+    before re-raising on that path (mirroring every other failure branch
+    here) — a function that both re-raises and returns a value has no channel
+    to hand the exception a value along with it, so the caller receives none
+    and has nothing left to run.
     """
     from ..errors import HeaderCompileContextAmbiguousError
     from .header_compile_context import resolve_header_compile_context
 
     if (sources is None and build_info is None) or not headers:
         return None, []
-    build_evidence: BuildEvidence | None
-    cleanups: list[Callable[[], None]]
-    if not isinstance(evidence, _Uncollected):
-        build_evidence, cleanups = evidence, []
-    else:
-        build_evidence, cleanups = _collect_l2_seed_build_evidence(
-            build_info,
-            sources,
-            build_config,
-            build_query,
-            build_compile_db,
-            allow_inferred_build_query,
-        )
+    cleanups: list[Callable[[], None]] = []
     try:
+        # Pack resolution stays inside this protected section for the same
+        # reason as derive_l2_include_dirs's own copy of this comment: a
+        # corrupt/unreadable pack must degrade best-effort, not raise
+        # (Codex review).
+        args = _resolve_l2_seed_pack_args(
+            build_config, sources, build_info, build_query, build_compile_db
+        )
+        if args is None:
+            return None, []
+        pack = collect_inline_pack(
+            sources=args.sources,
+            build_info=args.build_info,
+            build_config=args.build_config,
+            build_config_trusted_for_query=args.build_config_trusted_for_query,
+            compile_db_explicit=args.compile_db_explicit,
+            allow_inferred_build_query=allow_inferred_build_query,
+            base_build=args.base_build,
+            layers=("L3",),
+            defer_cleanup=cleanups,
+        )
+        build_evidence = pack.build_evidence if pack is not None else None
         resolution = resolve_header_compile_context(
-            build_evidence, list(headers), explicit=explicit
+            build_evidence,
+            list(headers),
+            explicit=explicit,
+            lang=lang,
+            lang_explicit=lang_explicit,
         )
         if resolution.context is None:
             _run_cleanups(cleanups)
@@ -447,7 +425,6 @@ def seed_l2_includes(
     gcc_options: str | None = None,
     gcc_option_tokens: Sequence[str] = (),
     allow_inferred_build_query: bool = True,
-    evidence: BuildEvidence | None | _Uncollected = _UNCOLLECTED,
 ) -> tuple[list[Path], list[Callable[[], None]]]:
     """Augment *includes* with build-derived L2 include dirs (shared by scan+dump).
 
@@ -469,14 +446,6 @@ def seed_l2_includes(
     pass ``False`` so a no-compile-DB tree does not trigger a build just to hint
     includes — passive discovery still applies; only the executing fallback is
     suppressed (Codex review).
-
-    *evidence* (P0.3): forwarded unchanged to :func:`derive_l2_include_dirs` —
-    see that function's own *evidence* docstring. Left as the default
-    sentinel by every existing caller except ``service_input_resolution``'s
-    ``_seeded_includes``, which shares one :func:`collect_l2_seed_evidence`
-    result between this function and its sibling
-    :func:`derive_l2_compile_context` call instead of each collecting L3
-    evidence independently.
 
     Returns ``(includes, pending_cleanups)``. Temp-build-dir cleanups (an inferred
     CMake dir may hold generated headers the seeded dirs point into) are pushed
@@ -507,7 +476,6 @@ def seed_l2_includes(
         build_query=build_query,
         build_compile_db=build_compile_db,
         allow_inferred_build_query=allow_inferred_build_query,
-        evidence=evidence,
     )
     if not derived:
         return incs, []

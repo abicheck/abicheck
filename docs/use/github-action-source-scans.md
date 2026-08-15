@@ -211,9 +211,9 @@ it, so update this section (not a copy) when the recipe changes.
 This is the concrete, Action-supported answer to a specific, recurring shape
 of project: several libraries built from one source tree, one facts pack
 collected **once** for the whole build (via [source
-replay](producing-source-facts.md#full-source-scan--replay-from-a-compile-database),
-the [`abicheck-cc` wrapper](producing-source-facts.md#wrapper-injection--the-abicheck-cc-compiler-wrapper),
-or the [Clang plugin](producing-source-facts.md#plugin-injection--the-clang-facts-plugin)),
+replay](producing-source-facts.md#full-source-scan-replay-from-a-compile-database),
+the [`abicheck-cc` wrapper](producing-source-facts.md#wrapper-injection-the-abicheck-cc-compiler-wrapper),
+or the [Clang plugin](producing-source-facts.md#plugin-injection-the-clang-facts-plugin)),
 and no single ".so that represents the release" to hand `scan`/`dump` — which,
 per [Mode/input compatibility](github-action.md#modeinput-compatibility), only
 accept **one** artifact each; there is no `scan`/`dump` equivalent of
@@ -246,7 +246,7 @@ which is easy to miss without seeing them chained together:
    pack; `-H`/`header` scopes the L2 declared surface to that row's own public
    headers, and the embedded L3/L4/L5 facts are matched against it — the pack
    is collected once per build, not once per library.
-3. **[Post-matrix ABI gate](github-action-recipes.md#post-matrix-abi-gate-unified-verdict)** —
+3. **[Post-matrix ABI gate](github-action-recipes.md#post-matrix-abi-gate-fan-out-builds-fan-in-verdict)** —
    aggregates the per-library verdicts into one exit code, since there is no
    single combined verdict from a fan-out this page's `dump`/`scan` don't do
    natively.

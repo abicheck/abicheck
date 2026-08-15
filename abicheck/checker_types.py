@@ -65,11 +65,15 @@ EVIDENCE_DEPTH_VALUES = frozenset({"binary", "headers", "build", "source"})
 def validate_evidence_depth(field_name: str, value: str) -> None:
     """Reject a depth spelling outside EVIDENCE_DEPTH_VALUES (G30 P0.3).
 
-    Nothing populates ``requested_depth``/``effective_depth`` yet, but a
-    future caller (G30 P1.3) setting a typo'd value would otherwise only be
-    caught by the JSON Schema — which production code never runs against
-    (only opt-in tests do). Fail fast here instead, at the point the caller
-    actually sets the field, matching
+    ``cli_compare_helpers._report_compare_result`` is the first real caller
+    to populate ``requested_depth`` (P0.4 round 9, from the CLI's own
+    Click-validated ``--depth`` string, which is already restricted to this
+    exact set — see ``cli_params.DepthParam``), so a typo'd value reaching
+    this field is not expected in practice today; kept as a fail-fast check
+    for any future caller (G30 P1.3) that sets it from a less-validated
+    source, since a bad value would otherwise only be caught by the JSON
+    Schema — which production code never runs against (only opt-in tests
+    do). Matches
     ``mcp_server._validate_public_depth``'s same check on the same set.
     Shared by ``reporter._add_check_identity`` (compare) and
     ``ScanOutcome.to_dict`` (scan) so both validate identically.
@@ -529,6 +533,16 @@ class DiffResult:
     # fold_coverage_exit`` derives the orthogonal coverage contribution from
     # it, so a run carrying one can exit ``1`` on that axis (ADR-049 §7).
     contract_context: object | None = None
+    # P0.4 — the orthogonal "how complete/trustworthy was the evidence"
+    # answer (analysis_assurance.py), sitting beside `verdict` (what changed)
+    # and the severity/gate exit code (whether to fail the build) as the
+    # third leg of a three-way split. Always populated by `checker.compare()`
+    # (never `None` for a `DiffResult` it returned) -- typed as `object` for
+    # the same reason `contract_context` above is: `analysis_assurance.py`
+    # imports `DiffResult` from this module to build one, so a real
+    # annotation here would be circular. Narrow with `isinstance` at any
+    # consumption site (see `reporter._add_analysis_assurance`).
+    analysis_assurance: object | None = None
 
     def _effective_kind_sets(
         self,

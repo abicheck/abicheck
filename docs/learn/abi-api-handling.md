@@ -47,6 +47,23 @@ when it sees one.
 > distros can load a release, how a mere rebuild raises that floor, the
 > macOS/Windows parallels, and the CPU-dispatch (oneDAL/OpenBLAS) scenario where
 > a new-hardware kernel moves the floor for every consumer.
+>
+> **Asking about behavior, data formats, ownership, threading, direction, or
+> library shape — not the ordinary source/binary comparison above?**
+> [Part 0 §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
+> maps all eight compatibility dimensions and links each to its own deep
+> dive: [behavioral](behavioral-compatibility.md),
+> [data/wire](data-wire-compatibility.md),
+> [ownership/lifetime](ownership-and-lifetime.md), and
+> [concurrency/initialization](concurrency-and-initialization.md) are
+> structurally outside what a static checker can decide the way it decides
+> source/binary compatibility (see each page for what execution-based
+> evidence covers instead); [compatibility direction](compatibility-direction.md)
+> is genuinely checkable with `compare` (just via a workflow this hub's
+> default examples don't show); [static/header-only contracts](static-and-header-only.md)
+> are a mixed case — a static library has a practical, if indirect, path to
+> a real comparison, while a genuinely binary-less header-only library hits
+> an actual gap in today's tooling, not just an undocumented workflow.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
@@ -73,7 +90,7 @@ here for a specific problem, jump straight to the relevant part.
 
 | Part | Page | What it covers | Read it when… |
 |------|------|----------------|---------------|
-| **0** | [Compatibility as a Product Contract](abi-series/00-product-contract.md) | Public surface, SemVer mapping, contract shapes — the *framing* | …before anything else: a change is only a "break" if it breaks a promise |
+| **0** | [Compatibility as a Product Contract](abi-series/00-product-contract.md) | The [kinds of compatibility](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean) (source, binary, behavioral, data, deployment, ecosystem, operational, build-profile), public surface, SemVer mapping, contract shapes — the *framing* | …before anything else: a change is only a "break" if it breaks a promise, and "compatible" needs a dimension named |
 | **1** | [Foundations](abi-series/01-foundations.md) | Source → object → link → load; what a symbol is; API vs ABI | …you want the ground-up mental model (start here) |
 | **2** | [Symbol Contracts](abi-series/02-symbol-contracts.md) | Removal, rename, signature, pointer-level, globals | …a symbol disappeared or changed meaning |
 | **3** | [Type Layout](abi-series/03-type-layout.md) | Struct size/offset, alignment, enums, unions, bitfields | …you changed a struct, enum, or union |
@@ -113,7 +130,7 @@ each audience to the pages that matter for them fastest:
 | **C++ library maintainer** | [Foundations](abi-series/01-foundations.md) → [C++ ABI](abi-series/04-cpp-abi.md) → [Type Layout](abi-series/03-type-layout.md) → [Transitive Breaks](abi-series/06-transitive-breaks.md) → [Designing for Stability](abi-series/07-designing-for-stability.md) |
 | **CI / release engineer** | [Product Contract](abi-series/00-product-contract.md) → [Detecting Breaks](abi-series/08-detection.md) → [Tool Comparison](../reference/tool-comparison.md) → [Policy Profiles](../use/policies.md) → [Baselines](../use/baseline-management.md) → [Exit Codes](../reference/exit-codes.md) → [Output Formats](../use/output-formats.md) |
 | **Distribution / package maintainer** | [Linker & ELF](abi-series/05-linker-elf.md) → [Transitive Breaks](abi-series/06-transitive-breaks.md) → [Multi-Binary Releases](../use/multi-binary.md) → [Application Compatibility](../use/appcompat.md) |
-| **Plugin / SDK author** | [Symbol Contracts](abi-series/02-symbol-contracts.md) → [Plugin Systems](../use/plugin-systems.md) → [Policy Profiles](../use/policies.md) → [Product Contract §4](abi-series/00-product-contract.md#4-name-your-contract-shape) |
+| **Plugin / SDK author** | [Symbol Contracts](abi-series/02-symbol-contracts.md) → [Plugin Systems](../use/plugin-systems.md) → [Policy Profiles](../use/policies.md) → [Product Contract §5](abi-series/00-product-contract.md#5-name-your-contract-shape) |
 | **AI agent / automated reviewer** | [Overview](abi-api-handling.md) → [Evidence & Detectability](evidence-and-detectability.md) → [Examples Encyclopedia](../reference/examples/index.md) → [Change Kind Reference](../reference/change-kinds.md) |
 
 ---
@@ -141,7 +158,7 @@ is the source of truth).
 | C++ qualifiers, mangling & ABI tags | [21](../reference/examples/case21_method_became_static.md), [22](../reference/examples/case22_method_const_changed.md), [30](../reference/examples/case30_field_qualifiers.md), [71](../reference/examples/case71_inline_namespace_moved.md), [86](../reference/examples/case86_tag_struct_renamed.md), [101](../reference/examples/case101_inline_namespace_version_bumped.md), [113](../reference/examples/case113_abi_tag_changed.md) | mixed — 🔴 BREAKING or 🟠 API_BREAK | [Part 4](abi-series/04-cpp-abi.md) |
 | Trivial → non-trivial (calling convention) | [64](../reference/examples/case64_calling_convention_changed.md), [69](../reference/examples/case69_trivial_to_nontrivial.md) | 🔴 BREAKING | [Part 4](abi-series/04-cpp-abi.md) |
 | Templates, inline & ODR | [16](../reference/examples/case16_inline_to_non_inline.md), [17](../reference/examples/case17_template_abi.md), [47](../reference/examples/case47_inline_to_outlined.md), [59](../reference/examples/case59_func_became_inline.md), [79](../reference/examples/case79_missing_template_instantiation.md), [85](../reference/examples/case85_internal_template_signature_changed.md), [87](../reference/examples/case87_default_template_arg_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 4](abi-series/04-cpp-abi.md) |
-| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | [105](../reference/examples/case105_concept_tightening.md), [114](../reference/examples/case114_char8t_migration.md), [115](../reference/examples/case115_bit_int_width_changed.md), [116](../reference/examples/case116_atomic_qualifier_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 4 §Modern](abi-series/04-cpp-abi.md#modern-cc-and-toolchain-abi-hazards) |
+| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | [105](../reference/examples/case105_concept_tightening.md), [114](../reference/examples/case114_char8t_migration.md), [115](../reference/examples/case115_bit_int_width_changed.md), [116](../reference/examples/case116_atomic_qualifier_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Modern C/C++ and Toolchain ABI Hazards](modern-cpp-toolchain-hazards.md) |
 | ELF/linker metadata (SONAME, visibility, versioning, RPATH, TLS) | [05](../reference/examples/case05_soname.md), [06](../reference/examples/case06_visibility.md), [13](../reference/examples/case13_symbol_versioning.md), [49](../reference/examples/case49_executable_stack.md), [51](../reference/examples/case51_protected_visibility.md), [52](../reference/examples/case52_rpath_leak.md), [65](../reference/examples/case65_symbol_version_removed.md), [67](../reference/examples/case67_tls_var_size_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 5](abi-series/05-linker-elf.md) |
 | Transitive/dependency & `detail::` leaks | [18](../reference/examples/case18_dependency_leak.md), [48](../reference/examples/case48_leaf_struct_through_pointer.md), [74](../reference/examples/case74_detail_base_class_changed.md), [75](../reference/examples/case75_detail_embedded_by_value.md), [76](../reference/examples/case76_detail_pimpl_vtable_changed.md), [77](../reference/examples/case77_detail_templated_base_changed.md), [80](../reference/examples/case80_pimpl_shared_to_unique.md), [97](../reference/examples/case97_api_depends_on_consumer_env.md), [104](../reference/examples/case104_glibcxx_dual_abi_flip.md), [112](../reference/examples/case112_lp64_ilp64.md) | 🔴 BREAKING | [Part 6](abi-series/06-transitive-breaks.md) |
 | Source-only / API-level (rename, access, explicit, default args, hidden friends) | [31](../reference/examples/case31_enum_rename.md), [34](../reference/examples/case34_access_level.md), [96](../reference/examples/case96_hidden_friend_removed.md), [106](../reference/examples/case106_ctor_became_explicit.md), [123](../reference/examples/case123_default_argument_removed.md), [124](../reference/examples/case124_header_constant_value_changed.md) | 🟠 API_BREAK | [Part 6 §Source-only API breaks](abi-series/06-transitive-breaks.md#source-only-api-breaks-binary-identical) |
@@ -308,139 +325,49 @@ is usually safe to ship without a version bump — *unless* some public,
 consumer-facing declaration depends on it, in which case the "internal"
 label is a fiction and the change is exactly as breaking as if it were
 public. Telling these two cases apart requires *reachability*: a graph walk
-from the public surface, not a flat list of what's public and what isn't.
+from the public surface, not a flat list of what's public and what isn't —
+including through the easy-to-miss case where a **public inline function's
+own body calls an "internal" helper**. For any consumer that actually calls
+or otherwise ODR-uses that inline function — a consumer that never does
+emits neither the body nor its reference to the helper, so it's simply
+unaffected — the inline function's own body is what's compiled directly
+into that consumer's binary; whether a change to the "internal" helper it
+calls is breaking for such a consumer depends on what the compiler did with
+that call: if the helper stays a real out-of-line symbol the consumer links
+against, a breaking change to it is exactly as breaking as if the helper
+were public itself. If the compiler fully inlined the helper too, an
+*already-built* consumer has no runtime dependency on it at all — it keeps
+running the code that was generated at its own build time, unaffected by
+anything the library does afterward; the risk there is a *source/behavioral*
+one on the consumer's next rebuild, not a binary dependency.
 
-That graph is **L5** — built by folding two kinds of edges on top of the L4
-source-fact surface (`--depth source`, or the standalone `abicheck scan`):
+That graph is **L5**, built from structural edges (a public type embedding,
+inheriting from, or holding a field/base of an internal one) and behavioral
+edges (one declaration's body calling or referencing another) — populated
+either from header-only evidence alone (built automatically for `--depth
+headers` and above, no `--sources`/`--build-info` needed, capturing
+in-header inline/template bodies) or from a build-integrated L4 source-fact
+surface when one is supplied, with the latter adding coverage the former
+can't reach (out-of-line bodies). The full mechanics — the edge kinds, how
+nodes and edges degrade gracefully when no build/graph evidence is
+available, the `reachability_state`/`public_reachable` fields a finding
+carries, and the ADR-044 dispatcher scenario worked end to end — are on
+their own page, not restated here:
 
-- **Structural edges** — `TYPE_HAS_FIELD_TYPE`, `TYPE_INHERITS`,
-  `DECL_HAS_TYPE` — a public type embeds, inherits from, or is a field/base
-  of an internal one. This is the same relationship `compute_leak_paths`
-  (the type-layout leak walk) already followed before L5 existed; the graph
-  just makes it explicit and queryable.
-- **Behavioral edges** — `DECL_CALLS_DECL` / `DECL_REFERENCES_DECL` — one
-  declaration's *body* calls or references another. This is the genuinely
-  new capability: it answers "does the compiled code a consumer links
-  against actually execute a call into this internal symbol?", a question no
-  amount of type-layout analysis can answer, because a call is not a type
-  relationship.
+➡️ **[Unified Impact Assessment](impact-analysis.md)** — what reachability
+means, the finding shape, and worked examples.
+➡️ **[Graph Coverage & Negative Evidence](graph-coverage.md)** — what an L5
+graph can and cannot prove, and why a missing edge under partial coverage is
+not proof of "unreachable."
+➡️ **[Suppressions § Reachability-aware suppression](../use/suppressions.md#reachability-aware-suppression)**
+— how a suppression rule that would hide a reachable public break is refused
+unless explicitly overridden.
 
-Nodes carry `visibility` (`public_header`/`private_header`/`source`/…) and,
-where the L4 surface can tell, `decl_kind` (ordinary declaration vs.
-`inline`/`template`) — the signal that decides whether a declaration's own
-body is compiled into *your* binary or only into the *library's*. Edges are
-built from a real build (`--sources`/`--build-info`, Clang AST calls/refs) or,
-with zero build integration, from a header-only Clang AST tree (built
-automatically for `--depth headers` and above, since G29 Phase A) that
-captures in-header inline/template bodies. Either
-way, evidence *degrades gracefully*: no graph, no compiler, no relevant
-edges — every feature described below simply sees nothing and stays silent,
-per the standing authority rule (L3–L5 evidence explains or corroborates an
-artifact-proven break; it never manufactures or deletes one).
-
-#### Why this distinction matters: the dispatcher scenario
-
-The scenario that motivated building this (ADR-044) is a shape real
-numerics/ML libraries hit constantly — a **public inline dispatcher**:
-
-```cpp
-// public header — compiled into every consumer's own translation unit
-namespace mylib {
-    inline Result compute(const Descriptor& d) {
-        return detail::compute_avx2(d);   // dispatches to an internal specialization
-    }
-}
-```
-
-`detail::compute_avx2` lives in the `detail` namespace — by convention,
-internal. A blanket suppression rule for `namespace: "mylib::detail::**"`
-looks obviously correct: nothing in `detail` is part of the documented API.
-But `compute()` is `inline`, so **its body — including the call to
-`compute_avx2`— is compiled directly into every consumer's binary**. If
-`compute_avx2`'s signature changes or it's removed, every consumer that
-already compiled against the old header now calls a symbol that no longer
-exists (or exists with an incompatible signature) — a real, consumer-visible
-break, hiding behind an internal-sounding name. Type-layout analysis alone
-cannot catch this: nothing about `compute_avx2`'s *type* changed from
-`compute()`'s point of view, because the dependency is a *call*, not a field
-or base class.
-
-This is exactly what the L5 call-graph walk is for. abicheck walks
-`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` from every entry whose own body is
-actually compiled into consumer code, and if that walk reaches the changed
-`detail::compute_avx2`, the change is tagged `public_reachable` with
-`reachability_kind: symbol_availability` and a proof path
-(`compute() --[DECL_CALLS_DECL]--> detail::compute_avx2()`) before
-suppression rules ever run. A broad `namespace: "mylib::detail::**"` rule is
-then refused for this specific change (a `suppression_would_hide_public_break`
-diagnostic explains why, naming the exact path) unless the rule author
-explicitly opts in with `allow_public_break: true` — turning a silent,
-accidental hole in the compatibility contract into a reviewable decision. See
-[Suppressions § Reachability-aware suppression](../use/suppressions.md#reachability-aware-suppression)
-for the full mechanics (the `reachability` rule setting, the diagnostic
-format) and [ADR-044](../contribute/adr/044-reachability-aware-suppression.md)
-for the design rationale.
-
-#### What it does *not* flag — staying quiet on the common case
-
-The flip side matters equally: **most functions in most libraries are
-ordinary, out-of-line, non-inline, non-template** — an ordinary ".cpp-defined"
-exported function whose body compiles into the *library's* binary only. If
-that function's out-of-line body calls an internal helper, and the helper is
-later removed, no consumer is affected: either the library's own build fails
-first (a vendor-side problem, caught by their own CI, invisible to anyone
-downstream), or the recompiled function simply stops making that call — a
-consumer only ever links against the function's own exported symbol and
-never sees, references, or embeds the helper it happens to call internally.
-abicheck's call-graph walk only seeds itself from entries whose *own body* is
-actually emitted into consumer code (inline functions/methods and templates)
-— an ordinary exported function is public, but is not one of these entries,
-so a private helper it calls is never reported as "reachable" through it. A
-project can suppress broad internal-namespace churn with confidence that the
-tool is not silently blocking the common case while chasing the rare one.
-
-A safe pimpl (pointer-to-implementation) class follows the same logic from
-the type-layout side: an internal `Impl` type reached only through a public
-class's *pointer* member (`std::unique_ptr<Impl>`) can freely change its
-internal layout, because consumers never see `Impl`'s size or fields — only
-the pointer, whose own size/alignment is stable. The call-graph and
-type-layout walks agree here: neither reaches into `Impl`'s internals unless
-something public actually embeds it by value or calls into it from an
-inline/template body.
-
-#### Other scenarios the L5 graph catches
-
-Beyond the headline dispatcher case, the same graph backs several narrower,
-intra-version and cross-version findings:
-
-- **`internal_symbol_required_by_public_api`** — the inverse framing of the
-  dispatcher scenario as its own finding: a public declaration's dependency
-  on a specific internal symbol, surfaced even when nothing changed yet, so
-  a reviewer can see the coupling before it becomes a break.
-- **`public_api_internal_dependency_added`** (`crosscheck.py`, intra-version)
-  — a single-build hygiene check: a public declaration or type newly depends
-  on an internal one, elevated when the internal side is among the files a
-  PR actually touched. No previous version is needed for this one — it is a
-  same-build "does your public surface quietly depend on something
-  unexported?" audit, useful even on a first release.
-- **`call_graph_public_entry_reachability_changed`** — the set of internal
-  declarations reachable from an exported entry point changed shape between
-  versions, independent of whether any individual declaration's own diff
-  triggered a break — a widening or narrowing of the effective public
-  surface as a fact worth surfacing on its own.
-- **`include_graph_public_header_drift`** / **`build_option_reaches_public_symbol`**
-  — the graph also folds in include-file and build-option edges, so a public
-  header quietly pulling in a different private header, or a build flag that
-  reaches all the way to a public symbol's ABI-relevant layout, shows up the
-  same way a call-graph leak does.
-
-All of these are `RISK_KINDS` or (for the intra-version hygiene checks)
-advisory findings — per the authority rule, L5 evidence never manufactures a
-`BREAKING` verdict on its own. What it changes is whether a break that *is*
-independently proven (an exported symbol actually removed, an exported
-type's layout actually changed) gets correctly attributed to the public
-surface instead of silently absorbed by an internal-looking suppression
-rule.
+The one governing rule worth carrying from all three: L5 evidence never
+manufactures a `BREAKING` verdict on its own (it's `RISK_KINDS` or advisory)
+— what it changes is whether a break that's *already* independently proven
+gets correctly attributed to the public surface instead of silently absorbed
+by an internal-looking suppression rule.
 
 ### Now run it — the practical flow, plugin, and CI guides
 

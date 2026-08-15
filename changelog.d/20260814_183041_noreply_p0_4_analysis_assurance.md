@@ -1,0 +1,288 @@
+### Added
+
+- **`compare` now reports `analysis_assurance`** — a new, always-present,
+  orthogonal answer to "how complete and trustworthy was the evidence behind
+  this comparison", independent of the compatibility verdict and the
+  policy/severity gate (P0.4, `abicheck/analysis_assurance.py`). Every
+  `--format json` report gains a top-level `analysis_assurance` object
+  (report schema 2.38 -- renumbered from 2.37 during the `origin/main`
+  rebase, since P0.2's `layer_coverage` root-target keys claimed 2.37 first)
+  with a `status` of `complete`/`partial`/`failed`/
+  `not_comparable`/`not_requested`, requested-vs-effective depth (reusing the
+  existing `binary`/`headers`/`build`/`source` vocabulary), translation-unit
+  and export accounting, header-parse-context and fact-set-comparability
+  status, and source-graph completeness — rolled up from evidence the
+  pipeline already computes. A new `--require-complete-analysis` flag on
+  `compare` (single-pair only) makes an incomplete status contribute exit
+  `1`, folded with the same `max` discipline `--contract-evaluation`'s
+  coverage axis already uses: it raises a clean `0` to `1` and never lowers a
+  `2`/`4`. Additive on two different axes, and it matters which: the report
+  *shape* change is unconditional — every `--format json` comparison gains
+  the new `analysis_assurance` object regardless of whether the flag is
+  passed, since schema 2.38 lists it as `required` (see the schema-required
+  fix below) — while the *exit-code* change is opt-in, gated entirely behind
+  `--require-complete-analysis`. An existing invocation's exit code is
+  unchanged unless the flag is passed; its report gains the new top-level
+  key either way, which is backward compatible for any consumer that
+  doesn't reject an unrecognized key. See `docs/reference/exit-codes.md`'s
+  new "Analysis-assurance contribution" section.
+
+### Fixed
+
+- **`analysis_assurance` now reflects an out-of-band `--old/new-build-info`/
+  `--old/new-sources` pack, not just each snapshot's own embedded evidence**
+  (P1 review). `compare` resolves such a pack separately from the snapshot
+  and uses it for the run's real findings/coverage without ever attaching it
+  back onto the snapshot; `analysis_assurance` previously never saw that
+  pack, so a genuinely partial or failed out-of-band pack could still read
+  `status="complete"` and let `--require-complete-analysis` exit `0` despite
+  the real evidence being incomplete. `analysis_assurance` is now recomputed
+  once the real pack is resolved, closing the gap `--require-complete-analysis`
+  exists to guard against.
+- **`graph_completeness` now accounts for a narrowed-scope source-graph
+  pass, absent pass-coverage bookkeeping, and old/new graph asymmetry**
+  (P1 review), instead of only checking `degraded_passes` and defaulting to
+  `"complete"` for every other state. Two new values, `"narrowed"` and
+  `"unknown"`, join the existing `"complete"`/`"degraded"`/`"not_collected"`.
+- **`compare_report.schema.json`'s `analysis_assurance` key is now
+  `required`** (schema 2.37, unchanged) alongside the report's other
+  unconditional fields, matching how it is actually always emitted (P2
+  review) — a 2.37 report missing the key now fails schema validation
+  instead of silently passing.
+- **`analysis_assurance` now reads a `BuildSourcePack`'s own manifest, not
+  just its model objects, and treats a present-but-empty L4 surface as
+  incomplete** (P1 review). `inline._run_inline_source_abi()` returns a bare
+  `SourceAbiSurface()` — present, but with no TU accounting at all — when
+  its extractor (clang/castxml) is unavailable, and the pack's manifest
+  correctly records that L4 layer as `partial`; the rollup previously never
+  consulted the manifest at all, so both sides read as fact-set
+  `comparable`, `translation_units.failed` stayed `None`, and `status`
+  silently fell through to `"complete"` — letting `--require-complete-analysis`
+  exit `0` after L4 extraction failed entirely on both sides. Two new
+  signals close this: a manifest-level check for a `partial`/`failed` L3/L4
+  layer or extractor row, and a TU-accounting check that flags an L4 surface
+  present with no `compile_units_selected`/`compile_units_parsed` keys at
+  all (as opposed to a real, populated `0`).
+- **The `--used-by`/`--required-symbol` scoped-exit path now folds the
+  orthogonal contract-coverage and analysis-assurance floors into
+  `result.scoped_exit_code` *before* rendering any report** (P2 review),
+  instead of only right before the terminal `sys.exit`. Previously a
+  SARIF/JUnit/JSON artifact could show a passing `gateExitCode`/
+  `scoped_exit_code` of `0` while the CLI process actually exited `1` under
+  `--require-complete-analysis`, because both the primary and secondary
+  reports were rendered from the pre-floor value. This path now also emits
+  `assurance_floor_diagnostic()`'s stderr explanation, which it previously
+  skipped entirely.
+- **New `dwarf_context_status` field detects one-sided DWARF evidence**
+  (P1 review). `confidence._detect_evidence_tiers()` combines both sides'
+  DWARF availability with OR semantics when promoting the aggregate
+  `evidence_tier` to `DWARF_AWARE`, so a comparison where only one side
+  actually carries usable DWARF/DWARF-advanced debug info still read as
+  DWARF-aware overall — with no per-side check anywhere in the rollup, that
+  silently made `nothing_requested` false without recording the asymmetry,
+  and the run fell through to `status="complete"` even though the real
+  DWARF-based struct/enum layout detectors (`diff_platform.py`,
+  `dwarf_advanced.diff_advanced_dwarf`) explicitly skip their own
+  comparison whenever either side lacks DWARF. `analysis_assurance` now
+  checks each side's own `dwarf.has_dwarf`/`dwarf_advanced.has_dwarf`
+  directly and reports `dwarf_context_status="asymmetric"` (folded into
+  `status="partial"`) when they disagree, mirroring
+  `header_context_status`'s existing asymmetry check.
+- **`export_accounting.unaccounted > 0` on either side now folds into
+  `status="partial"`** (P1 review), instead of only ever affecting the
+  `export_accounting` block's own numbers. An L4 manifest row stays
+  `PRESENT` even when some exported symbols couldn't be matched to a
+  source declaration (it is only downgraded when *no* exports match at
+  all), so a run with real, if partial, symbol matching previously fell
+  through to `status="complete"` under `--require-complete-analysis` even
+  though source-level analysis could not account for every exported entry
+  point.
+- **`graph_completeness`'s L5-extractor-status check no longer degrades a
+  confirmed, fully-executed, genuinely edge-free source-graph pass**
+  (P2 review — a regression in this session's own prior fix, above). A real
+  producer (`buildsource/inline_graph_fold.py`'s `fold_call_graph`/
+  `fold_type_graph`/... family) stamps its own `ExtractorRecord.status` as
+  `"ok" if added else "partial"` — keyed on whether the pass added any
+  edges, not on whether it examined everything requested — while
+  *unconditionally* also stamping `SourceGraphSummary.extractor_passes`
+  (confirmed full coverage) or `narrowed_passes` (confirmed narrowed
+  coverage) on success regardless of edge count. Folding every non-`"ok"`
+  record into `degraded` therefore overrode that stronger, independent
+  confirmed-coverage signal and could fail a simple project with no calls/
+  overrides/templates/etc. to discover under `--require-complete-analysis`,
+  despite every requested TU having been examined successfully. Fixed by
+  exempting a record whose own extractor family is separately confirmed
+  complete or confirmed narrowed on the same side; a record with neither
+  confirmation (a genuine shortfall — crash, missing tool, timeout) still
+  folds into `degraded`, unchanged.
+- **`fact_set_comparability` now actually compares the two sides' `fact_set`
+  identities against each other** (P1 review), instead of only checking
+  each side's own `fact_set_inconsistent` flag independently. Two
+  internally-consistent L4 surfaces carrying mutually *different* fact-set
+  identities (a producer/version mismatch between old and new) previously
+  read as `"comparable"`, letting `status="complete"` and
+  `--require-complete-analysis` exit `0`, even though
+  `buildsource.source_diff.diff_source_abi()`'s own
+  `SOURCE_FACT_COVERAGE_INCOMPLETE` check already identifies the identical
+  mismatch and suppresses source comparisons that rest on it. Fixed by
+  calling the same `buildsource.fact_set.check_fact_compatibility()` both
+  sides' rolled-up `fact_set` dicts, rather than a second, independent
+  comparison: a hard name/version mismatch now reads `"inconsistent"`
+  (folding into `status="failed"`, same as the pre-existing per-side
+  inconsistency case), and a softer producer/producer_version/
+  compiler_version/compiler_family mismatch now reads `"unknown"` (folding
+  into `status="partial"`). A symmetric, genuinely empty fact-set on both
+  sides (a pre-C.8 producer) still reads `"comparable"`, preserving the
+  same forward-compat treatment `check_fact_compatibility` already
+  documents for that shape.
+- **`target_accounting` now rolls up P0.2's Bazel root-target scoping**
+  (P1 review) instead of staying a permanent, always-empty placeholder.
+  `BuildEvidence.target_scope` (P0.2) has since landed and records
+  requested/resolved/transitive root targets per side, including partial
+  resolution — but this block was left empty pending it, hiding a case
+  like two requested Bazel roots with only one actually resolved (a
+  typo'd target label, say) with no predicate downgrading the overall
+  status for it. `target_accounting.requested`/`.resolved` now roll up
+  both sides' `TargetScope` (union of labels, summed transitive count),
+  staying `None` only when neither side requested root-target scoping at
+  all; a requested root absent from `resolved` on either side now folds
+  into `status="partial"`.
+- **New `l3_context_status` field detects one-sided L3 build evidence**
+  (P1 review) — the same asymmetry pattern already closed for L1
+  (`dwarf_context_status`) and L2 (`header_context_status`), now closed for
+  L3. When the baseline carries L3 `BuildEvidence` but the target has none,
+  `cli_buildsource_helpers.prepare_embedded_build_source()` already emits a
+  prose-only `layer_coverage_asymmetric` finding explaining that build-only
+  changes were not checked for the missing side, but nothing in this
+  rollup's own predicates examined L3 presence by side — an otherwise
+  clean comparison fell through to `status="complete"` regardless, even
+  while the report itself carried that incomplete-coverage finding.
+  `l3_context_status="asymmetric"` now folds into `status="partial"`,
+  mirroring `_header_context_status`'s/`_dwarf_context_status`'s
+  presence-then-asymmetry shape exactly.
+- **New `l0_context_status` field detects one-sided binary/export-table
+  evidence** (self-audit, following the L1/L2/L3 asymmetry fixes above —
+  the identical pattern applies one layer lower). A comparison where only
+  one side carries a real binary export table (the other a synthetic or
+  snapshot-only input — `cli_scan_helpers._intrinsic_coverage`'s own
+  documented "no binary export table (snapshot-only input)" state) means
+  every L0-derived signal (exported-symbol presence/removal, SONAME,
+  binding/visibility) was never even examined for the binary-lacking side.
+  `l0_context_status="asymmetric"` now folds into `status="partial"`, same
+  shape as the L1/L2/L3 checks. L5 (source-graph) presence asymmetry was
+  already caught by the existing `graph_completeness="unknown"` check, so
+  it needed no new field.
+- **`export_accounting` now rolls up BOTH sides, not just whichever side a
+  "new, falling back to old" selection happened to prefer** (P1 review,
+  round 7). When both sides carried an L4 surface but only the old side had
+  unmatched exports, the previous "new-first" loop returned the new side's
+  clean accounting and never examined the old side, so `status` could read
+  `"complete"` under `--require-complete-analysis` despite genuinely
+  incomplete baseline linking. `_export_accounting` now sums
+  total/source-linked/internal/unaccounted additively across both sides,
+  mirroring `_translation_units`'s own both-sides summation — a nonzero
+  `unaccounted` on either side is now always visible in the combined
+  `export_accounting`.
+- **`dwarf_context_status` now compares the basic `dwarf` and
+  `dwarf_advanced` evidence channels independently** (P1 review, round 7),
+  instead of OR-combining them into one per-side presence boolean before
+  comparing sides. An old snapshot with only basic `dwarf` and a new
+  snapshot with only `dwarf_advanced` previously both read as "this side
+  has SOME dwarf evidence", so the combined per-side booleans compared
+  equal and the status read `"clean"` — even though
+  `diff_platform.py`'s struct/enum layout diff (basic `dwarf` only) and
+  `dwarf_advanced.diff_advanced_dwarf` (advanced only) each independently
+  skip their own comparison whenever either side lacks their specific
+  channel, so both detector families silently skipped, on opposite sides.
+  `_dwarf_context_status` now checks `dwarf.has_dwarf` and
+  `dwarf_advanced.has_dwarf` as two independent per-channel asymmetry
+  checks, naming which channel(s) are asymmetric in the resulting note.
+- **`_manifest_layer_incompleteness` now recognizes ANY extractor record
+  with `status="failed"`, not just ones whose name starts with
+  `source_abi`/`compile_`/`source_graph`** (P1 review, round 7). Inline
+  collection's `_check_build_info_source_mismatch` records
+  `ExtractorRecord(name="build_info_source_tree_mismatch",
+  status="failed", ...)` when most of a compile database's own source
+  files are absent from the `--sources` tree — i.e. the build metadata and
+  the checked-out sources may not even be the same codebase — but that
+  name matched none of the old prefixes, so the record was silently
+  invisible to this rollup and `status` could read `"complete"` even
+  though the source facts may come from a different checkout. Fixed per
+  the root-cause principle: a `"failed"` record always invalidates the
+  layer it names regardless of which extractor family produced it, so the
+  prefix allowlist is dropped entirely for `"failed"` (this also closes
+  the identical gap for `build_query`/`build_query_auto`/`bazel` query
+  failures and `merge_layer_conflict` layer conflicts, none of which
+  matched the old prefixes either). `"partial"` deliberately keeps the
+  original, narrower prefix scope — a confirmed-complete, genuinely
+  edge-free L5 graph pass legitimately records its own `status="partial"`
+  (see `_graph_completeness`'s `confirmed` exemption), and only that
+  function has the context to tell the two apart.
+- **`graph_completeness` now rejects asymmetric source-graph pass coverage**
+  (P1 review, round 8). Both sides could independently be "confirmed
+  complete" on a nonempty `extractor_passes` mapping while covering entirely
+  DIFFERENT pass families — an old header-only graph confirmed on
+  `header_call_graph`/`header_type_graph` against a new build-integrated
+  graph confirmed on `call_graph`/`type_graph` — and this check read
+  `"complete"` regardless, since it only ever checked per-side confirmation
+  in isolation. The actual cross-snapshot graph diff
+  (`post_processing_reachability._call_graph_fully_trusted` and its
+  `source_diff` siblings) only ever compares edges within one shared family
+  name, so a run with no overlapping confirmed family lets
+  `--require-complete-analysis` exit `0` despite every edge on both sides
+  going uncompared. Fixed by comparing the two sides' own confirmed-family
+  sets (from the same `extractor_passes`/`narrowed_passes` dicts already
+  read); a total mismatch now reads `graph_completeness="unknown"`, folding
+  into `status="partial"` the same way the other coverage gaps already do.
+- **`compare`'s own `--depth` flag now actually reaches
+  `analysis_assurance.requested_depth`** (P1 review, round 9). Nothing
+  populated `DiffResult.requested_depth` before this fix, so an explicit
+  `compare --depth source` that never actually reached source evidence
+  (both sides lacking a compile database, say — the effective depth stays
+  `headers`) silently read `requested_depth=None`/`depth_satisfied=None`
+  and could still report `status="complete"`, letting
+  `--require-complete-analysis` exit `0` despite the explicitly requested
+  depth never being reached. `cli_compare_helpers._report_compare_result`
+  now copies its own Click-validated `--depth` string onto
+  `DiffResult.requested_depth` before recomputing `analysis_assurance` —
+  only ever from an *explicit* flag, never an inferred depth from bare
+  `--sources`/`--build-info` or `.abicheck.yml`'s `source.method`.
+- **`service.run_compare_request()` — the typed Python API / MCP
+  `abi_compare` entry point — now also propagates an explicit
+  `CompareRequest.depth` onto `requested_depth`/`depth_satisfied`** (P2
+  review, PR #767 follow-up, `discussion_r3787839902`). The round-9 fix
+  above was CLI-only: `cli_compare_helpers._report_compare_result` stamps
+  `DiffResult.requested_depth` from `compare`'s own Click-validated
+  `--depth`, but a direct typed-API caller passing
+  `CompareRequest(..., depth="headers")` never routes through that CLI
+  helper, so the identical successfully-reached, explicit depth request
+  still silently read `requested_depth=None`/`depth_satisfied=None` and
+  could report `status="complete"`. Fixed in the shared
+  `service_compare_pipeline.classify_compare_pair` (the classification half
+  both `run_compare_request` and the native `compare` CLI's
+  `resolve_and_apply` path build on) with the identical `if depth is not
+  None` guard, then recomputing `analysis_assurance` from each snapshot's
+  own embedded `build_source` (this path has no out-of-band
+  `--old/new-build-info`/`--old/new-sources` pack directory to fold in, so
+  it mirrors `checker.compare()`'s own recomputation rather than the CLI
+  helper's `_resolve_side_pack`). The CLI's own stamp in
+  `_report_compare_result` is deliberately kept, not removed — it still
+  needs to recompute after resolving its own out-of-band pack, which
+  `classify_compare_pair` has no visibility into.
+- **`graph_completeness`'s asymmetric-confirmed-family check now rejects a
+  PARTIALLY overlapping family-set pair, not only a fully disjoint one**
+  (P1 review, round 9 — fresh evidence after round 8's disjoint-family
+  fix). Old confirming `{call_graph, type_graph}` against new confirming
+  only `{call_graph}` is not disjoint (they share `call_graph`), so the
+  round-8 `isdisjoint()` check left `graph_completeness="complete"` even
+  though `buildsource/source_graph_findings.py` only trusts a family when
+  BOTH sides cover it — `type_graph`, confirmed on old and never even
+  attempted on new, was silently skipped for this comparison the same way
+  a fully disjoint pair already was, just for one family instead of all of
+  them. Fixed by comparing the two sides' confirmed-family sets for *any*
+  inequality (`!=`) rather than only total disjunction — a subset,
+  superset, or partial-overlap pair are all "the two sides disagree on
+  what they confirmed" just as much as a fully disjoint pair, and the
+  resulting note now names which family/families are confirmed on only
+  one side.
+

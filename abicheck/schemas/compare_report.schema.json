@@ -42,7 +42,8 @@
           "detectors",
           "confidence",
           "evidence_tier",
-          "evidence_tiers"
+          "evidence_tiers",
+          "analysis_assurance"
         ]
       }
     },
@@ -1070,6 +1071,71 @@
         1
       ],
       "description": "ADR-049 (schema 2.26): what `contract_coverage_failures` contributes to the exit code \u2014 1 when non-empty, 0 otherwise, and 0 when `contract.unresolved=warn` accepted the failures. **Applied** since ADR-049 Phase 7: the process exit status is floored to this value (folded with max, so it never lowers a 2/4 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses. Present only alongside `contract_coverage_failures`."
+    },
+    "analysis_assurance": {
+      "type": "object",
+      "description": "P0.4 (schema 2.38): the analysis-assurance axis, orthogonal to verdict \u2014 how complete/trustworthy the evidence behind this comparison was. Unconditionally present on every compare-report JSON (checker.compare() always populates DiffResult.analysis_assurance). See analysis_assurance.py.",
+      "required": [
+        "schema_version",
+        "status"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "failed",
+            "not_comparable",
+            "not_requested"
+          ]
+        },
+        "requested_depth": {
+          "type": ["string", "null"]
+        },
+        "effective_depth": {
+          "type": ["string", "null"]
+        },
+        "depth_satisfied": {
+          "type": ["boolean", "null"]
+        },
+        "target_accounting": {
+          "type": "object"
+        },
+        "translation_units": {
+          "type": "object"
+        },
+        "export_accounting": {
+          "type": "object"
+        },
+        "l0_context_status": {
+          "type": "string"
+        },
+        "header_context_status": {
+          "type": "string"
+        },
+        "dwarf_context_status": {
+          "type": "string"
+        },
+        "l3_context_status": {
+          "type": "string"
+        },
+        "fact_set_comparability": {
+          "type": "string"
+        },
+        "graph_completeness": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "$defs": {

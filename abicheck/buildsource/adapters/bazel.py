@@ -170,7 +170,7 @@ class BazelAdapter:
                 f"bazel: {kind} input not found or unreadable: {self.redaction.path(str(value))}"
             )
             return None
-        if self.workspace is not None and self.target is not None and self.allow_query:
+        if self.workspace is not None and self.targets and self.allow_query:
             return self._run_bazel(kind, ev)
         return None
 

@@ -5,6 +5,8 @@ audience:
 level: intermediate
 canonical_for:
   - platform-support-matrix
+summarizes:
+  - static-and-header-only
 lifecycle: active
 generated: false
 ---
@@ -27,15 +29,26 @@ limitations you should understand before relying on it in production.
 |----------|--------------|:---------------:|:--------------------:|:----------------------:|
 | Linux | ELF (`.so`) | Yes (pyelftools) | Yes (GCC, Clang) | Yes (DWARF) |
 | Windows | PE/COFF (`.dll`) | Yes (pefile) | Yes (MSVC, MinGW) | Yes (PDB) |
-| macOS | Mach-O (`.dylib`) | Yes (macholib) | Yes (Clang, GCC) | Yes (DWARF) |
+| macOS | Mach-O (`.dylib`) | Yes (macholib) | Yes (Clang, GCC) | **No** |
 
 **Header AST analysis** (via castxml) is available on all platforms. castxml is
 maintained by Kitware and available via conda-forge, Homebrew, apt, or direct download.
 
-**Debug info cross-check** uses DWARF (Linux and macOS) and PDB (Windows). PDB
+**Debug info cross-check** uses DWARF (Linux only) and PDB (Windows). PDB
 support extracts struct/class/union layouts, enum types, calling conventions, and
 toolchain info from PDB files produced by MSVC (`/Zi` flag). Use `--pdb-path` to
-specify the PDB file location if automatic discovery fails.
+specify the PDB file location if automatic discovery fails. **Mach-O has no
+debug-info cross-check**: `abicheck` has no Mach-O debug-map/DWARF reader
+today, so a headerless macOS `.dylib`'s own binary/debug-info evidence is
+always L0 (exports + load-command metadata) only, even when the binary
+carries debug info — this is about the L0/L1 binary-evidence layers
+specifically, not the whole scan. `-H` (via either header-AST frontend,
+castxml or `--ast-frontend clang`) is the way to get past exports-only
+binary evidence on this platform; `--sources`/`--build-info` can still
+attach L3–L5 build/source evidence independently of the platform. See
+[Architecture](architecture.md) and the
+[platform evidence table](../reference/platforms.md#what-no-headers-actually-means)
+for the full picture.
 
 **"Yes" above means implemented capability, not per-toolchain CI-proven
 maturity.** Windows in particular has more than one toolchain path with very
@@ -184,14 +197,15 @@ Use `abicheck compare --format json` for precise machine-readable `API_BREAK` ve
 Functions defined entirely in headers (inline, `constexpr`, template) may not appear
 in the `.so` symbol table. By **default** (binary + headers only, no `--sources`),
 abicheck analyzes the public exported ABI — header-only changes that don't affect
-exported symbols will not be detected.
+exported symbols will not be detected. **L4 source ABI replay** (`--sources`,
+ADR-030) substantially closes this gap; see [Source & Build
+Data](build-source-data.md#source-abi-replay-findings-l4) for the full list of
+L4-only change kinds, and the next section for the residual that even L4 cannot see.
 
-With **L4 source ABI replay** (`--sources`, ADR-030), this gap is
-substantially closed: inline/template **body** changes, macro constants, default
-arguments, and `constexpr` values are recovered even though they never become a
-symbol. See [Source & Build Data](build-source-data.md#source-abi-replay-findings-l4)
-for the full list of L4-only change kinds, and the next section for the residual
-that even L4 cannot see.
+For the full compatibility model of a header-only (or static) library — what
+still needs checking once there's no separate compiled artifact, and why
+source-level evidence is the only way to check it at all — see [Static &
+Header-Only Contracts](static-and-header-only.md).
 
 ---
 
@@ -291,18 +305,11 @@ if you can only obtain debug info as separate files.)
 ## Static / import library archives (`.a`, `.lib`)
 
 `abicheck` analyses **single linkable images** — shared libraries (`.so`,
-`.dll`, `.dylib`) and individual object files. It does **not** analyse static
-or import library archives (`.a` on Unix, `.lib` on Windows). This is a
-deliberate non-goal (see [Project Goals → Non-goals](../contribute/goals.md#non-goals)),
-for two reasons:
-
-- A static library has **no runtime ABI surface**: no `SONAME`, no dynamic
-  symbol table, no symbol versioning — the very signals abicheck's verdict
-  semantics are built on. Only object-level symbol/type information would
-  apply, and a link-time API check over the union of members is a different
-  tool with different semantics.
-- Archives are **member containers** (`ar` format, magic `!<arch>\n`), not a
-  single image; both `.a` and MSVC `.lib` share this format.
+`.dll`, `.dylib`) and individual object files — not static/import library
+archives (`.a` on Unix, `.lib` on Windows, both `ar`-format member
+containers). This is a deliberate non-goal: a static archive has no runtime
+ABI surface for abicheck's verdict semantics to be built on. See [Project
+Goals → Non-goals](../contribute/goals.md#non-goals) for the full reasoning.
 
 Handing a `.a`/`.lib` to `dump` or `compare` produces a **clear, actionable
 error** rather than a misleading "unknown format" message or a traceback:
@@ -314,14 +321,11 @@ objects). Extract the members (e.g. `ar x lib.a`) and compare the resulting
 object files or the shared library built from them instead.
 ```
 
-**Mitigation:** extract the archive members and compare the resulting object
-files, or compare the shared library built from the same sources:
-
-```bash
-ar x libfoo-old.a && ar x libfoo-new.a   # then compare the .o members
-# or, preferred:
-abicheck compare libfoo-old.so libfoo-new.so -H include/foo.h
-```
+For the full compatibility model of a static (or header-only) library —
+what's still worth checking without a dynamic ABI boundary, and the
+recommended practical workaround (building a purpose-built shared object
+from the same sources so abicheck has a real artifact to compare) — see
+[Static & Header-Only Contracts](static-and-header-only.md).
 
 ---
 
@@ -376,84 +380,17 @@ covering common false positives, false negatives, and unexpected verdicts.
 
 ## ELF-Only Mode and Symbol Filtering
 
-When `abicheck compare` (or `abicheck dump`) is run **without header files** — i.e.
-directly against `.so` binaries — the tool operates in *ELF-only mode*.  In this
-mode the public ABI surface is inferred entirely from exported ELF symbols (`.dynsym`),
-with no source-level type information available.
+Run without header files — i.e. directly against `.so` binaries — abicheck
+infers the public ABI surface from exported ELF symbols (`.dynsym`), falling
+back to a strictly symbols-only view only when the binary also carries no
+usable DWARF. Shared libraries often export symbols that aren't part of their
+intended public ABI (statically-linked compiler runtime internals, transitive
+C++ stdlib symbols, private-namespace C separators), so abicheck applies a
+heuristic ABI-relevance filter to `.dynsym` — without it, comparing two builds
+that differ in compiler/stdlib provenance can trigger hundreds of spurious
+BREAKING findings. That filter runs **whether or not headers are supplied**:
+`-H` improves type evidence and surface scoping, but does not bypass it.
 
-### Why false positives can occur in ELF-only mode
-
-Shared libraries often contain exported symbols that are **not** part of their intended
-public ABI:
-
-| Symbol category | Example | Root cause |
-|---|---|---|
-| GCC / compiler internals | `ix86_tune_indices`, `_ZGVbN2v_sin` | Statically-linked compiler runtime (libgcc, SVML) leaks symbols into `.dynsym` |
-| Transitive C++ stdlib symbols | `_ZNSt6thread8_M_startEv`, `_ZTISt9exception` | Weak-linked libstdc++ / libc++ symbols that appear in `.dynsym` |
-| Private C namespace separators | `H5C__flush_marked_entries`, `MPI__send` | Internal `LibPrefix__FunctionName` naming convention — globally visible but not public API |
-
-Comparing two versions of a library that differ in which compiler or stdlib they were
-built against can trigger hundreds of spurious *BREAKING* findings (e.g. `mpfr 4.2.0→4.2.1`
-reported 91 false-positive breaks caused by `ix86_*` symbols).
-
-### How abicheck filters these symbols
-
-`abicheck` applies an ABI-relevance filter (`_is_abi_relevant_symbol`) when parsing
-`.dynsym` in ELF-only mode.  Symbols are excluded when they match any of the following:
-
-**GCC / compiler-internal prefixes** (`ix86_`, `x86_64_`, `__cpu_model`, `__cpu_features`,
-`_ZGV*`, `__svml_*`, `__libm_sse2_*`, `__libm_avx_*`)
-
-**C++ standard-library prefixes** (`_ZNSt`, `_ZNKSt`, `_ZNSt3__1`, `_ZdlPv`, `_ZnwSt`,
-`_ZnaSt`, `_ZdaPv`, `_ZTVN10__cxxabiv`, `_ZTI`, `_ZTS`, `_ZSt`)
-
-**Private C double-underscore separator** — any non-C++-mangled symbol (i.e. not
-starting with `_Z`) whose name contains `__` after the first two characters.
-This matches patterns like `H5C__flush` or `MPI__send` while leaving system symbols
-(which start with `__` or `_[A-Z]`) unaffected.
-
-### Limitations of the filter
-
-- The filter is heuristic.  A library that intentionally exports a symbol matching
-  one of the filtered prefixes (unlikely but possible) will have it silently ignored.
-- Non-standard SIMD / math libraries with different naming conventions are not covered;
-  open an issue if you encounter new patterns causing false positives.
-- In **header mode** (when headers are supplied), this filter is not applied — castxml
-  provides accurate type information and the ELF surface is used only for visibility
-  decisions, not for inferring the API surface.
-
-### Mitigation for header mode
-
-For the most accurate results, always supply public headers:
-
-```bash
-abicheck compare old.so new.so -H include/foo.h
-```
-
-This eliminates ELF-only mode entirely and removes the need for heuristic filtering.
-
-### Header scoping on PE and Mach-O
-
-Headers supplied via `-H/--header` (and the per-side `--header old=`/`--header new=`)
-are now honored for PE (Windows DLL) and Mach-O (macOS dylib) inputs, not just ELF.
-When headers are provided, the export-table surface is scoped to the symbols declared
-in those public headers via castxml. This is **best-effort**:
-
-- If castxml is unavailable, or the headers fail to parse, abicheck emits a warning and
-  falls back to the full export table (the previous behavior).
-- For C++ binaries built with **MSVC**, export names use MSVC mangling while castxml
-  emits Itanium-mangled names, so declarations may not match the export table. When no
-  declaration matches, abicheck warns and falls back to the export table. `extern "C"`
-  and MinGW-built exports match by plain name and scope correctly.
-
-Reachability-based public-surface filtering (keeping only the symbols and types reachable
-from the public API, with an auditable trail of what was filtered and why) is **on by
-default** (`--scope-public-headers`, add `--show-filtered` to print the audit ledger;
-opt out with `--no-scope-public-headers`). Findings about symbols/types not reachable from
-the public-header-declared exported API are recorded as *filtered* rather than reported, while
-internal-type *leaks* are never hidden. Source-header provenance (distinguishing a
-privately-included header from a public one independently of reachability) is implemented
-across castxml, DWARF, and PDB (ADR-024 Phase 1); the one residual gap is MSVC C++ name
-mangling on PE, where castxml can't match a mangled export and the surface falls back to
-the export table with a `mangling-fallback` confidence note. See
-[ADR-024](../contribute/adr/024-public-abi-surface-resolution.md).
+For the exact filtered prefixes, the filter's known limitations, and how
+header scoping works on PE/Mach-O, see [ELF-Only Mode and Symbol
+Filtering](elf-symbol-filtering.md).

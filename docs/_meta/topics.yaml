@@ -135,6 +135,19 @@ topics:
     allowed_summaries:
       - learn/architecture.md
 
+  # Split out of Limitations & Known Boundaries (docs/AGENTS.md criterion 5:
+  # the page had grown to answer more than one primary question). The ELF-only
+  # symbol filter is a genuinely separate, self-contained mechanism (heuristic
+  # prefix filtering of `.dynsym`) distinct from the rest of the page's
+  # practical boundary list.
+  elf-symbol-filtering:
+    canonical_page: learn/elf-symbol-filtering.md
+    fact_sources:
+      - abicheck/elf_symbol_filter.py
+      - abicheck/dumper_elf_symbols.py
+    allowed_summaries:
+      - learn/limitations.md
+
   source-evidence-producers:
     canonical_page: use/producing-source-facts.md
     fact_sources:
@@ -257,6 +270,21 @@ topics:
       - learn/verdicts.md
       - reference/exit-codes.md
 
+  # A third, orthogonal axis alongside `verdicts` (compatibility verdict) and
+  # `contract-relevance-and-coverage` (the ADR-049 coverage gate): "how
+  # complete and trustworthy was the evidence behind this comparison",
+  # independent of what the verdict itself says. Always computed and
+  # reported; `--require-complete-analysis` is the opt-in exit-code gate
+  # (P0.4).
+  analysis-assurance:
+    canonical_page: reference/exit-codes.md
+    fact_sources:
+      - abicheck/analysis_assurance.py
+      - abicheck/schemas/compare_report.schema.json
+    reference_page: use/output-formats.md
+    allowed_summaries:
+      - learn/verdicts.md
+
   # A CI matrix's per-target compare/scan JSON reports, folded into one
   # gate. Distinct from `verdicts`/`compatibility-evaluation-config` (which
   # own a single comparison's own result) -- this topic is about
@@ -351,3 +379,71 @@ topics:
       - use/github-action.md
       - use/dump-compare-flags.md
       - use/tool-modes.md
+
+  # Compatibility dimensions beyond source/binary ABI that a static checker
+  # cannot decide directly -- named explicitly in Compatibility as a Product
+  # Contract §2 so a reader can tell which question they're actually asking.
+  # Each gets its own page rather than a subsection of an already-large page
+  # (topics.yaml's own "new fact needs a new page" criterion 4).
+  behavioral-compatibility:
+    canonical_page: learn/behavioral-compatibility.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+
+  data-wire-compatibility:
+    canonical_page: learn/data-wire-compatibility.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+
+  ownership-and-lifetime:
+    canonical_page: learn/ownership-and-lifetime.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-series/07-designing-for-stability.md
+      - learn/abi-api-handling.md
+
+  compatibility-direction:
+    canonical_page: learn/compatibility-direction.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - use/plugin-systems.md
+      - learn/abi-api-handling.md
+
+  static-and-header-only:
+    canonical_page: learn/static-and-header-only.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - learn/limitations.md
+
+  concurrency-and-initialization:
+    canonical_page: learn/concurrency-and-initialization.md
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+
+  # Split out of Part 4 — C++ ABI Specifics (docs/AGENTS.md criterion 5: the
+  # page had grown to answer more than one primary question). Part 4 keeps
+  # the core, first-read-through mechanisms and links out to these for the
+  # deep-dive material.
+  exception-unwinding-abi:
+    canonical_page: learn/exception-unwinding-abi.md
+    fact_sources:
+      - abicheck/diff_platform.py
+      - abicheck/buildsource/build_diff.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/modern-cpp-toolchain-hazards.md
+
+  modern-cpp-toolchain-hazards:
+    canonical_page: learn/modern-cpp-toolchain-hazards.md
+    fact_sources:
+      - scripts/evidence_tiers.py
+      - abicheck/build_context.py
+      - abicheck/dwarf_advanced.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/abi-api-handling.md
+      - learn/exception-unwinding-abi.md

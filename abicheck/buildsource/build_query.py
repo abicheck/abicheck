@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import deadline
-from .build_evidence import BuildEvidence
+from .build_evidence import BuildEvidence, TargetScope
 from .model import ExtractorRecord
 
 #: Out-of-source build dir name. abicheck no longer writes a configure tree into
@@ -737,6 +737,18 @@ def _merge_query_result(
         merged.diagnostics.append(
             f"build_query_auto: {system} exited {proc.returncode}"
         )
+        if system == "bazel" and bazel_targets:
+            # A typo'd/nonexistent root target (e.g. `--build-target //:typo`)
+            # makes the aquery itself exit nonzero, well before
+            # `_ingest_query_output` -- the only path that otherwise stamps
+            # `target_scope` -- ever runs. Record the requested labels with an
+            # empty `resolved` set here too, so the L3_build coverage report
+            # still shows "requested: [//:typo], resolved: []" instead of
+            # omitting `requested_roots` entirely, which is exactly the
+            # typo-detection/audit signal this accounting exists to surface.
+            merged.target_scope = TargetScope(
+                requested=list(bazel_targets), resolved=[], transitive_count=None
+            )
         return None
     # Ingestion parses tool output (the cmake compile DB, bazel aquery JSON) —
     # keep it inside the never-raises contract so a malformed payload or a
