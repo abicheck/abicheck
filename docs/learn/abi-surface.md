@@ -101,7 +101,8 @@ Two abicheck features map directly onto this page:
   ([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)–[120](../reference/examples/case120_internal_struct_reordered_scoped.md)),
   public changes stay. Without headers, every exported symbol is treated as
   contract — the safe over-approximation.
-- **Audit mode** (`abicheck scan --audit`) — a single-build hygiene lint for a
+- **Audit mode** (`abicheck scan` with no `--against` — there is no separate
+  `--audit` flag) — a single-build hygiene lint for a
   *leaking* boundary: accidental exports
   ([case143](../reference/examples/case143_audit_accidental_export.md)), private-header
   leaks ([case144](../reference/examples/case144_audit_private_header_leak.md)),

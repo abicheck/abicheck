@@ -247,7 +247,7 @@ table for why).
 
 **Exception: `ast-frontend` also gets a per-cell override**, on the same
 precedence rule (G34 Phase B). A profile's `compile.frontend:`
-([`project-targets-schema.md`](project-targets-schema.md#compilefrontend--consumer_compilefrontend--per-profile-ast-frontend-g34-phase-b))
+([`project-targets-schema.md`](project-targets-schema.md#compilefrontend-consumer_compilefrontend-per-profile-ast-frontend-g34-phase-b))
 reaches its cells as `compile_ast_frontend` and replaces this workflow's own
 `ast-frontend` input there — so a GCC profile's cell can parse headers with
 castxml while a Clang/DPC++ profile's cell in the same run uses
@@ -272,7 +272,7 @@ three exceptions.
 
 **Exception: `dependency-source` also gets a per-cell override**, on the same
 precedence rule (G34 Phase C). A profile's own `dependency_source:`
-([`project-targets-schema.md`](project-targets-schema.md#os-and-dependency_source--how-a-profile-schedules-its-own-check-cell-g34-phase-c))
+([`project-targets-schema.md`](project-targets-schema.md#os-and-dependency_source-how-a-profile-schedules-its-own-check-cell-g34-phase-c))
 wins over this workflow's `dependency-source` input for that profile's cells
 only, so a GCC-profile cell and a Clang-profile cell in one run can each
 provision a matching conda environment instead of sharing whatever the

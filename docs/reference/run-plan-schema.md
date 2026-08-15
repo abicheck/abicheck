@@ -133,7 +133,7 @@ anywhere in this pipeline — this is config-schema projection only.
 
 **`compile.frontend`/`consumer_compile.frontend` reach the cell the same
 way (G34 Phase B).** [`project-targets-schema.md`'s `compile.frontend`
-section](project-targets-schema.md#compilefrontend--consumer_compilefrontend--per-profile-ast-frontend-g34-phase-b)
+section](project-targets-schema.md#compilefrontend-consumer_compilefrontend-per-profile-ast-frontend-g34-phase-b)
 documents the config-schema side; this generator projects each overlay's
 `frontend:` into its own field (`compile_ast_frontend`/
 `consumer_compile_ast_frontend`), resolved independently.

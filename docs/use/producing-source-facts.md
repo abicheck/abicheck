@@ -66,15 +66,22 @@ result.
 ## Full source scan — replay from a compile database
 
 ```bash
-# Source-only: infer the compile DB, replay L4, fold the L5 graph, all inline.
-abicheck dump --sources . -H include/ --depth source -o libfoo.src.json
-
-# Or against a real binary in one shot (L0–L5 in one snapshot). Unseeded
-# `--depth source` already analyses the whole target (the old separate `full`
-# rung collapsed into `source` — ADR-043):
+# Infer the compile DB, replay L4, fold the L5 graph, and (with -H) capture
+# L2 header declarations, all inline, in one snapshot (L0–L5 together).
+# Unseeded `--depth source` already analyses the whole target (the old
+# separate `full` rung collapsed into `source` — ADR-043):
 abicheck dump libfoo.so -H include/ --sources . --compile-db build/compile_commands.json \
   --depth source -o libfoo.full.json
 ```
+
+`dump` also accepts `--sources`/`--build-info` with no binary operand at
+all, producing a snapshot that carries only L3/L4/L5 facts (no L0–L2 layer,
+and no `-H`-derived declarations either — that no-artifact path has no
+header-AST step to feed). Treat that snapshot as **diagnostic output with no
+supported consumer today**: there is no user-facing command that folds it onto
+a binary-side snapshot (the `merge` command that once did was removed in
+ADR-043, and nothing replaced it). For anything `compare` can actually use,
+run `dump` against the real binary as shown above.
 
 With just `--sources`, abicheck infers and runs the build-system query itself
 (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a `make -n`
