@@ -316,6 +316,24 @@ class TestCompileContextForwardingParity:
         assert cmd.count("--compiler-option") == 1
         assert "-DMSG=hello world" in cmd
 
+    def test_gcc_options_unquoted_windows_path_backslashes_survive(self) -> None:
+        """Third-round regression (Codex review, PR #774): a later revision
+        that reverted to plain shlex.split(text, posix=True) fixed the two
+        cases above but then corrupted an ordinary unquoted Windows path
+        (backslashes silently consumed as escape characters). run.sh now
+        delegates to the real abicheck._compiler_options.split_gcc_options
+        instead of reimplementing the tokenizer inline, so this is really a
+        regression test for that import wiring, not a second copy of the
+        tokenizer's own logic."""
+        env = {
+            **_FULL_ENV,
+            "INPUT_GCC_OPTIONS": r"-IC:\mypath\include -DFOO=bar",
+        }
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 2
+        assert r"-IC:\mypath\include" in cmd
+        assert "-DFOO=bar" in cmd
+
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,

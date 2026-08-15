@@ -14,12 +14,15 @@ from abicheck._compiler_options import (
 
 class TestSplitGccOptions:
     """Regression coverage for the Windows quoted-value CI failure this
-    helper was added to fix (Codex review, PR #774), plus the two review
-    findings against an earlier revision that tried to *also* preserve a
-    literal Windows path's backslashes via a hand-rolled ``shlex.shlex``
-    with ``escape=""`` -- that revision broke both real POSIX escape
-    sequences and comment-character handling, so this class pins the exact
-    inputs that caught each regression."""
+    helper was added to fix (Codex review, PR #774) and the three rounds
+    of review findings against earlier revisions -- each pinned input below
+    caught a real regression in some prior revision (see the function's own
+    docstring for the full history): a hand-rolled ``shlex.shlex`` with
+    ``escape=""`` broke both real POSIX escape sequences and comment-
+    character handling; reverting to plain ``shlex.split(text, posix=True)``
+    fixed those but then corrupted an ordinary unquoted Windows path's
+    backslashes. The final hand-rolled tokenizer satisfies every one of
+    these simultaneously."""
 
     def test_quoted_value_with_embedded_space_stays_one_token(self) -> None:
         # The original CI failure: shlex.split(..., posix=False) (the old
@@ -50,6 +53,26 @@ class TestSplitGccOptions:
     def test_malformed_quoting_raises_value_error(self) -> None:
         with pytest.raises(ValueError):
             split_gcc_options('-DMSG="unterminated')
+
+    def test_unquoted_windows_path_backslashes_survive(self) -> None:
+        # Codex review, third round: plain shlex.split(text, posix=True)
+        # treats every unquoted backslash as an escape character, silently
+        # corrupting an ordinary Windows include path with no quotes and no
+        # escape intent at all -- the single most common real shape this
+        # flag carries on Windows.
+        assert split_gcc_options(r"-IC:\mypath\include -DFOO=bar") == [
+            r"-IC:\mypath\include",
+            "-DFOO=bar",
+        ]
+
+    def test_quoted_windows_path_still_uses_real_posix_escaping(self) -> None:
+        # A quoted value is a deliberate opt-in to POSIX quoting, so
+        # backslash-escaping inside quotes follows real shlex rules
+        # unconditionally, unlike the unquoted case above.
+        assert split_gcc_options(r'-DPATH="C:\a\b"') == [r"-DPATH=C:\a\b"]
+
+    def test_single_quoted_value_is_fully_literal(self) -> None:
+        assert split_gcc_options(r"-DMSG='a \ b \" c'") == [r"-DMSG=a \ b \" c"]
 
 
 def test_has_explicit_std_accepts_string_and_tokens() -> None:

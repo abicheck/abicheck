@@ -38,23 +38,36 @@ add_flag() {
 
 # ---------------------------------------------------------------------------
 # Helper: like add_flag(), but a single-line value is split the way
-# abicheck's own shlex.split() splits a compiler-flags string server-side
-# (quote-aware -- a value like -DMSG="hello world" stays one token), not
-# add_flag()'s plain bash word-splitting (Codex review, PR #757: routing
-# gcc-options through add_flag()'s unquoted `for item in $value` broke a
-# quoted value into malformed tokens, since bash word-splitting treats `"`
-# as a literal character once the string is already sitting in a variable,
-# unlike a real shell command line). Used only for the gcc-options ->
-# --compiler-option conversion, where the CLI flag it now maps to used to
-# be one scalar --gcc-options string abicheck itself shlex-split.
+# abicheck's own compiler-flags string splitting works server-side
+# (quote-aware -- a value like -DMSG="hello world" stays one token, and an
+# unquoted Windows path's backslashes survive intact), not add_flag()'s
+# plain bash word-splitting (Codex review, PR #757: routing gcc-options
+# through add_flag()'s unquoted `for item in $value` broke a quoted value
+# into malformed tokens, since bash word-splitting treats `"` as a literal
+# character once the string is already sitting in a variable, unlike a
+# real shell command line). Used only for the gcc-options -> --compiler-
+# -option conversion, where the CLI flag it now maps to used to be one
+# scalar --gcc-options string abicheck itself shlex-split.
 #
-# Delegates to `python3`/`python` (`_PY_BIN`, resolved once above) rather
-# than `eval`: xargs-style or eval-based quote parsing would either use its
-# own, different quoting dialect or -- for eval -- actually execute a
-# `$(...)`/backtick command substitution embedded in untrusted Action input,
-# which this must not do. Falls back to add_flag()'s plain whitespace split
-# only if no Python interpreter is on PATH, which should not happen in this
-# Action's own runtime (it needs one to run abicheck itself).
+# Delegates to the real `abicheck._compiler_options.split_gcc_options`
+# (imported, not reimplemented) via `python3`/`python` (`_PY_BIN`, resolved
+# once above) rather than `eval`: xargs-style or eval-based quote parsing
+# would either use its own, different quoting dialect or -- for eval --
+# actually execute a `$(...)`/backtick command substitution embedded in
+# untrusted Action input, which this must not do. Importing the real
+# function (rather than an inline reimplementation) is deliberate: three
+# earlier revisions of an inline copy each independently regressed a real
+# case a review round caught (real POSIX escape sequences, `#`-as-comment
+# truncation, unquoted Windows-path corruption -- see that function's own
+# docstring for the full history) precisely because there were two copies
+# of the same non-trivial tokenizer to keep in sync. `abicheck` is always
+# importable here: action.yml's "Install abicheck" step runs `pip install`
+# before "Run abicheck" invokes this script, so `_PY_BIN` (found via the
+# same `command -v python3`/`python` PATH lookup pip itself resolved
+# against) already has it on its import path. Falls back to add_flag()'s
+# plain whitespace split only if no Python interpreter is on PATH at all,
+# which should not happen in this Action's own runtime (it needs one to
+# run abicheck itself).
 # ---------------------------------------------------------------------------
 add_flag_shlex_split() {
   local flag="$1"
@@ -75,21 +88,11 @@ add_flag_shlex_split() {
     return
   fi
   split="$("$_PY_BIN" -c '
-import shlex
 import sys
 
-# Always real POSIX shlex splitting, on every platform -- posix=False on
-# Windows (the previous choice, mirroring abicheck itself before this fix)
-# kept backslashes literal but never collapsed a quoted value with an
-# embedded space into one token, breaking e.g. -DMSG="hello world" into
-# three malformed tokens instead of two. A hand-rolled lexer with escaping
-# disabled was tried to *also* preserve a literal Windows path'\''s
-# backslashes, but that broke real POSIX escape sequences
-# (-DMSG=hello\ world) and left shlex'\''s default #-starts-a-comment
-# behavior active, silently truncating any token containing # (see
-# abicheck._compiler_options.split_gcc_options, the identical fix and its
-# own docstring for the full reasoning on the Python side).
-for tok in shlex.split(sys.argv[1], posix=True):
+from abicheck._compiler_options import split_gcc_options
+
+for tok in split_gcc_options(sys.argv[1]):
     print(tok)
 ' "$value")"
   while IFS= read -r item; do

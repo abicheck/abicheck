@@ -3,49 +3,147 @@
 
 from __future__ import annotations
 
-import shlex
+#: Matches ``shlex.shlex``'s own POSIX-mode default (space/tab/CR/LF) --
+#: kept as an explicit constant so :func:`split_gcc_options`'s hand-rolled
+#: tokenizer stays byte-for-byte compatible with plain ``shlex.split``
+#: wherever the two aren't deliberately diverging (see that function's
+#: docstring for what does diverge and why).
+_WHITESPACE = " \t\r\n"
 
 
 def split_gcc_options(text: str) -> list[str]:
     """Quote-aware split of a ``--gcc-options``-style compiler-flags string
     (e.g. ``-DMSG="hello world" -DOK=1``).
 
-    Always uses real POSIX shlex splitting (``shlex.split(text,
-    posix=True)``), on every platform -- the previous
-    ``shlex.split(text, posix=os.name != "nt")`` picked quote-collapsing
-    behavior on POSIX and backslash-preserving behavior on Windows, but
-    never both on the same platform, so a quoted value with an embedded
-    space (``-DMSG="hello world"``) silently split into malformed tokens
-    on Windows specifically (Codex review; see
-    ``tests/test_action_compile_context_parity.py::
-    TestCompileContextForwardingParity::test_gcc_options_quoted_value_stays_one_token``,
-    which exercises ``action/run.sh``'s own bash mirror of this identical
-    fix).
+    Three earlier revisions of this helper each traded away a real,
+    independently-confirmed case (Codex review, every example below
+    verified against real Python ``shlex`` output or this function
+    directly):
 
-    Deliberately plain ``shlex.split`` rather than a hand-rolled
-    ``shlex.shlex`` with ``escape=""`` disabled -- an earlier revision of
-    this helper tried that to *also* preserve a literal Windows path's
-    backslashes (``-IC:\\mypath\\include``) unconditionally, but that broke
-    two things a real POSIX-quoted ``--gcc-options`` value can legitimately
-    rely on (Codex review, both confirmed against real Python
-    ``shlex`` output): a real ``\\``-escaped character
-    (``-DMSG=hello\\ world``, ``-DVERSION=\\"1.2\\"``) stopped being
-    unescaped correctly, and disabling ``escape`` left ``shlex``'s default
-    ``#``-starts-a-comment behavior active, silently truncating any token
-    containing ``#`` (e.g. ``-I/build/#generated``) and dropping every
-    flag after it -- a far worse regression than the Windows-path
-    preservation it was trying to add. No existing caller or test ever
-    relied on that backslash preservation (it was speculative, not a
-    tested contract), so this reverts to plain ``posix=True`` -- the exact
-    behavior every ``gcc_options``/``--gcc-options`` splitting call site in
-    this codebase already had on POSIX platforms, now applied uniformly
-    regardless of host OS.
+    1. ``shlex.split(text, posix=os.name != "nt")`` -- the original,
+       pre-existing pattern this helper replaced everywhere -- picked
+       quote-collapsing behavior on POSIX and backslash-preserving
+       behavior on Windows, but never both on the same platform: a quoted
+       value with an embedded space (``-DMSG="hello world"``) silently
+       split into malformed tokens on Windows specifically (the original
+       regression this whole helper exists to fix; see
+       ``tests/test_action_compile_context_parity.py::
+       TestCompileContextForwardingParity::test_gcc_options_quoted_value_stays_one_token``).
+    2. A hand-rolled ``shlex.shlex(text, posix=True)`` with ``escape=""``
+       disabled, to *also* preserve a literal Windows path's backslashes
+       (``-IC:\\mypath\\include``) unconditionally -- broke a real
+       ``\\``-escaped character inside a quoted value
+       (``-DVERSION=\\"1.2\\"``) and left ``shlex``'s default
+       ``#``-starts-a-comment behavior active, silently truncating any
+       token containing ``#`` (``-I/build/#generated``) and dropping every
+       flag after it.
+    3. Plain ``shlex.split(text, posix=True)`` -- fixed both of #2's
+       regressions, but real POSIX escaping treats *any* unquoted
+       backslash as an escape character, so an ordinary unquoted Windows
+       path (``-IC:\\mypath\\include``, no quotes at all -- the single most
+       common real shape this flag carries on Windows) got its backslashes
+       silently eaten (``-IC:mypathinclude``), corrupting the include path
+       for every migrated compiler command.
 
-    Raises ``ValueError`` the same way ``shlex.split`` does on malformed
-    input (e.g. an unbalanced quote) -- callers that need to tolerate that
-    already catch it.
+    The general case is genuinely ambiguous: an unquoted ``\\`` immediately
+    before an ARBITRARY character could mean "Windows path separator" or
+    "POSIX escape of the next character," and no rule can read both from
+    the character alone. But the two *specific* escape uses real POSIX
+    shells (and item #1's own pre-existing Windows behavior for #2's own
+    cited examples) actually need outside quotes are narrower than "escape
+    anything": escaping a quote character so it doesn't open real quoting
+    (``-DVERSION=\\"1.2\\"``), and escaping whitespace so it doesn't end
+    the current token (``-DMSG=hello\\ world``). Neither of those two cases
+    can be confused with an ordinary Windows path component -- a real path
+    never needs literal quote or whitespace characters embedded via
+    backslash, since those aren't legal unescaped/unquoted path characters
+    to begin with. So outside quotes, a backslash immediately followed by
+    ``"``, ``'``, or whitespace escapes exactly that one character
+    (consumed together, dropping the backslash, keeping the literal
+    character -- including keeping an escaped space as part of the current
+    token rather than ending it); a backslash followed by anything else
+    (an ordinary path character, end of string, or another backslash) is
+    left completely untouched, both characters preserved literally one at
+    a time. This satisfies every example from all three items above
+    simultaneously (verified against real ``shlex.split`` output where a
+    comparison applies): ``-DVERSION=\\"1.2\\"`` -> one token
+    ``-DVERSION="1.2"`` (matches plain ``shlex``); ``-DMSG=hello\\ world``
+    -> one token ``-DMSG=hello world`` (matches plain ``shlex``);
+    ``-IC:\\mypath\\include`` -> unchanged, backslashes intact (matches
+    item #1's pre-existing Windows behavior, diverging from plain
+    ``shlex``, which would corrupt it). Inside quotes, escaping follows
+    real POSIX rules unconditionally (double quotes: ``\\"`` -> ``"``,
+    ``\\\\`` -> ``\\``, any other ``\\x`` stays literal; single quotes: no
+    escaping at all) -- matching plain ``shlex`` exactly, since a quoted
+    Windows path is already an explicit, deliberate opt-in to POSIX
+    quoting semantics.
+
+    Raises ``ValueError`` on an unterminated quote, the same way
+    ``shlex.split`` does -- callers that need to tolerate that already
+    catch it.
     """
-    return shlex.split(text, posix=True)
+    tokens: list[str] = []
+    current: list[str] = []
+    have_current = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in _WHITESPACE:
+            if have_current:
+                tokens.append("".join(current))
+                current = []
+                have_current = False
+            i += 1
+            continue
+        # Outside any quote, a backslash escapes exactly a following quote
+        # character or whitespace character (dropping the backslash,
+        # keeping the literal character as part of the current token --
+        # including an escaped space, which does NOT end the token here).
+        # Anything else after the backslash -- an ordinary path character,
+        # another backslash, or end of string -- is left untouched, so an
+        # unquoted Windows path's backslashes survive intact (see the
+        # docstring above for why only these two escapes are honored).
+        if ch == "\\" and i + 1 < n and text[i + 1] in ('"', "'", *_WHITESPACE):
+            have_current = True
+            current.append(text[i + 1])
+            i += 2
+            continue
+        have_current = True
+        if ch == "'":
+            end = text.find("'", i + 1)
+            if end == -1:
+                raise ValueError("No closing quotation")
+            current.append(text[i + 1 : end])
+            i = end + 1
+            continue
+        if ch == '"':
+            i += 1
+            while True:
+                if i >= n:
+                    raise ValueError("No closing quotation")
+                c2 = text[i]
+                if c2 == '"':
+                    i += 1
+                    break
+                # POSIX double-quote rule: only a backslash escaping the
+                # quote itself or another backslash is special; any other
+                # `\x` (e.g. the literal-path case) is kept as-is, matching
+                # plain shlex exactly (see the docstring above).
+                if c2 == "\\" and i + 1 < n and text[i + 1] in ('"', "\\"):
+                    current.append(text[i + 1])
+                    i += 2
+                    continue
+                current.append(c2)
+                i += 1
+            continue
+        # Ordinary character outside any quote, backslash included -- always
+        # literal, so an unquoted Windows path's backslashes survive intact.
+        current.append(ch)
+        i += 1
+    if have_current:
+        tokens.append("".join(current))
+    return tokens
 
 
 def has_explicit_std(
