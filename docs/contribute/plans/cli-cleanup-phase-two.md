@@ -43,7 +43,7 @@ simplification).
 | `--exit-code-scheme` (compare, scan) | Remove, but reworked | Own ADR + semantics PR: keep two orthogonal axes, drop the *manual algorithm selector* |
 | `compare --stat`, `compare --recommend` | Remove | `--format review` replaces `--stat`; recommendation becomes an unconditional renderer output |
 | `scan --artifact-set` | **Keep** | Refine the value syntax only (repeatable option / manifest); do not overload positional `DIRECTORY` |
-| `--annotate`, `--annotate-additions` | Remove from CLI | Render annotations in the composite Action from an existing report |
+| `--annotate`, `--annotate-additions` | Remove from CLI for single-library `compare`; **defer** for the directory/package release fan-out | Render annotations in the composite Action from an existing report — release-operand annotations need a persistence prerequisite first (see PR 1) |
 | `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to explicitly-trusted `.abicheck.yml`, with a real trust + dry-run contract |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
 
@@ -97,8 +97,10 @@ Windows, and a red required check demonstrably blocks a merge.
 ## PR 1 — presentation and GitHub transport
 
 Removes `compare --stat`, `compare --recommend`, `compare --annotate`,
-`compare --annotate-additions` (and the same two annotate flags on the
-directory/package release fan-out in `cli_compare_release.py`).
+`compare --annotate-additions`. The same two annotate flags exist on the
+directory/package release fan-out (`cli_compare_release.py`) but are **not**
+removed by this PR — see "Annotations move to the Action" below for why that
+path needs its own persistence prerequisite first.
 
 ### `--stat`
 
@@ -160,29 +162,62 @@ abicheck compare … → JSON / SARIF / typed CompareResult
 composite Action   → reads that result → emits ::error / ::warning / ::notice
 ```
 
-The Action must **not** re-run the comparison to produce annotations. Behaviour
-to preserve verbatim in the move: file/line mapping; escaping of workflow-command
-values; the annotation count cap; additions annotated only under an explicit
-Action input; suppressed and out-of-contract findings never becoming gating
-annotations; annotations reflecting the same scoped gate the report does.
+The Action must **not** re-run the comparison to produce annotations — for a
+**single-library** operand. For a **directory/package (release-style)**
+operand this does not hold today, and the plan must say so rather than assume
+it: `cli_compare_release._strip_diff_results_and_adjust_verdict` discards each
+library's `DiffResult` after projecting only a capped
+(`_MAX_RELEASE_FINDINGS_PER_LIBRARY = 10`) `findings` list
+(`bucket`/`kind`/`symbol`/`description`/`source_location`) into the JSON
+summary — no severity/contract-evaluation classification, and truncated past
+the cap. Today's `--annotate` on a release operand does not read that
+projection; it goes through `_collect_release_extras`, which **re-runs every
+library's comparison independently** specifically to recover a full
+`DiffResult` for `annotations.collect_annotations`. Separately,
+`action/run.sh`'s `_is_release_style_operand` skips the internal `--write`
+JSON sidecar entirely for a directory/package operand (the release engine
+rejects `--write`), so for that shape the Action does not even have a
+persisted machine report to read annotations from in the first place.
 
-**The Action inputs do not exist yet — they must be added, not "kept".**
-`action.yml` has no `annotate` or `annotate-additions` input today; a workflow
-that wants annotations passes the CLI flags through `extra-args`. So removing
-the CLI flags without the same PR introducing the inputs would leave published
-recipes forwarding a deleted option and exiting `64` before any renderer runs.
-PR 1 must therefore, in one change: define `annotate` / `annotate-additions`
-inputs in `action.yml`; implement the renderer over the report the Action
-already produces; update every first-party workflow, recipe and doc snippet
-that passes these through `extra-args`; and state the migration for external
-callers ("move `--annotate` out of `extra-args` into the `annotate` input").
+So PR 1 cannot uniformly move annotation rendering onto "the report already
+produced" — that is true for `compare`'s single-library JSON/SARIF report, and
+false for the release fan-out's summary report. Two consequences follow:
 
-**Tests.** A saved report fixture must produce, through the Action's renderer,
-byte-identical annotations to what the CLI emitted for the same report before
-the move. Plus: `compare --stat` and `compare --annotate` exit `64` with
-`No such option`; `--format review` output contains the recommendation.
+1. **Do not remove `--annotate`/`--annotate-additions` for the release path in
+   this PR.** Either scope PR 1 to single-library `compare` only (leave the
+   release fan-out's annotation flags in place, tracked as a follow-up), or —
+   if release-operand annotations must move too — make that its own
+   prerequisite slice: have the primary release pass persist a real,
+   uncapped, un-stripped per-finding machine report (schema work: what today
+   collapses to `findings`/`findings_truncated` needs the same detail
+   `collect_annotations` reads from a live `DiffResult`, including the
+   severity/contract classification the capped projection currently drops),
+   and give `action/run.sh` a `--write`-equivalent path for a release operand
+   before removing the flags that currently work around both gaps by
+   re-running.
+2. **`action.yml` inputs are not pre-existing to "keep" either way.**
+   `action.yml` has no `annotate`/`annotate-additions` input today; a workflow
+   that wants annotations passes the CLI flags through `extra-args`. PR 1
+   must, in one change, for whichever scope it actually covers: define
+   `annotate` / `annotate-additions` inputs in `action.yml`; implement the
+   renderer over a persisted report; update every first-party workflow,
+   recipe and doc snippet passing these through `extra-args`; and state the
+   migration for external callers ("move `--annotate` out of `extra-args`
+   into the `annotate` input").
 
-**Risk:** low — no analysis, verdict, or exit code changes.
+**Tests.** A saved single-library report fixture must produce, through the
+Action's renderer, byte-identical annotations to what the CLI emitted for the
+same report before the move. Plus: `compare --stat` and `compare --annotate`
+exit `64` with `No such option`; `--format review` output contains the
+recommendation; `compare-release`'s (the directory/package fan-out's)
+`--annotate`/`--annotate-additions` continue to work unchanged, proving they
+were genuinely untouched rather than silently broken by the single-library
+removal.
+
+**Risk:** low for the single-library flags — no analysis, verdict, or exit
+code changes. The release-operand annotation move is out of this PR's scope
+precisely because it is not low-risk: it needs new persisted-report schema
+work, not a renderer move.
 
 ## PR 2 — aggregate policy into the manifest schema
 
