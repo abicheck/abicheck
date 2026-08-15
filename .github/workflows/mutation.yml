@@ -99,7 +99,13 @@ jobs:
             --json mutation-receipt.json
       - name: Run mutation testing (baseline drift)
         if: github.event_name == 'schedule'
-        run: python scripts/check_mutation_score.py --run --json mutation-receipt.json
+        # --require-baseline: with no baseline recorded, this lane would return
+        # 0 no matter how many mutants survived — a lane that advertises drift
+        # gating while being report-only. Fail loudly and point at the dispatch
+        # lane instead (Codex review).
+        run: |
+          python scripts/check_mutation_score.py --run --require-baseline \
+            --json mutation-receipt.json
       - name: Run mutation testing (record baseline)
         if: github.event_name == 'workflow_dispatch'
         run: |

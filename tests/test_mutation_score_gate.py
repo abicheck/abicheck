@@ -117,7 +117,9 @@ def test_run_mode_fails_when_run_aborts_unparseable(
     """--run where the run aborts (no parseable count) must fail — never an
     inferred zero."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "config error: nothing to mutate")
+    monkeypatch.setattr(
+        gate, "_run_mutmut", lambda cmd: ("config error: nothing to mutate", 0)
+    )
     assert gate.main(["--run", "--baseline", "0"]) == 1
 
 
@@ -127,14 +129,16 @@ def test_run_mode_fails_on_interrupted_progress(
     """An interrupted run that printed only progress ("309/464") with no explicit
     survivor count must NOT be mistaken for a clean zero-survivor run."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "309/464  🎉 300")  # no 🙁 count
+    monkeypatch.setattr(
+        gate, "_run_mutmut", lambda cmd: ("309/464  🎉 300", 0)
+    )  # no 🙁 count
     assert gate.main(["--run", "--baseline", "0"]) == 1
 
 
 def test_run_mode_counts_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
     """--run with an explicit survivor count is gated normally."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "🙁 2")
+    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("🙁 2", 0))
     assert gate.main(["--run", "--baseline", "5"]) == 0  # within baseline
     assert gate.main(["--run", "--baseline", "1"]) == 1  # exceeds baseline
 
@@ -145,7 +149,9 @@ def test_run_mode_clean_run_zero_survivors_passes(
     """A clean run prints an explicit '🙁 0' in its summary → parsed as 0 → passes
     baseline 0. Zero is detected, never inferred."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "12/12  🎉 12  🙁 0  ⏰ 0  🤔 0")
+    monkeypatch.setattr(
+        gate, "_run_mutmut", lambda cmd: ("12/12  🎉 12  🙁 0  ⏰ 0  🤔 0", 0)
+    )
     assert gate.main(["--run", "--baseline", "0"]) == 0
 
 
@@ -153,7 +159,7 @@ def test_run_mode_fails_on_unresolved_mutants(monkeypatch: pytest.MonkeyPatch) -
     """Zero survivors but unresolved (timeout/suspicious) mutants is an
     incomplete measurement — it must not pass a zero baseline."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "🙁 0  ⏰ 2  🤔 1")
+    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("🙁 0  ⏰ 2  🤔 1", 0))
     assert gate.main(["--run", "--baseline", "0"]) == 1
 
 
@@ -161,7 +167,7 @@ def test_unresolved_does_not_fail_report_only(monkeypatch: pytest.MonkeyPatch) -
     """In report-only mode (no baseline) unresolved mutants are surfaced but the
     gate does not fail — it is only reporting."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "🙁 0  ⏰ 2")
+    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("🙁 0  ⏰ 2", 0))
     assert gate.main(["--run"]) == 0  # SURVIVOR_BASELINE is None → report-only
 
 
@@ -384,7 +390,11 @@ def test_diff_scoped_ignores_survivors_in_untouched_functions(
         ("@@ -1,0 +2,1 @@", {2}),
         ("@@ -5,2 +5,3 @@", {5, 6, 7}),
         ("@@ -1 +1 @@", {1}),  # no count => 1 line
-        ("@@ -3,1 +3,0 @@", set()),  # pure deletion adds no new-side lines
+        # A pure deletion contributes no new-side line, but deleting a guard
+        # is a real way to weaken a detector, so it is attributed to the
+        # surrounding function rather than skipped. This fixture previously
+        # asserted `set()`, which pinned the hole rather than the behaviour.
+        ("@@ -3,1 +3,0 @@", {3, 4}),
     ],
 )
 def test_parse_changed_lines_hunk_shapes(hunk: str, expected: set[int]) -> None:
@@ -396,3 +406,137 @@ def test_parse_changed_lines_ignores_deleted_files() -> None:
     assert (
         gate.parse_changed_lines("--- a/f.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n") == {}
     )
+
+
+# --- Codex review: the gate must not pass on a run that did not happen --------
+
+
+def test_an_aborted_mutmut_run_fails_even_with_readable_results(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The stale-cache hole introduced by caching `mutants/` in CI.
+
+    `mutmut run` exits 0 even when mutants survive (verified against 3.7.0), so
+    a nonzero exit means the run aborted — and with a restored cache the
+    results left on disk are the *previous* commit's, complete-looking and
+    wrong. The gate must refuse to read them.
+    """
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+
+    def fake(cmd):
+        if cmd[1] == "run":
+            return ("config error: nothing to mutate", 1)
+        return (_TWO_MODULES, 0)  # a perfectly readable stale database
+
+    monkeypatch.setattr(gate, "_run_mutmut", fake)
+    assert gate.main(["--run", "--baseline", "99"]) == 1
+    assert "the run aborted" in capsys.readouterr().out
+
+
+def test_a_successful_run_with_survivors_is_still_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control for the check above: exit 0 with survivors is normal,
+    and must not be mistaken for an abort."""
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: (_TWO_MODULES, 0))
+    assert gate.main(["--run", "--baseline", "99"]) == 0
+    assert gate.main(["--run", "--baseline", "1"]) == 1
+
+
+# --- Codex review: a drift lane with no baseline is not a drift lane ----------
+
+
+def test_require_baseline_fails_when_no_baseline_exists(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The scheduled lane advertises baseline-drift gating. With no baseline
+    file and SURVIVOR_BASELINE unset it would return 0 regardless of how many
+    mutants survived — a can't-fail gate, which is what this whole script
+    exists to remove."""
+    results = _write(tmp_path, "r.txt", _TWO_MODULES)
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            str(tmp_path / "absent.json"),
+            "--require-baseline",
+        ]
+    )
+    assert rc == 1
+    assert "could only ever report, never gate" in capsys.readouterr().out
+
+
+def test_require_baseline_passes_once_a_baseline_exists(tmp_path: Path) -> None:
+    results = _write(tmp_path, "r.txt", _TWO_MODULES)
+    baseline = _baseline(
+        tmp_path, {"abicheck/diff_types.py": 2, "abicheck/diff_symbols.py": 1}
+    )
+    assert (
+        gate.main(
+            [
+                "--results-file",
+                results,
+                "--baseline-file",
+                baseline,
+                "--require-baseline",
+            ]
+        )
+        == 0
+    )
+
+
+def test_require_baseline_is_satisfied_by_the_global_baseline_too(
+    tmp_path: Path,
+) -> None:
+    """`--baseline N` is a real baseline, even without the per-module file."""
+    results = _write(tmp_path, "r.txt", _TWO_MODULES)
+    assert (
+        gate.main(
+            [
+                "--results-file",
+                results,
+                "--baseline-file",
+                str(tmp_path / "absent.json"),
+                "--baseline",
+                "99",
+                "--require-baseline",
+            ]
+        )
+        == 0
+    )
+
+
+# --- Codex review: deleting a guard must be attributed to its function --------
+
+
+def test_a_pure_deletion_still_gates_the_function_it_was_deleted_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Deleting a condition is the most direct way to weaken a detector, and it
+    produces a hunk with no added lines at all."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    deletion_diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -2,1 +1,0 @@\n-    return 1\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            deletion_diff,
+        ]
+    )
+    assert rc == 1
+    assert "abicheck/diff_types.py::alpha" in capsys.readouterr().out

@@ -114,6 +114,26 @@ def _run(cmd: list[str], cwd: Path | None = None) -> str:
     return proc.stdout + proc.stderr
 
 
+def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
+    """Run a mutmut subcommand, returning ``(output, returncode)``.
+
+    The return code matters for ``mutmut run`` specifically, and only for
+    telling "this run aborted" from "this run completed": verified against
+    mutmut 3.7.0, a completed run exits **0 even when mutants survived**, and a
+    configuration/collection abort exits nonzero. So a nonzero exit here is
+    never "there are survivors" — it is "no measurement happened".
+
+    That distinction is load-bearing once ``mutants/`` is a restored CI cache
+    (see mutation.yml): a run that aborts leaves the *previous* commit's result
+    database in place, which would otherwise satisfy the completeness witness
+    and let the gate pass on stale results (Codex review).
+    """
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        cmd, capture_output=True, text=True, timeout=7200
+    )
+    return proc.stdout + proc.stderr, proc.returncode
+
+
 # ---------------------------------------------------------------------------
 # Baseline file
 # ---------------------------------------------------------------------------
@@ -201,6 +221,16 @@ def parse_changed_lines(diff_text: str) -> dict[str, set[int]]:
             count = int(m.group(2)) if m.group(2) is not None else 1
             if count:
                 changed.setdefault(current, set()).update(range(start, start + count))
+            else:
+                # A pure deletion (`@@ -3,1 +3,0 @@`) contributes no new-side
+                # line, but deleting a guard is one of the most direct ways to
+                # weaken a detector — and skipping it made the diff-scoped gate
+                # ignore every survivor in the function that lost the check
+                # (Codex review). Git reports the deletion as having happened
+                # *after* new-side line `start`, so attribute both `start` and
+                # its successor, which is the surrounding function either way.
+                anchor = max(1, start)
+                changed.setdefault(current, set()).update({anchor, anchor + 1})
     return changed
 
 
@@ -268,11 +298,23 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
 
     if args.run:
         print("mutation-score: running `mutmut run` (this is slow)…")
-        run_out = _run(["mutmut", "run"])
+        run_out, run_rc = _run_mutmut(["mutmut", "run"])
         tail = "\n".join(run_out.splitlines()[-5:])
         print(f"mutation-score: mutmut run tail:\n{tail}")
-        _run(["mutmut", "export-cicd-stats"])
-    return _run(["mutmut", "results"]), load_cicd_stats(Path(args.mutants_dir))
+        if run_rc != 0:
+            # Fail here rather than reading results: with a restored cache the
+            # results on disk may be a previous commit's, and they would look
+            # perfectly complete.
+            print(
+                f"ERROR: `mutmut run` exited {run_rc} — the run aborted, so any "
+                "results on disk are from an earlier run, not this one. Not "
+                "reading them."
+            )
+            return None, None
+        _run_mutmut(["mutmut", "export-cicd-stats"])
+    return _run_mutmut(["mutmut", "results"])[0], load_cicd_stats(
+        Path(args.mutants_dir)
+    )
 
 
 def _measurement_is_complete(
@@ -329,6 +371,14 @@ def main(argv: list[str] | None = None) -> int:
         "--base-ref", default="origin/main", help="Base ref for --diff-scoped."
     )
     parser.add_argument("--diff-file", help="Read the diff from a file instead of git.")
+    parser.add_argument(
+        "--require-baseline",
+        action="store_true",
+        help=(
+            "Fail if no baseline is available. The scheduled drift lane uses "
+            "this so it cannot silently degrade to report-only."
+        ),
+    )
     parser.add_argument("--json", help="Write a machine-readable receipt here.")
     args = parser.parse_args(argv)
 
@@ -379,6 +429,19 @@ def main(argv: list[str] | None = None) -> int:
     gating_active = (
         args.diff_scoped or baseline_modules is not None or total_baseline is not None
     )
+
+    if args.require_baseline and not gating_active:
+        # Without this, a "baseline drift" lane with no baseline to compare
+        # against returns 0 no matter how many mutants survive — the exact
+        # can't-fail shape this whole gate exists to remove (Codex review).
+        print(
+            "ERROR: --require-baseline was passed but no baseline is available "
+            f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
+            "unset), so this run could only ever report, never gate. Establish "
+            "it once with the workflow_dispatch lane "
+            "(write_baseline: true), then re-enable this lane."
+        )
+        return 1
 
     if unresolved and (gating_active or args.write_baseline):
         print(

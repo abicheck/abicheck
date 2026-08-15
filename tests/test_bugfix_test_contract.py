@@ -93,6 +93,28 @@ class TestStructuralRequirement:
     def test_docs_only_change_is_not_shipped_code(self) -> None:
         assert not gate.touches_shipped_code(["docs/x.md", "README.md"])
 
+    @pytest.mark.parametrize(
+        "path", ["action/run.sh", "action/validate-inputs.sh", "action/install-deps.sh"]
+    )
+    def test_the_actions_shell_layer_counts_as_shipped_code(self, path: str) -> None:
+        """`action/` is shell, not Python.
+
+        Requiring `.py` everywhere let a fix to the composite Action's runtime
+        behaviour ship with no test at all and still pass the objective half of
+        this gate (Codex review). That layer has real coverage — the
+        `test_action_run_sh_*` suites execute these scripts — so there is
+        always a test to add.
+        """
+        assert gate.touches_shipped_code([path])
+
+    def test_shell_scripts_outside_the_action_tree_are_not_shipped_code(self) -> None:
+        """Per-prefix, not a blanket `.sh` rule: a helper script elsewhere is
+        not the Action's runtime."""
+        assert not gate.touches_shipped_code(["abicheck/x.sh", "tools/helper.sh"])
+
+    def test_non_code_files_in_the_action_tree_are_not_shipped_code(self) -> None:
+        assert not gate.touches_shipped_code(["action/README.md", "action/AGENTS.md"])
+
 
 class TestAnswerParsing:
     def test_parses_plain_bullets(self) -> None:

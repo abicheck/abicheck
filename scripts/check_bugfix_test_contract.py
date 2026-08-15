@@ -68,7 +68,18 @@ ROOT = Path(__file__).resolve().parent.parent
 _FIX_SUBJECT = re.compile(r"^(fix|perf|security)(\([^)]*\))?!?:", re.IGNORECASE)
 
 #: Shipped code. A fix here is what triggers the structural requirement.
-_SHIPPED_PREFIXES = ("abicheck/", "action/", "scripts/")
+#: Keyed by prefix *and* extension, because `action/` is the composite Action's
+#: shell layer, not Python — requiring `.py` everywhere let a fix to
+#: `action/run.sh` change the Action's runtime behaviour with no test at all
+#: and still pass the objective half of this gate (Codex review). That layer is
+#: covered by the `test_action_run_sh_*` suites, so there is a real test to
+#: add.
+_SHIPPED_SUFFIXES_BY_PREFIX = {
+    "abicheck/": (".py",),
+    "scripts/": (".py",),
+    "action/": (".py", ".sh"),
+}
+_SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 
 #: Anything that counts as a test change.
 _TEST_MARKERS = ("tests/", "/tests/", "test_")
@@ -223,7 +234,11 @@ def is_bugfix(subjects: list[str], title: str | None) -> bool:
 
 
 def touches_shipped_code(paths: list[str]) -> bool:
-    return any(p.startswith(_SHIPPED_PREFIXES) and p.endswith(".py") for p in paths)
+    return any(
+        p.startswith(prefix) and p.endswith(suffixes)
+        for p in paths
+        for prefix, suffixes in _SHIPPED_SUFFIXES_BY_PREFIX.items()
+    )
 
 
 def touches_tests(paths: list[str]) -> bool:
