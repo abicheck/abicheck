@@ -117,10 +117,19 @@ exact, current set is `abicheck/comparability.py`'s `PROFILE_FIELD_KEYS`
 (plus the conditional `frontend_context_kind` addition); check there directly
 before relying on which flags are actually pinned today.
 
-**`scope_fingerprint`** — the *declared surface* being compared (header/TU
-names, never absolute paths): which public headers and header directories
-were in scope, and — for a manifest-driven multi-TU extraction — which
-translation units contributed.
+**`scope_fingerprint`** — the *declared surface* being compared: which
+public headers and header directories were in scope, and — for a
+manifest-driven multi-TU extraction — which translation units contributed.
+A path *inside* the checkout is relativized so two checkouts at different
+nesting depths fingerprint identically — that's the "never absolute paths"
+case that matters for the common two-checkout comparison. A genuinely
+*external* path (declared absolute in the manifest, e.g. `/usr/include`, or
+any include path with no structural relationship to the checkout root) is
+deliberately kept as its resolved absolute path instead, since relativizing
+it would climb a `../` distance that depends on checkout nesting rather than
+on anything about the external path itself — so relocating an SDK referenced
+by such a path *can* change `scope_fingerprint` and make an otherwise-identical
+pair read as not comparable.
 
 The split matters: two dumps can legitimately have different
 `scope_fingerprint`s (you scoped OLD to a smaller header set than NEW,
@@ -130,13 +139,16 @@ superset-growth check (§ below) treats a scope that only *grew* between OLD
 and NEW as legitimate rather than incomparable. A `profile_fingerprint`
 mismatch is the one that means "this isn't the same kind of build at all."
 
-## Two carve-outs: a real difference is not always an error
+## Carve-outs: a real difference is not always an error
 
 Not every fingerprint mismatch is toolchain noise to be rejected — some are
 exactly the *finding* a check like this exists to surface. The gate
-distinguishes them from genuine incomparability with two narrow,
-evidence-gated carve-outs, both deliberately conservative (they widen the set
-of comparisons the gate allows, never the set it silently trusts):
+distinguishes them from genuine incomparability with four narrow,
+evidence-gated carve-outs (`_unexplained_profile_fields()`), all deliberately
+conservative and mutually disjoint — they widen the set of comparisons the
+gate allows, never the set it silently trusts, and they compose (a release
+combining two independently-sanctioned deltas at once, e.g. a header
+addition *and* a corroborated C++-standard raise, is still accepted):
 
 - **Platform-identity carve-out.** If `target_triple`/`pointer_width`/
   `endianness` differ, but both snapshots' own *binary-derived* platform
@@ -159,12 +171,25 @@ of comparisons the gate allows, never the set it silently trusts):
   profile field — compiler family/version, ABI dialect, pass-through flags,
   frontend context — still hard-fails even with build-context evidence on
   both sides.
+- **Header/include-sequence-growth carve-outs.** If `header_sequence` and/or
+  `include_sequence` differ *and* `scope_fingerprint` itself independently
+  confirms a genuine, additive superset growth for the same newly-added
+  header(s) — not merely a same-shaped "the sequence got longer" pattern —
+  the mismatch is treated as an ordinary header addition, not drift. This
+  double-check exists because a profile-level "sequence grew" shape *alone*
+  isn't sufficient evidence: a header declared identically on both sides via
+  `--public-header`, but only fed to the L2 frontend via `-H` on the new
+  side, produces the identical additive-growth shape in `header_sequence`
+  while `scope_fingerprint` stays completely unchanged — and the old
+  snapshot never actually parsed that header's content, so a real removal
+  inside it would go silently unreported if the carve-out trusted sequence
+  shape on its own.
 
 Everything else — an uncorroborated compiler-family swap, an uncorroborated
-target-triple change, any profile mismatch neither carve-out can explain —
-still hard-fails. The bar for "this is a real fact about the build, not
-noise" is independent, binary/build-derived evidence on **both** sides, not
-just a differing flag.
+target-triple change, any profile mismatch none of the four carve-outs can
+explain — still hard-fails. The bar for "this is a real fact about the
+build, not noise" is independent, corroborating evidence on **both** sides,
+not just a differing or superficially-growing flag.
 
 ## What this looks like in practice
 
