@@ -85,16 +85,20 @@ Two of these are worth naming as the genuine edge cases they are:
   build-integrated and machine-generated from the same headers/snapshot
   you already maintain, rather than hand-transcribed or vendored once and
   left to drift.
-- **Header-only has no provider artifact to fall back on at all.** Every
-  other row has *some* compiled or declared provider artifact — a `.so`, a
-  static archive, a set of headers a compiler parses — that a static
-  comparison can inspect, even where (as the behavioral/data-wire pages
-  document) the *content* of that artifact can't answer every question. A
-  header-only library has no such artifact of its own, ever: there's
-  nothing to build and ship that isn't also the consumer's own source. See
-  [Static & Header-Only Contracts](static-and-header-only.md) for why this
-  is a genuine, currently-unclosed gap in what static tooling can verify,
-  not just an unusual workflow.
+- **Header-only has no separate compiled provider artifact to fall back
+  on at all.** Every other row has *some* provider-side artifact distinct
+  from the consumer — a `.so`, a static archive, headers paired with a
+  binary a compiler can validate them against — that a static comparison
+  can build and inspect, even where (as the behavioral/data-wire pages
+  document) the *content* of that artifact can't answer every question.
+  For a header-only library, the headers themselves are perfectly
+  inspectable, but there is no separate compiled provider binary to derive
+  a second, provider-side snapshot from — the only "build" of those
+  headers that ever happens is the consumer's own, which is exactly the
+  case abicheck's comparison model doesn't have a no-binary path for
+  today. See [Static & Header-Only Contracts](static-and-header-only.md)
+  for why this is a genuine, currently-unclosed gap in what static tooling
+  can verify, not just an unusual workflow.
 
 ## Composing consumer model with the other axes
 
@@ -112,7 +116,7 @@ Naming all five before reasoning about "is this a break" is what actually
 resolves most real disagreements — two people can each be completely correct
 about a change's effect while silently assuming different consumer models.
 [abicheck's plugin/host-contract tooling](../use/plugin-systems.md) and
-[per-consumer application checks](../use/multi-binary.md) exist specifically
+[per-consumer application checks](../use/appcompat.md) exist specifically
 because a library's own global verdict answers "does this change violate the
 declared ABI/API policy for the whole public surface" — a real, useful
 question, but not automatically the same question any *one* real consumer
