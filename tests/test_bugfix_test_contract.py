@@ -115,6 +115,17 @@ class TestStructuralRequirement:
     def test_non_code_files_in_the_action_tree_are_not_shipped_code(self) -> None:
         assert not gate.touches_shipped_code(["action/README.md", "action/AGENTS.md"])
 
+    def test_the_root_action_manifest_is_shipped_code(self) -> None:
+        """`action.yml` *is* the published composite Action — it declares the
+        inputs and the executable steps — and has dedicated coverage in
+        `test_action_reference.py` / `test_action_run_contract.py`, so a fix to
+        it can carry a test (Codex review)."""
+        assert gate.touches_shipped_code(["action.yml"])
+
+    def test_an_unrelated_root_yaml_is_not_shipped_code(self) -> None:
+        """Named files, not a blanket root-YAML rule."""
+        assert not gate.touches_shipped_code(["mkdocs.yml", "codecov.yml"])
+
 
 class TestAnswerParsing:
     def test_parses_plain_bullets(self) -> None:
@@ -252,6 +263,56 @@ class TestRequirementCatalogue:
             assert f"- {req.prompt}:" in template, (
                 f"PR template is missing a row for {req.prompt!r}"
             )
+
+
+class TestEmptyPrBody:
+    """An empty description must not be treated like a local run.
+
+    CI always passes `--body-file`, so collapsing "flag absent" and "file
+    empty" into one branch let a contributor clear the PR description and
+    bypass every declared requirement while still passing (Codex review).
+    """
+
+    def test_an_empty_body_file_fails(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            gate, "changed_paths", lambda b, h: ["abicheck/x.py", "tests/test_x.py"]
+        )
+        monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        empty = tmp_path / "body.md"
+        empty.write_text("   \n\n", encoding="utf-8")
+        rc = gate.main(["--base", "A", "--head", "B", "--body-file", str(empty)])
+        assert rc == 1
+        assert "PR description is empty" in capsys.readouterr().out
+
+    def test_an_absent_body_file_is_structural_only(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Negative control: the local path must still work."""
+        monkeypatch.setattr(
+            gate, "changed_paths", lambda b, h: ["abicheck/x.py", "tests/test_x.py"]
+        )
+        monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        rc = gate.main(["--base", "A", "--head", "B"])
+        assert rc == 0
+        assert "no --body-file given" in capsys.readouterr().out
+
+    def test_a_populated_body_is_still_evaluated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            gate,
+            "changed_paths",
+            lambda b, h: ["abicheck/cli_deps.py", "tests/test_x.py"],
+        )
+        monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
+        body = tmp_path / "body.md"
+        body.write_text(COMPLETE_BODY, encoding="utf-8")
+        assert gate.main(["--base", "A", "--head", "B", "--body-file", str(body)]) == 0
 
 
 class TestSkipLabel:

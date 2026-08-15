@@ -1419,6 +1419,35 @@ Once a root command genuinely clears the bar above, pick the right home:
   in particular MSVC `/std:`/`/D` spellings, which this fix does not
   attempt (no `compiler_family: msvc` caller/test exists yet to validate
   against, and a wrong guess here is worse than the pre-existing gap).
+- **`ruff format` has never gated anything, and the tree has never been
+  formatted — pins fixed, the reformat itself deliberately not attempted.**
+  Two separate problems were tangled here. (1) `ruff` was pinned in two places
+  that disagreed: `.pre-commit-config.yaml` at `rev: v0.9.0`, and
+  `pyproject.toml`'s `[dev]` at `ruff>=0.3` — a floor, so CI and
+  `pip install -e ".[dev]"` resolved whatever was newest on the day they ran.
+  That is not cosmetic: 0.9.0 reports an `F811` in
+  `abicheck/cli_buildsource_helpers.py` that current ruff does not, so a
+  contributor's `pre-commit` run and CI reached different *lint* verdicts on
+  unmodified code. Fixed by pinning both to the same exact version, forward
+  rather than back (pinning to 0.9.0 would red the lint lane on existing
+  code), with `tests/test_toolchain_pins.py` asserting the two stay in
+  lockstep. (2) Separately — and *not* caused by the version skew — the tree is
+  not `ruff format`-clean under **any** version: 488 files under 0.9.0, 486
+  under 0.16.3, ~56.5k changed lines, and the diffs are near-identical across
+  versions (checked), i.e. the formatter has simply never been applied
+  repo-wide. It went unnoticed because the `fmt-check` step, though present in
+  `scripts/verify.py`'s `fast`/`pr`/`full` profiles, **is not run by any CI
+  job**: `ci.yml`'s `lint-and-types` invokes
+  `--profile pr --only lint,typecheck,docs-build`, no workflow runs the full
+  `pr` profile, and `pre-commit` is not run in CI at all. So the one consumer
+  that would catch it is `pixi run check` (which *does* run the whole `pr`
+  profile) — i.e. a pixi contributor's local gate is currently stricter than
+  CI. **Not fixed here**: making `fmt-check` real requires the ~56.5k-line
+  mechanical reformat first, which would drown this change's review and
+  conflict with every in-flight branch, so it belongs in its own PR that does
+  nothing else. Until then, treat a green CI run as saying nothing about
+  formatting.
+
 - **Deferred entirely, not attempted this pass** (heavier structural
   changes, each needing its own scoped design rather than a drive-by
   addition):

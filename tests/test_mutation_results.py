@@ -229,6 +229,31 @@ class TestChangedFunctionAttribution:
     def test_empty_line_set_is_empty_result(self) -> None:
         assert mr.functions_covering_lines(self.SOURCE, set()) == set()
 
+    def test_a_decorator_line_is_attributed_to_the_function_it_decorates(
+        self,
+    ) -> None:
+        """Every detector in this codebase is registered by decorator, so a
+        change confined to `@registry.detector("...")` is an ordinary edit —
+        and `ast.FunctionDef.lineno` points at `def`, not the decorator, so
+        anchoring there matched no function at all (Codex review)."""
+        source = (
+            "import x\n"
+            "\n"
+            "@registry.detector('foo')\n"
+            "@another\n"
+            "def alpha():\n"
+            "    return 1\n"
+        )
+        assert mr.functions_covering_lines(source, {3}) == {"alpha"}
+        assert mr.functions_covering_lines(source, {4}) == {"alpha"}
+        assert mr.functions_covering_lines(source, {5}) == {"alpha"}
+        # The import above the decorator is still outside any function.
+        assert mr.functions_covering_lines(source, {1}) == set()
+
+    def test_a_decorated_method_keeps_its_qualname(self) -> None:
+        source = "class W:\n    @property\n    def area(self):\n        return 1\n"
+        assert mr.functions_covering_lines(source, {2}) == {"W.area"}
+
     def test_syntax_error_degrades_instead_of_raising(self) -> None:
         """A half-edited file must not crash the gate."""
         assert mr.functions_covering_lines("def broken(:\n", {1}) == set()

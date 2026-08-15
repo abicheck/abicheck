@@ -81,6 +81,13 @@ _SHIPPED_SUFFIXES_BY_PREFIX = {
 }
 _SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 
+#: Individually-named shipped files that no prefix rule covers. The root
+#: `action.yml` *is* the published composite Action — it declares its inputs
+#: and its executable steps — and it has dedicated coverage in
+#: `tests/test_action_reference.py` / `test_action_run_contract.py`, so a fix
+#: to it can and should carry a test (Codex review).
+_SHIPPED_FILES = frozenset({"action.yml"})
+
 #: Anything that counts as a test change.
 _TEST_MARKERS = ("tests/", "/tests/", "test_")
 
@@ -234,6 +241,8 @@ def is_bugfix(subjects: list[str], title: str | None) -> bool:
 
 
 def touches_shipped_code(paths: list[str]) -> bool:
+    if any(p in _SHIPPED_FILES for p in paths):
+        return True
     return any(
         p.startswith(prefix) and p.endswith(suffixes)
         for p in paths
@@ -311,25 +320,33 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     # --- declared ------------------------------------------------------
-    body = ""
-    if args.body_file:
+    # "No --body-file at all" (a local run) and "--body-file given but empty"
+    # are different situations and must not share a code path: CI always passes
+    # the flag, so treating an empty file as "local, structural only" let a
+    # contributor clear the PR description and bypass every declared
+    # requirement (Codex review).
+    if args.body_file is None:
+        print(
+            "bugfix-test-contract: no --body-file given — structural checks "
+            "only. CI always passes one; this path is for local runs."
+        )
+    else:
         try:
             body = Path(args.body_file).read_text(encoding="utf-8")
         except OSError as e:
             print(f"ERROR: cannot read --body-file: {e}")
             return 1
-
-    if not body.strip():
-        print(
-            "bugfix-test-contract: no PR body available — structural checks "
-            "only. (In CI the body is always passed; this path is for local "
-            "runs.)"
-        )
-    else:
-        for req in missing_requirements(body, paths):
+        if not body.strip():
             failures.append(
-                f"{req.prompt} — unanswered.\n      Why it matters: {req.why}"
+                "The PR description is empty. A fix PR has to answer the "
+                "bug-fix test contract — fill in that section of the PR "
+                "template (or use the skip-test-contract label)."
             )
+        else:
+            for req in missing_requirements(body, paths):
+                failures.append(
+                    f"{req.prompt} — unanswered.\n      Why it matters: {req.why}"
+                )
 
     if failures:
         print("bugfix-test-contract: FAILED\n")

@@ -447,6 +447,31 @@ def test_a_successful_run_with_survivors_is_still_measured(
 # --- Codex review: a drift lane with no baseline is not a drift lane ----------
 
 
+def test_a_failing_results_command_is_not_read_as_zero_survivors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`mutmut run` can succeed while `mutmut results` fails.
+
+    Its stderr parses as "no per-mutant lines", and if exported stats happen to
+    exist with total > 0 the completeness check passes and the unparseable
+    output becomes zero survivors — passing even an explicit zero baseline
+    while the stats report survivors (Codex review).
+    """
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+
+    def fake(cmd):
+        if cmd[1] == "results":
+            return ("Traceback: cache is corrupt", 1)
+        return ("", 0)
+
+    monkeypatch.setattr(gate, "_run_mutmut", fake)
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda d: {"total": 40, "survived": 12}
+    )
+    assert gate.main(["--run", "--baseline", "0"]) == 1
+    assert "cannot read the per-mutant statuses" in capsys.readouterr().out
+
+
 def test_require_baseline_fails_when_no_baseline_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

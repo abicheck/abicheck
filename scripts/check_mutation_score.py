@@ -312,9 +312,19 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
             )
             return None, None
         _run_mutmut(["mutmut", "export-cicd-stats"])
-    return _run_mutmut(["mutmut", "results"])[0], load_cicd_stats(
-        Path(args.mutants_dir)
-    )
+    results_out, results_rc = _run_mutmut(["mutmut", "results"])
+    if results_rc != 0:
+        # Its stderr would otherwise be parsed as "no per-mutant lines", and if
+        # exported stats happen to exist with total > 0 the completeness check
+        # passes and the unparseable output becomes zero survivors — passing
+        # even an explicit zero baseline while the stats report survivors
+        # (Codex review).
+        print(
+            f"ERROR: `mutmut results` exited {results_rc} — cannot read the "
+            "per-mutant statuses, so no survivor count is trustworthy."
+        )
+        return None, None
+    return results_out, load_cicd_stats(Path(args.mutants_dir))
 
 
 def _measurement_is_complete(

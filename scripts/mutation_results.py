@@ -309,7 +309,14 @@ def functions_covering_lines(source: str, lines: set[int]) -> set[str]:
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 qual = f"{prefix}{name}"
                 start = child.lineno
-                end = getattr(child, "end_lineno", start) or start
+                # A change confined to a decorator — renaming a detector in
+                # `@registry.detector("...")`, which is how every detector in
+                # this codebase is registered — sits above `def`, so anchoring
+                # at `child.lineno` matched no function and the diff-scoped
+                # gate ignored every survivor in it (Codex review).
+                for decorator in getattr(child, "decorator_list", ()):
+                    start = min(start, decorator.lineno)
+                end = getattr(child, "end_lineno", child.lineno) or child.lineno
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
                     start <= ln <= end for ln in lines
                 ):

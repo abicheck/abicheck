@@ -64,7 +64,19 @@ dev = [
     "pytest-xdist>=3.0",
     "filelock>=3.0",
     "hypothesis>=6.0",
-    "ruff>=0.3",
+    # Pinned exactly, and kept in lockstep with .pre-commit-config.yaml's
+    # `rev:` — tests/test_toolchain_pins.py asserts the two agree.
+    #
+    # `ruff>=0.3` meant CI resolved whatever was newest on the day it ran while
+    # pre-commit pinned v0.9.0, so the lint gate's *rules* differed by entry
+    # point: 0.9.0 flags a pre-existing F811 in cli_buildsource_helpers.py that
+    # current ruff does not. A lint gate whose verdict depends on when it ran
+    # is not a gate. Pinned forward rather than back for that reason — moving
+    # to 0.9.0 would red the lint lane on existing code.
+    #
+    # Bumping is a deliberate, reviewable change: update both files together
+    # and run `python scripts/verify.py --profile fast --only lint,fmt-check`.
+    "ruff==0.16.3",
     # Pinned exact: an unpinned mypy (`mypy>=1.0` + `pip install mypy` in CI) made the
     # type gate non-reproducible — 2 errors slipped onto a branch and only surfaced on a
     # newer mypy (field-eval CI gap). Bump deliberately when adopting a new mypy.

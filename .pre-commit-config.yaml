@@ -1,6 +1,10 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.0
+    # Keep in lockstep with pyproject.toml's `ruff==` pin — CI installs ruff
+    # from [dev], pre-commit installs it from here, and when the two disagree
+    # the same code lints differently depending on which entry point ran.
+    # tests/test_toolchain_pins.py asserts they match.
+    rev: v0.16.3
     hooks:
       - id: ruff
         args: [--fix]
