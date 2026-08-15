@@ -212,7 +212,11 @@ def _merge_l3_compile_context(
 
 
 def _seeded_compile_context(
-    side: InputSpec, evidence: SideEvidence
+    side: InputSpec,
+    evidence: SideEvidence,
+    *,
+    lang: str = "c++",
+    lang_explicit: bool = False,
 ) -> tuple[CompileContext | None, bool, list[Callable[[], None]]]:
     """Fold L3 ``CompileUnit``-derived ABI context onto this side (P0.3).
 
@@ -236,6 +240,14 @@ def _seeded_compile_context(
     True only when a real L3 context was found and folded in, which is what
     the caller uses to decide whether to stamp
     ``AbiSnapshot.parsed_with_build_context``.
+
+    *lang*/*lang_explicit* (``discussion_r3787398644``, Codex review):
+    this side's own requested parse language, forwarded unchanged to
+    :func:`~abicheck.buildsource.l2_seed.derive_l2_compile_context` so a
+    matched compile unit's derived ``-std=`` whose language family
+    conflicts with an explicitly forced language is omitted rather than
+    forwarded into a parse that would reject it (e.g. a matched C compile
+    unit's ``-std=c17`` forwarded into an explicitly-forced C++ parse).
     """
     if not (side.sources or side.build_info) or not evidence.headers:
         return evidence.compile, False, []
@@ -252,6 +264,8 @@ def _seeded_compile_context(
         # -std=c++20) excuses a same-field-only disagreement across matched
         # compile units instead of failing closed on it.
         explicit=evidence.compile,
+        lang=lang,
+        lang_explicit=lang_explicit,
     )
     if derived is None:
         return evidence.compile, False, cleanups
@@ -299,7 +313,7 @@ def resolve_side_snapshot(
         includes, includes_cleanups = _seeded_includes(side, evidence)
         cleanups.extend(includes_cleanups)
         compile_ctx, context_applied, context_cleanups = _seeded_compile_context(
-            side, evidence
+            side, evidence, lang=lang, lang_explicit=lang_explicit
         )
         cleanups.extend(context_cleanups)
         snap = service.resolve_input(

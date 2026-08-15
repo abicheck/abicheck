@@ -36,8 +36,6 @@ Covers, in order:
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -107,6 +105,34 @@ def test_resolve_returns_empty_when_no_unit_references_the_header(
     assert result.context is None
 
 
+def test_resolve_expands_directory_header_input_before_matching(
+    tmp_path: Path,
+) -> None:
+    # A `-H`/InputSpec.headers entry may name a whole directory rather than a
+    # single file (the normal L2 path expands it via
+    # `service_scan.expand_header_inputs` before parsing). Passing the raw,
+    # unexpanded directory here must not silently no-op: it should be
+    # expanded to its real header files first, so a compile unit that
+    # `#include`s one of those files is still matched and the derived context
+    # still applies -- reproducing the reported gap (before the fix, matching
+    # against the directory path itself finds no `#include "headers"`-shaped
+    # text in any TU, so nothing matches and `parsed_with_build_context`
+    # never gets stamped).
+    header_dir = tmp_path / "headers"
+    header_dir.mkdir()
+    header = header_dir / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), standard="c++20")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header_dir])
+    assert result.matched is True
+    assert result.matched_unit_count == 1
+    assert result.context is not None
+    assert "-std=c++20" in result.context.gcc_option_tokens
+
+
 def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> None:
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -153,6 +179,303 @@ def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> No
     assert "-isystem" in tokens and sysinc_dir.as_posix() in tokens
     assert "-fPIC" in tokens
     assert "-fno-omit-frame-pointer" in tokens
+
+
+def test_resolve_derives_c_standard_not_only_cxx(tmp_path: Path) -> None:
+    # Regression: _context_flags previously only emitted -std= when
+    # "++" in cu.standard, silently omitting a plain C standard
+    # (-std=c17/-std=gnu11/...) even though the module claims to apply the
+    # standard generally, C and C++ alike.
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.context is not None
+    assert "-std=c17" in result.context.gcc_option_tokens
+
+
+def test_resolve_omits_conflicting_c_standard_when_cxx_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """Codex review, discussion_r3787398644: the matched compile unit is C
+    with standard="c17", but the caller explicitly requested C++
+    (lang="c++", lang_explicit=True). Forwarding the matched unit's derived
+    -std=c17 into a forced-C++ header invocation makes Clang abort with
+    "invalid argument '-std=c17' not allowed with 'C++'" -- so the
+    conflicting derived standard must be omitted, not forwarded.
+
+    Without the fix, this asserts False (the pre-fix code renders
+    "-std=c17" here unconditionally) -- i.e. this test fails against the
+    pre-fix code and passes after it.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    assert not any(t.startswith("-std=") for t in tokens), tokens
+
+
+def test_resolve_keeps_matching_cxx_standard_when_cxx_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """The non-conflicting counterpart: a matched C++ unit's own -std= is
+    still forwarded when the explicitly forced language agrees with it --
+    forced_language must only ever suppress a genuine conflict, never a
+    standard that already agrees."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="CXX", standard="c++20")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.context is not None
+    assert "-std=c++20" in result.context.gcc_option_tokens
+
+
+def test_resolve_keeps_c_standard_when_language_not_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """lang_explicit=False (the default -- includes an unspecified/auto-detect
+    request) must be a complete no-op: the matched unit's own -std=c17 is
+    still forwarded exactly as before, even if a non-explicit ``lang="c++"``
+    (e.g. Click's own default) happens to be passed alongside it."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=False
+    )
+    assert result.matched is True
+    assert result.context is not None
+    assert "-std=c17" in result.context.gcc_option_tokens
+
+
+def test_resolve_omits_conflicting_cxx_standard_when_c_explicitly_forced(
+    tmp_path: Path,
+) -> None:
+    """The reverse conflict direction: a matched C++ unit's -std=c++20 must
+    be omitted when the caller explicitly forces lang="c" -- symmetric with
+    the C-forced-into-C++ case the review finding names."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\nint f() { return 0; }\n', encoding="utf-8")
+    cu = _cu(source=str(src), directory=str(tmp_path), language="CXX", standard="c++20")
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header], lang="c", lang_explicit=True)
+    assert result.matched is True
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    assert not any(t.startswith("-std=") for t in tokens), tokens
+
+
+# ---------------------------------------------------------------------------
+# 1b. Pure-function unit tests for the language-family helpers
+#     (discussion_r3787398644), mirroring _is_structured_field_flag's own
+#     small-helper-with-direct-tests treatment above.
+# ---------------------------------------------------------------------------
+
+
+def test_derived_standard_language_family() -> None:
+    from abicheck.buildsource.header_compile_context import (
+        _derived_standard_language_family,
+    )
+
+    assert _derived_standard_language_family("c17") == "c"
+    assert _derived_standard_language_family("c11") == "c"
+    assert _derived_standard_language_family("gnu11") == "c"
+    assert _derived_standard_language_family("c++20") == "c++"
+    assert _derived_standard_language_family("gnu++17") == "c++"
+    assert _derived_standard_language_family("") is None
+
+
+def test_forced_language_family() -> None:
+    from abicheck.buildsource.header_compile_context import _forced_language_family
+
+    assert _forced_language_family("c++", lang_explicit=True) == "c++"
+    assert _forced_language_family("cpp", lang_explicit=True) == "c++"
+    assert _forced_language_family("c", lang_explicit=True) == "c"
+    # Not explicit: always a no-op regardless of the lang value.
+    assert _forced_language_family("c++", lang_explicit=False) is None
+    assert _forced_language_family("c", lang_explicit=False) is None
+    # No lang at all: a no-op even if lang_explicit were somehow True.
+    assert _forced_language_family(None, lang_explicit=True) is None
+    assert _forced_language_family("", lang_explicit=True) is None
+
+
+def test_standard_conflicts_with_forced_language() -> None:
+    from abicheck.buildsource.header_compile_context import (
+        _standard_conflicts_with_forced_language,
+    )
+
+    assert _standard_conflicts_with_forced_language("c17", "c++") is True
+    assert _standard_conflicts_with_forced_language("c++20", "c") is True
+    assert _standard_conflicts_with_forced_language("c17", "c") is False
+    assert _standard_conflicts_with_forced_language("c++20", "c++") is False
+    # No forced language: never a conflict, regardless of standard.
+    assert _standard_conflicts_with_forced_language("c17", None) is False
+    # Empty/unrecognized standard: nothing to conflict with.
+    assert _standard_conflicts_with_forced_language("", "c++") is False
+
+
+def test_cu_language_family() -> None:
+    from abicheck.buildsource.header_compile_context import _cu_language_family
+
+    assert _cu_language_family("C") == "c"
+    assert _cu_language_family("CXX") == "c++"
+    assert _cu_language_family("OBJC") is None
+    assert _cu_language_family("") is None
+
+
+def test_resolve_forced_language_resolves_language_ambiguity_before_grouping(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787672845``): two otherwise-
+    identical compile units differing ONLY in ``cu.language`` (one C, one
+    C++, neither carrying an explicit ``-std=``, so
+    ``_standard_conflicts_with_forced_language`` has nothing to compare)
+    used to raise ``HeaderCompileContextAmbiguousError`` even when the
+    caller passed an explicit ``lang="c++"``/``lang_explicit=True`` --
+    because ``_EffectiveContextSignature`` grouped on ``cu.language`` before
+    ``forced_language`` was ever computed. With the fix, the forced
+    language is resolved *first* and narrows the matched-unit set to the
+    C++ unit before signature grouping runs, so no ambiguity error is
+    raised and the resolved context reflects the forced C++ unit."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_c = tmp_path / "a.c"
+    src_c.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_cxx = tmp_path / "b.cpp"
+    src_cxx.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_c = _cu(
+        source=str(src_c),
+        directory=str(tmp_path),
+        language="C",
+        standard="",
+        defines={"SHARED": "1"},
+    )
+    unit_cxx = _cu(
+        source=str(src_cxx),
+        directory=str(tmp_path),
+        language="CXX",
+        standard="",
+        defines={"SHARED": "1"},
+    )
+    ev = BuildEvidence(compile_units=[unit_c, unit_cxx])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.matched_unit_count == 1
+    assert result.context is not None
+    assert "-DSHARED=1" in result.context.gcc_option_tokens
+
+
+def test_resolve_mixed_language_units_without_forced_language_still_ambiguous(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above: WITHOUT an explicit forced language, the
+    identical two-unit (one C, one C++) setup must still correctly raise
+    ``HeaderCompileContextAmbiguousError`` -- the forced-language narrowing
+    must never kick in, and never mask, a genuine language disagreement the
+    caller hasn't resolved."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_c = tmp_path / "a.c"
+    src_c.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_cxx = tmp_path / "b.cpp"
+    src_cxx.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_c = _cu(source=str(src_c), directory=str(tmp_path), language="C", standard="")
+    unit_cxx = _cu(
+        source=str(src_cxx), directory=str(tmp_path), language="CXX", standard=""
+    )
+    ev = BuildEvidence(compile_units=[unit_c, unit_cxx])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_forced_language_falls_back_to_unfiltered_set_when_no_unit_matches(
+    tmp_path: Path,
+) -> None:
+    """When an explicit forced language names something no matched compile
+    unit actually is (here: forcing C++ while every matched unit is C), the
+    full, unfiltered matched set is used instead of narrowing to an empty
+    one -- narrowing to nothing would silently discard real L3 evidence
+    this function has no way to resolve a language mismatch for. A single
+    agreeing C unit still resolves to one context (not an ambiguity, and
+    not "no evidence")."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "a.c"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit = _cu(source=str(src), directory=str(tmp_path), language="C", standard="c17")
+    ev = BuildEvidence(compile_units=[unit])
+    result = resolve_header_compile_context(
+        ev, [header], lang="c++", lang_explicit=True
+    )
+    assert result.matched is True
+    assert result.matched_unit_count == 1
+    assert result.context is not None
+    # The lone C unit's own -std=c17 conflicts with the forced C++ language
+    # (via _standard_conflicts_with_forced_language), so it's still omitted
+    # -- this is the pre-existing round-7 behavior, unaffected by the
+    # fallback-to-unfiltered path itself.
+    assert not any(t.startswith("-std=") for t in result.context.gcc_option_tokens)
+
+
+def test_explicit_pin_of_covers_bare_operand_and_malformed_options_branches() -> None:
+    """Direct unit coverage for ``_ExplicitPin.of``'s less-common branches
+    (bare-operand ``-target``/``-isysroot``/``-D``/``-U`` spellings, and a
+    malformed ``gcc_options`` string) that no existing end-to-end
+    ``resolve_header_compile_context(..., explicit=...)`` case happens to
+    exercise -- these are pre-existing branches from earlier P0.3 review
+    rounds, added here per Codex's coverage note on this PR rather than a
+    fresh finding of this pass."""
+    from abicheck.buildsource.header_compile_context import _ExplicitPin
+
+    # Malformed gcc_options (unbalanced quote) must degrade to "no tokens
+    # from it" rather than raising.
+    pin = _ExplicitPin.of(CompileContext(gcc_options="'unterminated"))
+    assert pin == _ExplicitPin()
+
+    # Bare (space-separated-operand) spellings of -target/-isysroot/-D/-U.
+    pin = _ExplicitPin.of(
+        CompileContext(
+            gcc_option_tokens=(
+                "-target",
+                "aarch64-linux-gnu",
+                "-isysroot",
+                "/sdk",
+                "-D",
+                "FOO=1",
+                "-U",
+                "BAR",
+            )
+        )
+    )
+    assert pin.target_triple is True
+    assert pin.sysroot is True
+    assert "FOO" in pin.defines
+    assert "BAR" in pin.undefines
 
 
 def test_resolve_strips_dangling_target_operand_flag(tmp_path: Path) -> None:
@@ -209,6 +532,59 @@ def test_resolve_strips_dangling_sysroot_operand_flags(tmp_path: Path) -> None:
     assert tokens.count(expected) == 1
     assert "--sysroot" not in tokens
     assert "-isysroot" not in tokens
+
+
+def test_context_flags_excludes_relative_sysroot_duplicate_after_structured_field(
+    tmp_path: Path,
+) -> None:
+    """Reviewer finding: a raw combined-form sysroot survivor in
+    ``abi_relevant_flags`` (e.g. ``--sysroot=sdk``, still relative to the
+    compile unit's own ``directory``) must not be appended after the
+    already-rendered, absolute structured ``--sysroot=<abs>`` token --
+    last-flag-wins compiler semantics would otherwise let the later,
+    uncorrected relative flag silently override the correct one, so the
+    header gets parsed against a sysroot relative to abicheck's own current
+    directory instead of the compile unit's.
+
+    Reproduces the exact ``CompileDbAdapter`` shape from the finding: the
+    structured field resolves to an absolute path while a *differently
+    spelled*, still-relative raw duplicate
+    (``('--sysroot=/.../sdk', '--sysroot=sdk')``) survives independently in
+    ``abi_relevant_flags``, since the adapter's raw-flag extraction and its
+    structured-field derivation are two independent passes over the same
+    argv.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    sdk_dir = tmp_path / "sdk"
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        sysroot=str(sdk_dir),
+        # The raw, uncorrected combined-form survivor a real adapter can
+        # independently capture alongside the resolved, absolute structured
+        # `sysroot` field -- relative to `cu.directory`, not abicheck's cwd.
+        abi_relevant_flags=["--sysroot=sdk", "-fPIC"],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    tokens = result.context.gcc_option_tokens
+    expected = f"--sysroot={sdk_dir.as_posix()}"
+    # Only the correct, absolute structured rendering appears -- the raw
+    # relative duplicate is excluded entirely, not merely deduplicated
+    # against a differently-spelled copy of itself.
+    assert tokens.count(expected) == 1
+    assert "--sysroot=sdk" not in tokens
+    assert "-fPIC" in tokens
+    # And, precisely: the absolute sysroot flag is not immediately
+    # shadowed by anything else naming --sysroot/-isysroot afterward.
+    sysroot_idx = tokens.index(expected)
+    assert not any(
+        t.startswith(("--sysroot", "-isysroot")) for t in tokens[sysroot_idx + 1 :]
+    )
 
 
 def test_resolve_matches_by_bare_filename_include(tmp_path: Path) -> None:
@@ -391,6 +767,321 @@ def test_resolve_explicit_define_resolves_macro_only_disagreement(
     assert result.matched is True
 
 
+def test_resolve_agreeing_structured_fields_with_different_raw_flag_spellings_not_ambiguous(
+    tmp_path: Path,
+) -> None:
+    # Two compile units that resolve to the IDENTICAL structured
+    # target_triple/sysroot, but whose adapter-captured raw
+    # `abi_relevant_flags` spell the flag that produced it differently
+    # (a complete single-token `--target=X` vs. a split two-token `-target`
+    # survivor, likewise for sysroot) must NOT be reported as ambiguous --
+    # the raw spelling carries no information the structured field doesn't
+    # already carry, and this holds with no explicit CompileContext at all
+    # (unlike the Finding-3 tests above, which need an explicit pin to
+    # excuse a genuine structured-field disagreement, this is a spelling-
+    # only non-disagreement the signature must never have raised on in the
+    # first place).
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++20",
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["--target=aarch64-linux-gnu", "--sysroot=/opt/sysroot"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["-target", "-isysroot"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+    assert result.context is not None
+
+
+def test_resolve_target_sdk_version_disagreement_still_raises(tmp_path: Path) -> None:
+    """A bare prefix match on ``-target`` would have masked
+    ``-target-sdk-version=<value>`` too -- a real ``clang -cc1`` flag that is
+    NOT represented by ``target_triple`` at all. Two units disagreeing only
+    on it must still raise, not silently collapse to one signature."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        abi_relevant_flags=["-target-sdk-version=13.0"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        abi_relevant_flags=["-target-sdk-version=14.0"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_exact_target_and_sysroot_spellings_still_masked(
+    tmp_path: Path,
+) -> None:
+    """The precision fix must not regress the exact structured spellings
+    (``-target``/``--target``/``--target=...``/``--sysroot``/
+    ``--sysroot=...``/``-isysroot``) themselves -- those still mask cleanly
+    when the structured field already agrees."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["--target=aarch64-linux-gnu", "--sysroot=/opt/sysroot"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        target_triple="aarch64-linux-gnu",
+        sysroot="/opt/sysroot",
+        abi_relevant_flags=["-target", "--sysroot", "-isysroot"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+
+
+def test_resolve_msvc_std_colon_disagreement_with_unpopulated_standard_field_still_raises(
+    tmp_path: Path,
+) -> None:
+    """Review finding: MSVC ``/std:`` is never parsed into
+    ``CompileUnit.standard`` (unlike GCC/Clang's ``-std=``), so when
+    ``standard`` is empty on both units, the raw ``/std:c++17``/
+    ``/std:c++20`` survivor in ``abi_relevant_flags`` is the ONLY signal
+    recording the language standard at all. Unconditionally masking it (the
+    way ``-std=``/``--target=``/``--sysroot=`` are unconditionally masked)
+    would silently collapse these two genuinely-disagreeing MSVC units into
+    one signature and apply the first unit's standard -- this must instead
+    raise ``HeaderCompileContextAmbiguousError``."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="",
+        abi_relevant_flags=["/std:c++17"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="",
+        abi_relevant_flags=["/std:c++20"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_msvc_std_colon_stays_masked_when_standard_field_populated_and_agrees(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above: once ``CompileUnit.standard`` genuinely
+    captured the language standard for BOTH units (and they agree), a
+    ``/std:`` survivor in ``abi_relevant_flags`` really is redundant and
+    must stay masked -- including when it carries a differing raw spelling
+    from what produced the now-agreeing structured value, mirroring the
+    already-established ``--target=``/``-target`` spelling-divergence
+    tolerance."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["/std:c++20"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["/std:c++20"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+    assert result.context is not None
+
+
+def test_resolve_msvc_std_colon_retained_when_disagreeing_with_populated_standard_field(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787584574``): ``clang-cl`` accepts
+    BOTH GCC/Clang's ``-std=`` and MSVC's ``/std:`` on one command line, and
+    per real ``clang-cl`` semantics the LATER, MSVC-style ``/std:`` wins --
+    confirmed empirically (``clang-cl -std=c++17 /std:c++20`` compiles under
+    C++20, ``-std=`` ignored). ``cu.standard`` here is populated to
+    ``"c++17"`` by the co-present ``-std=c++17`` token (mirroring
+    ``build_context.py``'s unconditional ``-std=`` capture), NOT by the
+    disagreeing ``/std:c++20`` survivor also present in
+    ``abi_relevant_flags`` -- so ``bool(cu.standard)`` alone (the previous,
+    now-wrong gate) would have wrongly treated ``/std:c++20`` as redundant
+    with the structured field and masked it away. The fix instead compares
+    the ``/std:`` token's own value against ``cu.standard`` and, finding
+    them disagree, retains ``/std:c++20`` in the rendered context -- which
+    is what a real ``clang-cl`` invocation actually honors."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "a.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        standard="c++17",
+        abi_relevant_flags=["-std=c++17", "/std:c++20"],
+    )
+    ev = BuildEvidence(compile_units=[unit])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.context is not None
+    tokens = list(result.context.gcc_option_tokens)
+    assert "/std:c++20" in tokens
+    # -std=c++17 (rendered from the structured field) must come *before*
+    # /std:c++20 in the final token list, so real compiler last-flag-wins
+    # semantics let /std:c++20 -- what clang-cl actually honors -- win.
+    assert tokens.index("-std=c++17") < tokens.index("/std:c++20")
+
+
+def test_resolve_msvc_std_colon_disagreement_raises_even_with_standard_field_populated(
+    tmp_path: Path,
+) -> None:
+    """Companion to the above: since ``/std:`` now stays in the per-unit
+    ambiguity signature whenever it disagrees with ``cu.standard`` (rather
+    than being unconditionally masked once ``cu.standard`` is merely
+    non-empty), two compile units both carrying a populated ``cu.standard``
+    from a co-present ``-std=`` -- but disagreeing ``/std:`` survivors --
+    must still raise ``HeaderCompileContextAmbiguousError``, not silently
+    collapse into one signature."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++17",
+        abi_relevant_flags=["-std=c++17", "/std:c++20"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++17",
+        abi_relevant_flags=["-std=c++17", "/std:c++23"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
+
+
+def test_resolve_msvc_std_colon_retained_when_values_agree_on_clang_cl(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787672845``): even when the
+    ``/std:<value>`` token AGREES with the structured ``cu.standard`` field,
+    the two spellings are still NOT interchangeable on a clang-cl-dialect
+    compile unit. ``clang-cl /?`` documents ``/std:<value>`` as "Set
+    language version," while a bare ``-std=c++20`` with no ``/std:`` at all
+    produces "warning: unknown argument ignored" and compiles at clang-cl's
+    *default* dialect, not C++20 -- so dropping ``/std:c++20`` here (the
+    pre-fix behavior, since the two values genuinely agree) would silently
+    change the dialect L2 actually replays under. A unit detected as
+    MSVC/clang-cl-dialect (via its own ``argv``) must retain ``/std:c++20``
+    regardless of value agreement."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "a.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["-std=c++20", "/std:c++20"],
+        argv=["clang-cl", "-std=c++20", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[unit])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.context is not None
+    tokens = list(result.context.gcc_option_tokens)
+    assert "/std:c++20" in tokens
+    # The structurally-rendered -std=c++20 comes first; /std:c++20 -- what
+    # clang-cl actually honors -- must come after it (last-flag-wins).
+    assert tokens.index("-std=c++20") < tokens.index("/std:c++20")
+
+
+def test_resolve_msvc_std_colon_agreement_across_units_stays_unambiguous_and_retained(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above at multi-unit scope: two clang-cl units
+    that fully agree (including on ``/std:``) must still resolve to a
+    single, non-ambiguous context, and the retained ``/std:c++20`` survives
+    into the rendered command for that single context."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["-std=c++20", "/std:c++20"],
+        argv=["clang-cl", "-std=c++20", "/std:c++20", "-c", str(src_a)],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        standard="c++20",
+        abi_relevant_flags=["-std=c++20", "/std:c++20"],
+        argv=["clang-cl", "-std=c++20", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.matched is True
+    assert result.matched_unit_count == 2
+    assert result.context is not None
+    assert "/std:c++20" in list(result.context.gcc_option_tokens)
+
+
 def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
     h1 = tmp_path / "a.h"
     h1.write_text("struct A {};\n", encoding="utf-8")
@@ -469,6 +1160,35 @@ def test_derive_l2_compile_context_from_compile_db(tmp_path: Path) -> None:
         assert "-DFOO=1" in ctx.gcc_option_tokens
         assert "-fPIC" in ctx.gcc_option_tokens
         assert "-fno-omit-frame-pointer" in ctx.gcc_option_tokens
+    finally:
+        from abicheck.buildsource.inline import _run_cleanups
+
+        _run_cleanups(cleanups)
+
+
+def test_derive_l2_compile_context_omits_conflicting_c_standard_when_cxx_forced(
+    tmp_path: Path,
+) -> None:
+    """discussion_r3787398644, threaded down to derive_l2_compile_context:
+    a real compile_commands.json matching to a C compile unit
+    (standard=c17, via the .c source extension), with the caller explicitly
+    forcing lang="c++" -- the derived -std=c17 must not be forwarded."""
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    _write_compile_db(tmp_path, src, ["-std=c17"])
+
+    ctx, cleanups = derive_l2_compile_context(
+        [header], None, tmp_path, lang="c++", lang_explicit=True
+    )
+    try:
+        assert ctx is not None
+        assert not any(t.startswith("-std=") for t in ctx.gcc_option_tokens), (
+            ctx.gcc_option_tokens
+        )
     finally:
         from abicheck.buildsource.inline import _run_cleanups
 
@@ -589,6 +1309,67 @@ def test_derive_l2_compile_context_swallows_non_ambiguous_errors(
     monkeypatch.setattr(l2_seed, "collect_inline_pack", _boom)
     ctx, cleanups = l2_seed.derive_l2_compile_context([Path("x.h")], None, tmp_path)
     assert (ctx, cleanups) == (None, [])
+
+
+def _write_corrupt_pack(pack_dir: Path) -> None:
+    """A directory ``is_pack_dir()`` recognizes as a (corrupt) pack: a
+    ``manifest.json`` present but unparseable, matching ``is_pack_dir``'s own
+    documented "present but unparseable: keep treating it as a (corrupt) pack"
+    contract -- ``BuildSourcePack.load()`` then raises decoding it."""
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "manifest.json").write_text("{not valid json", encoding="utf-8")
+
+
+def test_derive_l2_include_dirs_corrupt_sources_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    """P2 regression: a ``--sources`` pack recognized by ``is_pack_dir`` but
+    failing to load (corrupt ``manifest.json``) must degrade this best-effort
+    seeding to ``([], [])``, not raise -- ``BuildSourcePack.load()`` used to
+    run inside this function's own protected section pre-refactor; the shared
+    ``_resolve_l2_seed_pack_args`` extraction moved it ahead of the ``try``
+    by mistake (Codex review)."""
+    from abicheck.buildsource.l2_seed import derive_l2_include_dirs
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    assert derive_l2_include_dirs(None, pack_dir) == ([], [])
+
+
+def test_derive_l2_include_dirs_corrupt_build_info_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    """Same as above via ``--build-info`` naming the corrupt pack directly."""
+    from abicheck.buildsource.l2_seed import derive_l2_include_dirs
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    assert derive_l2_include_dirs(pack_dir, None) == ([], [])
+
+
+def test_derive_l2_compile_context_corrupt_sources_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    """Same P2 regression as above, for ``derive_l2_compile_context``."""
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    assert derive_l2_compile_context([header], None, pack_dir) == (None, [])
+
+
+def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
+    tmp_path: Path,
+) -> None:
+    from abicheck.buildsource.l2_seed import derive_l2_compile_context
+
+    pack_dir = tmp_path / "pack"
+    _write_corrupt_pack(pack_dir)
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    assert derive_l2_compile_context([header], pack_dir, None) == (None, [])
 
 
 # ---------------------------------------------------------------------------
@@ -736,6 +1517,66 @@ def test_resolve_side_snapshot_stamps_parsed_with_build_context(
     assert snap.parsed_with_build_context is True
 
 
+def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """discussion_r3787398644, threaded all the way through resolve_side_
+    snapshot (the exact caller ``service_dump_pipeline.run_dump_request``
+    uses): a matched C compile unit (standard=c17) with the side's own
+    ``lang="c++", lang_explicit=True`` must not carry -std=c17 into the
+    compile context handed to ``service.resolve_input``.
+
+    Without the fix, ``compile_ctx.gcc_option_tokens`` contains
+    "-std=c17" here -- exactly the token a real forced-C++ Clang/CastXML
+    invocation rejects (see the module-level docstring in
+    ``header_compile_context._context_flags`` for the confirmed repro).
+    """
+    from abicheck import service_input_resolution as sir
+    from abicheck.api_types import InputSpec
+    from abicheck.model import AbiSnapshot
+    from abicheck.service_compare_evidence import SideEvidence
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.c"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    _write_compile_db(tmp_path, src, ["-std=c17"])
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    captured: dict[str, object] = {}
+
+    def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
+        captured.update(kwargs)
+        return AbiSnapshot(library="lib", version="1.0", from_headers=True)
+
+    import abicheck.service as service_mod
+
+    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+
+    side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    snap = sir.resolve_side_snapshot(
+        side,
+        evidence,
+        lang="c++",
+        lang_explicit=True,
+        header_backend="clang",
+        fmt="elf",
+        public_headers=[],
+        public_header_dirs=[],
+    )
+    compile_ctx = captured["compile"]
+    assert isinstance(compile_ctx, CompileContext)
+    assert not any(t.startswith("-std=") for t in compile_ctx.gcc_option_tokens), (
+        compile_ctx.gcc_option_tokens
+    )
+    assert snap.parsed_with_build_context is True
+
+
 def test_resolve_side_snapshot_does_not_stamp_when_unmatched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -837,84 +1678,25 @@ def test_resolve_side_snapshot_propagates_ambiguous_error(
 # 4. End-to-end (real clang): macro-gated field, before/after, drift finding
 # ---------------------------------------------------------------------------
 
-_HEADER = """
-#pragma once
-struct Widget {
-    int x;
-#ifdef WIDGET_EXTRA
-    int y;
-#endif
-};
-int touch(Widget* w);
-"""
-
-_SOURCE = """
-#include "widget.h"
-int touch(Widget* w) { return w->x; }
-"""
+# ``widget_lib`` (the real g++-compiled shared library + compile_commands.json
+# fixture the suite below depends on) lives in ``tests/conftest.py`` -- shared,
+# real-compiler fixtures belong there rather than inline in a test file (see
+# AGENTS.md's test-quality conventions), and pytest auto-discovers it as a
+# regular fixture with no import needed here.
 
 
-def _have(tool: str) -> bool:
-    return shutil.which(tool) is not None
-
-
-@pytest.fixture
-def widget_lib(tmp_path: Path) -> tuple[Path, Path, Path]:
-    """Build a real .so (compiled *with* WIDGET_EXTRA, so its real ABI has the
-    extra field) plus its public header and a compile_commands.json recording
-    that same real -DWIDGET_EXTRA=1 (+ two ABI-relevant flags)."""
-    if not (_have("clang") and _have("g++")):
-        pytest.skip("clang and g++ are required for this P0.3 integration test")
-    header = tmp_path / "widget.h"
-    header.write_text(_HEADER, encoding="utf-8")
-    src = tmp_path / "widget.cpp"
-    src.write_text(_SOURCE, encoding="utf-8")
-    so = tmp_path / "libwidget.so"
-    subprocess.run(
-        [
-            "g++",
-            "-shared",
-            "-fPIC",
-            "-fno-omit-frame-pointer",
-            "-DWIDGET_EXTRA=1",
-            "-o",
-            str(so),
-            str(src),
-            f"-I{tmp_path}",
-        ],
-        check=True,
-        capture_output=True,
+def pytestmark_e2e(func: object) -> object:
+    """Composed marker for the real-clang/g++ end-to-end suite below: needs a
+    real toolchain (``@pytest.mark.integration`` -- excluded from the
+    default fast lane, which runs ``-m "not integration and ..."``, per
+    AGENTS.md) and is ELF/Linux-scoped.
+    """
+    skip = pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="P0.3 end-to-end test is ELF/Linux-scoped (mirrors "
+        "test_clang_header_backend_integration.py)",
     )
-    (tmp_path / "compile_commands.json").write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(tmp_path),
-                    "file": str(src),
-                    "arguments": [
-                        "g++",
-                        "-c",
-                        str(src),
-                        "-o",
-                        "widget.o",
-                        "-DWIDGET_EXTRA=1",
-                        "-fPIC",
-                        "-fno-omit-frame-pointer",
-                        "-std=c++17",
-                    ],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    return so, header, tmp_path
-
-
-pytestmark_e2e = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="P0.3 end-to-end test is ELF/Linux-scoped (mirrors "
-    "test_clang_header_backend_integration.py)",
-)
+    return pytest.mark.integration(skip(func))
 
 
 def _widget_fields(snap: object) -> list[str]:
@@ -965,6 +1747,40 @@ def test_e2e_with_l3_evidence_context_is_genuinely_applied(
     assert snap.from_headers is True
     assert snap.parsed_with_build_context is True
     assert _widget_fields(snap) == ["x", "y"]  # fixed: matches the real ABI
+
+
+@pytestmark_e2e
+def test_e2e_forced_cxx_dump_succeeds_against_c_compile_unit_std(
+    c_widget_lib: tuple[Path, Path, Path],
+) -> None:
+    """End-to-end reproduction of ``discussion_r3787398644``'s own repro:
+    ``run_dump_request`` with a real ``gcc -std=c17`` compile database
+    matched against the requested header(s), and the caller explicitly
+    forcing a C++ parse (``DumpRequest``'s own default ``lang="c++"``, plus
+    ``lang_explicit=True``).
+
+    Before the fix, this raises: the matched C compile unit's own
+    ``-std=c17`` is forwarded verbatim into the forced-C++ Clang header
+    invocation, and Clang aborts with "invalid argument '-std=c17' not
+    allowed with 'C++'" -- reproduced directly against this fixture without
+    the fix applied. After the fix, the conflicting derived standard is
+    omitted and the dump succeeds, with the real L3 context (target
+    triple/defines/etc.) still genuinely applied.
+    """
+    from abicheck import service
+    from abicheck.api_types import DumpRequest, InputSpec
+
+    so, header, src_dir = c_widget_lib
+    req = DumpRequest(
+        input=InputSpec(path=so, headers=(header,), version="1.0", sources=src_dir),
+        frontend="clang",
+        lang_explicit=True,  # lang defaults to "c++" -- the finding's own repro
+    )
+    snap = service.run_dump_request(req)
+    assert snap.from_headers is True
+    assert snap.parsed_with_build_context is True
+    widget = next(t for t in snap.types if t.name == "Widget")
+    assert [f.name for f in widget.fields] == ["x", "y"]
 
 
 @pytestmark_e2e
