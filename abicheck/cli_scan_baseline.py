@@ -344,7 +344,7 @@ def _add_severity_blocking_compatible_findings(
     ``_baseline_summary`` omits ``diff.compatible`` from ``findings`` because
     under the legacy scheme those findings never gate -- so naming them would
     be noise. Severity inverts that for two categories: with
-    ``--severity-addition error`` a compatible diff exits 1, and the report
+    ``severity.addition: error`` a compatible diff exits 1, and the report
     then named the blocking *category* and count while giving no symbol, kind,
     or description for the finding that actually failed the scan (Codex
     review).
@@ -417,8 +417,7 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
     """The compatible findings whose own category is one severity blamed.
 
     Slicing all of ``diff.compatible`` spent the report's budget on the
-    *non-blocking* compatible category too -- with ``--severity-addition
-    error`` a quality finding is as compatible as an addition, but only the
+    *non-blocking* compatible category too -- with ``severity.addition: error`` a quality finding is as compatible as an addition, but only the
     addition failed the run (Codex review). Classified through
     ``classify_change_object`` -- the same ``classify_effective_change`` the
     gate itself routed through -- so the two cannot disagree about which
@@ -543,7 +542,7 @@ def _baseline_finding_dicts(
     canonical identity ``reporter._change_to_dict`` emits, so the two are
     joinable rather than merely both present) and the four contract fields
     close the rest. The contract keys appear only when a finding actually
-    carries a decision -- i.e. under ``scan --against --contract-evaluation``
+    carries a decision -- i.e. under ``scan --against --contract``
     -- exactly as ``reporter._add_contract_evaluation_fields`` gates them,
     so an ordinary scan's summary is byte-identical to before.
 
@@ -619,7 +618,7 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
 
     Includes ADR-049 D1's ``compatibility_evaluation_status`` /
     ``compatibility_decision`` pair, and for the same reason as everything
-    else here: a `scan --against --contract-evaluation` row that carried
+    else here: a `scan --against --contract` row that carried
     relevance but not the decision could not be compared field-by-field with
     the `compare` finding for the same fact, which is exactly the
     cross-command divergence this projection exists to prevent (Codex
@@ -926,7 +925,7 @@ def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
 
     Installs this front end's own resolved configuration over the narrower
     object ``checker.compare`` reconstructs from its arguments, then emits the
-    whole persisted context -- which ``scan --against --contract-evaluation``
+    whole persisted context -- which ``scan --against --contract``
     computed and then dropped, so the receipt its per-finding decisions rest on
     was unobservable. Same encoder ``reporter._add_contract_context`` uses, so
     the block is byte-for-byte the one ``compare`` writes and
@@ -1123,7 +1122,7 @@ def _run_baseline_compare(
     # ADR-049 Phase 5: install this front end's own resolved configuration
     # over the narrower object `checker.compare` reconstructs from its
     # arguments, then emit the whole persisted context -- which `scan
-    # --against --contract-evaluation` computed and then dropped, so the
+    # --against --contract` computed and then dropped, so the
     # receipt its per-finding decisions rest on was unobservable. Same
     # encoder `reporter._add_contract_context` uses, so the block is
     # byte-for-byte the one `compare` writes and `replay_original_decisions`
@@ -1145,7 +1144,7 @@ def _run_baseline_compare(
 
         # §6.4 cross-command parity, and the reason this block is not
         # optional: under the severity scheme a *compatible* diff can exit
-        # non-zero (`--severity-addition error` on an additions-only diff
+        # non-zero (`severity.addition: error` on an additions-only diff
         # exits 1), and without the gate block the report said `COMPATIBLE`
         # with exit 1 and no stated cause -- indistinguishable from ADR-049's
         # orthogonal contract-coverage 1 (Codex review). Built by

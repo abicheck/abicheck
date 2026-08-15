@@ -344,5 +344,5 @@ def _equivalent_public_roots_for_unit(
 
 
 def clang_cache_identity_extra(clang_bin: str, compiler_binary: str | None) -> str:
-    """Fold the resolved --gcc-path override into the D8 cache key (Codex review)."""
+    """Fold the resolved --compiler override into the D8 cache key (Codex review)."""
     return f"{clang_bin}|{compiler_binary or ''}"

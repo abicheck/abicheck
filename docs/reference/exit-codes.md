@@ -18,7 +18,7 @@ generated: false
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
-Under `--contract-evaluation`, each finding's contract relevance is classified
+Under `--contract`, each finding's contract relevance is classified
 **before** compatibility policy runs, and policy then scores only the
 `EVALUATED` findings — those whose relevance is `IN_CONTRACT` or
 `NOT_APPLICABLE`. A `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN` or
@@ -39,13 +39,13 @@ independently-orthogonal axis below (missing evidence contributing its own
 exit `1`), not from relevance itself; that's what stops missing evidence
 from being the cheapest way to pass.
 
-**Without `--contract-evaluation` no finding carries a relevance**, so every
+**Without `--contract` no finding carries a relevance**, so every
 finding is scored exactly as before and every exit code below is unchanged.
 
 ## Contract-coverage contribution (ADR-049)
 
 `compare` and `scan --against` carry an **orthogonal contract-coverage axis**
-under `--contract-evaluation`. Complete coverage of the mode-selected evidence
+under `--contract`. Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
 identity-incomplete **required domain evidence** is recorded as a
 `CoverageFailure` in the run-level `contract_coverage_failures` ledger and
@@ -70,7 +70,7 @@ library`'s exit `8` is checked ahead of the coverage-only fallback, so a
 removed library's own signal is never masked by an unrelated coverage gap
 (and a real verdict-based `2`/`4` still wins outright over both, unchanged).
 
-**Without `--contract-evaluation` there is no selected domain, so the
+**Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.
 
 Ordinary change suppressions cannot clear a provider/domain coverage failure —
@@ -118,7 +118,7 @@ any finding, or the severity gate's own contribution.
 tracked follow-up for extending this axis to the release fan-out).
 
 **Without `--require-complete-analysis` every pre-existing invocation's exit
-code is unchanged**, exactly as `--contract-evaluation`'s own coverage axis
+code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 
 ## Commands removed in the ADR-043 CLI reset
@@ -181,8 +181,9 @@ The highest applicable code wins. For example, if both `abi_breaking=error` and
 | `strict` | error | error | error | error |
 | `info-only` | info | info | info | info |
 
-Per-category overrides (`--severity-abi-breaking`, `--severity-potential-breaking`,
-`--severity-quality-issues`, `--severity-addition`) take precedence over the preset.
+Per-category overrides — `.abicheck.yml`'s `severity:` block
+(`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`) — take
+precedence over the preset.
 
 ### CI gate patterns
 
@@ -194,8 +195,9 @@ ret=$?
 [ $ret -eq 2 ] && echo "API_BREAK — source-level break" && exit 1
 echo "OK (NO_CHANGE or COMPATIBLE)"
 
-# Block unexpected API expansion (severity-aware)
-abicheck compare old.json new.json --severity-addition error
+# Block unexpected API expansion (severity-aware; `severity.addition: error`
+# in .abicheck.yml, which compare discovers from the working directory)
+abicheck compare old.json new.json
 ret=$?
 [ $ret -eq 1 ] && echo "ADDITIONS — unexpected API expansion" && exit 1
 [ $ret -eq 4 ] && echo "BREAKING — release blocked" && exit 1
@@ -299,7 +301,7 @@ Under the `severity` scheme the JSON report's `diff` block also carries a
 `blocking`/`blocking_categories` shape `compare`'s own report uses (one
 shared builder, so the two are comparable field by field), added in
 `scan_schema_version` 1.9. It is what makes a non-zero exit on an otherwise
-*compatible* diff self-explanatory: `--severity-addition error` on an
+*compatible* diff self-explanatory: `severity.addition: error` on an
 additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
 the cause, distinguishing it from the orthogonal contract-coverage `1`
 above. The default **text** output states the same fact in its
@@ -391,7 +393,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract-evaluation`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
+| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -418,13 +420,11 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
   for a `project plan`-driven workflow instead of a separate manifest
   projection step); each check's own `check_id` becomes the expected target
   id, matching what `check-target` writes as every report's `target_id`.
-- `--expect <ids>` (repeatable / comma-separated), with optional `--optional
-  <ids>` — an inline alternative to a manifest file.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
   **no required-target coverage gate** (a missing target is simply not
   counted, never a coverage failure — the `contract_coverage` axis is
   unaffected and still applies to whatever *is* present). Required to run
-  without a manifest/`--expect`: with no declared target set the gate cannot
+  without `--manifest`/`--run-plan`: with no declared target set the gate cannot
   tell a missing required target from an intentionally absent one, so a bare
   `aggregate reports/` is a usage error (exit `64`), not a silent pass.
 
@@ -437,7 +437,7 @@ gate but not in required coverage. The `--format json` output is versioned
 for the current value) and carries the four axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
 — the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
-present even when no target used `--contract-evaluation` (an empty
+present even when no target used `--contract` (an empty
 `incomplete_targets` list, not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the
@@ -628,11 +628,11 @@ none of these rows — it always exits `0`/`1`/`64`; see
 
 \* Severity exit codes depend on the configuration, and the range covers the
 whole configuration space — **including demotion of a real break**. With
-`--severity-addition error`, additions exit `1`; with `--severity-preset
+`severity.addition: error`, additions exit `1`; with `--severity-preset
 info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
 comparison included. The default preset leaves `potential_breaking` at
 `warning`, so an `API_BREAK` exits `0` unless `--severity-preset strict` (or
-`--severity-potential-breaking error`) raises it to `2`. Read the report's
+`severity.potential_breaking: error`) raises it to `2`. Read the report's
 own `severity` gate block — `exit_code`/`blocking`/`blocking_categories` —
 rather than inferring the cause from the code.
 
@@ -649,7 +649,7 @@ json` if your pipeline needs to distinguish them. Under a resolved
 `severity` scheme (`scan --against` with any `--severity-*`/
 `--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
 the `compare` exit (severity) column on the same `*` terms, in **both**
-directions: `--severity-addition error` exits `1` on an additions-only diff,
+directions: `severity.addition: error` exits `1` on an additions-only diff,
 and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
 ["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 

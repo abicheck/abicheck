@@ -192,8 +192,6 @@ def test_header_graph_reproduces_documented_finding(
                 str(lib),
                 "--header",
                 str(case_dir / header),
-                "--public-header",
-                str(case_dir / header),
                 "-o",
                 str(out),
             ],

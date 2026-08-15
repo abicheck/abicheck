@@ -27,7 +27,7 @@ knobs interact.
 flowchart LR
     B["Baseline<br/>(snapshot / library)"] --> D["Detect changes<br/>(compare)"]
     N["New build"] --> D
-    D --> CR["1 · Contract relevance<br/>(--contract-evaluation, opt-in)"]
+    D --> CR["1 · Contract relevance<br/>(--contract, opt-in)"]
     CR --> P["2 · Policy classifies<br/>EVALUATED findings"]
     P --> S["3 · Suppressions<br/>waive findings"]
     S --> V["4 · Verdict + severity<br/>categories"]
@@ -49,7 +49,7 @@ the stages below (the numbers match the diagram above), which is the
 normative order `contract_pipeline.py` fixes (ADR-049 D9) for the ordinary,
 unscoped path:
 
-1. **Classify contract relevance — opt-in, `--contract-evaluation`.** Only
+1. **Classify contract relevance — opt-in, `--contract`.** Only
    when this flag is set: each finding is classified against the selected
    [contract mode](../reference/compatibility-evaluation-config.md)
    (`public`/`exports`/`all`, or the legacy `--scope-public-headers` alias)
@@ -59,12 +59,12 @@ unscoped path:
    including `PROVEN_OUT_OF_CONTRACT` — are `NOT_EVALUATED`: their
    `compatibility_decision` is JSON `null` and they contribute `0` to the
    gate, but they stay listed in the report with the reason code that says
-   why. Without `--contract-evaluation`, every finding is `EVALUATED` and
+   why. Without `--contract`, every finding is `EVALUATED` and
    this stage is a no-op — every exit code is unchanged from before this
    feature existed.
 2. **Classify (policy).** The active [policy profile](policies.md)
    (`--policy strict_abi|sdk_vendor|plugin_abi` or a custom
-   `--policy-file`) maps each *evaluated* change kind to its impact — the
+   `--policy`) maps each *evaluated* change kind to its impact — the
    same change can be `API_BREAK` under `strict_abi` but `COMPATIBLE` under
    `sdk_vendor`. A `NOT_EVALUATED` finding is not scored by policy at all.
 3. **Waive (suppressions).** [Suppression rules](suppressions.md)
@@ -85,11 +85,11 @@ unscoped path:
    run has been *told* what the contract is (a concrete consumer's imports,
    or an explicit entrypoint list — ADR-049 §4.3), and that outranks
    whatever the snapshot-derived relevance in step 1 concluded on its own.
-   For a finding already carrying a relevance (i.e. `--contract-evaluation`
+   For a finding already carrying a relevance (i.e. `--contract`
    was also set), a match against that explicit scope *promotes* it to
    `IN_CONTRACT` — never demotes — and the affected verdict/gate is then
    recomputed, monotonically: promotion can only raise it. Without
-   `--contract-evaluation`, findings carry no relevance to promote, so this
+   `--contract`, findings carry no relevance to promote, so this
    step has nothing to do.
 6. **Exit.** The exit code comes from one of the two schemes below, folded
    with the orthogonal contract-coverage contribution (next section) —
@@ -97,7 +97,7 @@ unscoped path:
    `--required-symbol` run.
 
 **Contract coverage runs alongside, not inside, this chain.** Under
-`--contract-evaluation`, if the selected domain's required evidence is
+`--contract`, if the selected domain's required evidence is
 incomplete (missing, partial, stale, or contradictory), `compare`/
 `scan --against` contribute an additional, independent exit `1` — folded
 with `max` against whatever the six stages above produced, so it can raise a
@@ -157,7 +157,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
   policy classification; a `NOT_EVALUATED` finding (out-of-contract or
   unresolved) never gets a `ChangeKind` verdict at all, so downgrading a kind
   in a custom policy has no effect on a finding contract relevance already
-  excluded. This stage is opt-in (`--contract-evaluation`) and off by
+  excluded. This stage is opt-in (`--contract`) and off by
   default — every other bullet below applies unconditionally.
 - **Policy → severity.** Severity categorizes changes *after* the policy has
   classified them. If `sdk_vendor` downgrades a kind from `potential_breaking`
@@ -172,8 +172,8 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 - **Suppressions → verdict, severity, and exit code.** Suppressed changes are
   removed before scoring, so they affect *all* downstream outputs: the
   verdict, the severity category counts, and therefore the exit code — under
-  either scheme. Guard the waiver list itself with `--strict-suppressions`
-  (fail on unused/expired rules) and `--require-justification`.
+  either scheme. Guard the waiver list itself with `suppression.strict: true`
+  (fail on unused/expired rules) and `suppression.require_justification: true`.
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see
@@ -183,9 +183,15 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 
 **Breakage-only gate** — report everything, fail only on binary ABI breaks:
 
+```yaml
+# .abicheck.yml
+severity:
+  preset: info-only
+  abi_breaking: error
+```
+
 ```bash
-abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --severity-preset info-only --severity-abi-breaking error
+abicheck compare baseline.json build/libfoo.so --header new=include/
 ```
 
 **Fail on source-level breaks too** (the legacy default behaviour, pinned
@@ -197,23 +203,34 @@ abicheck compare baseline.json build/libfoo.so --header new=include/ \
 ```
 
 **Strict API-surface governance** — also fail when new public API appears.
-Note that any `--severity-*` flag switches to the severity scheme, where
+Note that any severity setting switches to the severity scheme, where
 `potential_breaking` (which covers `API_BREAK`) defaults to `warning` — raise
 it to `error` too, or a source-level break that failed under the legacy
 scheme would now exit `0`:
 
+```yaml
+# .abicheck.yml
+severity:
+  potential_breaking: error
+  addition: error
+```
+
 ```bash
-abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --severity-potential-breaking error \
-  --severity-addition error
+abicheck compare baseline.json build/libfoo.so --header new=include/
 ```
 
 **Vendor-friendly gate with audited waivers**:
 
+```yaml
+# .abicheck.yml
+suppression:
+  strict: true
+  require_justification: true
+```
+
 ```bash
 abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --policy sdk_vendor --suppress suppressions.yaml \
-  --strict-suppressions --require-justification
+  --policy sdk_vendor --suppress suppressions.yaml
 ```
 
 More recipes: [Choose Your Workflow → How should CI behave](../start/choose-your-workflow.md)

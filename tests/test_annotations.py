@@ -524,7 +524,7 @@ class TestEmitGitHubStepSummary:
         """Codex review on #549: `_maybe_emit_annotations` (cli.py) makes the
         inline GitHub annotations severity-aware, but still called
         `emit_github_step_summary(result)` without `severity_config` — so
-        e.g. `--severity-addition error` could fail the annotations/exit code
+        e.g. a `severity.addition: error` config could fail the annotations/exit code
         while the step summary rendered the legacy compatible report with no
         severity gate section, contradicting the actual gate on the same
         PR."""

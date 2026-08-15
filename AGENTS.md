@@ -21,7 +21,7 @@ they are.
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 396 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 395 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -156,7 +156,7 @@ Core pipeline (in order of data flow):
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
    - `dumper_scoping.py` — dependency exclusion, on by default (`dump`/
-     `compare --include-dependencies` opts out, both sharing one
+     `compare --include-system-declarations` opts out, both sharing one
      `cli_options.include_dependencies_option` decorator): drops
      declarations whose own defining header is a toolchain/system header
      (`/usr/include`, MSVC `VC/Tools`, the Xcode/macOS SDK, ...) so a full
@@ -234,7 +234,7 @@ Core pipeline (in order of data flow):
    - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's per-field
      front-end wirings: `resolve_legacy_contract_mode` (`contract.mode` from
      the real `--scope-public-headers`/`--no-` flag),
-     `resolve_internal_namespaces` (from a real `--policy-file`),
+     `resolve_internal_namespaces` (from a real `--policy` document),
      `resolve_selected_packs`/`resolve_policy_pack_overrides`/
      `resolve_pack_field_assignments` (real pack manifests → the three
      `*.packs` fields, `policy.overrides`, and — through an explicit
@@ -273,7 +273,7 @@ Core pipeline (in order of data flow):
      (`policy.overrides`, `surface.internal_namespaces`) and the resolved
      compare config (`gate.exit_code_scheme`, `gate.severity.*`). Ordering
      matters: the config is resolved from the *explicitly given*
-     `--policy-file` and only then folded, since folding first would present
+     `--policy` document and only then folded, since folding first would present
      a pack's override to the resolver as an explicit one.
      `UNAPPLIED_PACK_FIELDS` is the enforcement half — a routable field with
      no engine consumer (`contract.overlays`, `assurance.require_evidence`)
@@ -282,7 +282,7 @@ Core pipeline (in order of data flow):
      listed, never neither. `contract.unresolved` left that list in Phase 7,
      when the coverage exit gave it a consumer. Three more routes are
      rejected for adjacent reasons: a field whose consumer only runs under
-     `--contract-evaluation` when that flag is absent
+     contract evaluation when no `--contract` was given
      (`CONTRACT_EVALUATION_ONLY_FIELDS`), a value the runtime does not act on
      (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
      empty — each is a pack recorded as active configuration that changes
@@ -298,10 +298,12 @@ Core pipeline (in order of data flow):
      resolved that early
    - `contract_evaluation.py` — ADR-049's contract-relevance evaluator: one
      `ContractEvaluationDecision` (relevance + stable reason code +
-     assurance) per already-emitted finding. Computed only under `compare
-     --contract-evaluation`. Which evidence domain it judges against is
-     selected by `compare --contract public|exports|all` (ADR-049 Phase 6);
-     omitted, the domain still follows `--scope-public-headers`/
+     assurance) per already-emitted finding. Computed only when `compare`
+     is given `--contract`, which both activates the evaluation and selects
+     the evidence domain it judges against: `public|exports|all` name one
+     (ADR-049 Phase 6), while `auto` activates without naming one and lets
+     D7's lower tiers decide. Under `auto` the domain follows
+     `--scope-public-headers`/
      `--no-scope-public-headers`, and an explicit value outranks that legacy
      alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
      (D7 precedence). **No longer advisory** — see `contract_pipeline.py`
@@ -340,7 +342,7 @@ Core pipeline (in order of data flow):
      `checker._compute_verdict_for` and `severity.compute_exit_code`/
      `compute_gate_decision` share so the verdict and the gate cannot exclude
      different sets. An **unstamped** finding is evaluated, which is what
-     keeps every run without `--contract-evaluation` bit-for-bit unchanged
+     keeps every run without `--contract` bit-for-bit unchanged
    - `contract_evidence_collect.py` — ADR-049 Phase 3's *observed provider
      ledger* (plan §4.1) and the raw type graph Phase 4 persists. Produces
      one `EvidenceSearchRecord` per (provider, side) — `public_header`,
@@ -366,7 +368,7 @@ Core pipeline (in order of data flow):
      one place suppression is applied — cannot see one;
      `suppression_reaches_coverage_failures()` is the executable *proof* of
      that, not its enforcement. `coverage_exit_contribution()` states §6.1's
-     `0`/`1`. Emitted by `reporter.py` under `--contract-evaluation`
+     `0`/`1`. Emitted by `reporter.py` under `--contract`
      (report schema 2.26), `[]` rather than omitted when a domain closed
    - `contract_coverage_exit.py` — ADR-049 Phase 7: the step that turns the
      ledger's `0`/`1` into a real exit code. Deliberately the *only* place
@@ -384,7 +386,7 @@ Core pipeline (in order of data flow):
      not hiding it. `reporter.py` emits *this* function's answer as
      `contract_coverage_exit_contribution`, so the number a user reads is
      the one that gated them. `0` whenever no contract context exists: a run
-     without `--contract-evaluation` has no selected domain to be short of
+     without `--contract` has no selected domain to be short of
      evidence for, which is what keeps every pre-existing invocation's exit
      code unchanged
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
@@ -504,7 +506,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 396 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 395 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 
@@ -827,16 +829,16 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Exit codes
 
-- `compare` command (legacy, without `--severity-*` flags): 0 = compatible, 2 = source break, 4 = ABI break
-- `compare` command (severity-aware, with any `--severity-*` flag): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--severity-*`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
+- `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
+- `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
-  `scan --against` alike:** under `--contract-evaluation`, a selected
-  `--contract` domain whose required evidence is incomplete contributes
+  `scan --against` alike:** under `--contract`, the selected
+  domain whose required evidence is incomplete contributes
   **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
   `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's
   compatibility decision or gate contribution. Without
-  `--contract-evaluation` the contribution is always `0`, so every
+  `--contract` the contribution is always `0`, so every
   pre-existing invocation is unchanged. Every consumer that publishes an
   exit status folds it and explains it — the two CLIs and the composite
   Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
@@ -1245,7 +1247,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   still dropping what's only reachable transitively through that type's
   own internals (`std::string::_Alloc_hider` and the like stay excluded).
   **Still open, deliberately not attempted in the same change:** the
-  chosen dependency-scoping mode (scoped vs. `--include-dependencies`) is
+  chosen dependency-scoping mode (scoped vs. `--include-system-declarations`) is
   not part of the `ExtractionContract` `scope_fingerprint`
   (`comparability.py`'s `SCOPE_FIELD_KEYS`), so two snapshots extracted
   under different scoping modes can still compare as "comparable" even
@@ -1258,7 +1260,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   `test_comparability_gate.py`'s existing superset-growth assertions), not
   a drive-by extension of the direct-reference fix above. Until then, the
   safe authoritative flow for a compiler/stdlib-sensitive comparison is
-  either `--include-dependencies` on both `dump` invocations, or comparing
+  either `--include-system-declarations` on both `dump` invocations, or comparing
   two default-scoped persisted snapshots against each other rather than
   mixing a persisted baseline JSON with a live-binary operand.
 

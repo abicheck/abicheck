@@ -1726,7 +1726,7 @@ def _make_source_extractor(
 
     # pick_compiler_binary() only consults compiler_binary for CL-vs-GNU mode
     # detection, not clang_bin (the binary to invoke) -- forward an explicit
-    # --gcc-path override (e.g. dpcpp-cl) so mode detection sees it too,
+    # --compiler override (e.g. dpcpp-cl) so mode detection sees it too,
     # instead of silently falling back to each CompileUnit's own argv[0]
     # (Codex review). Skip it for the generic "clang" default so
     # auto-detection from a mixed-toolchain compile database still works.

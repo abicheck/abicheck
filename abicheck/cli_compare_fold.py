@@ -74,7 +74,7 @@ def _fold_scoped_compat_into_text(
     scoped-only fold-in unfiltered would let a `--show-only` run re-surface a
     finding it explicitly excluded (Codex review, mirrors the identical
     ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
-    deliberately always-unfiltered, e.g. the ``--secondary-format`` render,
+    deliberately always-unfiltered, e.g. the ``--write`` render,
     which ignores the primary format's own ``--show-only``.
 
     *report_mode* ``"root-cause"`` skips the markdown/text
@@ -306,7 +306,7 @@ class _ScopedFold:
         # published `gate_contribution: 4` on a run that exited 0 (Codex
         # review, reproduced with a removal outside the required-symbol
         # contract). Only entries that already carry the field are
-        # touched, so a run without --contract-evaluation is unaffected.
+        # touched, so a run without --contract is unaffected.
         # Called here, *before* the scoped-only/missing-contract fold-in
         # below: those are the scoped gate's own findings and only the
         # ones tracked in `scoped_relevant_finding_ids` would survive it.
@@ -339,8 +339,8 @@ class _ScopedFold:
                 # gate, so this is not one of the always-0 ledger cases.
                 severity_config=severity_config,
                 # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
-                # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
-                # is proven by the real consumer's own import table/execution,
+                # CONSUMER_REQUIRED_SYMBOL_REMOVED) is proven by the real
+                # consumer's own import table,
                 # not by an artifact-level library diff -- evidence_status_for_change
                 # would otherwise report "artifact_proven" purely from the kind's
                 # BREAKING/RISK category, same as appcompat_to_json's own
@@ -800,6 +800,94 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     if selectors:
         return selectors
     return f"rule#{index}"
+
+
+#: The formats a ``--use-cases`` attribution actually reaches a reader
+#: through. Two mechanisms, one set: the JSON paths emit ``use_case_impact``
+#: straight off the ``DiffResult`` (``reporter._add_use_case_impact``), and
+#: the three text-shaped formats get the section folded in by
+#: :func:`_fold_use_case_impact_into_text` below. sarif/junit/html render
+#: from the same attributed result and carry none of it. ``text`` is here
+#: because the fold accepts it, not because ``compare --format`` offers it.
+_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
+
+
+def format_carries_use_case_impact(fmt: str | None, *, stat: bool = False) -> bool:
+    """Would a report rendered as *fmt* carry the use-case attribution?
+
+    Asked once per rendered output, so ``compare``'s preflight can reject
+    ``--use-cases`` on the real condition -- *no* output carries it -- rather
+    than on the primary format alone. A ``--format html --write json=PATH``
+    run renders the secondary from the same attributed result, at
+    ``report_mode="full"`` and ``stat=False``, so the attribution does reach
+    the caller and rejecting it was arbitrary (Codex review); the primary's
+    own error message had already been proposing that exact arrangement.
+
+    Note the quantifier is the caller's, and it is the opposite of
+    :func:`contract_coverage_exit.report_carries_the_ledger`'s: that one asks
+    whether *every* output states the ledger, because it is deciding whether
+    a stderr notice would be a redundant second copy. This one feeds an
+    *any* -- one output carrying the block is enough for the run to be
+    meaningful.
+
+    ``stat`` is a property of the primary render only: the secondary always
+    renders the full report, so its caller leaves the default.
+    """
+    if fmt is None or stat:
+        return False
+    return fmt in _USE_CASE_IMPACT_BEARING_FORMATS
+
+
+def _fold_use_case_impact_into_text(
+    text: str, fmt: str, result: Any, show_only: str | None = None
+) -> str:
+    """Fold ``compare --use-cases``'s attribution into the rendered report.
+
+    Markdown/text/review only. The JSON paths already carry the block --
+    ``reporter._add_use_case_impact`` emits it straight off
+    ``DiffResult.use_case_impact`` -- so folding it again here would write
+    the key twice; the structured formats (sarif, junit, html) are left
+    untouched, the same scope boundary
+    :func:`_fold_suppression_audit_into_text` uses.
+
+    *show_only* projects the attribution onto the findings the report above
+    it actually lists, so the section cannot resurface a change the filter
+    removed (Codex review) -- the same thing
+    :func:`_fold_scoped_compat_into_text` does for its own scoped-only
+    changes, and the same projection the JSON paths apply.
+    """
+    from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
+
+    impact = getattr(result, "use_case_impact", None)
+    if not isinstance(impact, UseCaseImpact) or fmt not in (
+        "markdown",
+        "text",
+        "review",
+    ):
+        return text
+    if show_only:
+        from .reporter import apply_show_only
+        from .root_cause_evidence import scoped_only_changes_filtered
+
+        # Every argument the JSON paths pass, so a policy-sensitive token
+        # ("breaking") filters identically in both renders rather than
+        # against the default policy here. Scoped-only findings are appended
+        # through the shared filter for the same reason the JSON paths' own
+        # `_displayed_with_scoped_only` does: this fold runs alongside
+        # `_fold_scoped_compat_into_text`, which puts them in the findings
+        # list above, so projecting onto `result.changes` alone would drop
+        # every attribution that landed on one.
+        impact = impact.restricted_to(
+            apply_show_only(
+                list(result.changes),
+                show_only,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+            )
+            + scoped_only_changes_filtered(result, show_only)
+        )
+    return "\n".join([text, *render_use_case_impact_lines(impact)])
 
 
 def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:

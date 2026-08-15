@@ -25,39 +25,40 @@ Evaluation Config](../reference/compatibility-evaluation-config.md).
 ## Turning it on
 
 ```bash
-abicheck compare old.so new.so -H include/ --contract-evaluation
+abicheck compare old.so new.so -H include/ \
+  --contract public   # or: exports | all
 ```
 
-With no `--contract`, the domain follows the legacy
-`--scope-public-headers`/`--no-scope-public-headers` flag (default: public
-headers). To select a domain explicitly:
+Naming a domain is the whole request: `--contract` both turns the evaluator
+on and says which evidence it judges against. Omit the flag and nothing about
+the run changes.
+
+There used to be a separate `--contract-evaluation` switch, with `--contract`
+merely selecting a domain for it. That left two ways to ask for one thing, so
+the switch is gone. Its domain-less form — evaluate, but let the domain be
+chosen by `--scope-public-headers`/`--no-scope-public-headers` or the project's
+`.abicheck.yml` — is now `--contract auto`:
 
 ```bash
-abicheck compare old.so new.so -H include/ \
-  --contract-evaluation --contract public   # or: exports | all
+abicheck compare old.so new.so -H include/ --contract auto
 ```
 
-`--contract public`/`exports`/`all` **implies** `--contract-evaluation` if it
-isn't already given — naming a domain is by itself enough to ask for a
-decision against it, so `--contract public` alone is equivalent to
-`--contract-evaluation --contract public`. (`--contract-evaluation` alone,
-with no `--contract`, still means the older domain-less behavior above —
-naming a domain is what turns the evaluator on when it wasn't already; it
-never turns it off.)
+Use `auto` when the domain is a project-level decision you have already
+recorded elsewhere, and a named domain when this run is asking a specific
+question.
 
-`scan --against` accepts the identical pair of flags, with the same
-implication:
+`scan --against` accepts the same flag, with the same meaning:
 
 ```bash
 abicheck scan build/libfoo.so --against baseline.json \
-  --contract-evaluation --contract exports
+  --contract exports
 ```
 
 ## Reading the result
 
 ```bash
 abicheck compare old.so new.so -H include/ \
-  --contract-evaluation --format json -o report.json
+  --contract public --format json -o report.json
 ```
 
 Two things to check in the JSON:
@@ -89,27 +90,27 @@ assignments:
 
 ```bash
 abicheck compare old.so new.so -H include/ \
-  --contract-evaluation --contract exports \
+  --contract exports \
   --pack packs/accept-unresolved.yml
 ```
 
 This zeroes the contract-coverage exit contribution *only* — the failures
 stay listed in `contract_coverage_failures`, and it changes nothing about
 per-finding compatibility decisions. `contract.unresolved` requires
-`--contract-evaluation`; setting it in a pack without the flag is a usage
+`--contract`; setting it in a pack without the flag is a usage
 error naming the field and the reason.
 
 ## Consumer/entrypoint evidence outranks header/export inference
 
 `compare --used-by APP` or `--required-symbol(s)` layered on top of
-`--contract-evaluation` promotes a finding to `IN_CONTRACT` whenever it
+`--contract` promotes a finding to `IN_CONTRACT` whenever it
 matches the app's actual imports or the plugin host's required entrypoints
 — stronger evidence than anything a header/export scan alone can infer,
 per ADR-049 §4.3:
 
 ```bash
 abicheck compare old.so new.so --used-by ./myapp \
-  --contract-evaluation --contract public
+  --contract public
 ```
 
 This promotion only ever raises a finding toward `IN_CONTRACT` — it never
@@ -126,7 +127,7 @@ for the deeper "why", not just "whether."
   run: |
     abicheck compare baseline.json build/libfoo.so \
       -H include/ \
-      --contract-evaluation --contract public \
+      --contract public \
       --pack packs/accept-unresolved.yml \
       --severity-preset default \
       --format json -o report.json
@@ -140,8 +141,14 @@ summary usually wants to say which one fired.
 
 ## Common mistakes
 
-- **Expecting `--contract` alone to do anything.** It needs
-  `--contract-evaluation`.
+- **Expecting the Python API to infer evaluation from the mode.** The CLI
+  does — naming a domain is the whole request — but `CompareRequest`/
+  `ScanRequest` still require `contract_evaluation=True` *alongside*
+  `contract_mode`, and reject a mode given without it. They also have no
+  `auto`: pass `contract_mode=None` to leave the domain unstated.
+- **Passing `--contract` to `scan` without `--against`.** There is no
+  comparison to evaluate, so it is a usage error (exit `64`) rather than a
+  silently ignored flag.
 - **Suppressing to fix a coverage gap.** `--suppress` cannot reach a
   `CoverageFailure` — give the evaluator the missing evidence (headers,
   build info) or accept the gap explicitly with `contract.unresolved: warn`.

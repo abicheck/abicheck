@@ -219,7 +219,7 @@ def report_carries_the_ledger(
     """Does *every* output this invocation renders already state the ledger?
 
     The condition for staying quiet, and it has to hold for all of them:
-    `--format json --secondary-format markdown` writes a second report that
+    `--format json --write markdown=abi.md` writes a second report that
     carries none of the ledger, so answering from the primary alone let the
     markdown say the change is safe while the process exited 1 (Codex
     review). Getting this wrong in the permissive direction is exactly what

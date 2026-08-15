@@ -55,11 +55,12 @@ scenarios:
     persona: CI engineer
     narrative: >
       A team is mid-migration and wants ABI breaks reported but NOT
-      build-failing for one release. Passing a --severity-* flag switches to the
-      severity-aware exit scheme; downgrading abi_breaking to "warning" yields
-      exit 0 while the default gate still fails with exit 4.
+      build-failing for one release. Any severity setting switches to the
+      severity-aware exit scheme; downgrading abi_breaking to "warning" in
+      .abicheck.yml yields exit 0 while the default gate still fails with
+      exit 4.
     flow:
-      - abicheck compare old.json new.json --severity-abi-breaking warning
+      - abicheck compare old.json new.json --config warn.abicheck.yml
     expected:
       exit_code: 0
       default_exit_code: 4
@@ -105,12 +106,12 @@ scenarios:
     persona: CI maintainer running a depth matrix
     narrative: >
       A CI matrix often builds one command template and varies only --depth,
-      leaving --headers, --sources, and --compile-db on every rung. The binary
+      leaving --headers, --sources, and --build-info on every rung. The binary
       rung must remain an L0/L1 artifact scan: it should ignore those deeper
       inputs, skip the source pattern scan and L3 collection, and return the same
       binary verdict quickly.
     flow:
-      - abicheck scan --binary new.json --baseline old.json -H include/ --sources src/ --compile-db compile_commands.json --depth binary --format json
+      - abicheck scan --binary new.json --baseline old.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
     expected:
       exit_code: 4
       verdict: BREAKING

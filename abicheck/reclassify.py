@@ -78,7 +78,7 @@ the sanctioned way around that per CLAUDE.md "What NOT to do" -- extending
 
 **Known gap, deliberately not closed here (Codex review, P2):**
 ``contract_pipeline.ContractEvaluationStage.build_context()`` -- the ADR-049
-Phase 4 persisted-context assembly under ``compare --contract-evaluation`` --
+Phase 4 persisted-context assembly under ``compare --contract`` --
 folds ``policy_file.overrides`` into the receipt's
 ``CompatibilityPolicyConfig`` but does not yet do the same for
 ``policy_file.reclassify``. A finding's ``compatibility_decision`` is

@@ -6,7 +6,7 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Dump-time dependency scoping (``dump --include-dependencies`` opt-out).
+"""Dump-time dependency scoping (``dump --include-system-declarations`` opt-out).
 
 A header-AST dump serializes every declaration the parser saw, including the
 entire transitive dependency surface pulled in by ``#include`` (every
@@ -26,9 +26,9 @@ dump's own ``-H``/``--header`` roots (or lives under one) — see
 library analyzed via its real system-prefixed install path
 (``-H /usr/include/mylib/api.h``) must not have its own headers misread as
 toolchain headers (Codex review). This applies **by default**, without
-requiring a ``--public-header``/``--public-header-dir`` set:
+requiring a public-header set:
 ``AbiSnapshot.source_header`` is populated unconditionally by
-``provenance.apply_provenance``. ``dump --include-dependencies`` opts out
+``provenance.apply_provenance``. ``dump --include-system-declarations`` opts out
 and writes the full, unscoped snapshot (the old default).
 
 Because this scopes by header origin rather than ABI visibility, it is a
@@ -65,7 +65,7 @@ don't want a dump of the standard dependency"'s implementation internals,
 not a bug, but it does mean `dump`'s default output alone is still not a
 toolchain/stdlib ABI-drift detector for *transitively*-reached dependency
 internals across compiler or C++ standard library upgrades; pass
-``--include-dependencies`` on both sides of a comparison if that detection
+``--include-system-declarations`` on both sides of a comparison if that detection
 is needed.
 
 **Known limitation (investigated, deliberately not fixed here):** this
@@ -233,8 +233,8 @@ def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
     for forwarding into :func:`scope_snapshot_excluding_dependencies`'s
     ``header_roots`` -- not just ``roots`` (Codex review).
     ``public_header_paths``/``public_header_dirs`` (the manifest's own
-    ADR-015 provenance-input equivalent of ``--public-header``/
-    ``--public-header-dir``) and any per-translation-unit include directory
+    ADR-015 provenance-input equivalent of the public-header set) and any
+    per-translation-unit include directory
     explicitly marked ``project_owned: true`` are just as much "the dump's
     actual root set" as ``roots`` -- a declaration under one of them must
     not be misclassified as a dependency just because those paths happen to
@@ -1126,7 +1126,7 @@ def scope_snapshot_excluding_dependencies(
 
     The result is a lossy artifact: a later ``compare`` against it can only
     see what this filter kept, so comparing a scoped snapshot against one
-    dumped with ``--include-dependencies`` is not meaningful — scope both
+    dumped with ``--include-system-declarations`` is not meaningful — scope both
     sides of a comparison the same way.
     """
     if not snap.from_headers:

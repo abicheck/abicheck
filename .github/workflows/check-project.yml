@@ -196,9 +196,6 @@ on:
       build-config:
         type: string
         default: ''
-      verify-runtime:
-        type: boolean
-        default: false
       policy:
         type: string
         default: 'strict_abi'
@@ -211,9 +208,6 @@ on:
       severity-preset:
         type: string
         default: 'default'
-      severity-addition:
-        type: string
-        default: ''
       extra-args:
         type: string
         default: ''
@@ -925,7 +919,7 @@ jobs:
           # ast-frontend above is: a bundle cell's operand is the
           # bundle-staging *directory*, and cli_resolve.py's
           # `_reject_compile_context_for_set_inputs` hard-rejects
-          # --gcc-path/--gcc-options for a directory/package compare (the
+          # gcc-path/gcc-options for a directory/package compare (the
           # per-library release fan-out never threads a single-pair L2
           # compile context to each pair). Before this line, a profile that
           # set compile.binding for its target cells would have that same
@@ -962,12 +956,10 @@ jobs:
           build-info: ${{ inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
-          verify-runtime: ${{ inputs.verify-runtime }}
           policy: ${{ inputs.policy }}
           policy-file: ${{ inputs.policy-file }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
-          severity-addition: ${{ inputs.severity-addition }}
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}

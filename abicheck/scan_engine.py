@@ -94,7 +94,7 @@ def _preprocessor_scan_clang_bin(compile_context: CompileContext | None) -> str:
     (the shared resolver also used for L4 source-ABI replay's ``clang_bin``,
     see ``embed_build_source``'s callers) — see that function's docstring for
     the override rules and rationale. ``compile_context is None`` (no
-    ``--gcc-path``/``--gcc-prefix`` given at all) short-circuits to the
+    ``--compiler``/``--compiler-prefix`` given at all) short-circuits to the
     ``clang++`` fallback directly, same as passing two ``None``s would.
     """
     from .dumper_clang import resolve_source_frontend_clang_bin
@@ -252,7 +252,7 @@ def _build_new_snapshot(
         build_info=build_info,
         build_config=build_config,
         defer_cleanup=None,
-        # -I dirs the user gave through --gcc-options/--gcc-option (carried on the
+        # -I dirs the user gave through --compiler-option (carried on the
         # CompileContext) are explicit too — pass them so the seed stays a no-op
         # and the user's include search precedence is preserved (Codex review).
         gcc_options=compile_context.gcc_options if compile_context else None,
@@ -286,7 +286,7 @@ def _build_new_snapshot(
             # *include_dependencies* itself is derived from the baseline's
             # own explicit tag when one is given (see run_scan_core's
             # _scan_candidate_include_dependencies) so the inverse, explicit
-            # `dump --include-dependencies` baseline workflow isn't
+            # `dump --include-system-declarations` baseline workflow isn't
             # hard-broken the other way (Codex review, fresh evidence).
             include_dependencies=include_dependencies,
         )
@@ -315,11 +315,11 @@ def _build_new_snapshot(
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             # L4 source-ABI replay must invoke the same compiler the scan's own
-            # L2 header AST was pointed at (--gcc-path/--gcc-prefix), not the
+            # L2 header AST was pointed at (--compiler/--compiler-prefix), not the
             # embed_build_source default of a bare "clang" — mirrors
             # _preprocessor_scan_clang_bin's identical S2 fix above; without
             # this a scan compiled with a non-default toolchain (e.g.
-            # --gcc-path icpx) silently replayed L4 through a plain "clang"
+            # --compiler icpx) silently replayed L4 through a plain "clang"
             # that may not even understand the real build's flags.
             clang_bin=resolve_source_frontend_clang_bin(
                 compile_context.gcc_path if compile_context else None,
@@ -351,10 +351,10 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     -- correct for the single most common case: no baseline, a native-binary
     baseline (which now resolves filtered too), or a JSON baseline that is
     itself filtered/untagged. Only a JSON baseline explicitly dumped with
-    ``dump --include-dependencies`` (tagged ``"full"``) needs the candidate
+    ``dump --include-system-declarations`` (tagged ``"full"``) needs the candidate
     to go unfiltered too, else the comparability gate hard-fails that
     legitimate, if less common, inverse workflow (Codex review, fresh
-    evidence) -- and ``scan`` has no ``--include-dependencies`` flag of its
+    evidence) -- and ``scan`` has no ``--include-system-declarations`` flag of its
     own to let a caller request it directly. A cheap, best-effort JSON peek
     (not a full ``resolve_input``/dump) so this never triggers expensive
     work merely to decide a default; any failure to read/parse falls back to
@@ -394,7 +394,7 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     # not JSON text, so both the tail-byte-scan trick below and a plain-text
     # `json.load` would silently fail to find `dependency_scope` regardless
     # of its real value, always falling through to the `False` (filtered)
-    # default even for a baseline explicitly dumped `--include-dependencies`
+    # default even for a baseline explicitly dumped `--include-system-declarations`
     # (tagged `"full"`). Decode through the canonical snapshot I/O path
     # first for a compressed file -- skipping the tail-scan heuristic
     # entirely (it has no equivalent for compressed content: the *decoded*
@@ -802,7 +802,7 @@ def _check_scan_evidence_contract(
         advisories.append(
             f"requested depth '{eff_depth_enum.value}' (source-method "
             f"{resolved.value}) needs an L3 compile database, but none was found — "
-            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
+            "L3/L4/L5 were skipped. Provide one with --build-info (a "
             "compile_commands.json or build dir), or a trusted --config whose "
             "build.query this pinned depth auto-enables."
         )
@@ -908,7 +908,7 @@ def run_scan_core(
     ``_run_baseline_compare`` when a ``baseline`` is given — closing the
     asymmetry documented in AGENTS.md's "Known gaps": `scan --against` used
     to compute its exit code from the verdict alone (``legacy_exit_code``)
-    regardless of any ``--severity-*``/``.abicheck.yml`` ``severity:``
+    regardless of any ``--severity-preset``/``.abicheck.yml`` ``severity:``
     setting, unlike `compare`. ``exit_code_scheme == "severity"`` there now
     uses ``severity.compute_exit_code`` the same way `compare` does; the
     default ``"legacy"`` reproduces the prior, unchanged behavior exactly.
@@ -949,8 +949,10 @@ def run_scan_core(
     _record_stage("poi", _stage)
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
-    # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
-    # L3 source; both feed embed_build_source's build_info input. The POI path set
+    # --build-info is the one build-context operand now (the separate
+    # --compile-db flag it subsumed is gone): a build dir, a
+    # compile_commands.json, or a pack, all feeding embed_build_source's
+    # build_info input. The POI path set
     # focuses the replay — but ONLY when a real diff seed was supplied
     # (``seeded``). Without --since/--changed-path the scan is broad by contract
     # (the report says so), so passing pattern-trigger POIs as the changed set

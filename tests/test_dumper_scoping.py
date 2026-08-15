@@ -6,7 +6,7 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Unit tests for dump-time dependency scoping (``dump --include-dependencies``)."""
+"""Unit tests for dump-time dependency scoping (``dump --include-system-declarations``)."""
 
 from __future__ import annotations
 

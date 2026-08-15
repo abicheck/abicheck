@@ -37,7 +37,7 @@ g++ -shared -fPIC -g v1.cpp -o libnet_v1.so
 g++ -shared -fPIC -g v2.cpp -o libnet_v2.so
 abicheck compare libnet_v1.so libnet_v2.so \
   --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --gcc-path "$(command -v clang)"
+  --ast-frontend clang --compiler "$(command -v clang)"
 ```
 
 ## Expected abicheck finding

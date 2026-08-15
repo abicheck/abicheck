@@ -41,12 +41,12 @@ abicheck dump libfoo.so -H api.h -o snap.json
 
 # Opt out to get the old, unfiltered full dump (every declaration the
 # header AST parser saw, including the full dependency surface):
-abicheck dump libfoo.so -H api.h --include-dependencies -o snap.json
+abicheck dump libfoo.so -H api.h --include-system-declarations -o snap.json
 ```
 
 Since this changes what a scoped snapshot can see, compare two snapshots
 dumped the same way — don't mix a default-scoped snapshot with one dumped
-via `--include-dependencies`.
+via `--include-system-declarations`.
 
 ## Cross-compilation
 
@@ -72,11 +72,9 @@ abicheck compare libv1.so libv2.so -H include/foo.h \
   --compiler-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
 ```
 
-Available compile-context flags (on `dump`, `compare`, and `scan`; each also
-has a hidden, still-functional `--gcc-*` alias kept for backward
-compatibility — `--gcc-path`/`--gcc-prefix`/`--gcc-option` — not shown in
-`--help`/`--help-all` since `--compiler`/`--compiler-prefix`/
-`--compiler-option` supersede them):
+Available compile-context flags (on `dump`, `compare`, and `scan`; the older
+`--gcc-path`/`--gcc-prefix`/`--gcc-option` spellings are removed, not
+aliased — use the `--compiler*` names below):
 - `--compiler` — path to the cross-compiler binary. For the `clang`
   `--ast-frontend`, this is honored only when the binary is clang-family
   (basename contains `clang`, or is a known non-`clang`-named clang-based
@@ -94,7 +92,7 @@ compatibility — `--gcc-path`/`--gcc-prefix`/`--gcc-option` — not shown in
   the headers; `hybrid` runs both castxml and clang and merges them
 
 On `compare` these apply to **both** old and new sides; the per-side
-`--old-ast-frontend` / `--new-ast-frontend` overrides still win for the frontend
+`--ast-frontend old=` / `--ast-frontend new=` overrides still win for the frontend
 when one release parses on a different toolchain than the other.
 
 Rather than repeating these flags on every invocation, set them once in the
@@ -144,12 +142,15 @@ target triple, sysroot, and ABI-affecting options like `-fvisibility=hidden`.
 
 | Flag | Description |
 |------|-------------|
-| `-p <dir>` / `--build-dir <dir>` | Build directory containing `compile_commands.json` |
-| `--compile-db <file>` | Explicit path to `compile_commands.json` (alias for `-p`) |
+| `--build-info <path>` | A build directory containing `compile_commands.json`, the database file itself, or a pre-captured pack |
 | `--compile-db-filter <glob>` | Filter entries by source file pattern (e.g., `src/libfoo/**`) |
 
-When both `-p` and explicit flags (`--compiler-option`, `--sysroot`) are
-specified, explicit flags take precedence.
+`--build-info` is the one flag that takes this operand: with `-H`/`--header`
+also given, the database it resolves to parameterizes the header parse with
+the build's exact flags, and it is the L3 build source either way.
+
+When both `--build-info` and explicit flags (`--compiler-option`,
+`--sysroot`) are specified, explicit flags take precedence.
 
 ```bash
 # Override a single flag while inheriting the rest from compile_commands.json

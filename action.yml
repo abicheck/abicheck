@@ -110,8 +110,11 @@ inputs:
       Directory whose headers are treated as public for provenance
       classification (repeatable, space-separated) — establishes the
       public/internal boundary so leakage/RTTI/exported-vs-public
-      cross-checks run instead of skipping. dump and scan modes only
-      (`--public-header-dir` on the CLI); compare has no equivalent flag.
+      cross-checks run instead of skipping. scan mode forwards it as
+      `--public-header-dir`; dump mode forwards it as one more `-H/--header`
+      root, which is where `dump` reads declaration provenance from (a
+      directory entry tags everything under it public). compare has no
+      equivalent flag.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
@@ -203,14 +206,16 @@ inputs:
     required: false
   gcc-path:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary. Applies to dump,
+      Path to GCC/G++ (or clang) cross-compiler binary (maps to the CLI's
+      --compiler). Applies to dump,
       scan, and compare mode with a single-pair (non-directory, non-package)
       operand — a directory/package compare rejects it with an error (same
       restriction as ast-frontend above).
     required: false
   gcc-prefix:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Applies to dump,
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu- (maps to the CLI's
+      --compiler-prefix). Applies to dump,
       scan, and compare mode with a single-pair (non-directory, non-package)
       operand — a directory/package compare rejects it with an error (same
       restriction as ast-frontend above).
@@ -218,7 +223,7 @@ inputs:
   gcc-options:
     description: >
       Extra compiler flags passed through to the header frontend (maps to
-      the CLI's --compiler-option, CLI audit PR 5/5). A single-line value is
+      the CLI's --compiler-option). A single-line value is
       split on whitespace into separate flags, same as before; a multi-line
       (YAML block scalar) value keeps each line as one flag verbatim,
       spaces included — use that form for a flag whose value contains a
@@ -277,16 +282,6 @@ inputs:
       with required-symbol/required-symbols (the CLI rejects both being
       set). compare mode only.
     required: false
-  verify-runtime:
-    description: >
-      With used-by: actually run each consumer binary once against the old
-      library and once against the new one (LD_BIND_NOW=1), recording a
-      runtime-load-failure finding when the dynamic linker reports an
-      undefined symbol against the new library after loading cleanly
-      against the old one. Linux-only; a no-op elsewhere. Ignored without
-      used-by. compare mode only.
-    required: false
-    default: 'false'
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym
@@ -329,9 +324,11 @@ inputs:
     required: false
   compile-db:
     description: >
-      Explicit path to a compile_commands.json (scan mode; also compare
-      mode's new side when build-info is unset). For dump mode this is
-      folded into build-info. Use when the compile DB is not under sources.
+      Explicit path to a compile_commands.json, when it is not under
+      `sources`. Folded into `--build-info` for every mode (scan, dump, and
+      compare mode's new side) — `--build-info` already accepts a build dir,
+      a compile_commands.json, or a pre-captured pack, so it is the one flag
+      that takes this operand.
     required: false
   build-config:
     description: >
@@ -541,7 +538,12 @@ inputs:
     required: false
     default: 'strict_abi'
   policy-file:
-    description: 'Path to a YAML policy file with per-kind (overrides:) or selector-scoped (reclassify:) verdict re-classification.'
+    description: >
+      Path to a YAML policy document with per-kind (overrides:) or
+      selector-scoped (reclassify:) verdict re-classification, or the name of
+      a packaged built-in one (e.g. `security`). Forwarded as `--policy`,
+      which takes a profile name or a document; setting this outranks
+      `policy` for the run, exactly as the removed `--policy-file` flag did.
     required: false
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes.'
@@ -608,12 +610,6 @@ inputs:
       Severity preset: 'default', 'strict', or 'info-only'.
       Controls exit codes and report labels. Only applies to compare mode.
     required: false
-  severity-addition:
-    description: >
-      Severity for new public API additions: 'error', 'warning', or 'info'.
-      Set to 'error' to fail the step when additions are detected.
-      Only applies to compare mode.
-    required: false
   jobs:
     description: >
       Number of parallel library comparisons for compare mode when
@@ -676,9 +672,10 @@ outputs:
   verdict:
     description: >
       ABI verdict. For compare (single-pair or directory/package operands):
-      COMPATIBLE, SEVERITY_ERROR (with --severity-* via extra-args, or when
-      --severity-addition=error detects new public API additions),
-      COVERAGE_INCOMPLETE (with --contract-evaluation via extra-args, when
+      COMPATIBLE, SEVERITY_ERROR (with the severity-preset input, or when a
+      `severity.addition: error` key in the repository's .abicheck.yml
+      detects new public API additions),
+      COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
       compatibility verdict unchanged), API_BREAK, BREAKING,
@@ -686,7 +683,7 @@ outputs:
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
-      `--severity-*` or `--exit-code-scheme` setting, when an error-level
+      severity or `--exit-code-scheme` setting, when an error-level
       category has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
@@ -779,7 +776,6 @@ runs:
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_USED_BY: ${{ inputs.used-by }}
-        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
@@ -930,7 +926,6 @@ runs:
         INPUT_OLD_ROOT: ${{ inputs.old-root }}
         INPUT_NEW_ROOT: ${{ inputs.new-root }}
         INPUT_USED_BY: ${{ inputs.used-by }}
-        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_AGAINST: ${{ inputs.against }}
@@ -939,7 +934,6 @@ runs:
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
-        INPUT_SEVERITY_ADDITION: ${{ inputs.severity-addition }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}

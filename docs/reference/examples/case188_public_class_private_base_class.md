@@ -17,7 +17,7 @@
 
 `demo::PublicHandle` gains a second base class, `detail::InternalBase` —
 declared only in an internal, non-public header (`detail_private.h`, never
-passed as `--public-header`) — alongside its existing public `Base`. Adding
+named as a public header) — alongside its existing public `Base`. Adding
 a base class shifts every member declared after it: `PublicHandle::x` moves
 from offset +4 to +8, and the object grows from 8 to 12 bytes. Any binary
 that allocates, copies, or accesses fields of `PublicHandle` is broken
@@ -127,7 +127,7 @@ inheritance for internal implementation details.
 
 ## Ground-truth provenance
 
-**Known kind gap:** public_api_internal_dependency_added needs `--public-header` set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not set --public-header in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via type_base_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
+**Known kind gap:** public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via type_base_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 

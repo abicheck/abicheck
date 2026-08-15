@@ -78,7 +78,7 @@ class TestCompileFlagsSlicing:
 
     def test_user_supplied_earlier_xclang_is_preserved(self):
         # Codex review: a user's own "-Xclang <arg>" passed through
-        # --gcc-options/--gcc-option sits BEFORE abicheck's own appended
+        # --compiler-option sits BEFORE abicheck's own appended
         # "-Xclang -ast-dump=json" tail. The first bare "-Xclang" in the
         # command is the user's, not ours -- stopping there would drop the
         # user's own flag/value plus every later shared flag (system

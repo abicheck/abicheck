@@ -357,7 +357,7 @@ class TestCastxmlNotFound:
 
 
 def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
-    """G21.5: repeatable --gcc-option tokens reach castxml as literal argv
+    """G21.5: repeatable --compiler-option tokens reach castxml as literal argv
     elements (no shlex split), so a flag value with whitespace survives intact
     and identically across platforms — the cross-platform-correct design that
     the string-quoting approach could not provide on Windows."""
@@ -377,14 +377,14 @@ def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
     )
     # --gcc-options still whitespace-splits into separate flags.
     assert "-O2" in cmd and "-DA" in cmd
-    # Each --gcc-option is one literal argv element; the spaced value is NOT split.
+    # Each --compiler-option is one literal argv element; the spaced value is NOT split.
     i = cmd.index("-include")
     assert cmd[i + 1] == "some header.h"
     assert "some" not in cmd and "header.h" not in cmd
 
 
 def test_has_explicit_std_checks_both_flag_forms():
-    """Codex review: an explicit -std supplied via the repeatable --gcc-option
+    """Codex review: an explicit -std supplied via the repeatable --compiler-option
     must be honoured, not just one in the whitespace --gcc-options string."""
     from abicheck._compiler_options import has_explicit_std
 
@@ -504,7 +504,7 @@ def test_clang_langmode_cpp20_only_syntax_selects_cpp_mode(tmp_path):
 
 
 def test_castxml_command_user_std_token_not_overridden(tmp_path):
-    """A -std passed via --gcc-option suppresses the automatic C++20 bump, so the
+    """A -std passed via --compiler-option suppresses the automatic C++20 bump, so the
     user's dialect is the last (winning) standard flag (Codex review)."""
     from pathlib import Path
 
@@ -525,7 +525,7 @@ def test_castxml_command_user_std_token_not_overridden(tmp_path):
 
 
 def test_clang_header_command_carries_gcc_option_tokens(tmp_path):
-    """The clang L2 backend honours --gcc-option too (verbatim argv + std guard)."""
+    """The clang L2 backend honours --compiler-option too (verbatim argv + std guard)."""
     from pathlib import Path
 
     from abicheck.dumper import _build_clang_header_command
@@ -546,7 +546,7 @@ def test_clang_header_command_carries_gcc_option_tokens(tmp_path):
 
 def test_castxml_c_mode_user_std_token_not_overridden():
     """C-mode castxml must not append -std=gnu11 after a user -std token, so a
-    C dialect chosen via --gcc-option actually takes effect (Codex review)."""
+    C dialect chosen via --compiler-option actually takes effect (Codex review)."""
     from pathlib import Path
 
     from abicheck.dumper import _build_castxml_command

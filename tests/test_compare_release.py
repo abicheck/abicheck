@@ -575,14 +575,19 @@ class TestDirVsDir:
         new = _snap("2.0", new_funcs, library="libfoo.so")
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
+        # --severity-addition duplicated `severity.addition` and was removed;
+        # the release fan-out reads the resolved severity config either way,
+        # which is the point of driving it from .abicheck.yml here.
+        cfg = tmp_path / "addition-error.abicheck.yml"
+        cfg.write_text("severity:\n  addition: error\n", encoding="utf-8")
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--format",
             "json",
-            "--severity-addition",
-            "error",
+            "--config",
+            str(cfg),
         )
         assert code == 1
         data = json.loads(out)

@@ -309,10 +309,10 @@ class TestSelectedByEntry:
     # fail instead of the malformed input being rejected at construction.
     def test_real_fields_construct(self):
         entry = SelectedByEntry(
-            layer=SelectorLayer.EXPLICIT_CLI, option="--policy-file", argument_index=4
+            layer=SelectorLayer.EXPLICIT_CLI, option="--policy", argument_index=4
         )
         assert entry.layer is SelectorLayer.EXPLICIT_CLI
-        assert entry.option == "--policy-file"
+        assert entry.option == "--policy"
         assert entry.argument_index == 4
 
     def test_raw_string_layer_is_rejected(self):
@@ -371,12 +371,12 @@ class TestValueProvenance:
             selected_by=(
                 SelectedByEntry(
                     layer=SelectorLayer.EXPLICIT_CLI,
-                    option="--policy-file",
+                    option="--policy",
                     argument_index=4,
                 ),
             ),
         )
-        assert prov.selected_by[0].option == "--policy-file"
+        assert prov.selected_by[0].option == "--policy"
         assert isinstance(prov.selected_by, tuple)
 
     def test_manifest_selected_via_project_config_layer(self):
@@ -403,7 +403,7 @@ class TestValueProvenance:
         assert prov.shadowed_legacy is None
 
     def test_shadowed_legacy_round_trips(self):
-        # ADR-049 D7's --policy/--policy-file exception: "provenance records
+        # ADR-049 D7's --policy/--policy exception: "provenance records
         # the file-selected effective base and the shadowed --policy input."
         legacy = ValueProvenance(layer=SelectorLayer.LEGACY_ALIAS, path="legacy.yml")
         winner = ValueProvenance(

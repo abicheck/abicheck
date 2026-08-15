@@ -81,7 +81,7 @@ the severity-aware scheme).
 | *(no equivalent)* | `--debuginfod` | Fetch debug info from a debuginfod server |
 | `--stat` | `--stat` | One-line summary instead of the full report |
 | `--leaf-changes-only` / `-l` | `--report-mode leaf` | Root-type-grouped leaf view |
-| `--impacted-interfaces` | `--show-impact` | Impact summary appended to the report |
+| `--impacted-interfaces` | `--report-mode impact` | Impact summary appended to the report |
 | `--no-added-syms` | `--show-only removed,changed` | Display-only filter; verdict and exit code unchanged |
 | `--harmless` | *(default)* | Compatible changes are already reported; isolate them with `--show-only compatible` |
 | `--exported-interfaces-only` | *(default)* | abicheck always analyses the exported ABI surface |

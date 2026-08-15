@@ -67,7 +67,7 @@ def _stub_abicheck(
     stderr: str = "",
     to_stdout: bool = False,
 ) -> Path:
-    """A fake ``abicheck`` on PATH: writes *report* to ``-o``/``--secondary-output``.
+    """A fake ``abicheck`` on PATH: writes *report* to ``-o``/``--write``.
 
     Mirrors what the real CLI does for the two things the mapping reads -- the
     JSON report and the stderr notice -- and nothing else. *to_stdout* is the
@@ -86,7 +86,7 @@ def _stub_abicheck(
         "#!/usr/bin/env bash\n"
         "prev=''\n"
         'for arg in "$@"; do\n'
-        '  if [[ "$prev" == "-o" || "$prev" == "--secondary-output" ]]; then\n'
+        '  if [[ "$prev" == "-o" ]]; then\n'
         f'    cp "{payload}" "$arg"\n'
         "  fi\n"
         '  prev="$arg"\n'
@@ -682,7 +682,7 @@ class TestCompareTellsTheTwoAxesApart:
     def test_a_run_without_contract_evaluation_is_unchanged(
         self, tmp_path: Path
     ) -> None:
-        """No `--contract-evaluation` means no ledger keys at all, which must
+        """No `--contract` means no ledger keys at all, which must
         read as a contribution of 0 rather than as an unanswered question."""
         outputs = self._compare_outputs(
             tmp_path,
@@ -1309,7 +1309,7 @@ class TestTheFailOnClaimTracksTheTier:
 class TestTheReleaseTableVerdictIsRead:
     """A directory/package compare reaches the text fallback with no JSON.
 
-    `--secondary-format` is rejected for a release-style operand, so a
+    `--write` is rejected for a release-style operand, so a
     markdown release compare has no machine-readable report at all — and its
     renderer writes the verdict as a table row (`| **Verdict** | 💥
     `BREAKING` |`), with no colon. Matching only the colon form left every
@@ -1534,7 +1534,7 @@ class TestCoverageGatedFallbackIgnoresAccepted:
     the "Accepted by contract.unresolved=warn" wording from a real gate
     (Codex review, P1, second round) -- exactly the shape a directory/
     package `compare` takes with a non-JSON format outside a `pull_request`
-    event (this PR's own P1 release fix): `--secondary-format` is rejected
+    event (this PR's own P1 release fix): `--write` is rejected
     for a release-style operand, and the Action's PR-comment JSON rerun only
     fires on `pull_request`/`pull_request_target`, so this fallback is the
     ONLY signal available at all -- there is no readable-JSON branch to

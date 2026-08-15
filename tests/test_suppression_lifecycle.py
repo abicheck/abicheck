@@ -1,8 +1,8 @@
 """Tests for suppression lifecycle enforcement features.
 
 Covers:
-- --strict-suppressions (fail on expired rules)
-- --require-justification (require reason field)
+- suppression.strict (fail on expired rules)
+- suppression.require_justification (require reason field)
 - suggest-suppressions command
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ def write_yaml(tmp_path: Path, content: str) -> Path:
     return p
 
 
-# ─── --strict-suppressions: check_expired_strict ─────────────────────────────
+# ─── suppression.strict: check_expired_strict ────────────────────────────────
 
 class TestStrictSuppressions:
 
@@ -93,7 +93,7 @@ class TestStrictSuppressions:
         assert len(expired) == 1
 
 
-# ─── --require-justification ─────────────────────────────────────────────────
+# ─── suppression.require_justification ───────────────────────────────────────
 
 class TestRequireJustification:
 
@@ -256,8 +256,21 @@ class TestSuggestSuppressions:
 
 # ─── CLI integration tests ───────────────────────────────────────────────────
 
+def _strict_config(tmp_path: Path, **keys: bool) -> Path:
+    """A project config setting `suppression:` keys.
+
+    The `--strict-suppressions`/`--require-justification` pair were hidden CLI
+    duplicates of these keys and were removed, so a config file is how a run
+    asks for them now.
+    """
+    cfg = tmp_path / ".abicheck.yml"
+    body = "".join(f"  {k}: {str(v).lower()}\n" for k, v in keys.items())
+    cfg.write_text(f"suppression:\n{body}", encoding="utf-8")
+    return cfg
+
+
 class TestStrictSuppressionsCliFlag:
-    """Test --strict-suppressions via Click's CliRunner."""
+    """Test `suppression.strict` end to end via Click's CliRunner."""
 
     def test_strict_suppressions_fails_on_expired(self, tmp_path: Path) -> None:
         from click.testing import CliRunner
@@ -287,7 +300,7 @@ class TestStrictSuppressionsCliFlag:
         result = runner.invoke(main, [
             "compare", str(old_snap), str(new_snap),
             "--suppress", str(sup_path),
-            "--strict-suppressions",
+            "--config", str(_strict_config(tmp_path, strict=True)),
         ])
         assert result.exit_code != 0
         assert "expired" in result.output.lower() or "expired" in (result.stderr or "").lower() or "expired" in str(result.exception or "").lower()
@@ -319,7 +332,7 @@ class TestStrictSuppressionsCliFlag:
         result = runner.invoke(main, [
             "compare", str(old_snap), str(new_snap),
             "--suppress", str(sup_path),
-            "--strict-suppressions",
+            "--config", str(_strict_config(tmp_path, strict=True)),
         ])
         assert result.exit_code == 0
 
@@ -358,7 +371,7 @@ class TestStrictSuppressionsCliFlag:
         result = runner.invoke(main, [
             "compare", str(old_snap), str(new_snap),
             "--suppress", str(sup_path),
-            "--strict-suppressions",
+            "--config", str(_strict_config(tmp_path, strict=True)),
         ])
         assert result.exit_code != 0
         output = result.output + str(result.exception or "")
@@ -392,7 +405,7 @@ class TestRequireJustificationCliFlag:
         result = runner.invoke(main, [
             "compare", str(old_snap), str(new_snap),
             "--suppress", str(sup_path),
-            "--require-justification",
+            "--config", str(_strict_config(tmp_path, require_justification=True)),
         ])
         assert result.exit_code != 0
         assert "reason" in result.output.lower() or "reason" in str(result.exception or "").lower()
@@ -413,7 +426,7 @@ class TestRequireJustificationCliFlag:
 
 
 class TestRequireJustificationErrorType:
-    """--require-justification failures should be ClickException, not BadParameter."""
+    """suppression.require_justification failures are ClickException, not BadParameter."""
 
     def test_justification_error_is_not_usage_error(self, tmp_path: Path) -> None:
         from click.testing import CliRunner
@@ -439,7 +452,7 @@ class TestRequireJustificationErrorType:
         result = runner.invoke(main, [
             "compare", str(old_snap), str(new_snap),
             "--suppress", str(sup_path),
-            "--require-justification",
+            "--config", str(_strict_config(tmp_path, require_justification=True)),
         ])
         assert result.exit_code != 0
         # Should show "Error:" (ClickException) not "Usage:" (BadParameter)

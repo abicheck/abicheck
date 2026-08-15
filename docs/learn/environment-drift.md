@@ -88,7 +88,7 @@ exits **0**: CI stays green, the report and the
 is the opt-in that turns the warning into a gate (`BREAKING`, exit 4) when a
 declared target is actually cut off. Teams that want risk findings to block
 CI even without floors can do that independently via the severity knobs
-(`--severity-potential-breaking error`).
+(`severity.potential_breaking: error`).
 
 ### Why a separate file and not `.abicheck.yml`?
 
@@ -97,7 +97,7 @@ The environment matrix (ADR-020b) describes a **deployment target**, while
 same pair of binaries against several targets — "does this break our RHEL 8
 tier?" and "our Ubuntu 24.04 tier?" are two invocations with two matrices and
 possibly two different verdicts — so the matrix rides per-invocation
-(`--env-matrix <file>`), like `--policy-file`, rather than being a single
+(`--env-matrix <file>`), like `--policy`, rather than being a single
 project-wide setting. It is also the same file that declares SYCL/CUDA
 deployment constraints, which are equally target-specific. A convenience
 `environment:` block in `.abicheck.yml` for single-target projects would be a

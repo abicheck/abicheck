@@ -128,8 +128,8 @@ Notes:
   `new=` (rare): `--header both=old=weird.h`.
 - The **version** flag defaults per side stay `old` / `new` — pass `--version`
   only when your `.so` files need explicit labels.
-- The `--ast-frontend` per-side overrides (`--old-ast-frontend` /
-  `--new-ast-frontend`) are **unchanged**: the base `--ast-frontend` is shared
+- The `--ast-frontend` per-side overrides (`--ast-frontend old=` /
+  `--ast-frontend new=`) are **unchanged**: the base `--ast-frontend` is shared
   with `dump` and `scan`, so that family was deliberately left alone.
 
 ### Config demotion
@@ -144,7 +144,7 @@ overrides, but the reviewed home is `.abicheck.yml`. See the
 | `--dwarf-only` | `debug.dwarf_only: true` |
 | `--debuginfod` | `debug.debuginfod: true` |
 | `--debuginfod-url URL` | `debug.debuginfod_url: URL` |
-| `--show-redundant` | `scope.show_redundant: true` |
+| `scope.show_redundant: true` | `scope.show_redundant: true` |
 
 Example `.abicheck.yml`:
 

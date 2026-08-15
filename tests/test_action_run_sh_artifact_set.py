@@ -199,7 +199,7 @@ class TestScanArtifactSetForwarding:
 class TestScanPolicyFlagsOmittedWithoutBaseline:
     """P1 regression (Codex review): cli_scan.py's
     ``_reject_comparison_only_flags()`` hard-rejects ``--policy``/
-    ``--policy-file``/``--suppress`` on a scan with no ``--against``
+    ``--suppress`` on a scan with no ``--against``
     baseline. ``action.yml``'s ``policy`` input has a non-empty default
     (``strict_abi``), so it is *always* present in ``INPUT_POLICY`` — an
     unconditional forward would break every existing audit-only scan step
@@ -228,7 +228,7 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
             "INPUT_POLICY_FILE": "policy.yml",
             "INPUT_SUPPRESS": "suppress.yml",
         })
-        assert "--policy-file" not in cmd
+        assert "--policy" not in cmd
         assert "--suppress" not in cmd
 
     def test_new_library_set_audit_only_omits_default_policy_flag(self) -> None:
@@ -240,7 +240,13 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
         })
         assert "--policy" not in cmd
 
-    def test_scan_with_baseline_forwards_policy_flags(self) -> None:
+    def test_scan_with_baseline_forwards_the_policy_document(self) -> None:
+        """A ``policy-file`` input outranks ``policy``, in one ``--policy``.
+
+        The two flags folded into one that takes either operand, so the
+        Action forwards the document when it has one -- the same precedence
+        the removed ``--policy-file`` had.
+        """
         cmd = _run_cmd({
             "INPUT_MODE": "scan",
             "INPUT_NEW_LIBRARY": "new.so",
@@ -249,12 +255,21 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
             "INPUT_POLICY_FILE": "policy.yml",
             "INPUT_SUPPRESS": "suppress.yml",
         })
+        assert cmd.count("--policy") == 1
         i = cmd.index("--policy")
-        assert cmd[i + 1] == "sdk_vendor"
-        i = cmd.index("--policy-file")
         assert cmd[i + 1] == "policy.yml"
         i = cmd.index("--suppress")
         assert cmd[i + 1] == "suppress.yml"
+
+    def test_scan_with_baseline_forwards_a_bare_profile(self) -> None:
+        cmd = _run_cmd({
+            "INPUT_MODE": "scan",
+            "INPUT_NEW_LIBRARY": "new.so",
+            "INPUT_AGAINST": "old.so",
+            "INPUT_POLICY": "sdk_vendor",
+        })
+        i = cmd.index("--policy")
+        assert cmd[i + 1] == "sdk_vendor"
 
     def test_audit_true_alias_omits_default_policy_flag_even_with_against(self) -> None:
         # The deprecated `audit: true` back-compat alias forces audit-only

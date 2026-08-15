@@ -64,7 +64,7 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
     # CLI-audit P1 (release/package contract parity): present, and matches
     # single-pair compare JSON's field name, whenever any library entry
     # carries the per-library contract_coverage_exit_contribution key --
-    # the marker that --contract-evaluation was active for this run.
+    # the marker that --contract was active for this run.
     libs = [
         {
             "library": "liba.so",
@@ -192,7 +192,7 @@ def test_release_stderr_announces_contract_coverage_for_non_json_format(capsys) 
     # back to grepping stderr for "Contract coverage incomplete" whenever no
     # JSON report exists -- exactly the shape of a directory/package
     # (release) `compare` outside a `pull_request` event, since the release
-    # fan-out rejects `--secondary-format` and the Action's PR-comment JSON
+    # fan-out rejects `--write` and the Action's PR-comment JSON
     # rerun only fires on `pull_request`/`pull_request_target`. A markdown
     # (or any non-json) release format must announce the same notice
     # single-pair `compare` already does via `announce_coverage_floor`.

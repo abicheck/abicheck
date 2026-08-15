@@ -325,7 +325,7 @@ def internal_namespaces_candidate(
     policy_file: PolicyFile | None,
     layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
     sha256: str | None = None,
-    option: str = "--policy-file",
+    option: str = "--policy",
 ) -> FieldCandidate | None:
     """Build the ``surface.internal_namespaces`` candidate a ``--policy-file``
     contributes, or ``None`` when it contributes nothing.

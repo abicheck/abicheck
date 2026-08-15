@@ -676,7 +676,7 @@ class TestSeverityGate:
     def test_result_level_follows_severity_addition_override(self) -> None:
         """Codex review on #549: per-result `level` was built by `_result_for`
         from the legacy policy severity, ignoring `severity_config` entirely.
-        `--severity-addition error` blocks the build (exitCode=1) but the
+        a `severity.addition: error` config blocks the build (exitCode=1) but the
         added-symbol result kept `level: warning` — a code-scanning UI reading
         result levels would disagree with the configured gate."""
         from abicheck.severity import resolve_severity_config

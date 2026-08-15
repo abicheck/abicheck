@@ -81,7 +81,6 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_ESTIMATE",
     "INPUT_AUDIT",
     "INPUT_USED_BY",
-    "INPUT_VERIFY_RUNTIME",
     "INPUT_REQUIRED_SYMBOL",
     "INPUT_REQUIRED_SYMBOLS",
     "INPUT_AST_FRONTEND",
@@ -91,6 +90,8 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_SYSROOT",
     "INPUT_NOSTDINC",
     "INPUT_SNAPSHOT_COMPRESSION",
+    "INPUT_BUILD_INFO",
+    "INPUT_COMPILE_DB",
 )
 
 
@@ -1052,7 +1053,6 @@ class TestScopedComparisonInputs:
         "env_name,value",
         [
             ("INPUT_USED_BY", "app1"),
-            ("INPUT_VERIFY_RUNTIME", "true"),
             ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
             ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
         ],

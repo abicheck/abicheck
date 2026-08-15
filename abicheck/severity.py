@@ -691,7 +691,7 @@ def resolve_severity_config(
 # Exit code computation
 # ---------------------------------------------------------------------------
 
-# Severity-aware exit codes (used when any --severity-* flag is set):
+# Severity-aware exit codes (used when a severity setting is in effect):
 #
 #   0 — no error-level findings
 #   1 — error-level findings in additions or quality_issues only
@@ -708,7 +708,7 @@ def resolve_severity_config(
 #
 # These codes align with the legacy verdict-based exits (BREAKING → 4,
 # API_BREAK → 2) but are independent: the legacy path runs when no
-# --severity-* flag is provided.  The two paths are mutually exclusive
+# severity setting is in effect.  The two paths are mutually exclusive
 # in cli.py.
 
 _CATEGORY_EXIT_CODES: dict[IssueCategory, int] = {
@@ -789,7 +789,7 @@ def compute_exit_code(
     -- contributes ``0`` and is skipped here. It keeps its place in the
     report and in every ledger; what it loses is the ability to gate. Every
     finding is evaluated for a run that did not opt into
-    ``--contract-evaluation``, so this is inert by default.
+    ``--contract``, so this is inert by default.
     """
     worst = 0
     for change in gate_eligible_changes(changes):
@@ -917,7 +917,7 @@ class GateDecision:
     A :data:`CompatibilityDecision` (== ``Verdict``) answers "is this
     ABI/API compatible?". A ``GateDecision`` answers "does this block CI?" —
     a genuinely separate question once severity configuration is in play: an
-    addition can gate CI (``--severity-addition error``) while its
+    addition can gate CI (``severity.addition: error``) while its
     compatibility decision stays ``COMPATIBLE``; a breaking kind can pass CI
     (``--severity-preset info-only``) while its compatibility decision stays
     ``BREAKING``. Renderers should read gate status from here rather than

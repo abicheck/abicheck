@@ -58,7 +58,7 @@ abicheck diffs them directly, the same mechanism as case 02, and reports
 
 **On the `frozen_namespaces:` policy layer:** this case directory also
 ships `policy.yaml`, which declares `**::detail::r1::*` (and `r2`) as a
-contractually frozen namespace. Passing `--policy-file policy.yaml`
+contractually frozen namespace. Passing `--policy policy.yaml`
 reproduces the identical BREAKING verdict and finding set above (verified
 directly) — the policy's purpose (per its own source in
 `abicheck/post_processing.py`'s `EscalateFrozenNamespaceViolations`) is to
@@ -69,7 +69,7 @@ qualified name to *match* the glob pattern relies on demangling the
 linker symbol or on header/source-graph evidence; because `dispatch` is
 `extern "C"` its exported symbol carries no namespace information at all
 (that's what `extern "C"` means), so in this reproduction — with or
-without `--header`/`--policy-file` — the tag did not attach to the
+without `--header`/`--policy` — the tag did not attach to the
 `func_params_changed`/`func_return_changed` findings themselves. The
 underlying BREAKING verdict is unaffected either way; treat the escalation
 tag as the intended design for namespaces recoverable from available

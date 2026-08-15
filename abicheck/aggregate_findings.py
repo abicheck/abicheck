@@ -305,7 +305,7 @@ class ReportFinding:
     #: ADR-049's per-finding contract-decision quartet, read verbatim off
     #: the report entry (see ``reporter._add_contract_evaluation_fields``
     #: for what stamps them) -- ``None`` for every field when the profile's
-    #: run never opted into ``--contract-evaluation``, which is what keeps
+    #: run never opted into ``--contract``, which is what keeps
     #: a matrix built from pre-ADR-049 reports unaffected. Kept here rather
     #: than only surfaced in :class:`FindingMatrixEntry` so a caller working
     #: with raw per-profile findings (not yet reconciled into the matrix)
@@ -694,7 +694,7 @@ class ProfileContractState:
     A single ``finding_matrix`` entry today only says a profile *observed*
     a finding (``affected_profiles``) -- it collapses "GCC: IN_CONTRACT and
     gating" and "Clang: UNKNOWN_UNRESOLVED and not gating" into the same
-    membership fact, even though under ``--contract-evaluation`` those are
+    membership fact, even though under ``--contract`` those are
     different outcomes for the *same* logical finding. This is the
     per-profile answer that distinction needs, read verbatim off that
     profile's own report entry -- never re-derived, so it can't disagree
@@ -764,12 +764,12 @@ class FindingMatrixEntry:
     #: :attr:`affected_profiles` (same order), each that profile's own
     #: ADR-049 contract decision for this finding. Empty when no affected
     #: profile's report carried a ``contract_relevance`` at all -- i.e. no
-    #: profile checking this target ran ``--contract-evaluation`` -- so a
+    #: profile checking this target ran ``--contract`` -- so a
     #: matrix built from pre-ADR-049 reports serializes identically to
     #: before this field existed. A profile that *did* opt in but whose own
     #: entry for this finding somehow carries none still gets a state
     #: record here (every field ``None``), so "this profile ran without
-    #: --contract-evaluation" and "this profile's own report was missing
+    #: --contract" and "this profile's own report was missing
     #: the field" are never conflated with each other by omission.
     profile_contract: tuple[ProfileContractState, ...] = ()
 
@@ -805,7 +805,7 @@ class FindingMatrixEntry:
         }
         # CLI-audit P1: present only when at least one affected profile's
         # report actually carried a contract decision -- i.e. some profile
-        # checking this target ran --contract-evaluation. Omitted rather
+        # checking this target ran --contract. Omitted rather
         # than emitted empty so a matrix built entirely from pre-ADR-049
         # reports serializes byte-for-byte as it always did.
         if self.profile_contract:
@@ -1038,7 +1038,7 @@ def build_finding_matrix(
             # same identity should already agree on its contract decision;
             # this does not attempt to reconcile a disagreement). Built only
             # when at least one profile's sample actually carries a
-            # contract_relevance, so a matrix with no --contract-evaluation
+            # contract_relevance, so a matrix with no --contract
             # profile anywhere never allocates the field at all.
             profile_contract: tuple[ProfileContractState, ...] = ()
             if any(s.contract_relevance is not None for s in samples):

@@ -20,7 +20,7 @@ safest to most severe: `NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`,
 `API_BREAK`, `BREAKING`. By default the verdict is the *worst* classification
 across all detected changes under the active [policy](../use/policies.md).
 
-> **Under `--contract-evaluation` (opt-in), that's the worst classification
+> **Under `--contract` (opt-in), that's the worst classification
 > across *evaluated* changes only.** Every detected change still exists and
 > stays in the report, but a change contract relevance proved outside the
 > declared contract, or couldn't resolve, never reaches policy at all — see
@@ -78,7 +78,7 @@ Changes found, but **backwards-compatible** — existing compiled consumers can 
 
 > **Note:** `noexcept` removal is **not** `COMPATIBLE` — it is `COMPATIBLE_WITH_RISK` (see below), because callers compiled assuming `noexcept` omit exception landing pads.
 
-**CI action:** warn; do not fail. Use a severity flag (e.g. `--severity-addition error`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
+**CI action:** warn; do not fail. Set a severity value (e.g. `severity.addition: error` in `.abicheck.yml`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
 
 ---
 
@@ -133,7 +133,7 @@ Examples:
 
 ## Contract evaluation and the verdict
 
-`compare --contract-evaluation` (ADR-049 Phase 7) doesn't add a sixth
+`compare --contract` (ADR-049 Phase 7) doesn't add a sixth
 verdict — it changes which findings the five verdicts above are computed
 *over*. Three separate questions are worth keeping apart, because collapsing
 them is the most common source of confusion once this flag is in play:
@@ -145,7 +145,7 @@ them is the most common source of confusion once this flag is in play:
    under `suppression.suppressed_changes` instead — see [Suppressions](../use/suppressions.md)
    — but that's an independent, unrelated waiver step, not something
    contract evaluation does.)
-2. **Compatibility evaluation status.** Under `--contract-evaluation`, each
+2. **Compatibility evaluation status.** Under `--contract`, each
    finding is either `EVALUATED` (its contract relevance is `IN_CONTRACT` or
    `NOT_APPLICABLE`) or `NOT_EVALUATED` (`PROVEN_OUT_OF_CONTRACT`,
    `UNKNOWN_UNPROVEN`, or `UNKNOWN_UNRESOLVED`). Without the flag, every
@@ -158,7 +158,7 @@ them is the most common source of confusion once this flag is in play:
    The finding still carries its `ChangeKind`, its reason code, and its
    evidence references, so a reader can see exactly why it wasn't scored.
 
-Under `--contract-evaluation`, the run-level `verdict` is the worst
+Under `--contract`, the run-level `verdict` is the worst
 *compatibility decision* among `EVALUATED` findings — a run can detect a
 real binary break and still exit clean if that break is
 `PROVEN_OUT_OF_CONTRACT` (e.g. a private implementation detail outside your
@@ -212,7 +212,7 @@ the severity of the findings) becomes the process **exit code** your CI reads:
 \* Severity-aware codes depend on the active severity configuration. Under the
 **`default`** preset (`abi_breaking=error`, everything else `warning`/`info`),
 only `BREAKING` reaches an error level, so the other rows exit `0` unless you
-raise their category — e.g. `--severity-addition error` makes an
+raise their category — e.g. `severity.addition: error` makes an
 additions-only `COMPATIBLE` exit `1`, and `--severity-preset strict` makes
 `API_BREAK`/`COMPATIBLE_WITH_RISK` exit `2`.
 

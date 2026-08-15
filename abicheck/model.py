@@ -146,7 +146,8 @@ class ScopeOrigin(str, Enum):
     Linkage × Origin surface model (ADR-024 D1, ADR-015 schema v6).
 
     Classification is opt-in: it is only meaningful when the caller
-    supplies a public-header set (``--public-header`` / ``--public-header-dir``).
+    supplies a public-header set (``-H``/``--header``; ``scan`` also takes
+    ``--public-header-dir``).
     Without one, every declaration is ``UNKNOWN`` and downstream behaviour
     is unchanged.
     """
@@ -500,7 +501,7 @@ class ExtractionContract:
     Built by ``abicheck.comparability.compute_extraction_contract`` — never
     constructed by hand outside tests. Both fingerprints are independently
     optional: a symbols-only dump with no header-AST inputs but a real
-    ``--public-header``/``--public-header-dir`` still attaches a
+    a public-header set still attaches a
     ``scope_fingerprint`` with ``profile_fingerprint=None`` (see that
     module's docstring for the full rationale).
     """
@@ -649,7 +650,7 @@ class AbiSnapshot:
     # None when ast_resolved_standard is unset or not a recognized C++ edition.
     ast_cplusplus_macro: str | None = field(default=None, kw_only=True)
     # The ordered extra compiler arguments passed to the header frontend
-    # (--gcc-option tokens, then a shlex-split --gcc-options) — the exact
+    # (--compiler-option tokens, then a shlex-split composed-flags string) — the exact
     # argv tail, for reproducibility and fingerprinting.
     ast_compile_args: tuple[str, ...] = field(default_factory=tuple, kw_only=True)
     # The --sysroot passed to the header frontend, if any.
@@ -1033,7 +1034,7 @@ class AbiSnapshot:
     # Dependency-scoping mode (schema v18) — whether toolchain/system-header
     # declarations were excluded from this snapshot's flat lists/DWARF
     # collections by ``dumper_scoping.scope_snapshot_excluding_dependencies``
-    # ("filtered") or deliberately kept ("full", via ``--include-dependencies``).
+    # ("filtered") or deliberately kept ("full", via ``--include-system-declarations``).
     # ``dump`` and ``compare``'s own live-binary dumping (``service.run_dump``)
     # both filter by default and tag "filtered"; a direct Python API caller of
     # ``service.run_dump``/``resolve_input`` gets the opposite default

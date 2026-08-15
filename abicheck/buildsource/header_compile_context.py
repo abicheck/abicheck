@@ -241,7 +241,7 @@ class _ExplicitPin:
     already resolves (Finding 3).
 
     A caller who already pinned a field via ``--gcc-options``/
-    ``--gcc-option`` (or the structured ``sysroot`` field) does not need the
+    ``--compiler-option`` (or the structured ``sysroot`` field) does not need the
     L3 evidence to agree on that field too -- ``resolve_header_compile_
     context`` masks a pinned field out of the multi-unit ambiguity
     comparison below, so a genuine disagreement on a *different*,
@@ -984,7 +984,7 @@ def _ambiguity_message(
         "-std=/target/defines/include-search-order/sysroot/ABI-relevant "
         "flags); abicheck cannot pick one context over another without "
         "guessing. Narrow the input (--compile-db-filter / a project "
-        "compile: block / --gcc-options pinning the ambiguous field(s)) or "
+        "compile: block / --compiler-option pinning the ambiguous field(s)) or "
         "compare a header per contract at a time. Conflicting translation "
         "units:",
     ]

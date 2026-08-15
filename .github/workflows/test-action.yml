@@ -342,9 +342,9 @@ jobs:
             exit 1
           fi
 
-  # ── Test: severity-addition error ─────────────────────────────────────────
+  # ── Test: severity.addition: error (config) ───────────────────────────────
   test-severity-addition-error:
-    name: 'severity-addition error: detect unexpected API expansion'
+    name: 'severity.addition error: detect unexpected API expansion'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -359,7 +359,7 @@ jobs:
           new-library: tests/fixtures/action/action_test_v1_with_addition.json
           install-deps: false
           fail-on-breaking: false
-          extra-args: '--severity-addition error'
+          extra-args: '--config tests/fixtures/action/severity_addition_error.abicheck.yml'
 
       - name: Verify severity-driven failure
         shell: bash
@@ -452,7 +452,7 @@ jobs:
           fi
 
   test-additions-pass-by-default:
-    name: 'additions pass through without severity-addition error'
+    name: 'additions pass through without a severity.addition error'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

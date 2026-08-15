@@ -29,7 +29,7 @@ API](../use/python-api.md).
 | Change | What breaks | Fix |
 |---|---|---|
 | `CompareResult` instead of a bare tuple | `result, old, new = run_compare(...)` (positional unpack) | `result, old, new = run_compare(...).as_tuple()` — one-line fix |
-| Authoritative contract evaluation | If you already pass `--contract-evaluation`, the *compatibility verdict* can only move one direction — same or **less severe** — since policy now scores just the `EVALUATED` subset it used to score in full (a finding proven out-of-contract stops blocking; one that can't be resolved stops gating as an ABI break — it still stays in `changes`/audit ledgers, `NOT_EVALUATED`). The **overall process exit** can move the other way too, but via the separate mechanism in the next row: the newly-authoritative contract-coverage contribution can raise a clean exit to `1` | Re-check any script that parsed `verdict`/exit code under `--contract-evaluation` — see [Contract-Aware Compatibility](../learn/contract-aware-compatibility.md) |
+| Authoritative contract evaluation | If you already pass `--contract`, the *compatibility verdict* can only move one direction — same or **less severe** — since policy now scores just the `EVALUATED` subset it used to score in full (a finding proven out-of-contract stops blocking; one that can't be resolved stops gating as an ABI break — it still stays in `changes`/audit ledgers, `NOT_EVALUATED`). The **overall process exit** can move the other way too, but via the separate mechanism in the next row: the newly-authoritative contract-coverage contribution can raise a clean exit to `1` | Re-check any script that parsed `verdict`/exit code under `--contract` — see [Contract-Aware Compatibility](../learn/contract-aware-compatibility.md) |
 | Contract-coverage exit `1` | A script that treats every exit `1` as "a severity error" will now also see `1` for incomplete contract evidence | Read `contract_coverage_exit_contribution` (or the severity block's own pre-fold `exit_code`) to tell the two apart — see [Exit Codes](../reference/exit-codes.md#contract-coverage-contribution-adr-049) |
 | Aggregate schema `1.2`/`1.3` | A JSON consumer with a fixed field list will silently ignore the new `finding_matrix`/`profile_matrix`/`contract_coverage` blocks (additive, not a breaking JSON change) — but a consumer asserting an *exact* key set will fail | Check `aggregate_schema_version` if you need to react to the new blocks; see [Aggregate Reports](../use/aggregate-reports.md) |
 | Scoped severity correction | A `compare --used-by`/`--required-symbol` script that assumed `--severity-*` flags were silently ignored on the scoped path now gets real severity-aware exit codes there too | Re-check any script relying on the old fixed legacy `0`/`2`/`4` mapping for a scoped run — see [Application Compatibility → Exit codes](../use/appcompat.md#exit-codes) |
@@ -62,7 +62,7 @@ libraries](../use/python-api.md#compare-two-libraries).
 
 ## Authoritative contract evaluation
 
-If you already had `--contract-evaluation` in a script or CI job before
+If you already had `--contract` in a script or CI job before
 this landed, re-read [Contract-Aware
 Compatibility](../learn/contract-aware-compatibility.md) — relevance used
 to be computed and reported but never consulted by policy (a shadow
@@ -73,7 +73,7 @@ the flag, which is unaffected either way.
 
 ## Contract-coverage exit `1`
 
-A **new**, independent reason for exit `1` under `--contract-evaluation`:
+A **new**, independent reason for exit `1` under `--contract`:
 incomplete evidence for the selected domain. It's folded with `max` against
 the ordinary severity gate, so it only ever raises a clean `0`, never lowers
 a `2`/`4`. A CI script that branches only on `exit_code == 1` meaning

@@ -100,18 +100,36 @@ class StepResult:
         }
 
 
-def _bash() -> str:
+def bash_executable() -> str:
     """A real bash, bypassing Windows' WSL launcher stub.
 
-    Mirrors ``test_action_run_sh_helpers._bash_executable``.
+    On GitHub's windows-latest runners ``%SystemRoot%\\System32\\bash.exe`` is
+    the WSL launcher, present even with no distro installed, and a bare
+    ``["bash", ...]`` call can resolve to it ahead of Git for Windows' real
+    bash depending on inherited PATH order. It then prints WSL's own
+    "no installed distributions" text (UTF-16LE, so it does not even match a
+    substring assertion) and exits 1, which reads as every test in the file
+    failing at once for no stated reason.
+
+    This is the canonical copy. Roughly two dozen ``test_action_*`` modules
+    still carry their own private ``_bash_executable``, each written before
+    there was a shared home for it -- a new module should import this one
+    rather than clone a twenty-fifth, which is exactly how
+    ``test_action_run_sh_build_info_conflict`` shipped with a bare ``bash``
+    and reddened the Windows lane. Migrating the existing copies is a
+    separate, mechanical change and deliberately not done here.
+
+    ``GIT_BASH_PATH`` is honoured first so a runner with Git installed
+    somewhere unusual can point at it.
     """
     if os.name != "nt":
         return "bash"
     for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
         r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
     ):
-        if Path(candidate).exists():
+        if candidate and Path(candidate).exists():
             return candidate
     return "bash"
 
@@ -151,7 +169,7 @@ def run_step(
         # command failing mid-body left returncode 0 here while the real step
         # failed — every `assert result.returncode == 0` in the workflow tests
         # was weaker than the thing it models (CodeRabbit review).
-        [_bash(), "-eo", "pipefail", "-c", step["run"]],
+        [bash_executable(), "-eo", "pipefail", "-c", step["run"]],
         cwd=workspace,
         env=step_env,
         capture_output=True,
@@ -208,5 +226,5 @@ def have_bash() -> bool:
     and callers ran the steps instead of skipping — the opposite of what the
     name promises (CodeRabbit review).
     """
-    candidate = _bash()
+    candidate = bash_executable()
     return Path(candidate).is_file() or shutil.which(candidate) is not None

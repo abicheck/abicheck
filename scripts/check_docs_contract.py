@@ -68,6 +68,16 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
 DOCS = ROOT / "docs"
+#: The example-case tree whose per-case READMEs `gen_examples_docs.py`
+#: publishes into `docs/reference/examples/`. Named separately from ROOT so
+#: the retired-surface sweep can be pointed at a fixture tree in tests the
+#: same way DOCS already is.
+EXAMPLES = ROOT / "examples"
+#: The user-flow catalogue. Each entry's `flow:` is a command a reader is
+#: meant to be able to run, so it is documentation by another file extension
+#: -- swept alongside the trees above, and pointable at a fixture tree the
+#: same way.
+SCENARIOS = ROOT / "tests" / "scenarios"
 
 #: Trees outside `docs/` whose Markdown may be registered as a topic's
 #: `task_pages`/`allowed_summaries` entry (ADR-058 / G36 P0.6). Only
@@ -1284,13 +1294,182 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
-        "--gcc-options (CLI flag removed, CLI audit PR 5/5 -- the Action's"
-        " own `gcc-options` input, without the leading dashes, is unaffected"
-        " and still valid)",
-        ("--gcc-options",),
-        frozenset({"AGENTS.md", "use/github-action.md"}),
+        "--gcc-options/--gcc-option/--gcc-path/--gcc-prefix (the whole legacy"
+        " cross-toolchain family, superseded by --compiler-option/--compiler/"
+        " --compiler-prefix -- the Action's own `gcc-options`/`gcc-path`/"
+        " `gcc-prefix` inputs, without the leading dashes, are unaffected and"
+        " still valid)",
+        ("--gcc-options", "--gcc-option", "--gcc-path", "--gcc-prefix"),
+        frozenset(
+            {
+                "AGENTS.md",
+                "use/github-action.md",
+                # Names the retired spellings once, to point a reader at the
+                # --compiler* replacements -- the page documenting the family.
+                "use/dump-compare-flags.md",
+            }
+        ),
+    ),
+    (
+        "--verify-runtime (the consumer-execution probe; it had already been"
+        " reduced to a safety no-op, and the static --used-by scanner answers"
+        " the same undefined-symbol question without executing anything)",
+        ("--verify-runtime",),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--contract-evaluation (folded into --contract, which now both turns"
+        " the ADR-049 evaluator on and selects its evidence domain; the"
+        " former domain-less form is --contract auto)",
+        ("--contract-evaluation",),
+        frozenset({"AGENTS.md", "use/contract-evaluation.md"}),
+    ),
+    (
+        "--show-impact (folded into --report-mode impact, which was already"
+        " documented as its exact equivalent)",
+        ("--show-impact",),
+        frozenset(
+            {
+                "AGENTS.md",
+                # A point-in-time design review: §3.3 describes the surface as
+                # it was and recommends exactly this fold, so it names the
+                # flag in its own historical-record capacity.
+                "contribute/config-key-review.md",
+            }
+        ),
+    ),
+    (
+        "aggregate --expect/--optional/--report-prefix (the expected-target"
+        " set is declared by --manifest or --run-plan, or waived with"
+        " --discovered-only; the report-filename prefix is fixed)",
+        ("--report-prefix", "--expect", "--optional"),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "the four per-category --severity-<category> flags (hidden duplicates"
+        " of .abicheck.yml's own severity: block, which is now their one"
+        " spelling; --severity-preset stays as the coarse per-run override)",
+        (
+            "--severity-abi-breaking",
+            "--severity-potential-breaking",
+            "--severity-quality-issues",
+            "--severity-addition",
+        ),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--strict-suppressions/--require-justification/--public-symbol/"
+        "--public-symbols-list/--show-redundant/--collapse-versioned-symbols"
+        " (hidden duplicates of the suppression:/scope: config blocks, which"
+        " are now their one spelling)",
+        (
+            "--strict-suppressions",
+            "--require-justification",
+            "--public-symbols-list",
+            "--public-symbol",
+            "--show-redundant",
+            "--collapse-versioned-symbols",
+        ),
+        frozenset({"AGENTS.md"}),
+    ),
+    # `dump --public-header`/`--public-header-dir` are gone too (declaration
+    # provenance comes from -H/--header itself now), but they are deliberately
+    # NOT registered here: `scan --public-header-dir` is still live, and this
+    # gate matches plain substrings, so a pattern that catches the retired
+    # `dump` spelling necessarily catches the surviving `scan` one. The
+    # executable guard for that pair is `tests/test_cli_contract.py`'s
+    # per-command option-set snapshot.
+    (
+        "dump -p/--build-dir and --compile-db, and scan --compile-db"
+        " (--build-info already takes a build dir, a compile_commands.json,"
+        " or a pack -- the one flag for that operand; --compile-db-filter"
+        " still scopes it)",
+        ("--build-dir", "--compile-db"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # A point-in-time design review: it inventories the surface
+                # as it was, in its own historical-record capacity.
+                "contribute/config-key-review.md",
+            }
+        ),
+    ),
+    (
+        "--policy-file (folded into --policy, which now takes a built-in"
+        " profile name or a policy document -- a path, or a packaged built-in"
+        " like 'security'; the Action's own `policy-file` input, without the"
+        " leading dashes, is unaffected and still valid)",
+        ("--policy-file",),
+        frozenset({"AGENTS.md", "reference/github-action-inputs.md"}),
+    ),
+    (
+        "--secondary-format/--secondary-output (folded into --write"
+        " FORMAT=PATH -- half the pair was a usage error either direction, so"
+        " they were one option spelled as two)",
+        ("--secondary-format", "--secondary-output"),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--old-ast-frontend/--new-ast-frontend (--ast-frontend is side-aware"
+        " on compare: --ast-frontend old=castxml --ast-frontend new=clang,"
+        " ADR-040 Lever 1's prefix convention)",
+        ("--old-ast-frontend", "--new-ast-frontend"),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "--include-dependencies (renamed --include-system-declarations: it"
+        " restores the declarations a system/toolchain header contributed to"
+        " the AST, which is unrelated to the DT_NEEDED library graph"
+        " --follow-deps walks)",
+        ("--include-dependencies",),
+        frozenset({"AGENTS.md"}),
+    ),
+    (
+        "project validate-use-cases --against/--against-new (resolving a"
+        " manifest against a real library, and attributing a comparison's"
+        " findings to the use cases that reach them, is compare --use-cases)",
+        ("--against-new",),
+        frozenset({"AGENTS.md"}),
     ),
 )
+
+
+def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
+    """Every page the retired-surface sweep reads, with its allowlist key.
+
+    `docs/**/*.md` is the hand-authored narrative tree, keyed docs-relative
+    (what `_RETIRED_SURFACES`'s allowlists already spell).
+
+    `examples/case*/README.md` is here because it is the *generator source*
+    for the published `docs/reference/examples/case*.md` pages: those carry
+    the generated marker and are skipped below, so scanning only the output
+    tree left a stale flag in a case README reproducing into a public page on
+    the next `gen_examples_docs.py` run while this guard stayed green -- which
+    is exactly what happened to Case 148's `--compile-db` recommendation
+    (Codex review). Checking the source rather than the artifact is the same
+    direction every other generated-file gate in this repo takes.
+
+    `tests/scenarios/*.yaml` is here for the same reason one step further out:
+    it is the repository's user-flow catalogue, and each entry's `flow:` is a
+    command a reader is meant to be able to run. Its structural tests check
+    that a flow *has* an automated counterpart, not that the command it prints
+    still parses -- so a scenario kept advertising a removed `scan
+    --compile-db` while both this sweep and those tests stayed green (Codex
+    review). YAML rather than Markdown, but the same failure and the same fix.
+
+    Keyed repo-relative (`examples/caseNN.../README.md`,
+    `tests/scenarios/x.yaml`), which cannot collide with a docs-relative key,
+    so an allowlist entry stays unambiguous about which tree it exempts.
+    """
+    targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
+    targets += [
+        (p, f"examples/{p.relative_to(EXAMPLES).as_posix()}")
+        for p in sorted(EXAMPLES.glob("case*/README.md"))
+    ]
+    targets += [
+        (p, f"tests/scenarios/{p.name}") for p in sorted(SCENARIOS.glob("*.yaml"))
+    ]
+    return targets
 
 
 def _check_retired_surfaces(f: Findings) -> None:
@@ -1305,8 +1484,7 @@ def _check_retired_surfaces(f: Findings) -> None:
     historical-record capacity, same reasoning as the ADR/plans/archive
     directory exemption below. WARN-only: a hit needs a human read to add
     historical framing or an allowlist entry, not an automatic rewrite."""
-    for path in sorted(DOCS.rglob("*.md")):
-        rel = path.relative_to(DOCS).as_posix()
+    for path, rel in _retired_surface_scan_targets():
         if rel.startswith(_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES):
             continue
         if _has_generated_marker(path):
@@ -1345,6 +1523,17 @@ def _check_retired_surfaces(f: Findings) -> None:
                         break
                     end = idx + len(pattern)
                     search_from = end
+                    # A flag pattern must match a whole token, so a retired
+                    # `--compile-db` is found in "`--compile-db`" and
+                    # "-p/--compile-db" but not inside the still-live
+                    # `--compile-db-filter`. Registering the trailing space
+                    # instead (the first attempt) matched only one of those
+                    # three and let punctuation-delimited live references
+                    # through the gate entirely (Codex review).
+                    if pattern.startswith("--") and end < len(text):
+                        nxt = text[end]
+                        if nxt.isalnum() or nxt in "-_":
+                            continue
                     if any(idx >= s and end <= e for s, e in reported_spans):
                         continue
                     reported_spans.append((idx, end))
@@ -1393,6 +1582,87 @@ _STALE_PROCESS_LANGUAGE_PATTERNS = tuple(
         r"\bTODO:",
     )
 )
+
+
+#: A ``key.subkey:`` token -- what a `.abicheck.yml` block's setting looks
+#: like when it is written inline. Anchored to a whitespace/quote boundary so
+#: it cannot match inside a URL, a Python attribute access, or a flag value.
+_CONFIG_KEY_OPERAND_RE = re.compile(r"(?:^|[\s'\"])([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*):(?=\s|$)")
+
+#: A shell line invoking the tool, including a backslash-continued one. The
+#: subcommand list is deliberately explicit: `abicheck` alone also appears in
+#: prose like "abicheck reads .abicheck.yml", which is not a command line.
+_ABICHECK_COMMAND_RE = re.compile(
+    r"^\s*(?:\$\s*)?abicheck\s+"
+    r"(?:compare|scan|dump|aggregate|compat|deps|project|appcompat)\b"
+)
+
+#: The Action input that forwards raw argv. Same rule applies to its value:
+#: a config key written there reaches Click as a positional operand.
+_EXTRA_ARGS_RE = re.compile(r"^\s*extra-args:\s*(.+)$")
+
+
+def _shell_command_lines(text: str) -> list[tuple[int, str]]:
+    """Every ``abicheck <subcommand> ...`` invocation in *text*, with its
+    backslash continuations joined, as ``(line_number, command)``."""
+    out: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if _ABICHECK_COMMAND_RE.match(lines[i]):
+            start = i + 1
+            parts = [lines[i]]
+            while parts[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                parts.append(lines[i])
+            out.append((start, " ".join(p.rstrip().rstrip("\\") for p in parts)))
+        i += 1
+    return out
+
+
+def _check_config_keys_as_cli_operands(f: Findings) -> None:
+    """Flag a documented command line that passes a config key as argv.
+
+    The failure this exists for: when a hidden per-run flag is demoted to a
+    ``.abicheck.yml``-only setting, a mechanical rewrite of every mention
+    (``--severity-addition error`` -> ``severity.addition: error``) is correct
+    in the *prose* naming the key and wrong in every *command line* that used
+    to pass the flag -- Click sees two unexpected positional operands and the
+    example exits 64. Eight such examples shipped across five pages before a
+    reviewer read one of them (Codex review), because nothing distinguishes
+    the two contexts by eye.
+
+    Scoped to actual invocations (and the Action's ``extra-args``, which is
+    raw argv by another name), so prose and YAML config blocks -- where the
+    same token is exactly right -- are untouched. WARN-only, matching the
+    retired-surface sweep: the fix is a human decision about which spelling
+    the passage meant.
+    """
+    for path, rel in _retired_surface_scan_targets():
+        text = path.read_text(encoding="utf-8")
+        for line_no, command in _shell_command_lines(text):
+            for m in _CONFIG_KEY_OPERAND_RE.finditer(command):
+                f.warn(
+                    "config-key-as-cli-operand",
+                    f"{_rel(path)}:{line_no}: {m.group(1)!r} is a "
+                    ".abicheck.yml key, not a CLI operand -- this command "
+                    "exits 64 (Click reads it as unexpected positional "
+                    "arguments). Show a config file, or the flag that "
+                    "really exists.",
+                )
+        for i, line in enumerate(text.splitlines(), start=1):
+            em = _EXTRA_ARGS_RE.match(line)
+            if em is None:
+                continue
+            for m in _CONFIG_KEY_OPERAND_RE.finditer(em.group(1)):
+                f.warn(
+                    "config-key-as-cli-operand",
+                    f"{_rel(path)}:{i}: {m.group(1)!r} is a .abicheck.yml "
+                    "key, but `extra-args` is raw argv -- it reaches Click "
+                    "as unexpected positional arguments. Put it in the "
+                    "repository's .abicheck.yml instead.",
+                )
+        del rel
 
 
 def _check_stale_process_language(f: Findings) -> None:
@@ -1460,6 +1730,7 @@ def main() -> int:
     _check_duplicate_paragraphs(f)
     _check_stale_process_language(f)
     _check_retired_surfaces(f)
+    _check_config_keys_as_cli_operands(f)
     return f.report()
 
 

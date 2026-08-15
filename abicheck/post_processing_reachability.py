@@ -82,7 +82,7 @@ class MarkReachability:
     roadmap), not a heuristic on the symbol's own spelling.
 
     ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
-    ``--public-header``/``--public-header-dir`` scoping) is a *different*
+    public-header scoping) is a *different*
     signal from the naming heuristic just described — an explicit, reliable
     tag, not a guess — and is consulted directly below for a change whose
     own subject type carries it, since :func:`internal_leak.compute_leak_paths`
@@ -119,7 +119,7 @@ class MarkReachability:
     resolution of ADR-052's own open measurement question ("is
     ``assess_change`` ever called more than once for the same ``Change``
     within one ``compare`` run"): measured directly (not assumed) via
-    ``compare --format json --secondary-format sarif``, which renders the
+    ``compare --format json --write sarif=abi.sarif``, which renders the
     identical ``DiffResult``/``Change`` objects twice in one process --
     ``reporter.py``'s JSON path and ``sarif.py``'s SARIF path each call
     ``assess_change`` independently. A one-off instrumented run over a
@@ -223,8 +223,8 @@ class MarkReachability:
         from .model import ScopeOrigin
 
         def _public_header_names(snap: AbiSnapshot) -> set[str]:
-            """Names of every declaration ADR-024's opt-in ``--public-header``/
-            ``--public-header-dir`` scoping marked ``ScopeOrigin.PUBLIC_HEADER``
+            """Names of every declaration ADR-024's opt-in public-header
+            scoping marked ``ScopeOrigin.PUBLIC_HEADER``
             — ``Function``/``Variable``/``RecordType``/``EnumType`` all carry
             this field. Without that flag every origin is ``ScopeOrigin.UNKNOWN``,
             so this returns empty and degrades to the prior behavior.

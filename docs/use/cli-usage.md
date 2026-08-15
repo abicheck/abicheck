@@ -140,7 +140,7 @@ Beyond the core `compare`/`dump` flow:
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
 - [Output Formats](output-formats.md) — `--show-only` filtering, `--stat`,
-  `--report-mode leaf`, `--show-impact`, redundancy filtering, SARIF/JUnit
+  `--report-mode leaf|impact`, redundancy filtering, SARIF/JUnit
   output, evidence-tier confidence, JSON schema.
 - `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
   application's actual imports or a plugin host's required entrypoints — see
@@ -185,8 +185,8 @@ abicheck compare old.json new.json --profile ci-gate
 abicheck compare old.json new.json --profile release-cut --format json
 ```
 
-> `--show-only` filtering, `--show-redundant`, `--stat`, `--report-mode leaf`,
-> and `--show-impact` are covered in full on
+> `--show-only` filtering, `scope.show_redundant: true`, `--stat`, and
+> `--report-mode leaf|impact` are covered in full on
 > [Output Formats](output-formats.md) — all are display-only and do not affect
 > the verdict or exit code.
 

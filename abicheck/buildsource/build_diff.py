@@ -142,7 +142,7 @@ def check_header_parse_drift(
                 "Public headers were parsed without the build's ABI-relevant "
                 f"context ({', '.join(abi_flags)}); header-derived API facts may "
                 "be unreliable. Re-run the dump with the build's "
-                "compile_commands.json (-p/--compile-db) to restore confidence."
+                "compile_commands.json (--build-info) to restore confidence."
             ),
             new_value=", ".join(abi_flags),
         )

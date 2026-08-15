@@ -980,7 +980,7 @@ def detect_mandatory_template_param_added(
         # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
         # observation is reliably public — a Visibility.PUBLIC function, or a
         # type explicitly scoped to the public-header set (ADR-024's opt-in
-        # ScopeOrigin.PUBLIC_HEADER, --public-header/--public-header-dir).
+        # ScopeOrigin.PUBLIC_HEADER, from the public-header set).
         # Without that flag every type's origin is ScopeOrigin.UNKNOWN, so
         # this degrades to "public only if a public function contributed"
         # automatically for the common case.

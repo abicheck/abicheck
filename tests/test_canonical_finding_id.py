@@ -873,7 +873,7 @@ class TestReporterEmitsCanonicalFindingId:
         # Regression (Codex review, PR #753): _add_contract_evaluation_fields
         # used to return before stamping finding_id/canonical_finding_id
         # whenever contract_relevance was unset -- which is every ordinary
-        # run without --contract-evaluation -- so out_of_surface_changes
+        # run without --contract -- so out_of_surface_changes
         # entries (built by the same helper) silently lacked both ids.
         change = _func_removed(
             "_Z3fooi", description="Function removed: foo(int)", source_location=None

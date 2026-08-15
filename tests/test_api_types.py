@@ -258,7 +258,7 @@ class TestCompareRequestValidate:
         assert req.validation_errors() == []
 
     def test_missing_policy_file_rejected(self, tmp_path):
-        # D9 pre-flight: a --policy-file path that doesn't exist errors identically
+        # D9 pre-flight: a --policy path that doesn't exist errors identically
         # from CLI and MCP (one Tier-2 rule).
         missing = tmp_path / "nope.yml"
         req = CompareRequest(

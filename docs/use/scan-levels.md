@@ -167,7 +167,7 @@ matches your goal, then supply the input named in column 3.
 |---|---|---|---|---|
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
 | Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **directory** + a C/C++ frontend | `-H include/ --public-header-dir include/`; `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
-| Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info`/`--compile-db` | L3 `not_collected`; the scan advises the exact remedy |
+| Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info` | L3 `not_collected`; the scan advises the exact remedy |
 | Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (ADR-043 D3 — never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
 | Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
 | Single-build hygiene lint (accidental exports, leaks, unversioned/RTTI) | any depth, no `--against` | binary + public-header **dir** (+ optional L3/L4) | as above | `header_build_context_mismatch` needs L3; `odr_type_variant` needs L4 |
@@ -216,7 +216,7 @@ the request to collect build evidence.
 Make is queried with a fixed dry-run command (`make -B -n -k -w`) and the transcript
 is scraped as reduced-confidence L3 evidence. This lets Make/EPICS-style projects
 work without a manual `compile_commands.json`; a real compile DB (for example
-from `bear -- make`, then `--compile-db compile_commands.json`) is still preferred
+from `bear -- make`, then `--build-info compile_commands.json`) is still preferred
 when available.
 
 Only an abicheck-constructed command runs automatically. An *arbitrary*
@@ -225,7 +225,7 @@ Only an abicheck-constructed command runs automatically. An *arbitrary*
 An auto-discovered `.abicheck.yml` sitting inside the `--sources` tree is never
 trusted to execute its `build.query` (it may be attacker-controlled); its
 non-executing settings are still honoured. Pre-generating and passing a
-`--compile-db` yourself remains supported as an advanced option.
+`--build-info` yourself remains supported as an advanced option.
 
 ```yaml
 # .abicheck.yml
@@ -270,7 +270,7 @@ Four layers resolve the context, **highest precedence first**:
    reviewed in PRs (see below). Put include roots, `std`, and `defines` here so
    every scan/CI run is reproducible without re-typing them.
 3. **Compile-DB-derived flags** — *planned*: per-TU `-I`/`-std`/`-D` taken from a
-   `--compile-db`. Today the compile DB feeds L3–L5 only.
+   `--build-info`. Today the compile DB feeds L3–L5 only.
 4. **Auto-detected system includes** — the default floor (below).
 
 ```yaml
@@ -361,7 +361,7 @@ with the number of corroborating sources (the provider-agreement matrix).
 Some audit checks need more evidence than the artifact tiers provide:
 `header_build_context_mismatch` compares the headers' parse context against the
 real build flags, so it only fires when you also pass an L3 build input
-(`--build-info`/`--compile-db` or `--sources`) — without one it is reported as a
+(`--build-info` or `--sources`) — without one it is reported as a
 skipped coverage row, not a pass:
 
 ```bash
@@ -382,7 +382,7 @@ source and resolve only by crosschecking two.
 When you only have the two binaries (or want a fast pre-check), pin a cheap
 depth. `--depth build` adds build-flag/toolchain drift, but only when you also
 give it a build input to read — a compile DB or build dir via
-`--build-info`/`--compile-db` (or a `--sources` tree); without one, L3 is
+`--build-info` (or a `--sources` tree); without one, L3 is
 reported `not_collected` and no drift is checked. `--depth binary` stays on the
 exported-symbol surface (L0) plus cheap debug-info *presence* and the always-on
 pattern scan — it skips the deep DWARF type walk, so no compiler, headers, or

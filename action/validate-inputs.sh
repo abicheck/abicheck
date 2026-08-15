@@ -248,7 +248,7 @@ if [[ "$_JOBS" != "0" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_
   _warn "jobs is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
 fi
 
-# used-by/verify-runtime/required-symbol/required-symbols: compare mode only
+# used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/
 # --required-symbols are mutually exclusive on the CLI itself, but that
 # UsageError only surfaces after Python setup/dependency install/pip
@@ -262,9 +262,9 @@ _REQUIRED_SYMBOLS="${INPUT_REQUIRED_SYMBOLS:-}"
 if [[ -n "$_USED_BY" && ( -n "$_REQUIRED_SYMBOL" || -n "$_REQUIRED_SYMBOLS" ) ]]; then
   _fail "used-by is mutually exclusive with required-symbol/required-symbols -- set only one contract per check."
 fi
-_scoped_input_names=(used-by verify-runtime required-symbol required-symbols)
-_scoped_input_values=("$_USED_BY" "${INPUT_VERIFY_RUNTIME:-false}" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
-_scoped_input_unset_values=("" "false" "" "")
+_scoped_input_names=(used-by required-symbol required-symbols)
+_scoped_input_values=("$_USED_BY" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
+_scoped_input_unset_values=("" "" "")
 for _i in "${!_scoped_input_names[@]}"; do
   if [[ "${_scoped_input_values[$_i]}" != "${_scoped_input_unset_values[$_i]}" && "$MODE" != "compare" ]]; then
     _warn "${_scoped_input_names[$_i]} is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
@@ -371,4 +371,15 @@ fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$FORMAT" != "sarif" ]]; then
   _fail "upload-sarif requires format: sarif (got '${FORMAT:-markdown}') — without it there is no SARIF report for the upload-sarif step to find."
+fi
+
+# build-info + compile-db, scan mode: the same conflict `action/run.sh`
+# rejects when it assembles argv, checked here so it fails before Python
+# setup, dependency install and toolchain provisioning -- this script's whole
+# reason for existing (Codex review). Kept scan-only for the same reason
+# run.sh keeps it scan-only: scan is the mode whose behavior changed, having
+# forwarded both operands and preferred compile-db, while compare and dump
+# have always resolved this pair by the documented build-info-wins fallback.
+if [[ "$MODE" == "scan" && -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
+  _fail "build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
 fi

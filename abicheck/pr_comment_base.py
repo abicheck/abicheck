@@ -329,7 +329,7 @@ def _normalize_location(raw: str) -> str:
 def _severity_levels(report: dict[str, object]) -> dict[str, str]:
     """Resolved per-category severity levels from the report, or ``{}``.
 
-    Present when the comparison ran with a severity config (``--severity-*`` /
+    Present when the comparison ran with a severity config (a ``severity:`` config /
     preset). A category set to ``error`` turns the check red, so the comment
     must file that category's findings under Breaking to match — this covers
     ``severity-addition: error`` and any preset/extra-arg path uniformly.
@@ -480,7 +480,7 @@ _CONTRACT_PROVIDER_LABEL = {
 def _contract_coverage_findings(report: dict[str, object]) -> list[Finding]:
     """Build analysis-incomplete findings from ``report["contract_coverage_
     failures"]`` (ADR-049 Phase 5's unsuppressible sibling ledger, emitted
-    only under ``compare --contract-evaluation``).
+    only under ``compare --contract``).
 
     Codex review: this ledger is deliberately kept *outside*
     ``DiffResult.changes`` — see ``AGENTS.md``'s own contract_coverage_
@@ -496,7 +496,7 @@ def _contract_coverage_findings(report: dict[str, object]) -> list[Finding]:
     — while under ``--on=always`` it renders the actively misleading "✅ No
     ABI changes" next to a check that already failed.
 
-    Always ``[]`` for a report that never ran ``--contract-evaluation``
+    Always ``[]`` for a report that never ran ``--contract``
     (the key is entirely absent then, never an empty list emitted for a
     different reason — ``reporter.py`` only emits this key when
     ``result.contract_context`` is not ``None``).

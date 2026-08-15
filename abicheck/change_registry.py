@@ -283,7 +283,7 @@ REGISTRY = ChangeKindRegistry([
     _E("symbol_size_changed_internal", _B,
        impact="ELF size changed on an internal-looking (reserved/underscore-prefixed) exported data symbol; "
               "exported data remains part of the dynamic ABI and size changes can break copy relocations "
-              "or direct data consumers. Override severity via --policy-file only when the symbol is known private.",
+              "or direct data consumers. Override severity via --policy only when the symbol is known private.",
        description_template="Symbol size changed: {name} ({old} → {new} bytes)"),
     _E("symbol_size_changed_const_object", _B,
        impact="ELF size changed on a public const string-like object declared without a fixed bound in headers. "

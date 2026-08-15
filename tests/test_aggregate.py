@@ -1135,21 +1135,51 @@ class TestAggregateCLI:
 
         return CliRunner().invoke(main, ["aggregate", *args])
 
+    def _manifest(self, tmp_path: Path, *ids: str, optional: tuple[str, ...] = ()):
+        """Write an expected-target manifest.
+
+        The ad-hoc ``--expect``/``--optional`` id lists these tests used to
+        pass are gone: a manifest file is the one way to declare the target
+        set, so the CLI cannot drift from the plan job that produced it.
+        """
+        path = tmp_path / "expected.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "targets": [{"id": i, "required": True} for i in ids]
+                    + [{"id": i, "required": False} for i in optional]
+                }
+            )
+        )
+        return path
+
     def test_missing_required_exits_1(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        res = self._run(["--expect", f"{LINUX},{WINDOWS}", str(tmp_path)])
+        res = self._run(
+            ["--manifest", str(self._manifest(tmp_path, LINUX, WINDOWS)), str(tmp_path)]
+        )
         assert res.exit_code == 1
         assert "Failed" in res.output
 
     def test_all_clean_exits_0(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         _write_report(tmp_path, WINDOWS, "COMPATIBLE")
-        res = self._run(["--expect", f"{LINUX},{WINDOWS}", str(tmp_path)])
+        res = self._run(
+            ["--manifest", str(self._manifest(tmp_path, LINUX, WINDOWS)), str(tmp_path)]
+        )
         assert res.exit_code == 0
 
     def test_abi_break_exits_4(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "BREAKING")
-        res = self._run(["--expect", LINUX, "--format", "json", str(tmp_path)])
+        res = self._run(
+            [
+                "--manifest",
+                str(self._manifest(tmp_path, LINUX)),
+                "--format",
+                "json",
+                str(tmp_path),
+            ]
+        )
         assert res.exit_code == 4
         assert json.loads(res.output)["compatibility"]["verdict"] == "BREAKING"
 
@@ -1177,26 +1207,34 @@ class TestAggregateCLI:
             json.dumps({"targets": [{"id": LINUX, "required": True}]})
         )
         res = self._run(
-            ["--manifest", str(tmp_path / "m.json"), "--expect", LINUX, str(tmp_path)]
+            [
+                "--manifest",
+                str(tmp_path / "m.json"),
+                "--run-plan",
+                str(tmp_path / "m.json"),
+                str(tmp_path),
+            ]
         )
         assert res.exit_code == 64
 
-    def test_discovered_only_conflicts_with_expect(self, tmp_path: Path):
+    def test_discovered_only_conflicts_with_manifest(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        res = self._run(["--discovered-only", "--expect", LINUX, str(tmp_path)])
-        assert res.exit_code == 64
-
-    def test_optional_without_expect_is_usage_error(self, tmp_path: Path):
-        # --optional alone would make an all-optional (never-gated) target set —
-        # a fail-open gate. It must be a usage error, not a silent exit 0.
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        res = self._run(["--optional", MACOS, str(tmp_path)])
+        res = self._run(
+            [
+                "--discovered-only",
+                "--manifest",
+                str(self._manifest(tmp_path, LINUX)),
+                str(tmp_path),
+            ]
+        )
         assert res.exit_code == 64
 
     def test_duplicate_target_id_usage_error(self, tmp_path: Path):
         _write_report(tmp_path, "linux", "COMPATIBLE", prefix="abi-report-")
         _write_report(tmp_path, "linux", "BREAKING", prefix="")
-        res = self._run(["--expect", "linux", str(tmp_path)])
+        res = self._run(
+            ["--manifest", str(self._manifest(tmp_path, "linux")), str(tmp_path)]
+        )
         assert res.exit_code == 64
 
     def test_malformed_manifest_is_usage_error(self, tmp_path: Path):
@@ -1211,7 +1249,15 @@ class TestAggregateCLI:
         _write_report(reports, LINUX, "COMPATIBLE")
         out = tmp_path / "out.json"
         res = self._run(
-            ["--expect", LINUX, "--format", "json", "-o", str(out), str(reports)]
+            [
+                "--manifest",
+                str(self._manifest(tmp_path, LINUX)),
+                "--format",
+                "json",
+                "-o",
+                str(out),
+                str(reports),
+            ]
         )
         assert res.exit_code == 0
         assert json.loads(out.read_text())["status"] == "pass"
@@ -1546,7 +1592,7 @@ class TestContractCoverageAxis:
         assert result.exit_code() == 4
 
     def test_a_report_without_the_key_contributes_nothing(self, tmp_path: Path) -> None:
-        # Every pre-2.26 report, and every run without --contract-evaluation:
+        # Every pre-2.26 report, and every run without --contract:
         # no contract domain was selected, so there is none to be short of
         # evidence for. This is what keeps existing matrices unchanged.
         _write_report(tmp_path, LINUX, "COMPATIBLE")

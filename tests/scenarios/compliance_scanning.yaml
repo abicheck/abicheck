@@ -72,12 +72,12 @@ scenarios:
     title: Strict suppressions fail when a waiver has expired
     persona: Library maintainer
     narrative: >
-      Suppressions are time-boxed waivers. With --strict-suppressions, a rule
-      past its `expires` date fails the run (exit 1) so stale waivers can't hide
-      breaks indefinitely. (Note: an expired rule no longer suppresses, so the
-      underlying break also resurfaces.)
+      Suppressions are time-boxed waivers. With `suppression.strict: true` in
+      `.abicheck.yml`, a rule past its `expires` date fails the run (exit 1) so
+      stale waivers can't hide breaks indefinitely. (Note: an expired rule no
+      longer suppresses, so the underlying break also resurfaces.)
     flow:
-      - abicheck compare old.json new.json --suppress expired.yaml --strict-suppressions
+      - abicheck compare old.json new.json --suppress expired.yaml --config strict.abicheck.yml
     expected:
       exit_code: 1
     validates: UC-WF-compare

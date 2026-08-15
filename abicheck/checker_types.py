@@ -508,7 +508,7 @@ class DiffResult:
     # side against a full L2 side). None on the ordinary case (both or
     # neither side carries a contract) — this is report-level metadata, not
     # a ChangeKind/Change finding, so it is structurally unreachable by any
-    # --severity-* promotion. "partial" is currently the only recognized
+    # severity promotion. "partial" is currently the only recognized
     # value.
     contract_coverage: Literal["partial"] | None = None
     # ADR-050 D2 — set to "none" only when --diagnostic-comparison forced a
@@ -543,6 +543,15 @@ class DiffResult:
     # annotation here would be circular. Narrow with `isinstance` at any
     # consumption site (see `reporter._add_analysis_assurance`).
     analysis_assurance: object | None = None
+    # ``compare --use-cases MANIFEST``'s attribution of this comparison's own
+    # findings to the declared use cases whose entrypoints reach them
+    # (``impact.use_case_impact.UseCaseImpact``). ``None`` for every run that
+    # did not pass the flag. Typed ``object`` for the same circular-import
+    # reason as the two blocks above -- the builder imports ``Change`` from
+    # this module. Read-only report data: it never reaches the verdict, the
+    # gate, or an exit code, because an unattributed finding is an absence of
+    # proof, not proof the finding is harmless.
+    use_case_impact: object | None = None
 
     def _effective_kind_sets(
         self,
@@ -598,7 +607,7 @@ class DiffResult:
         still in ``changes``, they are listed by :attr:`not_evaluated`, and
         every renderer discloses them with their relevance and reason.
 
-        Without ``--contract-evaluation`` no finding carries a relevance at
+        Without ``--contract`` no finding carries a relevance at
         all, so this returns ``changes`` unchanged and every bucket is
         exactly what it was before ADR-049.
         """
@@ -612,7 +621,7 @@ class DiffResult:
 
         ``PROVEN_OUT_OF_CONTRACT``, ``UNKNOWN_UNPROVEN`` and
         ``UNKNOWN_UNRESOLVED`` findings, in ``changes`` order. Empty for
-        every run that did not opt into ``--contract-evaluation``.
+        every run that did not opt into ``--contract``.
         """
         from .contract_gating import is_evaluated
 

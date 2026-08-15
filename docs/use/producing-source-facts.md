@@ -70,7 +70,7 @@ result.
 # L2 header declarations, all inline, in one snapshot (L0–L5 together).
 # Unseeded `--depth source` already analyses the whole target (the old
 # separate `full` rung collapsed into `source` — ADR-043):
-abicheck dump libfoo.so -H include/ --sources . --compile-db build/compile_commands.json \
+abicheck dump libfoo.so -H include/ --sources . --build-info build/compile_commands.json \
   --depth source -o libfoo.full.json
 ```
 
@@ -85,7 +85,7 @@ run `dump` against the real binary as shown above.
 
 With just `--sources`, abicheck infers and runs the build-system query itself
 (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a `make -n`
-transcript). Pass `--compile-db` when you already have a `compile_commands.json`
+transcript). Pass `--build-info` when you already have a `compile_commands.json`
 that isn't under the tree — it is the most faithful input.
 
 ## Wrapper injection — the `abicheck-cc` compiler wrapper

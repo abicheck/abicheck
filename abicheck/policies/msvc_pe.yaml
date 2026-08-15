@@ -10,7 +10,7 @@
 #
 # Turnkey usage:
 #
-#   abicheck compare foo.dll foo.new.dll --policy-file msvc_pe
+#   abicheck compare foo.dll foo.new.dll --policy msvc_pe
 base_policy: strict_abi
 
 overrides:

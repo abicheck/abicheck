@@ -686,7 +686,7 @@ def test_broadened_abi_flag_vocabulary_is_captured(flag):
     "-fsycl-targets=nvptx64-nvidia-cuda",
 ])
 def test_sycl_language_mode_flag_is_captured(flag):
-    """A resolved --gcc-path override can now actually invoke icpx/dpcpp for
+    """A resolved --compiler override can now actually invoke icpx/dpcpp for
     L4 replay (previously always a bare "clang"), so -fsycl and its variants
     must be captured as ABI-relevant -- otherwise a SYCL TU replays as plain
     C++, silently missing built-in SYCL state (Codex review)."""

@@ -70,7 +70,7 @@ Generated output, per skill, per target tree:
    the range to it would approve an installation lacking the surface: that is
    how the range first came to say `>=0.5.0` while every workflow depended on
    `aggregate`, `project plan`, `--report-mode root-cause`,
-   `--diagnostic-comparison`, and `--contract-evaluation`, none of which
+   `--diagnostic-comparison`, and `--contract`, none of which
    0.5.0 shipped. `tests/test_agent_skills_structural.py` enforces the
    minimum against its own `SURFACE_FLOOR` constant — a stated fact about
    which release contains which commands, since nothing in the working tree

@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 def _contract_tag(c: Change, contract_evaluation: bool) -> str:
     """A ``[contract: ...]`` suffix for an audit-ledger line, matching the
     tag rendered elsewhere (``reporter_markdown``/``cli_compare_fold``) --
-    a no-op unless ``--contract-evaluation`` was requested and this finding
+    a no-op unless ``--contract`` was requested and this finding
     was already stamped (ADR-049 Phase 3; Codex review, fresh evidence: this
     stderr audit ledger was the one remaining per-finding contract-decision
     rendering site left unstamped after the JSON/Markdown fixes)."""

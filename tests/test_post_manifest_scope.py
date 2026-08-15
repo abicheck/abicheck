@@ -135,7 +135,7 @@ def test_manifest_allowlist_matches_exactly_not_by_suffix() -> None:
 
 
 def test_force_public_ignored_in_manifest_scope_without_header_scoping() -> None:
-    # Codex: the CLI warns --public-symbol is ignored under
+    # Codex: the CLI warns a forced public-symbol set is ignored under
     # --no-scope-public-headers. The allowlist branch must honor that — a
     # force_public private symbol is NOT re-added when header scoping is off, but
     # IS when it is on.

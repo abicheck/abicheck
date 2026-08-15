@@ -138,7 +138,7 @@ class TestResolverErrorsAreUsageErrors:
     Patched rather than driven by a real conflicting invocation, matching
     `test_cli_compare_config_receipt`'s equivalent test and for the same
     reason: `scan` exposes no flag pair that resolves to a same-tier
-    conflict today (`--policy`/`--policy-file` is D7's documented
+    conflict today (`--policy`/`--policy` is D7's documented
     compatibility exception, and `--public-symbol`/`--public-symbols-list`
     union rather than conflict). So this pins the handler -- that the error
     becomes exit 64 with its message intact rather than a traceback -- not
@@ -211,7 +211,8 @@ class TestResolverErrorsAreUsageErrors:
                 str(new_p),
                 "--against",
                 str(old_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],

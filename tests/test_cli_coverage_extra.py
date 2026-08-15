@@ -266,8 +266,8 @@ class TestRenderOutputFormats:
     # test_html_output: covered by test_cli_unit.py::TestCompareHtml
     # test_json_output: covered by test_cli_unit.py::TestCompareJson
 
-    def test_show_impact_flag(self, tmp_path: Path) -> None:
-        """--show-impact includes impact summary when type changes have affected symbols."""
+    def test_report_mode_impact(self, tmp_path: Path) -> None:
+        """--report-mode impact includes the impact summary when type changes have affected symbols."""
         from abicheck.model import (
             AbiSnapshot,
             Function,
@@ -297,7 +297,9 @@ class TestRenderOutputFormats:
         new_f.write_text(snapshot_to_json(new_snap), encoding="utf-8")
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_f), str(new_f), "--show-impact"])
+        result = runner.invoke(
+            main, ["compare", str(old_f), str(new_f), "--report-mode", "impact"]
+        )
         assert result.exit_code == 4  # breaking (struct size changed)
         assert "Impact Summary" in result.output or "impact" in result.output.lower()
 
@@ -371,10 +373,13 @@ class TestCompareErrorDisplay:
 
 
 class TestShowRedundant:
-    """Test --show-redundant flag for merging redundant changes."""
+    """``scope.show_redundant`` merges redundant changes back into the list.
 
-    def test_show_redundant_flag(self, tmp_path: Path) -> None:
-        """--show-redundant merges redundant changes back into main list."""
+    Config-only: the hidden ``--show-redundant`` CLI flag that duplicated
+    this key was removed.
+    """
+
+    def test_show_redundant_config_key(self, tmp_path: Path) -> None:
         from abicheck.model import (
             AbiSnapshot,
             Function,
@@ -418,9 +423,11 @@ class TestShowRedundant:
         hidden = runner.invoke(main, ["compare", str(old_file), str(new_file)])
         assert hidden.exit_code == 4
 
-        # With --show-redundant the hidden derived change is restored
+        # With scope.show_redundant the hidden derived change is restored
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  show_redundant: true\n", encoding="utf-8")
         result = runner.invoke(main, [
-            "compare", str(old_file), str(new_file), "--show-redundant",
+            "compare", str(old_file), str(new_file), "--config", str(cfg),
         ])
         assert result.exit_code == 4
         assert "init" in result.output  # derived change now visible

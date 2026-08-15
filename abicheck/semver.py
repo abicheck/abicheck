@@ -234,7 +234,7 @@ def _unresolved_contract_findings(result: DiffResult) -> list[Change]:
     contract-coverage exit already makes, so the recommendation and that exit
     code cannot disagree about whether the run established anything.
 
-    Empty for every run that did not pass ``--contract-evaluation``: nothing
+    Empty for every run that did not pass ``--contract``: nothing
     carries a relevance, so nothing is unresolved.
     """
     from .contract_gating import contract_relevance_of

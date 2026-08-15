@@ -224,10 +224,6 @@ on:
         description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison.'
         type: string
         default: ''
-      verify-runtime:
-        description: 'target-kind: app-consumer only.'
-        type: boolean
-        default: false
       contract-file:
         description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line).'
         type: string
@@ -248,10 +244,6 @@ on:
         description: 'Forwarded to the internal compare step. Defaults to ''default'' so the report always carries a severity block.'
         type: string
         default: 'default'
-      severity-addition:
-        description: 'Severity for new public API additions: error, warning, or info.'
-        type: string
-        default: ''
       extra-args:
         description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
         type: string
@@ -491,13 +483,11 @@ jobs:
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           consumer-binary: ${{ inputs.consumer-binary }}
-          verify-runtime: ${{ inputs.verify-runtime }}
           contract-file: ${{ inputs.contract-file }}
           policy: ${{ inputs.policy }}
           policy-file: ${{ inputs.policy-file }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
-          severity-addition: ${{ inputs.severity-addition }}
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}

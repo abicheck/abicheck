@@ -167,8 +167,8 @@ class TestPolicyBase:
     def test_policy_file_wins_over_policy_flag_and_records_the_shadowed_input(
         self, tmp_path
     ):
-        # D7, verbatim: "when both --policy and --policy-file are supplied,
-        # --policy-file keeps winning as documented and tested today;
+        # D7, verbatim: "when both --policy and --policy are supplied,
+        # --policy keeps winning as documented and tested today;
         # provenance records the effective file-selected base plus the
         # shadowed --policy input."
         pf = _policy_file(tmp_path, "base_policy: plugin_abi\n")
@@ -1289,7 +1289,7 @@ class TestUnstatableSelectors:
         assert "'--policy'" in offenders[0]
 
     def test_a_shadowed_legacy_candidate_is_checked_too(self) -> None:
-        """D7's `--policy`/`--policy-file` exception parks a suppressed
+        """D7's `--policy`/`--policy` exception parks a suppressed
         candidate's own provenance under `shadowed_legacy`; a replay reads it
         the same way, so it cannot claim an unstatable input either."""
         from dataclasses import replace

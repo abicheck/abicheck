@@ -60,7 +60,7 @@ from .contract_relevance_types import ContractAssurance, ContractRelevance
 # abi_compare tool and cli_compare_helpers.py/cli_compare_fold.py's
 # compare CLI command -- both apply the identical override to the
 # identical class of finding (Codex review: originally private to
-# mcp_server.py only, leaving the CLI's own --contract-evaluation +
+# mcp_server.py only, leaving the CLI's own --contract +
 # --used-by/--required-symbol combination permanently unstamped).
 #: The reason code stamp_explicit_scope_contract_evaluation always uses --
 #: hoisted so the two assignment branches below can't drift apart (CodeRabbit

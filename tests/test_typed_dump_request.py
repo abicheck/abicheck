@@ -748,7 +748,7 @@ class TestSourceReplayUsesTheSelectedCompiler:
     """L4 source-ABI replay invokes the compiler the request selected.
 
     `embed_build_source` defaults `clang_bin` to a bare "clang"; the `dump`
-    CLI and `scan_engine` both override it from `--gcc-path`/`--gcc-prefix`,
+    CLI and `scan_engine` both override it from `--compiler`/`--compiler-prefix`,
     and the typed path did not. On a hermetic or cross-toolchain host where
     only the requested compiler works, that made an omitted `depth` return a
     weaker snapshot and an explicit `depth="source"` fail, even though the

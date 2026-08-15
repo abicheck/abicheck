@@ -47,10 +47,10 @@ abicheck ships a built-in policy that promotes the hardening kinds to hard
 breaks. Reference it by name — no file to author:
 
 ```bash
-abicheck compare libfoo.so.1 libfoo.so.2 --policy-file security
+abicheck compare libfoo.so.1 libfoo.so.2 --policy security
 ```
 
-`--policy-file security` resolves to the packaged
+`--policy security` resolves to the packaged
 [`abicheck/policies/security.yaml`](https://github.com/abicheck/abicheck/blob/main/abicheck/policies/security.yaml).
 It uses `base_policy: strict_abi` and gates `relro_weakened`, `pie_disabled`,
 `stack_canary_removed`, `fortify_source_weakened`, `writable_executable_segment`
@@ -60,7 +60,7 @@ and `executable_stack` to `break`, and `rpath_changed` / `runpath_changed` to
 ## Example
 
 ```console
-$ abicheck compare libfoo.so.1 libfoo.so.2 --policy-file security
+$ abicheck compare libfoo.so.1 libfoo.so.2 --policy security
 BREAKING
   relro_weakened     GNU_RELRO    RELRO weakened: full → none
   stack_canary_removed __stack_chk_fail  Stack canary removed: -fstack-protector no longer referenced

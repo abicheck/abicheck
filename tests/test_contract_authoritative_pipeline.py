@@ -25,7 +25,7 @@ outcome").
 Two properties are asserted throughout rather than once, because together
 they are what "authoritative but safe" means:
 
-- a run that did not opt into `--contract-evaluation` is bit-for-bit what it
+- a run that did not opt into `--contract` is bit-for-bit what it
   was, since nothing carries a relevance for the new rule to act on;
 - an excluded finding is *excluded from scoring*, never dropped, re-kinded,
   or turned green -- the unresolved case is reported on its own orthogonal
@@ -341,7 +341,6 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 str(new_p),
                 "--required-symbol",
                 "_Z4keepv",
-                "--contract-evaluation",
                 "--contract",
                 "all",
                 "--format",
@@ -370,7 +369,6 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
                 "--contract",
                 "all",
                 "--format",
@@ -400,7 +398,6 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 str(new_p),
                 "--required-symbol",
                 "_Z4keepv",
-                "--contract-evaluation",
                 "--contract",
                 "all",
                 "--report-mode",
@@ -512,7 +509,7 @@ class TestScanKeepsWhatItDoesNotScore:
         return payload.get("report", payload)
 
     def test_an_excluded_finding_is_still_itemized(self, tmp_path: Path) -> None:
-        report = self._scan(tmp_path, "--contract-evaluation", "--contract", "exports")
+        report = self._scan(tmp_path, "--contract", "exports")
         diff = report["diff"]
         assert diff["breaking"] == 0
         assert diff["not_evaluated"] == 1
@@ -531,7 +528,7 @@ class TestScanKeepsWhatItDoesNotScore:
         could not be compared with `compare`'s finding for the same fact
         (Codex review). `null` is the required value for an unscored row --
         it records that policy never ran."""
-        report = self._scan(tmp_path, "--contract-evaluation", "--contract", "exports")
+        report = self._scan(tmp_path, "--contract", "exports")
         row = next(
             f for f in report["diff"]["findings"] if f["bucket"] == "not_evaluated"
         )
@@ -626,14 +623,14 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         declared the symbol part of the contract — which outranks the
         missing export evidence."""
         assert (
-            self._run(tmp_path, "--contract-evaluation", "--contract", "exports") == 4
+            self._run(tmp_path, "--contract", "exports") == 4
         )
 
     @pytest.mark.parametrize(
         "extra",
         [
             pytest.param((), id="no-contract-evaluation"),
-            pytest.param(("--contract-evaluation", "--contract", "all"), id="all"),
+            pytest.param(("--contract", "all"), id="all"),
         ],
     )
     def test_it_matches_the_runs_that_never_needed_the_promotion(
@@ -667,7 +664,6 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_bi",
-                "--contract-evaluation",
                 "--contract",
                 "exports",
                 "--format",
@@ -708,7 +704,6 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 # rather than being deduped into the real removal finding.
                 "--required-symbol",
                 "_Z7missingv",
-                "--contract-evaluation",
                 "--contract",
                 "exports",
                 "--exit-code-scheme",
@@ -813,7 +808,7 @@ class TestEveryRendererTellsTheSameStory:
 
     def test_sarif_keeps_error_for_a_scored_finding(self) -> None:
         """The control: this is a filter on excluded findings, not a blanket
-        SARIF downgrade under `--contract-evaluation`."""
+        SARIF downgrade under `--contract`."""
         from abicheck.sarif import to_sarif
 
         entries = to_sarif(self._scored())["runs"][0]["results"]
@@ -1008,7 +1003,7 @@ class TestAnExcludedFindingCannotLaunderItselfBack:
 
     def test_the_advisory_is_still_derived_when_the_finding_scores(self) -> None:
         """The control: this is a filter on excluded findings, not a
-        disabling of the SONAME policy under `--contract-evaluation`."""
+        disabling of the SONAME policy under `--contract`."""
         result = _compare(
             self._pair_with_soname(),
             contract_evaluation=True,
@@ -1273,7 +1268,6 @@ class TestNothingIsLost:
                 str(new_p),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "--contract",
                 "exports",
             ],

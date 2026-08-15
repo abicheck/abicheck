@@ -371,11 +371,13 @@ def test_sc_ci_severity_gate(tmp_path: Path) -> None:
     old, new = _lib("1", [_fn("a"), _fn("b")]), _lib("2", [_fn("a")])
     # Default gate fails on the ABI break …
     assert _compare(tmp_path, old, new).exit_code == 4
-    # … but downgrading abi_breaking to a warning passes (severity-aware scheme).
-    assert (
-        _compare(tmp_path, old, new, "--severity-abi-breaking", "warning").exit_code
-        == 0
-    )
+    # … but downgrading abi_breaking to a warning passes (severity-aware
+    # scheme). The per-category --severity-* flags duplicated the `severity:`
+    # config block and were removed, so this is now what a CI owner actually
+    # writes: the setting lives in .abicheck.yml, once, for every run.
+    cfg = tmp_path / "warn.abicheck.yml"
+    cfg.write_text("severity:\n  abi_breaking: warning\n", encoding="utf-8")
+    assert _compare(tmp_path, old, new, "--config", str(cfg)).exit_code == 0
 
 
 def test_sc_ci_stat(tmp_path: Path) -> None:
@@ -385,6 +387,18 @@ def test_sc_ci_stat(tmp_path: Path) -> None:
     assert res.exit_code == 4
     assert "total" in res.output
     assert res.output.count("\n") <= 1  # one-line summary
+
+
+def _strict_suppressions_config(tmp_path: Path) -> Path:
+    """``suppression.strict: true`` -- what ``--strict-suppressions`` became.
+
+    The flag was a hidden duplicate of this key and was removed; a waiver
+    policy is a project-level setting anyway, so the config file is where a
+    real run states it.
+    """
+    cfg = tmp_path / "strict.abicheck.yml"
+    cfg.write_text("suppression:\n  strict: true\n", encoding="utf-8")
+    return cfg
 
 
 def test_sc_suppression_expiry(tmp_path: Path) -> None:
@@ -404,7 +418,8 @@ def test_sc_suppression_expiry(tmp_path: Path) -> None:
         _lib("2", [_fn("a")]),
         "--suppress",
         str(expired),
-        "--strict-suppressions",
+        "--config",
+        str(_strict_suppressions_config(tmp_path)),
     )
     assert res.exit_code == 1  # the expired waiver fails the run
 
@@ -595,7 +610,7 @@ def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
         str(include),
         "--sources",
         str(src),
-        "--compile-db",
+        "--build-info",
         str(cdb),
         "--depth",
         "binary",

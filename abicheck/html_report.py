@@ -886,7 +886,7 @@ def generate_html_report(
     # metric reads 100%, with the relevance and reason appearing nowhere
     # (Codex review, reproduced). It gets its own section below instead --
     # conserved and explained, not filed under a verdict policy never
-    # reached. Empty for every run without `--contract-evaluation`.
+    # reached. Empty for every run without `--contract`.
     from .contract_gating import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
@@ -1066,7 +1066,8 @@ def generate_html_report(
         redundancy_note = (
             f"<div class='section' style='background:#fff3e0; padding:10px; border-left:4px solid #ff9800;'>"
             f"<strong>ℹ️ {redundant_count} redundant change(s)</strong> hidden "
-            f"(derived from root type changes). Use <code>--show-redundant</code> to show all."
+            f"(derived from root type changes). Set <code>scope.show_redundant: true</code> "
+            f"in <code>.abicheck.yml</code> to show all."
             f"</div>"
         )
 
@@ -1157,7 +1158,7 @@ def _build_sections_html(
     section: those findings were never scored by compatibility policy, so
     filing them under Removed/Changed/Added would contradict the verdict
     banner at the top of the same page. Defaults to nothing, so a run without
-    `--contract-evaluation` produces the identical document it always did.
+    `--contract` produces the identical document it always did.
     """
     sections: list[str] = []
     for title, anchor, css_class, items in (

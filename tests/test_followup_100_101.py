@@ -386,19 +386,26 @@ class TestCliPolicy:
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
-                ["compare", str(old_p), str(new_p), "--policy-file", str(policy_p)],
+                ["compare", str(old_p), str(new_p), "--policy", str(policy_p)],
             )
 
         assert result.exit_code == 0, result.output
 
-    def test_policy_file_wins_over_policy_flag(self, tmp_path: Any) -> None:
-        """--policy-file base_policy takes precedence; --policy is ignored."""
+    def test_last_policy_operand_wins(self, tmp_path: Any) -> None:
+        """One flag, one question: --policy takes a built-in profile name or a
+        document path, and the last one given wins.
+
+        The separate --policy-file this pair used to need is gone, so there is
+        no precedence rule between two flags left to state -- only Click's
+        ordinary last-value-wins over one scalar option, which the resolver
+        then routes to the profile slot or the document slot by what the
+        operand names.
+        """
         from click.testing import CliRunner
 
         from abicheck.cli import main
 
         old_p, new_p = self._write_snapshots(tmp_path)
-        # YAML file explicitly sets base_policy=strict_abi
         policy_p = tmp_path / "strict.yaml"
         policy_p.write_text("base_policy: strict_abi\noverrides: {}\n", encoding="utf-8")
 
@@ -409,35 +416,53 @@ class TestCliPolicy:
             captured["policy_file"] = kwargs.get("policy_file")
             return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
 
+        # A document last: the document is loaded, the profile slot falls back
+        # to the default rather than keeping the earlier profile name.
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
                 ["compare", str(old_p), str(new_p),
                  "--policy", "sdk_vendor",
-                 "--policy-file", str(policy_p)],
+                 "--policy", str(policy_p)],
             )
-
         assert result.exit_code == 0, result.output
-        # policy_file must be passed (not None)
         assert captured["policy_file"] is not None
-        # warning emitted on stderr
-        assert "--policy" in result.output or "ignored" in result.output
+
+        # A profile name last: no document is loaded at all.
+        captured.clear()
+        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
+            result = CliRunner().invoke(
+                main,
+                ["compare", str(old_p), str(new_p),
+                 "--policy", str(policy_p),
+                 "--policy", "sdk_vendor"],
+            )
+        assert result.exit_code == 0, result.output
+        assert captured["policy_file"] is None
+        assert captured["policy"] == "sdk_vendor"
 
     def test_help_lists_policy_choices(self) -> None:
         from click.testing import CliRunner
 
         from abicheck.cli import main
+        from abicheck.cli_params import BUILTIN_POLICY_PROFILES
+
         result = CliRunner().invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
-        # rich-click wraps the choices metavar across two columns, so scraping
-        # the rendered tokens is unreliable; assert the actual Choice instead.
+        # --policy is no longer a click.Choice: it takes a built-in profile
+        # name OR a document path, so its type is a plain string the callback
+        # routes by value. The built-in names are still a closed set, and the
+        # help text is where a user reads them -- so assert both, since a
+        # metavar alone would let the name list silently drift out of the help.
+        assert {"sdk_vendor", "plugin_abi", "strict_abi"} <= set(BUILTIN_POLICY_PROFILES)
         policy = next(p for p in main.commands["compare"].params
                       if getattr(p, "name", "") == "policy")
-        choices = set(policy.type.choices)  # type: ignore[attr-defined]
-        assert {"sdk_vendor", "plugin_abi", "strict_abi"} <= choices
-        # --policy-file is documented (stable single-token flag name).
         norm = result.output.replace("│", "").replace("\n", "").replace(" ", "")
-        assert "--policy-file" in norm
+        assert "--policy" in norm
+        assert policy.metavar == "NAME|PATH"
+        help_norm = (policy.help or "").replace("\n", " ")
+        for name in BUILTIN_POLICY_PROFILES:
+            assert name in help_norm, name
 
 
 class TestDiffResultPolicyAwareProperties:

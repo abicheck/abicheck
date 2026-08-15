@@ -40,14 +40,13 @@ from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
+    compile_db_filter_scope_error,
+    compile_db_from_build_info,
     handle_non_elf_dump,
-    has_other_l3_source,
     perform_elf_dump,
     reject_snapshot_compression_conflict,
-    resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
-    resolve_dump_compile_db,
     resolve_dump_debug_format,
 )
 from .cli_help import compare_help_options, configure_rich_help, dump_help_options
@@ -301,15 +300,13 @@ def main() -> None:
 def _load_dump_manifest_or_reject(
     dump_manifest_path: Path | None,
     headers: tuple[Path, ...],
-    public_headers: tuple[Path, ...],
-    public_header_dirs: tuple[Path, ...],
 ) -> Any:
-    """Parse ``--dump-manifest``, rejecting the flags it is exclusive with.
+    """Parse ``--dump-manifest``, rejecting the flag it is exclusive with.
 
     A manifest's own ``roots`` field and base profile declare the public
-    surface, so ``-H``/``--public-header``/``--public-header-dir`` would be a
-    second, conflicting declaration. Returns the parsed manifest, or ``None``
-    when no ``--dump-manifest`` was given.
+    surface, so ``-H``/``--header`` would be a second, conflicting
+    declaration. Returns the parsed manifest, or ``None`` when no
+    ``--dump-manifest`` was given.
     """
     if dump_manifest_path is None:
         return None
@@ -317,12 +314,6 @@ def _load_dump_manifest_or_reject(
         raise click.UsageError(
             "--dump-manifest and -H/--header are mutually exclusive -- the "
             "manifest's own 'roots' field declares the public surface instead."
-        )
-    if public_headers or public_header_dirs:
-        raise click.UsageError(
-            "--dump-manifest and --public-header/--public-header-dir are "
-            "mutually exclusive -- declare them in the manifest's own base "
-            "profile instead."
         )
     from .dump_manifest import load_manifest
     from .errors import ManifestValidationError
@@ -338,32 +329,21 @@ def _resolve_and_check_dump_debug_format(
     so_path: Path | None,
     debug_format_opt: str | None,
     debug_format: str | None,
-    compile_db_path: Path | None,
-    compile_db_path_alt: Path | None,
-    headers: tuple[Path, ...],
 ) -> str | None:
-    """Resolve the effective debug format and reject the usage errors it implies.
+    """Resolve the effective debug format and reject the usage error it implies.
 
-    Both checks are genuine usage errors in the real run (exit 64), raised here
-    -- before the ``--dry-run`` branch -- so the dry run and the real run agree
-    on them rather than the dry run downgrading either into an evidence
-    blocker. Returns ``None`` for a source-only dump, which has no binary to
-    resolve a debug format against.
+    A genuine usage error in the real run (exit 64), raised here -- before the
+    ``--dry-run`` branch -- so the dry run and the real run agree on it rather
+    than the dry run downgrading it into an evidence blocker. Returns ``None``
+    for a source-only dump, which has no binary to resolve a debug format
+    against.
     """
     if so_path is None:
         return None
     from .binary_utils import normalize_binary_input as _peek_binary_format
-    from .cli_dump_helpers import (
-        check_dump_compile_db_error,
-        check_dump_debug_format_error,
-    )
+    from .cli_dump_helpers import check_dump_debug_format_error
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
-    compile_db_error = check_dump_compile_db_error(
-        compile_db_path, compile_db_path_alt, headers
-    )
-    if compile_db_error is not None:
-        raise click.UsageError(compile_db_error)
     _, dry_run_binary_fmt = _peek_binary_format(so_path)
     debug_format_error = check_dump_debug_format_error(
         effective_debug_format, dry_run_binary_fmt
@@ -380,16 +360,11 @@ def _resolve_and_check_dump_debug_format(
               help="Public header file or directory (repeat for multiple).")
 @click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
               help="Extra include directory for castxml.")
-# ── Declaration provenance (ADR-015) ─────────────────────────────────────────
-@click.option("--public-header", "public_headers", multiple=True,
-              type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              help="Header treated as public for provenance classification (repeat for "
-                   "multiple). Declarations are tagged public/private/system in the snapshot. "
-                   "Opt-in: omitting this leaves every origin UNKNOWN.")
-@click.option("--public-header-dir", "public_header_dirs", multiple=True,
-              type=click.Path(exists=True, file_okay=False, path_type=Path),
-              help="Directory whose headers are treated as public for provenance "
-                   "classification (repeat for multiple).")
+# Declaration provenance (ADR-015) comes from -H/--header itself: a file
+# entry tags that header public, a directory entry tags everything under it
+# (split by header_utils.split_public_header_inputs, the same partition
+# `compare` has always applied to its own -H list). The separate
+# --public-header/--public-header-dir pair said the same thing a second way.
 @include_dependencies_option
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
@@ -398,7 +373,7 @@ def _resolve_and_check_dump_debug_format(
               help="Output JSON file. Defaults to stdout.")
 @snapshot_compression_option
 # ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
-# --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
+# --ast-frontend / --compiler / --compiler-prefix / --compiler-option /
 # --sysroot / --nostdinc are defined once in cli_options.compile_context_options
 # so `dump` and `scan` never drift; applied as a decorator below.
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
@@ -433,13 +408,9 @@ def _resolve_and_check_dump_debug_format(
 @click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
               help="Force DWARF debug format (ELF only).")
 # ── Build context capture (ADR-020a) ──────────────────────────────────────────
-@click.option("-p", "--build-dir", "compile_db_path", type=click.Path(path_type=Path), default=None,
-              help="Build directory containing compile_commands.json, or path to the "
-                   "file itself. Enables deterministic header parsing with exact build "
-                   "flags. Requires -H/--header.")
-@click.option("--compile-db", "compile_db_path_alt", type=click.Path(path_type=Path), default=None,
-              hidden=True,
-              help="Explicit path to compile_commands.json (alias for -p).")
+# The L2 compile database comes from --build-info, whose operand is already
+# "a build dir, a compile_commands.json, or a pre-captured pack" -- the same
+# thing -p/--build-dir and its --compile-db alias took.
 @click.option("--compile-db-filter", "compile_db_filter", default=None,
               help="Glob pattern to filter compile_commands.json entries by source file "
                    "(e.g. 'src/libfoo/**'). Useful for large databases.")
@@ -457,9 +428,9 @@ def _resolve_and_check_dump_debug_format(
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
               help="A strict YAML document describing multiple translation units to compile "
                    "and merge into one snapshot, instead of a single -H/--header list. "
-                   "Mutually exclusive with -H/--header and --public-header/"
-                   "--public-header-dir (declare those in the manifest's own base profile "
-                   "instead). ELF only so far.")
+                   "Mutually exclusive with -H/--header (declare the public surface in "
+                   "the manifest's own roots field and base profile instead). ELF only "
+                   "so far.")
 @verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 @click.option("--git-tag", "git_tag", default=None,
@@ -470,14 +441,11 @@ def _resolve_and_check_dump_debug_format(
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
 @header_graph_options  # hidden deprecated no-op shim (shared with `compare`)
-@compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
+@compile_context_options()  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
-             public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
              snapshot_compression: str,
-             gcc_path: str | None, gcc_prefix: str | None,
-             gcc_option_tokens: tuple[str, ...],
              compiler_path: str | None, compiler_prefix: str | None,
              compiler_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
@@ -485,7 +453,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              dwarf_only: bool, dry_run: bool,
              debug_format_opt: str | None,
              debug_format: str | None,
-             compile_db_path: Path | None, compile_db_path_alt: Path | None,
              compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
              debuginfod: bool, debuginfod_url: str | None,
@@ -572,18 +539,45 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values
-    # (headers/public_headers/public_header_dirs haven't been reassigned yet).
+    # (headers hasn't been reassigned yet).
     parsed_dump_manifest = None
-    parsed_dump_manifest = _load_dump_manifest_or_reject(
-        dump_manifest_path, headers, public_headers, public_header_dirs
-    )
+    parsed_dump_manifest = _load_dump_manifest_or_reject(dump_manifest_path, headers)
+
+    # Declaration provenance (ADR-015) is derived from -H/--header itself:
+    # file entries tag those headers public, directory entries tag everything
+    # under them. Same partition `compare` applies to its own -H list, so a
+    # `dump -H include/` and the equivalent `compare -H include/` describe one
+    # public surface rather than two.
+    from .header_utils import split_public_header_inputs
 
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
-    collect_mode, headers, compile_db_path, compile_db_path_alt = resolve_dump_collect_context(
-        depth, _resolved_collect_mode, sources, build_info,
-        headers, compile_db_path, compile_db_path_alt,
+    collect_mode, headers = resolve_dump_collect_context(
+        depth, _resolved_collect_mode, sources, build_info, headers,
     )
+
+    # Derived from the *post-suppression* headers, not the raw ones: at
+    # --depth binary `resolve_dump_collect_context` clears the header-AST
+    # inputs, and provenance roots split off beforehand survived that and were
+    # still stamped into the snapshot's scope contract. Two binary-depth
+    # snapshots taken with different -H sets then carried different scope
+    # fingerprints and `compare` rejected the pair with ScopeMismatchError --
+    # at the one depth that is supposed to ignore headers entirely (Codex
+    # review). Deriving after the clear makes them empty exactly when the
+    # headers they describe are.
+    _public_header_files, _public_header_dirs = split_public_header_inputs(headers)
+    public_headers = tuple(_public_header_files)
+    public_header_dirs = tuple(_public_header_dirs)
+    # The L2 compile database is whatever --build-info names, read back after
+    # --depth binary has had its say about the headers (a headerless dump has
+    # no header AST for a database to parameterize).
+    compile_db_path = compile_db_from_build_info(build_info, headers)
+    if (
+        _filter_scope_error := compile_db_filter_scope_error(
+            compile_db_filter, compile_db_path, collect_mode
+        )
+    ) is not None:
+        raise click.UsageError(_filter_scope_error)
 
     # Fold the project's .abicheck.yml compile: block into the L2 compile context
     # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
@@ -598,8 +592,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # like it already does the binary-dump path, not just this validation check.
     _cc, includes = resolve_dump_compile_context(
         _resolved_compile_context,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        gcc_options=gcc_options, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
         frontend_context=frontend_context,
@@ -659,15 +652,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
 
     # Resolve debug-format and binary-format identity once, shared between
-    # the dry-run report and the real run, and raise the same UsageError/
-    # BadParameter a real run would for either -- unconditionally, before the
-    # --dry-run branch, exactly like the hybrid+depth UsageError check above.
-    # These two validations (resolve_dump_compile_db's UsageError, and the
-    # debug-format/PE-Mach-O BadParameter below) previously only ran in the
-    # real path, after the dry-run branch, so `dump --dry-run` could report
-    # success on an invocation the real run would immediately reject.
-    # CodeRabbit review: an earlier version of this fix instead encoded both
-    # as DryRunResult blockers (exit 1) -- silently downgrading what is a
+    # the dry-run report and the real run, and raise the same BadParameter a
+    # real run would -- unconditionally, before the --dry-run branch, exactly
+    # like the hybrid+depth UsageError check above.
+    # This validation (the debug-format/PE-Mach-O BadParameter below)
+    # previously only ran in the real path, after the dry-run branch, so
+    # `dump --dry-run` could report success on an invocation the real run
+    # would immediately reject.
+    # CodeRabbit review: an earlier version of this fix instead encoded it
+    # as a DryRunResult blocker (exit 1) -- silently downgrading what is a
     # genuine usage error (exit 64) into an evidence-blocker mistakenly, and
     # disagreeing with the real run's actual exit code for the identical
     # input. Raising directly here keeps dry-run and the real run on the
@@ -680,7 +673,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # this has already passed).
     effective_debug_format = _resolve_and_check_dump_debug_format(
         so_path, debug_format_opt, debug_format,
-        compile_db_path, compile_db_path_alt, headers,
     )
 
     if dry_run:
@@ -690,19 +682,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from .cli_helpers_compare import dry_run_compile_db_matched
 
         _dry_matched = dry_run_compile_db_matched(
-            compile_db_path, compile_db_path_alt, headers, compile_db_filter,
-        )
-        # AC-007 dry-run parity (Codex review): the real run below reuses a
-        # matched -p/--compile-db as the L3 build source when no --build-info is
-        # given, but that decision runs after this branch. Compute it here with
-        # the same pure helper so the dry-run report describes the invocation it
-        # is validating (its L3 source), instead of claiming "L0-L2 only".
-        _dry_reused_bi, _ = resolve_compile_db_l3_reuse(
-            depth, build_info, compile_db_path or compile_db_path_alt,
-            matched=bool(_dry_matched), compile_db_filter=compile_db_filter,
-            explicit_l3_selector=has_other_l3_source(
-                build_query, build_compile_db, build_config, sources,
-            ),
+            compile_db_path, None, headers, compile_db_filter,
         )
         emit_dry_run(
             render_dump_dry_run(
@@ -711,13 +691,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
                 snapshot_compression=snapshot_compression,
-                has_compile_db=bool(compile_db_path or compile_db_path_alt),
+                has_compile_db=compile_db_path is not None,
                 # External review: dry-run previously only checked bare -p/
                 # --compile-db presence; loading it and matching against the
                 # resolved headers is cheap, deterministic, read-only
                 # resolution, not "real work out of scope for a dry run".
                 compile_db_matched=_dry_matched,
-                compile_db_reused_as_l3=_dry_reused_bi is not build_info,
                 # embed_build_source's own classification: a source-capable
                 # --build-info is either a BuildSourcePack (is_pack_dir) or a
                 # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
@@ -736,39 +715,17 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
-    effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
+    effective_compile_db = compile_db_path
 
     # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
-    # branches need the same -p/--compile-db -> castxml/clang flags and matched
+    # branches need the same --build-info -> castxml/clang flags and matched
     # signal -- the ELF path used to compute these only after the PE/Mach-O
     # early return, so a compile database's flags were silently dropped for
-    # PE/Mach-O input, and --depth build backed only by -p was wrongly
-    # rejected there (parsed_with_build_context was never stamped either).
+    # PE/Mach-O input (parsed_with_build_context was never stamped either).
     build_context_flags, compile_db_matched = _resolve_build_context_flags(
         effective_compile_db, headers, compile_db_filter,
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
-
-    # AC-007: reuse a `-p`/`--compile-db` database as the L3 build source for an
-    # explicit `--depth build`/`source` with no dedicated `--build-info`. Gated on
-    # the just-computed `compile_db_matched` (an unrelated/filtered DB must not
-    # embed as L3), on `compile_db_filter` (which scopes L2 only, so the raw DB
-    # can't be reused for L3 without pulling every entry), and on every other
-    # dedicated L3 selector being absent — the CLI `--build-query`/
-    # `--build-compile-db` flags AND an explicit `--config`, which may set
-    # `build.query`/`build.compile_db`. Hijacking `build_info` would otherwise
-    # override those lower-precedence selectors in `inline._resolve_compile_db`
-    # (Codex review). All the decision logic is in the pure helper; only the echo
-    # stays here.
-    build_info, _l3_note = resolve_compile_db_l3_reuse(
-        depth, build_info, effective_compile_db,
-        matched=compile_db_matched, compile_db_filter=compile_db_filter,
-        explicit_l3_selector=has_other_l3_source(
-            build_query, build_compile_db, build_config, sources,
-        ),
-    )
-    if _l3_note:
-        click.echo(_l3_note, err=True)
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
@@ -1058,10 +1015,10 @@ def _announce_exit_scheme(
     else:
         click.echo(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
-            "with --contract-evaluation, 1=incomplete contract coverage; with "
+            "with --contract, 1=incomplete contract coverage; with "
             "--require-complete-analysis, 1=incomplete analysis assurance -- both "
             "orthogonal axes that never lower a 2/4). "
-            "Pass --exit-code-scheme severity (or a --severity-* setting) for the "
+            "Pass --exit-code-scheme severity (or a severity setting) for the "
             "severity-aware scheme.",
             err=True,
         )
@@ -1524,7 +1481,7 @@ def _embed_inline_source_side(
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         _resolved_include_labels=include_labels,
-        # Thread compare's own --include-dependencies flag through, rather
+        # Thread compare's own --include-system-declarations flag through, rather
         # than hardcoding it, so this inline `--old/new-sources` embed path
         # scopes the same way the sibling path (a side reaching
         # service.run_dump directly, with no raw source tree) now does --
@@ -1552,21 +1509,10 @@ def _embed_inline_source_side(
 # Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
 # family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
 # the shared @compile_context_options decorator so compare/dump/scan never drift
-# (ADR-037 D3); --lang and the per-side --old/new-ast-frontend overrides stay inline.
+# (ADR-037 D3), with --ast-frontend side-aware here; --lang stays inline.
 @two_sided_input_options
-@compile_context_options  # --ast-frontend + cross-toolchain (shared with dump/scan)
+@compile_context_options(sided_frontend=True)  # --ast-frontend (side-aware) + cross-toolchain
 @lang_option
-@click.option("--old-ast-frontend", "old_header_backend",
-              default=None,
-              type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
-              help="C/C++ AST frontend for the old side only (overrides "
-                   "--ast-frontend for old). Use when the old release parses on "
-                   "castxml but the new one needs clang (or vice versa).")
-@click.option("--new-ast-frontend", "new_header_backend",
-              default=None,
-              type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
-              help="C/C++ AST frontend for the new side only (overrides "
-                   "--ast-frontend for new).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -1576,28 +1522,22 @@ def _embed_inline_source_side(
 )
 @secondary_output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
-    format_help="Emit a second output format from this same comparison run, "
-                "without re-running the comparison a second time (e.g. a human "
-                "--format markdown report alongside a --secondary-format json "
-                "artifact for tooling). Requires --secondary-output (writing two "
-                "formats to the same stream would be ambiguous). Always renders "
-                "the full, unfiltered report (ignores --show-only/--stat). Not "
-                "supported for directory/package (release) comparisons.",
+    format_help="Emit a second output format from this same comparison run, to "
+                "its own file, without re-running the comparison (e.g. "
+                "--format markdown for a human alongside --write json=abi.json "
+                "for tooling). FORMAT is one of {formats}; PATH must differ from "
+                "--output/-o. Always renders the full, unfiltered report "
+                "(ignores --show-only/--stat). Not supported for "
+                "directory/package (release) comparisons.",
 )
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review output (default "
                    "ON; use --no-demangle to turn off). json/sarif always keep raw "
                    "mangled names, and HTML is rendered structurally and is never "
                    "demangled regardless of this flag.")
-# Policy + suppression family (ADR-037 D3); strict/justification stay inline.
+# Policy + suppression family (ADR-037 D3). The strict/justification pair
+# lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options
-@click.option("--strict-suppressions", is_flag=True, default=False, hidden=True,
-              help="Fail with exit code 1 if any suppression rule has expired "
-                   "(config: suppression.strict). Demoted to config (ADR-037 D4).")
-@click.option("--require-justification", is_flag=True, default=False, hidden=True,
-              help="Require every suppression rule to have a non-empty 'reason' "
-                   "field (config: suppression.require_justification). Demoted to "
-                   "config (ADR-037 D4).")
 @click.option("--pdb-path", "pdb", multiple=True, type=SIDED_PATH_PARAM,
               help="Explicit PDB file path for Windows PE debug info. Applies to both "
                    "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
@@ -1621,10 +1561,10 @@ def _embed_inline_source_side(
               help="Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), "
                    "'severity' (per-category error levels), or 'auto' (severity "
                    "when a severity setting is in effect, else legacy). Declared "
-                   "explicitly here so passing --severity-* no longer silently "
+                   "explicitly here so passing --severity-preset no longer silently "
                    "changes the scheme. Default: config's exit_code_scheme, else auto. "
-                   "Deliberately NOT demoted to hidden (unlike --strict-suppressions/"
-                   "--public-symbol) -- ADR-040 D4 keeps it a visible coarse override; "
+                   "Deliberately kept visible (unlike the removed per-category "
+                   "--severity-* family) -- ADR-040 D4 keeps it a coarse override; "
                    "see test_config_rebalance.py's test_coarse_overrides_stay_visible.")
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
@@ -1636,35 +1576,9 @@ def _embed_inline_source_side(
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
 @header_graph_options  # hidden deprecated no-op shim (shared with `dump`)
-@click.option("--show-redundant/--no-show-redundant", "show_redundant", default=False,
-              hidden=True,
-              help="Disable redundancy filtering and show all changes including those "
-                   "derived from root type changes. Demoted to config "
-                   "(scope.show_redundant, ADR-040); --show-redundant/--no-show-redundant "
-                   "still overrides it either way.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
-@click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
-              hidden=True,
-              help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
-                   "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
-                   "reclassify those version-rename pairs as compatible so the verdict "
-                   "reflects the real delta, not the rename churn. A real SONAME bump and "
-                   "non-versioned removals still drive the verdict. Demoted to config "
-                   "(scope.collapse_versioned_symbols, ADR-037 D4).")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
-@click.option("--public-symbol", "public_symbols", multiple=True, hidden=True,
-              help="Widening overlay (ADR-024 §D6): force a symbol (mangled or demangled "
-                   "name) into the public surface even when header provenance can't see it "
-                   "(asm stubs, .def exports, extern \"C\" shims, MSVC-mangling gaps). "
-                   "Repeatable. Only meaningful with --scope-public-headers. Demoted to "
-                   "config (scope.public_symbols, ADR-037 D4).")
-@click.option("--public-symbols-list", "public_symbols_list",
-              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
-              hidden=True,
-              help="File of symbols to force public (one per line; '#' comments and blank "
-                   "lines ignored), à la abi-compliance-checker -symbols-list. "
-                   "Merged with --public-symbol and scope.public_symbols (ADR-037 D4).")
 @click.option("--post-manifest", "post_manifest_path",
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
               help="Scope the comparison to a POST Python export manifest's committed ABI "
@@ -1693,16 +1607,14 @@ def _embed_inline_source_side(
               default="full", show_default=True,
               help="Report mode: 'full' lists all changes individually (default), "
                    "'leaf' groups by root type changes with impact lists, "
-                   "'impact' behaves as 'full' with the impact summary table enabled "
-                   "(equivalent to --report-mode full --show-impact), "
+                   "'impact' behaves as 'full' plus an impact summary table "
+                   "listing root changes and the interfaces they affect, "
                    "'root-cause' groups findings sharing a root cause "
                    "(Change.caused_by_type) under one entry for "
                    "--format json/markdown (the default rendered text output); "
                    "--format sarif keeps its normal one-result-per-finding "
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
-@click.option("--show-impact", is_flag=True, default=False,
-              help="Append an impact summary table showing root changes and affected interfaces.")
 @click.option("--recommend", is_flag=True, default=False,
               help="Append a release recommendation (semver bump + SONAME action) to the "
                    "report. Always present in --format json under 'release_recommendation'.")
@@ -1741,14 +1653,27 @@ def _embed_inline_source_side(
                    "reader knows not to trust it the way an ordinary comparable "
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
-@contract_options  # ADR-049: --contract-evaluation/--contract/--audit-suppressions
+@contract_options  # ADR-049: --contract/--audit-suppressions
 @pack_option  # ADR-049 D8: --pack
+@click.option("--use-cases", "use_cases_manifest",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 "
+                   "amendment) whose declared use cases this comparison's own "
+                   "findings are attributed to: for each use case, which changes "
+                   "its resolved entrypoints can be shown to reach. Needs a "
+                   "source graph on at least one side (dump --sources/"
+                   "--build-info, or the always-on header-only graph). Read-only "
+                   "-- an unattributed finding is an absence of proof, not proof "
+                   "the finding is harmless, so this never moves a verdict or an "
+                   "exit code. Validate a manifest on its own with "
+                   "`abicheck project validate-use-cases`.")
 @click.option("--require-complete-analysis", "require_complete_analysis",
               is_flag=True, default=False,
               help="P0.4: fail the build when analysis_assurance.status is not "
                    "'complete', independent of the compatibility verdict. "
                    "Contributes exit 1, folded with max the same way "
-                   "--contract-evaluation's coverage axis is (ADR-049 Phase 7): "
+                   "--contract's coverage axis is (ADR-049 Phase 7): "
                    "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
                    "compares only, not the directory/package release fan-out. "
                    "See docs/reference/exit-codes.md.")
@@ -1765,23 +1690,23 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     DWARF-only mode (if DWARF available) or symbols-only analysis.
 
     \b
-    Exit codes (legacy, without --severity-* flags):
+    Exit codes (legacy, with no severity setting in effect):
       0  NO_CHANGE, COMPATIBLE, or COMPATIBLE_WITH_RISK — no binary ABI break
          (COMPATIBLE_WITH_RISK: deployment risk present; check the report)
       2  API_BREAK — source-level API break — recompilation required
       4  BREAKING — binary ABI break detected
     \b
-    Exit codes (severity-aware, with any --severity-* flag):
+    Exit codes (severity-aware, with --severity-preset or a config severity: block):
       0  No error-level findings
       1  Error-level findings in addition or quality_issues only
       2  Error-level findings in potential_breaking (but not abi_breaking)
       4  Error-level findings in abi_breaking
     \b
-    Orthogonal to both tables (ADR-049 Phase 7): with --contract-evaluation,
+    Orthogonal to both tables (ADR-049 Phase 7): with --contract,
     incomplete contract coverage of the selected --contract domain
     contributes exit 1. It is folded with max, so it raises a clean 0 to 1
     and never lowers a 2/4 — under the legacy scheme, 1 can only mean this.
-    Without --contract-evaluation there is no domain to be short of evidence
+    Without --contract there is no domain to be short of evidence
     for and the tables above are exhaustive. Set contract.unresolved=warn
     (via a `kind: contract` --pack) to accept incomplete coverage.
     \b

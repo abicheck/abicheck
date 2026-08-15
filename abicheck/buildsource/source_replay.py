@@ -1381,7 +1381,7 @@ def _extractor_version(extractor: SourceAbiExtractor) -> str:
     """Pull a version string off an extractor for the cache key, if it exposes one.
 
     Also folds in ``cache_identity_extra()`` when the extractor exposes it
-    (``ClangSourceExtractor`` does, to fold a resolved ``--gcc-path``
+    (``ClangSourceExtractor`` does, to fold a resolved ``--compiler``
     compiler override into the D8 key — see its docstring) — mirrors
     ``_cache_public_header_roots()``'s optional-hook pattern below, so a
     per-instance identity detail an extractor cares about can ride the

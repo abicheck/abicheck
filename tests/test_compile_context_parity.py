@@ -41,16 +41,17 @@ from abicheck.model import AbiSnapshot
 from abicheck.service_scan import CompileContext, ScanRequest
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
-#: --gcc-options is deliberately absent (CLI audit PR 5/5: removed as a CLI
-#: flag -- see cli_options.py's compile_context_options docstring); the
-#: internal CompileContext.gcc_options field survives, but no Click option
-#: registers that dest anymore, so it's not a *CLI-exposed* dest to check here.
+#: The ``gcc_*`` dests are deliberately absent: --gcc-options was removed as a
+#: CLI flag first, and --gcc-path/--gcc-prefix/--gcc-option followed it once
+#: --compiler/--compiler-prefix/--compiler-option superseded them. The internal
+#: CompileContext.gcc_* fields survive, but no Click option registers those
+#: dests anymore, so they are not *CLI-exposed* dests to check here.
 _COMPILE_CONTEXT_DESTS = frozenset(
     {
         "header_backend",
-        "gcc_path",
-        "gcc_prefix",
-        "gcc_option_tokens",
+        "compiler_path",
+        "compiler_prefix",
+        "compiler_option_tokens",
         "sysroot",
         "nostdinc",
     }
@@ -264,7 +265,7 @@ def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
 
 
 def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> None:
-    """CLI --compiler-option/--gcc-option tokens must win over a config-
+    """CLI --compiler-option tokens must win over a config-
     synthesized -std=/-D, the same way the now-removed --gcc-options scalar
     used to (Codex review, PR #757): appending config tokens *after* the
     CLI's own gcc_option_tokens silently let `compile.std` override an
@@ -1059,16 +1060,16 @@ def _compare_capturing_dump(
 def test_compare_threads_compile_context_to_both_sides(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """--gcc-* / --sysroot / --nostdinc reach *both* sides' dumper.dump (ADR-037 D3)."""
+    """--compiler* / --sysroot / --nostdinc reach *both* sides' dumper.dump (ADR-037 D3)."""
     sysroot = tmp_path / "sr"
     sysroot.mkdir()
     calls = _compare_capturing_dump(
         monkeypatch,
         tmp_path,
         [
-            "--gcc-path",
+            "--compiler",
             "/opt/g++",
-            "--gcc-prefix",
+            "--compiler-prefix",
             "aarch64-linux-gnu-",
             "--compiler-option",
             "-DFOO=1",
@@ -1099,8 +1100,8 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
             "-DBAR=2",
             "--ast-frontend",
             "castxml",
-            "--new-ast-frontend",
-            "clang",
+            "--ast-frontend",
+            "new=clang",
         ],
     )
     # gcc context on both sides...
@@ -1108,6 +1109,63 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
     # ...while the per-side frontend override still wins.
     assert calls[0]["header_backend"] == "castxml"
     assert calls[1]["header_backend"] == "clang"
+
+
+def test_a_one_sided_frontend_keeps_the_configured_frontend_for_the_other_side(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A side-qualified ``--ast-frontend`` must not discard ``compile.frontend``.
+
+    Click reports one parameter source for the whole ``--ast-frontend``
+    parameter, so ``new=castxml`` alone marks it COMMANDLINE while the shared
+    value is the synthesized ``"auto"`` nobody typed. Reading the parameter
+    source alone handed that default to ``merge_compile_config`` as an explicit
+    override, so the old side -- which the user never mentioned -- was parsed
+    with ``auto`` instead of the project's configured ``clang`` (Codex review).
+    """
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        ["--config", str(cfg), "--ast-frontend", "new=castxml"],
+    )
+    # The unqualified side inherits the config; the named side overrides it.
+    assert calls[0]["header_backend"] == "clang"
+    assert calls[1]["header_backend"] == "castxml"
+
+
+def test_a_shared_frontend_still_beats_the_configured_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The other direction of the same rule, so the fix above cannot be
+    satisfied by simply never treating ``--ast-frontend`` as explicit: a
+    stated shared value must still win over ``compile.frontend``."""
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        ["--config", str(cfg), "--ast-frontend", "castxml"],
+    )
+    assert all(c["header_backend"] == "castxml" for c in calls)
+
+
+def test_an_explicit_auto_still_beats_the_configured_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`resolve_compile_context`'s own documented contract: "an
+    explicitly-typed value -- even a default-looking ``auto`` -- beats a
+    pinned config one". The fix must keep that true for a value the user
+    really did type, and only stop claiming it for the synthesized one."""
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        ["--config", str(cfg), "--ast-frontend", "auto"],
+    )
+    assert all(c["header_backend"] == "auto" for c in calls)
 
 
 def test_compare_reads_compile_block_from_config(
@@ -1186,7 +1244,7 @@ def test_compare_rejects_compiler_aliases_for_set_inputs(
     directory/package operands exactly like their legacy gcc_* counterparts
     (test_compare_rejects_compile_context_for_set_inputs above) -- without
     this, --compiler would silently no-op instead of raising, unlike
-    --gcc-path (Codex review, PR #757)."""
+    --compiler (Codex review, PR #757)."""
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
     old_dir.mkdir()
@@ -1369,7 +1427,7 @@ def test_fallback_flag_is_scoped_to_one_cli_invocation(
     monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
 
     @click.command()
-    @compile_context_options
+    @compile_context_options()
     def probe(**_kwargs: object) -> None:
         click.echo(os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "unset"))
 
@@ -1394,7 +1452,7 @@ def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
     monkeypatch.delenv("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", raising=False)
 
     @click.command()
-    @compile_context_options
+    @compile_context_options()
     def probe(**_kwargs: object) -> None:
         click.echo(os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "unset"))
 
@@ -1409,13 +1467,14 @@ def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
     assert "ABICHECK_ALLOW_UNSUPPORTED_CASTXML" not in os.environ
 
 
-# ── --compiler/--compiler-prefix/--compiler-option aliases (CLI audit PR 2/5) ─
+# ── --compiler/--compiler-prefix/--compiler-option ───────────────────────────
 #
-# Neutral aliases for the deprecated --gcc-path/--gcc-prefix/--gcc-option,
-# folded together by cli_options._merge_compiler_aliases inside
-# resolve_compile_context (the one choke point compare/dump/scan all share --
-# see the module docstring above). This probe command exercises the merge
-# function through the real Click parsing path, mirroring the two tests above.
+# The one cross-toolchain spelling. The former --gcc-path/--gcc-prefix/
+# --gcc-option aliases and the merge function that reconciled them are gone;
+# what remains to pin is that the surviving flags reach CompileContext's
+# internal gcc_* fields through the one choke point compare/dump/scan share
+# (resolve_compile_context -- see the module docstring above). This probe
+# command exercises that mapping through the real Click parsing path.
 
 
 @pytest.fixture
@@ -1423,14 +1482,11 @@ def _compile_context_probe():
     from abicheck.cli_options import resolve_compile_context
 
     @click.command()
-    @compile_context_options
+    @compile_context_options()
     @click.pass_context
     def probe(ctx: click.Context, **kwargs: object) -> None:
         cc, _includes = resolve_compile_context(
             ctx,
-            gcc_path=kwargs["gcc_path"],  # type: ignore[arg-type]
-            gcc_prefix=kwargs["gcc_prefix"],  # type: ignore[arg-type]
-            gcc_option_tokens=kwargs["gcc_option_tokens"],  # type: ignore[arg-type]
             sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
             nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]
             header_backend=kwargs["header_backend"],  # type: ignore[arg-type]
@@ -1447,93 +1503,124 @@ def _compile_context_probe():
     return probe
 
 
-def test_compiler_alias_used_alone_no_deprecation_note(_compile_context_probe) -> None:
+def test_compiler_flags_reach_the_compile_context(_compile_context_probe) -> None:
     result = CliRunner().invoke(
         _compile_context_probe,
         ["--compiler", "/usr/bin/clang", "--compiler-prefix", "arm-"],
     )
     assert result.exit_code == 0, result.output
     assert "path=/usr/bin/clang prefix=arm-" in result.output
-    assert "deprecated" not in result.output.lower()
 
 
-def test_legacy_gcc_flag_still_works_with_deprecation_note(
-    _compile_context_probe,
-) -> None:
-    result = CliRunner().invoke(
-        _compile_context_probe,
-        ["--gcc-path", "/usr/bin/gcc", "--gcc-prefix", "aarch64-linux-gnu-"],
-    )
-    assert result.exit_code == 0, result.output
-    assert "path=/usr/bin/gcc prefix=aarch64-linux-gnu-" in result.output
-    assert "deprecated compiler flag(s)" in result.output
-    assert "--gcc-path (use --compiler)" in result.output
-    assert "--gcc-prefix (use --compiler-prefix)" in result.output
+def test_removed_gcc_spellings_are_rejected(_compile_context_probe) -> None:
+    """The legacy aliases are gone outright, not hidden-but-functional: a
+    caller still passing one gets a hard usage error naming the flag rather
+    than a silently-ignored value."""
+    for flag, value in (
+        ("--gcc-path", "/usr/bin/gcc"),
+        ("--gcc-prefix", "aarch64-linux-gnu-"),
+        ("--gcc-option", "-DOLD"),
+    ):
+        result = CliRunner().invoke(_compile_context_probe, [flag, value])
+        assert result.exit_code != 0, (flag, result.output)
+        assert "No such option" in result.output, (flag, result.output)
 
 
-def test_new_compiler_flag_wins_when_both_given(_compile_context_probe) -> None:
-    """The new spelling is an explicit override, same precedence style as
-    CLI-beats-config elsewhere in this module -- and since the new value won,
-    no deprecation note fires (the legacy value was never actually used)."""
-    result = CliRunner().invoke(
-        _compile_context_probe,
-        ["--gcc-path", "/bin/old-gcc", "--compiler", "/bin/new-gcc"],
-    )
-    assert result.exit_code == 0, result.output
-    assert "path=/bin/new-gcc" in result.output
-    assert "deprecated" not in result.output.lower()
-
-
-def test_compiler_option_tokens_alone_still_works(_compile_context_probe) -> None:
-    """--compiler-option alone (no --gcc-option) is unaffected by the mixing
-    rejection -- still fully functional, accumulates repeats normally."""
+def test_compiler_option_tokens_accumulate_verbatim(_compile_context_probe) -> None:
+    """--compiler-option is repeatable and never whitespace-split, so a flag
+    and its own spaced operand stay adjacent and in order."""
     result = CliRunner().invoke(
         _compile_context_probe,
         ["--compiler-option", "-include", "--compiler-option", "some header.h"],
     )
     assert result.exit_code == 0, result.output
     assert "tokens=('-include', 'some header.h')" in result.output
-    assert "deprecated" not in result.output.lower()
 
 
-def test_compiler_option_tokens_mixing_both_spellings_is_rejected(
-    _compile_context_probe,
-) -> None:
-    """--compiler-option and --gcc-option cannot both be given (a UsageError).
-
-    Two rounds of Codex review, two wrong fixes, both instructive: naive
-    concatenation could separate a flag from its own operand across
-    spellings (--gcc-option=-include + --compiler-option='some header.h' ->
-    ('some header.h', '-include')); "new spelling wins entirely" silently
-    dropped legitimate --gcc-option tokens the moment any --compiler-option
-    was present. Neither a merge rule nor an order-recovery scheme can be
-    correct without the real argv order Click doesn't expose across two
-    independently-collected tuples, so mixing is rejected outright instead
-    of guessed at (PR #757)."""
-    result = CliRunner().invoke(
-        _compile_context_probe,
-        ["--compiler-option", "-DNEW", "--gcc-option", "-DOLD"],
-    )
-    assert result.exit_code != 0
-    assert "cannot both be given" in result.output
-
-
-def test_compiler_option_tokens_legacy_alone_still_works(
-    _compile_context_probe,
-) -> None:
-    """--gcc-option alone (no --compiler-option) is unaffected -- still fully
-    functional, still deprecation-noted, same as before this fix."""
-    result = CliRunner().invoke(
-        _compile_context_probe,
-        ["--gcc-option", "-include", "--gcc-option", "some header.h"],
-    )
-    assert result.exit_code == 0, result.output
-    assert "tokens=('-include', 'some header.h')" in result.output
-    assert "--gcc-option (use --compiler-option)" in result.output
-
-
-def test_neither_compiler_flag_given_no_note_no_crash(_compile_context_probe) -> None:
+def test_neither_compiler_flag_given_no_crash(_compile_context_probe) -> None:
     result = CliRunner().invoke(_compile_context_probe, [])
     assert result.exit_code == 0, result.output
     assert "path=None prefix=None tokens=()" in result.output
-    assert "deprecated" not in result.output.lower()
+
+
+def test_a_one_sided_frontend_keeps_the_source_trees_configured_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The same rule on the *inline source-tree* path, which had its own copy.
+
+    ``resolve_compile_context`` was fixed to read the shared ``--ast-frontend``
+    value's own explicitness, but ``_embed_inline_source_sides`` still asked
+    Click for the whole parameter's source -- so ``--ast-frontend new=castxml``
+    marked it COMMANDLINE, the synthesized shared ``"auto"`` reached the *old*
+    side as an explicit override, and an ``--old-sources`` tree's own
+    ``.abicheck.yml`` ``compile.frontend`` was suppressed and frozen at
+    ``auto``: a materially different snapshot for the side the user never
+    mentioned (Codex review).
+
+    Asserted at the boundary the bug lives on -- what each side is *told* about
+    explicitness -- rather than through a full inline dump, so the test states
+    the contract rather than one downstream consequence of it.
+    """
+    import abicheck.cli_compare_helpers as helpers
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    src = tmp_path / "srctree"
+    src.mkdir()
+    (src / ".abicheck.yml").write_text(
+        "compile:\n  frontend: clang\n", encoding="utf-8"
+    )
+
+    seen: list[dict[str, object]] = []
+    real = helpers._embed_inline_source_side
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen.append(dict(kwargs))
+        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
+
+    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
+    assert real is not _spy  # the symbol really was patched, not shadowed
+    CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--sources", f"old={src}",
+            "--ast-frontend", "new=castxml",
+        ],
+    )
+    assert len(seen) == 2, seen
+    old_side, new_side = seen
+    # The side nobody named must not be told the frontend was stated: that is
+    # what lets its own source-tree config still apply.
+    assert old_side["frontend_explicit"] is False, old_side
+    # ...while the named side keeps its genuine per-side override.
+    assert new_side["frontend_explicit"] is True, new_side
+
+
+def test_a_shared_frontend_is_explicit_for_both_inline_source_sides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The other direction, so the fix above cannot be satisfied by simply
+    # never reporting the inline path's shared frontend as explicit.
+    import abicheck.cli_compare_helpers as helpers
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    src = tmp_path / "srctree2"
+    src.mkdir()
+
+    seen: list[dict[str, object]] = []
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen.append(dict(kwargs))
+        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
+
+    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
+    res = CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--sources", f"old={src}",
+            "--ast-frontend", "castxml",
+        ],
+    )
+    assert len(seen) == 2, res.output
+    assert all(s["frontend_explicit"] is True for s in seen), seen

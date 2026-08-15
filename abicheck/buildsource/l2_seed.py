@@ -435,7 +435,7 @@ def seed_l2_includes(
     those headers without a manual ``-I``.
 
     ``gcc_options``/``gcc_option_tokens`` are the pass-through compile flags
-    (``--gcc-options``/``--gcc-option``). Include dirs given through them (e.g.
+    (``--compiler-option``). Include dirs given through them (e.g.
     ``--gcc-options '-I /sdk/include'``) are as explicit as ``-I``, so the fallback
     treats them the same and stays a no-op — seeding compile-DB dirs as
     ``extra_includes`` on top would front-run the user's SDK in the dumper's search
@@ -457,7 +457,7 @@ def seed_l2_includes(
     from ..header_utils import _context_tokens, _has_include_build_context
 
     incs = list(includes)
-    # An explicit -I list OR include dirs supplied through --gcc-options/--gcc-option
+    # An explicit -I list OR include dirs supplied through --compiler-option
     # both count as "the user gave includes" — either suppresses the fallback so the
     # user's search precedence is preserved.
     user_gave_includes = bool(incs) or _has_include_build_context(

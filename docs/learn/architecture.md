@@ -168,18 +168,18 @@ are all correctly detected on Windows.
 
 **Compiler resolution priority** (highest to lowest):
 
-1. `--gcc-path /path/to/compiler` — explicit path override, used as-is
-2. `--gcc-prefix <prefix>` — cross-toolchain prefix; abicheck appends `g++` (C++ mode)
+1. `--compiler /path/to/compiler` — explicit path override, used as-is
+2. `--compiler-prefix <prefix>` — cross-toolchain prefix; abicheck appends `g++` (C++ mode)
    or `gcc` (C mode) automatically
 3. Default mapping — logical name (`c++` → `g++`, `cc` → `gcc`, `clang++` → `clang++`)
 
-**Scanning with a specific compiler version:** use `--gcc-path` to point at the exact
+**Scanning with a specific compiler version:** use `--compiler` to point at the exact
 binary. castxml queries that binary for its version-specific predefined macros and include
 paths, so the parse reflects exactly what that compiler version defines:
 
 ```bash
-abicheck dump libfoo.so -H foo.h --gcc-path /usr/bin/g++-9   # GCC 9
-abicheck dump libfoo.so -H foo.h --gcc-path /usr/bin/g++-12  # GCC 12
+abicheck dump libfoo.so -H foo.h --compiler /usr/bin/g++-9   # GCC 9
+abicheck dump libfoo.so -H foo.h --compiler /usr/bin/g++-12  # GCC 12
 ```
 
 **Limitations — non-C/C++ languages and compiler extensions:**

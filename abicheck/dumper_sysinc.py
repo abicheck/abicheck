@@ -305,12 +305,12 @@ def _resolve_probe_compiler(
 ) -> str | None:
     """Pick a GNU ``gcc``/``g++`` driver to probe for system includes, or None.
 
-    Prefers an explicit GNU ``--gcc-path`` (a clang-family binary there is
+    Prefers an explicit GNU ``--compiler`` (a clang-family binary there is
     useless for discovering the host libstdc++, so it is skipped — this
     includes the non-"clang"-spelled aliases in
     :data:`abicheck.dumper_clang._CLANG_FAMILY_ALIAS_NAMES`, e.g.
     ``icx``/``icpx``/``dpcpp``/``dpcpp-cl``, not just names containing
-    "clang"), then the cross ``--gcc-prefix`` driver, then ``g++``/``gcc`` on
+    "clang"), then the cross ``--compiler-prefix`` driver, then ``g++``/``gcc`` on
     PATH. Returns the first that resolves, or ``None`` when no GNU compiler is
     available (then clang falls back to its own detection).
     """
@@ -329,7 +329,7 @@ def _resolve_probe_compiler(
 
 
 #: Pass-through flags that signal a hermetic/cross/selected-toolchain parse — if
-#: the caller already supplied any of these via ``--gcc-options``/``--gcc-option``,
+#: the caller already supplied any of these via ``--compiler-option``,
 #: the host-compiler probe must stay out of the way (matching what the structured
 #: ``nostdinc`` / ``sysroot`` fields do). Substring match covers ``-nostdinc`` /
 #: ``-nostdinc++``, ``--sysroot`` / ``--sysroot=…`` / ``-isysroot``, the GCC
@@ -374,7 +374,7 @@ def _resolve_clang_system_includes(
     Empty when auto-detection is disabled, ``-nostdinc`` was requested, an
     explicit ``--sysroot`` already redirects the search, the caller passed an
     equivalent hermetic/cross/selected-toolchain flag through ``--gcc-options``/
-    ``--gcc-option`` (``-nostdinc``/``-nostdinc++``/``--sysroot``/``-isysroot``/
+    ``--compiler-option`` (``-nostdinc``/``-nostdinc++``/``--sysroot``/``-isysroot``/
     ``--gcc-toolchain``/``--gcc-install-dir``/``--target``), or no GNU compiler is
     available to probe. Otherwise the host GNU driver's system include dirs
     (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).

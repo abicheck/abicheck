@@ -1,5 +1,5 @@
 // case191 v2 — demo::Config gains a field typed detail::RawConfig*, an
-// internal type declared only in detail_private.h (never a --public-header).
+// internal type declared only in detail_private.h (never a public header).
 // This grows Config's size (4 -> 16 bytes), which is a genuine binary-visible
 // layout break on its own -- struct_size_changed/type_size_changed fire from
 // the plain binary+header lane, no build integration needed. Layered on top,

@@ -255,7 +255,7 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(ignore_removals),
-            "--policy-file",
+            "--policy",
             str(policy_file),
         )
         assert result.exit_code == 4, result.output
@@ -263,7 +263,7 @@ class TestD8Precedence:
     def test_a_pack_folds_into_a_policy_file_that_states_other_kinds(
         self, two_kind_pair: tuple[Path, Path], ignore_removals: Path, tmp_path: Path
     ) -> None:
-        """Outranking is per *kind*, not per file: a `--policy-file` shadows
+        """Outranking is per *kind*, not per file: a `--policy` shadows
         only the kinds it actually states, and the pack still supplies the
         rest by merging into that same file rather than replacing it.
 
@@ -282,7 +282,7 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(ignore_removals),
-            "--policy-file",
+            "--policy",
             str(policy_file),
         )
         assert result.exit_code == 0, result.output
@@ -290,6 +290,9 @@ class TestD8Precedence:
     def test_an_explicit_severity_flag_outranks_a_gate_pack(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        # --severity-preset is the explicit severity flag that survived the
+        # per-category removals; D8's rule is about an explicitly *stated*
+        # value outranking a pack, not about which spelling states it.
         gate = _pack(
             tmp_path,
             "lenient.yml",
@@ -303,8 +306,8 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(gate),
-            "--severity-abi-breaking",
-            "error",
+            "--severity-preset",
+            "strict",
         )
         assert result.exit_code == 4, result.output
 
@@ -390,7 +393,7 @@ class TestD8Precedence:
         assert result.exit_code == 0, result.output
 
     def test_a_pack_never_resets_an_explicitly_chosen_base_policy(self) -> None:
-        """With no `--policy-file` there is nothing to fold into, so one is
+        """With no `--policy` there is nothing to fold into, so one is
         synthesized -- and `checker` reads a present file's `base_policy`
         *instead of* the `policy` argument. Defaulting it would silently move
         a `--policy plugin_abi` run back to `strict_abi` for every kind the
@@ -444,11 +447,11 @@ class TestOnlyAppliedFieldsAreAccepted:
         back to the default namespaces, so the pack would be recorded as
         active configuration having changed nothing (Codex review).
 
-        The runtime collapse is pre-existing and shared with a `--policy-file`
+        The runtime collapse is pre-existing and shared with a `--policy`
         writing the same empty list, so honoring stated-empty is its own
         change; rejecting the inert value keeps this module's rule true.
 
-        Whether a `--policy-file` shadows the field is read off the file
+        Whether a `--policy` shadows the field is read off the file
         itself via the resolver's own predicate, so a file that states
         something else entirely does not suppress the rejection -- the
         `base_policy`-only case below is the one a coarser "was any policy
@@ -471,7 +474,7 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_a_policy_file_stating_something_else_does_not_shadow(
         self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
     ) -> None:
-        """A `--policy-file` only shadows the field it actually states.
+        """A `--policy` only shadows the field it actually states.
 
         Passing "a policy file exists" as the shadow signal treated a file
         setting only `base_policy` as pinning `surface.internal_namespaces`,
@@ -491,7 +494,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             pair,
             "--pack",
             str(pack),
-            "--policy-file",
+            "--policy",
             str(policy),
             *extra,
         )
@@ -500,7 +503,7 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_a_shadowed_inert_value_is_not_rejected(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """D8: an explicit `--policy-file` stating the field wins, so the
+        """D8: an explicit `--policy` stating the field wins, so the
         pack's value never reaches runtime and there is nothing inert to
         reject.
 
@@ -519,7 +522,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "assignments:\n  surface.internal_namespaces: []\n",
         )
         result = _compare(
-            CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
+            CliRunner(), pair, "--pack", str(pack), "--policy", str(policy)
         )
         assert result.exit_code == 4, result.output
         # ...and the dry run agrees rather than rejecting it early.
@@ -529,7 +532,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "--dry-run",
             "--pack",
             str(pack),
-            "--policy-file",
+            "--policy",
             str(policy),
         )
         assert dry.exit_code == 0, dry.output
@@ -668,14 +671,14 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_an_unreadable_policy_file_does_not_decide_the_shadow_question(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """The early shadow probe reads the `--policy-file` itself, so it has
+        """The early shadow probe reads the `--policy` itself, so it has
         to answer "unreadable" somehow. It answers "shadows nothing", which is
         the conservative half: the pack stays subject to the inert-value rule
         rather than being waved through by a file that states nothing.
 
         The probe swallows the failure instead of reporting it, since the real
         run loads the same file a moment later and reports it with its own
-        `--policy-file` framing -- this path exists only to keep `--dry-run`
+        `--policy` framing -- this path exists only to keep `--dry-run`
         honest, not to validate policy files. It swallows exactly the three
         exceptions `PolicyFile.load` documents, which is also the set
         `cli_params` catches, so an undocumented failure surfaces identically
@@ -690,7 +693,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "assignments:\n  surface.internal_namespaces: []\n",
         )
         result = _compare(
-            CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
+            CliRunner(), pair, "--pack", str(pack), "--policy", str(policy)
         )
         assert result.exit_code == 64, result.output
         assert "surface.internal_namespaces" in result.output
@@ -736,7 +739,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         the files (Codex review).
 
         It cannot move to the resolved check either: a pack an explicit
-        `--policy-file` outranks *also* supplies no provenance, so at the
+        `--policy` outranks *also* supplies no provenance, so at the
         resolution "assigns nothing" is indistinguishable from D8 precedence
         working correctly. It lives in `load_selected_packs` instead — every
         path that resolves or validates packs loads through there, so neither
@@ -895,7 +898,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
         """A gate pack's scheme cannot be resolved this early — the
-        configuration needs the `--policy-file` loaded much later, and a
+        configuration needs the `--policy` loaded much later, and a
         *partial* resolution would run D8 conflict detection against
         different pins than the real one, which can reject a pack pair the
         real run accepts. Saying so is honest; asserting a scheme computed
@@ -923,7 +926,7 @@ class TestOnlyAppliedFieldsAreAccepted:
     ) -> None:
         """The directory/package fan-out dispatches before the effective
         configuration is resolved, so a pack there would be accepted and score
-        nothing -- the same reason `--contract-evaluation` is rejected."""
+        nothing -- the same reason `--contract` is rejected."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -984,12 +987,7 @@ class TestNoPackChangesNothing:
         resolved = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None,
-            cli_severity_quality_issues=None,
-            cli_severity_addition=None,
             cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
         )
         assert resolved.exit_code_scheme == "legacy"
         application = PackApplication(
@@ -1017,7 +1015,6 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            "--contract-evaluation",
             # See the parity test below: `all` keeps ADR-049 Phase 7's
             # contract-coverage axis quiet so this stays a test about packs.
             "--contract",
@@ -1053,7 +1050,6 @@ class TestReceiptAgreesWithWhatScored:
         compare_out = tmp_path / "compare.json"
         scan_out = tmp_path / "scan.json"
         common = [
-            "--contract-evaluation",
             # Pin the rollback domain so this stays a test about `packs`.
             # ADR-049 Phase 7 made the contract-coverage axis real, and this
             # fixture's symbols carry no header provenance, so `public` would
@@ -1110,7 +1106,8 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "--format",
             "json",
             "--pack",

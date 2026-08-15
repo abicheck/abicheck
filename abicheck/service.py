@@ -1097,7 +1097,7 @@ def _attach_header_graph(
         # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
         #
         # Resolve the same clang driver `_clang_header_dump` above used
-        # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
+        # (honoring `--compiler`/`--compiler-prefix`) rather than defaulting to
         # the bare "clang++" — otherwise a hermetic/cross toolchain selected
         # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
         # edge (or resolves them against the host's clang instead) even
@@ -1455,7 +1455,7 @@ def _dump_pe(
     # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
     # castxml could not resolve a surface (commonly the MSVC C++-mangling gap),
     # recover declared types — *with their defining source header* — from the
-    # PDB debug info so that --public-header scoping still has a provenance
+    # PDB debug info so that public-header scoping still has a provenance
     # signal to classify against. Bounded to this fallback branch so default
     # PE diffs (no --header) are unaffected.
     pdb_types: list[RecordType] = []
@@ -1605,8 +1605,13 @@ def load_suppression_and_policy(
         except (ValueError, OSError) as e:
             raise ValidationError(f"Invalid policy file: {e}") from e
         if policy != "strict_abi":
+            # Named as Tier-2 *parameters*, not CLI flags: the CLI merged
+            # --policy/--policy-file into one --policy that routes an operand
+            # to exactly one of these, so it can no longer set both and this
+            # branch is now reachable only from a typed API caller, for whom
+            # the flag spellings would name nothing.
             _logger.warning(
-                "--policy=%r is ignored when --policy-file is given. "
+                "policy=%r is ignored when policy_file_path is given. "
                 "Set base_policy in the YAML file to override the base policy.",
                 policy,
             )

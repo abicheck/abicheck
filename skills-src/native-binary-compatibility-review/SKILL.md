@@ -87,10 +87,10 @@ Add as the situation requires:
   on both sides and cancels out, reporting compatible
   ([getting the two sides](references/getting-the-two-sides.md)). Use the bare
   form only when one set of paths genuinely describes both sides.
-- `--policy plugin_abi` / `--policy sdk_vendor`, or `--policy-file`, when the
+- `--policy plugin_abi` / `--policy sdk_vendor`, or `--policy <document>`, when the
   project has its own view of what a given change kind means
   ([policies and suppressions](../shared/policies-and-suppressions.md)).
-- `--contract-evaluation --contract public` when you need per-finding
+- `--contract public` when you need per-finding
   contract relevance and its coverage ledger
   ([public surface and scoping](../shared/public-surface-and-scoping.md)).
 - `--suppress FILE` only when the project already has a suppression file.

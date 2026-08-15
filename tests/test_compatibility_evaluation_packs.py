@@ -832,7 +832,7 @@ class TestLoadPackManifestValidation:
     def test_unknown_change_kind_slug_in_policy_pack_raises(
         self, tmp_path: Path
     ) -> None:
-        # ADR-049 D8: a hard load error, matching --policy-file's behavior --
+        # ADR-049 D8: a hard load error, matching --policy's behavior --
         # a renamed/typo'd slug must never silently vanish from a pack.
         path = _write(
             tmp_path,

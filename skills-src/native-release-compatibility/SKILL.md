@@ -106,7 +106,7 @@ Per library:
 abicheck compare OLD_RELEASE NEW \
   --depth headers \
   --scope-public-headers \
-  --contract-evaluation --contract public \
+  --contract public \
   --report-mode root-cause \
   --format json \
   -o release-<library>.json
@@ -136,7 +136,7 @@ by another route:
 abicheck compare OLD_RELEASE NEW \
   --depth headers \
   --no-scope-public-headers \
-  --contract-evaluation --contract exports \
+  --contract exports \
   --report-mode root-cause \
   --format json \
   -o release-<library>.json
@@ -153,7 +153,7 @@ abicheck compare old_release_dir/ new_dir/ \
   --output-dir release-reports/ \
   --depth headers \
   --scope-public-headers \
-  --contract-evaluation --contract public \
+  --contract public \
   --fail-on-removed-library \
   --format json
 ```
@@ -163,7 +163,7 @@ command above — the example shows `public`, so substitute
 `--no-scope-public-headers --contract exports` (or `all`) when that is what
 the release promises. The fan-out applies whatever it is given to each
 library and folds every library's own coverage contribution into the
-release's exit code, so dropping `--contract-evaluation` on this path would
+release's exit code, so dropping `--contract` on this path would
 leave step 4 unable to see incomplete contract evidence — and selecting a
 *different* domain here than per-library would answer a different question
 for the same release. Either mistake records a cell as **pass** that the
@@ -195,7 +195,7 @@ directory.
 Two things are required, not optional, and omitting either exits 64:
 
 - **`REPORTS_DIR`** — a positional operand, not an option.
-- **An expected-target mode** — `--manifest`, `--run-plan`, or `--expect`.
+- **An expected-target mode** — `--manifest` or `--run-plan`.
   Prefer one of these: they declare the targets the matrix *must* produce, so
   a target that produced no report at all is reported as missing instead of
   silently absent. That is precisely the **not run** state of step 4, and
@@ -207,7 +207,7 @@ distinguish "this target passed" from "this target never ran" — so use it
 only when there is genuinely no declared target set, and say so in the
 report.
 
-Gate configuration — `--policy`/`--policy-file`, `--severity-*`,
+Gate configuration — `--policy`, `--severity-preset`,
 `--exit-code-scheme` — belongs here rather than in review runs; see
 [policies and suppressions](../shared/policies-and-suppressions.md).
 

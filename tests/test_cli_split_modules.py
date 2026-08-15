@@ -367,7 +367,7 @@ class TestCompareReleaseErrorPaths:
         assert [c.kind.value for c in result.changes] == ["cxx_standard_floor_raised"]
 
     def test_collect_matrix_result_respects_policy_file_override(self, tmp_path: Path) -> None:
-        """A --policy-file override (e.g. ignore) applies to matrix findings,
+        """A --policy override (e.g. ignore) applies to matrix findings,
         matching the single-pair compare path (checker.compare → PolicyFile)."""
         from abicheck import cli_compare_release
 

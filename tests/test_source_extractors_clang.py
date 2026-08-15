@@ -629,7 +629,7 @@ def test_build_command_dpcpp_cl_driver_mode() -> None:
     driven through ``--driver-mode=cl`` the same as ``clang-cl`` -- without
     this, ``dumper_clang.resolve_source_frontend_clang_bin``'s
     ``exclude_cl_style=False`` (L4 source-ABI replay) resolves a
-    ``--gcc-path dpcpp-cl`` override correctly, but this module built a
+    ``--compiler dpcpp-cl`` override correctly, but this module built a
     GNU-shaped command for it instead (Codex review)."""
     cmd = build_clang_command(
         _cu(standard="c++20", defines={"WIN": "1"}, include_paths=["inc"]),
@@ -716,7 +716,7 @@ def test_build_command_respects_final_disabled_sycl_toggle_despite_earlier_enabl
 
 def test_build_command_carries_sycl_language_mode() -> None:
     """-fsycl must reach the reconstructed L4 replay command via
-    abi_relevant_flags -- a resolved --gcc-path override can now actually
+    abi_relevant_flags -- a resolved --compiler override can now actually
     invoke icpx/dpcpp for L4 replay (previously always a bare "clang"), so
     without this a SYCL TU would replay as plain C++, silently missing
     built-in SYCL state (Codex review)."""
@@ -749,7 +749,7 @@ def test_build_command_collapses_sycl_to_host_only_pass() -> None:
 def test_build_command_sycl_host_only_skipped_for_non_intel_driver() -> None:
     """Stock upstream clang hard-rejects ``-fsycl-host-only`` ("unknown
     argument") -- appending it unconditionally for any clang-family binary
-    would turn a working ``--gcc-path clang`` + ``-fsycl`` replay into a
+    would turn a working ``--compiler clang`` + ``-fsycl`` replay into a
     guaranteed failure."""
     cu = _cu(
         argv=["clang++", "-fsycl", "-c", "foo.cpp"],
@@ -777,7 +777,7 @@ def test_build_command_sycl_host_only_gated_on_invoked_binary_not_recorded_argv(
     """The host-only decision must be gated on the binary this command will
     actually be RUN with (``clang_bin``), not on ``pick_compiler_binary``'s
     *emulated* compiler, which falls back to the compile unit's own recorded
-    ``argv[0]`` when no ``--gcc-path``/``compiler_binary`` override is given.
+    ``argv[0]`` when no ``--compiler``/``compiler_binary`` override is given.
     Without an override, L4 replay invokes the generic default ``"clang"``
     even for a TU whose real build used ``icpx`` -- appending
     ``-fsycl-host-only`` there would hit stock clang's "unknown argument"
@@ -859,7 +859,7 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
     def test_skipped_with_no_override_regardless_of_recorded_argv0(
         self, recorded_argv0: str
     ) -> None:
-        """The extractor's own real default (no ``--gcc-path``, so
+        """The extractor's own real default (no ``--compiler``, so
         ``clang_bin``/``compiler_binary`` are never passed at all) always
         invokes plain ``"clang"`` -- never Intel-family -- no matter what the
         compile unit's own build recorded itself as."""

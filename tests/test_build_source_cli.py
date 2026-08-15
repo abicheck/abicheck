@@ -1356,7 +1356,7 @@ def test_evidence_policy_build_drift_fail_on_abi_relevant_escalates(tmp_path):
             "old=" + str(ev_old),
             "--build-info",
             "new=" + str(ev_new),
-            "--policy-file",
+            "--policy",
             str(pol),
             "--format",
             "json",
@@ -1401,7 +1401,7 @@ def test_require_evidence_fails_when_layer_absent(tmp_path):
             "compare",
             str(old_snap),
             str(new_snap),
-            "--policy-file",
+            "--policy",
             str(pol),
             "--format",
             "json",
@@ -1432,7 +1432,7 @@ def test_require_evidence_fails_when_layer_only_on_target_side(tmp_path):
             str(new_snap),
             "--build-info",
             "new=" + str(ev_new),
-            "--policy-file",
+            "--policy",
             str(pol),
             "--format",
             "json",
@@ -1468,7 +1468,7 @@ def test_require_evidence_satisfied_when_layer_comparable(tmp_path):
             "old=" + str(ev_old),
             "--build-info",
             "new=" + str(ev_new),
-            "--policy-file",
+            "--policy",
             str(pol),
             "--format",
             "json",
@@ -1491,7 +1491,7 @@ def test_evidence_policy_invalid_action_rejected(tmp_path):
             "compare",
             str(old_snap),
             str(new_snap),
-            "--policy-file",
+            "--policy",
             str(pol),
         ],
     )
@@ -2902,10 +2902,10 @@ def test_dump_source_only_no_binary(tmp_path):
 
 
 def test_dump_source_only_include_dependencies_is_noop(tmp_path):
-    """`dump --sources <tree> --include-dependencies` (no SO_PATH) must not
+    """`dump --sources <tree> --include-system-declarations` (no SO_PATH) must not
     error: dependency-exclusion runs by default now, and a source-only
     snapshot has no header-derived declarations at all, so both the default
-    (excluding) and --include-dependencies (opting out) paths are a no-op
+    (excluding) and --include-system-declarations (opting out) paths are a no-op
     for it -- succeed normally either way.
     """
     tree = tmp_path / "src"
@@ -2922,7 +2922,7 @@ def test_dump_source_only_include_dependencies_is_noop(tmp_path):
     out = tmp_path / "libfoo.src.json"
     result = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(tree), "--include-dependencies", "-o", str(out)],
+        ["dump", "--sources", str(tree), "--include-system-declarations", "-o", str(out)],
     )
     assert result.exit_code == 0, result.output
     assert out.exists()

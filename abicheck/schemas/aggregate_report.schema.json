@@ -250,7 +250,7 @@
         "profile_contract": {
           "type": "array",
           "items": {"$ref": "#/$defs/profile_contract_state"},
-          "description": "Added in schema 1.4. Per-affected-profile ADR-049 contract-decision detail for this finding -- one entry per profile in affected_profiles, using that profile's own representative report entry. Present only when at least one affected profile's report carries a contract_relevance (i.e. that profile ran --contract-evaluation); entirely absent for a comparison where no profile ever evaluated contract relevance, so a report using none of ADR-049's contract machinery renders byte-identical to schema 1.3. Answers, per profile, the four questions a single scope/verdict pair collapses together: whether the finding was IN_CONTRACT/NOT_APPLICABLE/etc (contract_relevance), whether policy actually scored it (compatibility_evaluation_status), what it resolved to (compatibility_decision), and whether it contributed to that profile's own gate (gate_contribution)."
+          "description": "Added in schema 1.4. Per-affected-profile ADR-049 contract-decision detail for this finding -- one entry per profile in affected_profiles, using that profile's own representative report entry. Present only when at least one affected profile's report carries a contract_relevance (i.e. that profile ran --contract); entirely absent for a comparison where no profile ever evaluated contract relevance, so a report using none of ADR-049's contract machinery renders byte-identical to schema 1.3. Answers, per profile, the four questions a single scope/verdict pair collapses together: whether the finding was IN_CONTRACT/NOT_APPLICABLE/etc (contract_relevance), whether policy actually scored it (compatibility_evaluation_status), what it resolved to (compatibility_decision), and whether it contributed to that profile's own gate (gate_contribution)."
         }
       }
     },
@@ -262,7 +262,7 @@
         "profile": {"type": "string", "description": "The profile this state belongs to; one of the entry's affected_profiles."},
         "contract_relevance": {
           "type": ["string", "null"],
-          "description": "ADR-049 relevance classification for this finding on this profile (e.g. IN_CONTRACT, NOT_APPLICABLE, PROVEN_OUT_OF_CONTRACT, UNKNOWN_UNRESOLVED), or null when this profile's report never stamped one -- it did not run --contract-evaluation, or ran it under a mode that never reached this finding."
+          "description": "ADR-049 relevance classification for this finding on this profile (e.g. IN_CONTRACT, NOT_APPLICABLE, PROVEN_OUT_OF_CONTRACT, UNKNOWN_UNRESOLVED), or null when this profile's report never stamped one -- it did not run --contract, or ran it under a mode that never reached this finding."
         },
         "compatibility_evaluation_status": {
           "type": ["string", "null"],

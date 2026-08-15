@@ -2,11 +2,11 @@
 #
 # Turnkey usage (the name resolves to this shipped file):
 #
-#   abicheck compare libv1.so libv2.so --policy-file security
+#   abicheck compare libv1.so libv2.so --policy security
 #
 # or point at an explicit copy:
 #
-#   abicheck compare libv1.so libv2.so --policy-file path/to/security.yaml
+#   abicheck compare libv1.so libv2.so --policy path/to/security.yaml
 #
 # Purpose: fail the build when a release silently weakens a checksec-style
 # hardening property (RELRO, PIE, stack canary, FORTIFY_SOURCE, W^X, executable

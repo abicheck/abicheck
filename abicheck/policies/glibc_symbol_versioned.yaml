@@ -9,7 +9,7 @@
 #
 # Turnkey usage:
 #
-#   abicheck compare libc.so.6.old libc.so.6.new --policy-file glibc_symbol_versioned
+#   abicheck compare libc.so.6.old libc.so.6.new --policy glibc_symbol_versioned
 base_policy: strict_abi
 
 overrides:

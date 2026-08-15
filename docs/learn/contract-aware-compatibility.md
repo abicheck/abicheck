@@ -25,7 +25,7 @@ narrow what actually gets scored — but none of that asks about a
 *declared contract*: it's about whether a change is public/reachable or
 explicitly waived, not whether it belongs to a promise you've made about
 what stays stable. **Contract-aware compatibility**
-(`compare --contract-evaluation`, ADR-049) adds that narrower, more useful
+(`compare --contract`, ADR-049) adds that narrower, more useful
 question on top: *does this change even touch the compatibility contract
 you actually promised?*
 
@@ -62,7 +62,7 @@ flowchart LR
   *state* the answer confidently. The rest are honestly reported as
   unresolved rather than guessed at.
 
-This is why a finding's fate under `--contract-evaluation` isn't a single
+This is why a finding's fate under `--contract` isn't a single
 in/out flag — it's the combination of *where* it falls (in the domain or
 not) and *how sure* abicheck is (proven or not).
 
@@ -190,7 +190,7 @@ abicheck compare old.json new.json --no-scope-public-headers
 
 # Contract-aware, public mode -- visible, but not evaluated
 abicheck compare old.json new.json --no-scope-public-headers \
-  --contract-evaluation --contract public
+  --contract public
 # verdict: NO_CHANGE (nothing EVALUATED changed)
 # the finding is still in `changes`, with:
 #   "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
@@ -204,7 +204,7 @@ abicheck compare old.json new.json --no-scope-public-headers \
 ```bash
 # --contract exports needs an observed export table; a header-only JSON
 # snapshot pair has none, so exclusion can never be proven either way.
-abicheck compare old.json new.json --contract-evaluation --contract exports
+abicheck compare old.json new.json --contract exports
 # exit code: 1  (contract coverage incomplete, folded orthogonally)
 # the finding: "contract_relevance": "UNKNOWN_UNRESOLVED"
 # report:      "contract_coverage_failures": [{"provider": "export_table", ...}]
@@ -222,7 +222,7 @@ assignments:
 ```
 
 ```bash
-abicheck compare old.json new.json --contract-evaluation --contract exports \
+abicheck compare old.json new.json --contract exports \
   --pack accept-unresolved.yml
 # exit code: back to whatever the ordinary gate says (0 here)
 # report still carries the SAME non-empty "contract_coverage_failures" list

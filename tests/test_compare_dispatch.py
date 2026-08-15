@@ -45,7 +45,7 @@ _SNAP = AbiSnapshot(library="stub", version="0")
 class TestCompareHeaderMarksProvenance:
     """compare's --header is documented as "Public header file or directory"
 
-    (unlike dump's split -H/--public-header) — it must also be threaded
+    (unlike dump's former split -H/--public-header pair) — it must also be threaded
     through as the public-header set for provenance tagging, not just as
     castxml AST input. Regression: this was silently dropped, leaving every
     compare-on-native-binaries run in reduced-confidence "no-provenance" mode
@@ -884,12 +884,12 @@ class TestCompareDispatch:
         assert code == 4
         assert "BREAKING" in out
 
-    @pytest.mark.parametrize("flag, expected", [("--include-dependencies", True), (None, False)])
+    @pytest.mark.parametrize("flag, expected", [("--include-system-declarations", True), (None, False)])
     def test_include_dependencies_reaches_set_comparison(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool,
     ) -> None:
         """Codex review: a directory/package ``compare`` used to drop
-        ``--include-dependencies`` entirely on its way through
+        ``--include-system-declarations`` entirely on its way through
         ``_dispatch_release_compare`` -> ``_compare_release_libraries`` ->
         ``_run_compare_pair``, so set comparisons stayed unfiltered
         regardless of the flag. Assert it now reaches the per-library engine
@@ -944,8 +944,8 @@ class TestCompareDispatch:
         assert code != 0
         assert "--exit-code-scheme is not supported" in (out + err)
 
-    def test_secondary_format_rejected_on_set_inputs(self, tmp_path: Path) -> None:
-        # --secondary-format reuses the single comparison's DiffResult, which
+    def test_write_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        # --write reuses the single comparison's DiffResult, which
         # doesn't exist as a single object across the release fan-out.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
@@ -955,10 +955,10 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
         code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--secondary-format", "json", "--secondary-output", str(tmp_path / "sec.json"),
+            "--write", f"json={tmp_path / 'sec.json'}",
         )
         assert code != 0
-        assert "--secondary-format is not supported" in (out + err)
+        assert "--write is not supported" in (out + err)
 
     def test_config_legacy_exit_scheme_applies_to_set_inputs(self, tmp_path: Path) -> None:
         # A project config may demote ABI-breaking findings to warnings for

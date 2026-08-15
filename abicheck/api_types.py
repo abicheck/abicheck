@@ -123,10 +123,10 @@ class InputSpec:
     version: str = ""
     pdb: Path | None = None
     debug_roots: tuple[Path, ...] = ()
-    # Mirrors `dump --include-dependencies`/`compare --include-dependencies`
+    # Mirrors `dump --include-system-declarations`/`compare --include-system-declarations`
     # (dumper_scoping.py): default True preserves the historical unfiltered
     # behavior for any caller that doesn't opt in; `run_compare` (and the
-    # CLI's `--include-dependencies` default False) sets it explicitly.
+    # CLI's `--include-system-declarations` default False) sets it explicitly.
     include_dependencies: bool = True
     # ADR-055 D1: this side's inline build/source evidence (mirrors
     # `--sources`/`--build-info`, side-scoped like the CLI's own
@@ -155,7 +155,7 @@ class InputSpec:
     compile: CompileContext | None = None
     # ADR-055 D1: additional public-header *directories* beyond what's
     # already inferred by splitting `headers` into files/dirs
-    # (`split_public_header_inputs`) -- mirrors `--public-header-dir`.
+    # (`split_public_header_inputs`) -- mirrors `scan --public-header-dir`.
     public_header_dirs: tuple[Path, ...] = ()
     # ADR-055 D4: whether resolving `path` may follow a GNU ld linker script's
     # INPUT()/GROUP() target to the real library. Default True matches

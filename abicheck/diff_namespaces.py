@@ -738,8 +738,8 @@ def _emit_experimental_change(
     The type-sourced path (``kind_label == "type"``, origins dicts provided)
     has no ``Visibility`` field to fall back on — ``RecordType`` carries
     none (unlike ``Function``/``Variable``) — but it *does* carry ``origin``
-    (ADR-024's ``ScopeOrigin``, opt-in via ``--public-header``/
-    ``--public-header-dir``): a type explicitly scoped to the public-header
+    (ADR-024's ``ScopeOrigin``, opt-in via a public-header
+    set): a type explicitly scoped to the public-header
     set (``ScopeOrigin.PUBLIC_HEADER``) is a reliable public-reachability
     signal Codex review pointed out was overlooked. Without that opt-in flag
     every type's origin is ``ScopeOrigin.UNKNOWN``, so this degrades to the
@@ -1152,7 +1152,7 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     A function entry is reliably public because it was filtered to
     ``Visibility.PUBLIC`` above. A type entry is reliably public only when
     ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
-    public-header scoping, ``--public-header``/``--public-header-dir``) —
+    public-header scoping via ``-H``/``--header``) —
     the one signal that *does* exist for a type in the absence of a
     visibility field (Codex review). Without that opt-in flag every type's
     ``origin`` is ``ScopeOrigin.UNKNOWN``, so this degrades to the prior

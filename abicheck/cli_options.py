@@ -26,11 +26,13 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import click
 
 from .cli_params import (
+    BUILTIN_POLICY_PROFILES,
+    DEFAULT_POLICY_PROFILE,
     DEPTH_PARAM,
     POLICY_FILE_PARAM,
     SIDED_BUILD_INFO_PARAM,
@@ -40,6 +42,7 @@ from .cli_params import (
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
     SIDED_STR_PARAM,
+    SidedChoiceParam,
 )
 from .cli_secondary_output import secondary_output_options as _secondary_output_options
 
@@ -165,10 +168,34 @@ def _split_sided_version(
     return old, new
 
 
+def _split_sided_frontend(
+    pairs: Sequence[tuple[str, str]],
+) -> tuple[str, str | None, str | None]:
+    """Resolve ``--ast-frontend``'s ``(side, frontend)`` pairs.
+
+    The "base + per-side override" model :func:`_split_sided_base` implements
+    for paths, for a string with a default: a bare/``both=`` value is the
+    frontend both sides use, ``old=``/``new=`` override one side (``None`` =
+    inherit the base), and an unset base is ``"auto"``. Last value wins per
+    bucket.
+    """
+    base = "auto"
+    old: str | None = None
+    new: str | None = None
+    for side, frontend in pairs:
+        if side == "both":
+            base = frontend
+        elif side == "old":
+            old = frontend
+        else:
+            new = frontend
+    return base, old, new
+
+
 def normalize_sided_options(kwargs: dict[str, object]) -> None:
     """Translate the sided ``header``/``include``/``sources``/``build_info``/
-    ``debug_root``/``pdb``/``probe_matrix``/``version`` dests into the per-side
-    kwargs the command bodies consume, in place (ADR-040 L1).
+    ``debug_root``/``pdb``/``probe_matrix``/``version``/``ast-frontend`` dests
+    into the per-side kwargs the command bodies consume, in place (ADR-040 L1).
 
     Absent keys are left untouched, so this is safe to call on any command that
     composes only a subset of the sided families.
@@ -224,6 +251,13 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         old_v, new_v = _split_sided_version(kwargs.pop("version"))  # type: ignore[arg-type]
         kwargs["old_version"] = old_v
         kwargs["new_version"] = new_v
+    if isinstance(kwargs.get("header_backend"), tuple):
+        base_f, old_f, new_f = _split_sided_frontend(
+            kwargs["header_backend"]  # type: ignore[arg-type]
+        )
+        kwargs["header_backend"] = base_f
+        kwargs["old_header_backend"] = old_f
+        kwargs["new_header_backend"] = new_f
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -381,11 +415,39 @@ def release_input_options(func: F) -> F:
     return func
 
 
-def policy_options(func: F) -> F:
-    """Verdict-classification policy + suppression file (`--policy`/`--policy-file`/`--suppress`).
+def _resolve_policy_operand(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str:
+    """Split ``--policy NAME|PATH`` into a profile and a policy document.
 
-    Shared verbatim by every verdict-emitting command. (``--policy`` accepting a
-    *path* directly, folding ``--policy-file`` in, is a later-phase D4 change.)
+    ``--policy`` used to name only a built-in profile, with a separate
+    ``--policy-file`` naming a document -- two flags for the one question
+    "how are verdicts classified for this run?", and the second silently
+    winning when both were given. One flag now answers it: a
+    :data:`~abicheck.cli_params.BUILTIN_POLICY_PROFILES` name selects that
+    profile, anything else is resolved as a document (a path, or a packaged
+    built-in like ``security``) and runs under the default profile, exactly
+    what ``--policy-file`` did.
+
+    The document half is published on ``ctx.params["policy_file_path"]`` --
+    the same key the old option bound -- so every consumer downstream still
+    receives the pair it always did, and only the user-facing spelling
+    changed.
+    """
+    resolved = value if value is not None else DEFAULT_POLICY_PROFILE
+    if resolved in BUILTIN_POLICY_PROFILES:
+        ctx.params["policy_file_path"] = None
+        return resolved
+    ctx.params["policy_file_path"] = POLICY_FILE_PARAM.convert(resolved, param, ctx)
+    return DEFAULT_POLICY_PROFILE
+
+
+def policy_options(func: F) -> F:
+    """Verdict-classification policy + suppression file (`--policy`/`--suppress`).
+
+    Shared verbatim by every verdict-emitting command. ADR-037 D4's fold: the
+    separate ``--policy-file`` is gone and ``--policy`` takes both operands
+    (see :func:`_resolve_policy_operand`).
     """
     func = click.option(
         "--suppress",
@@ -394,82 +456,46 @@ def policy_options(func: F) -> F:
         help="Suppression file (YAML) to filter known/intentional changes.",
     )(func)
     func = click.option(
-        "--policy-file",
-        "policy_file_path",
-        type=POLICY_FILE_PARAM,
-        default=None,
-        help="YAML policy file with per-kind ('overrides:') or selector-scoped "
-        "('reclassify:') verdict re-classification, or a built-in name "
-        "(e.g. 'security'). Overrides --policy.",
-    )(func)
-    func = click.option(
         "--policy",
         "policy",
-        type=click.Choice(
-            ["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True
-        ),
-        default="strict_abi",
+        metavar="NAME|PATH",
+        default=DEFAULT_POLICY_PROFILE,
         show_default=True,
-        help="Built-in policy profile for verdict classification. Ignored when "
-        "--policy-file is given.",
+        callback=_resolve_policy_operand,
+        help="How verdicts are classified: a built-in profile "
+        "(strict_abi, sdk_vendor, plugin_abi), or a YAML policy document -- "
+        "a path, or a packaged built-in name like 'security' -- carrying "
+        "per-kind ('overrides:') or selector-scoped ('reclassify:') "
+        "re-classification.",
     )(func)
     return func
 
 
 def severity_options(func: F) -> F:
-    """The severity preset + the four per-category overrides.
+    """``--severity-preset``, the one visible severity control.
 
-    ADR-037 D4 demotes the per-category flags into ``.abicheck.yml``'s
-    ``severity:`` block (G22 Phase 5): they stay on the CLI as **hidden**
-    overrides (a CLI value still beats config for a one-off run), but the visible
-    surface keeps only ``--severity-preset``. The whole family remains a genuine
-    shared decorator across ``compare`` / ``compare-release`` / ``appcompat`` so
-    the contract gate (D10.2) still sees it composed once, not copy-pasted.
+    ADR-037 D4 demoted the four per-category overrides
+    (``--severity-abi-breaking``/``--severity-potential-breaking``/
+    ``--severity-quality-issues``/``--severity-addition``) into
+    ``.abicheck.yml``'s ``severity:`` block, and they have now been removed
+    from the CLI outright: a hidden flag that duplicates a config key is a
+    second way to say one thing, and the config block is the one that
+    survives across invocations. ``severity:`` in the project config is the
+    only per-category spelling; the preset stays on the CLI because it is a
+    genuine one-off coarse override.
+
+    Still a shared decorator across ``compare`` / ``compare-release`` /
+    ``appcompat`` so the contract gate (D10.2) sees it composed once, not
+    copy-pasted.
     """
-    func = click.option(
-        "--severity-addition",
-        "severity_addition",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for new public API additions (config: "
-        "severity.addition). Beats the preset and config for this run.",
-    )(func)
-    func = click.option(
-        "--severity-quality-issues",
-        "severity_quality_issues",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for quality issues like std symbol leaks (config: "
-        "severity.quality_issues).",
-    )(func)
-    func = click.option(
-        "--severity-potential-breaking",
-        "severity_potential_breaking",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for potential incompatibilities needing review "
-        "(config: severity.potential_breaking).",
-    )(func)
-    func = click.option(
-        "--severity-abi-breaking",
-        "severity_abi_breaking",
-        type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        hidden=True,
-        help="Override severity for clear ABI/API incompatibilities (config: "
-        "severity.abi_breaking).",
-    )(func)
     func = click.option(
         "--severity-preset",
         "severity_preset",
         type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
         default=None,
         help="Severity preset: 'default', 'strict', or 'info-only'. "
-        "Controls exit codes and report labels. Per-category "
-        "--severity-* options override the chosen preset.",
+        "Controls exit codes and report labels. A project config's "
+        "severity: block overrides individual categories of the preset.",
     )(func)
     return func
 
@@ -498,7 +524,7 @@ def snapshot_compression_option(func: F) -> F:
 
 
 def include_dependencies_option(func: F) -> F:
-    """``--include-dependencies``, shared by ``dump`` and ``compare``
+    """``--include-system-declarations``, shared by ``dump`` and ``compare``
     (dumper_scoping.py): by default, toolchain/system-header declarations
     (std::/SYCL/etc. pulled in transitively by #include) are excluded from
     a header-AST dump -- a header-origin filter, not a public-API-surface
@@ -510,14 +536,24 @@ def include_dependencies_option(func: F) -> F:
     DWARF/DWARF-advanced collections keyed off them; an embedded header-only
     semantic graph (always attached by default) is not filtered. A filtered
     and an unfiltered snapshot are not comparable -- mixing them raises
-    ScopeMismatchError."""
+    ScopeMismatchError.
+
+    Named for what it does rather than for the internal
+    ``include_dependencies`` dest it still binds (kept because
+    ``AbiSnapshot.dependency_scope``, ``service.run_dump``'s parameter, and
+    the snapshot cache key all spell it that way): "dependencies" reads as
+    the DT_NEEDED library graph ``--follow-deps`` walks, which is a
+    different thing entirely, while what this flag actually restores is the
+    *declarations* a system/toolchain header contributed to the AST."""
     func = click.option(
-        "--include-dependencies",
+        "--include-system-declarations",
         "include_dependencies",
         is_flag=True,
         default=False,
-        help="Include toolchain/system-header declarations (std::/SYCL/etc. "
-        "pulled in transitively by #include). By default these are "
+        help="Include declarations that came from toolchain/system headers "
+        "(std::/SYCL/etc. pulled in transitively by #include). Unrelated to "
+        "--follow-deps, which walks the DT_NEEDED library graph. By default "
+        "these declarations are "
         "excluded -- pass this flag to get the old, unfiltered full "
         "surface instead. A no-op on a binary-only/DWARF-only dump. "
         "Mixing a filtered and an unfiltered snapshot across a "
@@ -628,168 +664,167 @@ _enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
 )
 
 
-def compile_context_options(func: F) -> F:
+#: The AST frontends ``--ast-frontend`` accepts, in one place so the sided and
+#: single-valued spellings of the option cannot drift apart.
+AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
+
+
+def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]:
     """L2 header-AST compile context — the cross-toolchain + frontend family.
+
+    A factory (``@compile_context_options()``) because ``--ast-frontend`` is
+    side-aware on ``compare`` and single-valued on ``dump``/``scan``: with
+    *sided_frontend*, it becomes a repeatable ``[old=|new=]FRONTEND`` option
+    (ADR-040 Lever 1's convention, the same one ``--header``/``--include``/
+    ``--version`` follow) and :func:`normalize_sided_options` splits it back
+    into the ``header_backend`` / ``old_header_backend`` /
+    ``new_header_backend`` triple the compare flow already threads. That
+    replaces the separate ``--old-ast-frontend``/``--new-ast-frontend`` pair,
+    which were a third and fourth spelling of one setting on the one command
+    that has two sides.
 
     The single source of truth for the flags that tell the header frontend how to
     parse the public headers: ``--ast-frontend`` (which frontend), the cross
     compiler (``--compiler``/``--compiler-prefix``, plus the deprecated-but-still
-    -functional ``--gcc-path``/``--gcc-prefix`` aliases), pass-through compiler
+    -functional ``--compiler``/``--compiler-prefix`` aliases), pass-through compiler
     flags (``--gcc-options``/``--compiler-option``, the latter superseding the
-    deprecated ``--gcc-option``), an alternate ``--sysroot``, and ``--nostdinc``.
+    deprecated ``--compiler-option``), an alternate ``--sysroot``, and ``--nostdinc``.
     Shared verbatim by ``dump``, ``scan``, **and** ``compare`` so the three never
     drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
     real L2). Decorators apply bottom-up, so the options are listed in reverse of
     their displayed order. Dest names match the ``dumper.dump`` /
     :class:`~abicheck.service_scan.CompileContext` kwargs exactly, except for the
-    new ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
-    :func:`resolve_compile_context` merges into the same ``gcc_*`` fields.
+    ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
+    :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
     """
-    func = click.option(
-        "--frontend-context",
-        "frontend_context",
-        default="host",
-        show_default=True,
-        type=click.Choice(["host", "device"], case_sensitive=False),
-        help="Which AST context the L2 header frontend should target (ADR-050 "
-        "D3/D5). 'device' selects the SYCL/DPC++ offload-device AST from a "
-        "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
-        "loudly if the configured frontend cannot produce a device context. "
-        "Matches a manifest's own frontend_context field for the legacy, "
-        "non-manifest path.",
-    )(func)
-    func = click.option(
-        "--nostdinc/--no-nostdinc",
-        "nostdinc",
-        default=False,
-        help="Do not search the standard system include paths (suppresses the "
-        "castxml/clang system-include auto-detection too). Paired form so an "
-        "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
-        "true` for a one-off run (CLI > config).",
-    )(func)
-    func = click.option(
-        "--sysroot",
-        "sysroot",
-        type=click.Path(path_type=Path),
-        default=None,
-        help="Alternative system root directory for header resolution.",
-    )(func)
-    # ── --compiler/--compiler-prefix/--compiler-option (CLI audit PR 2/5) ────
-    # Neutral aliases for --gcc-path/--gcc-prefix/--gcc-option: the "gcc"
-    # spelling was always misleading (these accept a Clang cross-compiler
-    # binary too, per the docstring on the legacy --gcc-path below). Additive
-    # and non-breaking: the legacy flags stay fully functional (just hidden
-    # from --help/--help-all, since they're superseded, not removed), merged
-    # in resolve_compile_context() with the new spelling winning when both are
-    # given and a one-line stderr note when only the legacy one is used.
-    # --gcc-options (the whitespace-split string form) is removed outright
-    # (CLI audit PR 5/5): --compiler-option is its safer repeatable verbatim
-    # replacement, and the Action's own run.sh migrated to it first (word-
-    # splitting its gcc-options input into --compiler-option tokens itself).
-    # `gcc_options`/`CompileContext.gcc_options` stay as an internal field
-    # (composed from build-context flags, castxml/clang command assembly,
-    # etc.) -- only the raw user-facing CLI flag is gone.
-    func = click.option(
-        "--compiler-option",
-        "compiler_option_tokens",
-        multiple=True,
-        help="A single extra compiler flag passed to the header frontend verbatim "
-        "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
-        "e.g. --compiler-option=-include --compiler-option='some header.h'. "
-        "Do not mix with the deprecated --gcc-option in the same invocation "
-        "(a usage error) -- pick one spelling.",
-    )(func)
-    func = click.option(
-        "--gcc-option",
-        "gcc_option_tokens",
-        multiple=True,
-        hidden=True,
-        help="Deprecated alias for --compiler-option (kept functional; "
-        "superseded, not removed). Do not mix with --compiler-option in the "
-        "same invocation (a usage error) -- pick one spelling.",
-    )(func)
-    func = click.option(
-        "--compiler-prefix",
-        "compiler_prefix",
-        default=None,
-        help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-). Wins over the "
-        "deprecated --gcc-prefix if both are given.",
-    )(func)
-    func = click.option(
-        "--gcc-prefix",
-        "gcc_prefix",
-        default=None,
-        hidden=True,
-        help="Deprecated alias for --compiler-prefix (kept functional; "
-        "superseded, not removed).",
-    )(func)
-    func = click.option(
-        "--compiler",
-        "compiler_path",
-        default=None,
-        help="Path to a GCC/G++ or Clang cross-compiler binary. Wins over the "
-        "deprecated --gcc-path if both are given.",
-    )(func)
-    func = click.option(
-        "--gcc-path",
-        "gcc_path",
-        default=None,
-        hidden=True,
-        help="Deprecated alias for --compiler (kept functional; superseded, "
-        "not removed). Always accepted a Clang binary too, despite the name.",
-    )(func)
-    func = click.option(
-        "--allow-unsupported-castxml",
-        is_flag=True,
-        expose_value=False,
-        envvar="ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
-        callback=_enable_unsupported_castxml_for_command,
-        help="Proceed with a CastXML build outside the supported version range "
-        "(castxml_policy.MIN_CASTXML/MAX_CASTXML/MIN_CASTXML_CLANG_MAJOR) instead "
-        "of aborting the scan before headers are parsed. Exploratory-mode-only: "
-        "the resulting snapshot's ast_toolchain_supported is recorded as false "
-        "with ast_toolchain_unsupported_reasons, so it is never mistaken for a "
-        "normal supported scan and cannot become a new strict baseline without a "
-        "further explicit acknowledgment.",
-    )(func)
-    func = click.option(
-        "--allow-ast-frontend-fallback",
-        is_flag=True,
-        expose_value=False,
-        envvar="ABICHECK_ALLOW_AST_FALLBACK",
-        callback=_enable_ast_fallback_for_command,
-        help="Allow auto-selected CastXML to fall back to Clang for a recognized "
-        "toolchain mismatch, an unsupported CastXML release, or a direct-include "
-        "guard. Disabled by default because the frontends can produce materially "
-        "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
-        "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
-        "routes to Clang without this flag, since CastXML has no host/device "
-        "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
-        "has no device concept either) still rejects it.",
-    )(func)
-    func = click.option(
-        "--ast-frontend",
-        "header_backend",
-        default="auto",
-        show_default=True,
-        type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
-        help="C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
-        "or clang (-ast-dump=json; for hosts where castxml is absent or its "
-        "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
-        "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
-        "costs roughly 2x a single-backend dump; never selected by auto. auto "
-        "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
-        "changes producer unless --allow-ast-frontend-fallback (or "
-        "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
-        "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
-        "castxml (no pin) routes to clang since castxml can't satisfy it at "
-        "all (a castxml- or hybrid-pinned auto still rejects it, since "
-        "hybrid has no device concept either; an explicit clang, or auto "
-        "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
-        "directly). "
-        "Env: ABICHECK_AST_FRONTEND.",
-    )(func)
-    return func
+
+    def _apply(func: F) -> F:
+        func = click.option(
+            "--frontend-context",
+            "frontend_context",
+            default="host",
+            show_default=True,
+            type=click.Choice(["host", "device"], case_sensitive=False),
+            help="Which AST context the L2 header frontend should target (ADR-050 "
+            "D3/D5). 'device' selects the SYCL/DPC++ offload-device AST from a "
+            "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
+            "loudly if the configured frontend cannot produce a device context. "
+            "Matches a manifest's own frontend_context field for the legacy, "
+            "non-manifest path.",
+        )(func)
+        func = click.option(
+            "--nostdinc/--no-nostdinc",
+            "nostdinc",
+            default=False,
+            help="Do not search the standard system include paths (suppresses the "
+            "castxml/clang system-include auto-detection too). Paired form so an "
+            "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
+            "true` for a one-off run (CLI > config).",
+        )(func)
+        func = click.option(
+            "--sysroot",
+            "sysroot",
+            type=click.Path(path_type=Path),
+            default=None,
+            help="Alternative system root directory for header resolution.",
+        )(func)
+        # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
+        # The one spelling for the cross-toolchain family. The former
+        # --gcc-path/--gcc-prefix/--gcc-option names were always misleading (each
+        # accepts a Clang cross-compiler binary just as well) and are removed
+        # outright rather than kept as aliases -- carrying two spellings meant a
+        # per-invocation conflict resolver whose only correct answer for the
+        # repeatable --*-option pair was to reject mixing them anyway.
+        # `gcc_path`/`gcc_prefix`/`gcc_option_tokens`/`gcc_options` stay as
+        # internal `CompileContext` field names (also composed from build-context
+        # flags and the castxml/clang command assembly, and serialized into the
+        # run-plan JSON) -- only the user-facing CLI flags are gone.
+        func = click.option(
+            "--compiler-option",
+            "compiler_option_tokens",
+            multiple=True,
+            help="A single extra compiler flag passed to the header frontend verbatim "
+            "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
+            "e.g. --compiler-option=-include --compiler-option='some header.h'.",
+        )(func)
+        func = click.option(
+            "--compiler-prefix",
+            "compiler_prefix",
+            default=None,
+            help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
+        )(func)
+        func = click.option(
+            "--compiler",
+            "compiler_path",
+            default=None,
+            help="Path to a GCC/G++ or Clang cross-compiler binary.",
+        )(func)
+        func = click.option(
+            "--allow-unsupported-castxml",
+            is_flag=True,
+            expose_value=False,
+            envvar="ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
+            callback=_enable_unsupported_castxml_for_command,
+            help="Proceed with a CastXML build outside the supported version range "
+            "(castxml_policy.MIN_CASTXML/MAX_CASTXML/MIN_CASTXML_CLANG_MAJOR) instead "
+            "of aborting the scan before headers are parsed. Exploratory-mode-only: "
+            "the resulting snapshot's ast_toolchain_supported is recorded as false "
+            "with ast_toolchain_unsupported_reasons, so it is never mistaken for a "
+            "normal supported scan and cannot become a new strict baseline without a "
+            "further explicit acknowledgment.",
+        )(func)
+        func = click.option(
+            "--allow-ast-frontend-fallback",
+            is_flag=True,
+            expose_value=False,
+            envvar="ABICHECK_ALLOW_AST_FALLBACK",
+            callback=_enable_ast_fallback_for_command,
+            help="Allow auto-selected CastXML to fall back to Clang for a recognized "
+            "toolchain mismatch, an unsupported CastXML release, or a direct-include "
+            "guard. Disabled by default because the frontends can produce materially "
+            "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
+            "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
+            "routes to Clang without this flag, since CastXML has no host/device "
+            "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
+            "has no device concept either) still rejects it.",
+        )(func)
+        frontend_kwargs: dict[str, Any] = (
+            {"multiple": True, "type": SidedChoiceParam(AST_FRONTENDS)}
+            if sided_frontend
+            else {
+                "default": "auto",
+                "show_default": True,
+                "type": click.Choice(AST_FRONTENDS, case_sensitive=False),
+            }
+        )
+        func = click.option(
+            "--ast-frontend",
+            "header_backend",
+            **frontend_kwargs,
+            help=("Scope to one side with an 'old='/'new=' prefix, repeating the "
+            "flag per side (e.g. --ast-frontend old=castxml --ast-frontend "
+            "new=clang) when the old release parses on one frontend and the new "
+            "one needs the other; a bare value applies to both (default: auto). "
+            if sided_frontend else "")
+            + "C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
+            "or clang (-ast-dump=json; for hosts where castxml is absent or its "
+            "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
+            "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
+            "costs roughly 2x a single-backend dump; never selected by auto. auto "
+            "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
+            "changes producer unless --allow-ast-frontend-fallback (or "
+            "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
+            "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
+            "castxml (no pin) routes to clang since castxml can't satisfy it at "
+            "all (a castxml- or hybrid-pinned auto still rejects it, since "
+            "hybrid has no device concept either; an explicit clang, or auto "
+            "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
+            "directly). "
+            "Env: ABICHECK_AST_FRONTEND.",
+        )(func)
+        return func
+
+    return _apply
 
 
 def merge_compile_config(
@@ -811,7 +846,7 @@ def merge_compile_config(
     is gone, CLI audit PR 5/5, so this is now always the case from the CLI —
     the field stays as an internal-composition-only escape hatch); those
     synthesized tokens are prepended *before* any CLI ``--compiler-option``/
-    ``--gcc-option`` tokens, not appended after, so an explicit CLI ``-std=``/
+    ``--compiler-option`` tokens, not appended after, so an explicit CLI ``-std=``/
     ``-D`` still wins the way a compiler resolves a repeated flag (Codex
     review: appending after silently let config override an explicit CLI
     token once ``--gcc-options`` -- the flag that used to suppress this
@@ -888,7 +923,7 @@ def merge_compile_config(
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI
-        # --compiler-option/--gcc-option token appended after it is the one a
+        # --compiler-option token appended after it is the one a
         # compiler actually honors for a repeated flag like -std= (Codex
         # review: appending config tokens *after* CLI ones silently let
         # `compile.std`/`compile.defines` override an explicit CLI
@@ -924,121 +959,103 @@ def merge_compile_config(
     return merged, includes
 
 
-def resolve_contract_evaluation(
-    contract_mode: str | None, contract_evaluation: bool
-) -> bool:
-    """CLI audit PR 3/5: ``--contract VALUE`` alone enables the evaluator.
+def resolve_contract_evaluation(contract_mode: str | None) -> bool:
+    """``--contract VALUE`` is what enables the ADR-049 evaluator on the CLI.
 
-    Previously ``compare``/``scan`` hard-rejected ``--contract public`` given
-    without ``--contract-evaluation`` (a `UsageError`, exit 64) -- correct in
-    that the flag would otherwise silently do nothing, but an extra flag for
-    a choice that already only has one interpretation ("I named a domain, so
-    judge against it"). Since the Tier-1 core (`checker.compare`) already
-    documents *contract_mode* as inert-not-erroring when *contract_evaluation*
-    is unset, and the strict rejection was purely a CLI-level "did you
-    forget a flag" guard rather than a core invariant, this loosens that
-    guard into an implication instead: given a domain, evaluation turns on.
+    There used to be a separate ``--contract-evaluation`` switch, and
+    ``--contract`` without it was a hard `UsageError` (exit 64). That was
+    first loosened into an implication (naming a domain is enough to ask for
+    a decision against it), which left two ways to request one thing; the
+    standalone switch is now gone, so the flag *is* the request.
 
     Deliberately CLI-only. The typed Python API (`api_types.CompareRequest.
     validation_errors`) and the Tier-2 entry (`service._validate_contract_mode`)
-    keep rejecting a *contract_mode* given without an explicit
-    `contract_evaluation=True` -- both are documented public-API contracts
-    (CLAUDE.md: changing them is a breaking Python API change, coordinated
-    separately from a CLI ergonomics fix) and this resolver runs strictly
-    before either is ever constructed, so an implied `True` is indistinguishable
-    from an explicit one to them: no working invocation of either changes,
-    and no previously-erroring CLI invocation now behaves differently there.
-    Never lowers `contract_evaluation` -- an explicit `--contract-evaluation`
-    with no `--contract` is untouched (still legacy shadow-evaluator behavior,
-    domain-less).
+    keep requiring an explicit `contract_evaluation=True` alongside a
+    *contract_mode* -- both are documented public-API contracts (CLAUDE.md:
+    changing them is a breaking Python API change, coordinated separately from
+    a CLI ergonomics fix) and this resolver runs strictly before either is ever
+    constructed, so the value it derives is indistinguishable from an
+    explicitly-passed one to them.
+
+    The former domain-less evaluation (``--contract-evaluation`` with no
+    ``--contract``, whose domain fell through to the D7 chain below an
+    explicit CLI value) is spelled ``--contract auto``:
+    :func:`resolve_contract_domain` maps it back to ``None``, which is exactly
+    the state that lets `compatibility_evaluation_wiring.
+    resolve_legacy_contract_mode`'s ``--scope-public-headers`` reading, and
+    then `.abicheck.yml`, decide the domain.
     """
-    return contract_evaluation or contract_mode is not None
+    return contract_mode is not None
 
 
-def _merge_compiler_aliases(
-    *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...],
-    compiler_path: str | None,
-    compiler_prefix: str | None,
-    compiler_option_tokens: tuple[str, ...],
-) -> tuple[str | None, str | None, tuple[str, ...]]:
-    """Fold the deprecated ``--gcc-*`` flags into their ``--compiler*`` aliases.
+def resolve_contract_domain(
+    contract_mode: str | None, ctx: click.Context | None = None
+) -> str | None:
+    """Map ``--contract auto`` back to "no explicit domain stated".
 
-    CLI audit PR 2/5: ``--compiler``/``--compiler-prefix``/``--compiler-option``
-    are the new, neutral spellings (the old ``gcc`` name was always misleading —
-    it always accepted a Clang binary too); the legacy flags stay hidden-but-
-    functional rather than removed. A new flag wins entirely if given (an
-    explicit override, same precedence style as CLI>config elsewhere in this
-    module); a legacy value is used, with a stderr deprecation note, only when
-    the new spelling wasn't given at all.
+    ``auto`` exists only to separate the two questions the one flag now
+    answers: *evaluate at all* (any value) and *which domain* (a named one).
+    Downstream, "the caller stated no domain" has always been spelled ``None``,
+    and every D7 tier below ``explicit_cli`` keys off that -- so ``auto`` must
+    not reach the resolver as a literal, or it would read as an explicit CLI
+    value outranking the very layers it exists to defer to (and
+    ``contract_relevance_types.coerce_contract_mode`` would raise on it, since
+    ``auto`` is not a real ``ContractMode``).
 
-    ``--compiler-option``/``--gcc-option`` deliberately do NOT merge when both
-    are given, even though each is independently repeatable and each is
-    individually documented as accumulating across its own repeated uses:
-    Click hands back ``compiler_option_tokens``/``gcc_option_tokens`` as two
-    separately-collected tuples with no record of their original relative
-    argv order, so *any* fixed merge rule -- concatenation, or "one spelling
-    wins entirely" -- either reorders flag/value pairs across the two
-    spellings or silently drops real tokens the user asked for. Both were
-    tried and both are wrong (Codex review, PR #757, two rounds): naive
-    concatenation can separate ``-include`` from its own operand when the
-    pieces come from different spellings (e.g. ``--gcc-option=-include
-    --compiler-option='some header.h'`` -> ``('some header.h', '-include')``);
-    "new wins entirely" silently drops legitimate ``--gcc-option`` tokens the
-    moment even one ``--compiler-option`` is present, e.g. during an
-    incremental migration that adds new tokens via the new spelling while
-    older ones are still passed via the old one. Since neither a token-list
-    merge rule nor an order-recovery scheme can be correct without knowing
-    the real argv order Click doesn't expose across two options, mixing both
-    spellings is rejected outright instead of guessed at -- the user must use
-    exactly one spelling for this specific repeatable pair (unlike the two
-    scalars above, where "new wins" is unambiguous and safe).
+    Normalizing the local value alone is not enough: the two front ends read
+    the raw parameters differently -- ``compare`` hands
+    ``cli_compare_receipt.resolve_and_apply`` explicit values, but
+    ``cli_scan._resolve_scan_evaluation_config`` rebuilds its inputs from
+    ``ctx.params`` and its typed-parameter set from
+    ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied
+    there too, and the parameter source is demoted from ``COMMANDLINE`` to
+    ``DEFAULT`` -- ``auto`` is precisely the caller declining to state a
+    domain, so recording it as an explicit CLI value would re-create the
+    precedence bug this mapping exists to avoid (Codex review).
     """
-    if compiler_option_tokens and gcc_option_tokens:
-        raise click.UsageError(
-            "--compiler-option and --gcc-option (its deprecated alias) "
-            "cannot both be given: each is independently repeatable, but "
-            "there's no way to recover their combined argv order from here, "
-            "and any fixed merge rule risks silently reordering a flag away "
-            "from its own operand or dropping real tokens. Use only "
-            "--compiler-option (preferred) or only --gcc-option, not both."
+    if contract_mode != "auto":
+        return contract_mode
+    if ctx is not None:
+        if "contract_mode" in ctx.params:
+            ctx.params["contract_mode"] = None
+        ctx.set_parameter_source("contract_mode", click.core.ParameterSource.DEFAULT)
+    return None
+
+
+def _shared_frontend_explicit(ctx: click.Context) -> bool:
+    """Did the command line state a *shared* ``--ast-frontend`` value?
+
+    Click reports one parameter source for the whole ``--ast-frontend``
+    parameter, so a side-aware command marks it ``COMMANDLINE`` as soon as
+    *any* occurrence is given -- including a purely side-qualified
+    ``new=castxml``, for which :func:`_split_sided_frontend` then synthesizes
+    the shared value ``"auto"`` that nobody typed. Reading the parameter
+    source alone would hand that synthesized default to
+    :func:`merge_compile_config` as an explicit override and suppress a
+    configured ``compile.frontend`` for the side the user never mentioned --
+    so a one-sided override would silently discard the project's setting for
+    the other side (Codex review). The raw pairs are still on ``ctx.params``
+    here (``normalize_sided_options`` rewrites the command's own kwargs, not
+    the context), so the shared value's own explicitness is recoverable:
+    it was stated exactly when some pair carries the ``both`` side.
+
+    A command composing the unsided ``@compile_context_options()`` has a
+    plain string here and keeps the parameter-source answer unchanged.
+    """
+    if ctx.get_parameter_source("header_backend") != click.core.ParameterSource.COMMANDLINE:
+        return False
+    raw = ctx.params.get("header_backend")
+    if isinstance(raw, (tuple, list)):
+        return any(
+            isinstance(pair, tuple) and len(pair) == 2 and pair[0] == "both"
+            for pair in raw
         )
-    deprecated_used: list[str] = []
-    resolved_path: str | None
-    if compiler_path is not None:
-        resolved_path = compiler_path
-    else:
-        resolved_path = gcc_path
-        if gcc_path is not None:
-            deprecated_used.append("--gcc-path (use --compiler)")
-    resolved_prefix: str | None
-    if compiler_prefix is not None:
-        resolved_prefix = compiler_prefix
-    else:
-        resolved_prefix = gcc_prefix
-        if gcc_prefix is not None:
-            deprecated_used.append("--gcc-prefix (use --compiler-prefix)")
-    resolved_tokens = compiler_option_tokens or gcc_option_tokens
-    if gcc_option_tokens and not compiler_option_tokens:
-        deprecated_used.append("--gcc-option (use --compiler-option)")
-    if deprecated_used:
-        click.echo(
-            "Note: deprecated compiler flag(s) still work but are superseded: "
-            + ", ".join(deprecated_used)
-            + ". Planned removal: two minor releases out.",
-            err=True,
-        )
-    return resolved_path, resolved_prefix, resolved_tokens
+    return True
 
 
 def resolve_compile_context(
     ctx: click.Context,
     *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     header_backend: str,
@@ -1065,12 +1082,12 @@ def resolve_compile_context(
     a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
     L2 compile context cannot drift.
 
-    ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` (CLI audit
-    PR 2/5) are the ``--compiler``/``--compiler-prefix``/``--compiler-option``
-    values; :func:`_merge_compiler_aliases` folds them together with their
-    deprecated ``gcc_*`` counterparts into the single set of values the rest of
-    this function (and thus ``CompileContext``) has always used, so nothing
-    downstream needs to know the alias exists.
+    ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` are the
+    ``--compiler``/``--compiler-prefix``/``--compiler-option`` values; they map
+    straight onto ``CompileContext``'s long-standing ``gcc_path``/
+    ``gcc_prefix``/``gcc_option_tokens`` fields, which keep their internal
+    names (they are also composed from build-context flags and serialized into
+    the run-plan JSON), so nothing downstream sees the CLI rename.
 
     ``frontend_context`` (ADR-050 D3/D5) passes through unchanged here — Click's
     own ``type=click.Choice(["host", "device"])`` on ``--frontend-context``
@@ -1082,20 +1099,11 @@ def resolve_compile_context(
     """
     from .service_scan import CompileContext
 
-    gcc_path, gcc_prefix, gcc_option_tokens = _merge_compiler_aliases(
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_option_tokens=tuple(gcc_option_tokens),
-        compiler_path=compiler_path,
-        compiler_prefix=compiler_prefix,
-        compiler_option_tokens=tuple(compiler_option_tokens),
-    )
-
     cli_ctx = CompileContext(
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
+        gcc_path=compiler_path,
+        gcc_prefix=compiler_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=tuple(gcc_option_tokens),
+        gcc_option_tokens=tuple(compiler_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=header_backend,
@@ -1112,7 +1120,7 @@ def resolve_compile_context(
         tuple(includes),
         build_config,
         sources=sources,
-        frontend_explicit=_explicit("header_backend"),
+        frontend_explicit=_shared_frontend_explicit(ctx),
         nostdinc_explicit=_explicit("nostdinc"),
     )
 
@@ -1157,7 +1165,7 @@ def output_options(
     return deco
 
 
-#: The ``--secondary-format``/``--secondary-output`` decorator factory
+#: The ``--write FORMAT=PATH`` decorator factory
 #: (Codex review: previously declared inline, separately, by ``compare``
 #: and ``scan --against``, with drifted help text and duplicated
 #: ``reject_incoherent_*`` validation logic) lives in the dependency-free
@@ -1499,7 +1507,7 @@ def adr027_compare_options(func: F) -> F:
 def app_usage_scope_options(func: F) -> F:
     """Add the ADR-043 app-usage/required-symbol scoping options to ``compare``.
 
-    ``--used-by``/``--verify-runtime`` and ``--required-symbol``/
+    ``--used-by`` and ``--required-symbol``/
     ``--required-symbols`` are mutually exclusive scoping mechanisms folding
     the former standalone ``appcompat``/``plugin-check`` commands into
     ``compare``. Decorators apply bottom-up, so they are listed here in
@@ -1521,19 +1529,6 @@ def app_usage_scope_options(func: F) -> F:
         "and requires (repeatable; folds `plugin-check`). Scopes the "
         "comparison to this explicit entrypoint contract instead of the "
         "full diff. Mutually exclusive with --used-by.",
-    )(func)
-    func = click.option(
-        "--verify-runtime",
-        "verify_runtime",
-        is_flag=True,
-        default=False,
-        help="DEPRECATED, SAFETY NO-OP: this used to actually execute each "
-        "consumer binary against the OLD and NEW library, which meant "
-        "running load-time code from an analyzed artifact -- abicheck "
-        "never executes analyzed inputs, so this flag is now inert and "
-        "always attempted=False regardless of platform or --used-by. Use "
-        "the static --used-by scanner for undefined-symbol corroboration; "
-        "it never executes anything. Kept only for CLI/API compatibility.",
     )(func)
     func = click.option(
         "--used-by",
@@ -1650,7 +1645,9 @@ def build_source_dump_options(func: F) -> F:
         default=None,
         help="Optional build context: a build dir, a compile_commands.json, "
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
-        "omitted.",
+        "omitted. When it resolves to a compile database and -H/--header is "
+        "given, that database also parameterizes the header parse with the "
+        "build's exact flags (scope it with --compile-db-filter).",
     )(func)
     return func
 

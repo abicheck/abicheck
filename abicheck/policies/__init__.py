@@ -15,7 +15,7 @@
 """Built-in, shipped policy files.
 
 These YAML policy files are packaged with abicheck so common gating profiles
-are turnkey: ``--policy-file security`` resolves to ``security.yaml`` here
+are turnkey: ``--policy security`` resolves to ``security.yaml`` here
 (see ``abicheck.policy_file.builtin_policy_path``).
 """
 from __future__ import annotations

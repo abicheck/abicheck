@@ -95,6 +95,7 @@ from .cli_options import (
     pack_option,
     policy_options,
     resolve_compile_context,
+    resolve_contract_domain,
     resolve_contract_evaluation,
     scope_options,
     secondary_output_options,
@@ -284,12 +285,11 @@ def _normalize_depth_inputs(
     baseline_header: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
-    compile_db: Path | None,
-) -> tuple[tuple[Path, ...], tuple[Path, ...], Path | None, Path | None, Path | None]:
+) -> tuple[tuple[Path, ...], tuple[Path, ...], Path | None, Path | None]:
     """Prune inputs that would collect evidence above the effective scan depth."""
     if depth is not EvidenceDepth.BINARY:
-        return headers, baseline_header, sources, build_info, compile_db
-    return (), (), None, None, None
+        return headers, baseline_header, sources, build_info
+    return (), (), None, None
 
 
 def _render_text(out: ScanOutcome, *, show_suppressed: bool = False) -> str:
@@ -416,7 +416,7 @@ def _dry_run_exit_code_lines(
         lines.append(
             "a real scan run's exit codes are 0 no error-level findings, "
             "1 error-level addition/quality findings (or incomplete contract "
-            "coverage under --contract-evaluation), 2 error-level "
+            "coverage under --contract), 2 error-level "
             "potential_breaking, 4 error-level abi_breaking, "
             f"{tail} -- a category set to warning/info never gates, so a "
             "breaking comparison can exit 0"
@@ -424,7 +424,7 @@ def _dry_run_exit_code_lines(
         return lines
     lines.append(
         "a real scan run's exit codes are 0 compatible, "
-        "1 incomplete contract coverage (--contract-evaluation only), "
+        "1 incomplete contract coverage (--contract only), "
         f"2 API break, 4 ABI break, {tail}"
     )
     return lines
@@ -580,8 +580,8 @@ def _emit_scan_report(
 
     ``secondary_fmt``/``secondary_output`` render the same already-computed
     ``outcome`` a second time to a second path -- e.g. a human ``--format
-    text`` report alongside a ``--secondary-format json`` artifact for
-    tooling -- without a second scan (mirrors ``compare --secondary-format``;
+    text`` report alongside a ``--write json=scan.json`` artifact for
+    tooling -- without a second scan (mirrors ``compare --write``;
     see the GitHub Action's own PR-comment renderer, which uses exactly this
     to avoid re-running a potentially --depth build/source-expensive scan
     just to get JSON out of a --format text invocation).
@@ -621,7 +621,7 @@ def _emit_scan_report(
         # run resolved the severity scheme, and only otherwise the verdict's
         # own code. Re-deriving `_verdict_exit_code(verdict)` unconditionally
         # misreported the severity case: a COMPATIBLE_WITH_RISK diff promoted
-        # to 2 by `--severity-potential-breaking error` alongside a coverage
+        # to 2 by a config `severity.potential_breaking: error` alongside a coverage
         # failure exits 2, but the notice claimed coverage floored it to 1
         # (Codex review). `_run_baseline_compare` emits the gate block from
         # the same `compute_gate_decision` result it took its own base from,
@@ -739,21 +739,13 @@ def _render_artifact_set_text(result: Any) -> str:
 
 _COMPARISON_ONLY_FLAGS = {
     "suppress": "--suppress",
-    "policy_file_path": "--policy-file",
+    "policy_file_path": "--policy",
     "policy": "--policy",
     "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
     "severity_preset": "--severity-preset",
-    "severity_abi_breaking": "--severity-abi-breaking",
-    "severity_potential_breaking": "--severity-potential-breaking",
-    "severity_quality_issues": "--severity-quality-issues",
-    "severity_addition": "--severity-addition",
     "exit_code_scheme": "--exit-code-scheme",
-    "strict_suppressions": "--strict-suppressions",
-    "public_symbols": "--public-symbol",
-    "public_symbols_list": "--public-symbols-list",
     "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
     "env_matrix_path": "--env-matrix",
-    "contract_evaluation": "--contract-evaluation",
     "contract_mode": "--contract",
     # ADR-049 D8: a pack's only application here is the baseline comparison's
     # policy file, so without one it would configure nothing.
@@ -801,7 +793,6 @@ def _run_artifact_set(
     public_header_dirs: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
-    compile_db: Path | None,
     build_config: Path | None,
     depth: str | None,
     since: str | None,
@@ -815,9 +806,6 @@ def _run_artifact_set(
     fmt: str,
     output: Path | None,
     header_backend: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     frontend_context: str,
@@ -868,10 +856,7 @@ def _run_artifact_set(
     # caller explicitly selected a target sysroot/toolchain (Codex review).
     compile_context, includes_tuple = resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=tuple(gcc_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
         header_backend=header_backend,
@@ -898,7 +883,6 @@ def _run_artifact_set(
         includes=list(includes_tuple),
         public_header_dirs=list(public_header_dirs),
         sources=sources,
-        compile_db=compile_db,
         build_info=build_info,
         baseline=None,
         mode="audit",
@@ -971,7 +955,7 @@ def _resolve_scan_evaluation_config(
 
     Returns ``(resolved_config, policy_file)`` -- ``(None, policy_file)`` when
     there is nothing to resolve, i.e. no ``--against`` to compare against or
-    neither ``--contract-evaluation`` nor ``--pack`` given.
+    neither ``--contract`` nor ``--pack`` given.
 
     ADR-049 Phase 5's "same typed config", for the third and last front end.
     ``checker.compare`` can only claim ``API_REQUEST`` for arguments it was
@@ -1040,7 +1024,7 @@ def _resolve_scan_evaluation_config(
                 resolved_config,
                 gate_supported=False,
                 gate_reason=(
-                    "a scan's exit code now honors --severity-*/--exit-code-"
+                    "a scan's exit code now honors --severity-preset/--exit-code-"
                     "scheme (direct CLI flags and .abicheck.yml's `severity:`/"
                     "`exit_code_scheme` config), but does not yet fold a gate "
                     "pack's `gate.*` assignments the way `compare --pack` "
@@ -1170,13 +1154,6 @@ def _discover_scan_project_config(
     "build context.",
 )
 @click.option(
-    "--compile-db",
-    "compile_db",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Explicit compile_commands.json (use when not under --sources).",
-)
-@click.option(
     "--config",
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -1280,7 +1257,7 @@ def _discover_scan_project_config(
 )
 @policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
 @scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
-@severity_options  # With --against: severity preset + per-category overrides, mirrors `compare`
+@severity_options  # With --against: --severity-preset, mirrors `compare`
 @click.option(
     "--exit-code-scheme",
     "exit_code_scheme",
@@ -1293,37 +1270,6 @@ def _discover_scan_project_config(
     "`compare`'s own visible coarse override (ADR-040 D4).",
 )
 @click.option(
-    "--strict-suppressions",
-    is_flag=True,
-    default=False,
-    hidden=True,
-    help="With --against: fail with exit code 1 if any --suppress rule has "
-    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4). "
-    "Demoted to config (suppression.strict, ADR-037 D4) like `compare`'s flag.",
-)
-@click.option(
-    "--public-symbol",
-    "public_symbols",
-    multiple=True,
-    hidden=True,
-    help="With --against: force a symbol (mangled or demangled name) into the "
-    "public surface even when header provenance can't see it (mirrors "
-    "`compare --public-symbol`). Repeatable. Only meaningful with "
-    "--scope-public-headers. Demoted to config (scope.public_symbols, "
-    "ADR-037 D4) like `compare`'s flag.",
-)
-@click.option(
-    "--public-symbols-list",
-    "public_symbols_list",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    hidden=True,
-    help="With --against: file of symbols to force public (one per line; '#' "
-    "comments and blank lines ignored), merged with --public-symbol (mirrors "
-    "`compare --public-symbols-list`). Demoted to config, mirroring "
-    "`compare`'s already-demoted flag (CLI audit PR 4/5).",
-)
-@click.option(
     "--pattern-verdicts/--no-pattern-verdicts",
     "pattern_verdicts",
     default=False,
@@ -1334,34 +1280,16 @@ def _discover_scan_project_config(
 )
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract), --against only
 @click.option(
-    "--contract-evaluation",
-    "contract_evaluation",
-    is_flag=True,
-    default=False,
-    help="With --against: stamp each comparison finding with its ADR-049 "
-    "contract decision (contract_relevance / contract_reason_code / "
-    "contract_assurance / contract_evidence_refs), exactly as `compare "
-    "--contract-evaluation` does. The decisions are authoritative (ADR-049 "
-    "Phase 7): relevance is classified before compatibility policy, which "
-    "then scores only IN_CONTRACT/NOT_APPLICABLE findings -- so this changes "
-    "the verdict and the exit code, while the excluded findings stay in the "
-    "report with the reason they did not gate. Separately, if the selected "
-    "domain's evidence is incomplete the orthogonal contract-coverage ledger "
-    "contributes exit 1 (folded with max, so it never lowers a 2/4). Set "
-    "contract.unresolved=warn via a `kind: contract` --pack to accept "
-    "incomplete coverage; the failures stay reported either way.",
-)
-@click.option(
     "--contract",
     "contract_mode",
-    type=click.Choice(["public", "exports", "all"]),
+    type=click.Choice(["public", "exports", "all", "auto"]),
     default=None,
-    help="With --against: which evidence domain --contract-evaluation judges "
+    help="With --against: which evidence domain each finding is judged "
     "against ('public' header-derived surface, 'exports' the binary's own "
-    "export table plus its type closure, 'all' every entity). Omitted, the "
-    "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Implies --contract-evaluation if it isn't already given (CLI audit "
-    "PR 3/5). The domain decides which findings "
+    "export table plus its type closure, 'all' every entity, 'auto' let the "
+    "D7 chain below an explicit CLI value decide) -- and the flag "
+    "that turns the ADR-049 contract evaluator on; omit it and nothing about "
+    "the run changes. The domain decides which findings "
     "compatibility policy scores, so it can change the verdict and the exit "
     "code, and it is also what the orthogonal contract-coverage axis is "
     "answered against (mirrors `compare --contract`).",
@@ -1399,17 +1327,16 @@ def _discover_scan_project_config(
 )
 @secondary_output_options(
     ["text", "json"],
-    format_help="Emit a second output format from this same scan run, without "
-    "re-running it a second time (e.g. a human --format text report "
-    "alongside a --secondary-format json artifact for tooling -- the "
-    "GitHub Action's own PR-comment renderer uses exactly this to avoid a "
-    "second, potentially --depth build/source-expensive scan for the "
-    "default --format text invocation). Requires --secondary-output "
-    "(writing two formats to the same stream would be ambiguous). Not "
-    "supported with --artifact-set.",
+    format_help="Emit a second output format from this same scan run, to its "
+    "own file, without re-running it (e.g. a human --format text report "
+    "alongside --write json=scan.json for tooling -- the GitHub Action's own "
+    "PR-comment renderer uses exactly this to avoid a second, potentially "
+    "--depth build/source-expensive scan for the default --format text "
+    "invocation). FORMAT is one of {formats}; PATH must differ from "
+    "--output/-o. Not supported with --artifact-set.",
 )
 @verbose_option
-@compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
+@compile_context_options()  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     artifact: Path | None,
     artifact_set: str | None,
@@ -1419,7 +1346,6 @@ def scan_cmd(
     public_header_dirs: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
-    compile_db: Path | None,
     build_config: Path | None,
     against: Path | None,
     depth: str | None,
@@ -1436,18 +1362,10 @@ def scan_cmd(
     policy: str,
     scope_public_headers: bool,
     severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
     show_suppressed: bool,
     exit_code_scheme: str | None,
-    strict_suppressions: bool,
-    public_symbols: tuple[str, ...],
-    public_symbols_list: Path | None,
     pattern_verdicts: bool,
     env_matrix_path: Path | None,
-    contract_evaluation: bool,
     contract_mode: str | None,
     pack_paths: tuple[Path, ...],
     lang: str,
@@ -1463,10 +1381,7 @@ def scan_cmd(
     # above scan_cmd's decorators for why removing the flag was safe here).
     allow_build_query: bool = False,
     header_backend: str = "auto",
-    gcc_path: str | None = None,
-    gcc_prefix: str | None = None,
     gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
@@ -1486,11 +1401,11 @@ def scan_cmd(
     \b
     Exit codes (legacy scheme — the default):
       0  compatible (or advisory-only findings)
-      1  incomplete contract coverage (ADR-049 Phase 7): with
-         --contract-evaluation, the selected --contract domain's required
-         evidence could not be closed. Orthogonal — folded with max, so it
-         raises a clean 0 and never lowers a 2/4, and it never changes the
-         compatibility verdict. Only reachable with --contract-evaluation
+      1  incomplete contract coverage (ADR-049 Phase 7): the selected
+         --contract domain's required evidence could not be closed.
+         Orthogonal — folded with max, so it raises a clean 0 and never
+         lowers a 2/4, and it never changes the compatibility verdict.
+         Only reachable with --contract
       2  source-level / API break (incl. API_BREAK cross-source findings)
       4  ABI break (from the --against comparison)
       5  --budget overflow
@@ -1498,7 +1413,7 @@ def scan_cmd(
          extracted under a comparable profile/scope contract
 
     \b
-    With --against, --severity-preset/--severity-*/--exit-code-scheme (or
+    With --against, --severity-preset/--exit-code-scheme (or
     .abicheck.yml's severity:/exit_code_scheme) select the severity-aware
     scheme instead, exactly as for `compare`: the 0/2/4 codes above are then
     computed from the per-category error levels rather than the verdict, so
@@ -1550,7 +1465,6 @@ def scan_cmd(
             public_header_dirs=public_header_dirs,
             sources=sources,
             build_info=build_info,
-            compile_db=compile_db,
             build_config=build_config,
             depth=depth,
             since=since,
@@ -1564,10 +1478,7 @@ def scan_cmd(
             fmt=fmt,
             output=output,
             header_backend=header_backend,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
             gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
             compiler_path=compiler_path,
             compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
@@ -1639,10 +1550,7 @@ def scan_cmd(
     # reads from, and is only ever `None` or already known to parse cleanly).
     compile_context, includes_tuple = resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=tuple(gcc_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
         header_backend=header_backend,
@@ -1683,9 +1591,8 @@ def scan_cmd(
     # code the same way `compare`'s does (see `sev_config`/`resolved_exit_
     # scheme` below) -- previously they were required positional args of the
     # shared function but deliberately discarded, which meant
-    # `.abicheck.yml`'s `severity:`/`exit_code_scheme` block, and every
-    # `--severity-*`/`--exit-code-scheme` flag, silently had no effect on
-    # `scan --against`, unlike `compare`.
+    # `.abicheck.yml`'s `severity:`/`exit_code_scheme` block silently had no
+    # effect on `scan --against`, unlike `compare`.
     #
     # Gated on `against is not None`: every field this resolves only means
     # anything for a baseline comparison (mirrors the "reject comparison-only
@@ -1694,6 +1601,12 @@ def scan_cmd(
     # affects an audit-only run.
     collapse_versioned_symbols = False
     require_justification = False
+    # Config-only now that the hidden --strict-suppressions/--public-symbol/
+    # --public-symbols-list trio is gone, and resolved only for a baseline
+    # comparison (the block below) -- an audit-only run has no gate for them
+    # to configure, so they keep their built-in defaults.
+    strict_suppressions = False
+    public_symbols: tuple[str, ...] = ()
     sev_config = None
     resolved_exit_scheme = "legacy"
     # What `--dry-run` previews as the exit-code contract. Defaults match an
@@ -1706,25 +1619,18 @@ def scan_cmd(
         resolved_cfg = resolve_compare_config(
             project_cfg,
             cli_severity_preset=severity_preset,
-            cli_severity_abi_breaking=severity_abi_breaking,
-            cli_severity_potential_breaking=severity_potential_breaking,
-            cli_severity_quality_issues=severity_quality_issues,
-            cli_severity_addition=severity_addition,
             cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-            cli_collapse_versioned_symbols=None,
-            cli_public_symbols=public_symbols,
-            cli_strict_suppressions=_cli_flag(
-                "strict_suppressions", strict_suppressions
-            ),
             cli_exit_code_scheme=exit_code_scheme,
         )
         scope_public_headers = resolved_cfg.scope_public
         strict_suppressions = resolved_cfg.strict_suppressions
         public_symbols = tuple(resolved_cfg.public_symbols)
-        # `scan` has no --collapse-versioned-symbols/--require-justification
-        # flags of its own (config-only for scan, same as compare's hidden/
-        # demoted equivalents), so these are purely `resolved_cfg`'s config >
-        # default resolution with no CLI override to consider.
+        # Every one of these is config-only now -- `scan` never had a
+        # --collapse-versioned-symbols/--require-justification flag, and the
+        # --strict-suppressions/--public-symbol/--public-symbols-list trio it
+        # did carry were hidden duplicates of the same config keys and have
+        # been removed, so this is `resolved_cfg`'s config > default
+        # resolution with no CLI override to consider.
         collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
         require_justification = resolved_cfg.require_justification
         # Mirrors `compare`'s own `sev_config = resolved_cfg.severity` (a gate
@@ -1776,18 +1682,20 @@ def scan_cmd(
     from .cli_helpers_compare import resolve_force_public_scope
 
     force_public_symbols, _symbols_list = resolve_force_public_scope(
-        public_symbols, public_symbols_list
+        public_symbols, None
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
 
-    # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+    # --contract is the only way to ask for the ADR-049 evaluator on the CLI
     # (abicheck.cli_options.resolve_contract_evaluation), mirroring
     # `compare`'s own resolution in `cli_compare_helpers.run_compare` --
     # resolved here, before contract_evaluation is used for anything else
-    # in this function, same as the Tier-2 entry's (`service.
-    # _validate_contract_mode`) explicit-only contract stays untouched for
-    # direct Python API callers.
-    contract_evaluation = resolve_contract_evaluation(contract_mode, contract_evaluation)
+    # in this function. The Tier-2 entry's (`service._validate_contract_mode`)
+    # explicit-only contract stays untouched for direct Python API callers.
+    contract_evaluation = resolve_contract_evaluation(contract_mode)
+    contract_mode = resolve_contract_domain(
+        contract_mode, click.get_current_context()
+    )
 
     from .errors import AbicheckError
     from .service import load_env_matrix
@@ -1856,15 +1764,10 @@ def scan_cmd(
         eff_depth_enum,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
-    headers, baseline_header, sources, build_info, compile_db = _normalize_depth_inputs(
-        eff_depth_enum,
-        headers,
-        baseline_header,
-        sources,
-        build_info,
-        compile_db,
+    headers, baseline_header, sources, build_info = _normalize_depth_inputs(
+        eff_depth_enum, headers, baseline_header, sources, build_info,
     )
-    effective_build_info = compile_db or build_info
+    effective_build_info = build_info
 
     if dry_run:
         from .dry_run import emit_dry_run

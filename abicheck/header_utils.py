@@ -58,7 +58,7 @@ CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 #: in the pass-through compile context means a real build supplied its own
 #: include tree, which an inferred ``-H`` root must defer to. Both GNU/clang
 #: (``-I``/``-isystem``/…) and MSVC/clang-cl (``/I``/``/external:I``/``/imsvc``)
-#: spellings are recognised so an MSVC build context (``--gcc-path cl.exe`` with
+#: spellings are recognised so an MSVC build context (``--compiler cl.exe`` with
 #: ``/I`` options) is not mistaken for "no build context" (Codex review).
 #: Distinct, case-sensitive prefixes (``-I`` ≠ ``-isystem``/``-iquote``);
 #: ``startswith`` covers both spaced (``-I dir``) and attached (``-Idir``) forms.

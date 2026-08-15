@@ -176,8 +176,8 @@ class TestScanCandidateIncludeDependencies:
     """Codex review, fresh evidence: ``scan``'s candidate now defaults to
     filtered dependency scope (matching a default ``dump`` baseline), but
     that alone would hard-break the inverse, explicit
-    ``dump --include-dependencies`` baseline workflow -- scan has no
-    ``--include-dependencies`` flag of its own, so the candidate's mode is
+    ``dump --include-system-declarations`` baseline workflow -- scan has no
+    ``--include-system-declarations`` flag of its own, so the candidate's mode is
     derived from a JSON baseline's own explicit tag instead."""
 
     def test_no_baseline_defaults_to_filtered(self):

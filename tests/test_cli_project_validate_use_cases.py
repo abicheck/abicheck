@@ -13,13 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``abicheck project validate-use-cases`` (G29 Phase 4, ADR-057 amendment).
+"""``impact-use-cases.yaml``'s two CLI front doors (G29 Phase 4, ADR-057).
 
-Gives ``impact-use-cases.yaml`` its first real front door: the manifest
-parser and ``resolve_use_case_entrypoints`` (both already unit-tested in
-``tests/test_use_cases.py``) previously had no CLI caller at all — a
-manifest author had no way to find out a declared entrypoint failed to
-resolve short of writing their own Python calling the module directly.
+``abicheck project validate-use-cases`` checks a manifest's own structure;
+``abicheck compare --use-cases`` folds it into a real comparison and reports
+which of that comparison's findings each declared use case reaches. (The
+``--against``/``--against-new`` pair that used to diff two snapshots from
+inside the validator is gone -- a manifest validator had grown a second
+snapshot-diffing surface, and the attribution belongs where the comparison
+already happens.)
+
 This file exercises the CLI wiring end to end, not the resolution logic
 itself (that's ``test_use_cases.py``'s job).
 """
@@ -29,6 +32,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner, Result
 
 from abicheck.buildsource.pack import BuildSourcePack
@@ -40,6 +44,25 @@ from abicheck.serialization import save_snapshot
 
 def _run(args: list[str]) -> Result:
     return CliRunner().invoke(main, ["project", "validate-use-cases", *args])
+
+
+def _compare(manifest: Path, old: Path, new: Path, *extra: str) -> Result:
+    return CliRunner().invoke(
+        main,
+        ["compare", str(old), str(new), "--use-cases", str(manifest), *extra],
+    )
+
+
+def _json_report(res: Result) -> dict:
+    """The JSON document out of a ``--format json`` run's mixed output.
+
+    ``CliRunner`` folds stderr in, and ``compare`` writes an evidence-coverage
+    preamble there, so the report starts at the first line that is a bare
+    ``{``.
+    """
+    lines = res.output.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "{")
+    return json.loads("\n".join(lines[start:]))
 
 
 def _write_manifest(tmp_path: Path, text: str) -> Path:
@@ -209,15 +232,15 @@ class TestStructuralValidationOnly:
         assert res.exception is None or isinstance(res.exception, SystemExit)
         assert "permission denied" in res.output
 
-    def test_json_format_carries_no_use_cases_key_without_against(
-        self, tmp_path: Path
-    ) -> None:
+    def test_json_format_reports_structure_only(self, tmp_path: Path) -> None:
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
         res = _run([str(manifest), "--format", "json"])
         assert res.exit_code == 0, res.output
         payload = json.loads(res.output)
         assert payload["ok"] is True
         assert payload["use_case_count"] == 1
+        # Structure only: resolving entrypoints against a real library is
+        # `compare --use-cases`, not this command.
         assert "use_cases" not in payload
         assert "against" not in payload
 
@@ -231,8 +254,12 @@ class TestStructuralValidationOnly:
         assert payload["ok"] is True
 
 
-class TestResolutionAgainstALibraryGraph:
-    """With ``--against``: entrypoints resolve against a real source graph."""
+class TestUseCaseImpactOnCompare:
+    """``compare --use-cases``: the manifest folded into a real comparison.
+
+    Resolution *and* attribution in one place -- the comparison the user is
+    already running, rather than a second snapshot diff inside a validator.
+    """
 
     def test_resolved_and_unresolved_entrypoints_reported_text(
         self, tmp_path: Path
@@ -243,99 +270,13 @@ class TestResolutionAgainstALibraryGraph:
             "  entrypoints: [train, does_not_exist]\n"
             "  tests: [test_train_e2e]\n",
         )
-        snapshot = _snapshot_with_graph(tmp_path)
-        res = _run([str(manifest), "--against", str(snapshot)])
-        assert res.exit_code == 0, res.output
-        assert "resolved: train" in res.output
-        assert "unresolved" in res.output
-        assert "does_not_exist" in res.output
-        assert "test_train_e2e" in res.output
-
-    def test_resolved_and_unresolved_entrypoints_reported_json(
-        self, tmp_path: Path
-    ) -> None:
-        manifest = _write_manifest(
-            tmp_path,
-            "- use_case: training workflow\n  entrypoints: [train, does_not_exist]\n",
-        )
-        snapshot = _snapshot_with_graph(tmp_path)
-        res = _run([str(manifest), "--against", str(snapshot), "--format", "json"])
-        assert res.exit_code == 0, res.output
-        payload = json.loads(res.output)
-        assert payload["against"] == str(snapshot)
-        assert payload["use_cases"] == [
-            {
-                "use_case": "training workflow",
-                "resolved_entrypoints": ["train"],
-                "unresolved_entrypoints": ["does_not_exist"],
-                "tests": [],
-            }
-        ]
-
-    def test_unresolved_entrypoint_never_fails_the_command(
-        self, tmp_path: Path
-    ) -> None:
-        """Per the manifest format's own discipline: absence is never
-        evidence of a wrong answer. Even a use case with *zero* resolved
-        entrypoints still exits 0."""
-        manifest = _write_manifest(
-            tmp_path,
-            "- use_case: nothing resolves\n  entrypoints: [does_not_exist]\n",
-        )
-        snapshot = _snapshot_with_graph(tmp_path)
-        res = _run([str(manifest), "--against", str(snapshot)])
-        assert res.exit_code == 0, res.output
-
-    def test_no_entrypoints_declared_is_reported_distinctly(
-        self, tmp_path: Path
-    ) -> None:
-        manifest = _write_manifest(tmp_path, "- use_case: bare\n")
-        snapshot = _snapshot_with_graph(tmp_path)
-        res = _run([str(manifest), "--against", str(snapshot)])
-        assert res.exit_code == 0, res.output
-        assert "no entrypoints declared" in res.output
-
-    def test_snapshot_without_a_source_graph_is_a_usage_error(
-        self, tmp_path: Path
-    ) -> None:
-        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        snapshot = _snapshot_without_graph(tmp_path)
-        res = _run([str(manifest), "--against", str(snapshot)])
-        assert res.exit_code == 64
-        assert "carries no source graph" in res.output
-
-    def test_malformed_snapshot_json_is_a_usage_error_not_a_traceback(
-        self, tmp_path: Path
-    ) -> None:
-        """snapshot_from_dict's own raise surface for a malformed document
-        isn't a closed set (KeyError, TypeError, ValueError, ...) -- every
-        one of them must land as a clean usage error, not an internal
-        crash, since AGAINST is arbitrary user-supplied JSON."""
-        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        bad_snapshot = tmp_path / "bad.abi.json"
-        bad_snapshot.write_text(json.dumps({"not": "a snapshot"}))
-        res = _run([str(manifest), "--against", str(bad_snapshot)])
-        assert res.exit_code == 64
-        assert res.exception is None or isinstance(res.exception, SystemExit)
-
-    def test_nonexistent_against_path_is_a_usage_error(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        res = _run([str(manifest), "--against", str(tmp_path / "does-not-exist.json")])
-        assert res.exit_code != 0
-
-
-class TestDiffImpactAgainstNew:
-    """``--against-new``: the manifest folded into a real two-snapshot diff
-    (G29 Phase 4) via `impact.use_cases.explain_use_case_impact`."""
-
-    def test_against_new_requires_against(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        new_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "new", with_train_function=False
-        )
-        res = _run([str(manifest), "--against-new", str(new_snapshot)])
-        assert res.exit_code == 64
-        assert "--against-new requires --against" in res.output
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        res = _compare(manifest, old, new)
+        assert res.exit_code == 4, res.output
+        assert "Use-case impact" in res.output
+        assert "training workflow" in res.output
+        assert "unresolved entrypoints: does_not_exist" in res.output
 
     def test_removed_function_attributed_to_declaring_use_case_text(
         self, tmp_path: Path
@@ -343,25 +284,12 @@ class TestDiffImpactAgainstNew:
         manifest = _write_manifest(
             tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
         )
-        old_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
-        )
-        new_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "new", with_train_function=False
-        )
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(new_snapshot),
-            ]
-        )
-        assert res.exit_code == 0, res.output
-        assert "1 change(s), 1 attributed" in res.output
-        assert "training workflow:" in res.output
-        assert "func_removed: train" in res.output
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        res = _compare(manifest, old, new)
+        assert res.exit_code == 4, res.output
+        assert "training workflow: 1 change(s)" in res.output
+        assert "- train (func_removed)" in res.output
 
     def test_removed_function_attributed_to_declaring_use_case_json(
         self, tmp_path: Path
@@ -369,84 +297,46 @@ class TestDiffImpactAgainstNew:
         manifest = _write_manifest(
             tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
         )
-        old_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
-        )
-        new_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "new", with_train_function=False
-        )
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(new_snapshot),
-                "--format",
-                "json",
-            ]
-        )
-        assert res.exit_code == 0, res.output
-        payload = json.loads(res.output)
-        assert payload["against_new"] == str(new_snapshot)
-        assert payload["diff_impact"] == {
-            "total_changes": 1,
-            "unattributed_changes": 0,
-            "by_use_case": {
-                "training workflow": [{"symbol": "train", "kind": "func_removed"}]
-            },
-        }
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        res = _compare(manifest, old, new, "--format", "json")
+        assert res.exit_code == 4, res.output
+        doc = _json_report(res)
+        block = doc["use_case_impact"]
+        assert block["manifest"] == str(manifest)
+        assert block["use_case_count"] == 1
+        assert block["unattributed_changes"] == 0
+        (row,) = block["by_use_case"]["training workflow"]
+        assert (row["symbol"], row["kind"]) == ("train", "func_removed")
+        # finding_id is what lets a consumer join this row back to the
+        # report's own findings array, so pin the join, not just the key.
+        assert row["finding_id"] in {c["finding_id"] for c in doc["changes"]}
+        assert block["use_cases"] == [
+            {
+                "use_case": "training workflow",
+                "resolved_entrypoints": ["train"],
+                "unresolved_entrypoints": [],
+                "tests": [],
+            }
+        ]
 
     def test_change_unreachable_from_any_use_case_is_unattributed(
         self, tmp_path: Path
     ) -> None:
         # A use case whose own entrypoint does not name the removed symbol
         # at all -- the change is real but attributed to no declared use
-        # case, reported distinctly from "no changes at all".
+        # case, counted rather than silently dropped.
         manifest = _write_manifest(
             tmp_path,
             "- use_case: unrelated workflow\n  entrypoints: [does_not_exist]\n",
         )
-        old_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
-        )
-        new_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "new", with_train_function=False
-        )
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(new_snapshot),
-            ]
-        )
-        assert res.exit_code == 0, res.output
-        assert "1 change(s), 0 attributed" in res.output
-        assert "no change is reachable from any declared use case" in res.output
-
-    def test_no_changes_between_identical_snapshots(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(
-            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
-        )
-        old_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
-        )
-        same_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old-copy", with_train_function=True
-        )
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(same_snapshot),
-            ]
-        )
-        assert res.exit_code == 0, res.output
-        assert "0 change(s), 0 attributed" in res.output
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        res = _compare(manifest, old, new, "--format", "json")
+        assert res.exit_code == 4, res.output
+        block = _json_report(res)["use_case_impact"]
+        assert block["by_use_case"] == {}
+        assert block["unattributed_changes"] == block["total_changes"] == 1
 
     def test_added_function_attributed_via_the_new_side_graph(
         self, tmp_path: Path
@@ -458,56 +348,167 @@ class TestDiffImpactAgainstNew:
         manifest = _write_manifest(
             tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
         )
-        old_snapshot = _snapshot_with_or_without_train(tmp_path, "old", present=False)
-        new_snapshot = _snapshot_with_or_without_train(tmp_path, "new", present=True)
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(new_snapshot),
-            ]
+        old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
+        new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
+        res = _compare(manifest, old, new, "--format", "json")
+        doc = _json_report(res)
+        block = doc["use_case_impact"]
+        (row,) = block["by_use_case"]["training workflow"]
+        assert (row["symbol"], row["kind"]) == ("train", "func_added")
+        assert row["finding_id"] in {c["finding_id"] for c in doc["changes"]}
+
+    def test_show_only_scopes_the_block_to_the_displayed_findings(
+        self, tmp_path: Path
+    ) -> None:
+        """--show-only filters what the report lists, and the attribution was
+        built from every finding -- so the block named a change absent from
+        the findings section beside it, resurfacing exactly what the user
+        filtered out (Codex review)."""
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
         )
+        old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
+        new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
+
+        # Unfiltered: the added function is attributed and listed.
+        full = _json_report(_compare(manifest, old, new, "--format", "json"))
+        assert full["use_case_impact"]["by_use_case"]["training workflow"]
+
+        # `--show-only removed` displays no findings here (the only change is
+        # an addition), so the block must attribute none either.
+        scoped = _json_report(
+            _compare(
+                manifest, old, new, "--format", "json", "--show-only", "removed"
+            )
+        )
+        block = scoped["use_case_impact"]
+        assert block["by_use_case"] == {}
+        assert block["total_changes"] == len(scoped["changes"])
+        # The manifest's own entrypoint resolution is a property of the
+        # comparison, not of what is on screen, so it survives untouched.
+        assert block["use_cases"] == full["use_case_impact"]["use_cases"]
+
+    def test_show_only_scopes_the_markdown_section_too(self, tmp_path: Path) -> None:
+        """The rendered-text fold has its own projection, on a different code
+        path from the JSON one -- ``_fold_use_case_impact_into_text`` appends
+        the section after the report body rather than emitting a key, so a
+        JSON-only test leaves the fix in the text path unexercised."""
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
+        new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
+
+        full = _compare(manifest, old, new, "--format", "markdown")
+        assert "training workflow: 1 change(s)" in full.output, full.output
+
+        scoped = _compare(
+            manifest, old, new, "--format", "markdown", "--show-only", "removed"
+        )
+        # The only change is an addition, so `--show-only removed` displays
+        # nothing -- and the section must attribute nothing to match. The use
+        # case is still listed at zero: it is declared in the manifest either
+        # way, and dropping the row would read as "not declared" rather than
+        # "nothing displayed reaches it".
+        assert "training workflow: 0 change(s)" in scoped.output, scoped.output
+
+    def test_no_changes_between_identical_snapshots(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        same = _snapshot_with_walkable_graph(
+            tmp_path, "old-copy", with_train_function=True
+        )
+        res = _compare(manifest, old, same, "--format", "json")
         assert res.exit_code == 0, res.output
-        assert "1 change(s), 1 attributed" in res.output
-        assert "training workflow:" in res.output
-        assert "func_added: train" in res.output
+        block = _json_report(res)["use_case_impact"]
+        assert block["total_changes"] == 0
+        assert block["unattributed_changes"] == 0
 
-    def test_malformed_against_new_snapshot_is_a_usage_error(
+    def test_no_source_graph_on_either_side_is_a_usage_error(
         self, tmp_path: Path
     ) -> None:
-        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        old_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
-        )
-        bad_new = tmp_path / "bad_new.abi.json"
-        bad_new.write_text(json.dumps({"not": "a snapshot"}))
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(bad_new),
-            ]
-        )
-        assert res.exit_code == 64
+        """A pair with nothing to resolve entrypoints against fails loudly.
 
-    def test_nonexistent_against_new_path_is_a_usage_error(
-        self, tmp_path: Path
-    ) -> None:
+        An omitted section would read as "no use case is affected" for a run
+        that never looked.
+        """
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        old_snapshot = _snapshot_with_walkable_graph(
-            tmp_path, "old", with_train_function=True
+        graphless = _snapshot_without_graph(tmp_path)
+        res = _compare(manifest, graphless, graphless)
+        assert res.exit_code == 64, res.output
+        assert "needs a source graph" in res.output
+
+    def test_malformed_manifest_is_a_usage_error(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, "- 42\n")
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        res = _compare(manifest, old, new)
+        assert res.exit_code == 64, res.output
+
+    def test_a_run_without_the_flag_carries_no_block(self, tmp_path: Path) -> None:
+        """Omitted, not emitted empty, when the flag was never passed."""
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        res = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "--format", "json"]
         )
-        res = _run(
-            [
-                str(manifest),
-                "--against",
-                str(old_snapshot),
-                "--against-new",
-                str(tmp_path / "does-not-exist.json"),
-            ]
+        assert res.exit_code == 4, res.output
+        assert "use_case_impact" not in _json_report(res)
+
+    @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
+    def test_a_carrying_secondary_rescues_a_non_carrying_primary(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        """``--format html --write json=PATH`` does deliver the attribution.
+
+        The secondary render reuses the same attributed ``DiffResult`` at
+        ``report_mode="full"``/``stat=False``, so rejecting on the primary
+        format alone was arbitrary -- the primary-only error message had in
+        fact been proposing this exact arrangement as the fix (Codex review).
+
+        Asserting the block really lands in the secondary file, not merely
+        that the invocation was accepted: "not rejected" would also pass
+        against a run that silently dropped it, which is the failure the
+        rejection exists to prevent in the first place.
+        """
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
         )
-        assert res.exit_code != 0
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        secondary = tmp_path / "second.json"
+        res = _compare(
+            manifest, old, new,
+            "--format", fmt, "-o", str(tmp_path / f"r.{fmt}"),
+            "--write", f"json={secondary}",
+        )
+        assert res.exit_code == 4, res.output
+        assert "--use-cases is not supported" not in res.output
+        block = json.loads(secondary.read_text(encoding="utf-8"))["use_case_impact"]
+        assert block["by_use_case"]["training workflow"]
+
+    def test_stat_is_rescued_by_a_carrying_secondary_too(self, tmp_path: Path) -> None:
+        """``--stat`` constrains the *primary* shape only.
+
+        The secondary always renders the full report, so the summary-only
+        contract stays intact while the attribution still reaches the caller
+        (Codex review). Both halves are asserted in one run, so a fix that
+        delivered the block by widening ``--stat`` itself would fail.
+        """
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
+        new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
+        primary = tmp_path / "stat.json"
+        secondary = tmp_path / "full.json"
+        res = _compare(
+            manifest, old, new,
+            "--stat", "--format", "json", "-o", str(primary),
+            "--write", f"json={secondary}",
+        )
+        assert res.exit_code == 4, res.output
+        assert "use_case_impact" in json.loads(secondary.read_text(encoding="utf-8"))
+        assert "use_case_impact" not in json.loads(primary.read_text(encoding="utf-8"))

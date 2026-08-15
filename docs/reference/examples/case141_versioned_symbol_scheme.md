@@ -79,7 +79,7 @@ trailing version digit (the `versioned_symbol_scheme_detected` advisory)
 and surfaces it as one grouped risk finding explaining the churn is a
 library-wide rename — without ever downgrading the underlying
 artifact-proven `func_removed` findings. Opt in with
-`compare --collapse-versioned-symbols` to reclassify the version-rename
+a `scope.collapse_versioned_symbols: true` config to reclassify the version-rename
 pairs as compatible and see any *real* delta underneath the rename.
 
 ## Runtime failure demonstration

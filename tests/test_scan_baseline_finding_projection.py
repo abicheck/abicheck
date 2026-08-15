@@ -18,7 +18,7 @@
 `tests/test_scan_compare_parity.py` drives these helpers end to end and pins
 their output against `compare`'s. That is the assertion that matters, but it
 only ever reaches the *fully stamped* shape: a real
-`compare --contract-evaluation` run either stamps all four contract fields or
+`compare --contract` run either stamps all four contract fields or
 none. The partial shapes are reachable in practice -- a decision with no
 resolved assurance, or one that consulted no provider and so cites nothing --
 and this file covers each independently (ADR-049 Phase 5 §6.4).
@@ -58,7 +58,7 @@ def _change(**kwargs):
 class TestContractFields:
     def test_an_unstamped_finding_carries_no_contract_key_at_all(self):
         """Absent, not `None`: `reporter._add_contract_evaluation_fields`
-        omits the keys entirely for a run without `--contract-evaluation`,
+        omits the keys entirely for a run without `--contract`,
         and a consumer must be able to tell "not evaluated" from
         "evaluated, no answer"."""
         (entry,) = _baseline_finding_dicts([_change()], "breaking")

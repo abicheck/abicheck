@@ -41,7 +41,7 @@ decision tree. See
 
 An exploratory or reduced-evidence run informs a review. Only a run whose
 evidence depth and contract coverage meet the bar the skill stated may back
-a release decision. If you lowered `--depth`, dropped `--contract-evaluation`,
+a release decision. If you lowered `--depth`, dropped `--contract`,
 or skipped a target to get an answer faster, that run is diagnostic.
 
 ## 4. Missing required matrix targets are not compatible

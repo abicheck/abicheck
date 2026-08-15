@@ -255,10 +255,10 @@ jobs:
 ```
 
 The gate downloads the manifest as an artifact (not `actions/checkout`), so it
-gates against the exact target set the matrix was planned from. For a quick
-inline set instead of a manifest, `--expect linux-x86_64,macos-arm64,windows-x86_64`
-with optional `--optional <ids>` is equivalent; `--discovered-only` opts out of
-the coverage gate entirely. One of the three is **required** — a bare
+gates against the exact target set the matrix was planned from. `--run-plan
+run-plan.json` is the equivalent for a `project plan`-driven workflow, and
+`--discovered-only` opts out of the coverage gate entirely. One of the three is
+**required** — a bare
 `aggregate abi-reports/` is a usage error, because with no declared target set
 the gate cannot tell a missing required target from an absent one. `aggregate`
 then guarantees the properties the old hand-written gate loop silently violated:
@@ -274,7 +274,7 @@ then guarantees the properties the old hand-written gate loop silently violated:
   `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather than
   recomputing a gate from the verdict. The exit code is `0` pass / `1`
   coverage gap, an addition/quality-only block, a target's own contract
-  evidence being incomplete under `--contract-evaluation`, or another
+  evidence being incomplete under `--contract`, or another
   non-verdict per-report failure (e.g. a `scan` budget overflow) / `2`
   source break / `4` ABI break (see [`abicheck
   aggregate`](../reference/exit-codes.md#abicheck-aggregate) for the full
@@ -291,8 +291,8 @@ then guarantees the properties the old hand-written gate loop silently violated:
     nor skips the fan-in. Pass `--on-missing-required warn` to `aggregate` if
     you want a missing required target to be reported but not fail the gate (the
     per-target gate decisions alone then decide the exit code); mark a target
-    `"required": false` in the manifest (or `--optional`) if its absence should
-    never fail coverage.
+    `"required": false` in the manifest if its absence should never fail
+    coverage.
 
 Sample output when the Windows leg failed to produce a report:
 
@@ -317,7 +317,7 @@ are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
 `coverage` (`status`/counts/`missing_required_targets`), `compatibility`
 (`verdict`/`analyzed_targets`), and `contract_coverage`
 (`exit_contribution`/`incomplete_targets`; always present, with zero/empty
-values when `--contract-evaluation` is not enabled), plus a per-`targets`
+values when `--contract` is not enabled), plus a per-`targets`
 breakdown and an `unexpected_targets` list — to post elsewhere.
 
 ## Skip system dependency installation
@@ -473,7 +473,7 @@ Two exceptions are unconditional, with no `fail-on-*` gate at all: a
 `compatible`-severity finding (e.g. `dwarf_info_missing`) whose resolved
 severity-config category (`addition` or `quality_issues`) is set to `error`
 — compare's own exit-code-1 `SEVERITY_ERROR` tier — and a
-`--contract-evaluation` run's own coverage-failure ledger
+`--contract` run's own coverage-failure ledger
 (`contract_coverage_failures`): its `contract_coverage_exit_contribution`
 folds into the real exit code regardless of any other axis, including a
 `--used-by`/`--required-symbol` scoped verdict — a scoped-compatible run

@@ -228,10 +228,10 @@ add_single_flag() {
 # is_package(), including its magic-byte fallback — abicheck/package.py:547-554
 # — since classify_compare_operand() delegates to it regardless of filename;
 # a name-suffix-only check here would still let the Action add
-# --secondary-format for such an operand and have the CLI reject it, Codex
+# --write for such an operand and have the CLI reject it, Codex
 # review, PR #557). `compare` fans such an operand out through the release
 # engine internally regardless of the Action's MODE, and the release engine
-# rejects --secondary-format — used to skip the --secondary-format
+# rejects --write — used to skip the --write
 # optimization for compare mode's PR-comment JSON rather than let it
 # hard-fail a directory/package comparison that used to work.
 _is_release_style_operand() {
@@ -260,12 +260,12 @@ _is_release_style_operand() {
 }
 
 # Whether the user's own `extra-args` passthrough already requests
-# `--secondary-format`/`--secondary-output` (documented, supported usage —
-# `extra-args` is a general CLI escape hatch). If it does, injecting our own
-# internal pair ahead of it is unsafe: Click applies both occurrences and
-# the *last* one wins, so the actual scan/compare run would silently honor
-# the user's pair instead of ours, writing their chosen format/path rather
-# than the internal `$PR_JSON` sidecar this script expects to read back --
+# `--write` (documented, supported usage — `extra-args` is a general CLI
+# escape hatch). If it does, injecting our own internal one ahead of it is
+# unsafe: Click applies both occurrences and the *last* one wins, so the
+# actual scan/compare run would silently honor the user's value instead of
+# ours, writing their chosen format/path rather than the internal
+# `$PR_JSON` sidecar this script expects to read back --
 # `$PR_JSON` then stays an empty mktemp file, and `_maybe_post_pr_comment`
 # falls through to a full rerun anyway (which the internal injection exists
 # specifically to avoid), except now confusingly alongside a stray empty
@@ -277,10 +277,9 @@ _is_release_style_operand() {
 # script's existing extra-args handling (`CMD+=($INPUT_EXTRA_ARGS)`, plain
 # word-splitting, not full shell quoting) -- good enough to catch the
 # documented flag spellings without parsing arbitrary quoting.
-_extra_args_has_secondary_output() {
+_extra_args_has_write_flag() {
   case " ${INPUT_EXTRA_ARGS:-} " in
-    *' --secondary-format '* | *' --secondary-format='* \
-      | *' --secondary-output '* | *' --secondary-output='*)
+    *' --write '* | *' --write='*)
       return 0
       ;;
   esac
@@ -910,14 +909,17 @@ if [[ "$MODE" == "dump" ]]; then
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
-  add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  # `public-header-dir` has no dedicated dump flag any more -- `dump` derives
+  # declaration provenance from -H/--header itself (a directory entry tags
+  # everything under it public), so forward it as one more -H root.
+  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -1006,8 +1008,8 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
   else
     add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-    add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-    add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+    add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+    add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
     add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
     add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -1083,7 +1085,7 @@ elif [[ "$MODE" == "compare" ]]; then
   CMD+=(--format "$FORMAT")
 
   # dry-run performs no analysis and writes nothing, so it is mutually
-  # exclusive with -o/--output AND --secondary-output/--secondary-format on
+  # exclusive with -o/--output AND --write on
   # the CLI -- skip both entirely when set, rather than passing them and
   # letting the CLI reject the combination.
   DRY_RUN="${INPUT_DRY_RUN:-false}"
@@ -1099,28 +1101,30 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
 
     # Render a second, always-unfiltered JSON report from this same run for
-    # the sticky PR comment (--secondary-format), instead of re-invoking
+    # the sticky PR comment (--write), instead of re-invoking
     # abicheck a second time just to get JSON. Only needed when the primary
     # format isn't already JSON — a json primary is reused as-is (see
     # _can_reuse_primary_json below). The per-library release fan-out
-    # (directory/package operands) rejects --secondary-format, so it's
+    # (directory/package operands) rejects --write, so it's
     # skipped there too, falling back to the rerun path in
     # _maybe_post_pr_comment (Codex review).
     if [[ "$FORMAT" != "json" ]] \
        && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
        && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+      CMD+=(--write "json=$PR_JSON")
     fi
   fi
 
-  add_single_flag "--policy" "${INPUT_POLICY:-}"
-  add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
+  # `--policy` takes both operands now: a built-in profile name, or a policy
+  # document (a path, or a packaged built-in like `security`). A policy-file
+  # input therefore *is* the policy for this run and outranks the profile,
+  # exactly as the removed `--policy-file` flag did.
+  add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
 
   # Severity configuration
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
-  add_single_flag "--severity-addition" "${INPUT_SEVERITY_ADDITION:-}"
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
@@ -1133,9 +1137,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # mutual exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
-  if [[ "${INPUT_VERIFY_RUNTIME:-false}" == "true" ]]; then
-    CMD+=(--verify-runtime)
-  fi
   add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
   add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
 
@@ -1312,8 +1313,24 @@ elif [[ "$MODE" == "scan" ]]; then
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
-  add_single_flag "--build-info" "${INPUT_BUILD_INFO:-}"
-  add_single_flag "--compile-db" "${INPUT_COMPILE_DB:-}"
+  # `scan --compile-db` is gone: --build-info already accepts a build dir, a
+  # compile_commands.json, or a pack, so a compile-db input is one more way
+  # to name the same operand.
+  #
+  # Rejected rather than resolved by the fallback below when both are set,
+  # and *only* in scan mode. Scan is the one mode whose behavior this changed:
+  # it used to forward both operands (`--build-info` AND `--compile-db`) and
+  # the scan pipeline gave `compile-db` precedence, so collapsing them onto
+  # one flag silently analyzes a different build context than the same
+  # workflow used to (Codex review). Compare and dump have always used this
+  # same fallback -- `compare` never had a `--compile-db` flag to forward --
+  # so their "build-info wins" precedence is pre-existing, documented
+  # behavior, not a regression, and is deliberately left alone.
+  if [[ -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
+    echo "::error::build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
+    exit 1
+  fi
+  add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
@@ -1330,8 +1347,8 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -1363,8 +1380,11 @@ elif [[ "$MODE" == "scan" ]]; then
   # every existing audit-only (no baseline) scan step with a usage error
   # (Codex review, P1).
   if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" && -n "${INPUT_AGAINST:-}" ]]; then
-    add_single_flag "--policy" "${INPUT_POLICY:-}"
-    add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
+    # `--policy` takes both operands now: a built-in profile name, or a
+    # policy document (a path, or a packaged built-in like `security`). A
+    # policy-file input therefore *is* the policy for this run and outranks
+    # the profile, exactly as the removed `--policy-file` flag did.
+    add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
     add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
   fi
 
@@ -1398,9 +1418,9 @@ elif [[ "$MODE" == "scan" ]]; then
     fi
 
     # Render a second, always-unfiltered JSON report from this same scan run
-    # for the sticky PR comment (--secondary-format), instead of re-invoking
+    # for the sticky PR comment (--write), instead of re-invoking
     # abicheck a second time just to get JSON -- the same reasoning compare
-    # mode's own --secondary-format wiring above already documents, and the
+    # mode's own --write wiring above already documents, and the
     # cost is sharper here: a re-run could redo a --depth build/source scan
     # (Codex review — a naive rerun-on-text-format fallback would double
     # potentially expensive work and describe a second, separately
@@ -1408,14 +1428,14 @@ elif [[ "$MODE" == "scan" ]]; then
     # step). Only needed when the primary format isn't already JSON, and
     # --artifact-set has no single-artifact JSON shape to render a second
     # time (the CLI itself rejects --secondary-* there too). Also skipped
-    # when the user's own `extra-args` already requests `--secondary-format`/
-    # `--secondary-output` (Codex review, follow-up) -- see
-    # `_extra_args_has_secondary_output`'s own docstring for why injecting
+    # when the user's own `extra-args` already requests `--write`/
+    # `--write` (Codex review, follow-up) -- see
+    # `_extra_args_has_write_flag`'s own docstring for why injecting
     # ours anyway would be actively wrong, not merely redundant.
     if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
-       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_secondary_output; then
+       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+      CMD+=(--write "json=$PR_JSON")
     fi
   fi
 
@@ -1445,7 +1465,7 @@ ABICHECK_EXIT=0
 ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
 #: PR_JSON (Codex review) is created well after this trap is installed --
-#: either by the primary CMD's own --secondary-format/--secondary-output
+#: either by the primary CMD's own --write
 #: (compare/scan, non-JSON primary format) or by `_maybe_post_pr_comment`'s
 #: reuse-or-rerun fallback -- but bash re-evaluates a single-quoted trap
 #: string at EXIT time, so referencing it here (like `_STDOUT_JSON_FILE`/
@@ -1502,7 +1522,7 @@ _is_cli_error() {
 # The JSON report this run produced, if any — the primary output when
 # format=json, or (the common case: default format=markdown) the
 # always-unfiltered secondary JSON the compare-mode command setup above
-# already asks the same invocation to write via --secondary-format. Empty
+# already asks the same invocation to write via --write. Empty
 # when neither exists. One function because three separate decisions below
 # read the same report and must not disagree about which one it is.
 #
@@ -1640,7 +1660,7 @@ PYQUERY
 
 # Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
 #
-# Since ADR-049 Phase 7, a run passing --contract-evaluation (via extra-args)
+# Since ADR-049 Phase 7, a run passing --contract (via extra-args)
 # whose selected contract domain cannot be closed on the available evidence
 # contributes exit 1 — independently of the compatibility verdict, which the
 # axis deliberately never rewrites. Without asking, `scan` published
@@ -1650,7 +1670,7 @@ PYQUERY
 # Two signals, mirroring where abicheck itself puts the answer: the JSON
 # report carries `contract_coverage_exit_contribution`, and for every other
 # renderer — which omits the ledger — the same fact is announced on stderr.
-# Absent both (no --contract-evaluation), the field reads 0 and the mapping
+# Absent both (no --contract), the field reads 0 and the mapping
 # below is exactly what it was.
 #
 # The JSON answer is AUTHORITATIVE when readable, and the stderr grep is
@@ -1794,7 +1814,7 @@ _report_compat_verdict() {
   # macOS while passing on Linux. `-E` is accepted by both.
   #
   # `Verdict(:|**)` covers both spellings, because the per-library release
-  # fan-out has no third option: `--secondary-format` is rejected for a
+  # fan-out has no third option: `--write` is rejected for a
   # directory/package operand, so a markdown release compare reaches this
   # fallback with no JSON at all -- and its renderer writes the verdict as a
   # table row, `| **Verdict** | 💥 \`BREAKING\` |`, with no colon. Matching
@@ -2161,7 +2181,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # case: default FORMAT=markdown with PR comments on) $PR_JSON — the
         # always-unfiltered secondary JSON report the compare-mode command
         # setup above already asks the same abicheck invocation to write via
-        # --secondary-format/--secondary-output, so it's already populated
+        # --write, so it's already populated
         # by this point without a second run (Codex review). Falls back to
         # the generic message when no report is readable.
         # Through `_severity_gate_categories`, which falls back to the text
@@ -2386,7 +2406,7 @@ _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
   # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before
-  # _emit_scan_report ever runs, so neither --secondary-output nor a JSON
+  # _emit_scan_report ever runs, so neither --write nor a JSON
   # primary output was written -- there is no report to reuse, and
   # re-running would just re-execute the same budget-limited (and
   # potentially expensive) scan only to hit the identical overflow again
@@ -2419,7 +2439,7 @@ _maybe_post_pr_comment() {
   fi
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
   if [[ -s "$PR_JSON" ]]; then
-    : # Already populated by the primary run's --secondary-format (compare
+    : # Already populated by the primary run's --write (compare
       # or scan mode, non-json primary format) — nothing left to do.
   elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead

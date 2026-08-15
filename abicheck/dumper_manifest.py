@@ -458,7 +458,7 @@ def run_tu_loop(
     *scope* declaration, D1's ``scope_fingerprint`` input, not an ADR-015
     provenance input -- "a manifest with public headers but no separate
     provenance fields behaves exactly like a legacy dump -H foo.h
-    invocation with no --public-header", i.e. every declaration stays
+    invocation naming a lone file", i.e. every declaration stays
     ``UNKNOWN``). Passing the roots-augmented set into the merge step
     instead would let :func:`abicheck.tu_merge._more_public_of` treat a
     root-only declaration as public during the merge, keep *that* TU's

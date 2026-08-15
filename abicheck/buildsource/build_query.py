@@ -485,7 +485,7 @@ def _resolve_inferred_make_launcher(
                 detail=(
                     "detected a Make project but no GNU Make launcher "
                     "(`gmake` or GNU `make`) is available; pass "
-                    "--build-info / --compile-db instead"
+                    "--build-info instead"
                 ),
             )
         )
@@ -526,7 +526,7 @@ def _claim_cmake_build_dir(
                 status="skipped",
                 detail=(
                     "could not create a private temp directory for the cmake "
-                    "build; pass --build-info / --compile-db instead"
+                    "build; pass --build-info instead"
                 ),
             )
         )
@@ -555,7 +555,7 @@ def _resolve_query_launcher(
                 status="skipped",
                 detail=(
                     f"detected a {system} project but `{tool}` is not installed; "
-                    "install it or pass --build-info / --compile-db"
+                    "install it or pass --build-info"
                 ),
             )
         )

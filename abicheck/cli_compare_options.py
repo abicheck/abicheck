@@ -83,6 +83,7 @@ def _reject_set_input_flags(
     secondary_fmt: str | None = None,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
+    use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
     audit_suppressions: bool = False,
     pack_paths: tuple[Path, ...] = (),
@@ -116,7 +117,7 @@ def _reject_set_input_flags(
         )
     if secondary_fmt is not None:
         raise click.UsageError(
-            "--secondary-format is not supported for directory/package "
+            "--write is not supported for directory/package "
             "(release) comparisons yet; it applies to single-file / snapshot "
             "inputs. Compare the libraries individually to use it."
         )
@@ -133,6 +134,14 @@ def _reject_set_input_flags(
             "fan-out has no plugin-host-contract scoping. Compare the "
             "specific library individually with --required-symbol."
         )
+    if use_cases_manifest is not None:
+        raise click.UsageError(
+            "--use-cases is not supported for directory/package (release) "
+            "comparisons: attribution walks one pair's own call graphs, and "
+            "the per-library fan-out never builds them, so the manifest "
+            "would be accepted and attribute nothing. Compare the specific "
+            "library individually with --use-cases."
+        )
     if diagnostic_comparison:
         raise click.UsageError(
             "--diagnostic-comparison is not supported for directory/package "
@@ -141,9 +150,9 @@ def _reject_set_input_flags(
             "hatch (a mismatch there still raises unhandled). Compare the "
             "specific library individually to use it."
         )
-    # --contract-evaluation/--contract are deliberately NOT rejected here
+    # --contract is deliberately NOT rejected here
     # (CLI-audit P1, release/package contract parity): the per-library
-    # fan-out now threads both straight into each pair's own
+    # fan-out now threads it straight into each pair's own
     # service.run_compare(contract_evaluation=..., contract_mode=...) call
     # (compare_release_cmd), the exact same Tier-2 chokepoint a single-pair
     # `compare` uses -- so a library compared through the fan-out gets the
@@ -206,7 +215,7 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     flag always wins over the per-format default.
 
     Shared by the primary render (:func:`_normalize_compare_options`) and
-    the ``--secondary-format`` render in :func:`run_compare`, each resolved
+    the ``--write`` render in :func:`run_compare`, each resolved
     against its own format — a machine primary format paired with a text
     secondary format (or vice versa) must not inherit the other's default.
     """
@@ -245,10 +254,16 @@ def _resolve_debug_roots(
 def _warn_force_public_ignored(
     force_public: object, scope_public_headers: bool,
 ) -> None:
-    """Warn that --public-symbol overlays need --scope-public-headers to apply."""
+    """Warn a ``scope.public_symbols`` overlay needs ``--scope-public-headers``.
+
+    Names the config key rather than the removed ``--public-symbol``/
+    ``--public-symbols-list`` flags it used to: they were hidden duplicates of
+    that key and are gone, so the overlay this warns about can only have come
+    from ``.abicheck.yml`` (Codex review).
+    """
     if force_public and not scope_public_headers:
         click.echo(
-            "Warning: --public-symbol/--public-symbols-list only take effect with "
-            "--scope-public-headers; ignoring the widening overlay.",
+            "Warning: .abicheck.yml's scope.public_symbols overlay only takes "
+            "effect with --scope-public-headers; ignoring the widening overlay.",
             err=True,
         )

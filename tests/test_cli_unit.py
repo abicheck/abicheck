@@ -156,7 +156,7 @@ class TestCompareHtml:
         assert "<html" in result.output.lower()
 
 
-# ── _resolve_demangle (shared by primary and --secondary-format renders) ──
+# ── _resolve_demangle (shared by the primary and --write renders) ────────
 
 class TestResolveDemangle:
     def test_defaults_on_for_markdown_and_review(self):
@@ -247,16 +247,16 @@ class TestResolveCompareCollectMode:
             self._call(source_method="not-a-method")
 
 
-# ── compare --secondary-format/--secondary-output ───────────────────────
+# ── compare --write FORMAT=PATH ─────────────────────────────────────────
 
-class TestCompareSecondaryFormat:
+class TestCompareWrite:
     def test_writes_second_format_from_same_run(self, tmp_path):
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+            "--write", f"json={secondary_out}",
         ])
         assert result.exit_code == 4
         assert "# ABI Report" in result.output
@@ -272,7 +272,7 @@ class TestCompareSecondaryFormat:
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
             "--show-only", "added",
-            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+            "--write", f"json={secondary_out}",
         ])
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
@@ -280,7 +280,7 @@ class TestCompareSecondaryFormat:
 
     def test_secondary_format_ignores_primary_report_mode(self, tmp_path):
         # The secondary render always uses report_mode="full", not the
-        # primary's --report-mode leaf — a --secondary-format consumer
+        # primary's --report-mode leaf — a --write consumer
         # expects the same full shape regardless of how the primary format
         # groups its own display (Codex review, PR #557).
         old_p, new_p = _breaking_snapshots(tmp_path)
@@ -289,7 +289,7 @@ class TestCompareSecondaryFormat:
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
             "--report-mode", "leaf",
-            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+            "--write", f"json={secondary_out}",
         ])
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
@@ -307,7 +307,7 @@ class TestCompareSecondaryFormat:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "json",
-            "--secondary-format", "markdown", "--secondary-output", str(secondary_out),
+            "--write", f"markdown={secondary_out}",
         ])
         assert result.exit_code == 4
         secondary_text = secondary_out.read_text(encoding="utf-8")
@@ -319,7 +319,7 @@ class TestCompareSecondaryFormat:
     ):
         """ADR-052 D2 follow-up (G29 Phase 3 slice 10): the measurement this
         slice's ``MarkReachability`` caching decision rests on.
-        ``--format json --secondary-format sarif`` renders the *same*
+        ``--format json --write sarif=…`` renders the *same*
         ``DiffResult``/``Change`` objects twice in one process — the module
         docstring of ``impact.engine`` says as much, but this asserts it
         directly by counting real ``assess_change`` calls keyed by
@@ -351,7 +351,7 @@ class TestCompareSecondaryFormat:
             result = runner.invoke(main, [
                 "compare", str(old_p), str(new_p),
                 "--format", "json", "--output", str(primary_out),
-                "--secondary-format", "sarif", "--secondary-output", str(secondary_out),
+                "--write", f"sarif={secondary_out}",
             ])
         finally:
             for mod, name, orig_fn in originals:
@@ -368,31 +368,56 @@ class TestCompareSecondaryFormat:
         # question needed measured, not assumed.
         assert any(n > 1 for n in per_change_counts.values())
 
-    def test_secondary_format_requires_secondary_output(self, tmp_path):
+    def test_write_rejects_a_half_given_operand(self, tmp_path):
+        """``--write``'s FORMAT=PATH operand cannot be half-given.
+
+        The ``--secondary-format``/``--secondary-output`` pair it replaced
+        needed a check in each direction, because either alone was silently
+        useless -- no artifact and no error. One operand makes both a parse
+        error instead.
+        """
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--secondary-format", "json",
-        ])
-        assert result.exit_code == 64
-        assert "--secondary-format requires --secondary-output" in result.output
+        for operand in ("json", "=out.json", "json="):
+            result = runner.invoke(main, [
+                "compare", str(old_p), str(new_p), "--format", "markdown",
+                "--write", operand,
+            ])
+            assert result.exit_code == 64, operand
+            assert "FORMAT=PATH" in result.output, operand
 
-    def test_secondary_output_requires_secondary_format(self, tmp_path):
-        # Passing --secondary-output alone would otherwise be silently
-        # ignored — no secondary artifact, no error (Codex review, PR #557).
+    def test_write_rejects_a_directory_destination_at_parse_time(self, tmp_path):
+        """A directory destination is a *parse* error, not a late write error.
+
+        The replaced ``--secondary-output`` was a ``click.Path(dir_okay=
+        False)``, so this failed before any analysis ran. Building the path
+        from the operand directly let it through, moving the failure to the
+        secondary write -- after the whole comparison and the primary render
+        had already completed, leaving a partial report behind (Codex
+        review). The primary report not existing is what proves it is still
+        a parse error rather than a tidier late one.
+        """
         old_p, new_p = _write_snapshots(tmp_path)
-        secondary_out = tmp_path / "secondary.json"
-        runner = CliRunner()
-        result = runner.invoke(main, [
+        destination = tmp_path / "adir"
+        destination.mkdir()
+        primary = tmp_path / "primary.md"
+        result = CliRunner().invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--secondary-output", str(secondary_out),
+            "-o", str(primary), "--write", f"json={destination}",
+        ])
+        assert result.exit_code == 64, result.output
+        assert "is a directory" in result.output
+        assert not primary.exists(), "the comparison ran before rejecting"
+
+    def test_write_rejects_an_unrenderable_format(self, tmp_path):
+        old_p, new_p = _write_snapshots(tmp_path)
+        result = CliRunner().invoke(main, [
+            "compare", str(old_p), str(new_p), "--write", "text=out.txt",
         ])
         assert result.exit_code == 64
-        assert "--secondary-output requires --secondary-format" in result.output
-        assert not secondary_out.exists()
+        assert "not a renderable format here" in result.output
 
-    def test_secondary_output_rejects_same_path_as_primary(self, tmp_path):
+    def test_write_rejects_same_path_as_primary(self, tmp_path):
         # Writing both formats to the same file would silently overwrite the
         # primary report with the secondary one (Codex review, PR #557).
         old_p, new_p = _write_snapshots(tmp_path)
@@ -401,25 +426,25 @@ class TestCompareSecondaryFormat:
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
             "-o", str(same_path),
-            "--secondary-format", "json", "--secondary-output", str(same_path),
+            "--write", f"json={same_path}",
         ])
         assert result.exit_code == 64
-        assert "--secondary-output must differ from --output/-o" in result.output
+        assert "--write's PATH must differ from --output/-o" in result.output
 
-    def test_dry_run_rejects_secondary_output(self, tmp_path):
+    def test_dry_run_rejects_write(self, tmp_path):
         # Regression (CLI-audit P2): --dry-run promises no output-file side
-        # effect and already rejects -o/--output, but --secondary-output was
-        # accepted and then silently never written (the dry run exits before
-        # the secondary render runs) — reject it the same way.
+        # effect and already rejects -o/--output, but the secondary
+        # destination was accepted and then silently never written (the dry
+        # run exits before the secondary render runs) — reject it the same way.
         old_p, new_p = _write_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--dry-run",
-            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+            "--write", f"json={secondary_out}",
         ])
         assert result.exit_code == 64
-        assert "--dry-run cannot be combined with --secondary-output" in result.output
+        assert "--dry-run cannot be combined with --write" in result.output
         assert not secondary_out.exists()
 
 

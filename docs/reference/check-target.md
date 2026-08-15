@@ -77,7 +77,7 @@ meaningful when `kind: target` (never `kind: bundle`):
 | `target-kind` | Compare shape | Extra inputs |
 |---|---|---|
 | `library` (default) | A plain `compare`. | — |
-| `app-consumer` | `compare --used-by` (S22, application compatibility). | `consumer-binary`, `verify-runtime` |
+| `app-consumer` | `compare --used-by` (S22, application compatibility). | `consumer-binary` |
 | `plugin-contract` | `compare --required-symbols` (S23, plugin/dlopen contract). | `contract-file` — a `.syms` file, one required linker symbol per line, `#` comments allowed; **not** YAML |
 
 **The "library redirect" (ADR-047 §3):** `app-consumer`/`plugin-contract`
@@ -126,7 +126,6 @@ caller-provided directory of the candidate build's own member binaries.
 | `evidence-pack-path` | no | `abicheck_inputs` | Must match an earlier `collect-facts phase: prepare` step's own output path (`wrapper`/`clang-plugin` only). |
 | `new-library` | yes | — | Candidate binary (`kind: target`) or directory of candidate member binaries (`kind: bundle`). |
 | `consumer-binary` | when `target-kind: app-consumer` | — | Forwarded as `--used-by`. |
-| `verify-runtime` | no | `false` | Forwarded when `target-kind: app-consumer`. |
 | `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as `--required-symbols`. |
 | `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `policy-file`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
 
