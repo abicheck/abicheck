@@ -51,9 +51,21 @@ actually reached by ``#include`` first fails, not necessarily the one named
 via ``-H``), not merely a single hand-rolled header the string-only unit
 tests in ``test_header_failure_hints.py`` already cover.
 
-Marked ``integration`` (needs a real compiler); uses ``--ast-frontend
-clang`` like its ``test_pvxs_regression.py`` sibling, so it also runs on
-hosts with clang but no castxml.
+Marked ``integration`` (needs a real compiler) -- the marker itself, not
+just this test's own skipif guards, is what keeps it out of the default
+fast lane (tests/CLAUDE.md: "Mark tests that shell out ... so default runs
+stay fast"), so it must stay on this test even though the test body itself
+only ever shells out to g++/clang. Uses ``--ast-frontend clang`` like its
+``test_pvxs_regression.py`` sibling; both tests' own skip guards ask only
+for g++ and clang, not castxml, but ``tests/conftest.py``'s
+``_integration_skip_reason()`` currently requires castxml too for *any*
+``integration``-marked test on Linux regardless of which backend an
+individual test actually uses -- a pre-existing, repo-wide gate this test
+inherits rather than a defect of its own, and not something a single
+test's marker choice can opt out of without losing the fast-lane exclusion
+the marker is what actually provides (Codex review, fresh evidence: this
+same gate makes ``test_pvxs_regression.py``'s identical claim not hold
+today either). Both tests are candidates to run once castxml IS present.
 """
 
 from __future__ import annotations
