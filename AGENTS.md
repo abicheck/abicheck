@@ -855,7 +855,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
-- **The native `abicheck dump` CLI never applies L3 build context to its own
+- **The native ELF `abicheck dump` path never applies L3 build context to its own
   L2 header parse, and this is now confirmed by an external end-to-end
   reproduction, not only by the pre-existing module-map note about the
   `DumpRequest` migration (2026-08-15, `napetrov/abicheck-bazel-lab` audit

@@ -164,3 +164,38 @@ class TestScanRequireCompleteAnalysisCliIntegration:
     ) -> None:
         res = _scan(tmp_path, _breaking_pair(), "--require-complete-analysis")
         assert res.exit_code == 4, res.output
+
+    def test_an_unreached_pinned_source_depth_is_reported_incomplete(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #780: `checker.compare()`'s own internal
+        `compute_analysis_assurance` call runs *inside* `compare_snapshots`,
+        before `_run_baseline_compare` ever sees the returned `diff` -- so
+        it always read `DiffResult.requested_depth` as `None`, regardless
+        of what this scan was actually pinned to. An explicit `--depth
+        source --sources <tree>` whose tree has no compile database only
+        gets an *advisory* (`_check_scan_evidence_contract`'s
+        "gave_source_input and not l3" branch -- not a hard failure, since
+        a source input genuinely was supplied), and the effective depth
+        silently stayed `headers`. Without stamping/recomputing
+        `requested_depth` after the fact, that silently read
+        `status="complete"` (nothing to compare the unset `requested_depth`
+        against) even though the requested depth was demonstrably not
+        reached -- defeating `--require-complete-analysis` for exactly the
+        invocation shape it exists to catch."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "empty.txt").write_text("nothing here\n", encoding="utf-8")
+
+        res = _scan(
+            tmp_path,
+            _header_pair(),
+            "--depth", "source", "--sources", str(src_dir),
+            "--require-complete-analysis", "--format", "json",
+        )
+        assert res.exit_code == 1, res.output
+        payload = json.loads(res.output[res.output.index("{") :])
+        aa = payload["diff"]["analysis_assurance"]
+        assert aa["status"] != "complete", aa
+        assert aa["requested_depth"] == "source", aa
+        assert aa["effective_depth"] == "headers", aa

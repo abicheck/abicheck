@@ -1142,6 +1142,16 @@ def run_scan_core(
                     exit_code_scheme=exit_code_scheme,
                     max_findings=max_findings,
                     require_complete_analysis=require_complete_analysis,
+                    # P0.4 (Codex review): only when the caller genuinely
+                    # pinned this depth (an explicit --depth or a non-auto
+                    # --source-method), mirroring compare's own "explicit
+                    # override, never inferred" discipline for
+                    # DiffResult.requested_depth -- an auto-resolved depth
+                    # is not this scan's stated request the same way an
+                    # explicit pin is.
+                    requested_depth=(
+                        eff_depth_enum.value if pinned_explicit else None
+                    ),
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

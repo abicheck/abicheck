@@ -998,6 +998,7 @@ def _run_baseline_compare(
     exit_code_scheme: str = "legacy",
     max_findings: int | None = None,
     require_complete_analysis: bool = False,
+    requested_depth: str | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -1048,6 +1049,24 @@ def _run_baseline_compare(
     floors the returned exit code (folded with the same ``max`` discipline
     :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` already
     uses for its own orthogonal axis, immediately below).
+
+    *requested_depth* (Codex review, fresh evidence): the caller's own
+    explicitly-pinned ``--depth``/non-``auto`` ``--source-method`` (``None``
+    when the depth was only inferred, mirroring the exact "explicit
+    override, never inferred" discipline ``cli_compare_helpers.
+    _report_compare_result`` already applies for ``compare --depth``).
+    ``checker.compare()``'s own internal ``compute_analysis_assurance`` call
+    runs *before* this function ever sees *diff*, so it always reads
+    ``DiffResult.requested_depth`` as ``None`` regardless of what the scan
+    was actually pinned to -- without this, an explicit ``scan --against
+    --depth source --sources <tree>`` that never reached source evidence
+    (no compile database found, so the effective depth silently stayed
+    ``headers``) reported ``analysis_assurance.status="complete"`` (nothing
+    to compare the unset ``requested_depth`` against) even though the
+    evidence contract was demonstrably not satisfied, silently defeating
+    ``--require-complete-analysis``. When given, *diff* is stamped and
+    ``analysis_assurance`` is recomputed before the summary/exit-code fold
+    below so the requested-vs-effective gate has something real to check.
     """
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
@@ -1142,6 +1161,28 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
+    # P0.4 (Codex review, fresh evidence): checker.compare()'s own internal
+    # compute_analysis_assurance call (inside compare_snapshots above) runs
+    # before this function ever sees *diff*, so it always reads
+    # DiffResult.requested_depth as None regardless of what this scan was
+    # actually pinned to -- mirroring the exact gap
+    # cli_compare_helpers._report_compare_result already closes for
+    # `compare --depth`. Stamp and recompute here so an explicit `scan
+    # --against --depth source` that never reached source evidence reports
+    # a genuinely incomplete status instead of silently reading "complete"
+    # (nothing to compare the unset requested_depth against) and defeating
+    # --require-complete-analysis.
+    if requested_depth is not None:
+        diff.requested_depth = requested_depth
+        from .analysis_assurance import compute_analysis_assurance
+
+        diff.analysis_assurance = compute_analysis_assurance(
+            diff,
+            old_snap,
+            new_snap,
+            old_pack=getattr(old_snap, "build_source", None),
+            new_pack=getattr(new_snap, "build_source", None),
+        )
     summary = _baseline_summary(diff, max_findings=max_findings)
     # ADR-049 Phase 5: install this front end's own resolved configuration
     # over the narrower object `checker.compare` reconstructs from its

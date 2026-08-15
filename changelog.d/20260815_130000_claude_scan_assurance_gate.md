@@ -22,8 +22,8 @@
 - **The composite Action now recognizes P0.4's analysis-assurance exit
   and gates on it unconditionally.** `--require-complete-analysis`
   (passed via `extra-args`, on either `compare` or `scan --against`)
-  floors the CLI exit code to 1 on incomplete evidence, but `action/
-  run.sh`'s exit-1 disambiguation had no notion of this axis: it fell
+  floors the CLI exit code to 1 on incomplete evidence, but
+  `action/run.sh`'s exit-1 disambiguation had no notion of this axis: it fell
   through to `SEVERITY_ERROR` on `compare` (a severity-policy failure it
   is not) or the catch-all `ERROR` on `scan` (an operational failure it
   is not), which meant a genuinely assurance-gated run could read as

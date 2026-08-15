@@ -106,8 +106,8 @@ present in `--format json` output (`analysis_assurance` — a top-level key on
 `compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
-is purely informational until a caller opts in. Passing `--require-complete-
-analysis` makes `compare`/`scan --against` additionally contribute exit `1`
+is purely informational until a caller opts in. Passing
+`--require-complete-analysis` makes `compare`/`scan --against` additionally contribute exit `1`
 whenever `analysis_assurance.status` is not `complete`, folded with the same
 `max` discipline the contract-coverage axis above uses: it raises a clean `0`
 to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
