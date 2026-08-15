@@ -81,7 +81,7 @@ from .._compiler_options import explicit_language_standard
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import iter_directory_headers
-from .adapters.base import _is_msvc_command
+from .adapters.base import _SPLIT_OPERAND_ABI_FLAGS, _is_msvc_command
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
 if TYPE_CHECKING:
@@ -544,13 +544,16 @@ class _EffectiveContextSignature:
     unpinned dimension still does.
 
     ``abi_relevant_flags`` here is *also* not ``cu.abi_relevant_flags``
-    verbatim, independent of ``pin``: see ``_STRUCTURED_FIELD_FLAG_PREFIXES``
-    and :func:`_mask_pinned_abi_flags` — a raw flag already fully represented
-    by ``target_triple``/``sysroot``/``standard`` is excluded unconditionally,
+    verbatim: see ``_STRUCTURED_FIELD_FLAG_PREFIXES`` and
+    :func:`_mask_pinned_abi_flags` — a raw flag already fully represented by
+    ``target_triple``/``sysroot``/``standard`` is excluded unconditionally,
     so two compile units that agree on the structured value but spell the
     flag that produced it differently (``--target=X`` vs. ``-target X``)
     compare equal here instead of falsely disagreeing, whether or not the
-    caller pinned anything.
+    caller pinned anything. A raw ``-D<macro>``/``/D<macro>`` survivor whose
+    macro *is* pinned (``pin.defines``) is excluded too (Finding 1,
+    ``discussion_r3787772663``) — genuinely conditional on ``pin``, unlike
+    the structured-field exclusion above.
     """
 
     language: str
@@ -613,11 +616,21 @@ def _mask_pinned_abi_flags(
     survivors excluded, or it would reopen the exact ambiguity the
     structured-field pin-masking in ``.of()`` was meant to close, is one
     instance of the general rule this function already applies regardless
-    of ``pin``). *pin* is accepted for a symmetrical call signature with the
-    structured-field masking above and is reserved for a future dimension
-    (e.g. a pinned macro spelled only as a raw flag) that genuinely needs
-    per-pin conditioning rather than the unconditional rule; it plays no
-    role in today's target/sysroot/standard exclusion.
+    of ``pin``).
+
+    *pin* additionally gates one genuinely conditional exclusion (P2 review,
+    ``discussion_r3787772663``): a raw ``-D<macro>[=value]``/``/D<macro>``
+    survivor whose macro name the caller already pinned via *pin.defines*
+    (Finding 1). Unlike the structured target/sysroot/standard fields above,
+    a pinned *macro* has no dedicated structured field of its own to compare
+    by instead -- ``.of()`` already drops the pinned key out of ``cu.defines``
+    itself (the dict comprehension filters ``k not in pin.defines``), but
+    this function used to leave the *raw* survivor untouched, so two units
+    disagreeing only on a macro the caller explicitly pinned (e.g.
+    ``-D_GLIBCXX_USE_CXX11_ABI=0`` vs. ``=1``, both pinned to ``=1`` via an
+    explicit ``--gcc-options``) still raised
+    ``HeaderCompileContextAmbiguousError`` despite the documented override.
+    See :func:`_pinned_define_macro`.
 
     ``cu_standard`` (``cu.standard`` itself, not merely its truthiness, for
     the compile unit *flags* came from) is passed straight through to
@@ -643,7 +656,25 @@ def _mask_pinned_abi_flags(
         f
         for f in flags
         if not _is_structured_field_flag(f, cu_standard=cu_standard, msvc=msvc)
+        and _pinned_define_macro(f) not in pin.defines
     ]
+
+
+def _pinned_define_macro(flag: str) -> str | None:
+    """The macro name *flag* defines, if it is a ``-D``/``/D`` token.
+
+    ``None`` for every other flag shape -- including a bare ``-D``/``/D``
+    with no macro name (``len(flag) <= 2``), which is not a real token
+    :func:`~abicheck.buildsource.adapters.base.extract_abi_relevant_flags`
+    ever emits on its own. Mirrors the identical ``-D``/``/D`` recognition
+    :meth:`_ExplicitPin.of` already uses when scanning *explicit*'s own
+    tokens for a pinned macro name, so a flag this function names is
+    recognized as "the same macro" the caller pinned regardless of which of
+    the two spellings (or which value) it carries.
+    """
+    if flag.startswith(("-D", "/D")) and len(flag) > 2:
+        return flag[2:].split("=", 1)[0]
+    return None
 
 
 #: ``CompileUnit.standard``'s two language families, as returned by
@@ -822,14 +853,33 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
         flags.extend(
             ["-isystem", _resolve_cu_relative_path(inc, cu.directory).as_posix()]
         )
-    flags.extend(
-        f
-        for f in cu.abi_relevant_flags
-        if not _is_structured_field_flag(
+    for f in cu.abi_relevant_flags:
+        if _is_structured_field_flag(
             f, cu_standard=cu.standard, msvc=_is_msvc_command(cu.argv)
-        )
-    )
+        ):
+            continue
+        flags.extend(_split_operand_survivor(f))
     return flags
+
+
+def _split_operand_survivor(flag: str) -> list[str]:
+    """Expand one ``cu.abi_relevant_flags`` survivor into its literal argv token(s).
+
+    ``adapters.base.extract_abi_relevant_flags`` normalizes a genuinely
+    split two-token flag (``-target-abi <value>`` and its siblings in
+    ``adapters.base._SPLIT_OPERAND_ABI_FLAGS``) into one internal
+    ``<flag>=<value>`` token -- see that set's own docstring for why this is
+    a purely-internal encoding rather than real clang syntax (unlike
+    ``-D<KEY>=<VALUE>``, which is valid either way). This is the one place
+    that encoding is reconstructed into the two real, separate argv tokens
+    (``["-target-abi", "<value>"]``) a real compiler invocation needs (P2
+    review, ``discussion_r3787772666``) -- every other flag is returned
+    unchanged as a single-element list.
+    """
+    name, sep, value = flag.partition("=")
+    if sep and name in _SPLIT_OPERAND_ABI_FLAGS:
+        return [name, value]
+    return [flag]
 
 
 @dataclass(frozen=True)
@@ -967,11 +1017,89 @@ def resolve_header_compile_context(
         )
 
     ((_sig, units),) = by_signature.items()
-    flags = _context_flags(units[0], forced_language=forced_language)
-    context = CompileContext(gcc_option_tokens=tuple(flags))
+    sample = units[0]
+    flags = _context_flags(sample, forced_language=forced_language)
+    context = CompileContext(
+        gcc_option_tokens=tuple(flags),
+        gcc_path=_derived_gcc_path(sample),
+    )
     return HeaderCompileContextResolution(
         context=context, matched_unit_count=len(matched)
     )
+
+
+def _derived_gcc_path(cu: CompileUnit) -> str | None:
+    """The compiler binary to replay *cu*'s derived flags through, if any
+    (P1 review, ``discussion_r3787772668``, Finding 3).
+
+    A resolved :class:`CompileContext` previously carried only option
+    tokens, never which compiler understands them -- for an MSVC/clang-cl
+    compile unit this silently broke the very ``/std:`` survivor
+    ``_context_flags``/``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES`` are
+    already careful to retain (see that set's own docstring): with no
+    ``gcc_path`` selected alongside it, the direct-clang L2 backend defaults
+    to plain ``clang++`` (``dumper_clang._resolve_clang_bin``'s own
+    fallback), and a real ``clang++`` reads ``/std:c++20`` as a missing
+    source file, not a language flag (confirmed empirically) -- turning an
+    otherwise-working header parse into a hard failure for evidence that
+    was, until this point, resolved and applied correctly.
+
+    Returns ``cu.argv[0]`` -- the exact compiler this compile unit was
+    itself invoked with -- only when *cu* is genuinely MSVC/clang-cl-dialect
+    (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`). ``None``
+    otherwise -- a complete no-op for every non-MSVC unit, unchanged from
+    this module's pre-Finding-3 behavior.
+
+    Deliberately unconditional on any caller-supplied ``explicit`` context
+    -- mirrors ``_context_flags`` itself, which always renders *cu*'s own
+    fields regardless of *pin*/*explicit* and leaves "the caller's own
+    explicit value wins" to the merge step. ``resolve_header_compile_
+    context`` returns only the *derived* half of the context (``derive_l2_
+    compile_context``'s own docstring); its one caller,
+    ``service_input_resolution._seeded_compile_context``, folds it against
+    the caller's own explicit context via ``_merge_l3_compile_context``,
+    which now performs the identical "derived leads, explicit wins"
+    arbitration for ``gcc_path``/``gcc_prefix`` that it already performs for
+    ``sysroot``/``gcc_options`` -- so an explicit ``--gcc-path`` a caller
+    already set is never overridden, without this function needing to know
+    about *explicit* at all.
+
+    Deliberately does **not** attempt to validate that ``cu.argv[0]`` is
+    itself a clang-family binary (``clang-cl`` vs. a real, literal
+    ``cl.exe``) -- ``dumper_clang._resolve_clang_bin``/
+    ``resolve_source_frontend_clang_bin`` already gate a ``gcc_path``
+    override on exactly that (``_is_clang_family_binary``), falling back to
+    their own existing default otherwise. Handing them a real ``cl.exe``
+    path here is therefore safe (ignored, same as today) rather than
+    harmful; only a genuinely clang-family unit (``clang-cl``, Intel's
+    ``dpcpp-cl``, ...) is actually honored downstream, which is exactly the
+    case this fix closes. A literal ``cl.exe`` compile unit stays an
+    inherent, pre-existing limitation of the clang-only L2 header backends
+    (neither can shell out to real MSVC to produce a Clang AST) --
+    unrelated to, and not widened by, this fix.
+
+    Also does not force ``frontend``/``--ast-frontend`` to ``"clang"``: this
+    module's contract is "resolve a CompileContext", not "choose which L2
+    backend runs it" -- ``"auto"`` never falls back from castxml on its own
+    (``dumper._resolve_header_backend``), so this value only takes effect
+    once a caller (explicitly, or via ``ABICHECK_AST_FRONTEND``) already
+    selected the clang backend -- exactly the scenario this finding's own
+    repro describes (a caller already on the direct-clang path, whose
+    resolved compiler was the ONLY missing piece). Forcing the frontend too
+    would mean auditing frontend precedence across ``cli.py``/
+    ``service_compare_evidence.py``/``cli_resolve.py``/``api_types.py`` this
+    PR's prior nine rounds never touched, *and* separately fixing
+    ``dumper_ast_config._resolve_compiler_binary``'s own castxml dialect
+    detection (which recognizes literal ``cl``/``cl.exe`` but not
+    ``clang-cl`` as MSVC-dialect, so an ``"auto"`` resolution landing on
+    castxml for this same evidence would still mis-emulate it as a GNU
+    compiler) -- out of scope for this pass; see AGENTS.md's "Known gaps"
+    entry on this finding for the full reasoning and what a complete fix
+    needs.
+    """
+    if not cu.argv or not _is_msvc_command(cu.argv):
+        return None
+    return cu.argv[0]
 
 
 def _ambiguity_message(

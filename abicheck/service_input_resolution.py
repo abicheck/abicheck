@@ -179,6 +179,24 @@ def _merge_l3_compile_context(
     representation strictly after every derived one, regardless of which of
     the three explicit channels (``sysroot``, ``gcc_options``,
     ``gcc_option_tokens``) it came through.
+
+    Finding 3 (P1 review, ``discussion_r3787772668``): ``derived.gcc_path``
+    (``header_compile_context._derived_gcc_path`` — the matched compile
+    unit's own compiler, set when it is genuinely MSVC/clang-cl-dialect) was
+    never read here at all, only ``derived``'s option-token fields — so even
+    once ``resolve_header_compile_context`` started returning a real
+    ``gcc_path``, this merge silently discarded it, and the L2 header parse
+    still defaulted to a plain ``clang++`` that cannot parse the retained
+    ``/std:`` survivor. Unlike ``sysroot``/``gcc_options`` (foldable,
+    "derived leads, explicit wins" via trailing-token order),
+    ``gcc_path``/``gcc_prefix`` each select a single compiler and cannot be
+    folded the same way — the natural per-field rule mirrors this module's
+    other explicit-pin precedents instead: ``explicit.gcc_path`` (or
+    ``gcc_prefix``) wins outright when the caller already set one, and
+    ``derived``'s value is used only when the caller left it unset (the
+    default). A caller's own explicit ``--gcc-path`` was always going to be
+    the correct choice regardless of what the matched compile unit used, so
+    this can only ever fill in a gap, never override an explicit choice.
     """
     if derived is None:
         return explicit
@@ -207,6 +225,14 @@ def _merge_l3_compile_context(
             *derived.gcc_option_tokens,
             *explicit_tail,
             *explicit.gcc_option_tokens,
+        ),
+        gcc_path=explicit.gcc_path
+        if explicit.gcc_path is not None
+        else derived.gcc_path,
+        gcc_prefix=(
+            explicit.gcc_prefix
+            if explicit.gcc_prefix is not None
+            else derived.gcc_prefix
         ),
     )
 

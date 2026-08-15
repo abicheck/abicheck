@@ -161,3 +161,45 @@
   `target_triple`) still raises exactly as before, and the companion
   no-forced-language case (the same two-unit C/C++ setup with no explicit
   `lang`) still correctly raises `HeaderCompileContextAmbiguousError`.
+- **An eleventh review round found three more gaps in the same
+  ambiguity-signature/rendering machinery.** (1) The raw-survivor
+  comprehension in `_EffectiveContextSignature.of()` masked only the
+  structured target/sysroot/standard fields, never consulting the
+  caller's own explicit `pin` — so an explicitly-pinned macro spelled as a
+  raw `-D<macro>[=value]`/`/D<macro>` survivor in
+  `cu.abi_relevant_flags` (captured a second time alongside the
+  structured `cu.defines` dict entry the pin already excused) still made
+  two otherwise-agreeing compile units read as ambiguous.
+  `_mask_pinned_abi_flags()` now also drops a raw define survivor whose
+  macro name is in `pin.defines`, via a new `_pinned_define_macro()`
+  helper shared with `_ExplicitPin.of`'s own `-D`/`/D` recognition. (2)
+  `extract_abi_relevant_flags()` normalized a genuinely split two-token
+  flag like `-target-abi aapcs` by capturing only the bare switch (it
+  shares the `-target` prefix already matched by
+  `ABI_RELEVANT_FLAG_PREFIXES`), silently dropping the operand — so two
+  units disagreeing purely on the ABI value read as identical, and any
+  caller replaying the bare survivor got a syntactically incomplete
+  command. Confirmed via a real `clang -cc1 --help` that
+  `-target-abi`/`-target-cpu`/`-target-feature`/`-target-linker-version`
+  are all genuine two-token forms; each is now normalized into one
+  internal `<flag>=<value>` token (`_SPLIT_OPERAND_ABI_FLAGS`), and
+  `header_compile_context._split_operand_survivor()` reconstructs it back
+  into the two literal argv tokens a real compiler invocation needs by
+  the time it reaches the rendered `CompileContext`. Deliberately not
+  extended to the bare `-target`/`--sysroot`/`-isysroot` split forms,
+  which already have their own dedicated structured fields. (3) A
+  resolved `CompileContext` never carried which compiler understands its
+  own option tokens — for an MSVC/clang-cl compile unit, the retained
+  `/std:` survivor (from the ninth round's fix) was silently handed to
+  whatever default compiler the caller's L2 backend resolves to, and a
+  real `clang++` reads `/std:c++20` as a missing source file, not a
+  language flag (confirmed empirically), turning an otherwise-working
+  header parse into a hard failure. `header_compile_context.
+  _derived_gcc_path()` now returns the matched compile unit's own
+  `argv[0]` when it is genuinely MSVC/clang-cl-dialect
+  (`adapters.base._is_msvc_command()`), `None` otherwise (a complete
+  no-op for the non-MSVC case), and `service_input_resolution.
+  _merge_l3_compile_context()` folds it in via the same "derived leads,
+  explicit wins" precedence already used for `sysroot`/`gcc_options` —
+  extended to two new fields, `gcc_path`/`gcc_prefix` — so a caller's own
+  explicit `--gcc-path` is never overridden.

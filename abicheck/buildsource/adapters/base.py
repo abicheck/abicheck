@@ -19,6 +19,7 @@ adapter implements; the free functions are the normalization helpers shared
 across adapters (language detection, compile-unit identity, ABI-flag
 extraction). Keeping these here avoids each adapter re-deriving them.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,9 +31,17 @@ from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 _LANG_BY_EXT: dict[str, str] = {
     ".c": "C",
     ".i": "C",
-    ".cc": "CXX", ".cpp": "CXX", ".cxx": "CXX", ".c++": "CXX", ".cp": "CXX",
-    ".ii": "CXX", ".hpp": "CXX", ".hh": "CXX", ".hxx": "CXX",
-    ".m": "OBJC", ".mm": "OBJCXX",
+    ".cc": "CXX",
+    ".cpp": "CXX",
+    ".cxx": "CXX",
+    ".c++": "CXX",
+    ".cp": "CXX",
+    ".ii": "CXX",
+    ".hpp": "CXX",
+    ".hh": "CXX",
+    ".hxx": "CXX",
+    ".m": "OBJC",
+    ".mm": "OBJCXX",
     ".cu": "CUDA",
 }
 
@@ -46,26 +55,62 @@ _LANG_BY_EXT: dict[str, str] = {
 #: toolchain flag with a dedicated finding). Per ADR-028 D3 these are risk/
 #: source-level signals — the artifact diff proves any concrete break.
 ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
-    "-std=", "/std:", "-stdlib=",
-    "--target=", "-target", "-mabi=", "/arch:", "-m32", "-m64",
+    "-std=",
+    "/std:",
+    "-stdlib=",
+    "--target=",
+    "-target",
+    "-mabi=",
+    "/arch:",
+    "-m32",
+    "-m64",
     # Microarchitecture / float ABI — can change struct alignment (vector ABI)
     # or the hard/soft-float calling convention (ARM), so a flip is a risk.
-    "-march=", "-mtune=", "-mfloat-abi=", "-mfpmath=",
-    "--sysroot", "-isysroot",
-    "-fvisibility", "-fvisibility-inlines-hidden",
-    "-fpack-struct", "/Zp", "-fshort-enums", "-fno-short-enums", "-fshort-wchar",
-    "-fsigned-char", "-funsigned-char",
-    "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
-    "-flto", "-fno-lto", "-fwhole-program-vtables", "-fno-whole-program-vtables",
-    "-ftls-model", "-fextern-tls-init", "-fno-extern-tls-init",
-    "-fno-threadsafe-statics", "-fthreadsafe-statics",
-    "-freg-struct-return", "-fpcc-struct-return",
+    "-march=",
+    "-mtune=",
+    "-mfloat-abi=",
+    "-mfpmath=",
+    "--sysroot",
+    "-isysroot",
+    "-fvisibility",
+    "-fvisibility-inlines-hidden",
+    "-fpack-struct",
+    "/Zp",
+    "-fshort-enums",
+    "-fno-short-enums",
+    "-fshort-wchar",
+    "-fsigned-char",
+    "-funsigned-char",
+    "-fabi-version",
+    "-fno-rtti",
+    "-frtti",
+    "-fno-exceptions",
+    "-fexceptions",
+    "-flto",
+    "-fno-lto",
+    "-fwhole-program-vtables",
+    "-fno-whole-program-vtables",
+    "-ftls-model",
+    "-fextern-tls-init",
+    "-fno-extern-tls-init",
+    "-fno-threadsafe-statics",
+    "-fthreadsafe-statics",
+    "-freg-struct-return",
+    "-fpcc-struct-return",
     # Sanitizers change object layout/instrumentation and the runtime contract.
-    "-fsanitize=", "-fno-sanitize=",
+    "-fsanitize=",
+    "-fno-sanitize=",
     # Position-independence / TLS access model and frame-pointer presence.
-    "-fPIC", "-fpic", "-fPIE", "-fpie",
-    "-fno-pic", "-fno-pie", "-fno-PIC", "-fno-PIE",
-    "-fomit-frame-pointer", "-fno-omit-frame-pointer",
+    "-fPIC",
+    "-fpic",
+    "-fPIE",
+    "-fpie",
+    "-fno-pic",
+    "-fno-pie",
+    "-fno-PIC",
+    "-fno-PIE",
+    "-fomit-frame-pointer",
+    "-fno-omit-frame-pointer",
     # SYCL language mode (icpx/dpcpp -fsycl/-fsycl-*): enables an entirely
     # different parse (implicit SYCL builtins/attributes, kernel-lambda
     # codegen), so its presence/absence is exactly the kind of parse-affecting
@@ -142,7 +187,59 @@ _LANG_QUALIFIED_MODE_KEYS: frozenset[str] = frozenset(
 #: must be explicitly excluded from extraction or the generic option path would
 #: report a standalone tuning flag as ABI_RELEVANT_BUILD_FLAG_CHANGED (Codex).
 _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
-    "-flto-partition=", "-flto-jobs=", "-flto-compression-level=", "-flto-incremental=",
+    "-flto-partition=",
+    "-flto-jobs=",
+    "-flto-compression-level=",
+    "-flto-incremental=",
+)
+
+#: ABI-relevant flags whose value is a *separate*, following argv token
+#: rather than a combined ``=``/immediate-suffix spelling -- confirmed
+#: against a real ``clang -cc1 --help``: ``-target-abi <value>``,
+#: ``-target-cpu <value>``, ``-target-feature <value>``,
+#: ``-target-linker-version <value>`` are all two-token forms (unlike
+#: ``-target-sdk-version=<value>``, already combined). Each shares the
+#: ``-target`` prefix already matched by ``ABI_RELEVANT_FLAG_PREFIXES``, so
+#: without this the naive prefix match below captured only the flag token
+#: itself and silently discarded its operand -- a real, information-losing
+#: bug (P2 review, ``discussion_r3787772666``): two compile units disagreeing
+#: only on e.g. ``-target-abi aapcs`` vs. ``-target-abi aapcs16`` read as
+#: identical once the operand was dropped, and any caller replaying the
+#: bare, valueless survivor got a syntactically incomplete command.
+#:
+#: Deliberately **not** extended to the bare ``-target``/``--sysroot``/
+#: ``-isysroot`` split forms those same three prefixes also match: unlike
+#: the four flags here, each of those already has its own dedicated
+#: structured ``CompileUnit`` field (``target_triple``/``sysroot``) derived
+#: by a separate, correct parse of the same argv (``build_context.py``), so
+#: their raw split-form survivor carries no additional information -- adding
+#: it here would only introduce a new value-bearing list entry
+#: (``derive_build_options``/``source_graph.py`` iterate this list treating
+#: each entry as one independent flag) with nothing to gain.
+#:
+#: Normalized to one internal ``<flag>=<value>`` token, not two separate
+#: list entries -- ``-target-abi=<value>`` is not real clang syntax (unlike
+#: ``-D<KEY>=<VALUE>``, which genuinely is both split- and combined-form
+#: valid, the reason the ``-D``/``-U`` handling below concatenates the raw
+#: tokens directly), it is a purely-internal, round-trippable encoding.
+#: Every other reader of ``CompileUnit.abi_relevant_flags``
+#: (``derive_build_options``, ``crosscheck_coherence.py``,
+#: ``source_graph.py``, ``call_graph.py``'s safe-replay allowlist, which does
+#: not include any of these four prefixes at all) already treats "one list
+#: entry = one flag" -- keeping that invariant means none of them need any
+#: change to stay correct in the presence of this fix, and a genuinely
+#: differing value still makes two units' entries compare unequal for
+#: ambiguity grouping. Only :func:`~abicheck.buildsource.header_compile_
+#: context._split_operand_survivor` (the one consumer that replays this into
+#: a real command) splits the encoding back into the two literal argv tokens
+#: a real compiler invocation needs.
+_SPLIT_OPERAND_ABI_FLAGS = frozenset(
+    {
+        "-target-abi",
+        "-target-cpu",
+        "-target-feature",
+        "-target-linker-version",
+    }
 )
 
 #: Macro defines whose value is ABI-relevant even though they're plain -D flags.
@@ -170,8 +267,7 @@ class BuildAdapter(Protocol):
 
     name: str
 
-    def collect(self) -> BuildEvidence:
-        ...
+    def collect(self) -> BuildEvidence: ...
 
 
 def detect_language(source: str) -> str:
@@ -187,10 +283,18 @@ def detect_language(source: str) -> str:
 #: earlier ``-x`` and reverts to extension-based detection. Unknown languages
 #: (assembler, ``cuda``, …) leave the forced language unchanged.
 _X_LANG_TO_NORMALIZED: dict[str, str] = {
-    "c": "C", "c-header": "C", "cpp-output": "C",
-    "objective-c": "OBJC", "objective-c-header": "OBJC", "objc-cpp-output": "OBJC",
-    "c++": "CXX", "c++-header": "CXX", "c++-cpp-output": "CXX",
-    "objective-c++": "OBJCXX", "objective-c++-header": "OBJCXX", "objc++-cpp-output": "OBJCXX",
+    "c": "C",
+    "c-header": "C",
+    "cpp-output": "C",
+    "objective-c": "OBJC",
+    "objective-c-header": "OBJC",
+    "objc-cpp-output": "OBJC",
+    "c++": "CXX",
+    "c++-header": "CXX",
+    "c++-cpp-output": "CXX",
+    "objective-c++": "OBJCXX",
+    "objective-c++-header": "OBJCXX",
+    "objc++-cpp-output": "OBJCXX",
 }
 
 
@@ -237,12 +341,28 @@ def effective_language(argv: list[str], source: str) -> str:
 #: Skipping the operand keeps :func:`source_from_argv` from mistaking a forced or
 #: precompiled header for the real source. Combined MSVC forms like
 #: ``/FIconfig.hpp`` are handled by the ``/``-prefix guard.
-SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset({
-    "-include", "-imacros", "-include-pch", "-Xclang", "-x",
-    "-o", "-MF", "-MT", "-MQ", "-MJ",
-    "-I", "-isystem", "-iquote", "-idirafter", "-D", "-U",
-    "/FI", "/FU",
-})
+SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset(
+    {
+        "-include",
+        "-imacros",
+        "-include-pch",
+        "-Xclang",
+        "-x",
+        "-o",
+        "-MF",
+        "-MT",
+        "-MQ",
+        "-MJ",
+        "-I",
+        "-isystem",
+        "-iquote",
+        "-idirafter",
+        "-D",
+        "-U",
+        "/FI",
+        "/FU",
+    }
+)
 
 
 def _is_bare_input(arg: str, msvc: bool) -> bool:
@@ -260,7 +380,9 @@ def _is_bare_input(arg: str, msvc: bool) -> bool:
     return True
 
 
-def sources_from_argv(argv: list[str], *, accept_forced_language: bool = False) -> list[str]:
+def sources_from_argv(
+    argv: list[str], *, accept_forced_language: bool = False
+) -> list[str]:
     """Return **every** argv token that names a compiled translation unit, in order.
 
     A single compiler invocation may build several TUs (``gcc -c a.c b.c``), so a
@@ -408,8 +530,14 @@ def _is_msvc_option_token(arg: str) -> bool:
         return True
     if lower.startswith("/w"):
         suffix = lower[2:]
-        return suffix.isdigit() or suffix in {"all", "x"} or (
-            len(suffix) > 1 and suffix[0] in {"d", "e", "o"} and suffix[1:].isdigit()
+        return (
+            suffix.isdigit()
+            or suffix in {"all", "x"}
+            or (
+                len(suffix) > 1
+                and suffix[0] in {"d", "e", "o"}
+                and suffix[1:].isdigit()
+            )
         )
     if lower.startswith("/o"):
         suffix = lower[2:]
@@ -438,6 +566,11 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     Handles both the combined ``-DKEY=VALUE`` define form and the split
     ``['-D', 'KEY=VALUE']`` form; split ABI macros are normalized to the
     combined token so downstream option derivation parses them uniformly.
+    A genuinely split-operand flag in :data:`_SPLIT_OPERAND_ABI_FLAGS`
+    (``-target-abi``/``-target-cpu``/``-target-feature``/
+    ``-target-linker-version``) is normalized the same way, into one
+    internal ``<flag>=<value>`` token -- see that set's own docstring for
+    why this differs from the ``-D`` combined-form concatenation just below.
     """
     out: list[str] = []
     i = 0
@@ -447,6 +580,16 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
             # LTO backend-tuning flag (not enabling): not ABI-relevant, though it
             # shares the -flto prefix. Skip so it never reaches option derivation.
             pass
+        elif arg in _SPLIT_OPERAND_ABI_FLAGS and i + 1 < len(argv):
+            # Split two-token form (`-target-abi <value>`): must be checked
+            # *before* the generic ABI_RELEVANT_FLAG_PREFIXES prefix match
+            # below, since every one of these flags shares the "-target"
+            # prefix that match already recognizes -- reaching that branch
+            # first would append the bare flag alone and silently drop the
+            # operand (the bug this set exists to fix).
+            out.append(f"{arg}={argv[i + 1]}")
+            i += 2
+            continue
         elif arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
             out.append(arg)
         elif arg in ("-D", "/D") and i + 1 < len(argv):
@@ -519,7 +662,7 @@ def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
         # separately from the GNU flag and diffed only when both sides are
         # explicit (build_diff), avoiding a false flip when a VS project
         # merely records its platform default against an omitted side.
-        return "struct_packing_msvc", flag[len("/Zp"):] or "1"
+        return "struct_packing_msvc", flag[len("/Zp") :] or "1"
     if flag.startswith("-fpack-struct"):
         # GNU/Clang struct-packing width (-fpack-struct[=N]). The default
         # is known (disabled → natural packing), so a one-sided add/remove
@@ -571,7 +714,11 @@ def _add_generic_flag_option(
             sep = "=" if "=" in flag else ":"
             std_val = flag.split(sep, 1)[1] if sep in flag else flag
             _add_build_option(
-                out, seen, f"std:{cu.language}" if cu.language else "std", std_val, raw=flag
+                out,
+                seen,
+                f"std:{cu.language}" if cu.language else "std",
+                std_val,
+                raw=flag,
             )
     elif flag.startswith(_TOOLCHAIN_PATH_FLAG_PREFIXES):
         # sysroot/target are already emitted from the normalized
@@ -623,5 +770,8 @@ _STD_FLAG_PREFIXES: tuple[str, ...] = ("-std=", "/std:")
 #: options, so the raw flag must not also become an option (split vs combined
 #: spelling would otherwise read as a change).
 _TOOLCHAIN_PATH_FLAG_PREFIXES: tuple[str, ...] = (
-    "--sysroot", "-isysroot", "--target", "-target",
+    "--sysroot",
+    "-isysroot",
+    "--target",
+    "-target",
 )

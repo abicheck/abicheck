@@ -767,6 +767,44 @@ def test_resolve_explicit_define_resolves_macro_only_disagreement(
     assert result.matched is True
 
 
+def test_resolve_explicit_define_pin_also_excuses_raw_abi_flag_survivor_disagreement(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787772663``): an ABI-relevant
+    macro like ``_GLIBCXX_USE_CXX11_ABI`` is captured TWICE by a real
+    adapter -- once into the structured ``cu.defines`` dict (already
+    filtered by the pin, per the sibling test above) and once as a raw
+    ``-D_GLIBCXX_USE_CXX11_ABI=<value>`` survivor in
+    ``cu.abi_relevant_flags`` (``adapters.base.extract_abi_relevant_flags``'s
+    ``_ABI_RELEVANT_DEFINES`` handling). Before the fix, only the structured
+    copy was pin-masked -- the raw survivor still differed across the two
+    units, so an explicit ``-D_GLIBCXX_USE_CXX11_ABI=1`` pin failed to
+    excuse the disagreement and ``HeaderCompileContextAmbiguousError`` was
+    still raised despite the documented override."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "0"},
+        abi_relevant_flags=["-D_GLIBCXX_USE_CXX11_ABI=0"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "1"},
+        abi_relevant_flags=["-D_GLIBCXX_USE_CXX11_ABI=1"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    explicit = CompileContext(gcc_option_tokens=("-D_GLIBCXX_USE_CXX11_ABI=1",))
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.matched is True
+
+
 def test_resolve_agreeing_structured_fields_with_different_raw_flag_spellings_not_ambiguous(
     tmp_path: Path,
 ) -> None:
