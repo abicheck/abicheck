@@ -365,6 +365,31 @@ def mutated_modules() -> set[str]:
         return set()
 
 
+def deletion_only_paths(diff_text: str) -> set[str]:
+    """Paths with at least one hunk that removes lines and adds none.
+
+    Such a hunk cannot be scoped from the *post-change* AST: the new-side
+    anchor lands on whatever now occupies that position, so deleting a
+    module-level statement immediately above a `def` attributes to that
+    function instead of module scope (Codex review). What was deleted is only
+    knowable from the old side, so the honest answer is "cannot tell".
+    """
+    paths: set[str] = set()
+    current: str | None = None
+    for line in diff_text.splitlines():
+        if line.startswith("+++ b/"):
+            current = line[6:].strip()
+            if current == "/dev/null":
+                current = None
+            continue
+        if current is None:
+            continue
+        m = _HUNK.match(line)
+        if m and m.group(2) is not None and int(m.group(2)) == 0:
+            paths.add(current)
+    return paths
+
+
 def _changed_scope(args: argparse.Namespace) -> str:
     """``"module"`` when a mutated module has a module-scope change.
 
@@ -391,6 +416,11 @@ def _changed_scope(args: argparse.Namespace) -> str:
                 return "module"
             diff_text = proc.stdout
         mutated = mutated_modules()
+        # "Cannot tell" must not be reported as "function" — that would let the
+        # cache serve verdicts computed before a deleted global changed those
+        # functions' behaviour.
+        if deletion_only_paths(diff_text) & mutated:
+            return "module"
         changed = {
             path: lines
             for path, lines in parse_changed_lines(diff_text).items()

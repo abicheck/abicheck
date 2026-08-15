@@ -807,3 +807,80 @@ class TestChangedScopeProbe:
         with redirect_stdout(buf):
             gate.main(["--print-changed-scope", "--base-ref", "definitely-not-a-ref"])
         assert buf.getvalue().strip() == "module"
+
+
+class TestDeletionOnlyHunksCannotBeScoped:
+    """A deletion-only hunk carries no new-side content, so the post-change AST
+    cannot say what was removed: deleting a module-level statement immediately
+    above a `def` anchors onto that function and reports `function`, which
+    would let the cache serve verdicts computed before the deleted global
+    changed those functions (Codex review)."""
+
+    def test_a_deletion_only_hunk_is_detected(self) -> None:
+        diff = (
+            "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+            "@@ -1,1 +1,0 @@\n-_KINDS = frozenset()\n"
+        )
+        assert gate.deletion_only_paths(diff) == {"abicheck/diff_types.py"}
+
+    def test_an_ordinary_hunk_is_not(self) -> None:
+        diff = (
+            "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+            "@@ -1,1 +1,1 @@\n+_KINDS = frozenset({'a'})\n"
+        )
+        assert gate.deletion_only_paths(diff) == set()
+
+    def test_a_deleted_file_is_not_attributed_to_a_path(self) -> None:
+        assert (
+            gate.deletion_only_paths("--- a/f.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n")
+            == set()
+        )
+
+    def test_a_deletion_in_a_mutated_module_answers_module(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end: the scope probe must not report `function` here."""
+        (tmp_path / "abicheck").mkdir()
+        (tmp_path / "abicheck" / "diff_types.py").write_text(
+            "def f():\n    return 1\n", encoding="utf-8"
+        )
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.mutmut]\nsource_paths = ["abicheck/diff_types.py"]\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+        diff = _write(
+            tmp_path,
+            "d.diff",
+            "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+            "@@ -1,1 +1,0 @@\n-_KINDS = frozenset()\n",
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            gate.main(["--print-changed-scope", "--diff-file", diff])
+        assert buf.getvalue().strip() == "module"
+
+    def test_a_deletion_outside_the_mutated_modules_still_answers_function(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control — only the mutated modules' staleness matters."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.mutmut]\nsource_paths = ["abicheck/diff_types.py"]\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+        diff = _write(
+            tmp_path,
+            "d.diff",
+            "--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1,1 +1,0 @@\n-text\n",
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            gate.main(["--print-changed-scope", "--diff-file", diff])
+        assert buf.getvalue().strip() == "function"

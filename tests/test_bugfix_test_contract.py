@@ -121,6 +121,12 @@ class TestStructuralRequirement:
             "scripts/check_bugfix_test_contract.py",
             "abicheck/latest_test_helper.py",
             "abicheck/diff_types.py",
+            # Prose whose *basename* starts with `test_`. Outside a test tree
+            # the basename forms must be real Python modules, or a fix could
+            # satisfy the structural requirement by editing a planning doc
+            # (Codex review).
+            "docs/test_plan.md",
+            "examples/test_notes.txt",
             # Prose under tests/ is documentation, not an executable test — a
             # fix that changes shipped code and only edits tests/CLAUDE.md
             # must not satisfy the structural gate (Codex review).

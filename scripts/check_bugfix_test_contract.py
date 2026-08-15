@@ -316,8 +316,16 @@ def is_test_path(path: str) -> bool:
         return False
     name = parts[-1]
     if _TEST_DIR in parts[:-1]:
+        # Inside a test tree, any file type can be test *data* (fixtures,
+        # golden snapshots) — only prose is excluded, and not under golden/.
         is_prose = name.endswith(_DOC_SUFFIXES)
         return not is_prose or _TEST_DATA_DIR in parts[:-1]
+    # Outside a test tree, the basename forms must be actual Python test
+    # modules: `docs/test_plan.md` and `examples/test_notes.txt` start with
+    # `test_` and are prose, and counting them satisfied the structural
+    # requirement with no executable test changed (Codex review).
+    if not name.endswith(".py"):
+        return False
     return (
         name.startswith(_TEST_BASENAME_PREFIX)
         or name.endswith(_TEST_BASENAME_SUFFIX)
