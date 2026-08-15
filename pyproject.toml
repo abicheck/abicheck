@@ -372,7 +372,12 @@ pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = [
     "-x",
     "-q",
-    "--tb=no",
+    # `--tb=line`, not `--tb=no`: with `-x`, the first failure ends the whole
+    # lane, and "failed to collect stats" with no traceback says nothing about
+    # which assertion broke. One line per failure costs nothing on the mutant
+    # runs (where failures are the expected outcome and are counted, not read)
+    # and is the difference between a diagnosable lane and a guess.
+    "--tb=line",
     "-m",
     "not integration and not libabigail and not abicc and not slow",
     # Repository-structure tests, excluded because they cannot run from
