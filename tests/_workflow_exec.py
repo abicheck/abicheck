@@ -146,7 +146,12 @@ def run_step(
     step_env.update(env or {})
 
     proc = subprocess.run(
-        [_bash(), "-o", "pipefail", "-c", step["run"]],
+        # `-e` as well as pipefail: the runner invokes a `run:` body as
+        # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without it a
+        # command failing mid-body left returncode 0 here while the real step
+        # failed — every `assert result.returncode == 0` in the workflow tests
+        # was weaker than the thing it models (CodeRabbit review).
+        [_bash(), "-eo", "pipefail", "-c", step["run"]],
         cwd=workspace,
         env=step_env,
         capture_output=True,
@@ -196,4 +201,12 @@ def outside_is_intact(base: Path) -> bool:
 
 
 def have_bash() -> bool:
-    return shutil.which(_bash()) is not None or os.name != "nt"
+    """Is a real bash actually available?
+
+    The `or os.name != "nt"` this used to carry short-circuited the lookup on
+    every POSIX platform, so a machine without bash reported that it had one
+    and callers ran the steps instead of skipping — the opposite of what the
+    name promises (CodeRabbit review).
+    """
+    candidate = _bash()
+    return Path(candidate).is_file() or shutil.which(candidate) is not None

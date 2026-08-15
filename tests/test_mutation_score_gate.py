@@ -469,6 +469,23 @@ def test_a_completed_summary_render_still_measures(
     assert "unmeasurable" not in capsys.readouterr().out
 
 
+def test_a_deleted_file_does_not_leak_into_the_previous_file() -> None:
+    """`+++ /dev/null` must end the previous file's attribution.
+
+    It does not match `+++ b/`, so the deleted file's hunk was recorded
+    against whichever file preceded it — and a pure deletion takes the
+    count == 0 path, which invents two line numbers. The diff-scoped gate
+    could then fail on a function the branch never touched (CodeRabbit
+    review). The existing deletion fixture missed it by having no preceding
+    file, leaving `current` None.
+    """
+    diff = (
+        "--- a/keep.py\n+++ b/keep.py\n@@ -1,0 +2,1 @@\n+x = 1\n"
+        "--- a/gone.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n-y = 2\n"
+    )
+    assert gate.parse_changed_lines(diff) == {"keep.py": {2}}
+
+
 class TestUngatedRun:
     """A run that examined nothing must not report a pass.
 

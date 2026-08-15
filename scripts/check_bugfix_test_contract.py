@@ -327,7 +327,13 @@ REQUIREMENTS: tuple[Requirement, ...] = (
 _MARKER = "<!-- bugfix-test-contract -->"
 
 #: `<!-- ... -->`, including multi-line regions.
-_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+#: An unterminated `<!--` hides the rest of the rendered description on
+#: GitHub while a closing-marker-only pattern still read the answers behind
+#: it — invisible to every reviewer, accepted by the parser, which is the
+#: exact bypass this strip exists to close (CodeRabbit review). The
+#: template ships two comment blocks, so a deleted `-->` is a realistic
+#: edit.
+_HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
 
 #: A line in the body answering a requirement: `- Negative control: <text>`.
 #: Tolerant of `*`/`-` bullets, bold, and a trailing checkbox.

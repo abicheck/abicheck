@@ -54,7 +54,12 @@ def _kind(value: str) -> ChangeKind:
 
 def _cid(kind: str, *, old: str, new: str, symbol: str = "sym", desc: str = "d") -> str:
     return report_canonical_finding_id(
-        Change(_kind(kind), symbol, desc, old_value=old, new_value=new)
+        # Keywords: `Change`'s field order is public API, and a
+        # positional call here would silently take a different meaning
+        # if it ever changed (CodeRabbit review).
+        Change(
+            _kind(kind), symbol=symbol, description=desc, old_value=old, new_value=new
+        )
     )
 
 

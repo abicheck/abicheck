@@ -429,13 +429,18 @@ def test_parser_reads_a_real_mutmut_run_end_to_end(tmp_path: Path) -> None:
     )
 
     env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(tmp_path)}
-    subprocess.run(
+    run = subprocess.run(
         [sys.executable, "-m", "mutmut", "run"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=900,
         env=env,
+    )
+    assert run.returncode == 0, (
+        f"`mutmut run` aborted ({run.returncode}), so nothing was measured — "
+        f"without this the failure below reads as a parser bug (CodeRabbit "
+        f"review):\n{run.stdout}\n{run.stderr}"
     )
     results = subprocess.run(
         [sys.executable, "-m", "mutmut", "results"],

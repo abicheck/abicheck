@@ -203,13 +203,18 @@ jobs:
         # state: a weakened test is only detectable as drift.
         env:
           REQUIRE_BASELINE: ${{ needs.resolve.outputs.require_baseline }}
+          # Through `env`, not expanded into the script: a branch name is
+          # attacker-chosen on a fork PR, and `${{ }}` inside `run:` is
+          # substituted before the shell ever sees it (CodeRabbit review,
+          # zizmor template-injection).
+          BASE_REF: ${{ github.base_ref }}
         run: |
           require=""
           if [ "$REQUIRE_BASELINE" = "true" ]; then
             require="--require-baseline"
           fi
           python scripts/check_mutation_score.py --run --diff-scoped \
-            --base-ref origin/${{ github.base_ref }} \
+            --base-ref "origin/$BASE_REF" \
             $require \
             --json mutation-receipt.json
       - name: Run mutation testing (baseline drift)
@@ -223,8 +228,10 @@ jobs:
             --json mutation-receipt.json
       - name: Run mutation testing (record baseline)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          WRITE_BASELINE: ${{ inputs.write_baseline }}
         run: |
-          if [ "${{ inputs.write_baseline }}" = "true" ]; then
+          if [ "$WRITE_BASELINE" = "true" ]; then
             python scripts/check_mutation_score.py --run --write-baseline
             echo '--- mutation-baseline.json ---'
             cat mutation-baseline.json

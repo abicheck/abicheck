@@ -137,6 +137,20 @@ def test_the_filter_is_exactly_sources_plus_infrastructure() -> None:
     assert set(_test_filter()) == _test_globs()
 
 
+def test_no_step_expands_a_github_expression_inside_its_script() -> None:
+    """`${{ }}` in a `run:` body is substituted before the shell sees it, so a
+    branch name — attacker-chosen on a fork PR — would land as code. Every
+    value this workflow needs goes through `env:` instead (CodeRabbit review,
+    zizmor template-injection)."""
+    offenders = []
+    for job in _workflow()["jobs"].values():
+        for step in job.get("steps", []):
+            script = step.get("run")
+            if script and "${{" in script:
+                offenders.append((step.get("name", "?"), script))
+    assert not offenders, f"expressions expanded inside run: {offenders}"
+
+
 def test_the_lane_does_not_cache_mutmut_results() -> None:
     """Removed deliberately, and pinned so it cannot return unnoticed.
 

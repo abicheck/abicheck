@@ -499,7 +499,7 @@ def _ci_only_step_names() -> set[str]:
 
     names: set[str] = set()
     workflow_dir = ROOT / ".github" / "workflows"
-    for path in sorted(workflow_dir.glob("*.yml")):
+    for path in sorted([*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")]):
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(
             r"verify\.py\s+--profile\s+\w+\s+--only\s+([\w,-]+)", text

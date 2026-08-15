@@ -109,13 +109,6 @@ DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
-def _run(cmd: list[str], cwd: Path | None = None) -> str:
-    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, capture_output=True, text=True, timeout=7200, cwd=cwd
-    )
-    return proc.stdout + proc.stderr
-
-
 def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     """Run a mutmut subcommand, returning ``(output, returncode)``.
 
@@ -210,10 +203,16 @@ def parse_changed_lines(diff_text: str) -> dict[str, set[int]]:
     changed: dict[str, set[int]] = {}
     current: str | None = None
     for line in diff_text.splitlines():
-        if line.startswith("+++ b/"):
-            current = line[6:].strip()
-            if current == "/dev/null":
-                current = None
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            # A deleted file's header is `+++ /dev/null`, which does not match
+            # `+++ b/` — so `current` kept pointing at the *previous* file and
+            # the deletion's `@@ -1,5 +0,0 @@` hunk was recorded against it
+            # through the count == 0 branch below. The diff-scoped gate then
+            # failed on a function the branch never touched (CodeRabbit
+            # review). The old `/dev/null` guard could never fire: it ran
+            # after the `b/` prefix had already been stripped.
+            current = target[2:] if target.startswith("b/") else None
             continue
         if current is None:
             continue

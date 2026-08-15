@@ -205,13 +205,28 @@ class TestContentEvidence:
         diff = _content_diff("abicheck/checker.py") + _RENAME_DIFF
         assert gate.added_content_paths(diff) == {"abicheck/checker.py"}
 
-    def test_the_diff_filter_keeps_type_changes(self) -> None:
+    def test_the_diff_filter_keeps_type_changes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Replacing a shipped script with a symlink is a real behavioural
-        change; excluding `T` made the path vanish from the diff entirely,
-        taking shipped-code detection and the conditionals with it (Codex
-        review)."""
-        source = Path(gate.__file__).read_text(encoding="utf-8")
-        assert '"--diff-filter=ACDMT"' in source
+        change; excluding `T` made the path vanish from the diff entirely.
+
+        Executed rather than grepped for in the source: asserting the literal
+        flag text is the same shape this whole gate exists to reject (#705
+        asserted workflow text, #758 had to execute it), and it would stay
+        green if the argument list were built differently (CodeRabbit review).
+        """
+        seen: dict[str, list[str]] = {}
+
+        def _spy(args: list[str]) -> str:
+            seen["args"] = args
+            return "T\tscripts/x.py\n"
+
+        monkeypatch.setattr(gate, "_git", _spy)
+        assert gate.changed_files("A", "B") == [("T", "scripts/x.py")]
+        assert [a for a in seen["args"] if a.startswith("--diff-filter=")] == [
+            "--diff-filter=ACDMT"
+        ]
 
     def test_a_plugin_subtree_test_counts(self) -> None:
         assert gate.touches_tests(["contrib/abicheck-clang-plugin/tests/test_x.py"])
@@ -367,6 +382,8 @@ class TestAlwaysRequiredAnswers:
     @pytest.mark.parametrize(
         "prompt, key",
         [
+            ("Bug class", "bug-class"),
+            ("Publicly observable failure", "publicly-observable-failure"),
             ("Regression test fails on base", "regression-test-fails-on-base"),
             ("Negative control", "negative-control"),
             ("Public-surface test", "public-surface"),
@@ -504,9 +521,34 @@ class TestConditionalRequirements:
         through (Codex review)."""
         assert gate.touches_shipped_code(["pyproject.toml"])
 
+    def test_an_unterminated_comment_hides_answers_from_the_parser_too(
+        self,
+    ) -> None:
+        """GitHub hides everything after an unclosed `<!--` from the rendered
+        description, so answers behind one are invisible to reviewers while a
+        closing-marker-only strip still read them (CodeRabbit review)."""
+        body = (
+            "Bug class: real\n<!-- oops, no closing marker\nNegative control: hidden\n"
+        )
+        answers = gate.parse_answers(body)
+        assert "bug-class" in answers
+        assert "negative-control" not in answers
+
+    def test_a_closed_comment_still_strips_exactly_its_own_region(self) -> None:
+        """Negative control: the unterminated case must not swallow the rest
+        of a body that closes its comment properly."""
+        body = "Bug class: real\n<!-- hidden -->\nNegative control: visible\n"
+        answers = gate.parse_answers(body)
+        assert "bug-class" in answers
+        assert "negative-control" in answers
+
     def test_other_root_toml_is_not_shipped(self) -> None:
-        """Negative control: the rule names one file, it is not "any TOML"."""
-        assert not gate.touches_shipped_code(["codecov.yml", "mkdocs.yml"])
+        """Negative control: the rule names one file, it is not "any TOML".
+
+        The first version of this asserted two `.yml` paths, so it tested no
+        TOML at all and duplicated the YAML control (CodeRabbit review).
+        """
+        assert not gate.touches_shipped_code(["ruff.toml", "pixi.toml"])
 
     def test_a_packaged_policy_named_security_is_not_a_trust_boundary(self) -> None:
         """`abicheck/policies/security.yaml` is a packaged runtime policy

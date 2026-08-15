@@ -32,6 +32,7 @@ from __future__ import annotations
 import pytest
 from _workflow_exec import (
     find_run_step,
+    have_bash,
     make_workspace,
     outside_is_intact,
     run_step,
@@ -39,10 +40,7 @@ from _workflow_exec import (
 
 CHECK_SINGLE = "check-single.yml"
 
-pytestmark = pytest.mark.skipif(
-    __import__("os").name == "nt" and not __import__("shutil").which("bash"),
-    reason="needs a real bash",
-)
+pytestmark = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
 
 
 # --- The caller-controlled value: check-id ------------------------------------
@@ -240,7 +238,10 @@ class TestStagingClearActuallyClears:
         workspace = make_workspace(tmp_path)
         victim = tmp_path / "outside"
         (workspace / staging).parent.mkdir(parents=True, exist_ok=True)
-        (workspace / staging).symlink_to(victim, target_is_directory=True)
+        try:
+            (workspace / staging).symlink_to(victim, target_is_directory=True)
+        except OSError as exc:  # Windows without the symlink privilege
+            pytest.skip(f"cannot create a symlink here: {exc}")
         result = run_step(
             find_run_step(CHECK_SINGLE, "check", step_name), workspace=workspace
         )
