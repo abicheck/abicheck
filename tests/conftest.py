@@ -18,23 +18,30 @@ except ImportError:
     filelock = None  # type: ignore[assignment]
 
 
-def _relax_hypothesis_deadline_under_mutmut() -> None:
-    """Drop Hypothesis's per-example deadline when mutmut is driving the run.
+def _hypothesis_profile_for_mutmut() -> None:
+    """Adjust Hypothesis for the way mutmut runs this suite.
 
-    Mutation testing routes every call to a mutated function through a
-    dispatcher, so the code under test is deliberately slower than it will
-    ever be in production — and slower still under the load of a full mutant
-    sweep. A 200ms wall-clock deadline then fails property tests for a reason
-    that has nothing to do with the property, which is how a Hypothesis test
-    that passes standalone aborted mutmut's clean-test phase and with it the
-    whole lane (observed once on
-    `test_ctor_dtor_key_drift.py::TestCanonicalizationProperties::test_idempotent`;
-    the same suite, same arguments, passed in isolation).
+    Two settings, for two different consequences of that driver:
+
+    `differing_executors` is the one that actually aborted the lane, and the
+    traceback took three attempts to obtain because the lane ran with
+    `--tb=no`. mutmut runs the whole suite several times inside one process
+    (stats, then a clean baseline, then each mutant), so a `@given` method is
+    invoked again with a fresh pytest instance and Hypothesis reports it as
+    called "from multiple different executors". The check exists to warn that
+    replay from its example database may not reproduce — a real concern for a
+    developer, and not one here, where each phase is a fresh measurement and
+    nothing replays across them. It is suppressed only under mutmut; an
+    ordinary run still gets the warning.
+
+    `deadline` is precautionary rather than observed: every call to a mutated
+    function goes through a dispatcher, so the code is deliberately slower
+    than production and a 200ms per-example limit would fail property tests
+    for a reason unrelated to the property.
 
     Keyed on the variable's *presence*: mutmut sets `MUTANT_UNDER_TEST` to the
     empty string for the clean run and to a mutant name otherwise, so a
-    truthiness check would miss exactly the phase this was seen in. Nothing
-    changes for an ordinary pytest run, where deadlines stay on.
+    truthiness check would miss exactly the phase this was seen in.
     """
     if "MUTANT_UNDER_TEST" not in os.environ:
         return
@@ -43,12 +50,17 @@ def _relax_hypothesis_deadline_under_mutmut() -> None:
     except ImportError:  # hypothesis is a dev dependency, not a hard one
         return
     settings.register_profile(
-        "mutmut", deadline=None, suppress_health_check=[HealthCheck.too_slow]
+        "mutmut",
+        deadline=None,
+        suppress_health_check=[
+            HealthCheck.too_slow,
+            HealthCheck.differing_executors,
+        ],
     )
     settings.load_profile("mutmut")
 
 
-_relax_hypothesis_deadline_under_mutmut()
+_hypothesis_profile_for_mutmut()
 
 
 @pytest.fixture(autouse=True)

@@ -170,6 +170,10 @@ def test_hypothesis_deadlines_are_relaxed_only_under_mutmut(
         "the variable to an empty string"
     )
     assert "deadline=None" in source
+    # The one that actually aborted the lane: mutmut runs the suite several
+    # times in one process, so a `@given` method is re-invoked with a fresh
+    # pytest instance and Hypothesis reports "multiple different executors".
+    assert "differing_executors" in source
 
     spec = importlib.util.spec_from_file_location("_conftest_probe", conftest)
     assert spec and spec.loader
