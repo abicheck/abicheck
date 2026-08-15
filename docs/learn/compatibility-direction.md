@@ -39,10 +39,15 @@ Each row is checking the same underlying contract from a different vantage
 point, and — this is the part worth internalizing — **a change can be safe
 in one direction and unsafe in another.** A newly *added* optional
 parameter with a default is safe, for an ordinary call expression, in old
-source recompiled against new headers (backward-compatible addition) —
-though not universally: it changes the function's *type*, so source taking
-its address for a function pointer (`void (*p)(int) = &f;` against
-`f(int, int = 0)`) stops compiling even in that same direction. In the
+source recompiled against new headers — though not universally: it changes
+the function's *type*, so source taking its address for a function pointer
+(`void (*p)(int) = &f;` against `f(int, int = 0)`) stops compiling even in
+that same direction. Note that this source-level safety is **not** the same
+as backward compatibility in this table's sense (old *binary*, new library):
+if the one-parameter overload is replaced rather than kept alongside the new
+one, the new library no longer exports the mangled symbol an
+already-compiled consumer references, and that is a hard backward binary
+break — the recompile-safety and the binary contract are separate answers. In the
 *forward* direction, the break isn't limited to source that names the new
 argument — it's a *link*-time failure, not just a compile-time one:
 `f(int, int = 0)` is a different function type from `f(int)`, so it

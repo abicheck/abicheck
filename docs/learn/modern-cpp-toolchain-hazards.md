@@ -32,7 +32,7 @@ often, because nothing in the diff "looks like" an ABI change.
 | **`_Atomic` qualifier** | The representation of an `_Atomic`-qualified type is implementation-defined: adding/removing the qualifier can change size and alignment, and with them how the object is classified for passing/returning. | [case116](../reference/examples/case116_atomic_qualifier_changed.md) |
 | **`[[no_unique_address]]`** | *Permits* an empty member to overlap the next field — so adding it can shrink the struct and shift following offsets, though existing alignment padding can absorb the overlap and leave both size and offsets unchanged. | [case117](../reference/examples/case117_no_unique_address.md) |
 | **Concept tightening (C++20)** | Narrowing a constraint removes instantiations the consumer relied on — a *source* break with no symbol-table change for already-emitted instantiations. | [case105](../reference/examples/case105_concept_tightening.md) |
-| **LP64 → ILP64 / data-model drift** | `long`/pointer widths change out from under every struct and signature — a whole-ABI shift driven by the target, not the source. | [case112](../reference/examples/case112_lp64_ilp64.md) |
+| **LP64 → ILP64 / data-model drift** | The library's public integer typedef widens (case112: `MKL_INT` `int`→`long`, 32→64-bit), so every dimension, stride, and count in the API changes width at once while the `extern "C"` names stay identical — the consumer links fine and silently passes integers of the wrong width. | [case112](../reference/examples/case112_lp64_ilp64.md) |
 
 Several more live only in the **build flags**, not the source, and abicheck
 surfaces them as toolchain/deployment risk when build context is captured:
