@@ -33,6 +33,16 @@ Duplicates the two small fixtures it needs (``_header_pair``/``_write``)
 rather than importing them from the parent module -- every other
 ``_extra``-style sibling test file in this suite is self-contained the same
 way, and there is no existing cross-test-module import to follow instead.
+
+Finding 3 (PR #767 follow-up, P2 review ``discussion_r3787839902``): Finding
+1's fix above was CLI-only (``cli_compare_helpers._report_compare_result``);
+a direct ``service.run_compare_request()``/``CompareRequest`` caller -- the
+typed Python API / MCP ``abi_compare`` entry point, which never routes
+through that CLI helper -- still read ``requested_depth=None``/
+``depth_satisfied=None`` for an explicit, successfully-reached
+``CompareRequest.depth``. ``TestRequestedDepthPropagationSharedPipeline``
+below is the direct-API-level regression the CLI-only test suite never
+covered.
 """
 
 from __future__ import annotations
@@ -46,7 +56,7 @@ from abicheck import checker
 from abicheck.analysis_assurance import compute_analysis_assurance
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.serialization import snapshot_to_json
+from abicheck.serialization import save_snapshot, snapshot_to_json
 
 
 def _fn(name: str, mangled: str) -> Function:
@@ -186,6 +196,117 @@ class TestRequestedDepthPropagation:
         aa = payload["analysis_assurance"]
         assert aa["requested_depth"] is None, aa
         assert aa["status"] == "complete", aa
+
+
+class TestRequestedDepthPropagationSharedPipeline:
+    """PR #767 follow-up (P2 review, ``discussion_r3787839902``): the CLI-only
+    fix above (``cli_compare_helpers._report_compare_result``) left the
+    shared ``service_compare_pipeline.classify_compare_pair`` -- what
+    ``service.run_compare_request()`` (the typed Python API / MCP
+    ``abi_compare`` entry point) actually runs -- never populating either
+    ``DiffResult.requested_depth`` or ``analysis_assurance.depth_satisfied``
+    for a direct caller's explicit ``CompareRequest.depth``.
+    """
+
+    def _snapshot_files(self, tmp_path: Path) -> tuple[Path, Path]:
+        old, new = _header_pair()
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(old, old_p)
+        save_snapshot(new, new_p)
+        return old_p, new_p
+
+    def test_direct_api_satisfied_depth_populates_requested_depth(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact repro from the review finding: a direct
+        ``run_compare_request(CompareRequest(..., depth="headers"))`` call on
+        two plain header-scoped snapshots reaches 'headers' evidence (so the
+        request IS satisfied) -- before this fix, the returned result still
+        silently read ``requested_depth=None``/``depth_satisfied=None``
+        despite the caller's explicit, successfully-reached request."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="headers"
+        )
+        result = run_compare_request(request).diff
+
+        assert result.requested_depth == "headers", result
+        aa = result.analysis_assurance
+        assert aa.requested_depth == "headers", aa
+        assert aa.effective_depth == "headers", aa
+        assert aa.depth_satisfied is True, aa
+        assert aa.status == "complete", aa
+
+    def test_direct_api_no_depth_leaves_requested_depth_none(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion negative case: a caller that never sets
+        ``CompareRequest.depth`` must see the identical, unaffected
+        ``requested_depth=None`` behavior as before this fix."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result = run_compare_request(request).diff
+
+        assert result.requested_depth is None, result
+        assert result.analysis_assurance.requested_depth is None
+        assert result.analysis_assurance.depth_satisfied is None
+        assert result.analysis_assurance.status == "complete"
+
+    def test_classify_compare_pair_unsatisfied_depth_is_not_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """Direct unit-level check of the fixed function itself
+        (``classify_compare_pair``), bypassing ``resolve_compare_request``'s
+        own separate ``enforce_requested_depth`` hard-fail (a request whose
+        depth is unreachable from a plain JSON-snapshot resolve raises
+        ``ValidationError`` before classification is ever reached -- see
+        ``service_input_resolution.enforce_requested_depth``) so the
+        'requested but not satisfied' half of this fix's own gate
+        (``analysis_assurance.status != 'complete'``) is exercised the same
+        way the CLI-fix's own
+        ``test_unit_level_unsatisfied_requested_depth_is_failed`` above
+        exercises it -- by constructing an already-resolved pair directly
+        rather than going through the full resolve step."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.service_compare_pipeline import (
+            ResolvedComparePair,
+            classify_compare_pair,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p),
+            new=InputSpec.of(new_p),
+            depth="source",
+        )
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+        pair = ResolvedComparePair(
+            old=old,
+            new=new,
+            old_fmt=None,
+            new_fmt=None,
+            old_evidence=evidence,
+            new_evidence=evidence,
+        )
+        result = classify_compare_pair(request, pair).diff
+
+        assert result.requested_depth == "source", result
+        aa = result.analysis_assurance
+        assert aa.requested_depth == "source", aa
+        assert aa.effective_depth == "headers", aa
+        assert aa.depth_satisfied is False, aa
+        assert aa.status != "complete", aa
 
 
 class TestGraphCompletenessPartialFamilyOverlap:

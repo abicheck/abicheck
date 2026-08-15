@@ -247,6 +247,28 @@
   `DiffResult.requested_depth` before recomputing `analysis_assurance` —
   only ever from an *explicit* flag, never an inferred depth from bare
   `--sources`/`--build-info` or `.abicheck.yml`'s `source.method`.
+- **`service.run_compare_request()` — the typed Python API / MCP
+  `abi_compare` entry point — now also propagates an explicit
+  `CompareRequest.depth` onto `requested_depth`/`depth_satisfied`** (P2
+  review, PR #767 follow-up, `discussion_r3787839902`). The round-9 fix
+  above was CLI-only: `cli_compare_helpers._report_compare_result` stamps
+  `DiffResult.requested_depth` from `compare`'s own Click-validated
+  `--depth`, but a direct typed-API caller passing
+  `CompareRequest(..., depth="headers")` never routes through that CLI
+  helper, so the identical successfully-reached, explicit depth request
+  still silently read `requested_depth=None`/`depth_satisfied=None` and
+  could report `status="complete"`. Fixed in the shared
+  `service_compare_pipeline.classify_compare_pair` (the classification half
+  both `run_compare_request` and the native `compare` CLI's
+  `resolve_and_apply` path build on) with the identical `if depth is not
+  None` guard, then recomputing `analysis_assurance` from each snapshot's
+  own embedded `build_source` (this path has no out-of-band
+  `--old/new-build-info`/`--old/new-sources` pack directory to fold in, so
+  it mirrors `checker.compare()`'s own recomputation rather than the CLI
+  helper's `_resolve_side_pack`). The CLI's own stamp in
+  `_report_compare_result` is deliberately kept, not removed — it still
+  needs to recompute after resolving its own out-of-band pack, which
+  `classify_compare_pair` has no visibility into.
 - **`graph_completeness`'s asymmetric-confirmed-family check now rejects a
   PARTIALLY overlapping family-set pair, not only a fully disjoint one**
   (P1 review, round 9 — fresh evidence after round 8's disjoint-family

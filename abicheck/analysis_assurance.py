@@ -56,15 +56,37 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   ``compare --depth source`` that never actually reached source evidence
   (both sides lacking a compile database, say) silently read
   ``requested_depth=None``/``depth_satisfied=None`` and could still report
-  ``status="complete"``. Fixed at the one front end that knows the user's
-  real, explicit ``--depth`` request: ``cli_compare_helpers.
-  _report_compare_result`` now copies its own Click-validated ``--depth``
+  ``status="complete"``. Fixed first at the one front end that knows the
+  user's real, explicit ``--depth`` request: ``cli_compare_helpers.
+  _report_compare_result`` copies its own Click-validated ``--depth``
   string onto ``DiffResult.requested_depth`` before recomputing this block
   (never an *inferred* depth from bare ``--sources``/``--build-info`` or
   ``.abicheck.yml``'s ``source.method`` -- only an explicit flag is this
-  comparison's stated request in the same on-the-record way). Any other
-  caller that never sets ``DiffResult.requested_depth`` keeps the prior,
-  unaffected behavior (``None``, depth-completeness untested).
+  comparison's stated request in the same on-the-record way). That fix was
+  CLI-only, though the underlying gap was not (P2 review,
+  ``discussion_r3787839902``): ``service.run_compare_request()`` -- the
+  shared, typed Python-API/MCP entry point ``service_compare_pipeline.
+  classify_compare_pair`` implements -- never gets this treatment, since
+  the CLI's own ``compare`` command resolves its evidence through
+  ``resolve_compare_request`` but classifies through a hand-rolled
+  ``compare_snapshots`` call of its own (its ``--depth`` flag never even
+  reaches ``CompareRequest.depth``; that field only carries a real value
+  for a *direct* typed-API caller). Fixed there too:
+  ``classify_compare_pair`` now applies the identical ``if request.depth
+  is not None`` stamp-and-recompute, so a direct
+  ``service.run_compare_request(CompareRequest(..., depth="headers"))``
+  call gets the same `requested_depth`/`depth_satisfied` receipt the CLI
+  already did, without disturbing a caller that never sets
+  ``CompareRequest.depth`` (unaffected, same as before). The two call
+  sites are not one shared helper because each recomputes from genuinely
+  different inputs the pipeline made available at a different point: the
+  CLI recomputes with a possibly out-of-band ``--old/new-build-info``/
+  ``--old/new-sources`` pack (`_resolve_side_pack`) that never touches
+  ``old``/``new`` directly, while ``classify_compare_pair`` recomputes from
+  each snapshot's own already-embedded ``build_source`` (mirroring
+  ``checker.compare()``'s own call) since a typed request's
+  ``InputSpec.sources``/``build_info`` are embedded before resolution ever
+  returns -- there is no separate out-of-band pack to fold in on that path.
   ``effective_depth`` is always computed here, independent of that field,
   from what each side's snapshot actually carries (mirrors
   ``cli_dump_helpers.evidence_depth_label``'s logic, reimplemented locally

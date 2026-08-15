@@ -130,7 +130,9 @@ def resolve_sides_sequentially(request: CompareRequest) -> bool:
         "no",
     ):
         return True
-    return request.old.dump_manifest is not None or request.new.dump_manifest is not None
+    return (
+        request.old.dump_manifest is not None or request.new.dump_manifest is not None
+    )
 
 
 def _manifest_forced_includes(dump_manifest: object) -> list[Path]:
@@ -147,17 +149,17 @@ def _manifest_forced_includes(dump_manifest: object) -> list[Path]:
     ]
 
 
-def _pair_compile_context(
-    request: CompareRequest, lang: str
-) -> CompileContext | None:
+def _pair_compile_context(request: CompareRequest, lang: str) -> CompileContext | None:
     """The pair-wide C++20 dialect override, if the header sets imply one."""
     from .compile_context import CompileContext
     from .service_scan import pair_wide_cxx20_std_override
 
     override = pair_wide_cxx20_std_override(
         lang,
-        list(request.old.headers) + _manifest_forced_includes(request.old.dump_manifest),
-        list(request.new.headers) + _manifest_forced_includes(request.new.dump_manifest),
+        list(request.old.headers)
+        + _manifest_forced_includes(request.old.dump_manifest),
+        list(request.new.headers)
+        + _manifest_forced_includes(request.new.dump_manifest),
         None,
         (),
     )
@@ -361,9 +363,7 @@ def resolve_compare_request(
     # ADR-055 D1: `--follow-deps`'s transitive DependencyInfo. After both sides
     # resolve, not inside `_resolve_side`: it reads the on-disk ELF, so it
     # gains nothing from the extraction threads.
-    populate_pair_dependency_info(
-        request, old, new, old_fmt=old_fmt, new_fmt=new_fmt
-    )
+    populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
     enforce_requested_depth(request.depth, (("old", old), ("new", new)))
     return ResolvedComparePair(
         old=old,
@@ -448,6 +448,41 @@ def classify_compare_pair(
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
     result.old_metadata = service.collect_metadata(request.old.path)
     result.new_metadata = service.collect_metadata(request.new.path)
+
+    # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
+    # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`
+    # were only ever stamped by the CLI's own `cli_compare_helpers.
+    # _report_compare_result` -- this shared classification half of
+    # `run_compare_request` (the typed Python API / MCP `abi_compare` entry
+    # point) never populated either, so a direct caller passing an explicit,
+    # successfully-resolved `CompareRequest.depth` still read
+    # `requested_depth=None`/`depth_satisfied=None` and could report
+    # `status="complete"` even though a depth was genuinely requested.
+    # `request.depth` is the same "explicit override, never inferred"
+    # sentinel `CompareRequest.depth`'s own field comment documents (`None`
+    # when the caller never set it -- there is no separate Click
+    # parameter-source concept for a plain dataclass, so `None`-vs-set is
+    # already the request's own "was this explicit" signal); only stamp it
+    # when it is not `None`, mirroring the CLI's identical `if depth is not
+    # None` guard. Recomputes `analysis_assurance` the same way
+    # `checker.compare()` itself does (`old_pack`/`new_pack` from each
+    # snapshot's own *embedded* `build_source` -- this path has no
+    # out-of-band `--old/new-build-info`/`--old/new-sources` pack directory
+    # of the CLI's own to fold in, since `InputSpec.sources`/`build_info`
+    # are embedded into `old`/`new` before `resolve_compare_request` ever
+    # returns), so `layer_coverage`/`requested_depth` -- both only known
+    # after `compare_snapshots` returns -- are reflected too.
+    if request.depth is not None:
+        result.requested_depth = request.depth
+    from .analysis_assurance import compute_analysis_assurance
+
+    result.analysis_assurance = compute_analysis_assurance(
+        result,
+        old,
+        new,
+        old_pack=getattr(old, "build_source", None),
+        new_pack=getattr(new, "build_source", None),
+    )
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
     # list this call already resolved instead of loading it a second time.
