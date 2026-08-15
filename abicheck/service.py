@@ -1605,8 +1605,13 @@ def load_suppression_and_policy(
         except (ValueError, OSError) as e:
             raise ValidationError(f"Invalid policy file: {e}") from e
         if policy != "strict_abi":
+            # Named as Tier-2 *parameters*, not CLI flags: the CLI merged
+            # --policy/--policy-file into one --policy that routes an operand
+            # to exactly one of these, so it can no longer set both and this
+            # branch is now reachable only from a typed API caller, for whom
+            # the flag spellings would name nothing.
             _logger.warning(
-                "--policy=%r is ignored when --policy-file is given. "
+                "policy=%r is ignored when policy_file_path is given. "
                 "Set base_policy in the YAML file to override the base policy.",
                 policy,
             )

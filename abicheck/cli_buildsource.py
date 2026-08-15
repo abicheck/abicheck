@@ -611,7 +611,7 @@ def _write_snapshot_output(
                 # Genuinely absent: no extractor / no compile DB / layer never ran.
                 parts.append(
                     f"not collected: {', '.join(absent)} — supply "
-                    "--build-info/--compile-db (a compile_commands.json, e.g. from "
+                    "--build-info (a compile_commands.json or build dir, e.g. from "
                     "`bear -- make`), or install the clang/castxml source frontend"
                 )
             if ran_empty:

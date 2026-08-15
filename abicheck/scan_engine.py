@@ -802,7 +802,7 @@ def _check_scan_evidence_contract(
         advisories.append(
             f"requested depth '{eff_depth_enum.value}' (source-method "
             f"{resolved.value}) needs an L3 compile database, but none was found — "
-            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
+            "L3/L4/L5 were skipped. Provide one with --build-info (a "
             "compile_commands.json or build dir), or a trusted --config whose "
             "build.query this pinned depth auto-enables."
         )
@@ -949,8 +949,10 @@ def run_scan_core(
     _record_stage("poi", _stage)
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
-    # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
-    # L3 source; both feed embed_build_source's build_info input. The POI path set
+    # --build-info is the one build-context operand now (the separate
+    # --compile-db flag it subsumed is gone): a build dir, a
+    # compile_commands.json, or a pack, all feeding embed_build_source's
+    # build_info input. The POI path set
     # focuses the replay — but ONLY when a real diff seed was supplied
     # (``seeded``). Without --since/--changed-path the scan is broad by contract
     # (the report says so), so passing pattern-trigger POIs as the changed set

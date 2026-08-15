@@ -387,6 +387,30 @@ class TestUseCaseImpactOnCompare:
         # comparison, not of what is on screen, so it survives untouched.
         assert block["use_cases"] == full["use_case_impact"]["use_cases"]
 
+    def test_show_only_scopes_the_markdown_section_too(self, tmp_path: Path) -> None:
+        """The rendered-text fold has its own projection, on a different code
+        path from the JSON one -- ``_fold_use_case_impact_into_text`` appends
+        the section after the report body rather than emitting a key, so a
+        JSON-only test leaves the fix in the text path unexercised."""
+        manifest = _write_manifest(
+            tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
+        )
+        old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
+        new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
+
+        full = _compare(manifest, old, new, "--format", "markdown")
+        assert "training workflow: 1 change(s)" in full.output, full.output
+
+        scoped = _compare(
+            manifest, old, new, "--format", "markdown", "--show-only", "removed"
+        )
+        # The only change is an addition, so `--show-only removed` displays
+        # nothing -- and the section must attribute nothing to match. The use
+        # case is still listed at zero: it is declared in the manifest either
+        # way, and dropping the row would read as "not declared" rather than
+        # "nothing displayed reaches it".
+        assert "training workflow: 0 change(s)" in scoped.output, scoped.output
+
     def test_no_changes_between_identical_snapshots(self, tmp_path: Path) -> None:
         manifest = _write_manifest(
             tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
