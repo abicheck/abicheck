@@ -845,7 +845,8 @@ def _explicit_scope(
     project: ProjectCompatibilityInputs | None,
     layer: SelectorLayer,
     *,
-    symbol_option: str = "--public-symbol",
+    symbol_option: str = "scope.public_symbols",
+    list_option: str = "scope.public_symbols",
 ) -> tuple[DigestedItems | None, ValueProvenance]:
     """Resolve ``surface.explicit_scope`` -- an *additive* overlay field.
 
@@ -892,7 +893,7 @@ def _explicit_scope(
         selected_by.append(
             SelectedByEntry(
                 layer=layer,
-                option="--public-symbols-list",
+                option=list_option,
                 path=explicit.public_symbols_list.path,
                 sha256=explicit.public_symbols_list.sha256,
             )
@@ -900,7 +901,7 @@ def _explicit_scope(
         merged.extend(explicit.public_symbols_list.items)
         sources.append(
             {
-                "option": "--public-symbols-list",
+                "option": list_option,
                 "path": explicit.public_symbols_list.path,
                 "sha256": explicit.public_symbols_list.sha256,
             }
@@ -1202,7 +1203,14 @@ def resolve_compatibility_evaluation_config(
         explicit,
         project,
         layer,
-        symbol_option=spell("--public-symbol", "force_public_symbols"),
+        # The CLI spelling is `scope.public_symbols`, not a flag: the
+        # `--public-symbol`/`--public-symbols-list` pair were hidden
+        # duplicates of that key and were removed, so a CLI-front-end value
+        # here can only have come from `.abicheck.yml` and a receipt naming a
+        # flag would send a replay to an unknown option (Codex review). The
+        # typed API still states both fields, and `spell` still names those.
+        symbol_option=spell("scope.public_symbols", "force_public_symbols"),
+        list_option=spell("scope.public_symbols", "public_symbols_list"),
     )
     surface = SurfaceConfig(
         explicit_scope=explicit_scope,

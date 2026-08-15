@@ -762,7 +762,7 @@ class TestCompareCommand:
             str(cfg),
         )
         assert result.exit_code == 0
-        assert "only take effect with" in result.output
+        assert "scope.public_symbols overlay only takes effect with" in result.output
 
     def test_report_mode_impact(self, tmp_path: Path) -> None:
         # --report-mode impact rewrites to full + show_impact (cli.py:1828-1830).

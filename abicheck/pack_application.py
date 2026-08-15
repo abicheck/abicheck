@@ -106,9 +106,9 @@ PACK_SOURCE_KIND = "pack_manifest"
 #: read natively, as opposed to one translated into a ``PolicyFile``.
 UNAPPLIED_PACK_FIELDS: Mapping[str, str] = {
     "contract.overlays": (
-        "the public domain's overlays come from --post-manifest/--public-symbol, "
-        "which name concrete inputs; a pack naming an overlay kind has nothing "
-        "to point those at"
+        "the public domain's overlays come from --post-manifest and "
+        ".abicheck.yml's scope.public_symbols, which name concrete inputs; a "
+        "pack naming an overlay kind has nothing to point those at"
     ),
     "assurance.require_evidence": (
         "PolicyFile.require_evidence is a per-layer mapping the compare "

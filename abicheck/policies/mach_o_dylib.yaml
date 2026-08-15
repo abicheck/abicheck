@@ -14,7 +14,7 @@
 #
 # Turnkey usage:
 #
-#   abicheck compare libfoo.dylib libfoo.new.dylib --policy-file mach_o_dylib
+#   abicheck compare libfoo.dylib libfoo.new.dylib --policy mach_o_dylib
 base_policy: strict_abi
 
 overrides:

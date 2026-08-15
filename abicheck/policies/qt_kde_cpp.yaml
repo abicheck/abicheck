@@ -5,7 +5,7 @@
 #
 # Turnkey usage:
 #
-#   abicheck compare libfoo.so.1 libfoo.so.2 --policy-file qt_kde_cpp
+#   abicheck compare libfoo.so.1 libfoo.so.2 --policy qt_kde_cpp
 #
 # Already enforced by the strict_abi base (no override needed — listed here so
 # the contract is explicit):

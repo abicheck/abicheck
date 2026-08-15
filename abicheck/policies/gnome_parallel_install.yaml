@@ -11,7 +11,7 @@
 #
 # Turnkey usage:
 #
-#   abicheck compare libgtk-3.so libgtk-4.so --policy-file gnome_parallel_install
+#   abicheck compare libgtk-3.so libgtk-4.so --policy gnome_parallel_install
 base_policy: strict_abi
 
 overrides:

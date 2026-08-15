@@ -254,10 +254,16 @@ def _resolve_debug_roots(
 def _warn_force_public_ignored(
     force_public: object, scope_public_headers: bool,
 ) -> None:
-    """Warn that --public-symbol overlays need --scope-public-headers to apply."""
+    """Warn a ``scope.public_symbols`` overlay needs ``--scope-public-headers``.
+
+    Names the config key rather than the removed ``--public-symbol``/
+    ``--public-symbols-list`` flags it used to: they were hidden duplicates of
+    that key and are gone, so the overlay this warns about can only have come
+    from ``.abicheck.yml`` (Codex review).
+    """
     if force_public and not scope_public_headers:
         click.echo(
-            "Warning: --public-symbol/--public-symbols-list only take effect with "
-            "--scope-public-headers; ignoring the widening overlay.",
+            "Warning: .abicheck.yml's scope.public_symbols overlay only takes "
+            "effect with --scope-public-headers; ignoring the widening overlay.",
             err=True,
         )

@@ -50,10 +50,12 @@ Format example (``my_policy.yaml``)::
 
 Usage::
 
-    abicheck compare old.json new.json --policy-file my_policy.yaml
+    abicheck compare old.json new.json --policy my_policy.yaml
 
 Notes:
-- ``--policy-file`` overrides ``--policy`` when both are supplied.
+- ``--policy`` takes either a built-in profile name or a document path;
+  the separate ``--policy-file`` it used to need is gone, so the last
+  ``--policy`` given wins rather than one flag overriding another.
 - Checks are always executed; only verdict classification changes.
 - An unknown ``ChangeKind`` slug is a hard load error (ADR-049 D8):
   warning-and-skip is unsafe because a renamed or misspelled kind can
@@ -643,7 +645,7 @@ class PolicyFile:
             import yaml
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
-                "PyYAML is required for --policy-file support. "
+                "PyYAML is required for --policy document support. "
                 "Install it with: pip install pyyaml"
             ) from exc
 

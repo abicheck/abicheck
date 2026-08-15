@@ -12,7 +12,7 @@
 #
 # Turnkey usage:
 #
-#   abicheck compare libfoo.so libfoo.new.so --policy-file rust_c_ffi
+#   abicheck compare libfoo.so libfoo.new.so --policy rust_c_ffi
 #
 # Kept strict (NOT overridden) because they are real for a repr(C)/extern "C"
 # surface: func_removed, func_params_changed, func_return_changed,

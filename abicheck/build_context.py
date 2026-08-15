@@ -1211,7 +1211,7 @@ def _pick_target_sysroot(
     target: str | None = None
     if len(targets) > 1:
         _logger.warning(
-            "Conflicting target triples: %s; use --gcc-options to override",
+            "Conflicting target triples: %s; use --compiler-option to override",
             ", ".join(sorted(targets)),
         )
     elif targets:
