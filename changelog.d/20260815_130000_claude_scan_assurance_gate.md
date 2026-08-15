@@ -68,4 +68,11 @@
   fixed alongside, with a new generalized contract test
   (`test_every_validate_inputs_var_is_set_by_its_own_step`, mirroring the
   existing `run.sh`-scoped ones) so this class of gap can't reopen
-  unnoticed for a future input either.
+  unnoticed for a future input either. `docs/reference/exit-codes.md`'s
+  own explanation of the Action-level mapping is corrected to name the
+  dedicated input instead of the now-superseded `extra-args` route, and
+  the `analysis-assurance` topic in `docs/_meta/topics.yaml` is extended
+  with `action.yml` as a `fact_sources` entry and the generated
+  `reference/github-action-inputs.md` as a `task_pages` entry, so the new
+  input's documentation ownership is registered per `docs/AGENTS.md`'s
+  "every new Action input" rule.

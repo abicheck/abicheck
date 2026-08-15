@@ -281,7 +281,14 @@ topics:
     fact_sources:
       - abicheck/analysis_assurance.py
       - abicheck/schemas/compare_report.schema.json
+      # The composite Action's own require-complete-analysis input (a
+      # dedicated boolean mirroring the CLI flag, ADR-058-adjacent Action
+      # gating) implements this axis's opt-in exit-code gate at the Action
+      # layer, not just the CLI layer.
+      - action.yml
     reference_page: use/output-formats.md
+    task_pages:
+      - reference/github-action-inputs.md
     allowed_summaries:
       - learn/verdicts.md
 

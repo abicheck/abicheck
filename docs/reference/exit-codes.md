@@ -125,10 +125,10 @@ code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 
 The composite GitHub Action folds this the same way it folds the
-contract-coverage axis: an assurance-gated exit `1` (passed via `extra-args`
-on either command) maps to a dedicated `ANALYSIS_INCOMPLETE` verdict —
-never the compatibility verdict, and unconditional (no `fail-on-*` input
-disables it).
+contract-coverage axis: an assurance-gated exit `1` (via the dedicated
+`require-complete-analysis` input, on either command) maps to a dedicated
+`ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
+unconditional (no `fail-on-*` input disables it).
 
 ## Commands removed in the ADR-043 CLI reset
 
