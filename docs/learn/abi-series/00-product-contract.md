@@ -84,7 +84,7 @@ actually asking about:
 | [**Deployment / environment compatibility**](../dependency-floors.md) | Will the binary still run on every platform/OS version it was promised to support? | A dependency's minimum runtime version (glibc floor, macOS deployment target) was silently raised by a rebuild |
 | [**Ecosystem / consumer compatibility**](../../use/plugin-systems.md) | Does *this specific* application, plugin, or binding keep working? | A plugin's vtable/callback contract changed; a language binding's assumed struct layout moved |
 | [**Operational compatibility**](../compatibility-direction.md) | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
-| **Build-profile comparability** | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
+| [**Build-profile comparability**](../build-profile-comparability.md) | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
 
 Three more contracts don't map to a single row above — each cuts across
 several rows at once, so each gets its own page rather than forcing a
@@ -127,13 +127,15 @@ data/wire-format compatibility — don't read a clean binary-compatibility
 result as a behavioral or wire-format guarantee it never claimed to make.
 The other dimensions get their own, narrower
 treatment where the series already covers them —
-[deployment/runtime floors](../dependency-floors.md) and
-[plugin/ecosystem contracts](../../use/plugin-systems.md) each have their
-own page; build-profile comparability doesn't yet have a single narrative
-page of its own — its mechanics are documented where they're enforced, in
-the [exit-code reference](../../reference/exit-codes.md) and
-[CLI reference](../../reference/cli-reference.md) — rather than being folded
-into "ABI" generically.
+[deployment/runtime floors](../dependency-floors.md),
+[plugin/ecosystem contracts](../../use/plugin-systems.md), and
+[build-profile comparability](../build-profile-comparability.md) each have
+their own page — rather than being folded into "ABI" generically. The
+mechanics build-profile comparability *enforces* — the exact exit codes and
+the `--diagnostic-comparison` opt-out — are documented where they're
+enforced, in the [exit-code reference](../../reference/exit-codes.md) and
+[CLI reference](../../reference/cli-reference.md); the narrative page
+explains *why* the gate exists and what its three possible outcomes mean.
 
 > **Rule of thumb:** name the dimension before you argue about whether a
 > change is "a break." A change that's a real source break and a total binary

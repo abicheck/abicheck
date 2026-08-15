@@ -447,3 +447,16 @@ topics:
       - learn/abi-series/04-cpp-abi.md
       - learn/abi-api-handling.md
       - learn/exception-unwinding-abi.md
+
+  # Part 0 names build-profile comparability as one of the eight
+  # compatibility dimensions but historically had no narrative page of its
+  # own for it (docs/AGENTS.md criterion 2: a new mental model — "which
+  # outcome, not just which finding" — was missing a home).
+  build-profile-comparability:
+    canonical_page: learn/build-profile-comparability.md
+    fact_sources:
+      - abicheck/comparability.py
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - learn/environment-drift.md

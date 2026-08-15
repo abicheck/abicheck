@@ -180,6 +180,7 @@ nav:
       - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
       - Exception Unwinding: learn/exception-unwinding-abi.md
       - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
+      - Build Profile Comparability: learn/build-profile-comparability.md
       - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
     - Learning Series:
       - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md

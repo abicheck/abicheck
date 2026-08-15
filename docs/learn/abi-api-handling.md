@@ -63,7 +63,10 @@ when it sees one.
 > default examples don't show); [static/header-only contracts](static-and-header-only.md)
 > are a mixed case — a static library has a practical, if indirect, path to
 > a real comparison, while a genuinely binary-less header-only library hits
-> an actual gap in today's tooling, not just an undocumented workflow.
+> an actual gap in today's tooling, not just an undocumented workflow;
+> [build-profile comparability](build-profile-comparability.md) is the
+> question that has to be answered *before* any of the above — were OLD and
+> NEW even built under conditions that make comparing them meaningful?
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
