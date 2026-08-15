@@ -169,19 +169,23 @@ nav:
     - Overview: learn/abi-api-handling.md
     - ABI Cheat Sheet: learn/abi-cheat-sheet.md
     - Deep Dives:
+      # Framing-level pages first: these name axes every other page in this
+      # group assumes (which consumer shape, which direction, whether the
+      # comparison is even valid) rather than one more compatibility
+      # dimension in Part 0's own list.
+      - Compatibility Direction: learn/compatibility-direction.md
+      - Consumer Models: learn/consumer-models.md
+      - Build Profile Comparability: learn/build-profile-comparability.md
       - Your ABI Surface: learn/abi-surface.md
       - Class Layout ABI & API: learn/class-layout-abi.md
       - Dependency & Runtime Floors: learn/dependency-floors.md
       - Behavioral & Semantic Compatibility: learn/behavioral-compatibility.md
       - Data, Wire & Storage Compatibility: learn/data-wire-compatibility.md
       - Ownership & Lifetime Contracts: learn/ownership-and-lifetime.md
-      - Compatibility Direction: learn/compatibility-direction.md
-      - Consumer Models: learn/consumer-models.md
       - Static & Header-Only Contracts: learn/static-and-header-only.md
       - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
       - Exception Unwinding: learn/exception-unwinding-abi.md
       - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
-      - Build Profile Comparability: learn/build-profile-comparability.md
       - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
     - Learning Series:
       - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md
