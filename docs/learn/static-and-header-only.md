@@ -187,11 +187,16 @@ subset of the header a given consumer's own code actually reaches:
   source-only snapshots — and additionally pin/document the supported
   compiler and standard-library ABI range explicitly, since there's no
   runtime check equivalent to a loader refusing an incompatible SONAME.
-- For a header-only library, be explicit that *every* function is
-  effectively "public inline" in the sense [the hub's dispatcher
+- For a header-only library, be explicit that every function a consumer
+  *actually uses or instantiates* is effectively "public inline" in the sense
+  [the hub's dispatcher
   scenario](abi-api-handling.md#the-l5-graph-reachability-not-just-structure)
-  describes — a behavior change in any function reaches consumers on their
-  next rebuild, with no version boundary to soften it. Document behavior
+  describes — a behavior change in such a function reaches that consumer on
+  their next rebuild, with no version boundary to soften it. (An unused
+  inline function or an uninstantiated template emits nothing into a consumer
+  that never reaches it, so changing it doesn't affect them — but you can't
+  know which subset any given consumer reaches, so design as if every
+  declaration is reached by someone.) Document behavior
   changes as prominently as you would a binary-breaking ABI change in a
   dynamic library, because from the consumer's perspective, that's what
   they are.

@@ -418,6 +418,10 @@ topics:
 
   modern-cpp-toolchain-hazards:
     canonical_page: learn/modern-cpp-toolchain-hazards.md
+    fact_sources:
+      - scripts/evidence_tiers.py
+      - abicheck/build_context.py
+      - abicheck/dwarf_advanced.py
     allowed_summaries:
       - learn/abi-series/04-cpp-abi.md
       - learn/abi-api-handling.md

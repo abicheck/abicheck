@@ -7,6 +7,9 @@ canonical_for:
   - modern-cpp-toolchain-hazards
 depends_on:
   - abicheck/diff_symbols.py
+  - scripts/evidence_tiers.py
+  - abicheck/build_context.py
+  - abicheck/dwarf_advanced.py
 lifecycle: active
 generated: false
 ---

@@ -380,16 +380,16 @@ covering common false positives, false negatives, and unexpected verdicts.
 
 ## ELF-Only Mode and Symbol Filtering
 
-When `abicheck compare` (or `abicheck dump`) is run **without header files** — i.e.
-directly against `.so` binaries — the tool operates in *ELF-only mode*, inferring
-the public ABI surface entirely from exported ELF symbols (`.dynsym`). Shared
-libraries often export symbols that aren't part of their intended public ABI
-(statically-linked compiler runtime internals, transitive C++ stdlib symbols,
-private-namespace C separators), so abicheck applies a heuristic ABI-relevance
-filter to `.dynsym` in this mode — without it, comparing two builds that differ
-in compiler/stdlib provenance can trigger hundreds of spurious BREAKING findings.
-Supplying public headers (`-H`) eliminates ELF-only mode entirely and is the
-most reliable mitigation.
+Run without header files — i.e. directly against `.so` binaries — abicheck
+infers the public ABI surface from exported ELF symbols (`.dynsym`), falling
+back to a strictly symbols-only view only when the binary also carries no
+usable DWARF. Shared libraries often export symbols that aren't part of their
+intended public ABI (statically-linked compiler runtime internals, transitive
+C++ stdlib symbols, private-namespace C separators), so abicheck applies a
+heuristic ABI-relevance filter to `.dynsym` — without it, comparing two builds
+that differ in compiler/stdlib provenance can trigger hundreds of spurious
+BREAKING findings. That filter runs **whether or not headers are supplied**:
+`-H` improves type evidence and surface scoping, but does not bypass it.
 
 For the exact filtered prefixes, the filter's known limitations, and how
 header scoping works on PE/Mach-O, see [ELF-Only Mode and Symbol

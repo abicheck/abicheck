@@ -68,8 +68,10 @@ hand-copied prefix table here would drift the moment the filter changes:
   filtered by this rule, only the standard library's.
 - **Private C double-underscore separator** — any non-C++-mangled symbol
   (not starting with `_Z`) whose name contains `__` after the first two
-  characters — matches `H5C__flush`/`MPI__send`-style internal naming while
-  leaving system symbols (which start with `__` or `_[A-Z]`) unaffected.
+  characters — matches `H5C__flush`/`MPI__send`-style internal naming. Only
+  the *first two* characters are exempt, so a leading `__` alone doesn't
+  protect a name: `__libc_start_main` survives (no further `__`), but
+  `__gmon_start__` is filtered by its trailing `__`.
 
 This filter runs whenever a symbol's visibility is ELF-derived, **whether or
 not headers were supplied** — supplying `-H` does not bypass it. A library

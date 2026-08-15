@@ -77,10 +77,11 @@ abicheck dump libfoo.so -H include/ --sources . --compile-db build/compile_comma
 `dump` also accepts `--sources`/`--build-info` with no binary operand at
 all, producing a snapshot that carries only L3/L4/L5 facts (no L0–L2 layer,
 and no `-H`-derived declarations either — that no-artifact path has no
-header-AST step to feed). That mode exists for a narrower purpose (embedding
-source facts as one input to a larger pipeline) than a directly-comparable
-snapshot; for producing something `compare` can use on its own, run `dump`
-against the real binary as shown above.
+header-AST step to feed). Treat that snapshot as **diagnostic output with no
+supported consumer today**: there is no user-facing command that folds it onto
+a binary-side snapshot (the `merge` command that once did was removed in
+ADR-043, and nothing replaced it). For anything `compare` can actually use,
+run `dump` against the real binary as shown above.
 
 With just `--sources`, abicheck infers and runs the build-system query itself
 (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a `make -n`
