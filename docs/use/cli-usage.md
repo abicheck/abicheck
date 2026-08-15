@@ -139,9 +139,10 @@ Beyond the core `compare`/`dump` flow:
 - [Evidence, Build-Context, and Debug Flags](dump-compare-flags.md) — language
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
-- [Output Formats](output-formats.md) — `--show-only` filtering, `--stat`,
-  `--report-mode leaf|impact`, redundancy filtering, SARIF/JUnit
-  output, evidence-tier confidence, JSON schema.
+- [Output Formats](output-formats.md) — `--show-only` filtering,
+  `--profile quick`'s one-line summary, `--report-mode leaf|impact`,
+  redundancy filtering, SARIF/JUnit output, evidence-tier confidence, JSON
+  schema.
 - `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
   application's actual imports or a plugin host's required entrypoints — see
   [Application Compatibility](appcompat.md) and [Plugin Systems](plugin-systems.md).
@@ -163,8 +164,8 @@ not a straitjacket.
 | Profile | Expands to | Use when |
 |---------|-----------|----------|
 | `ci-gate` | `--depth headers --format review --exit-code-scheme severity` | Blocking a PR in CI |
-| `release-cut` | `--depth source --format markdown --recommend` | Deciding a version bump at release time |
-| `quick` | `--depth binary --stat` | A fast "just tell me" look |
+| `release-cut` | `--depth source --format markdown` (recommendation always shown) | Deciding a version bump at release time |
+| `quick` | `--depth binary` (one-line summary) | A fast "just tell me" look |
 
 Precedence is **explicit flag > profile > project config > default**: a
 `--profile` is a per-run choice you typed, so it overrides `.abicheck.yml`
@@ -185,8 +186,8 @@ abicheck compare old.json new.json --profile ci-gate
 abicheck compare old.json new.json --profile release-cut --format json
 ```
 
-> `--show-only` filtering, `scope.show_redundant: true`, `--stat`, and
-> `--report-mode leaf|impact` are covered in full on
+> `--show-only` filtering, `scope.show_redundant: true`, `--profile quick`'s
+> one-line summary, and `--report-mode leaf|impact` are covered in full on
 > [Output Formats](output-formats.md) — all are display-only and do not affect
 > the verdict or exit code.
 

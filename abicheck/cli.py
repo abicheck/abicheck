@@ -868,20 +868,24 @@ def _render_output(
     show_only: str | None = None,
     report_mode: str = "full",
     show_impact: bool = False,
-    stat: bool = False,
     severity_config: SeverityConfig | None = None,
-    show_recommendation: bool = False,
     demangle: bool = False,
     contract_evaluation: bool = False,
 ) -> str:
-    """Render comparison result in the requested output format."""
+    """Render comparison result in the requested output format.
+
+    No ``stat``/``show_recommendation`` parameters (CLI cleanup phase two,
+    PR 1): the one-line summary is reached only via ``fmt ==
+    service_render.ONELINE_FORMAT`` (the built-in ``quick`` --profile's own
+    injection), and the release recommendation is unconditionally included
+    by :func:`service.render_output` itself.
+    """
     from .service import render_output
     return render_output(
         fmt, result, old, new,
         follow_deps=follow_deps, show_only=show_only,
         report_mode=report_mode, show_impact=show_impact,
-        stat=stat, severity_config=severity_config,
-        show_recommendation=show_recommendation,
+        severity_config=severity_config,
         demangle=demangle,
         contract_evaluation=contract_evaluation,
     )
@@ -994,7 +998,7 @@ def _write_or_echo(output: Path | None, text: str) -> None:
 
 def _announce_exit_scheme(
     scheme: str,
-    *, fmt: str = "markdown", stat: bool = False,
+    *, fmt: str = "markdown",
 ) -> None:
     """Announce (on stderr) which exit-code scheme the compare command uses.
 
@@ -1002,10 +1006,14 @@ def _announce_exit_scheme(
     config's ``exit_code_scheme``, with ``auto`` already resolved to ``legacy`` or
     ``severity`` by the time we get here). Kept on stderr so it never pollutes the
     report on stdout, and only for the human-readable formats — machine formats
-    (json/sarif/junit) and the one-line ``--stat`` summary are consumed by tooling
-    that treats the whole captured stream as data, so the banner is suppressed.
+    (json/sarif/junit) and the internal one-line format (``service_render.
+    ONELINE_FORMAT``, the built-in ``quick`` --profile's sole surviving use of
+    ``--stat``'s old one-line output) are consumed by tooling that treats the
+    whole captured stream as data, so the banner is suppressed for those too;
+    the ``fmt not in {...}`` check below already covers it without a separate
+    boolean, since it isn't one of the three human-readable format names.
     """
-    if stat or fmt not in {"markdown", "html", "review"}:
+    if fmt not in {"markdown", "html", "review"}:
         return
     if scheme == "severity":
         click.echo(
@@ -1026,7 +1034,7 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
-    fmt: str | None = None, stat: bool = False, secondary_fmt: str | None = None,
+    fmt: str | None = None, secondary_fmt: str | None = None,
     *, require_complete_analysis: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
@@ -1061,7 +1069,7 @@ def _exit_with_severity_or_verdict(
         )
     else:
         exit_code = legacy_exit_code(result.verdict)
-    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
+    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, secondary_fmt=secondary_fmt)
     exit_code = fold_coverage_exit(exit_code, result)
     diagnostic = assurance_floor_diagnostic(
         result, require_complete=require_complete_analysis, base_exit=exit_code
@@ -1527,7 +1535,7 @@ def _embed_inline_source_side(
                 "--format markdown for a human alongside --write json=abi.json "
                 "for tooling). FORMAT is one of {formats}; PATH must differ from "
                 "--output/-o. Always renders the full, unfiltered report "
-                "(ignores --show-only/--stat). Not supported for "
+                "(ignores --show-only). Not supported for "
                 "directory/package (release) comparisons.",
 )
 @click.option("--demangle/--no-demangle", default=None,
@@ -1599,9 +1607,6 @@ def _embed_inline_source_side(
                    "Element: functions, variables, types, enums, elf. "
                    "Action: added, removed, changed. "
                    "AND across dimensions, OR within. Does not affect exit codes.")
-@click.option("--stat", is_flag=True, default=False,
-              help="One-line summary output for CI gates. "
-                   "With --format json, emits only the summary object.")
 @click.option("--report-mode", "report_mode",
               type=click.Choice(["full", "leaf", "impact", "root-cause"], case_sensitive=True),
               default="full", show_default=True,
@@ -1615,9 +1620,6 @@ def _embed_inline_source_side(
                    "--format sarif keeps its normal one-result-per-finding "
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
-@click.option("--recommend", is_flag=True, default=False,
-              help="Append a release recommendation (semver bump + SONAME action) to the "
-                   "report. Always present in --format json under 'release_recommendation'.")
 @click.option("--annotate", is_flag=True, default=False,
               help="Emit GitHub Actions workflow command annotations to stderr. "
                    "Annotations appear as inline comments on PR diffs. "

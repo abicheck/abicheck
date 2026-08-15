@@ -380,9 +380,15 @@ def test_sc_ci_severity_gate(tmp_path: Path) -> None:
     assert _compare(tmp_path, old, new, "--config", str(cfg)).exit_code == 0
 
 
-def test_sc_ci_stat(tmp_path: Path) -> None:
+def test_sc_ci_quick_profile(tmp_path: Path) -> None:
+    # CLI cleanup phase two, PR 1: --stat removed, --profile quick is its
+    # sole surviving one-line-summary use.
     res = _compare(
-        tmp_path, _lib("1", [_fn("a"), _fn("b")]), _lib("2", [_fn("a")]), "--stat"
+        tmp_path,
+        _lib("1", [_fn("a"), _fn("b")]),
+        _lib("2", [_fn("a")]),
+        "--profile",
+        "quick",
     )
     assert res.exit_code == 4
     assert "total" in res.output

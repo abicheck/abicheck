@@ -3181,14 +3181,17 @@ class TestRenderOutput:
         with pytest.raises(ValidationError, match="Unsupported output format"):
             render_output("xml", diff_result, snap)
 
-    def test_stat_json(self, diff_result, snap):
-        out = render_output("json", diff_result, snap, stat=True)
-        d = json.loads(out)
-        assert isinstance(d, dict)
+    def test_oneline_format(self, diff_result, snap):
+        # CLI cleanup phase two, PR 1: --stat's boolean parameter is gone --
+        # the one-line summary is now its own fmt value
+        # (service_render.ONELINE_FORMAT), reached only via the built-in
+        # `quick` --profile at the CLI layer, but directly callable here as
+        # a plain fmt string like any other format.
+        from abicheck.service_render import ONELINE_FORMAT
 
-    def test_stat_text(self, diff_result, snap):
-        out = render_output("markdown", diff_result, snap, stat=True)
+        out = render_output(ONELINE_FORMAT, diff_result, snap)
         assert isinstance(out, str)
+        assert "\n" not in out.strip()
 
     def test_json_follow_deps(self, snap):
         snap.dependency_info = DependencyInfo(

@@ -464,9 +464,9 @@ class TestUseCaseImpactOnCompare:
         """``--format html --write json=PATH`` does deliver the attribution.
 
         The secondary render reuses the same attributed ``DiffResult`` at
-        ``report_mode="full"``/``stat=False``, so rejecting on the primary
-        format alone was arbitrary -- the primary-only error message had in
-        fact been proposing this exact arrangement as the fix (Codex review).
+        ``report_mode="full"``, so rejecting on the primary format alone was
+        arbitrary -- the primary-only error message had in fact been
+        proposing this exact arrangement as the fix (Codex review).
 
         Asserting the block really lands in the secondary file, not merely
         that the invocation was accepted: "not rejected" would also pass
@@ -489,26 +489,35 @@ class TestUseCaseImpactOnCompare:
         block = json.loads(secondary.read_text(encoding="utf-8"))["use_case_impact"]
         assert block["by_use_case"]["training workflow"]
 
-    def test_stat_is_rescued_by_a_carrying_secondary_too(self, tmp_path: Path) -> None:
-        """``--stat`` constrains the *primary* shape only.
+    def test_quick_profile_is_rescued_by_a_carrying_secondary_too(
+        self, tmp_path: Path
+    ) -> None:
+        """The internal one-line format (``--profile quick``) constrains the
+        *primary* shape only.
 
-        The secondary always renders the full report, so the summary-only
-        contract stays intact while the attribution still reaches the caller
-        (Codex review). Both halves are asserted in one run, so a fix that
-        delivered the block by widening ``--stat`` itself would fail.
+        CLI cleanup phase two, PR 1: this used to be ``--stat``, which
+        constrained only the primary render the identical way -- the format
+        changed, the property under test (a non-carrying primary paired with
+        a carrying secondary is accepted, and the block lands only in the
+        secondary) did not. The secondary always renders the full report, so
+        the summary-only contract stays intact while the attribution still
+        reaches the caller (Codex review, originally about --stat). Both
+        halves are asserted in one run, so a fix that delivered the block by
+        widening the primary format itself would fail.
         """
         manifest = _write_manifest(
             tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
         )
         old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
-        primary = tmp_path / "stat.json"
         secondary = tmp_path / "full.json"
         res = _compare(
             manifest, old, new,
-            "--stat", "--format", "json", "-o", str(primary),
+            "--profile", "quick",
             "--write", f"json={secondary}",
         )
         assert res.exit_code == 4, res.output
         assert "use_case_impact" in json.loads(secondary.read_text(encoding="utf-8"))
-        assert "use_case_impact" not in json.loads(primary.read_text(encoding="utf-8"))
+        # The primary one-line render carries no JSON at all to check for the
+        # block's absence in -- it's a bare one-line summary on stdout.
+        assert "use_case_impact" not in res.output

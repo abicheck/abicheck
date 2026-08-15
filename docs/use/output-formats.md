@@ -189,17 +189,29 @@ output.
 **JUnit XML**: The `show_only` parameter filters which test cases appear in the
 output. Filtered-out changes are omitted entirely.
 
-## `--stat` mode
+## One-line summary (`--profile quick`)
 
-One-line summary for CI gates:
+`--stat` was removed (CLI cleanup phase two, PR 1). For a compact one-line
+summary in a CI log, use the built-in `quick` profile instead:
 
 ```bash
-$ abicheck compare old.json new.json --stat
+$ abicheck compare old.json new.json --profile quick
 BREAKING: 3 breaking, 1 risk (42 total) [12 redundant hidden]
-
-$ abicheck compare old.json new.json --stat --format json
-{"library": "libfoo", "verdict": "BREAKING", "summary": {...}}
 ```
+
+For a machine-readable summary, use plain `--format json` and read the
+`summary` object — it is already present in the full JSON report alongside
+`changes`, so there is no separate summary-only shape to ask for:
+
+```bash
+$ abicheck compare old.json new.json --format json
+{"library": "libfoo", "verdict": "BREAKING", "summary": {...}, "changes": [...]}
+```
+
+An explicit `--format` on the command line always overrides `--profile
+quick`'s own one-line default (`--profile quick --format json` returns the
+full JSON report above, not the one-line text) — the profile only supplies a
+default when nothing else asked for a specific format.
 
 ## `--report-mode leaf`
 
@@ -307,7 +319,7 @@ abicheck compare old.json new.json \
 - `PATH` must point at a different file than `--output`/`-o` — otherwise the
   secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
-  `--show-only`/`--stat`, which describe only the primary format's display.
+  `--show-only`, which describes only the primary format's display.
 - Not supported for directory/package (release) comparisons — the release
   fan-out doesn't produce a single `DiffResult` to render twice. Compare the
   libraries individually to use it.
@@ -798,14 +810,17 @@ Reports](aggregate-reports.md) rather than repeated here.
 
 ---
 
-## Release recommendation (`--recommend`)
+## Release recommendation
 
 Translates the verdict into the maintainer's actual question — *what version do
 I release, and do I need to bump the SONAME?* — as a recommended semantic-version
-bump (`major`/`minor`/`patch`/`none`) plus a SONAME action.
+bump (`major`/`minor`/`patch`/`none`) plus a SONAME action. Unconditional in
+every output format (CLI cleanup phase two, PR 1 removed the `--recommend`
+opt-in flag): JSON always carries it under `release_recommendation`, and
+Markdown/`review` always render it as a section — no flag needed.
 
 ```bash
-abicheck compare old.so new.so -H include/ --recommend
+abicheck compare old.so new.so -H include/
 ```
 
 The recommendation is **policy-aware** (it honours `--policy` and

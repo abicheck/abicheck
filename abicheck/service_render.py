@@ -26,11 +26,22 @@ from typing import TYPE_CHECKING
 
 from .errors import ValidationError
 from .model import AbiSnapshot
-from .reporter import to_json, to_markdown, to_stat, to_stat_json
+from .reporter import to_json, to_markdown, to_stat
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
     from .severity import SeverityConfig
+
+#: Internal-only ``fmt`` value for :func:`render_output` — a one-line human
+#: summary, not exposed as a public ``--format`` choice (CLI cleanup phase
+#: two, PR 1: ``--stat`` was removed as a public flag/boolean threaded through
+#: every renderer; this is its sole surviving use, reached only via the
+#: built-in ``quick`` --profile injecting ``fmt="oneline"`` — see
+#: ``cli_profiles.COMPARE_PROFILES["quick"]``). Kept as a plain ``fmt`` value
+#: rather than a revived boolean so it flows through the one existing
+#: dispatch this function already has, instead of re-introducing a second,
+#: orthogonal axis every caller down the stack has to thread separately.
+ONELINE_FORMAT = "oneline"
 
 
 def render_output(
@@ -43,27 +54,29 @@ def render_output(
     show_only: str | None = None,
     report_mode: str = "full",
     show_impact: bool = False,
-    stat: bool = False,
     severity_config: SeverityConfig | None = None,
-    show_recommendation: bool = False,
     demangle: bool = False,
     contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
     Supported formats: ``'json'``, ``'markdown'``, ``'sarif'``, ``'html'``,
-    ``'junit'``.
+    ``'junit'``, ``'review'``. Plus :data:`ONELINE_FORMAT`, an internal-only
+    value not exposed on the public ``--format`` CLI choice.
 
     ``demangle`` only affects human-facing formats (markdown, review); machine
     formats (json/sarif/junit) always keep raw mangled symbols so downstream
     tooling can match on them.
 
+    The release recommendation is unconditionally included in every
+    human-facing format (markdown/review) and in JSON's own ``summary``
+    block — there is no longer a flag suppressing it (CLI cleanup phase two,
+    PR 1: ``--recommend`` removed as a no-op-by-default opt-in).
+
     Raises:
         ValidationError: For unrecognised output format.
     """
-    if stat and fmt != "junit":
-        if fmt == "json":
-            return to_stat_json(result, severity_config=severity_config)
+    if fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
     if fmt == "json":
@@ -129,14 +142,20 @@ def render_output(
             f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
         )
 
-    # Default: markdown
+    # Default: markdown. show_recommendation is unconditionally True here (CLI
+    # cleanup phase two, PR 1: --recommend removed -- the recommendation is no
+    # longer an opt-in, matching review's own unconditional inclusion above
+    # and JSON's unconditional release_recommendation field). to_markdown
+    # itself keeps its own show_recommendation parameter (public API,
+    # reporter.py) with its existing default -- only this CLI-facing
+    # chokepoint's caller-supplied toggle is gone.
     md = to_markdown(
         result,
         show_only=show_only,
         report_mode=report_mode,
         show_impact=show_impact,
         severity_config=severity_config,
-        show_recommendation=show_recommendation,
+        show_recommendation=True,
         contract_evaluation=contract_evaluation,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):

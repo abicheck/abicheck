@@ -608,15 +608,24 @@ class TestCollectReleaseInputs:
 
 class TestExitSchemeHelpers:
     def test_announce_suppressed_for_json(self, capsys) -> None:
-        _announce_exit_scheme("legacy", fmt="json", stat=False)
+        _announce_exit_scheme("legacy", fmt="json")
+        assert capsys.readouterr().err == ""
+
+    def test_announce_suppressed_for_oneline(self, capsys) -> None:
+        # The internal one-line format (service_render.ONELINE_FORMAT,
+        # reached via --profile quick) is suppressed the same way json/sarif/
+        # junit are -- it isn't one of the three human-readable format names,
+        # so the same `fmt not in {...}` check covers it with no separate
+        # boolean (CLI cleanup phase two, PR 1: --stat removed).
+        _announce_exit_scheme("legacy", fmt="oneline")
         assert capsys.readouterr().err == ""
 
     def test_announce_legacy_scheme(self, capsys) -> None:
-        _announce_exit_scheme("legacy", fmt="markdown", stat=False)
+        _announce_exit_scheme("legacy", fmt="markdown")
         assert "legacy verdict" in capsys.readouterr().err
 
     def test_announce_severity_scheme(self, capsys) -> None:
-        _announce_exit_scheme("severity", fmt="markdown", stat=False)
+        _announce_exit_scheme("severity", fmt="markdown")
         assert "severity-aware" in capsys.readouterr().err
 
     def test_exit_verdict_breaking(self) -> None:
@@ -821,12 +830,24 @@ class TestCompareCommand:
         assert result.exit_code == 0
         assert "$schema" in result.output or "sarif" in result.output.lower()
 
-    def test_stat_summary(self, tmp_path: Path) -> None:
+    def test_stat_flag_removed(self, tmp_path: Path) -> None:
+        # --stat itself is gone (CLI cleanup phase two, PR 1) -- exits 64 with
+        # a Click "no such option" usage error, not a comparison result.
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
         result = _invoke("compare", str(old_f), str(new_f), "--stat")
+        assert result.exit_code == 64
+        assert "No such option" in result.output
+
+    def test_quick_profile_one_line_summary(self, tmp_path: Path) -> None:
+        # --profile quick is --stat's sole surviving one-line-summary use.
+        old, new = _breaking_pair()
+        old_f = _write_snap(tmp_path / "old.json", old)
+        new_f = _write_snap(tmp_path / "new.json", new)
+        result = _invoke("compare", str(old_f), str(new_f), "--profile", "quick")
         assert result.exit_code == 4
+        assert "\n" not in result.output.strip()
 
     def test_probe_matrix_one_side_usage_error(self, tmp_path: Path) -> None:
         snap = _snap()
@@ -2283,30 +2304,18 @@ class TestUsedByScoping:
 
         jsonschema.validate(instance=data, schema=load_compare_report_schema())
 
-    def test_stat_json_summary_reflects_scoped_only_and_missing_findings(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        """Codex review: `--format json --stat` (to_stat_json) emits a
-        summary-only payload with no `changes` array at all, so the
-        changes_list-gated recompute above never ran for it -- `verdict`
-        still swapped to the scoped gate result, but `summary` stayed the
-        stale full-library counts and no `full_summary` was added. Same
-        contradiction as the non-stat case
-        (test_json_summary_reflects_scoped_only_and_missing_findings), just
-        reachable via --stat too."""
-        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--stat",
-        )
-        data = json.loads(result.stdout)
-        assert "changes" not in data
-        assert data["verdict"] == "BREAKING"
-        assert data["summary"]["total_changes"] == 1
-        assert data["summary"]["breaking"] == 1
-        assert data["full_summary"]["total_changes"] == 0
+    # test_stat_json_summary_reflects_scoped_only_and_missing_findings removed
+    # (CLI cleanup phase two, PR 1): it exercised `--format json --stat`
+    # (`to_stat_json`'s stale-summary-vs-recomputed-verdict contradiction),
+    # a CLI combination that no longer exists -- `--stat` was removed, and
+    # the CLI never sets `stat=True` on any `reporter.to_json` call anywhere
+    # any more (verified: `to_stat_json` is now reachable only via
+    # `reporter.to_json`'s own public `stat=` parameter, called by nothing in
+    # `abicheck/*.py` outside `reporter.py` itself). The bug class this test
+    # guarded against is provably unreachable from the CLI now, not merely
+    # untested. The sibling non-stat case,
+    # test_json_summary_reflects_scoped_only_and_missing_findings above,
+    # covers the still-live path.
 
 
 class TestFoldEvidenceDepthOutOfBandPack:

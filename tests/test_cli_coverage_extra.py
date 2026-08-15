@@ -205,36 +205,51 @@ class TestShowOnlyValidation:
 
 
 class TestStatOutput:
-    """Test --stat flag for one-line summary output."""
+    """--stat was removed (CLI cleanup phase two, PR 1); --profile quick is
+    its sole surviving one-line-summary use."""
 
-    def test_stat_json_output(self, tmp_path: Path) -> None:
-        """--stat with --format json produces JSON stat output."""
+    def test_quick_profile_with_explicit_json_returns_full_json(
+        self, tmp_path: Path
+    ) -> None:
+        """``--profile quick --format json`` returns full JSON, not a
+        summary-only shape.
+
+        A deliberate behaviour refinement over the old ``--stat --format
+        json`` (which returned a summary-only shape regardless of the
+        explicit format): an explicit ``--format`` on the command line now
+        outranks the profile's own injected one-line default (the usual
+        "explicit flag > profile" precedence, ``apply_compare_profile``), so
+        the user's clear intent to get JSON is honored rather than silently
+        overridden.
+        """
         old = _make_json_snapshot(tmp_path, name="libold", version="1.0")
         new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old), str(new), "--stat", "--format", "json",
+            "compare", str(old), str(new), "--profile", "quick", "--format", "json",
         ])
         assert result.exit_code == 0
         # Read stdout (not .output) so any stderr warning — e.g. the
         # public-surface scoping fallback — does not corrupt the JSON payload.
         data = json.loads(result.stdout)
         assert "verdict" in data
+        assert "changes" in data
 
-    def test_stat_text_output(self, tmp_path: Path) -> None:
-        """--stat produces one-line summary containing verdict."""
+    def test_quick_profile_text_output(self, tmp_path: Path) -> None:
+        """``--profile quick`` alone produces a one-line summary containing
+        the verdict."""
         old = _make_json_snapshot(tmp_path, name="libold", version="1.0")
         new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old), str(new), "--stat",
+            "compare", str(old), str(new), "--profile", "quick",
         ])
         assert result.exit_code == 0
         output = result.output.strip()
         assert output  # non-empty
-        assert "NO_CHANGE" in output  # verdict should appear in stat output
+        assert "NO_CHANGE" in output  # verdict should appear in the summary
 
 
 # ---------------------------------------------------------------------------

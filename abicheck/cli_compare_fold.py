@@ -812,16 +812,16 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
 _USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
 
 
-def format_carries_use_case_impact(fmt: str | None, *, stat: bool = False) -> bool:
+def format_carries_use_case_impact(fmt: str | None) -> bool:
     """Would a report rendered as *fmt* carry the use-case attribution?
 
     Asked once per rendered output, so ``compare``'s preflight can reject
     ``--use-cases`` on the real condition -- *no* output carries it -- rather
     than on the primary format alone. A ``--format html --write json=PATH``
     run renders the secondary from the same attributed result, at
-    ``report_mode="full"`` and ``stat=False``, so the attribution does reach
-    the caller and rejecting it was arbitrary (Codex review); the primary's
-    own error message had already been proposing that exact arrangement.
+    ``report_mode="full"``, so the attribution does reach the caller and
+    rejecting it was arbitrary (Codex review); the primary's own error
+    message had already been proposing that exact arrangement.
 
     Note the quantifier is the caller's, and it is the opposite of
     :func:`contract_coverage_exit.report_carries_the_ledger`'s: that one asks
@@ -830,10 +830,13 @@ def format_carries_use_case_impact(fmt: str | None, *, stat: bool = False) -> bo
     *any* -- one output carrying the block is enough for the run to be
     meaningful.
 
-    ``stat`` is a property of the primary render only: the secondary always
-    renders the full report, so its caller leaves the default.
+    No ``stat`` parameter (CLI cleanup phase two, PR 1): the internal
+    one-line format (``service_render.ONELINE_FORMAT``) is simply not in
+    :data:`_USE_CASE_IMPACT_BEARING_FORMATS`, so ``fmt in
+    _USE_CASE_IMPACT_BEARING_FORMATS`` already answers correctly for it with
+    no separate boolean needed.
     """
-    if fmt is None or stat:
+    if fmt is None:
         return False
     return fmt in _USE_CASE_IMPACT_BEARING_FORMATS
 

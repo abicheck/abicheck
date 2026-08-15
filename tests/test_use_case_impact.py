@@ -323,11 +323,16 @@ class TestSetInputsAreRejected:
 
 
 class TestStatKeepsItsSummaryOnlyShape:
-    """``--stat``'s documented contract is one shape: "With --format json,
-    emits only the summary object". A use-case attribution block is the
-    opposite of a summary, so the combination is rejected rather than
-    silently dropping the manifest — the same reasoning as the set-input
-    rejection above (Codex review)."""
+    """The internal one-line format's documented contract is one shape: a
+    bare one-line summary. A use-case attribution block is the opposite of a
+    summary, so the combination is rejected rather than silently dropping
+    the manifest — the same reasoning as the set-input rejection above
+    (Codex review, originally about ``--stat``; CLI cleanup phase two, PR 1
+    moved the one-line output behind ``--profile quick`` instead of a
+    boolean flag, but the summary-only contract is unchanged). Unlike the
+    old ``--stat`` boolean, this format is reached only when nothing else
+    (an explicit ``--format``) overrides the profile's own injected value —
+    so there is exactly one combination to check, not one per format."""
 
     @staticmethod
     def _pair(tmp_path: Path) -> tuple[Path, Path]:
@@ -354,12 +359,9 @@ class TestStatKeepsItsSummaryOnlyShape:
             paths.append(path)
         return paths[0], paths[1]
 
-    @pytest.mark.parametrize("fmt", ["json", "markdown", "review"])
-    def test_stat_with_use_cases_is_a_usage_error(
-        self, tmp_path: Path, fmt: str
+    def test_quick_profile_with_use_cases_is_a_usage_error(
+        self, tmp_path: Path
     ) -> None:
-        # Every format, not just json: the rendered-text paths appended the
-        # detailed section after the one-line stat output for the same reason.
         old, new = self._pair(tmp_path)
         manifest = tmp_path / "uc.yaml"
         manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
@@ -367,11 +369,11 @@ class TestStatKeepsItsSummaryOnlyShape:
             main,
             [
                 "compare", str(old), str(new),
-                "--stat", "--format", fmt, "--use-cases", str(manifest),
+                "--profile", "quick", "--use-cases", str(manifest),
             ],
         )
         assert result.exit_code == 64, result.output
-        assert "--stat emits only the summary object" in result.output
+        assert "--profile quick emits only a one-line summary" in result.output
 
     @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
     def test_a_format_that_cannot_carry_the_block_is_rejected(
@@ -431,20 +433,17 @@ class TestStatKeepsItsSummaryOnlyShape:
         )
         assert "--use-cases is not supported" not in result.output, result.output
 
-    def test_stat_without_the_manifest_still_emits_the_summary(
+    def test_quick_profile_without_the_manifest_still_emits_the_summary(
         self, tmp_path: Path
     ) -> None:
-        # The rejection must not have narrowed --stat itself.
-        import json
-
+        # The rejection must not have narrowed the one-line format itself.
         old, new = self._pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--stat", "--format", "json"]
+            main, ["compare", str(old), str(new), "--profile", "quick"]
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output[result.output.find("{"):])
-        assert "use_case_impact" not in doc
-        assert "changes" not in doc
+        assert "use_case_impact" not in result.output
+        assert "changes" not in result.output
 
     def test_the_renderer_itself_never_adds_the_block(self) -> None:
         """The CLI rejection is a guard, not the contract's only enforcement:

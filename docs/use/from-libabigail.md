@@ -79,7 +79,7 @@ the severity-aware scheme).
 | `--debug-info-dir1 DIR` / `--d1` | `--debug-root old=DIR` | Sidecar/split debug trees |
 | `--debug-info-dir2 DIR` / `--d2` | `--debug-root new=DIR` | `--debug-root DIR` applies to both sides |
 | *(no equivalent)* | `--debuginfod` | Fetch debug info from a debuginfod server |
-| `--stat` | `--stat` | One-line summary instead of the full report |
+| `--stat` | `--profile quick` | One-line summary instead of the full report |
 | `--leaf-changes-only` / `-l` | `--report-mode leaf` | Root-type-grouped leaf view |
 | `--impacted-interfaces` | `--report-mode impact` | Impact summary appended to the report |
 | `--no-added-syms` | `--show-only removed,changed` | Display-only filter; verdict and exit code unchanged |

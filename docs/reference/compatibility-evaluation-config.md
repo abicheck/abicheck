@@ -189,9 +189,8 @@ field in ADR-049's typed shape; they stay outside this object.
 corresponding flag alone, so it sits at D7's `run_profile` tier: below an
 explicit flag, above `.abicheck.yml`. Exactly one field of this object is
 reachable that way — `gate.exit_code_scheme`, which `ci-gate` sets to
-`severity`. The bundle's other keys (`depth`, the report format,
-`--recommend`, `--stat`) are execution and report settings with no field
-here.
+`severity`. The bundle's other keys (`depth`, the report format) are
+execution and report settings with no field here.
 
 That one field is a **known deviation** from D7, which scopes the
 `run_profile` tier to execution fields and puts the exit-code scheme in the
