@@ -264,6 +264,21 @@ MODE="${INPUT_MODE:-compare}"
 # no single-snapshot asset would otherwise fail with "command not found"
 # on exactly the runners this fallback exists to serve (Codex review).
 _PY_BIN="$(command -v python3 || command -v python || true)"
+# `command -v` can return a path relative to the CURRENT working directory
+# when PATH itself contains a relative entry (e.g. a self-hosted runner
+# configured with PATH=tools:$PATH) -- a real, if unusual, configuration.
+# Every inline Python invocation below runs as `(cd "$_PY_SAFE_DIR" && ...
+# "$_PY_BIN" ...)`, so a relative $_PY_BIN would resolve against the new
+# CWD after that `cd`, not the directory it was actually found relative to,
+# making a genuinely working, abicheck-capable interpreter falsely resolve
+# as unusable (Codex review, fresh evidence). Anchored to $PWD here, before
+# any `cd` happens, using the same portable absolute-path check
+# (`_report_query` below) already uses for the identical reason.
+case "$_PY_BIN" in
+  /* | ?:[/\\]* | \\*) ;; # already absolute: POSIX, Windows drive-letter, or UNC/root-relative (\\server\share\..., \foo)
+  "") ;; # not found at all -- leave empty, existing fallbacks handle this
+  *) _PY_BIN="$PWD/$_PY_BIN" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Security: `python -c`/`python -m` insert this process's current working
@@ -1514,7 +1529,7 @@ _report_query() {
   # point in the script.
   local report_path="$1"
   case "$report_path" in
-    /* | ?:[/\\]*) ;; # already absolute: POSIX, or Windows drive-letter
+    /* | ?:[/\\]* | \\*) ;; # already absolute: POSIX, Windows drive-letter, or UNC/root-relative (\\server\share\..., \foo)
     *) report_path="$PWD/$report_path" ;;
   esac
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null

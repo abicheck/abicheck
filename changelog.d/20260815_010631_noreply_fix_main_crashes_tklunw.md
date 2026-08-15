@@ -116,6 +116,24 @@
   value** (e.g. an unbalanced quote) — it now degrades the same way its
   sibling `explicit_language_standard` already does, instead of letting
   `split_gcc_options`'s `ValueError` escape and abort the dump.
+- **`$_PY_BIN` (the resolved Python interpreter `action/run.sh` uses for
+  every inline invocation) is now canonicalized to an absolute path
+  immediately after resolution.** `command -v python3` can return a path
+  relative to the current working directory when `PATH` itself contains a
+  relative entry (a real, if unusual, self-hosted-runner configuration) —
+  every inline invocation runs as `(cd "$_PY_SAFE_DIR" && ... "$_PY_BIN"
+  ...)`, so an uncanonicalized relative `$_PY_BIN` would resolve against
+  `$_PY_SAFE_DIR` instead of the directory it was actually found relative
+  to, making a genuinely working, abicheck-capable interpreter falsely
+  resolve as unusable (Codex review).
+- **`_report_query`'s report-path anchoring now also recognizes a Windows
+  UNC path (`\\server\share\report.json`) and a root-relative path
+  (`\report.json`) as already absolute**, not just a POSIX absolute path or
+  a drive-letter path — the previous check matched neither, so a UNC report
+  path was wrongly rewritten with a `$PWD/` prefix, making a real report
+  silently unreadable and the Job Summary/PR-comment severity lookups fall
+  back to their generic "no report available" message instead of the
+  report's actual verdict (Codex review).
 - **`_user_define_flags` (the ADR-039 build-context collector's global
   `-D`/`-U` harvester, `cli_dump_helpers.py`) now tokenizes its
   `--gcc-options` string with the shared `split_gcc_options`, not a bare

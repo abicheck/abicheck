@@ -66,6 +66,9 @@ _PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
 
 _MALICIOUS_MARKER = "MALICIOUS CODE EXECUTED"
 
+_PY_BIN_RESOLUTION_START = '_PY_BIN="$(command -v python3 || command -v python || true)"'
+_PY_BIN_RESOLUTION_END = "\nesac\n"
+
 
 def _py_safe_dir_source() -> str:
     """Extract the real ``_PY_SAFE_DIR=...`` assignment verbatim from
@@ -75,6 +78,19 @@ def _py_safe_dir_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_PY_SAFE_DIR_START)
     end = text.index(_PY_SAFE_DIR_END, start) + len(_PY_SAFE_DIR_END)
+    return text[start:end]
+
+
+def _py_bin_resolution_source() -> str:
+    """Extract the real ``$_PY_BIN`` resolution verbatim -- the
+    ``command -v`` lookup plus its immediately-following absolute-path
+    canonicalization ``case`` block (Codex review, fresh evidence: a
+    relative PATH entry can make ``command -v`` return a path relative to
+    the CWD, which every ``(cd "$_PY_SAFE_DIR" && ... "$_PY_BIN" ...)``
+    invocation below would then resolve against the wrong directory)."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PY_BIN_RESOLUTION_START)
+    end = text.index(_PY_BIN_RESOLUTION_END, start) + len(_PY_BIN_RESOLUTION_END)
     return text[start:end]
 
 
@@ -437,3 +453,59 @@ class TestPySafeDirCleanedUpOnEarlyExit:
             assert Path(created_dir).exists()
         finally:
             subprocess.run(["rm", "-rf", created_dir], timeout=10)
+
+
+class TestPyBinResolvedAsAbsolute:
+    """Codex review, fresh evidence: a self-hosted runner with a relative
+    ``PATH`` entry (e.g. ``PATH=tools:$PATH``) makes ``command -v python3``
+    return a path relative to the CWD -- every inline Python invocation runs
+    as ``(cd "$_PY_SAFE_DIR" && ... "$_PY_BIN" ...)``, so an uncanonicalized
+    ``$_PY_BIN`` would resolve against the wrong directory after that ``cd``,
+    making a genuinely working, abicheck-capable interpreter falsely
+    unusable."""
+
+    def test_relative_path_interpreter_is_anchored_to_the_original_cwd(
+        self, tmp_path: Path
+    ) -> None:
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        fake_python3 = tools / "python3"
+        fake_python3.write_text('#!/bin/bash\necho "ARGS: $@"\n')
+        fake_python3.chmod(0o755)
+
+        script = _py_bin_resolution_source() + 'echo "PY_BIN=$_PY_BIN"\n'
+        env = {**os.environ, "PATH": f"tools{os.pathsep}{os.environ.get('PATH', '')}"}
+        result = _run_bash_script(script, env=env, cwd=tmp_path, timeout=30)
+        assert result.returncode == 0, result.stderr
+        line = next(
+            ln for ln in result.stdout.splitlines() if ln.startswith("PY_BIN=")
+        )
+        py_bin = line[len("PY_BIN=") :]
+        assert Path(py_bin).is_absolute()
+        assert Path(py_bin) == fake_python3
+
+    def test_without_the_fix_relative_path_actually_reproduces(
+        self, tmp_path: Path
+    ) -> None:
+        """Proves the test above isn't vacuously passing -- the identical
+        ``command -v`` resolution, minus only the canonicalization ``case``
+        block, really does leave a relative path in ``$_PY_BIN`` when
+        ``PATH`` itself holds a relative entry."""
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        fake_python3 = tools / "python3"
+        fake_python3.write_text('#!/bin/bash\necho "ARGS: $@"\n')
+        fake_python3.chmod(0o755)
+
+        script = (
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            'echo "PY_BIN=$_PY_BIN"\n'
+        )
+        env = {**os.environ, "PATH": f"tools{os.pathsep}{os.environ.get('PATH', '')}"}
+        result = _run_bash_script(script, env=env, cwd=tmp_path, timeout=30)
+        assert result.returncode == 0, result.stderr
+        line = next(
+            ln for ln in result.stdout.splitlines() if ln.startswith("PY_BIN=")
+        )
+        py_bin = line[len("PY_BIN=") :]
+        assert not Path(py_bin).is_absolute()

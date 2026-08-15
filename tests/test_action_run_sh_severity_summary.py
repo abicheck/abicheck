@@ -102,6 +102,25 @@ def _verdict_case_region() -> str:
     )
 
 
+#: `_report_query`'s own report-path anchoring block: `local report_path=`
+#: through its closing `esac` -- extracted separately from the rest of the
+#: function (which shells out to Python) so its anchoring *decision* can be
+#: tested directly, without needing a real file for the Python heredoc to
+#: read (Codex review, fresh evidence: a Windows UNC path like
+#: ``\\server\share\report.json`` matched neither the POSIX nor
+#: drive-letter branch of the original pattern and was wrongly rewritten as
+#: ``$PWD/\\server\share\report.json``).
+_REPORT_PATH_ANCHOR_START = 'local report_path="$1"'
+_REPORT_PATH_ANCHOR_END = "\n  esac\n"
+
+
+def _report_path_anchor_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_REPORT_PATH_ANCHOR_START)
+    end = text.index(_REPORT_PATH_ANCHOR_END, start) + len(_REPORT_PATH_ANCHOR_END)
+    return text[start:end]
+
+
 def _bash_executable() -> str:
     """Resolve a real bash, bypassing Windows' WSL-launcher stub.
 
@@ -306,3 +325,53 @@ class TestSeverityErrorSummaryLine:
             {"VERDICT": "COMPATIBLE", "FORMAT": "markdown", "ABICHECK_EXIT": "0"}
         )
         assert "No binary ABI break detected" in out
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestReportPathAnchoring:
+    """`_report_query`'s path-anchoring `case` block (Codex review, fresh
+    evidence): a path that is already absolute in *some* real-world sense
+    must survive unchanged, not get a spurious `$PWD/` prefix prepended."""
+
+    def _anchor(self, report_path: str, cwd: Path) -> str:
+        script = (
+            'f() {\n  local report_path="$1"\n'
+            + _report_path_anchor_source()[len(_REPORT_PATH_ANCHOR_START) :]
+            + '  printf "%s" "$report_path"\n}\nf "$1"\n'
+        )
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+        ) as f:
+            f.write(script)
+            script_path = f.name
+        try:
+            result = subprocess.run(
+                [_bash_executable(), script_path, report_path],
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        finally:
+            os.unlink(script_path)
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    def test_posix_absolute_path_is_unchanged(self, tmp_path: Path) -> None:
+        assert self._anchor("/abs/report.json", tmp_path) == "/abs/report.json"
+
+    def test_windows_drive_letter_path_is_unchanged(self, tmp_path: Path) -> None:
+        assert self._anchor("C:\\report.json", tmp_path) == "C:\\report.json"
+
+    def test_unc_path_is_unchanged(self, tmp_path: Path) -> None:
+        """The original bug: `\\\\server\\share\\report.json` matched neither
+        the POSIX nor drive-letter branch and was wrongly rewritten with a
+        `$PWD/` prefix -- silently pointing at a nonexistent path and making
+        `_report_query` read as "no report available"."""
+        unc = "\\\\server\\share\\report.json"
+        assert self._anchor(unc, tmp_path) == unc
+
+    def test_windows_root_relative_path_is_unchanged(self, tmp_path: Path) -> None:
+        assert self._anchor("\\report.json", tmp_path) == "\\report.json"
+
+    def test_genuinely_relative_path_is_anchored_to_pwd(self, tmp_path: Path) -> None:
+        assert self._anchor("report.json", tmp_path) == f"{tmp_path}/report.json"
