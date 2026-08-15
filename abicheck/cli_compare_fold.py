@@ -116,6 +116,20 @@ def _fold_scoped_compat_into_text(
         return fold.into_json(text)
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
+    if fmt == "oneline":
+        # service_render.ONELINE_FORMAT (the built-in `quick` --profile's
+        # output), duplicated as a literal rather than imported -- same
+        # leaf-module-independence reasoning as contract_coverage_exit.py's
+        # own `_ONELINE_FORMAT` (CLI cleanup phase two, PR 1). Unlike
+        # markdown/text/review's into_text (which appends a scoped section
+        # after the existing report), the incoming `text` here is the
+        # *unscoped* one-liner and must be replaced outright, not appended
+        # to -- appending would break the one-line contract --profile quick
+        # exists to guarantee, and leaving it as the leading line would
+        # print the wrong (full-library) verdict/counts next to a process
+        # exit code computed from the scoped result (Codex review, fresh
+        # evidence).
+        return fold.into_oneline()
     return text
 
 
@@ -194,6 +208,67 @@ class _ScopedFold:
         elif isinstance(full_summary, dict):
             self._fold_findings_into_stat_summary(payload, full_summary)
         return json.dumps(payload, indent=2)
+
+    # ── One-line (service_render.ONELINE_FORMAT, the built-in `quick`
+    #    --profile's output) ──────────────────────────────────────────────
+
+    def into_oneline(self) -> str:
+        """The one-line summary, but for the *scoped* gate.
+
+        CLI cleanup phase two, PR 1 (Codex review, fresh evidence): before
+        this method existed, `--profile quick` combined with `--used-by`/
+        `--required-symbol` fell through `_fold_scoped_compat_into_text`'s
+        dispatch untouched (only json/markdown/text/review were handled),
+        so the printed one-liner showed the full-library verdict/counts even
+        though the process actually exits on the *scoped* result -- e.g.
+        removing an irrelevant symbol while breaking a required one could
+        print "BREAKING: 1 breaking" while exiting 0, or the reverse.
+
+        Rather than re-deriving scoped counts from scratch, this reuses
+        :meth:`into_json` over a `to_stat_json`-shaped payload -- the exact
+        same scoped-verdict-swap and count-recompute logic the JSON path
+        already uses and this module's own tests already cover -- and
+        re-renders the result through the identical one-line format
+        :func:`reporter_markdown.to_stat` uses, via the shared
+        `format_stat_line` helper (`stat_line.py`) both now call. This
+        guarantees the one-line output and a `--format json` run of the
+        same scoped invocation can never disagree about the verdict or
+        counts, since both are read from the one already-reviewed fold.
+        """
+        import json
+
+        from .reporter import to_stat_json
+        from .reporter_markdown import _VERDICT_LABEL
+        from .stat_line import format_stat_line
+
+        base = to_stat_json(self.result, severity_config=self.severity_config)
+        folded = json.loads(self.into_json(base))
+        summary = folded.get("summary") or {}
+        verdict_value = folded.get("verdict") or _VERDICT_LABEL[self.result.verdict]
+        gate_note = ""
+        severity_block = folded.get("severity")
+        if isinstance(severity_block, dict):
+            # Read back the already-scoped-swapped block `into_json`'s own
+            # `_swap_in_scoped_severity` produced (when the run's exit-code
+            # scheme is severity-aware) instead of recomputing from
+            # `self.result.changes` (full-library) here -- recomputing would
+            # reproduce, for this one-line path, exactly the full-vs-scoped
+            # severity mismatch `_swap_in_scoped_severity` exists to fix for
+            # the JSON path.
+            exit_code = severity_block.get("exit_code", 0)
+            gate_note = (
+                f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
+            )
+        return format_stat_line(
+            str(verdict_value),
+            breaking=summary.get("breaking", 0),
+            source_breaks=summary.get("source_breaks", 0),
+            risk_count=summary.get("risk_changes", 0),
+            compatible_additions=summary.get("compatible_additions", 0),
+            total_changes=summary.get("total_changes", 0),
+            redundant_count=self.result.redundant_count,
+            gate_note=gate_note,
+        )
 
     def _swap_in_scoped_severity(self, payload: dict[str, Any]) -> None:
         """Move the full-library severity block aside for the scoped one.

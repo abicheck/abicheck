@@ -1710,7 +1710,54 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
         assert "Scoped verdict: COMPATIBLE" in result.stdout
-        assert "full library verdict above is BREAKING" in result.stdout
+
+    def test_quick_profile_one_liner_states_scoped_verdict_not_full(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """CLI cleanup phase two, PR 1 (Codex review, fresh evidence): the
+        internal one-line format (``--profile quick``) used to fall through
+        ``_fold_scoped_compat_into_text``'s dispatch untouched, so the
+        printed one-liner showed the full-library BREAKING verdict/counts
+        even though the process exits 0 on the scoped-compatible result --
+        the identical setup as
+        ``test_markdown_states_scoped_verdict_when_it_disagrees_with_full``
+        above, just through the one-line renderer instead of markdown."""
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick",
+        )
+        assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
+        # The verdict label leads with the scoped result (COMPATIBLE), the
+        # same swap `into_json`'s `payload["verdict"]` makes -- not the
+        # full-library BREAKING that would exit 4. The counts after the
+        # colon still describe the full library's findings ("1 breaking",
+        # from the real removed-symbol diff below): that mirrors
+        # `--format json`'s own `summary`/`changes` in this identical
+        # scenario (see test_json_severity_block_reflects_scoped_gate_not_
+        # full_library above) -- the scoped gate decides pass/fail, it does
+        # not filter which findings are shown, so this is consistency with
+        # JSON, not a leftover full-library verdict.
+        assert result.stdout.strip() == "COMPATIBLE: 1 breaking (1 total)"
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch

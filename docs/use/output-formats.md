@@ -815,9 +815,12 @@ Reports](aggregate-reports.md) rather than repeated here.
 Translates the verdict into the maintainer's actual question — *what version do
 I release, and do I need to bump the SONAME?* — as a recommended semantic-version
 bump (`major`/`minor`/`patch`/`none`) plus a SONAME action. Unconditional in
-every output format (CLI cleanup phase two, PR 1 removed the `--recommend`
-opt-in flag): JSON always carries it under `release_recommendation`, and
-Markdown/`review` always render it as a section — no flag needed.
+`json`, `markdown`, and `review` (CLI cleanup phase two, PR 1 removed the
+`--recommend` opt-in flag that used to gate it): JSON always carries it under
+`release_recommendation`, and Markdown/`review` always render it as a
+section — no flag needed. `html` does not render it (the HTML report has no
+recommendation section), and `sarif`/`junit` intentionally omit it — neither
+format has a natural slot for a release verdict.
 
 ```bash
 abicheck compare old.so new.so -H include/

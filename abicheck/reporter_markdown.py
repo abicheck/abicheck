@@ -83,21 +83,9 @@ def to_stat(
     the verdict label alone could misreport whether the run actually blocks
     CI once severity configuration is in play.
     """
+    from .stat_line import format_stat_line
+
     summary = build_summary(result)
-    label = _VERDICT_LABEL[result.verdict]
-    parts = []
-    if summary.breaking:
-        parts.append(f"{summary.breaking} breaking")
-    if summary.source_breaks:
-        parts.append(f"{summary.source_breaks} source-level breaks")
-    if summary.risk_count:
-        parts.append(f"{summary.risk_count} risk")
-    if summary.compatible_additions:
-        parts.append(f"{summary.compatible_additions} compatible")
-    detail = ", ".join(parts) if parts else "no changes"
-    redundant_note = ""
-    if result.redundant_count > 0:
-        redundant_note = f" [{result.redundant_count} redundant hidden]"
     gate_note = ""
     if severity_config is not None:
         from .severity import compute_exit_code
@@ -112,8 +100,15 @@ def to_stat(
         gate_note = (
             f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
         )
-    return (
-        f"{label}: {detail} ({summary.total_changes} total){redundant_note}{gate_note}"
+    return format_stat_line(
+        _VERDICT_LABEL[result.verdict],
+        breaking=summary.breaking,
+        source_breaks=summary.source_breaks,
+        risk_count=summary.risk_count,
+        compatible_additions=summary.compatible_additions,
+        total_changes=summary.total_changes,
+        redundant_count=result.redundant_count,
+        gate_note=gate_note,
     )
 
 
