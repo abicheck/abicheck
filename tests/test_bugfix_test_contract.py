@@ -191,6 +191,53 @@ class TestAgainstRealGit:
         monkeypatch.setattr(gate, "ROOT", repo)
         assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == 1
 
+    def test_a_docstring_only_edit_is_not_a_regression_test(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A docstring cannot fail, so editing one is not evidence.
+
+        Through real git and a real file so the line numbers are real: a
+        docstring's middle lines are arbitrary prose, indistinguishable from
+        code by pattern alone (Codex review).
+        """
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/test_a.py": (
+                    "def test_a():\n"
+                    '    """Now with an explanation.\n'
+                    "\n"
+                    "    Several lines of it, none executable.\n"
+                    '    """\n'
+                    "    assert 1 == 1\n    assert 2 == 2\n"
+                ),
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == 1
+
+    def test_a_new_assertion_beside_a_new_docstring_is_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: the docstring rule drops docstring *lines*, not
+        the whole edit that happens to contain one."""
+        repo = _git_repo_with(
+            tmp_path,
+            second_commit={
+                "scripts/thing.py": "x = 2\n",
+                "tests/test_a.py": (
+                    "def test_a():\n"
+                    '    """Now with an explanation."""\n'
+                    "    assert 1 == 1\n    assert 2 == 2\n    assert 3 == 3\n"
+                ),
+            },
+        )
+        monkeypatch.setattr(gate, "ROOT", repo)
+        assert gate.main(["--base", "HEAD~1", "--head", "HEAD"]) == (
+            gate.EXIT_STRUCTURAL_ONLY
+        )
+
     def test_a_real_new_assertion_does_satisfy_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

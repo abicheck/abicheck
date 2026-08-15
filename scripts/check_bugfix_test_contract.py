@@ -55,9 +55,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -333,6 +335,9 @@ _MARKER = "<!-- bugfix-test-contract -->"
 #: exact bypass this strip exists to close (CodeRabbit review). The
 #: template ships two comment blocks, so a deleted `-->` is a realistic
 #: edit.
+#: `@@ -a,b +c,d @@` — only the new side matters here.
+_HUNK_NEW_SIDE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
 _HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
 
 #: A line in the body answering a requirement: `- Negative control: <text>`.
@@ -419,6 +424,19 @@ def unified_diff(base: str, head: str) -> str:
     )
 
 
+def _show_at(rev: str, path: str) -> str | None:
+    """The file's content at *rev*, or None when it cannot be read.
+
+    The docstring rule needs the new-side file, not the diff: a docstring's
+    middle lines are arbitrary prose and cannot be recognised from a hunk
+    alone.
+    """
+    try:
+        return _git(["show", f"{rev}:{path}"])
+    except subprocess.CalledProcessError:
+        return None
+
+
 def commit_subjects(base: str, head: str) -> list[str]:
     out = _git(["log", "--format=%s", f"{base}..{head}"])
     return [line for line in out.splitlines() if line]
@@ -477,50 +495,122 @@ def touches_tests(paths: list[str]) -> bool:
     return any(is_test_path(p) for p in paths)
 
 
-def added_content_paths(diff_text: str) -> set[str]:
-    """Paths this diff adds at least one line of *substantive* content to.
+def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
+    """`path -> [(new-side line number, text), ...]` for every added line.
 
-    Pure, so it can be tested against diff text directly. Two exclusions, both
-    of which are content-shaped rather than status-shaped:
+    The number comes from the hunk header (`--unified=0`, so every line in a
+    hunk is an addition) and the text from the `+` line itself, because both
+    are needed: the text answers "is this blank or a comment", the number
+    answers "is this inside a docstring", and neither question can be
+    answered from the other's evidence.
 
-    * A **pure rename** produces no added lines at all under rename detection
-      (`similarity index 100%`, no `+++` header), so it never appears here.
-      This is the reason the function exists: `changed_files()` runs with
-      `--no-renames`, which reports `git mv tests/test_a.py tests/test_b.py`
-      as one `D` and one `A`, and a status-only predicate read that `A` as a
-      regression test (Codex review). Renaming a test is not writing one.
-    * Blank lines, and comment-only lines in Python, are not evidence either.
-      They are the cheapest possible way to produce an `M` on a test file.
-
-    The comment rule is `.py`-only on purpose: `#` starts a heading in a
-    golden Markdown snapshot and is ordinary content in most fixture formats,
-    so applying it everywhere would discard real test-data changes.
+    A **pure rename or copy** produces no `+++` header at all under
+    rename/copy detection (`similarity index 100%`), so it contributes
+    nothing — which is the point: moving or duplicating a test is not writing
+    one (Codex review).
     """
-    out: set[str] = set()
+    out: dict[str, list[tuple[int, str]]] = {}
     current: str | None = None
+    next_line = 0
     for line in diff_text.splitlines():
         if line.startswith("diff --git "):
-            # Reset first: a rename-only entry carries no `+++` header at all,
-            # so without this the previous file's attribution would leak into
-            # it and any following `+` line would be credited to the rename.
+            # Reset first: a rename/copy-only entry carries no `+++` header,
+            # so without this the previous file's attribution leaks into it.
             current = None
             continue
         if line.startswith("+++ "):
             target = line[4:].strip()
             current = target[2:] if target.startswith("b/") else None
             continue
-        if current is None or not line.startswith("+"):
+        if current is None:
             continue
-        body = line[1:].strip()
-        if not body:
+        m = _HUNK_NEW_SIDE.match(line)
+        if m:
+            next_line = int(m.group(1))
             continue
-        if current.endswith(".py") and body.startswith("#"):
-            continue
-        out.add(current)
+        if line.startswith("+"):
+            out.setdefault(current, []).append((next_line, line[1:]))
+            next_line += 1
     return out
 
 
-def adds_or_modifies_a_test(changed: list[tuple[str, str]], diff_text: str) -> bool:
+def _docstring_lines(source: str) -> set[int]:
+    """Every line occupied by a docstring in *source*.
+
+    Docstrings are the one kind of added line that is real Python and still
+    cannot fail: editing one changes no assertion, no fixture and no
+    behaviour, so it is not regression evidence (Codex review). Other string
+    literals are left alone deliberately — a fixture's expected output *is*
+    test data.
+
+    Determined by parsing rather than by pattern-matching the diff: a
+    docstring's middle lines are arbitrary prose, indistinguishable from code
+    without knowing the enclosing node.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+    return lines
+
+
+def added_content_paths(
+    diff_text: str, read_new: Callable[[str], str | None] | None = None
+) -> set[str]:
+    """Paths this diff adds at least one line of *substantive* content to.
+
+    Three exclusions, all content-shaped rather than status-shaped: a rename
+    or copy (no added lines at all), a blank or comment-only line, and — when
+    *read_new* can supply the new file — a line inside a docstring.
+
+    The comment and docstring rules are `.py`-only on purpose: `#` starts a
+    heading in a golden Markdown snapshot and is ordinary content in most
+    fixture formats, so applying either everywhere would discard real
+    test-data changes. Without *read_new* the docstring rule simply does not
+    apply; the blank/comment rule still does, since it needs only the diff.
+    """
+    out: set[str] = set()
+    for path, added in added_lines_by_path(diff_text).items():
+        is_python = path.endswith(".py")
+        docstrings: set[int] = set()
+        if is_python and read_new is not None:
+            source = read_new(path)
+            if source is not None:
+                docstrings = _docstring_lines(source)
+        for number, text in added:
+            body = text.strip()
+            if not body:
+                continue
+            if is_python and body.startswith("#"):
+                continue
+            if number in docstrings:
+                continue
+            out.add(path)
+            break
+    return out
+
+
+def adds_or_modifies_a_test(
+    changed: list[tuple[str, str]],
+    diff_text: str,
+    read_new: Callable[[str], str | None] | None = None,
+) -> bool:
     """Positive evidence that a regression test exists.
 
     Both halves are required, because each catches something the other cannot:
@@ -529,7 +619,7 @@ def adds_or_modifies_a_test(changed: list[tuple[str, str]], diff_text: str) -> b
     out a rename or a whitespace/comment-only edit, which carry an `A`/`M`
     status while asserting nothing new.
     """
-    with_content = added_content_paths(diff_text)
+    with_content = added_content_paths(diff_text, read_new)
     return any(
         status in ("A", "M") and is_test_path(path) and path in with_content
         for status, path in changed
@@ -644,7 +734,9 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
 
     # --- structural ----------------------------------------------------
-    if touches_shipped_code(paths) and not adds_or_modifies_a_test(changed, diff_text):
+    if touches_shipped_code(paths) and not adds_or_modifies_a_test(
+        changed, diff_text, lambda path: _show_at(head, path)
+    ):
         failures.append(
             "This fix changes shipped code but no test. A fix with no test "
             "cannot fail if it is reverted — add the regression test, or use "
