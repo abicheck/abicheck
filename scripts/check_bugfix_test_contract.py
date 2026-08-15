@@ -96,6 +96,11 @@ _SHIPPED_SUFFIXES_BY_PREFIX = {
     # here because an action's manifest *is* its interface, unlike a workflow
     # (Codex review).
     "actions/": (".py", ".sh", ".yml"),
+    # AGENTS.md classifies the Clang facts plugin as a surrounding first-party
+    # tree with its own AGENTS.md and its own tests; its runtime is C++/CMake,
+    # so none of the suffixes above matched and a fix confined to the plugin
+    # skipped the structural requirement entirely (Codex review).
+    "contrib/abicheck-clang-plugin/": (".cpp", ".h", ".hpp", ".cmake", ".txt", ".py"),
 }
 _SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 
@@ -268,16 +273,33 @@ def _git(args: list[str]) -> str:
 
 
 def changed_paths(base: str, head: str) -> list[str]:
+    return [path for _status, path in changed_files(base, head)]
+
+
+def changed_files(base: str, head: str) -> list[tuple[str, str]]:
+    """``(status, path)`` pairs — the status matters for test evidence.
+
+    A *deleted* test path still appears in the diff, and counting it as "you
+    changed a test" let a fix that only removes a test satisfy the structural
+    requirement (Codex review). Only an added or modified test is evidence
+    that a regression test exists.
+    """
     out = _git(
         [
             "diff",
             "--no-renames",
-            "--name-only",
+            "--name-status",
             "--diff-filter=ACDM",
             f"{base}...{head}",
         ]
     )
-    return [line for line in out.splitlines() if line]
+    pairs: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        if not line or "\t" not in line:
+            continue
+        status, path = line.split("\t", 1)
+        pairs.append((status.strip(), path.strip()))
+    return pairs
 
 
 def commit_subjects(base: str, head: str) -> list[str]:
@@ -334,7 +356,16 @@ def is_test_path(path: str) -> bool:
 
 
 def touches_tests(paths: list[str]) -> bool:
+    """Path-only form: any test path, whatever happened to it."""
     return any(is_test_path(p) for p in paths)
+
+
+def adds_or_modifies_a_test(changed: list[tuple[str, str]]) -> bool:
+    """Positive evidence that a regression test exists.
+
+    Deleting a test is a change to a test path and the opposite of evidence.
+    """
+    return any(status in ("A", "M") and is_test_path(path) for status, path in changed)
 
 
 def strip_html_comments(text: str) -> str:
@@ -414,7 +445,8 @@ def main(argv: list[str] | None = None) -> int:
     base = args.base or _DEFAULT_BASE
     head = args.head or _DEFAULT_HEAD
     try:
-        paths = changed_paths(base, head)
+        changed = changed_files(base, head)
+        paths = [path for _status, path in changed]
         subjects = commit_subjects(base, head)
     except subprocess.CalledProcessError as e:
         # An unresolvable ref is a real failure when CI named the refs, and an
@@ -437,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
 
     # --- structural ----------------------------------------------------
-    if touches_shipped_code(paths) and not touches_tests(paths):
+    if touches_shipped_code(paths) and not adds_or_modifies_a_test(changed):
         failures.append(
             "This fix changes shipped code but no test. A fix with no test "
             "cannot fail if it is reverted — add the regression test, or use "

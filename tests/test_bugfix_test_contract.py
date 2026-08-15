@@ -87,6 +87,44 @@ class TestStructuralRequirement:
     def test_a_test_change_satisfies_it(self) -> None:
         assert gate.touches_tests(["abicheck/diff_types.py", "tests/test_diff.py"])
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "contrib/abicheck-clang-plugin/AbicheckFactsPlugin.cpp",
+            "contrib/abicheck-clang-plugin/CMakeLists.txt",
+        ],
+    )
+    def test_the_clang_plugin_runtime_is_shipped_code(self, path: str) -> None:
+        """AGENTS.md classifies it as a surrounding first-party tree with its
+        own tests; its runtime is C++/CMake, so no `.py`/`.sh`/`.yml` suffix
+        matched and a fix confined to the plugin skipped the structural
+        requirement (Codex review)."""
+        assert gate.touches_shipped_code([path])
+
+    def test_plugin_prose_is_not_shipped_code(self) -> None:
+        assert not gate.touches_shipped_code(
+            ["contrib/abicheck-clang-plugin/README.md"]
+        )
+
+    def test_a_deleted_test_is_not_evidence_of_a_regression_test(self) -> None:
+        """Deleting a test is a change to a test path and the opposite of
+        evidence — it let a fix satisfy the requirement by removing coverage
+        (Codex review)."""
+        assert not gate.adds_or_modifies_a_test([("D", "tests/test_x.py")])
+
+    @pytest.mark.parametrize("status", ["A", "M"])
+    def test_an_added_or_modified_test_is_evidence(self, status: str) -> None:
+        assert gate.adds_or_modifies_a_test([(status, "tests/test_x.py")])
+
+    def test_a_deleted_test_alongside_an_added_one_is_still_evidence(self) -> None:
+        """Replacing a test is legitimate — only *deletion alone* is not."""
+        assert gate.adds_or_modifies_a_test(
+            [("D", "tests/test_old.py"), ("A", "tests/test_new.py")]
+        )
+
+    def test_a_modified_non_test_is_not_evidence(self) -> None:
+        assert not gate.adds_or_modifies_a_test([("M", "abicheck/diff_types.py")])
+
     def test_a_plugin_subtree_test_counts(self) -> None:
         assert gate.touches_tests(["contrib/abicheck-clang-plugin/tests/test_x.py"])
 
@@ -389,7 +427,9 @@ class TestEmptyPrBody:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.setattr(
-            gate, "changed_paths", lambda b, h: ["abicheck/x.py", "tests/test_x.py"]
+            gate,
+            "changed_files",
+            lambda b, h: [("M", "abicheck/x.py"), ("A", "tests/test_x.py")],
         )
         monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
         empty = tmp_path / "body.md"
@@ -403,7 +443,9 @@ class TestEmptyPrBody:
     ) -> None:
         """Negative control: the local path must still work."""
         monkeypatch.setattr(
-            gate, "changed_paths", lambda b, h: ["abicheck/x.py", "tests/test_x.py"]
+            gate,
+            "changed_files",
+            lambda b, h: [("M", "abicheck/x.py"), ("A", "tests/test_x.py")],
         )
         monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
         rc = gate.main(["--base", "A", "--head", "B"])
@@ -415,8 +457,8 @@ class TestEmptyPrBody:
     ) -> None:
         monkeypatch.setattr(
             gate,
-            "changed_paths",
-            lambda b, h: ["abicheck/cli_deps.py", "tests/test_x.py"],
+            "changed_files",
+            lambda b, h: [("M", "abicheck/cli_deps.py"), ("A", "tests/test_x.py")],
         )
         monkeypatch.setattr(gate, "commit_subjects", lambda b, h: ["fix: thing"])
         body = tmp_path / "body.md"
