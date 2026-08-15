@@ -82,8 +82,10 @@ MSVC counterpart, not a cosmetically renamed one:
   | Windows **x64** | One platform convention. The x86 keywords are accepted and [**ignored**](https://learn.microsoft.com/en-us/cpp/cpp/argument-passing-and-naming-conventions); only `__vectorcall` is a genuinely distinct alternative |
   | Windows **ARM/ARM64** | The platform ABI. The x86 keywords/decoration model does not apply |
 
-  So on x64 and ARM64 a convention keyword change is normally a no-op, and a
-  decorated-name change points at something else. abicheck has no dedicated
+  So on x64 and ARM64 an **x86** convention keyword change is normally a
+  no-op, and a decorated-name change points at something else —
+  `__vectorcall` being the exception that remains a real, distinct x64
+  convention. abicheck has no dedicated
   calling-convention `ChangeKind`; it reports this the same way it would
   report an unrelated rename: `func_removed` + `func_added` on the two
   distinct decorated names. This is tracked as a known upstream-parity gap
@@ -119,15 +121,21 @@ the blanket form of the rule ("every DLL has its own heap") is not true:
 
 | Configuration | Cross-module `free`/`delete` |
 |---|---|
-| All modules link the **same dynamic** CRT/UCRT (`/MD`) | One shared heap — works, but still couples every module to that exact runtime |
-| Any module links the **static** CRT (`/MT`) | Its own private heap — cross-module release is undefined behavior |
-| Mixed `/MT` and `/MD`, or different runtime versions/configurations | Different heaps — same undefined behavior |
+| All modules link the **same, compatible dynamic** CRT/UCRT (`/MD`) | Supported — they share one heap |
+| Any module links the **static** CRT (`/MT`) | Its own private heap — undefined behavior |
+| Mixed `/MT` and `/MD`, or incompatible runtime configurations | Separate CRT copies — same undefined behavior |
+
+Note the two questions are distinct: what matters is **CRT compatibility**, not
+merely whether a DLL exists. Modern `/MD` modules built against the centrally
+deployed UCRT do share `ucrtbase.dll`, so "each DLL has its own heap" is not a
+general truth — it is what you get once any module carries its own CRT copy.
 
 Since a library cannot see how its consumers were built, the safe design rule
 is unconditional even though the hazard is not: **allocate and release in the
-same owning module**, through a matched exported create/destroy pair. This is
-a rule with no equivalent on Linux's single-system-libc model, and it is
-documented as a
+same owning module**, through a matched exported create/destroy pair. Linux's
+typical single-system-libc setup has no equivalent rule (though ELF does permit
+allocator interposition and alternate allocators, which can reintroduce a
+similar mismatch). It is documented as a
 row in [Part 5's PE/COFF parallels table](abi-series/05-linker-elf.md#pecoff-and-mach-o-parallels);
 it's called out again here because it's the kind of hazard a reader arriving
 from the Itanium-first Parts 3–5 has no prior mental model to expect at all —

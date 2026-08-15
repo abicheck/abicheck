@@ -100,12 +100,13 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 
 > **Why some rows say "L2 *(descriptor)*".** The fine-grained traits
 > `is_standard_layout`, `is_trivially_copyable`, `vptr_offset_bits` and
-> `data_size_bits` need the **header/AST** dump path — and not every header
-> backend supplies every one of them (see the producer column below). DWARF
-> gives abicheck `base_offsets` (so `base_class_offset_changed` works at L1),
-> `sizeof`, offsets, and `vptr_offset_bits`, but not the C++-semantic traits.
-> Feed headers to reach them. This is why the evidence you provide changes what
-> abicheck can prove — see
+> `data_size_bits` do **not** all come from the same place, so read the
+> producer column below rather than assuming "headers give you all four".
+> DWARF supplies `base_offsets` (so `base_class_offset_changed` works at L1),
+> `sizeof`, offsets, and a *measured* `vptr_offset_bits` — but not the
+> C++-semantic traits, which need the direct-clang AST path. `data_size_bits`
+> needs the optional layout-tool pass and nothing else provides it. This is why
+> the evidence you provide changes what abicheck can prove — see
 > [Evidence & Detectability](evidence-and-detectability.md).
 
 ---
@@ -128,7 +129,7 @@ A class has moving parts the coarse `sizeof` diff under-represents. The
 | Field | Meaning | Populated by |
 |-------|---------|--------------|
 | `base_offsets` | each base subobject's bit offset | DWARF + both header backends |
-| `vptr_offset_bits` | vtable-pointer offset (polymorphism witness) | DWARF + both header backends. Note all three derive it as `0` when the class has a vtable, so treat it as a *polymorphism* witness, not a measured offset |
+| `vptr_offset_bits` | vtable-pointer offset | **DWARF: measured** — read from the artificial vptr member's own `DW_AT_data_member_location`, with inherited offsets propagated, and `0` used only as a last-resort fallback. **Both header backends: derived**, `0` whenever the class has a vtable — a polymorphism witness, not a measured offset |
 | `data_size_bits` | `dsize` — bytes the members occupy, excl. tail padding | only the optional `ABICHECK_CLANG_LAYOUT_TOOL` companion pass |
 | `is_standard_layout` | standard-layout trait | direct-clang AST only |
 | `is_trivially_copyable` | trivially-copyable trait | direct-clang AST only |
@@ -161,9 +162,12 @@ has no layout evidence at all, abicheck emits the calm, non-escalating
 ### 3. Binary-only C++ layout — `diff_elf_layout.py` (L0)
 
 The biggest *narrowing* of the symbol-only blind spot — narrowing, not closing;
-see the limits below. The Itanium ABI fixes
-the on-disk size of two emitted objects for every polymorphic class, and both
-encode layout facts otherwise visible only in DWARF:
+see the limits below. The Itanium ABI fixes the on-disk size of two emitted
+objects per polymorphic class, and both encode layout facts otherwise visible
+only in DWARF. Coverage is per *symbol*, not per class: the detector reads
+positive-size `_ZTV`/`_ZTI` entries and reports only keys present on **both**
+sides, so a class whose vtable or typeinfo was never emitted, was hidden, or
+appears on one side only contributes nothing here.
 
 - **`_ZTV<type>`** (the vtable): for the simple single-inheritance case, laid
   out as `[offset-to-top, typeinfo*, slot0, slot1, …]`, so its `st_size`
@@ -219,11 +223,15 @@ derive from).
   encodes exactly this. (Note: on MSVC targets Clang ignores
   `[[no_unique_address]]` in favour of `[[msvc::no_unique_address]]`, and MSVC
   offers no ABI-stability guarantee for it.)
-- **The descriptor traits need headers.** Without the castxml header path,
-  `standard_layout_lost`, `trivially_copyable_lost`, `vptr_introduced`, and
-  `tail_padding_reuse_changed` cannot be proven (their inputs are `None`), so
-  abicheck stays silent rather than guessing. This is a property of the
-  *evidence*, not a detector bug — see [Limitations](limitations.md).
+- **The descriptor traits need the right header backend — not just "headers".**
+  Per the producer table above: `standard_layout_lost` and
+  `trivially_copyable_lost` need the **direct-clang** AST path (castxml leaves
+  both traits `None`); `tail_padding_reuse_changed` additionally needs the
+  optional `ABICHECK_CLANG_LAYOUT_TOOL` pass for `dsize`; `vptr_introduced`
+  is the exception, reachable from DWARF or either header backend. Where the
+  input is `None`, abicheck stays silent rather than guessing. This is a
+  property of the *evidence*, not a detector bug — see
+  [Limitations](limitations.md).
 - **Source-only contract changes leave no object trace.** Default-argument,
   inline-body, and uninstantiated-template changes are API events that only
   source replay (L4) can see; binary/DWARF comparison correctly reports

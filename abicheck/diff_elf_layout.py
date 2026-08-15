@@ -21,7 +21,7 @@ visible in DWARF debug info:
 * **vtable** (``_ZTV<type>``) — laid out as ``[offset-to-top, typeinfo*,
   slot0, slot1, …]`` in the simple single-inheritance case, so its ``st_size``
   grows or shrinks by one pointer per virtual function net added or removed;
-  ``slots ≈ size/pointer_size − 2`` for the primary vtable.  Two caveats the
+  ``slots ≈ size/pointer_size - 2`` for the primary vtable.  Two caveats the
   kind's name (``vtable_slot_count_changed``) does not carry:
 
   * The symbol covers the whole vtable *group* — vcall/vbase offsets plus a
@@ -52,7 +52,10 @@ from ``.dynsym`` symbol sizes **alone** — no debug info, no headers.  That
 narrows the blind spot a pure symbol-name dump has: adding a virtual method
 need not rename any mangled symbol, yet it does resize the class's ``_ZTV``.
 It does not close the blind spot: a base-class change that keeps the same
-``type_info`` runtime class and entry count resizes nothing either.
+``type_info`` runtime class and base count leaves ``_ZTI`` the same size.
+(That says nothing about ``_ZTV`` — a replacement base with a different
+virtual surface keeps ``__si_class_type_info`` while resizing the derived
+class's vtable group.)
 
 Scope: this detector only fires when the *same* ``_ZTV`` / ``_ZTI`` symbol is
 present on **both** sides with a **different** size.  A vtable/typeinfo object
@@ -153,7 +156,7 @@ def _sized_rtti(
 
 
 def _vtable_slots(size_bytes: int, pointer_size: int) -> int:
-    """Approximate primary-vtable slot count (``size/ptr − 2``), floored at 0."""
+    """Approximate primary-vtable slot count (``size/ptr - 2``), floored at 0."""
     if pointer_size <= 0:
         pointer_size = 8
     return max(0, size_bytes // pointer_size - 2)

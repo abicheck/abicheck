@@ -218,8 +218,8 @@ public API is declared (§3).
 | **Internal / private change** | No public-contract change *if truly hidden* | **No** SemVer impact |
 
 A `NO_CHANGE` release still lands at minor if it added public functionality
-somewhere this scan didn't look, and at major if it changed a documented
-behavior, a serialized format, or a threading guarantee. Those contracts are
+somewhere this scan didn't look, and at major if it made an **incompatible**
+change to a documented behavior, a serialized format, or a threading guarantee. Those contracts are
 covered by [Behavioral](../behavioral-compatibility.md) and
 [Data/Wire](../data-wire-compatibility.md) compatibility, and neither is
 provable by comparing two artifacts.

@@ -288,10 +288,12 @@ cross-DSO RTTI trap, and what abicheck can and cannot observe about it.
 
 ## 6. Trivial → non-trivial: the invisible calling-convention flip
 
-The System V AMD64 convention passes an aggregate that is **trivial for the
-purposes of calls** directly in registers, but passes a **non-trivial** one *by
-invisible reference* — the caller materializes the object on the stack and hands
-the callee a pointer. The governing property is the Itanium ABI's
+An aggregate that is **trivial for the purposes of calls** is passed according
+to the platform's own C ABI — often in registers, though System V AMD64 still
+classifies it as `MEMORY` when it is too large or has unaligned fields. A
+**non-trivial** one is instead passed *by invisible reference*: the caller
+materializes the object on the stack and hands the callee a pointer. Flipping
+a type between the two therefore changes how every existing caller passes it. The governing property is the Itanium ABI's
 [*non-trivial for the purposes of calls*](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#non-trivial-parameters)
 rule — related to, but not identical with, `std::is_trivially_copyable`. A type
 qualifies when it has a **non-trivial** copy constructor, move constructor, or

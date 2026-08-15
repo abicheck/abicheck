@@ -135,9 +135,12 @@ Two categories matter for the rest of the series:
     4. **externally visible** — not hidden by `-fvisibility=hidden`, a version
        script, or an `internal`/`hidden` visibility attribute.
 
-    A `T` in `nm` output tells you (1) and, by its case, (2). It does not tell
-    you (3) or (4) — `nm -D` (which reads `.dynsym`) does.
-    [Part 5](05-linker-elf.md) covers visibility and export control.
+    A `T` in `nm` output tells you (1) and, by its case, (2). `nm -D` reads
+    `.dynsym`, so it adds (3) — presence in the dynamic table — and stops
+    there. Nothing in either output establishes (4): a symbol can sit in
+    `.dynsym` and still be unusable by a consumer because of its ELF
+    visibility or the version script's export rules, which
+    [Part 5](05-linker-elf.md) covers.
 
 Linking is, at its heart, **matching every `U` to a `T`/`D` somewhere**. If a
 single `U` has no match, the link (or the load) fails. In the simplest ELF
