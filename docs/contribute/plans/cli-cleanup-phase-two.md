@@ -1,3 +1,9 @@
+---
+doc_type: contributor
+level: advanced
+lifecycle: active
+---
+
 # CLI cleanup, phase two — reviewed plan
 
 **Type:** Refactor / interface-contract plan. Continues the hard cleanup landed
@@ -116,7 +122,11 @@ user-facing capability. Change the defaults first, then delete the flag:
 - `review`: always shows the recommendation.
 - `markdown`: always shows it (own section).
 - `html`: shown in the summary block.
-- `json`/`sarif`/`junit`: unchanged — the field is already unconditional.
+- `json`: unchanged — `reporter.py` already writes `release_recommendation`
+  unconditionally on all three of its JSON paths, independent of `--recommend`.
+- `sarif`/`junit`: unchanged, and deliberately *without* the recommendation —
+  neither renderer emits the field today, and neither format has a natural slot
+  for a release verdict. Adding it is not part of this PR.
 
 ### `--report-mode` stays as-is
 
@@ -215,13 +225,24 @@ and `--build-query` is a **trusted executable command**, not a data path.
 Kept on the CLI (genuine per-run inputs): `--build-info`, `--build-target`,
 `--compile-db-filter`.
 
-Config form (argv list, not a shell string):
+Config form — **the existing string syntax**, so the removed flags have a
+replacement that works the day they are removed:
 
 ```yaml
 build:
-  query: ["cmake", "-S", ".", "-B", "build", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
+  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
   compile_db: build/compile_commands.json
 ```
+
+`build.query` is a string today: `BuildConfig.from_dict` reads it through
+`_str()` (a YAML list is silently coerced to `""`, i.e. dropped rather than
+rejected), and `inline.py` splits it with `shlex.split` at the point of use. An
+argv-list form would be *nicer* — it removes a quoting layer from a value that
+is executed — but it is a config-contract change, not a docs example. If PR 3
+wants it, it must be its own scoped slice: accept both forms (string kept
+working, list added), regenerate the schema and config reference, add migration
+tests for both, and keep the trust gating identical for both. Do **not** switch
+the parser to lists only — every existing trusted string config would break.
 
 **Prerequisites, all required before the flags are removed:**
 
