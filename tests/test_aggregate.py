@@ -621,6 +621,14 @@ class TestManifestAndIdentity:
                 "aggregate_manifest_version": "x.y",
             },  # not num
             {"targets": [{"id": LINUX}], "aggregate_manifest_version": "99.0"},  # newer
+            # CodeRabbit review, fresh evidence: only the prefix before the
+            # first "." was ever parsed, so a bare major ("2"), a
+            # non-numeric minor ("2.x"), and a three-component version
+            # ("2.0.1") all previously passed this check silently despite
+            # the manifest contract requiring exactly "MAJOR.MINOR".
+            {"targets": [{"id": LINUX}], "aggregate_manifest_version": "2"},
+            {"targets": [{"id": LINUX}], "aggregate_manifest_version": "2.x"},
+            {"targets": [{"id": LINUX}], "aggregate_manifest_version": "2.0.1"},
         ],
     )
     def test_manifest_rejects_malformed(self, bad):

@@ -393,7 +393,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `missing_required: fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -438,15 +438,19 @@ manifest's) own versioned `gate` block:
  "gate": {"missing_required": "warn", "unexpected_target": "fail"}}
 ```
 
-`missing_required: warn` downgrades a coverage gap to advisory (the
-per-target gate decisions alone then decide the exit code). `unexpected_target`
-(`include`/`warn`/`fail`/`ignore`, default `include`) controls a report whose
-target is not in the expected set: `include` counts its real findings in the
-gate but not in required coverage. Omitting `gate` entirely keeps the same
-defaults this command always had (`missing_required: fail`,
-`unexpected_target: include`). The resolved policy is reported back in the
-JSON output's `effective_policy` block, including which source (`manifest`/
-`run-plan`/`default`) it came from. The `--format json` output is versioned
+`missing_required: warn` downgrades a coverage gap to advisory — it stops
+contributing to exit `1` on its own, but the per-target gate decisions,
+contract-coverage evidence, and per-report failures above remain independent
+axes that can each still produce `1` for an unrelated reason.
+`unexpected_target` (`include`/`warn`/`fail`/`ignore`, default `include`)
+controls a report whose target is not in the expected set: `include` counts
+its real findings in the gate but not in required coverage. Omitting `gate`
+entirely keeps the same defaults this command always had (`missing_required:
+fail`, `unexpected_target: include`). The resolved policy is reported back in
+the JSON output's `effective_policy` block, including which source
+(`manifest`/`run-plan`/`explicit`/`default`) it came from — `explicit` only
+appears for a direct Python-API caller of `aggregate()` forcing a value
+(there is no CLI spelling for it). The `--format json` output is versioned
 (`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
 for the current value) and carries the four axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage`

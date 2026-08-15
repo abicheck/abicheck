@@ -80,9 +80,19 @@ def render_output(
     ``abicheck.service.__all__``) — the CLI's own ``--stat``/``--recommend``
     flags are gone, but a signature change here is a separate, unannounced
     break this PR's own docs never claimed (Codex review). ``show_recommendation``
-    is accepted but has no effect, since the recommendation the flag used to
-    gate is now always included. Prefer ``fmt=ONELINE_FORMAT`` directly in
-    new code.
+    stays a real, effective toggle for the markdown renderer, default
+    ``True`` — matching the "unconditional in every human-facing format"
+    behaviour this function's own CLI-facing wrapper (``cli._render_output``,
+    which never passes it) relies on by default, while still honoring an
+    explicit ``show_recommendation=False`` from a direct Tier-2 caller who
+    relied on the pre-removal default (Codex review, fresh evidence — an
+    earlier revision hard-coded ``True`` into the ``to_markdown`` call below
+    regardless of what the caller passed, silently reintroducing the
+    recommendation section for a caller that explicitly asked it be
+    suppressed). Only ``review``'s own unconditional inclusion (above) and
+    JSON's unconditional ``release_recommendation`` field are unaffected by
+    this parameter — those never had a suppressing flag to restore. Prefer
+    ``fmt=ONELINE_FORMAT`` directly in new code.
 
     ``stat=True`` reproduces the old ``--stat`` boolean's own format-dependent
     dispatch, not a single fixed replacement — the pre-removal behaviour it
@@ -172,20 +182,21 @@ def render_output(
             f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
         )
 
-    # Default: markdown. show_recommendation is unconditionally True here (CLI
-    # cleanup phase two, PR 1: --recommend removed -- the recommendation is no
-    # longer an opt-in, matching review's own unconditional inclusion above
-    # and JSON's unconditional release_recommendation field). to_markdown
-    # itself keeps its own show_recommendation parameter (public API,
-    # reporter.py) with its existing default -- only this CLI-facing
-    # chokepoint's caller-supplied toggle is gone.
+    # Default: markdown. show_recommendation defaults to True (CLI cleanup
+    # phase two, PR 1: --recommend removed as a CLI flag -- the CLI's own
+    # wrapper never passes this keyword, so its own output stays
+    # unconditional, matching review's own unconditional inclusion above and
+    # JSON's unconditional release_recommendation field). A direct Tier-2
+    # caller passing show_recommendation=False explicitly still suppresses
+    # it here, same as before this PR (Codex review, fresh evidence -- an
+    # earlier revision hard-coded True regardless of the caller's own value).
     md = to_markdown(
         result,
         show_only=show_only,
         report_mode=report_mode,
         show_impact=show_impact,
         severity_config=severity_config,
-        show_recommendation=True,
+        show_recommendation=show_recommendation,
         contract_evaluation=contract_evaluation,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):

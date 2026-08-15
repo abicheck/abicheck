@@ -1787,6 +1787,34 @@ class TestUsedByScoping:
         assert result.exit_code == 4
         assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
 
+    def test_quick_profile_one_liner_counts_scoped_only_finding_under_show_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review, fresh evidence: `_scoped_gate_findings()` applies
+        `--show-only` to `scoped_only`/`missing_labels` for *display*
+        purposes elsewhere, but this method's own printed counts must track
+        what actually decided the scoped verdict/exit code -- which
+        `--show-only` never changes. Filtering the count inputs by
+        `--show-only compatible` here let a purely-breaking scoped-only
+        finding (this test's `PE_ORDINAL_RETARGETED`) get silently excluded
+        from the count while the process still exited 4, printing the
+        self-contradictory "BREAKING: no changes (0 total)"."""
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick", "--show-only", "compatible",
+        )
+        assert result.exit_code == 4
+        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+
     def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
         self, tmp_path, monkeypatch
     ) -> None:

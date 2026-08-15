@@ -121,6 +121,37 @@ class TestToAggregateManifest:
         plan = RunPlan(checks=[], gate_missing_required="warn")
         assert plan.to_dict()["schema"] == RUN_PLAN_SCHEMA_GATE
 
+    def test_to_dict_rejects_a_bogus_directly_constructed_gate_value(self) -> None:
+        """CodeRabbit review, fresh evidence: a `RunPlan` built directly
+        (not through `from_dict()`) with a bogus gate value must not
+        serialize an artifact this tool's own reader would reject --
+        `to_dict()` now validates against the same enum vocabulary
+        `RunPlan.from_dict()`/`ExpectedTargets.from_manifest_data()` already
+        enforce, instead of only catching the mistake when someone reads
+        the bad JSON back."""
+        from abicheck.aggregate import AggregateError
+
+        plan = RunPlan(checks=[], gate_missing_required="bogus")
+        with pytest.raises(AggregateError):
+            plan.to_dict()
+
+    def test_to_aggregate_manifest_rejects_a_bogus_directly_constructed_gate_value(
+        self,
+    ) -> None:
+        from abicheck.aggregate import AggregateError
+
+        plan = RunPlan(checks=[], gate_unexpected_target="bogus")
+        with pytest.raises(AggregateError):
+            to_aggregate_manifest(plan)
+
+    def test_to_dict_round_trips_a_directly_constructed_valid_gate(self) -> None:
+        plan = RunPlan(
+            checks=[], gate_missing_required="warn", gate_unexpected_target="fail"
+        )
+        restored = RunPlan.from_dict(plan.to_dict())
+        assert restored.gate_missing_required == "warn"
+        assert restored.gate_unexpected_target == "fail"
+
     def test_gateless_plan_keeps_the_v1_schema(self) -> None:
         from abicheck.buildsource.run_plan import RUN_PLAN_SCHEMA
 

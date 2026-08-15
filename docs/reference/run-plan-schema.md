@@ -208,8 +208,8 @@ layer up, in the *persisted* `run-plan.json` artifact rather than only in the
 manifest `aggregate --run-plan` projects from it in memory. A plan with no
 `gate` keeps the unchanged `v1` schema string — the bump is additive-only,
 scoped to this one capability. A `gate` block paired with a declared `v1`
-schema (or an unrecognized/malformed `schema` string) is rejected as
-malformed input, not silently honored.
+schema, a missing `schema` field, or an unrecognized/malformed `schema`
+string is rejected as malformed input, not silently honored.
 
 ## CLI
 

@@ -88,8 +88,19 @@ def _check_manifest_version(raw: Any) -> None:
         return
     if not isinstance(raw, str) or not raw:
         raise AggregateError("manifest 'aggregate_manifest_version' must be a string")
+    # Exactly two dot-separated numeric components -- "2" (no minor), "2.x"
+    # (a non-numeric minor the old split(".", 1)[0] parse never looked at),
+    # and "2.0.1" (three components) all previously passed this check
+    # silently, since only the prefix before the first "." was ever
+    # inspected (CodeRabbit review, fresh evidence).
+    parts = raw.split(".")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        raise AggregateError(
+            f"manifest 'aggregate_manifest_version' is not a MAJOR.MINOR "
+            f"version: {raw!r}"
+        )
     try:
-        major = int(raw.split(".", 1)[0])
+        major = int(parts[0])
         supported = int(AGGREGATE_MANIFEST_VERSION.split(".", 1)[0])
     except ValueError as exc:
         raise AggregateError(

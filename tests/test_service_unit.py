@@ -3237,12 +3237,32 @@ class TestRenderOutput:
             "junit", diff_result, snap, stat=True
         ) == render_output("junit", diff_result, snap, stat=False)
 
-    def test_show_recommendation_kwarg_is_accepted_and_inert(self, diff_result, snap):
-        """Same compatibility contract as `stat` above: `show_recommendation`
-        is accepted (never a TypeError) but has no effect, since the
-        recommendation it used to gate is now unconditional."""
-        assert render_output(
+    def test_show_recommendation_false_still_suppresses_the_section(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: `show_recommendation` is a real,
+        effective toggle, not an inert compatibility shim -- an earlier
+        revision hard-coded `True` into the `to_markdown` call regardless
+        of what the caller passed, silently reintroducing the
+        recommendation section for a direct Tier-2 caller that explicitly
+        asked it be suppressed (only the CLI's own `--recommend` flag was
+        announced removed, not this keyword's effect)."""
+        with_rec = render_output(
+            "markdown", diff_result, snap, show_recommendation=True
+        )
+        without_rec = render_output(
             "markdown", diff_result, snap, show_recommendation=False
+        )
+        assert with_rec != without_rec
+
+    def test_show_recommendation_default_matches_the_cli_wrapper(
+        self, diff_result, snap
+    ):
+        """The CLI's own `cli._render_output` never passes this keyword, so
+        its default must keep matching the CLI's unconditional-inclusion
+        behaviour."""
+        assert render_output(
+            "markdown", diff_result, snap
         ) == render_output("markdown", diff_result, snap, show_recommendation=True)
 
     def test_json_follow_deps(self, snap):

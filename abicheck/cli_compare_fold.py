@@ -283,8 +283,22 @@ class _ScopedFold:
                 f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
             )
 
+        # Deliberately unfiltered by self.show_only (Codex review, fresh
+        # evidence): self._scoped_gate_findings() applies --show-only to
+        # scoped_only/missing_labels for *display* purposes (so markdown/
+        # json don't re-surface an excluded finding), but this method's own
+        # counts must track what actually decided the scoped verdict/exit
+        # code, which --show-only never changes -- `blocks` above (and the
+        # exit code read from `severity_block`) are already computed from
+        # the unfiltered set. Filtering scoped_only/missing_labels here but
+        # not relevant_in_changes below let a --show-only run print "no
+        # changes (0 total)" while still exiting non-zero on a synthesized
+        # scoped-only break (e.g. PE_ORDINAL_RETARGETED) that show_only
+        # happened to exclude from the display list.
+        from .reporter import _resolve_scoped_gate_findings
+
         scoped_only, missing_labels, blocks, _missing_kind = (
-            self._scoped_gate_findings()
+            _resolve_scoped_gate_findings(self.result, self.severity_config, None)
         )
         relevant_ids = (
             getattr(self.result, "scoped_relevant_finding_ids", None) or frozenset()

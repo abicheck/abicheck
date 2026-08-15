@@ -9,7 +9,8 @@
   result to `json.loads()` would get plain text instead. `stat=True` now
   dispatches by *fmt*: `to_stat_json`'s summary-only JSON object (no
   `changes` array) for `fmt="json"`, the human one-line renderer for every
-  other *fmt* (unchanged, and equivalent to `fmt=ONELINE_FORMAT`).
+  other non-JUnit *fmt* (unchanged, and equivalent to `fmt=ONELINE_FORMAT`).
+  `fmt="junit"` is a further exception, fixed in a later round — see below.
 - **`aggregate`'s manifest `gate` block is now rejected outright when the
   same manifest explicitly declares a pre-2.0 `aggregate_manifest_version`.**
   Honoring `gate` on such a manifest would recreate the exact version-skew

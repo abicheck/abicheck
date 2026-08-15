@@ -540,10 +540,43 @@ class RunPlan:
     gate_missing_required: str | None = None
     gate_unexpected_target: str | None = None
 
+    def _validated_gate(self) -> tuple[str | None, str | None]:
+        """Validate :attr:`gate_missing_required`/:attr:`gate_unexpected_target`
+        against the same enum vocabulary :func:`_parse_run_plan_gate`
+        enforces on read, so a direct construction (``RunPlan(...,
+        gate_missing_required="bogus")``) cannot serialize an artifact this
+        tool's own reader would reject (CodeRabbit review, fresh evidence --
+        validation previously only ran on the read path, so a hand-built
+        plan's bad value reached disk unchecked and only failed later, on
+        whatever consumer read it back)."""
+        from ..aggregate_manifest import (
+            AggregateError,
+            OnMissingRequired,
+            OnUnexpectedTarget,
+        )
+
+        if self.gate_missing_required is not None:
+            try:
+                OnMissingRequired(self.gate_missing_required)
+            except ValueError as exc:
+                raise AggregateError(
+                    f"RunPlan.gate_missing_required {self.gate_missing_required!r} "
+                    f"must be one of {[v.value for v in OnMissingRequired]}"
+                ) from exc
+        if self.gate_unexpected_target is not None:
+            try:
+                OnUnexpectedTarget(self.gate_unexpected_target)
+            except ValueError as exc:
+                raise AggregateError(
+                    f"RunPlan.gate_unexpected_target {self.gate_unexpected_target!r} "
+                    f"must be one of {[v.value for v in OnUnexpectedTarget]}"
+                ) from exc
+        return self.gate_missing_required, self.gate_unexpected_target
+
     def to_dict(self) -> dict[str, Any]:
+        gate_missing_required, gate_unexpected_target = self._validated_gate()
         has_gate = (
-            self.gate_missing_required is not None
-            or self.gate_unexpected_target is not None
+            gate_missing_required is not None or gate_unexpected_target is not None
         )
         # The gate-bearing schema is always stamped when a gate policy is
         # set, regardless of whatever self.schema was constructed with --
@@ -558,10 +591,10 @@ class RunPlan:
             d["head_sha"] = self.head_sha
         if has_gate:
             gate: dict[str, Any] = {}
-            if self.gate_missing_required is not None:
-                gate["missing_required"] = self.gate_missing_required
-            if self.gate_unexpected_target is not None:
-                gate["unexpected_target"] = self.gate_unexpected_target
+            if gate_missing_required is not None:
+                gate["missing_required"] = gate_missing_required
+            if gate_unexpected_target is not None:
+                gate["unexpected_target"] = gate_unexpected_target
             d["gate"] = gate
         d["checks"] = [c.to_dict() for c in self.checks]
         return d
@@ -1070,14 +1103,16 @@ def to_aggregate_manifest(
     # CLI cleanup phase two, PR 2: project the plan's own gate policy into
     # the manifest's `gate` block -- the same field `--manifest` reads,
     # so `--run-plan`/`--manifest` express identical policy shapes.
-    if (
-        plan.gate_missing_required is not None
-        or plan.gate_unexpected_target is not None
-    ):
+    # _validated_gate() rejects a bogus value the same way to_dict() does
+    # (CodeRabbit review, fresh evidence) -- both persistence paths off one
+    # RunPlan must agree on whether its gate fields are well-formed, not
+    # just the JSON serialization one.
+    gate_missing_required, gate_unexpected_target = plan._validated_gate()
+    if gate_missing_required is not None or gate_unexpected_target is not None:
         gate: dict[str, Any] = {}
-        if plan.gate_missing_required is not None:
-            gate["missing_required"] = plan.gate_missing_required
-        if plan.gate_unexpected_target is not None:
-            gate["unexpected_target"] = plan.gate_unexpected_target
+        if gate_missing_required is not None:
+            gate["missing_required"] = gate_missing_required
+        if gate_unexpected_target is not None:
+            gate["unexpected_target"] = gate_unexpected_target
         manifest["gate"] = gate
     return manifest

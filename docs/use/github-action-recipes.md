@@ -288,11 +288,17 @@ then guarantees the properties the old hand-written gate loop silently violated:
     Set `fail-on-breaking: false` in each matrix job and let the gate decide.
     Use `fail-fast: false` on the matrix and `if: ${{ always() }}` on the
     upload step and the gate job so one failed leg neither cancels the others
-    nor skips the fan-in. Set `"gate": {"missing_required": "warn"}` in the
-    manifest (or run-plan-projected manifest) if you want a missing required
-    target to be reported but not fail the gate (the per-target gate
-    decisions alone then decide the exit code); mark a target `"required":
-    false` in the manifest if its absence should never fail coverage.
+    nor skips the fan-in. For a manifest, this means bumping
+    `"aggregate_manifest_version"` to at least `"2.0"` (the `gate` block
+    ships only at that major — an older-versioned manifest carrying `gate`
+    is rejected as malformed rather than silently honored) and setting
+    `"gate": {"missing_required": "warn"}` (or run-plan-projected manifest,
+    via `project plan --gate-missing-required warn`) if you want a missing
+    required target to be reported but not fail the gate on that account
+    alone (contract-coverage evidence and other analyzed targets' own gate
+    decisions remain independent axes that can still produce a failing exit
+    code); mark a target `"required": false` in the manifest if its absence
+    should never fail coverage.
 
 Sample output when the Windows leg failed to produce a report:
 
