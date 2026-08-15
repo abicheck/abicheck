@@ -162,6 +162,43 @@ def _source_graph(snapshot: AbiSnapshot | None) -> Any:
     return getattr(getattr(snapshot, "build_source", None), "source_graph", None)
 
 
+def _coalesce_definitions(
+    definitions: Sequence[UseCaseDefinition],
+) -> tuple[UseCaseDefinition, ...]:
+    """One entry per *use case*, not per manifest list item.
+
+    A manifest may legitimately split one use case across several entries,
+    and :func:`explain_use_case_impact` already unions their entrypoints by
+    name -- so attribution lands under a single key while the count and the
+    resolutions were computed per entry. The report then claimed
+    ``use_case_count: 2`` for one use case, emitted a duplicate ``use_cases``
+    row, and the text renderer printed the same combined findings under both
+    (Codex review). Coalescing here is what makes those three agree with the
+    attribution model rather than with the file's line count.
+
+    First-appearance order is kept for the use cases and for each one's
+    entrypoints and tests, since that is the order a manifest author reads
+    their own file in; a repeat within one use case is dropped rather than
+    listed twice.
+    """
+    from .use_cases import UseCaseDefinition as _Definition
+
+    entrypoints: dict[str, list[str]] = {}
+    tests: dict[str, list[str]] = {}
+    for d in definitions:
+        for name, bucket in ((d.entrypoints, entrypoints), (d.tests, tests)):
+            seen = bucket.setdefault(d.use_case, [])
+            seen.extend(v for v in name if v not in seen)
+    return tuple(
+        _Definition(
+            use_case=use_case,
+            entrypoints=tuple(values),
+            tests=tuple(tests.get(use_case, ())),
+        )
+        for use_case, values in entrypoints.items()
+    )
+
+
 def _merge_resolutions(
     definitions: Sequence[UseCaseDefinition],
     old: Sequence[UseCaseResolution],
@@ -231,6 +268,11 @@ def build_use_case_impact(
     new_graph = _source_graph(new_snapshot)
     if old_graph is None and new_graph is None:
         return None
+
+    # Per use case, not per manifest entry -- see `_coalesce_definitions`.
+    # `explain_use_case_impact` below is given the coalesced list too, so the
+    # attribution and the resolutions describe the same set.
+    definitions = _coalesce_definitions(definitions)
 
     resolutions = _merge_resolutions(
         definitions,

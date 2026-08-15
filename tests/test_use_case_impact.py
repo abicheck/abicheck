@@ -497,3 +497,64 @@ class TestRestrictedToTheDisplayedFindings:
         assert len({c.finding_id for c in rows}) == 2, "the two rows collided"
         shown = impact.restricted_to([first])
         assert [c.finding_id for c in shown.by_use_case["uc"]] == [rows[0].finding_id]
+
+
+class TestOneRowPerUseCaseNotPerManifestEntry:
+    """A manifest may split one use case across several entries.
+
+    `explain_use_case_impact` already unions their entrypoints by name, so
+    attribution landed under a single key while the count and resolutions
+    were computed per entry -- `use_case_count: 2` for one use case, a
+    duplicate `use_cases` row, and the text renderer printing the same
+    combined findings twice (Codex review).
+    """
+
+    _SPLIT = [
+        UseCaseDefinition(use_case="training", entrypoints=("train",), tests=("t1",)),
+        UseCaseDefinition(use_case="training", entrypoints=("predict",), tests=("t2",)),
+    ]
+
+    def _impact(self, definitions: list[UseCaseDefinition]) -> UseCaseImpact:
+        graph = _graph("train", "predict")
+        impact = build_use_case_impact(
+            definitions,
+            _snapshot(graph, "1"),
+            _snapshot(graph, "2"),
+            [_change("train"), _change("predict")],
+            manifest="uc.yaml",
+        )
+        assert impact is not None
+        return impact
+
+    def test_the_count_and_rows_follow_the_use_cases(self) -> None:
+        impact = self._impact(self._SPLIT)
+        assert impact.use_case_count == 1
+        assert [r.use_case for r in impact.resolutions] == ["training"]
+        assert list(impact.by_use_case) == ["training"]
+
+    def test_the_split_entries_union_their_entrypoints_and_tests(self) -> None:
+        (row,) = self._impact(self._SPLIT).resolutions
+        assert row.resolved_entrypoints == ("train", "predict")
+        assert row.tests == ("t1", "t2")
+
+    def test_a_repeat_inside_one_use_case_is_not_listed_twice(self) -> None:
+        (row,) = self._impact([
+            UseCaseDefinition(use_case="training", entrypoints=("train",)),
+            UseCaseDefinition(use_case="training", entrypoints=("train", "predict")),
+        ]).resolutions
+        assert row.resolved_entrypoints == ("train", "predict")
+
+    def test_distinct_use_cases_are_still_separate(self) -> None:
+        # The coalescing must key on the name, not collapse everything.
+        impact = self._impact([
+            UseCaseDefinition(use_case="training", entrypoints=("train",)),
+            UseCaseDefinition(use_case="serving", entrypoints=("predict",)),
+        ])
+        assert impact.use_case_count == 2
+        assert [r.use_case for r in impact.resolutions] == ["training", "serving"]
+
+    def test_the_rendered_section_does_not_repeat_the_use_case(self) -> None:
+        from abicheck.impact.use_case_impact import render_use_case_impact_lines
+
+        lines = render_use_case_impact_lines(self._impact(self._SPLIT))
+        assert sum(1 for line in lines if "training:" in line) == 1, lines
