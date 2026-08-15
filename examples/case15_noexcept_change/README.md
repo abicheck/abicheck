@@ -95,9 +95,14 @@ g++ -shared -fPIC -std=c++17 -g v2.cpp -o libbuf.so
 ```
 
 **Why CRITICAL:** the caller was compiled trusting the `noexcept`
-guarantee, so no exception-handling frame was generated for that call.
-When v2 throws, `std::terminate` fires unconditionally — no `catch` clause
-anywhere in the call stack can intercept it. Binary linkage is fine
+guarantee, so no cleanup landing pad was generated for that call. When v2
+throws, the exception travels through a frame that was never compiled to
+cooperate with it — in the run above (GCC, x86-64) that ends in
+`std::terminate` with the `catch` bypassed. Treat the *outcome* as
+toolchain- and control-flow-dependent rather than fixed; what is
+guaranteed is that the caller's no-throw assumption no longer holds. See
+[Exception Unwinding](../../docs/learn/exception-unwinding-abi.md) for the
+machinery. Binary linkage is fine
 (the symbol resolves); the crash is a source-level contract violation
 `abicheck compare` cannot see from the binaries alone, which is exactly
 why the verdict is `COMPATIBLE_WITH_RISK` rather than `BREAKING`.
