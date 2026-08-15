@@ -27,6 +27,7 @@ pixi/pre-commit/CI all route through `scripts/verify.py`'s step catalog.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -323,6 +324,54 @@ def test_mutmut_config_uses_v3_key_names() -> None:
             "it or aborts on it"
         )
     assert isinstance(cfg.get("pytest_add_cli_args_test_selection"), list)
+
+
+def _ignored_test_files() -> list[str]:
+    """Test files mutmut is told to skip, from `--ignore=` in its pytest args."""
+    return [
+        arg.split("=", 1)[1]
+        for arg in _mutmut_config()["pytest_add_cli_args"]
+        if arg.startswith("--ignore=")
+    ]
+
+
+def test_no_ignored_test_file_can_kill_a_detector_mutant() -> None:
+    """The exclusions are free only while this holds.
+
+    These files are skipped because they cannot run from `mutants/` at all —
+    they read the real repository's git history, generated skill trees and
+    vendor adapters, none of which the copy carries, and `-x` makes any one of
+    them abort the lane. That is only acceptable while none of them imports a
+    mutated module: the moment one does, skipping it silently loses kills and
+    inflates the survivor count the baseline is recorded from.
+    """
+    mutated_modules = {p.replace("/", ".").removesuffix(".py") for p in _only_mutate()}
+    offenders = {}
+    for rel in _ignored_test_files():
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            continue
+        imported: set[str] = set()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                imported |= {a.name for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+        overlap = imported & mutated_modules
+        if overlap:
+            offenders[rel] = sorted(overlap)
+    assert not offenders, (
+        f"ignored test file(s) import mutated modules, so skipping them now "
+        f"loses real kills: {offenders}"
+    )
+
+
+def test_every_ignored_test_file_exists() -> None:
+    """A stale `--ignore=` is silent: pytest accepts a path that is gone, so
+    the entry would sit there implying a coverage hole that no longer exists —
+    and the real file it was meant to skip would abort the lane."""
+    missing = [rel for rel in _ignored_test_files() if not (REPO_ROOT / rel).is_file()]
+    assert not missing, f"[tool.mutmut] --ignore names missing files: {missing}"
 
 
 def test_marker_exclusion_still_reaches_pytest() -> None:

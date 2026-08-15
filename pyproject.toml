@@ -366,6 +366,25 @@ pytest_add_cli_args = [
     "--tb=no",
     "-m",
     "not integration and not libabigail and not abicc and not slow",
+    # Repository-structure tests, excluded because they cannot run from
+    # `mutants/` at all: they read the real repository — its git history, the
+    # generated agent-skill trees, the vendor instruction adapters — and the
+    # copy is not a git repo and does not carry those paths. `-x` means any
+    # one of them aborts the whole lane before a mutant is measured.
+    #
+    # Excluding them costs no measurement: none imports a mutated module, so
+    # none can kill a detector mutant, and
+    # tests/test_mutation_workflow_contract.py keeps that true — if one of
+    # these ever starts importing one, the exclusion stops being free and
+    # that test says so.
+    "--ignore=tests/test_publish_baseline_upload_step.py",
+    "--ignore=tests/test_publish_baseline_upload_step_evidence.py",
+    "--ignore=tests/test_publish_baseline_upload_step_generation.py",
+    "--ignore=tests/test_restore_git_mtimes.py",
+    "--ignore=tests/test_reusable_workflows.py",
+    "--ignore=tests/test_skill_eval_pack.py",
+    "--ignore=tests/test_skill_eval_scenarios.py",
+    "--ignore=tests/test_verify_profiles.py",
 ]
 
 # ---------------------------------------------------------------------------
