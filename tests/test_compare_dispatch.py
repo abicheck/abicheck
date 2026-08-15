@@ -715,6 +715,92 @@ def test_the_hybrid_rejection_names_only_live_flags(
     assert "--sources old=" in msg, msg
 
 
+def _embed_side_capturing_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    fmt: str | None,
+    collect_mode: str,
+    sources_raw: bool = True,
+    build_info_raw: bool = False,
+) -> str:
+    """Drive one ignored-evidence warning path and return what it printed."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    db = tmp_path / "compile_commands.json"
+    db.write_text("[]", encoding="utf-8")
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("must not reach the inline dump")
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), fmt))
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "old.json",
+        sources=tree if sources_raw else None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="castxml", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False,
+        build_info=db if build_info_raw else None,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode=collect_mode, out_dir=tmp_path,
+        label="old", depth=None,
+    )
+    return capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("sources_raw", "build_info_raw", "expected"),
+    [
+        (True, False, "--sources old= source tree"),
+        (False, True, "raw --build-info old="),
+        (True, True, "--sources old= source tree and raw --build-info old="),
+    ],
+)
+def test_a_snapshot_input_names_the_live_spelling_of_what_it_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    sources_raw: bool,
+    build_info_raw: bool,
+    expected: str,
+) -> None:
+    """A snapshot operand ignores raw evidence and says so -- in live flags.
+
+    The warning named an `--old-sources` tree and a `raw --old-build-info`;
+    both spellings are gone (`--sources`/`--build-info` are side-aware now),
+    so a reader following the message to re-run with the evidence attached
+    hit an unknown option (Codex review, alongside the frontend hint).
+    """
+    err = _embed_side_capturing_warning(
+        tmp_path, monkeypatch, capsys,
+        fmt=None, collect_mode="source-target",
+        sources_raw=sources_raw, build_info_raw=build_info_raw,
+    )
+    assert expected in err, err
+    for dead in ("--old-sources", "--old-build-info"):
+        assert dead not in err, err
+
+
+def test_a_depth_that_collects_nothing_names_the_live_spelling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The sibling path, same rewrite: --depth binary/headers resolves
+    # collect_mode to "off", so raw evidence is ignored with a note.
+    err = _embed_side_capturing_warning(
+        tmp_path, monkeypatch, capsys, fmt="elf", collect_mode="off",
+    )
+    assert "--sources old=/--build-info old= was given" in err, err
+    assert "--old-sources" not in err, err
+
+
 def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
     tmp_path: Path, monkeypatch
 ) -> None:
