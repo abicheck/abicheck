@@ -687,6 +687,44 @@ def test_replay_extra_flags_preserves_repeated_toggle_flags_in_order() -> None:
     assert extra == ["-fno-sycl", "-fsycl", "-fno-sycl"]
 
 
+def test_replay_extra_flags_decodes_split_operand_abi_flag_survivor() -> None:
+    """Codex review finding ("Decode normalized cc1 flags in every replay
+    path"): ``adapters.base.extract_abi_relevant_flags`` normalizes a
+    genuinely split two-token cc1 flag (``-target-abi aapcs``) into one
+    internal ``-target-abi=aapcs`` survivor token in
+    ``CompileUnit.abi_relevant_flags``. Before this fix,
+    ``replay_extra_flags``/``_carry_abi_relevant_flags`` read that survivor
+    unchanged: the bare form was silently DROPPED entirely by the
+    ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` filter (it starts with
+    ``-target``, the same prefix that filter drops as redundant for the
+    unrelated, already-structured ``target_triple``/``sysroot`` survivors),
+    losing the flag outright rather than merely mis-encoding it."""
+    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+    cu = _cu(abi_relevant_flags=["-target-abi=aapcs"])
+    extra = replay_extra_flags(cu, [], "gnu")
+    assert extra == ["-target-abi", "aapcs"]
+
+
+def test_replay_extra_flags_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> (
+    None
+):
+    """Companion case: the real-world ``-Xclang``-wrapped spelling (a
+    normal Clang driver invocation always wraps a cc1-only flag like this --
+    ``-Xclang -target-abi -Xclang aapcs``, never the bare two-token form) is
+    normalized into a distinct ``-Xclang -target-abi=aapcs`` internal
+    survivor. Before this fix it reached the replay command as ONE
+    malformed argv token (Clang would see a single string containing
+    literal spaces/an ``=`` instead of four real tokens) since it does not
+    start with any ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` entry and so was
+    never filtered, but also never decoded."""
+    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+    cu = _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"])
+    extra = replay_extra_flags(cu, [], "gnu")
+    assert extra == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
+
+
 def test_build_command_respects_final_disabled_sycl_toggle_despite_earlier_enable() -> (
     None
 ):

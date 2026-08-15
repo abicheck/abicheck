@@ -344,3 +344,44 @@
   chance to apply the caller's already-resolved explicit selection.
   `_ExplicitPin.gcc_path` is now `True` when *either* `explicit.gcc_path`
   or `explicit.gcc_prefix` is set.
+- **A fifteenth review round found two more gaps, both in the same
+  launcher-recognition and split-operand-ABI-flag machinery.** (1)
+  `adapters.base._executable_token_positions()`'s launcher recognition (the
+  fourteenth round's own fix, above) hard-coded a 3-name list
+  (`sccache`/`ccache`/`distcc`) and a fixed `{0, 1}` position pair — already
+  narrower than `source_extractors._argv.COMPILER_LAUNCHERS`'s six
+  recognized launchers (also `icecc`/`icerun`/`buildcache`), and unable to
+  locate the driver behind a chained launcher or one carrying a ccache-style
+  `KEY=VALUE` config-override token at all. A real
+  `buildcache clang-cl /std:c++20 /c x.cc` command was therefore not
+  recognized as MSVC-dialect: `msvc_driver_token()` returned `None`,
+  `_derived_gcc_path()` fell back to `buildcache`, and the downstream
+  resolver silently fell back to plain `clang++`, which cannot consume the
+  retained `/std:c++20` survivor. `_executable_token_positions()` now
+  reuses `source_extractors._argv.strip_launchers()` (the same, already
+  more complete launcher parser `adapters.base` already imports) to compute
+  the real driver's index directly, instead of an independent, already-
+  drifted name/position guess. (2) The internal `-target-abi=aapcs`
+  (bare) / `-Xclang -target-abi=aapcs` (`-Xclang`-wrapped) encoding the
+  twelfth round introduced was decoded back into real argv tokens only on
+  the L2 header-compile-context replay path
+  (`header_compile_context._split_operand_survivor()`). The identical
+  encoding also flows through L4 source replay
+  (`source_extractors._argv.replay_extra_flags()`/
+  `_carry_abi_relevant_flags()`), which read it unchanged: the bare
+  spelling was silently dropped outright by
+  `STRUCTURED_TOOLCHAIN_FLAG_PREFIXES` (it shares the `-target` prefix that
+  filter drops as redundant for the *unrelated*, already-structured
+  `target_triple`/`sysroot` survivors, but none of these four flags has a
+  structured field of its own), and the `-Xclang`-wrapped spelling reached
+  Clang as one malformed argv token instead of the required four real
+  tokens. The decode (`split_operand_survivor()`, plus the
+  `is_split_operand_abi_flag_survivor()` predicate) is now a single shared
+  implementation living in `source_extractors._argv` — the leaf,
+  tool-independent module both `adapters.base` (which *produces* the
+  encoding) and the L4 replay path already depend on, keeping the module
+  dependency a one-way DAG rather than introducing a real import cycle;
+  `adapters.base`/`header_compile_context` re-export it under their
+  existing names for backward compatibility. Both replay paths now
+  reconstruct the identical, real argv token(s) from one implementation
+  instead of drifting independently.

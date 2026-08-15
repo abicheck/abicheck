@@ -311,6 +311,44 @@ def test_build_command_drops_split_sysroot_flag_carried_without_operand() -> Non
     assert cmd[cmd.index("-o") + 1] == "o.xml"
 
 
+def test_build_command_decodes_split_operand_abi_flag_survivor() -> None:
+    # Codex review finding ("Decode normalized cc1 flags in every replay
+    # path"): adapters.base.extract_abi_relevant_flags normalizes a
+    # genuinely split two-token cc1 flag (`-target-abi aapcs`) into one
+    # internal `-target-abi=aapcs` survivor token in
+    # CompileUnit.abi_relevant_flags. The L4 replay path
+    # (source_extractors._argv.replay_extra_flags /
+    # _carry_abi_relevant_flags, reached here via build_castxml_command)
+    # must decode it back into its real, separate argv tokens -- not append
+    # the internal encoding as one malformed token that castxml would
+    # reject -- and must not let it be silently dropped by the (unrelated)
+    # STRUCTURED_TOOLCHAIN_FLAG_PREFIXES filter just because it shares the
+    # "-target" prefix with the already-structured target-triple survivor.
+    cmd = build_castxml_command(
+        _cu(abi_relevant_flags=["-target-abi=aapcs"]),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    assert cmd[cmd.index("-target-abi") + 1] == "aapcs"
+
+
+def test_build_command_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> None:
+    # Companion case: the real-world -Xclang-wrapped spelling (a normal
+    # Clang driver invocation always wraps a cc1-only flag like this --
+    # `-Xclang -target-abi -Xclang aapcs`, never the bare two-token form) is
+    # normalized into a distinct `-Xclang -target-abi=aapcs` internal
+    # survivor, which must decode back into the full four real argv tokens
+    # rather than reaching castxml as one malformed `-Xclang
+    # -target-abi=aapcs` token.
+    cmd = build_castxml_command(
+        _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"]),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    idx = cmd.index("-Xclang")
+    assert cmd[idx : idx + 4] == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
+
+
 def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # Mock castxml so we can assert the subprocess runs with cwd=directory and
     # exercise the extract() success path without the tool installed.
@@ -1585,7 +1623,9 @@ def test_strip_launchers_drops_bare_launcher() -> None:
     from abicheck.buildsource.source_extractors._argv import strip_launchers
 
     assert strip_launchers(["ccache", "clang++", "-c", "foo.cpp"]) == [
-        "clang++", "-c", "foo.cpp",
+        "clang++",
+        "-c",
+        "foo.cpp",
     ]
 
 
@@ -1650,7 +1690,9 @@ _LAUNCHER_NAME = st.sampled_from(sorted(_LAUNCHERS))
 #: A plain token that can never be confused for a launcher name or a
 #: KEY=VALUE override (no ``=`` at all, so the override regex can't match).
 _PLAIN_TOKEN = st.text(
-    alphabet=st.characters(min_codepoint=33, max_codepoint=126, blacklist_characters="="),
+    alphabet=st.characters(
+        min_codepoint=33, max_codepoint=126, blacklist_characters="="
+    ),
     min_size=1,
     max_size=10,
 ).filter(lambda t: t.lower().removesuffix(".exe") not in _LAUNCHERS)

@@ -82,9 +82,9 @@ from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import iter_directory_headers
 from .adapters.base import (
-    _SPLIT_OPERAND_ABI_FLAGS,
     _is_msvc_command,
     msvc_driver_token,
+    split_operand_survivor,
 )
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
@@ -888,51 +888,15 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
     return flags
 
 
-#: The literal marker :func:`extract_abi_relevant_flags` prepends to a
-#: ``-Xclang``-wrapped split-operand flag's internal encoding (see that
-#: function's and ``_SPLIT_OPERAND_ABI_FLAGS``'s own docstrings) -- a
-#: trailing space, never colliding with a real flag spelling since nothing
-#: in this codebase emits a bare ``-Xclang`` token from that function.
-_XCLANG_WRAPPED_MARKER = "-Xclang "
-
-
-def _split_operand_survivor(flag: str) -> list[str]:
-    """Expand one ``cu.abi_relevant_flags`` survivor into its literal argv token(s).
-
-    ``adapters.base.extract_abi_relevant_flags`` normalizes a genuinely
-    split two-token flag (``-target-abi <value>`` and its siblings in
-    ``adapters.base._SPLIT_OPERAND_ABI_FLAGS``) into one internal
-    ``<flag>=<value>`` token -- see that set's own docstring for why this is
-    a purely-internal encoding rather than real clang syntax (unlike
-    ``-D<KEY>=<VALUE>``, which is valid either way). This is the one place
-    that encoding is reconstructed into the two real, separate argv tokens
-    (``["-target-abi", "<value>"]``) a real compiler invocation needs (P2
-    review, ``discussion_r3787772666``) -- every other flag is returned
-    unchanged as a single-element list.
-
-    A cc1-only split-operand flag is, in real usage, always individually
-    wrapped in ``-Xclang`` on both sides (``-Xclang -target-abi -Xclang
-    aapcs``, never the bare two-token form -- P2 review,
-    ``discussion_r3788073752``, confirmed against a real ``clang -cc1
-    --help``/driver error). ``extract_abi_relevant_flags`` normalizes that
-    wrapped shape into a second, distinct internal encoding (a leading
-    ``-Xclang `` marker, see :data:`_XCLANG_WRAPPED_MARKER`), which this
-    function reconstructs into the full four-token ``["-Xclang", "<flag>",
-    "-Xclang", "<value>"]`` form -- a bare, unwrapped ``-target-abi
-    aapcs`` is not valid on a normal ``clang`` driver invocation (rejected
-    with "unknown argument"), so replaying the wrapped survivor without its
-    ``-Xclang`` forwarding would produce an invalid command.
-    """
-    if flag.startswith(_XCLANG_WRAPPED_MARKER):
-        remainder = flag[len(_XCLANG_WRAPPED_MARKER) :]
-        name, sep, value = remainder.partition("=")
-        if sep and name in _SPLIT_OPERAND_ABI_FLAGS:
-            return ["-Xclang", name, "-Xclang", value]
-        return [flag]
-    name, sep, value = flag.partition("=")
-    if sep and name in _SPLIT_OPERAND_ABI_FLAGS:
-        return [name, value]
-    return [flag]
+#: Re-export: the decode used to live here, L2-header-path-specific. It is
+#: now shared with L4 source replay (``source_extractors._argv.
+#: _carry_abi_relevant_flags``) and lives in ``adapters.base`` -- the module
+#: that *produces* the internal encoding in the first place (P2 review,
+#: "Decode normalized cc1 flags in every replay path", fresh evidence). Kept
+#: as a private alias here rather than updating every call site in this
+#: module (and this module's own test suite, which imports the private name
+#: directly) to the new public location.
+_split_operand_survivor = split_operand_survivor
 
 
 @dataclass(frozen=True)

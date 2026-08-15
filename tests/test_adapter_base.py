@@ -143,6 +143,46 @@ def test_source_from_argv_tp_space_separated_form():
     assert source_from_argv(["cl.exe", "/c", "/Tp", "foo.cc", "/Fofoo.obj"]) == "foo.cc"
 
 
+def test_msvc_driver_token_recognizes_buildcache_launcher():
+    # Codex review, "Reuse the complete launcher parser when locating
+    # clang-cl": the hard-coded 3-name launcher list (sccache/ccache/distcc)
+    # this scan previously used immediately drifted from
+    # source_extractors._argv.COMPILER_LAUNCHERS's six recognized launchers
+    # (which also include icecc/icerun/buildcache), so a real
+    # `buildcache clang-cl /std:c++20 /c x.cc` command was not recognized as
+    # MSVC-dialect at all -- the driver scan never looked past position 1's
+    # fixed launcher set, and buildcache wasn't in it.
+    argv = ["buildcache", "clang-cl", "/std:c++20", "/c", "x.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
+def test_msvc_driver_token_recognizes_icecc_and_icerun_launchers():
+    # Same finding: the other two launchers COMPILER_LAUNCHERS names beyond
+    # the old hard-coded set.
+    assert msvc_driver_token(["icecc", "clang-cl", "/c", "foo.cc"]) == "clang-cl"
+    assert msvc_driver_token(["icerun", "clang-cl", "/c", "foo.cc"]) == "clang-cl"
+
+
+def test_msvc_driver_token_behind_chained_launchers():
+    # source_extractors._argv.strip_launchers unwraps a chain of launcher
+    # tokens (and any per-launcher `KEY=VALUE` config override) in one pass;
+    # reusing it (rather than a fixed {0, 1} position pair) means a chained
+    # launcher invocation is handled too, not just a single wrapper.
+    argv = ["sccache", "buildcache", "clang-cl", "/std:c++20", "/c", "foo.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
+def test_msvc_driver_token_behind_launcher_config_override():
+    # ccache's own `KEY=VALUE` per-invocation config-override tokens (ccache
+    # manual, "Configuration" section) must be skipped too when locating the
+    # real driver behind a launcher.
+    argv = ["ccache", 'compiler_check="%compiler% --version"', "clang-cl", "/c", "x.cc"]
+    assert _is_msvc_command(argv) is True
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
 def test_source_from_argv_tp_without_valid_operand_is_skipped():
     # A trailing `/Tp` with no source-like operand consumes its slot and yields
     # no source (rather than misreading the next option).
