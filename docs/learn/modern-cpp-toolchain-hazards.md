@@ -30,7 +30,7 @@ often, because nothing in the diff "looks like" an ABI change.
 | **`char8_t` (C++20)** | `const char*` → `const char8_t*` is a *distinct type*: different mangling, and a new overload-resolution result. | [case114](../reference/examples/case114_char8t_migration.md) |
 | **`_BitInt(N)` width** | Changing `N` changes size/alignment and the register/stack class the value is passed in. | [case115](../reference/examples/case115_bit_int_width_changed.md) |
 | **`_Atomic` qualifier** | The representation of an `_Atomic`-qualified type is implementation-defined: adding/removing the qualifier can change size and alignment, and with them how the object is classified for passing/returning. | [case116](../reference/examples/case116_atomic_qualifier_changed.md) |
-| **`[[no_unique_address]]`** | Lets an empty member overlap the next field; adding it shrinks the struct and shifts every following offset. | [case117](../reference/examples/case117_no_unique_address.md) |
+| **`[[no_unique_address]]`** | *Permits* an empty member to overlap the next field — so adding it can shrink the struct and shift following offsets, though existing alignment padding can absorb the overlap and leave both size and offsets unchanged. | [case117](../reference/examples/case117_no_unique_address.md) |
 | **Concept tightening (C++20)** | Narrowing a constraint removes instantiations the consumer relied on — a *source* break with no symbol-table change for already-emitted instantiations. | [case105](../reference/examples/case105_concept_tightening.md) |
 | **LP64 → ILP64 / data-model drift** | `long`/pointer widths change out from under every struct and signature — a whole-ABI shift driven by the target, not the source. | [case112](../reference/examples/case112_lp64_ilp64.md) |
 

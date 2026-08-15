@@ -90,7 +90,10 @@ real trap is narrower than "hidden visibility breaks the catch":
 > thrown type's RTTI symbol is genuinely stripped from the binary entirely
 > (not merely hidden, and not merely `-fno-rtti` — see above, that flag
 > alone doesn't remove exception `type_info`). In either case the exception
-> unwinds past the intended handler and `std::terminate()` fires.
+> unwinds *past* the intended handler. What happens next is the ordinary
+> unwinding rule, not an automatic abort: the search continues up the chain,
+> so an outer `catch (...)` (or another matching handler) still takes it, and
+> `std::terminate()` fires only if no handler anywhere matches.
 
 **Default visibility on a thrown type's `type_info`** (in practice: an
 export/default-visibility annotation on the class itself, or an explicitly
@@ -153,9 +156,10 @@ remains.) We do not repeat that analysis here.
       so a default→hidden visibility flip presents identically to a genuine
       removal — while the local RTTI object and its type-name string are
       still there, and GNU libstdc++'s name fallback still matches. A
-      cross-DSO `catch` only genuinely stops matching when the RTTI is truly
-      unavailable *and* the runtime compares by pointer identity without
-      merged copies (see the section above);
+      cross-DSO `catch` only genuinely stops matching in either of the two
+      cases the section above sets out — a pointer-identity-only runtime with
+      unmerged copies, *or* RTTI that is genuinely unavailable — and even
+      then the exception continues unwinding to whatever handler does match;
     - the `noexcept`-driven library version requirement from
       [case15](../reference/examples/case15_noexcept_change.md).
 
