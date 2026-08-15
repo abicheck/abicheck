@@ -438,6 +438,34 @@ _PR_STEPS_NOT_IN_A_CI_ONLY_LIST = {
 }
 
 
+def test_the_bugfix_contract_step_skips_without_a_pr_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one gate CI can run more of than a local shell can.
+
+    Its declared half reads the PR body, so a local run that silently passed
+    let `--profile pr` claim CI parity having checked only the structural half
+    — while the CI job could still fail on the body afterwards (Codex review).
+    Routing it through the skip contract makes the run incomplete instead.
+    """
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    assert step.precondition is not None
+    monkeypatch.delenv("BUGFIX_CONTRACT_BODY_FILE", raising=False)
+    reason = step.precondition()
+    assert reason is not None and "BUGFIX_CONTRACT_BODY_FILE" in reason
+
+
+def test_the_bugfix_contract_step_runs_when_a_pr_body_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control: the skip must be about the missing body, not about
+    the step — CI sets this variable and gets the whole gate."""
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    assert step.precondition is not None
+    monkeypatch.setenv("BUGFIX_CONTRACT_BODY_FILE", "/tmp/pr-body.md")
+    assert step.precondition() is None
+
+
 def _ci_only_step_names() -> set[str]:
     """Every step name CI passes to `verify.py --only`, across all workflows.
 

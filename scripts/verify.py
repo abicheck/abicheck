@@ -193,6 +193,25 @@ def _pyscript(path: str, *args: str) -> tuple[str, ...]:
     return (sys.executable, path, *args)
 
 
+def _bugfix_contract_body_precondition() -> str | None:
+    """The declared half needs the PR body, which only CI has.
+
+    Reported as a *skip* rather than a pass, because a pass would let a local
+    `--profile pr` run claim CI parity having checked only the structural half
+    — and the CI workflow can still fail on the body afterwards. Routing it
+    through the skip contract makes the receipt say `complete: false` and
+    print the INCOMPLETE warning, which is exactly what that mechanism is for
+    (Codex review). Set BUGFIX_CONTRACT_BODY_FILE to a file holding the PR
+    description to run the whole gate locally.
+    """
+    if os.environ.get("BUGFIX_CONTRACT_BODY_FILE"):
+        return None
+    return (
+        "BUGFIX_CONTRACT_BODY_FILE is unset, so only the structural half "
+        "could run — set it to a file holding the PR description"
+    )
+
+
 @dataclass(frozen=True)
 class Step:
     name: str
@@ -274,6 +293,7 @@ STEPS: tuple[Step, ...] = (
         # contract fails later (AGENTS.md "M0-3", Codex review).
         _pyscript("scripts/check_bugfix_test_contract.py"),
         frozenset({PR, FULL}),
+        precondition=_bugfix_contract_body_precondition,
         description="Bug-fix test contract (structural half locally, declared half in CI)",
     ),
     Step(

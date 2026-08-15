@@ -170,6 +170,39 @@ class TestStatusVocabulary:
             assert rec.is_unresolved, status
 
 
+class TestCompletionWitness:
+    """`{total - not_checked}/{total}`, transcribed from mutmut 3.7.0."""
+
+    @pytest.mark.parametrize(
+        "text, complete",
+        [
+            ("12/12  🎉 12  🙁 0", True),
+            ("0/100  🎉 0  🙁 0", False),
+            ("309/464  🎉 300  🙁 0", False),
+            ("🙁 0", False),
+            ("", False),
+            # Zero total is not a finished run, it is no run.
+            ("0/0  🎉 0  🙁 0", False),
+        ],
+    )
+    def test_only_a_matching_counter_means_finished(
+        self, text: str, complete: bool
+    ) -> None:
+        assert mr.summary_run_is_complete(text) is complete
+
+    def test_the_last_render_decides(self) -> None:
+        """Same rule as the survivor counter: the stream re-renders, and only
+        the final one describes the run that happened."""
+        stream = "0/50  🙁 0\n25/50  🙁 1\n50/50  🎉 49  🙁 1\n"
+        assert mr.summary_run_is_complete(stream)
+        assert not mr.summary_run_is_complete("50/50  🙁 1\n0/50  🙁 0\n")
+
+    def test_a_bare_fraction_in_prose_is_not_a_render(self) -> None:
+        """The counter is only read from a line that also carries a status
+        emoji, so an unrelated ratio cannot be mistaken for completion."""
+        assert not mr.summary_run_is_complete("processed 7/7 files\n")
+
+
 class TestSurvivorCounting:
     def test_counts_real_results_listing(self) -> None:
         assert mr.parse_survivors(REAL_RESULTS) == 4

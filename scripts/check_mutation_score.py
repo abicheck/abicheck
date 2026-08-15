@@ -82,6 +82,7 @@ from mutation_results import (  # noqa: E402
     load_cicd_stats,
     parse_mutant_records,
     parse_survivors,
+    summary_run_is_complete,
     survivors_by_module,
 )
 
@@ -346,11 +347,12 @@ def _measurement_is_complete(
         return True, ""
     if parse_mutant_records(text):
         return True, ""
-    if parse_survivors(text) is not None:
+    if parse_survivors(text) is not None and summary_run_is_complete(text):
         return True, ""
     return False, (
-        "no per-mutant results and no mutants/mutmut-cicd-stats.json with "
-        "total > 0 — cannot tell 'all mutants killed' from 'mutmut never ran'"
+        "no per-mutant results, no mutants/mutmut-cicd-stats.json with "
+        "total > 0, and no completed progress render (N/N) — cannot tell "
+        "'all mutants killed' from 'mutmut never ran' or was interrupted"
     )
 
 

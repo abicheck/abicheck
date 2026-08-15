@@ -83,6 +83,14 @@ the identical command) — not just the fast command above.**
 these commands; if you change a check, change it in `scripts/verify.py` and
 let that test tell you what else needs updating.
 
+The `bugfix-test-contract` step is the one gate CI can run more of than a
+local shell can: its declared half reads the pull request's body. A local run
+without `BUGFIX_CONTRACT_BODY_FILE` set therefore reports as a **skip**, not a
+pass — the structural half still runs, and the `pr` profile marks the run
+incomplete rather than letting it claim parity with a CI job that can still
+fail on the body afterwards. Point that variable at a file holding the PR
+description to run the whole gate locally.
+
 **`pip install -e ".[dev]"` alone is not full `pr`-profile parity.** The
 `docs-build` step needs `mkdocs` (`pip install -e ".[dev,docs]"`) and the
 `distribution-build` step needs `build`/`twine` (`pip install -e ".[dev,dist]"`)

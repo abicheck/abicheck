@@ -77,7 +77,7 @@ def test_gate_skips_when_unmeasurable(tmp_path: Path) -> None:
 
 def test_gate_fails_when_survivors_exceed_baseline(tmp_path: Path) -> None:
     results = tmp_path / "results.txt"
-    results.write_text("🙁 9", encoding="utf-8")
+    results.write_text("20/20  🎉 11  🙁 9", encoding="utf-8")
     rc = gate.main(["--results-file", str(results), "--baseline", "3"])
     assert rc == 1
 
@@ -86,7 +86,7 @@ def test_gate_reports_only_when_baseline_unset(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     results = tmp_path / "results.txt"
-    results.write_text("🙁 42", encoding="utf-8")
+    results.write_text("50/50  🎉 8  🙁 42", encoding="utf-8")
     # No --baseline and module default is None -> report-only, never fails.
     rc = gate.main(["--results-file", str(results)])
     assert rc == 0
@@ -97,7 +97,7 @@ def test_gate_at_baseline_is_ok(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     results = tmp_path / "results.txt"
-    results.write_text("🙁 3", encoding="utf-8")
+    results.write_text("10/10  🎉 7  🙁 3", encoding="utf-8")
     rc = gate.main(["--results-file", str(results), "--baseline", "3"])
     assert rc == 0
     assert "OK" in capsys.readouterr().out
@@ -139,7 +139,7 @@ def test_run_mode_fails_on_interrupted_progress(
 def test_run_mode_counts_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
     """--run with an explicit survivor count is gated normally."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("🙁 2", 0))
+    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("10/10  🎉 8  🙁 2", 0))
     assert gate.main(["--run", "--baseline", "5"]) == 0  # within baseline
     assert gate.main(["--run", "--baseline", "1"]) == 1  # exceeds baseline
 
@@ -160,7 +160,9 @@ def test_run_mode_fails_on_unresolved_mutants(monkeypatch: pytest.MonkeyPatch) -
     """Zero survivors but unresolved (timeout/suspicious) mutants is an
     incomplete measurement — it must not pass a zero baseline."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("🙁 0  ⏰ 2  🤔 1", 0))
+    monkeypatch.setattr(
+        gate, "_run_mutmut", lambda cmd: ("10/10  🎉 7  🙁 0  ⏰ 2  🤔 1", 0)
+    )
     assert gate.main(["--run", "--baseline", "0"]) == 1
 
 
@@ -168,7 +170,7 @@ def test_unresolved_does_not_fail_report_only(monkeypatch: pytest.MonkeyPatch) -
     """In report-only mode (no baseline) unresolved mutants are surfaced but the
     gate does not fail — it is only reporting."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("🙁 0  ⏰ 2", 0))
+    monkeypatch.setattr(gate, "_run_mutmut", lambda cmd: ("10/10  🎉 8  🙁 0  ⏰ 2", 0))
     assert gate.main(["--run"]) == 0  # SURVIVOR_BASELINE is None → report-only
 
 
@@ -392,6 +394,41 @@ def test_no_results_file_and_no_run_is_still_a_clean_skip(
     """Negative control: the optional path stays optional. Without --run and
     without an explicit input there is genuinely nothing to do."""
     assert gate.main([]) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The opening render of a run that was then interrupted. Identical in
+        # shape to a clean finish, and it parsed as "zero survivors".
+        "0/100  🎉 0 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0",
+        "309/464  🎉 300  🙁 0",
+        # No counter at all: a bare count proves nothing about completion.
+        "🙁 0",
+    ],
+)
+def test_an_incomplete_summary_render_is_not_a_measurement(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str
+) -> None:
+    """A survivor count is not a completion witness (Codex review).
+
+    mutmut prints `{total - not_checked}/{total}`, so the halves match exactly
+    when nothing is left unchecked. Without that, an interrupted run's own
+    `🙁 0` passed a zero baseline — the false green this gate exists to remove.
+    """
+    results = _write(tmp_path, "r.txt", text)
+    assert gate.main(["--results-file", results, "--baseline", "0"]) == 0
+    assert "unmeasurable" in capsys.readouterr().out
+
+
+def test_a_completed_summary_render_still_measures(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Negative control: the witness must not reject a real finished run —
+    N == N is exactly what mutmut prints when nothing is left unchecked."""
+    results = _write(tmp_path, "r.txt", "12/12  🎉 12 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0")
+    assert gate.main(["--results-file", results, "--baseline", "0"]) == 0
+    assert "unmeasurable" not in capsys.readouterr().out
 
 
 class TestUngatedRun:
@@ -862,7 +899,7 @@ def test_summary_only_survivors_cannot_pass_the_per_module_gate(
 ) -> None:
     """`🙁 3` gives a count but no attribution, so `by_module` is empty — the
     per-module comparison then finds nothing to compare and reports success."""
-    results = _write(tmp_path, "r.txt", "🙁 3")
+    results = _write(tmp_path, "r.txt", "10/10  🎉 7  🙁 3")
     baseline = _baseline(tmp_path, {"abicheck/diff_types.py": 5})
     rc = gate.main(["--results-file", results, "--baseline-file", baseline])
     assert rc == 1
@@ -871,7 +908,7 @@ def test_summary_only_survivors_cannot_pass_the_per_module_gate(
 
 def test_summary_only_survivors_cannot_write_a_baseline(tmp_path: Path) -> None:
     """It would record `total_survivors: 0` and gate every later run on that."""
-    results = _write(tmp_path, "r.txt", "🙁 3")
+    results = _write(tmp_path, "r.txt", "10/10  🎉 7  🙁 3")
     out_file = tmp_path / "baseline.json"
     rc = gate.main(
         [
@@ -890,7 +927,7 @@ def test_summary_only_survivors_cannot_pass_the_diff_scoped_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     diff, _ = _diff_scoped_env(tmp_path, monkeypatch)
-    results = _write(tmp_path, "r.txt", "🙁 3")
+    results = _write(tmp_path, "r.txt", "10/10  🎉 7  🙁 3")
     rc = gate.main(
         [
             "--results-file",
@@ -910,7 +947,7 @@ def test_summary_only_survivors_still_serve_the_global_total_gate(
 ) -> None:
     """Negative control: counting needs no attribution, so the legacy
     whole-repository check must keep working on a summary."""
-    results = _write(tmp_path, "r.txt", "🙁 3")
+    results = _write(tmp_path, "r.txt", "10/10  🎉 7  🙁 3")
     assert (
         gate.main(
             [

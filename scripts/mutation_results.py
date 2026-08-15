@@ -108,6 +108,14 @@ _MUTANT_LINE = re.compile(
 #: match, never a first one; see the module docstring.
 _PROGRESS_SUMMARY = re.compile(r"🙁\s*(\d+)")
 
+#: The progress counter that leads each render. mutmut 3.7.0 formats it as
+#: ``f"{s.total - s.not_checked}/{s.total}  🎉 ..."`` (transcribed from
+#: ``mutmut/__main__.py``), so the two halves are equal exactly when nothing is
+#: left unchecked — i.e. the run reached its final render. Anchored to a line
+#: that also carries a status emoji so an unrelated ``3/4`` in prose cannot be
+#: read as one.
+_PROGRESS_COUNTER = re.compile(r"^\D*?(\d+)\s*/\s*(\d+)\s.*?[🎉🙁🫥⏰🤔🔇🧙]", re.MULTILINE)
+
 #: Emoji counters for the unresolved statuses, read from a summary render when
 #: there is no per-mutant listing to count instead. As with the survivor
 #: counter, only the *last* render is trusted.
@@ -246,6 +254,26 @@ def parse_survivors(text: str) -> int | None:
     if m:
         return int(m.group(1))
     return None
+
+
+def summary_run_is_complete(text: str) -> bool:
+    """Did a summary-only capture reach mutmut's *final* render?
+
+    The counter is ``{total - not_checked}/{total}``, so the run finished
+    exactly when the two halves match and the total is non-zero. Without this,
+    an interrupted run's opening render (``0/100 … 🙁 0``) parsed as "zero
+    survivors" and was accepted as a complete measurement — the same
+    false-green this module's last-match rule exists to prevent, one step
+    earlier (Codex review).
+
+    Only meaningful for summary-only input; a per-mutant listing or the
+    exported stats are stronger witnesses and are checked first.
+    """
+    matches = _PROGRESS_COUNTER.findall(text or "")
+    if not matches:
+        return False
+    checked, total = matches[-1]
+    return int(total) > 0 and int(checked) == int(total)
 
 
 def count_unresolved(text: str) -> int:
