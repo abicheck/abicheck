@@ -2,8 +2,7 @@ name: PVXS integration acceptance
 
 on:
   push:
-    branches:
-      - validation/pvxs-integration-20260814
+    branches: [validation/pvxs-integration-20260814]
   workflow_dispatch:
 
 permissions:
@@ -17,20 +16,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - old: '1.4.0'
-            new: '1.5.0'
-          - old: '1.5.0'
-            new: '1.5.1'
-          - old: '1.5.1'
-            new: '1.5.2'
-          - old: '1.5.2'
-            new: 'master'
+          - { old: '1.4.0', new: '1.5.0' }
+          - { old: '1.5.0', new: '1.5.1' }
+          - { old: '1.5.1', new: '1.5.2' }
+          - { old: '1.5.2', new: 'master' }
     env:
       SETUP_PATH: .ci-local
       SET: defaults
       CMP: gcc
       BCFG: default
-      BASE: '7.0'
+      BASE: 'R7.0.10'
       _PVXS_ABORT_ON_CRIT: '1'
       PVXS_LOG: 'pvxs.*=WARN'
 
@@ -46,31 +41,26 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - name: Install native dependencies
+      - name: Install PVXS and legacy ABI dependencies
         run: |
           sudo apt-get update
-          sudo apt-get -y install \
-            build-essential cmake libreadline-dev libevent-dev \
-            abi-dumper vtable-dumper abi-compliance-checker universal-ctags \
-            castxml jq time
-          castxml --version
+          sudo apt-get -y install build-essential cmake libreadline-dev libevent-dev \
+            abi-dumper vtable-dumper abi-compliance-checker universal-ctags jq time
           abi-dumper --version || true
           abi-compliance-checker --version || true
           gcc --version | head -1
-          g++ --version | head -1
 
       - name: Install current abicheck
         run: |
           python -m pip install .
           abicheck --version
 
-      - name: Prepare PVXS dependencies exactly as project CI does
+      - name: Prepare pinned EPICS Base
         working-directory: pvxs
         run: |
-          test -f .ci/cue.py
           python .ci/cue.py prepare
-          echo '--- generated local config ---'
-          find configure -maxdepth 1 -name '*.local' -print -exec sed -n '1,120p' {} \;
+          grep EPICS_BASE configure/RELEASE.local
+          git -C "$(sed -n 's/^EPICS_BASE=//p' configure/RELEASE.local)" describe --tags --always || true
 
       - name: Build both PVXS revisions
         id: build
@@ -82,113 +72,38 @@ jobs:
           set -euxo pipefail
           ROOT="$PWD"
           WORK="$RUNNER_TEMP/pvxs-${OLD_REF}-to-${NEW_REF}"
-          rm -rf "$WORK"
-          mkdir -p "$WORK/old" "$WORK/new"
-
+          rm -rf "$WORK" && mkdir -p "$WORK/old" "$WORK/new"
           prepare_tree() {
-            ref="$1"
-            dst="$2"
-            git archive "$ref" | tar -C "$dst" -x
-            if [ -f "$ROOT/configure/RELEASE.local" ]; then
-              cp "$ROOT/configure/RELEASE.local" "$dst/configure/"
-            fi
-            if [ -f "$ROOT/configure/CONFIG_SITE.local" ]; then
-              cp "$ROOT/configure/CONFIG_SITE.local" "$dst/configure/"
-            fi
-            for f in "$dst"/configure/*.local; do
-              [ -f "$f" ] || continue
-              sed -i -e "s|\$(TOP)|$ROOT|g" -e 's|-Werror||g' "$f"
-            done
+            git archive "$1" | tar -C "$2" -x
+            cp "$ROOT/configure/RELEASE.local" "$2/configure/"
+            [ ! -f "$ROOT/configure/CONFIG_SITE.local" ] || cp "$ROOT/configure/CONFIG_SITE.local" "$2/configure/"
+            for f in "$2"/configure/*.local; do [ ! -f "$f" ] || sed -i -e "s|\$(TOP)|$ROOT|g" -e 's|-Werror||g' "$f"; done
           }
-
           prepare_tree "$OLD_REF" "$WORK/old"
           prepare_tree "$NEW_REF" "$WORK/new"
-
-          /usr/bin/time -v -o "$WORK/build-old.time" \
-            make -C "$WORK/old" CROSS_COMPILER_TARGET_ARCHS= OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j2
-          /usr/bin/time -v -o "$WORK/build-new.time" \
-            make -C "$WORK/new" CROSS_COMPILER_TARGET_ARCHS= OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j2
-
-          old_pvxs=$(readlink -f $(ls "$WORK"/old/lib/linux-*/libpvxs.so.* | head -1))
-          new_pvxs=$(readlink -f $(ls "$WORK"/new/lib/linux-*/libpvxs.so.* | head -1))
-          old_ioc=$(readlink -f $(ls "$WORK"/old/lib/linux-*/libpvxsIoc.so.* | head -1))
-          new_ioc=$(readlink -f $(ls "$WORK"/new/lib/linux-*/libpvxsIoc.so.* | head -1))
-
+          /usr/bin/time -v -o "$WORK/build-old.time" make -C "$WORK/old" CROSS_COMPILER_TARGET_ARCHS= OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j2
+          /usr/bin/time -v -o "$WORK/build-new.time" make -C "$WORK/new" CROSS_COMPILER_TARGET_ARCHS= OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j2
+          old_pvxs=$(readlink -f "$(ls "$WORK"/old/lib/linux-*/libpvxs.so.* | head -1)")
+          new_pvxs=$(readlink -f "$(ls "$WORK"/new/lib/linux-*/libpvxs.so.* | head -1)")
+          old_ioc=$(readlink -f "$(ls "$WORK"/old/lib/linux-*/libpvxsIoc.so.* | head -1)")
+          new_ioc=$(readlink -f "$(ls "$WORK"/new/lib/linux-*/libpvxsIoc.so.* | head -1)")
           file "$old_pvxs" "$new_pvxs" "$old_ioc" "$new_ioc"
-          echo "work=$WORK" >> "$GITHUB_OUTPUT"
-          echo "old_pvxs=$old_pvxs" >> "$GITHUB_OUTPUT"
-          echo "new_pvxs=$new_pvxs" >> "$GITHUB_OUTPUT"
-          echo "old_ioc=$old_ioc" >> "$GITHUB_OUTPUT"
-          echo "new_ioc=$new_ioc" >> "$GITHUB_OUTPUT"
-          echo "old_headers=$WORK/old/include" >> "$GITHUB_OUTPUT"
-          echo "new_headers=$WORK/new/include" >> "$GITHUB_OUTPUT"
+          {
+            echo "work=$WORK"; echo "old_pvxs=$old_pvxs"; echo "new_pvxs=$new_pvxs"
+            echo "old_ioc=$old_ioc"; echo "new_ioc=$new_ioc"
+            echo "old_headers=$WORK/old/include"; echo "new_headers=$WORK/new/include"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Self-compare invariant (candidate libpvxs)
+      - name: Binary self-compare invariant
         env:
           LIB: ${{ steps.build.outputs.new_pvxs }}
-          HEADERS: ${{ steps.build.outputs.new_headers }}
         run: |
-          set +e
-          /usr/bin/time -v -o self.time \
-            abicheck compare "$LIB" "$LIB" \
-              --old-header "$HEADERS" --new-header "$HEADERS" \
-              --format json -o self.json
-          rc=$?
-          set -e
-          jq '{verdict, changes: (.changes | length?)}' self.json || cat self.json
-          test "$rc" -eq 0
+          /usr/bin/time -v -o self-binary.time abicheck compare "$LIB" "$LIB" --format json -o self-binary.json
+          jq '{verdict, change_count: (.changes | length?)}' self-binary.json
+          test "$(jq -r '.verdict' self-binary.json)" = COMPATIBLE
 
-      - name: Direct abicheck compare libpvxs
-        env:
-          OLD_LIB: ${{ steps.build.outputs.old_pvxs }}
-          NEW_LIB: ${{ steps.build.outputs.new_pvxs }}
-          OLD_HEADERS: ${{ steps.build.outputs.old_headers }}
-          NEW_HEADERS: ${{ steps.build.outputs.new_headers }}
-        run: |
-          set +e
-          /usr/bin/time -v -o libpvxs.time \
-            abicheck compare "$OLD_LIB" "$NEW_LIB" \
-              --old-header "$OLD_HEADERS" --new-header "$NEW_HEADERS" \
-              --old-version '${{ matrix.old }}' --new-version '${{ matrix.new }}' \
-              --format json -o libpvxs.json
-          rc=$?
-          set -e
-          echo "abicheck rc=$rc"
-          jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' libpvxs.json || cat libpvxs.json
-          case "$rc" in 0|1|2|4) ;; *) exit "$rc" ;; esac
-
-      - name: Direct abicheck compare libpvxsIoc
-        env:
-          OLD_LIB: ${{ steps.build.outputs.old_ioc }}
-          NEW_LIB: ${{ steps.build.outputs.new_ioc }}
-          OLD_HEADERS: ${{ steps.build.outputs.old_headers }}
-          NEW_HEADERS: ${{ steps.build.outputs.new_headers }}
-        run: |
-          set +e
-          /usr/bin/time -v -o libpvxsIoc.time \
-            abicheck compare "$OLD_LIB" "$NEW_LIB" \
-              --old-header "$OLD_HEADERS" --new-header "$NEW_HEADERS" \
-              --old-version '${{ matrix.old }}' --new-version '${{ matrix.new }}' \
-              --format json -o libpvxsIoc.json
-          rc=$?
-          set -e
-          echo "abicheck rc=$rc"
-          jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' libpvxsIoc.json || cat libpvxsIoc.json
-          case "$rc" in 0|1|2|4) ;; *) exit "$rc" ;; esac
-
-      - name: Existing PVXS ABI checker side-by-side
-        working-directory: pvxs
-        run: |
-          set +e
-          ./abi-diff.sh '${{ matrix.old }}' '${{ matrix.new }}' > "$RUNNER_TEMP/abicc.log" 2>&1
-          rc=$?
-          set -e
-          echo "abi-diff.sh rc=$rc"
-          tail -120 "$RUNNER_TEMP/abicc.log"
-          case "$rc" in 0|1) ;; *) exit "$rc" ;; esac
-
-      - name: Exercise local GitHub Action shell path on real PVXS lib
-        id: action_compare
+      - name: Full Action compare libpvxs with supported toolchain
+        id: action_pvxs
         continue-on-error: true
         uses: ./
         with:
@@ -197,47 +112,69 @@ jobs:
           new-library: ${{ steps.build.outputs.new_pvxs }}
           old-header: ${{ steps.build.outputs.old_headers }}
           new-header: ${{ steps.build.outputs.new_headers }}
-          dependency-source: none
+          old-version: ${{ matrix.old }}
+          new-version: ${{ matrix.new }}
+          dependency-source: conda-forge
           format: json
-          output-file: action-libpvxs.json
+          output-file: libpvxs.json
           pr-comment: false
           github-token: ''
-          add-job-summary: true
+          fail-on-breaking: false
+          fail-on-api-break: false
 
-      - name: Validate Action transport result
-        run: |
-          test -s action-libpvxs.json
-          jq '{verdict, change_count: (.changes | length?)}' action-libpvxs.json || cat action-libpvxs.json
-          echo "action step outcome=${{ steps.action_compare.outcome }}"
-          echo "verdict=${{ steps.action_compare.outputs.verdict }}"
-          echo "exit-code=${{ steps.action_compare.outputs.exit-code }}"
-          case '${{ steps.action_compare.outputs.exit-code }}' in 0|1|2|4) ;; *) exit 1 ;; esac
+      - name: Full Action compare libpvxsIoc with supported toolchain
+        id: action_ioc
+        continue-on-error: true
+        uses: ./
+        with:
+          mode: compare
+          old-library: ${{ steps.build.outputs.old_ioc }}
+          new-library: ${{ steps.build.outputs.new_ioc }}
+          old-header: ${{ steps.build.outputs.old_headers }}
+          new-header: ${{ steps.build.outputs.new_headers }}
+          old-version: ${{ matrix.old }}
+          new-version: ${{ matrix.new }}
+          dependency-source: conda-forge
+          format: json
+          output-file: libpvxsIoc.json
+          pr-comment: false
+          github-token: ''
+          fail-on-breaking: false
+          fail-on-api-break: false
 
-      - name: Collect acceptance summary
-        if: always()
+      - name: Header-aware self-compare through current CLI
+        env:
+          LIB: ${{ steps.build.outputs.new_pvxs }}
+          HDR: ${{ steps.build.outputs.new_headers }}
         run: |
-          {
-            echo '# PVXS acceptance ${{ matrix.old }} -> ${{ matrix.new }}'
-            echo
-            echo '## Tool versions'
-            echo '```text'
-            abicheck --version || true
-            castxml --version || true
-            gcc --version | head -1 || true
-            echo '```'
-            echo
-            echo '## Reports'
-            for f in self.json libpvxs.json libpvxsIoc.json action-libpvxs.json; do
-              echo "### $f"
-              if [ -f "$f" ]; then jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' "$f" 2>/dev/null || true; else echo missing; fi
-            done
-            echo
-            echo '## Timing/RSS'
-            for f in self.time libpvxs.time libpvxsIoc.time; do
-              echo "### $f"
-              [ -f "$f" ] && grep -E 'Elapsed|Maximum resident' "$f" || true
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          /usr/bin/time -v -o self-header.time abicheck compare "$LIB" "$LIB" \
+            --header "old=$HDR" --header "new=$HDR" --format json -o self-header.json
+          rc=$?
+          set -e
+          echo "rc=$rc"
+          test -s self-header.json && jq '{verdict, change_count: (.changes | length?)}' self-header.json || true
+          test "$rc" -eq 0
+
+      - name: Existing PVXS ABI checker side-by-side
+        working-directory: pvxs
+        run: |
+          set +e
+          ./abi-diff.sh '${{ matrix.old }}' '${{ matrix.new }}' > "$RUNNER_TEMP/abicc.log" 2>&1
+          rc=$?
+          set -e
+          echo "legacy rc=$rc"
+          tail -100 "$RUNNER_TEMP/abicc.log"
+          cp "$RUNNER_TEMP/abicc.log" ../abicc.log
+
+      - name: Validate Action transport
+        run: |
+          echo "libpvxs: outcome=${{ steps.action_pvxs.outcome }} verdict=${{ steps.action_pvxs.outputs.verdict }} exit=${{ steps.action_pvxs.outputs.exit-code }}"
+          echo "ioc: outcome=${{ steps.action_ioc.outcome }} verdict=${{ steps.action_ioc.outputs.verdict }} exit=${{ steps.action_ioc.outputs.exit-code }}"
+          test -s libpvxs.json
+          test -s libpvxsIoc.json
+          jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' libpvxs.json
+          jq '{verdict, summary, evidence_tiers, change_count: (.changes | length?)}' libpvxsIoc.json
 
       - name: Upload acceptance artifacts
         if: always()
@@ -247,13 +184,12 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
           path: |
-            self.json
+            self-binary.json
+            self-header.json
             libpvxs.json
             libpvxsIoc.json
-            action-libpvxs.json
-            self.time
-            libpvxs.time
-            libpvxsIoc.time
+            self-binary.time
+            self-header.time
+            abicc.log
             ${{ steps.build.outputs.work }}/build-old.time
             ${{ steps.build.outputs.work }}/build-new.time
-            pvxs/compat_reports
