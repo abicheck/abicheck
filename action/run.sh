@@ -507,7 +507,14 @@ _try_baseline_set_fallback() {
   fi
   local existing_url=""
   if [[ -n "$assets_json" ]]; then
-    existing_url=$(printf '%s' "$assets_json" | "$_PY_BIN" -c '
+    # Isolated the same way as every abicheck-importing invocation, even
+    # though this one only uses stdlib `json`/`sys` (Codex review, fresh
+    # evidence): the sitecustomize.py auto-import vector this mechanism
+    # guards against fires during interpreter *startup*, before a single
+    # line of this script body runs -- it doesn't depend on what (if
+    # anything) the body itself imports, so "no abicheck import" was never
+    # a reason to skip the isolation.
+    existing_url=$(printf '%s' "$assets_json" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import json
 import sys
 
@@ -520,7 +527,7 @@ for asset in data.get("assets") or []:
     if asset.get("name") == name:
         print(asset.get("apiUrl") or "")
         break
-' "$asset_name")
+' "$asset_name"))
   fi
 
   # A fixed, platform-safe local filename, NOT "$set_download_dir/$asset_name"
@@ -1487,7 +1494,27 @@ _report_query() {
   # be read or parsed, which every caller treats as "cannot tell" rather than
   # as an answer.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
-  "$_PY_BIN" - "$1" "$2" <<'PYQUERY' 2>/dev/null
+  # Isolated the same way as every other Python invocation in this file
+  # (Codex review, fresh evidence): the sitecustomize.py auto-import vector
+  # fires during interpreter *startup*, before this heredoc body ever runs
+  # a single line -- it doesn't depend on what the body imports, only on
+  # where the interpreter starts.
+  #
+  # $1 is NOT reliably absolute -- unlike $_STDOUT_JSON_FILE (mktemp-
+  # rooted), $OUTPUT_FILE (this function's other caller shape, via
+  # $_json_report_src) can be a bare user-supplied INPUT_OUTPUT_FILE value
+  # or a relative default (e.g. "abicheck-baseline.json"), relative to the
+  # workflow's own working directory -- which the `cd "$_PY_SAFE_DIR"`
+  # below would otherwise resolve it against instead (the identical class
+  # of bug this same pass already fixed for $BASELINE_DIR). Anchored to
+  # $PWD *before* that cd, since that's the correct base directory at this
+  # point in the script.
+  local report_path="$1"
+  case "$report_path" in
+    /* | ?:[/\\]*) ;; # already absolute: POSIX, or Windows drive-letter
+    *) report_path="$PWD/$report_path" ;;
+  esac
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null
 import json
 import sys
 

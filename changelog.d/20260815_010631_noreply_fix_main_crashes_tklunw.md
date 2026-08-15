@@ -39,9 +39,12 @@
   script body runs), could make one of these inline scripts import and
   execute that code instead of the real, pip-installed package — including
   via a `PYTHONPATH` entry the calling workflow set, resolved relative to
-  the checkout. Every inline script that imports an `abicheck` module now
-  runs from a freshly created, empty temporary directory with `PYTHONPATH`
-  cleared for that one invocation, so the checkout is never on `sys.path`
+  the checkout. Every Python invocation in this script now runs from a
+  freshly created, empty temporary directory with `PYTHONPATH` cleared for
+  that one invocation — not just the ones importing `abicheck`, since the
+  `sitecustomize.py` auto-import vector fires during interpreter startup
+  regardless of what (if anything) the invoked script body itself imports
+  — so the checkout is never on `sys.path`
   at any point during interpreter startup or after — closing both the
   direct-import and the `sitecustomize` vector at once, for a bare CWD
   entry, a `PYTHONPATH=.`-style entry, or a `PYTHONPATH=src`-style
@@ -85,7 +88,12 @@
   holds a relative value, and every path derived from it is passed into
   the same `$_PY_SAFE_DIR`-isolated invocations above, which would
   otherwise resolve a relative path against the wrong directory and
-  misreport a perfectly valid archive as corrupt or missing.
+  misreport a perfectly valid archive as corrupt or missing. `_report_query`
+  (the Job Summary's severity/coverage lookups) is anchored the same way:
+  its own report-path argument — which, unlike every other path this
+  isolation touches, can genuinely be a bare, relative user-supplied
+  `output-file` value — is resolved against the working directory before
+  the isolated invocation runs, not after.
 - **The Windows-only compiler-flags tokenizer (`--gcc-options`/
   `--compiler-option`) now follows the standard Windows command-line
   backslash/quote parsing rule** (the same one `CommandLineToArgvW` and

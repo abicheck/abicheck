@@ -60,6 +60,23 @@ _HELPERS_END = 'if [[ "$MODE" == "deps-compare" ]]; then'
 #: "no report available" fallback -- the identical vacuous-pass failure
 #: mode `_HELPERS_START`'s own docstring already warns about.
 _PY_BIN_LINE = re.compile(r"^_PY_BIN=.*$", re.MULTILINE)
+#: `_report_query` also references `$_PY_SAFE_DIR` (Codex review, fresh
+#: evidence: it now runs isolated the same way as every other Python
+#: invocation in run.sh) -- extracted for the identical reason as
+#: `_PY_BIN_LINE` above: without it, `$_PY_SAFE_DIR` is empty in the
+#: assembled test script, the `cd "$_PY_SAFE_DIR"` inside `_report_query`
+#: silently no-ops (an empty `cd` argument stays in the current directory),
+#: and every test here would keep passing regardless of whether the real
+#: isolation is exercised at all.
+_PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
+_PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
+
+
+def _py_safe_dir_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PY_SAFE_DIR_START)
+    end = text.index(_PY_SAFE_DIR_END, start) + len(_PY_SAFE_DIR_END)
+    return text[start:end]
 
 
 def _verdict_case_region() -> str:
@@ -75,7 +92,14 @@ def _verdict_case_region() -> str:
     assert "_json_report_src()" in helpers and "_severity_gate_exit()" in helpers
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start) + len(_END_MARKER)
-    return py_bin_match.group(0) + "\n" + helpers + "\n" + text[start:end]
+    return (
+        py_bin_match.group(0)
+        + "\n"
+        + _py_safe_dir_source()
+        + helpers
+        + "\n"
+        + text[start:end]
+    )
 
 
 def _bash_executable() -> str:
@@ -97,7 +121,7 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run(env_overrides: dict[str, str]) -> str:
+def _run(env_overrides: dict[str, str], *, cwd: Path | None = None) -> str:
     """Run the extracted VERDICT-case snippet, return its stdout."""
     with tempfile.NamedTemporaryFile(
         "w",
@@ -117,6 +141,7 @@ def _run(env_overrides: dict[str, str]) -> str:
             text=True,
             encoding="utf-8",
             env=env,
+            cwd=cwd,
         )
     finally:
         os.unlink(script_path)
@@ -150,6 +175,28 @@ class TestSeverityErrorSummaryLine:
         # Must not read as an ABI/API break when it's only a policy gate.
         assert "ABI BREAKING" not in out
         assert "policy gate, not necessarily an ABI/API break" in out
+
+    def test_reads_a_relative_output_file(self, tmp_path) -> None:
+        """Codex review, fresh evidence: unlike every other test here,
+        OUTPUT_FILE can genuinely be relative (a bare user-supplied
+        INPUT_OUTPUT_FILE value, or a relative default) -- relative to the
+        workflow's own working directory. _report_query now runs isolated
+        via a `cd "$_PY_SAFE_DIR"`, which would resolve a relative path
+        against the wrong directory unless anchored to $PWD first."""
+        (tmp_path / "report.json").write_text(
+            json.dumps({"severity": {"blocking_categories": ["addition"]}}),
+            encoding="utf-8",
+        )
+        out = _run(
+            {
+                "VERDICT": "SEVERITY_ERROR",
+                "FORMAT": "json",
+                "OUTPUT_FILE": "report.json",
+                "ABICHECK_EXIT": "1",
+            },
+            cwd=tmp_path,
+        )
+        assert "`addition` configured as `error`" in out
 
     def test_joins_multiple_blocking_categories(self, tmp_path) -> None:
         report = tmp_path / "report.json"
