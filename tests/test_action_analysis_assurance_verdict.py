@@ -17,14 +17,20 @@
 (``--require-complete-analysis``, ``abicheck/analysis_assurance.py``).
 
 Before this, ``action/run.sh`` had no notion of this axis at all: an exit 1
-caused by incomplete ``analysis_assurance`` (with the flag given via
-``extra-args``, since neither ``compare`` nor ``scan`` had a dedicated Action
-input for it) fell through the existing exit-1 disambiguation and was
-mislabeled -- ``SEVERITY_ERROR`` on ``compare`` (a *severity-policy* failure
-it is not) or ``ERROR`` on ``scan`` (an *operational* failure it is not).
-The axis is neither: like ADR-049's contract-coverage axis it never rewrites
-the compatibility verdict, only floors the exit code, and is unconditional
-(no ``fail-on-*`` flag can turn it off).
+caused by incomplete ``analysis_assurance`` fell through the existing exit-1
+disambiguation and was mislabeled -- ``SEVERITY_ERROR`` on ``compare`` (a
+*severity-policy* failure it is not) or ``ERROR`` on ``scan`` (an
+*operational* failure it is not). The axis is neither: like ADR-049's
+contract-coverage axis it never rewrites the compatibility verdict, only
+floors the exit code, and is unconditional (no ``fail-on-*`` flag can turn
+it off).
+
+The Action gates on this axis via a dedicated ``require-complete-analysis``
+boolean input (mirroring ``fail-on-breaking``), the terminal fix for a class
+of bug found across three Codex review rounds while this axis's detection
+was still inferred from other signals (an unanchored stderr grep, then a
+``$CMD``-array token scan) -- see ``action/run.sh``'s own comment above
+``_assurance_gated()`` for the full history.
 
 Mirrors ``test_action_coverage_verdict.py``'s own harness style (real
 subprocess through ``run.sh``, a shebang-dispatched ``abicheck`` stub on
@@ -75,13 +81,11 @@ ASSURANCE_BLOCK = {
     "notes": ["header context asymmetric between old and new"],
 }
 
-#: `_assurance_gated()` requires this literal token in `$CMD` (the actual
-#: invocation argv, extra-args included) before it will even look at the
-#: report or stderr -- the load-bearing anti-spoofing check (Codex
-#: review). Every test below that expects the axis to actually gate must
-#: pass this via `INPUT_EXTRA_ARGS`, mirroring how a real caller supplies
-#: the flag today (neither command has a dedicated Action input for it).
-EXTRA_ARGS_WITH_FLAG = {"INPUT_EXTRA_ARGS": "--require-complete-analysis"}
+#: `_assurance_gated()` requires this dedicated boolean input to be `true`
+#: before it will even look at the report or stderr -- the load-bearing
+#: check. Every test below that expects the axis to actually gate must pass
+#: this.
+REQUIRE_COMPLETE_ANALYSIS_INPUT = {"INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"}
 
 
 def _stub_abicheck(
@@ -178,7 +182,7 @@ class TestScanMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -211,17 +215,17 @@ class TestScanMapsTheAssuranceExit:
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
                 "INPUT_FAIL_ON_BREAKING": "false",
                 "INPUT_FAIL_ON_API_BREAK": "false",
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
         assert outputs["_exit"] == 1, outputs
 
     def test_a_run_without_the_flag_is_unaffected(self, tmp_path: Path) -> None:
-        """The flag is absent from `$CMD` (no `extra-args`) -> exit 1 with
-        neither coverage nor assurance signal stays a plain ERROR, exactly
-        as it always did -- regardless of the stderr diagnostic being
-        absent too in this particular fixture."""
+        """`require-complete-analysis` is unset -> exit 1 with neither
+        coverage nor assurance signal stays a plain ERROR, exactly as it
+        always did -- regardless of the stderr diagnostic being absent too
+        in this particular fixture."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -262,7 +266,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -301,7 +305,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -344,7 +348,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -373,7 +377,7 @@ class TestCompareMapsTheAssuranceExit:
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
                 "INPUT_FAIL_ON_BREAKING": "false",
                 "INPUT_FAIL_ON_API_BREAK": "false",
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -442,7 +446,7 @@ class TestHostileReportContentCannotExecute:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -454,21 +458,21 @@ class TestHostileReportContentCannotExecute:
         assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
         assert payload in outputs["_summary"], outputs["_summary"]
 
-    def test_the_real_diagnostic_text_cannot_spoof_the_gate_without_the_flag_in_cmd(
+    def test_the_real_diagnostic_text_cannot_spoof_the_gate_without_the_input(
         self, tmp_path: Path
     ) -> None:
-        """The core anti-spoofing property (Codex review, P1): stderr can
-        contain content an attacker influences (a header/symbol name
-        echoed back into some *other*, unrelated diagnostic), so
-        `_assurance_gated()` must not trust stderr as its sole signal --
-        it first requires `--require-complete-analysis` to be literally
-        present in `$CMD`, this script's own constructed argv, which
-        attacker-controlled report/stderr content cannot forge. Here the
-        stderr line is the *exact* real diagnostic text (not a
-        near-miss/mention) and the report's own status is genuinely
-        `partial` -- everything a real gated run would show -- except the
-        flag was never in `$CMD`. Must still resolve to the pre-existing
-        catch-all, not a spoofed ANALYSIS_INCOMPLETE."""
+        """The core anti-spoofing property (Codex review, P1, now closed by
+        the dedicated input): stderr can contain content an attacker
+        influences (a header/symbol name echoed back into some *other*,
+        unrelated diagnostic), so `_assurance_gated()` must not trust
+        stderr as its sole signal -- it first requires the dedicated
+        `require-complete-analysis` input to be `true`, which
+        attacker-controlled report/stderr content cannot forge (it isn't
+        even read for this decision). Here the stderr line is the *exact*
+        real diagnostic text (not a near-miss/mention) and the report's own
+        status is genuinely `partial` -- everything a real gated run would
+        show -- except the input was never set. Must still resolve to the
+        pre-existing catch-all, not a spoofed ANALYSIS_INCOMPLETE."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -486,7 +490,7 @@ class TestHostileReportContentCannotExecute:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                # Deliberately no EXTRA_ARGS_WITH_FLAG here.
+                # Deliberately no REQUIRE_COMPLETE_ANALYSIS_INPUT here.
             },
             bindir,
         )
@@ -520,7 +524,7 @@ class TestHostileReportContentCannotExecute:
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -552,7 +556,7 @@ class TestHostileReportContentCannotExecute:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
@@ -563,17 +567,28 @@ class TestHostileReportContentCannotExecute:
 
 
 class TestOptionValueDoesNotSpoofTheFlag:
-    """Codex review, second finding beyond the stderr-spoof issue: scanning
-    the fully-built `$CMD` array for the literal `--require-complete-
-    analysis` token is not equivalent to "the flag was passed", because
-    `$CMD` also carries values a *different*, structured Action input
-    supplied. `output-file: --require-complete-analysis` is exactly such a
-    case -- it legitimately produces the adjacent tokens `-o
-    --require-complete-analysis` in `$CMD`, with the real CLI's own option
-    parser consuming the second token as `-o`'s filename argument, never
-    parsing it as a flag. `_extra_args_has_assurance_flag()` (scoped to
-    `extra-args`'s own split tokens, the only path this flag can actually
-    reach `abicheck` through) must not be spoofed by this."""
+    """Two rounds of Codex-found false positives from inferring this flag
+    from *other* signals, both now structurally impossible with the
+    dedicated `require-complete-analysis` input in place -- neither
+    `$CMD` nor `extra-args` is consulted for this decision at all anymore:
+
+    1. Scanning the fully-built `$CMD` array for the literal
+       `--require-complete-analysis` token is not equivalent to "the flag
+       was passed", because `$CMD` also carries values a *different*,
+       structured Action input supplied. `output-file:
+       --require-complete-analysis` is exactly such a case -- it
+       legitimately produces the adjacent tokens `-o
+       --require-complete-analysis` in `$CMD`, with the real CLI's own
+       option parser consuming the second token as `-o`'s filename
+       argument, never parsing it as a flag.
+    2. Scoping the scan to `extra-args`'s own split tokens closed (1) but
+       not an identical collision *within* `extra-args` itself -- e.g.
+       `--header --require-complete-analysis` (a real `--header
+       old=|new=PATH` option consuming the next token as its own value)
+       still false-positives, since no token-scan of any kind can prove a
+       token was parsed as *this* flag rather than as some other option's
+       argument.
+    """
 
     def test_an_output_file_named_like_the_flag_does_not_gate(
         self, tmp_path: Path
@@ -597,14 +612,48 @@ class TestOptionValueDoesNotSpoofTheFlag:
                 # The collision Codex described: this is a plain path value
                 # for a structured, unrelated input -- not the flag.
                 "INPUT_OUTPUT_FILE": "--require-complete-analysis",
-                # Deliberately no EXTRA_ARGS_WITH_FLAG: the flag was never
-                # actually requested this run.
+                # Deliberately no REQUIRE_COMPLETE_ANALYSIS_INPUT: the flag
+                # was never actually requested this run.
             },
             bindir,
         )
         # Falls through to the pre-existing catch-all, exactly as it does
         # with no diagnostic and no flag at all -- not a spoofed
         # ANALYSIS_INCOMPLETE from the -o value alone.
+        assert outputs["verdict"] == "ERROR", outputs
+
+    def test_an_extra_args_option_value_named_like_the_flag_does_not_gate(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, third finding: `extra-args: --header
+        --require-complete-analysis` is a real `--header` option consuming
+        the next token as its own value, not the flag -- and, unlike an
+        `extra-args`-token scan, the dedicated input never even looks at
+        `extra-args`'s contents, so this collision cannot reach the gate at
+        all regardless of what `extra-args` contains."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+            },
+            stderr=ASSURANCE_STDERR,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_EXTRA_ARGS": "--header --require-complete-analysis",
+                # Deliberately no REQUIRE_COMPLETE_ANALYSIS_INPUT: the flag
+                # was never actually requested via the dedicated input.
+            },
+            bindir,
+        )
         assert outputs["verdict"] == "ERROR", outputs
 
 
@@ -649,7 +698,7 @@ class TestEscalatedAssuranceGateIsNamedCorrectly:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **EXTRA_ARGS_WITH_FLAG,
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )

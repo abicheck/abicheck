@@ -20,17 +20,25 @@
   flags (`--policy`, `--severity-preset`, ...).
 
 - **The composite Action now recognizes P0.4's analysis-assurance exit
-  and gates on it unconditionally.** `--require-complete-analysis`
-  (passed via `extra-args`, on either `compare` or `scan --against`)
-  floors the CLI exit code to 1 on incomplete evidence, but
-  `action/run.sh`'s exit-1 disambiguation had no notion of this axis: it fell
-  through to `SEVERITY_ERROR` on `compare` (a severity-policy failure it
-  is not) or the catch-all `ERROR` on `scan` (an operational failure it
-  is not), which meant a genuinely assurance-gated run could read as
-  something else in the job summary — and, on `scan`, was never actually
-  documented as failing the step for the right reason. `run.sh` now maps
-  this to a new `ANALYSIS_INCOMPLETE` verdict (mirroring ADR-049's own
-  `COVERAGE_INCOMPLETE` orthogonal-axis treatment: never rewrites the
-  compatibility verdict, unconditional — no `fail-on-*` flag disables
-  it), on both commands, including when it coincides with a severity or
-  contract-coverage gate on the same exit 1.
+  and gates on it unconditionally, via a new dedicated
+  `require-complete-analysis` input.** `--require-complete-analysis` (on
+  either `compare` or `scan --against`) floors the CLI exit code to 1 on
+  incomplete evidence, but `action/run.sh`'s exit-1 disambiguation had no
+  notion of this axis: it fell through to `SEVERITY_ERROR` on `compare` (a
+  severity-policy failure it is not) or the catch-all `ERROR` on `scan`
+  (an operational failure it is not), which meant a genuinely
+  assurance-gated run could read as something else in the job summary —
+  and, on `scan`, was never actually documented as failing the step for
+  the right reason. `run.sh` now maps this to a new `ANALYSIS_INCOMPLETE`
+  verdict (mirroring ADR-049's own `COVERAGE_INCOMPLETE` orthogonal-axis
+  treatment: never rewrites the compatibility verdict, unconditional — no
+  `fail-on-*` flag disables it), on both commands, including when it
+  coincides with a severity or contract-coverage gate on the same exit 1.
+  Gating on this axis is a plain boolean read of the new
+  `require-complete-analysis` input — not a scan of `extra-args` or the
+  constructed CLI invocation — closing out three rounds of Codex-found
+  false positives from inferring the flag's presence from other signals
+  (an unanchored stderr grep; a `$CMD`-array token scan colliding with
+  another input's own value; an `extra-args`-token scan colliding with an
+  adjacent option's own value) with a design that structurally cannot
+  reproduce any of them.

@@ -301,32 +301,6 @@ _extra_args_has_write_flag() {
   return 1
 }
 
-# Same shape as `_extra_args_has_write_flag` above, and for the same reason
-# (Codex review, P0.4 follow-up): `--require-complete-analysis` has no
-# dedicated Action input, so `extra-args` is the *only* place it can appear
-# -- but scanning the fully-built `$CMD` array for this literal token (an
-# earlier revision of this fix) is not equivalent to that. `$CMD` also
-# carries values a *different*, structured Action input supplied (e.g.
-# `output-file: --require-complete-analysis` legitimately produces the
-# adjacent tokens `-o --require-complete-analysis`, with Click consuming the
-# second one as `-o`'s filename argument, never parsing it as a flag), so a
-# bare token scan over the merged array can true-positive on a value that
-# was never parsed as this flag at all. Restricting the scan to
-# `extra-args`'s own split tokens (the one and only path this flag can
-# reach `abicheck` through) sidesteps the collision entirely, rather than
-# trying to reconstruct argv parsing/option-arity rules here.
-_extra_args_has_assurance_flag() {
-  local _arg
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    if [[ "$_arg" == "--require-complete-analysis" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1176,6 +1150,15 @@ elif [[ "$MODE" == "compare" ]]; then
   # Severity configuration
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
 
+  # P0.4: single-pair compares only -- the CLI itself rejects this flag
+  # outright (a UsageError) for a directory/package release fan-out, which
+  # has no single analysis_assurance result to gate on.
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] \
+     && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    CMD+=(--require-complete-analysis)
+  fi
+
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
     add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
@@ -1436,6 +1419,11 @@ elif [[ "$MODE" == "scan" ]]; then
     # the profile, exactly as the removed `--policy-file` flag did.
     add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
     add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+    # P0.4, same "--against only" contract: cli_scan.py rejects this flag
+    # outright without a baseline (_COMPARISON_ONLY_FLAGS).
+    if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
+      CMD+=(--require-complete-analysis)
+    fi
   fi
 
   # --allow-build-query removed from `scan` (CLI audit PR 5/5): scan never
@@ -1780,34 +1768,46 @@ _coverage_gated() {
 # run asked to gate on it" apart from "this run's evidence happens to be
 # partial and nobody asked".
 #
-# The FIRST, load-bearing check is therefore not the report or stderr at
-# all -- it is `_extra_args_has_assurance_flag()`: the flag has no
-# dedicated Action input, so `extra-args` is the only path it can reach
-# `abicheck` through, and the flag can only have gated this run if it is
-# literally one of that value's own split tokens. Two revisions, two
-# distinct Codex findings:
+# The FIRST, load-bearing check is therefore whether this Action's own
+# dedicated `require-complete-analysis` boolean input is `true`. This is the
+# third revision of this check, and the earlier two are worth recording
+# because each was a real, Codex-found bug in trying to infer the flag from
+# *other* signals, before a dedicated input existed to ask directly:
 #
 #   1. An unanchored stderr grep as the sole signal, which a hostile input
 #      (a header/symbol name, or any other value an `abicheck` diagnostic
 #      echoes back) could forge to spoof the whole match string and fail
 #      an otherwise clean, flag-less run through this axis's own
 #      unconditional gate.
-#   2. The first fix for (1) scanned the fully-built `$CMD` array instead
-#      -- safe from (1)'s forgery, but `$CMD` also carries values a
-#      *different*, structured Action input supplied (e.g. `output-file:
+#   2. The fix for (1) scanned the fully-built `$CMD` array instead -- safe
+#      from (1)'s forgery, but `$CMD` also carries values a *different*,
+#      structured Action input supplied (e.g. `output-file:
 #      --require-complete-analysis` legitimately produces the adjacent
 #      tokens `-o --require-complete-analysis`, with Click consuming the
 #      second one as `-o`'s filename argument, never parsing it as a
 #      flag), so a bare token scan over the merged array could
-#      true-positive on a value that was never parsed as this flag at
-#      all and fail an ungated, exit-0 run.
+#      true-positive on a value that was never parsed as this flag at all.
+#   3. Scoping the scan to `extra-args`'s own split tokens closed (2)'s
+#      collision with *other* inputs, but not an identical collision
+#      *within* `extra-args` itself -- e.g. `--header
+#      --require-complete-analysis` (a real `--header old=|new=PATH` option
+#      consuming the next token as its own value) still false-positives,
+#      since no amount of scoping proves a token was parsed as *this* flag
+#      rather than as some other option's argument. No token-scan of any
+#      input can be sound against this class of collision in general.
 #
-# `_extra_args_has_assurance_flag()` closes both: it reads only
-# `extra-args`'s own tokens (attacker-controlled report/stderr content
-# never reaches it, closing (1)) and never the tokens a different,
-# structured input contributed to `$CMD` (closing (2)).
+# A dedicated `require-complete-analysis` Action input (mirroring
+# `fail-on-breaking`) eliminates the whole class: this Action's own
+# detection is a plain boolean read, never a guess at how `abicheck`'s CLI
+# parser will tokenize some other string. `extra-args` is no longer
+# consulted for this flag at all -- a caller who still passes
+# `--require-complete-analysis` via `extra-args` gets correct CLI exit-code
+# behavior from Python (the flag still works), just an un-relabeled
+# `ERROR`/`SEVERITY_ERROR` verdict from this wrapper rather than
+# `ANALYSIS_INCOMPLETE`; the dedicated input is the documented way to get
+# the labeled verdict.
 #
-# Once the flag is confirmed present, the JSON report's own
+# Once the input is confirmed set, the JSON report's own
 # `analysis_assurance.status` is the authoritative answer (mirroring
 # `_coverage_gated`'s JSON-first preference) -- `assurance_floor_
 # diagnostic`'s stderr line is only the fallback for when there is no
@@ -1815,7 +1815,7 @@ _coverage_gated() {
 # is otherwise unreadable), the same "genuine cannot-tell" shape
 # `_coverage_gated`'s own stderr fallback exists for.
 _assurance_gated() {
-  _extra_args_has_assurance_flag || return 1
+  [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
 
   local _src _status
   _src=$(_json_report_src)

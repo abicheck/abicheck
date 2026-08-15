@@ -610,6 +610,18 @@ inputs:
       Severity preset: 'default', 'strict', or 'info-only'.
       Controls exit codes and report labels. Only applies to compare mode.
     required: false
+  require-complete-analysis:
+    description: >
+      Fail the step (P0.4's orthogonal ANALYSIS_INCOMPLETE axis) when
+      analysis_assurance.status is not 'complete', independent of the
+      compatibility verdict. Mirrors `compare`/`scan --against`'s own
+      --require-complete-analysis flag. Applies to compare and scan
+      (--against) modes; a dedicated input rather than routing through
+      extra-args, so this Action's own detection of whether the flag was
+      requested is never ambiguous with a value some other option in
+      extra-args happens to spell the same way.
+    required: false
+    default: 'false'
   jobs:
     description: >
       Number of parallel library comparisons for compare mode when
@@ -678,8 +690,8 @@ outputs:
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
-      compatibility verdict unchanged), ANALYSIS_INCOMPLETE (with
-      --require-complete-analysis via extra-args, when analysis_assurance.
+      compatibility verdict unchanged), ANALYSIS_INCOMPLETE (with the
+      require-complete-analysis input, when analysis_assurance.
       status is not "complete" -- P0.4's orthogonal assurance axis, which
       likewise leaves the compatibility verdict unchanged), API_BREAK,
       BREAKING, REMOVED_LIBRARY (directory/package operands with
@@ -688,7 +700,7 @@ outputs:
       For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
       severity or `--exit-code-scheme` setting, when an error-level
       category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
-      (with --against --require-complete-analysis via extra-args, same
+      (with --against and the require-complete-analysis input, same
       axis as compare's), API_BREAK, BREAKING,
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
