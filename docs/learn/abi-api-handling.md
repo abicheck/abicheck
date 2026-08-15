@@ -66,7 +66,9 @@ when it sees one.
 > an actual gap in today's tooling, not just an undocumented workflow;
 > [build-profile comparability](build-profile-comparability.md) is the
 > question that has to be answered *before* any of the above — were OLD and
-> NEW even built under conditions that make comparing them meaningful?
+> NEW even built under conditions that make comparing them meaningful? A
+> separate axis from all eight — *which shape is the consumer* rather than
+> *which promise broke* — is covered by [Consumer Models](consumer-models.md).
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a

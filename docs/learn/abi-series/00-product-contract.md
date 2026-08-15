@@ -232,7 +232,11 @@ different rows above depending on policy:
 ## 5. Name your contract shape
 
 "Public surface" looks different for different kinds of products. Identify which
-shape you are before reasoning about breaks.
+shape you are before reasoning about breaks. This section covers four common
+product shapes narratively; [Consumer Models](../consumer-models.md) formalizes
+all eight consumer shapes (including FFI bindings, header-only consumers, and
+static-linked consumers) into one table and composes that axis with the
+dimension/direction/surface/build-profile questions this page already covers.
 
 ### Traditional C shared library
 

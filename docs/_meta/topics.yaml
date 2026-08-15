@@ -461,3 +461,20 @@ topics:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
       - learn/environment-drift.md
+
+  # A separate axis from the eight compatibility dimensions in Part 0 §2:
+  # "which shape is the consumer" rather than "which kind of promise broke".
+  # Part 0 §5's "Name your contract shape" section already covers four of
+  # these shapes narratively; this page formalizes all eight into one table
+  # and composes the axis with dimension/direction/surface/build-profile
+  # (docs/AGENTS.md criterion 2: a genuinely new mental model, not just
+  # another variant of an already-explained mechanism).
+  consumer-models:
+    canonical_page: learn/consumer-models.md
+    fact_sources:
+      - abicheck/appcompat.py
+      - abicheck/cli_compare_helpers.py
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - use/plugin-systems.md
