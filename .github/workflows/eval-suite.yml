@@ -68,13 +68,21 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y zstd binutils
 
       - name: Run binary tier (fail on verdict drift)
+        # workflow_dispatch's `only` input is attacker-shapeable free text --
+        # routed through `env:` and referenced only as `$ONLY_INPUT` below so
+        # GitHub's ${{ }} template engine substitutes into a plain YAML string
+        # value, never into this script's literal source text (CodeRabbit
+        # review — inlining it directly into `run:`, as this step used to,
+        # lets a crafted input break out into new shell syntax).
+        env:
+          ONLY_INPUT: ${{ github.event.inputs.only }}
         run: |
           set -euo pipefail
-          ONLY=""
-          if [ -n "${{ github.event.inputs.only }}" ]; then
-            ONLY="--only ${{ github.event.inputs.only }}"
+          ONLY=()
+          if [ -n "${ONLY_INPUT:-}" ]; then
+            ONLY=(--only "$ONLY_INPUT")
           fi
-          python eval/runner.py --tier binary --fail-on-drift $ONLY
+          python eval/runner.py --tier binary --fail-on-drift "${ONLY[@]}"
 
       - name: Upload eval results
         if: always()
@@ -123,11 +131,15 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y zstd binutils git cmake clang
 
       - name: Run source tier (coverage; gated only against systemic breakage)
+        # See the binary-tier step's identical comment on why `only` is
+        # routed through `env:` rather than inlined into `run:` directly.
+        env:
+          ONLY_INPUT: ${{ github.event.inputs.only }}
         run: |
           set -euo pipefail
-          ONLY=""
-          if [ -n "${{ github.event.inputs.only }}" ]; then
-            ONLY="--only ${{ github.event.inputs.only }}"
+          ONLY=()
+          if [ -n "${ONLY_INPUT:-}" ]; then
+            ONLY=(--only "$ONLY_INPUT")
           fi
           # --fail-on-empty-source fails only when the WHOLE tier is broken
           # (zero libraries scanned, or every "successful" scan captured zero
@@ -135,7 +147,7 @@ jobs:
           # failure is still recorded as a per-row error and does not fail
           # this step, matching this job's own "exploratory per library"
           # design (see eval/runner.py's source_tier_broken() docstring).
-          python eval/runner.py --tier source --fail-on-empty-source $ONLY
+          python eval/runner.py --tier source --fail-on-empty-source "${ONLY[@]}"
 
       - name: Write coverage to job summary
         if: always()

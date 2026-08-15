@@ -150,6 +150,19 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y binutils
 
       - name: Run scaling benchmark
+        # workflow_dispatch inputs are attacker-shapeable free text (unlike
+        # github.event_name, a fixed trigger-kind string) -- routing them
+        # through `env:` and referencing only `$SIZES_INPUT`/
+        # `$MAX_SECONDS_INPUT` below means GitHub's own ${{ }} template
+        # engine substitutes into a plain YAML string value, never into this
+        # script's literal source text, so a crafted input (e.g. embedding
+        # `; curl ... | sh`) can't break out into new shell syntax the way
+        # inlining `${{ github.event.inputs.sizes }}` directly into `run:`
+        # could (CodeRabbit review — a real, if write-access-gated, RCE
+        # class GitHub's own docs warn against this exact pattern for).
+        env:
+          SIZES_INPUT: ${{ github.event.inputs.sizes }}
+          MAX_SECONDS_INPUT: ${{ github.event.inputs.max_seconds }}
         run: |
           set -euo pipefail
           mkdir -p reports/perf
@@ -162,14 +175,18 @@ jobs:
           # point (no tail exponent computable), and rename_churn/
           # opaque_filter kept only two of their three tuned points. Omitting
           # --sizes on every non-dispatch trigger (PR/schedule) restores each
-          # scenario's own default sweep.
-          SIZES_ARG=""
-          if [ -n "${{ github.event.inputs.sizes }}" ]; then
-            SIZES_ARG="--sizes ${{ github.event.inputs.sizes }}"
+          # scenario's own default sweep. Built as bash arrays (not a plain
+          # string) so an empty value expands to zero argv words rather than
+          # one empty-string word, and --sizes' own multi-value input word-
+          # splits into separate array elements the way argparse's nargs="+"
+          # expects.
+          SIZES_ARG=()
+          if [ -n "${SIZES_INPUT:-}" ]; then
+            SIZES_ARG=(--sizes ${SIZES_INPUT})
           fi
-          GATE=""
-          if [ -n "${{ github.event.inputs.max_seconds }}" ]; then
-            GATE="--max-seconds ${{ github.event.inputs.max_seconds }}"
+          GATE=()
+          if [ -n "${MAX_SECONDS_INPUT:-}" ]; then
+            GATE=(--max-seconds "$MAX_SECONDS_INPUT")
           fi
           # 5 timed repeats (+1 untimed warmup, always run — see
           # scripts/benchmark_scaling.py) on every trigger; the weekly
@@ -182,12 +199,12 @@ jobs:
             REPEAT=7
           fi
           python scripts/benchmark_scaling.py \
-            $SIZES_ARG \
+            "${SIZES_ARG[@]}" \
             --repeat "$REPEAT" \
             --max-exponent 1.4 \
             --max-rss-mb 2048 \
             --json-out reports/perf/scaling.json \
-            $GATE | tee reports/perf/scaling.txt
+            "${GATE[@]}" | tee reports/perf/scaling.txt
 
       - name: Run slow perf tests
         run: |
