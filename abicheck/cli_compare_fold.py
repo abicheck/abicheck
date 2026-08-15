@@ -238,15 +238,28 @@ class _ScopedFold:
         "COMPATIBLE: 1 breaking" with nothing explaining the 1 reads as a
         genuine contradiction, not a nuance. So the counts here are
         recomputed from scratch out of *only* the findings that actually
-        decide the scoped verdict/exit code -- `_scoped_gate_findings()`'s
-        `scoped_only` changes and `missing_labels` -- mirroring
+        decide the scoped verdict/exit code: `_scoped_gate_findings()`'s
+        `scoped_only` changes and `missing_labels`, mirroring
         `_fold_findings_into_stat_summary`'s own per-finding severity-bucket
-        tally, just without the full-library base it adds onto.
+        tally -- PLUS (Codex review, fresh evidence, third round) every
+        entry of `result.changes` itself that the scoped gate also counts.
+        `scoped_only`/`missing_labels` cover only the *synthesized*
+        scoped-relevant findings (e.g. a missing required symbol, or a
+        `PE_ORDINAL_RETARGETED` with no backing full-library `Change`) --
+        the ordinary case, a real full-library finding that is ALSO
+        scoped-relevant (e.g. removing a function `--required-symbol`
+        itself names), lives in `result.changes` and is marked relevant via
+        `result.scoped_relevant_finding_ids` (the same set
+        `sarif.py`/`junit_report.py`'s own scoped-gate folds already read).
+        Omitting it reproduced exactly the bug the earlier revision of this
+        fix was written to close, just for the far more common shape of
+        input: an ordinary in-scope removal exiting 4 while printing
+        "no changes (0 total)".
         """
         import json
 
         from .checker_policy import EvidenceStatus
-        from .reporter import _change_to_dict, to_stat_json
+        from .reporter import _change_to_dict, _finding_id, to_stat_json
         from .reporter_markdown import _VERDICT_LABEL
         from .stat_line import format_stat_line
 
@@ -271,6 +284,12 @@ class _ScopedFold:
         scoped_only, missing_labels, blocks, _missing_kind = (
             self._scoped_gate_findings()
         )
+        relevant_ids = (
+            getattr(self.result, "scoped_relevant_finding_ids", None) or frozenset()
+        )
+        relevant_in_changes = [
+            c for c in self.result.changes if _finding_id(c) in relevant_ids
+        ]
         counts = {
             "breaking": 0,
             "source_breaks": 0,
@@ -278,14 +297,17 @@ class _ScopedFold:
             "compatible_additions": 0,
         }
         eff_sets = self.result._effective_kind_sets()
-        for c in scoped_only:
+
+        def _tally(c: Any, *, consumer_proven: bool) -> None:
             entry = _change_to_dict(
                 c,
                 policy=self.result.policy or "strict_abi",
                 kind_sets=eff_sets,
                 policy_file=self.result.policy_file,
                 severity_config=self.severity_config,
-                evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+                evidence_status_override=(
+                    EvidenceStatus.CONSUMER_PROVEN if consumer_proven else None
+                ),
             )
             severity = entry.get("severity")
             bucket = (
@@ -295,6 +317,14 @@ class _ScopedFold:
             )
             if bucket:
                 counts[bucket] += 1
+
+        for c in relevant_in_changes:
+            # A real full-library finding, not synthesized -- its own
+            # already-computed severity applies, same as every other
+            # `result.changes` entry.
+            _tally(c, consumer_proven=False)
+        for c in scoped_only:
+            _tally(c, consumer_proven=True)
         for _label in missing_labels:
             bucket = _SEVERITY_TO_SUMMARY_BUCKET["breaking" if blocks else "compatible"]
             counts[bucket] += 1

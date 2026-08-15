@@ -1787,6 +1787,65 @@ class TestUsedByScoping:
         assert result.exit_code == 4
         assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
 
+    def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The far more common shape than either test above: an ordinary
+        full-library finding (a real `FUNC_REMOVED` already in
+        `result.changes`) that is ALSO scoped-relevant, because the removed
+        symbol is one `--used-by` actually calls. This is marked via
+        `result.scoped_relevant_finding_ids`, not `scoped_only_changes`
+        (which only covers *synthesized* scoped-only findings with no
+        backing `Change`) -- omitting that set from the one-liner's count
+        reproduced exactly the "no changes" bug this whole fix exists to
+        close, just for the ordinary case rather than the edge case (Codex
+        review, fresh evidence, third round)."""
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+
+        # Use the REAL diff's own Change (not a hand-built stub) so its
+        # finding id genuinely matches the one in result.changes -- same
+        # discipline as test_sarif_missing_symbol_covered_by_change_not_
+        # double_synthesized above.
+        def _scoped_for(diff, *_args, **_kwargs):
+            from abicheck.appcompat import AppCompatResult
+
+            real_change = next(
+                c for c in diff.changes if c.kind == ChangeKind.FUNC_REMOVED
+            )
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old), new_lib_path=str(new),
+                required_symbols={"_Z7removedv"}, required_symbol_count=1,
+                breaking_for_app=[real_change], verdict=Verdict.BREAKING,
+            )
+
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick",
+        )
+        assert result.exit_code == 4
+        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch
     ) -> None:
