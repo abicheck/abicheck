@@ -185,25 +185,46 @@ def test_the_run_decision_is_path_match_or_label() -> None:
 def test_a_detector_test_change_makes_the_pr_lane_fail_closed() -> None:
     """A test-only diff has no changed production function to scope to, so
     --diff-scoped alone reports "gated nothing" and exits 0 — green for a run
-    that checked nothing. That case, and only that case, requires a baseline
-    (Codex review)."""
+    that checked nothing (Codex review)."""
     steps = _workflow()["jobs"]["mutmut"]["steps"]
     pr_step = next(
         s for s in steps if "--diff-scoped" in str(s.get("run", "")) and "run" in s
     )
     assert "--require-baseline" in pr_step["run"]
-    assert pr_step["env"]["DETECTOR_TESTS"].strip().startswith("${{")
-    assert "detector_tests" in pr_step["env"]["DETECTOR_TESTS"]
+    assert "require_baseline" in pr_step["env"]["REQUIRE_BASELINE"]
 
 
-def test_the_detector_test_signal_is_published_by_resolve() -> None:
+def test_a_label_forced_run_also_fails_closed() -> None:
+    """The `mutation` label is documented as the complete check, so a
+    label-forced run on a test-only diff outside the globs must not go green
+    on "gated nothing" — the one run someone explicitly asked to be thorough
+    (Codex review)."""
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    decide = next(s for s in steps if s.get("id") == "decide")
+    # Anchored on the branch that sets the flag, not on the condition text
+    # alone: the run decision one block up ORs the same three variables, so a
+    # bare substring match passed against a version that dropped the label
+    # from *this* branch (caught by falsifying the fix).
+    guard = next(
+        line
+        for line, nxt in zip(
+            decide["run"].splitlines(), decide["run"].splitlines()[1:], strict=False
+        )
+        if "require_baseline=true" in nxt
+    )
+    assert '"$LABELLED" = "true"' in guard, guard
+    assert '"$MATCHED_TESTS" = "true"' in guard, guard
+
+
+def test_the_require_baseline_signal_is_published_by_resolve() -> None:
     """Otherwise the fail-closed branch above reads an always-empty variable
     and silently never fires."""
     outputs = _workflow()["jobs"]["resolve"]["outputs"]
-    assert "detector_tests" in outputs
+    assert "require_baseline" in outputs
     steps = _workflow()["jobs"]["resolve"]["steps"]
     decide = next(s for s in steps if s.get("id") == "decide")
-    assert 'echo "detector_tests=$MATCHED_TESTS"' in decide["run"]
+    assert 'echo "require_baseline=true"' in decide["run"]
+    assert 'echo "require_baseline=false"' in decide["run"]
 
 
 def test_the_mutmut_job_is_gated_on_that_decision() -> None:

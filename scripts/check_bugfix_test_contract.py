@@ -271,8 +271,16 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             # (Codex review).
             "actions/",
             "action.yml",
-            ".github/workflows/",
-            "security",
+            # Every trust boundary is a *path prefix*, and this is the only
+            # trigger list where that matters: a bare "security" substring
+            # matched `abicheck/policies/security.yaml`, a packaged runtime
+            # policy profile with no Action or workflow anywhere near it, and
+            # then demanded hostile-input evidence for it — which `N/A` cannot
+            # satisfy, since the answer parser rejects placeholders (Codex
+            # review). The real security *workflow*
+            # (`.github/workflows/security.yml`) is already covered by the
+            # prefix above.
+            *_TRUST_BOUNDARY_PREFIXES,
         ),
     ),
     Requirement(

@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       run: ${{ steps.decide.outputs.run }}
-      detector_tests: ${{ steps.decide.outputs.detector_tests }}
+      require_baseline: ${{ steps.decide.outputs.require_baseline }}
     steps:
       - uses: actions/checkout@v6
       - name: Detect changes to mutated modules (PR only)
@@ -126,7 +126,7 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "detector_tests=false" >> "$GITHUB_OUTPUT"
+            echo "require_baseline=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$MATCHED" = "true" ] || [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
@@ -134,11 +134,22 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-          # A detector test changed, so this run has something real to check.
-          # It is also the one case --diff-scoped cannot check by itself: the
-          # branch changed no production function, so there is nothing to
-          # scope to and the answer only exists as drift against a baseline.
-          echo "detector_tests=$MATCHED_TESTS" >> "$GITHUB_OUTPUT"
+          # Which PR runs must have a *drift* reference, not just
+          # --diff-scoped (which only looks at the functions this branch
+          # changed):
+          #   - a detector test changed: the branch may have changed no
+          #     production function at all, so there is nothing to scope to
+          #     and the answer exists only as drift;
+          #   - the `mutation` label: it is documented as the complete check,
+          #     and a label-forced run on a test-only diff outside the globs
+          #     above would otherwise print "gated nothing" and exit 0 —
+          #     green for precisely the run someone asked to be thorough
+          #     (Codex review).
+          if [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
+            echo "require_baseline=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "require_baseline=false" >> "$GITHUB_OUTPUT"
+          fi
 
   mutmut:
     name: mutmut (detector core)
@@ -183,19 +194,18 @@ jobs:
 
       - name: Run mutation testing (diff-scoped)
         if: github.event_name == 'pull_request'
-        # --require-baseline when a detector test changed: that diff has no
-        # changed production function for --diff-scoped to scope to, so
-        # without it the job reports "gated nothing" and still exits 0 —
-        # green for a run that checked nothing, which is the shape this lane
-        # exists to remove (Codex review). It fails until
-        # mutation-baseline.json is recorded (workflow_dispatch,
-        # write_baseline: true), which is the honest state: weakening a
-        # detector test is only detectable as drift.
+        # --require-baseline for the runs whose question --diff-scoped
+        # cannot answer (see the resolve job): without it the job reports
+        # "gated nothing" and still exits 0 — green for a run that checked
+        # nothing, which is the shape this lane exists to remove (Codex
+        # review). It fails until mutation-baseline.json is recorded
+        # (workflow_dispatch, write_baseline: true), which is the honest
+        # state: a weakened test is only detectable as drift.
         env:
-          DETECTOR_TESTS: ${{ needs.resolve.outputs.detector_tests }}
+          REQUIRE_BASELINE: ${{ needs.resolve.outputs.require_baseline }}
         run: |
           require=""
-          if [ "$DETECTOR_TESTS" = "true" ]; then
+          if [ "$REQUIRE_BASELINE" = "true" ]; then
             require="--require-baseline"
           fi
           python scripts/check_mutation_score.py --run --diff-scoped \

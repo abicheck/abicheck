@@ -496,6 +496,21 @@ class TestConditionalRequirements:
         requirement = next(r for r in gate.REQUIREMENTS if r.key == "malicious-fixture")
         assert requirement.applies_to([path])
 
+    def test_a_packaged_policy_named_security_is_not_a_trust_boundary(self) -> None:
+        """`abicheck/policies/security.yaml` is a packaged runtime policy
+        profile, not an Action or a workflow. A bare `security` substring
+        trigger demanded hostile-input evidence for it — and `N/A` cannot
+        satisfy that, since the answer parser rejects placeholders (Codex
+        review)."""
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == "malicious-fixture")
+        assert not requirement.applies_to(["abicheck/policies/security.yaml"])
+
+    def test_the_security_workflow_itself_still_asks_the_question(self) -> None:
+        """Negative control: narrowing must not switch the real boundary off —
+        it is covered by the prefix, not by the word."""
+        requirement = next(r for r in gate.REQUIREMENTS if r.key == "malicious-fixture")
+        assert requirement.applies_to([".github/workflows/security.yml"])
+
     def test_prose_under_a_trust_boundary_prefix_asks_nothing(self) -> None:
         """Negative control: the prefixes are *directory* prefixes, so the
         docs exclusion has to apply on the trust-boundary branch too, or a
