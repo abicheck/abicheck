@@ -1092,7 +1092,7 @@ def test_removed_lines_are_read_from_the_merge_base_not_the_new_file(
     touched = gate.changed_functions(
         {},
         tmp_path,
-        {"abicheck/diff_types.py": {5, 6}},
+        {"abicheck/diff_types.py": ("abicheck/diff_types.py", {5, 6})},
         gate._base_reader("origin/main"),
     )
     assert touched == {"abicheck/diff_types.py": {"removed"}}
@@ -1210,6 +1210,88 @@ def test_a_modification_is_not_treated_as_an_unattributable_removal(
     assert "unattributed removals" not in out
 
 
+def test_a_reader_that_answers_none_for_one_path_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A reader can exist and still not answer for one path.
+
+    Keying the risk check on `read_base is None` asked "is there a reader",
+    not "was this path resolved" — so a base that simply does not carry the
+    file (a rename, an unreadable blob) came back `None`, the removal was
+    skipped, and the survivor in the gutted function passed `--diff-scoped`
+    (Codex and CodeRabbit, independently).
+    """
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    # Callable, and unhelpful — the shape the `is None` guard could not see.
+    _with_base(monkeypatch, {})
+    deletion_diff = _write(
+        tmp_path,
+        "d.diff",
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n@@ -2,1 +1,0 @@\n-    return 1\n",
+    )
+    results = _write(
+        tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+    )
+    rc = gate.main(
+        [
+            "--results-file",
+            results,
+            "--baseline-file",
+            _baseline(tmp_path, {"abicheck/diff_types.py": 10}),
+            "--diff-scoped",
+            "--diff-file",
+            deletion_diff,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1, out
+    assert "abicheck/diff_types.py" in out
+
+
+def test_a_renamed_module_reads_its_removals_from_the_old_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the same conflation, and why it is not just a
+    fail-closed: a rename's removed lines *are* readable — under the old
+    name — and belong to the new one, which is what a mutant key carries."""
+    asked = _with_base(monkeypatch, {"abicheck/old_name.py": _SOURCE})
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    removed = gate.parse_removed_lines(
+        "diff --git a/abicheck/old_name.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/old_name.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -2,1 +1,0 @@\n-    return 1\n"
+    )
+    assert removed == {"abicheck/diff_types.py": ("abicheck/old_name.py", {2})}
+    touched = gate.changed_functions(
+        {}, tmp_path, removed, gate._base_reader("origin/main")
+    )
+    # Read from the old name, filed under the new one.
+    assert touched == {"abicheck/diff_types.py": {"alpha"}}
+    assert asked == ["abicheck/old_name.py"]
+    assert gate.unresolved_removals(removed, gate._base_reader("origin/main")) == set()
+
+
+def test_a_whole_file_deletion_is_still_a_pure_deletion(tmp_path: Path) -> None:
+    """`+++ /dev/null` has no new path at all, so keying on the new side alone
+    dropped a deleted module from the risk set entirely — the one shape with
+    nothing downstream to notice it (CodeRabbit)."""
+    diff = (
+        "diff --git a/abicheck/gone.py b/abicheck/gone.py\n"
+        "deleted file mode 100644\n"
+        "--- a/abicheck/gone.py\n+++ /dev/null\n"
+        "@@ -1,3 +0,0 @@\n-def f():\n-    return 1\n-\n"
+    )
+    assert gate.pure_deletion_paths(diff) == {"abicheck/gone.py"}
+    assert gate.parse_removed_lines(diff) == {
+        "abicheck/gone.py": ("abicheck/gone.py", {1, 2, 3})
+    }
+    # And it must not leak onto a neighbouring file in the same diff.
+    assert gate.parse_changed_lines(diff) == {}
+
+
 def test_pure_deletion_paths_separates_deletions_from_edits() -> None:
     """The predicate itself: only a hunk with no new side has its evidence
     exclusively in the base."""
@@ -1240,7 +1322,7 @@ def test_a_deleted_module_level_constant_keeps_module_scope(
     touched = gate.changed_functions(
         {},
         tmp_path,
-        {"abicheck/diff_types.py": {1}},
+        {"abicheck/diff_types.py": ("abicheck/diff_types.py", {1})},
         gate._base_reader("origin/main"),
     )
     assert touched == {"abicheck/diff_types.py": {gate.MODULE_SCOPE}}
@@ -1254,7 +1336,7 @@ def test_parse_removed_lines_reads_the_base_side_of_every_hunk() -> None:
         "@@ -5,4 +4,0 @@\n-a\n-b\n-c\n-d\n"
         "@@ -20,1 +17,1 @@\n-old\n+new\n"
     )
-    assert gate.parse_removed_lines(diff) == {"x.py": {5, 6, 7, 8, 20}}
+    assert gate.parse_removed_lines(diff) == {"x.py": ("x.py", {5, 6, 7, 8, 20})}
 
 
 def test_parse_removed_lines_ignores_pure_additions() -> None:
