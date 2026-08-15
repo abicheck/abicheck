@@ -1,8 +1,9 @@
 # abicheck suppression file — realistic examples
 #
-# Lifecycle enforcement flags (recommended for CI):
-#   --strict-suppressions     fail if any rule is past its expires date
-#   --require-justification   fail if any rule has an empty/missing reason
+# Lifecycle enforcement (recommended for CI) -- .abicheck.yml keys, not flags:
+#   suppression:
+#     strict: true                 # fail if any rule is past its expires date
+#     require_justification: true  # fail if any rule has an empty/missing reason
 #
 # Generate candidates automatically:
 #   abicheck compare old.so new.so --format json -o diff.json

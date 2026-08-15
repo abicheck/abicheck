@@ -73,24 +73,33 @@ def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> N
 
 def test_scan_exposes_against_config_surface_options() -> None:
     # ADR-049 Phase 5 §6.4: `--against` gets the same config surface as
-    # `compare` (`--policy`/`--policy`/`--suppress`/
-    # `--scope-public-headers`/`--strict-suppressions`/`--public-symbol`/
-    # `--public-symbols-list`/`--pattern-verdicts`/`--env-matrix`), not a
-    # hardcoded strict_abi/unsuppressed/scoped-True baseline comparison.
+    # `compare` (`--policy`/`--suppress`/`--scope-public-headers`/
+    # `--pattern-verdicts`/`--env-matrix`), not a hardcoded
+    # strict_abi/unsuppressed/scoped-True baseline comparison. The parity is
+    # stated over the *flags both commands still have*: the suppression-strict
+    # and public-symbol families were removed from compare and scan alike, so
+    # they moved to the config-surface assertion below rather than out of the
+    # parity claim.
     dests = {p.name for p in scan_cmd.params}
     assert {
         "suppress",
-        "policy_file_path",
         "policy",
         "scope_public_headers",
-        "strict_suppressions",
-        "public_symbols",
-        "public_symbols_list",
         "pattern_verdicts",
         "env_matrix_path",
         # ADR-049 Phase 5 §6.4's contract-relevance half of the same parity.
         "contract_mode",
     } <= dests
+    # The removed half of the same parity: neither command carries these as
+    # CLI destinations any more, and `.abicheck.yml` is their only source --
+    # so scan reaching them through --config is what keeps §6.4 true.
+    assert not dests & {
+        "policy_file_path",
+        "strict_suppressions",
+        "public_symbols",
+        "public_symbols_list",
+    }
+    assert "build_config" in dests
 
 
 def test_scan_exposes_side_aware_header_options() -> None:
@@ -392,10 +401,8 @@ def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "extra_args",
     [
-        ["--strict-suppressions"],
         ["--policy", "sdk_vendor"],
         ["--pattern-verdicts"],
-        ["--public-symbol", "foo"],
         ["--severity-preset", "info-only"],
         ["--exit-code-scheme", "severity"],
         ["--max-findings", "5"],

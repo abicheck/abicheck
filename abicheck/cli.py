@@ -681,10 +681,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 # resolved headers is cheap, deterministic, read-only
                 # resolution, not "real work out of scope for a dry run".
                 compile_db_matched=_dry_matched,
-                # --build-info *is* the L3 build source now; the L2 database is
-                # read off it rather than promoted into it, so there is no
-                # separate "reused as L3" state to report.
-                compile_db_reused_as_l3=False,
                 # embed_build_source's own classification: a source-capable
                 # --build-info is either a BuildSourcePack (is_pack_dir) or a
                 # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --

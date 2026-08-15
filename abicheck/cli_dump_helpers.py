@@ -850,14 +850,11 @@ def _add_dump_depth_feasibility(
         depth is not None
         and depth != "binary"
         and sources is None
+        # A compile database is now read off --build-info rather than named by
+        # its own flag, so "no --sources/--build-info" already excludes every
+        # case a database could supply L3 "build" evidence for; the precise
+        # block/no-signal handling below covers those instead.
         and build_info is None
-        # A matched -p/--compile-db is genuine L3 "build" evidence -- this
-        # generic "only L0-L2 data" warning is accurate for --depth
-        # headers/source regardless of a compile database (neither rung is
-        # satisfiable from one), but not for --depth build once the database
-        # actually matches (external review): the more precise, definitive
-        # block/no-signal handling below covers that specific case instead.
-        and not (depth == "build" and compile_db_matched is True)
     ):
         result.warn(
             f"--depth {depth} was requested but no --sources/--build-info was given; "
@@ -884,8 +881,8 @@ def _add_dump_depth_feasibility(
     if depth == "source" and sources is None and not build_info_is_pack:
         result.block(
             "--depth source was requested but no --sources was given -- a "
-            "raw --build-info/-p compile database supplies L3 build "
-            "context only, never L4 source-ABI replay -- the resolved "
+            "raw --build-info compile database or build directory supplies "
+            "L3 build context only, never L4 source-ABI replay -- the resolved "
             "evidence depth check_requested_depth_satisfied would raise "
             "on this: the real run would exit 1."
         )
@@ -910,14 +907,9 @@ def _add_dump_depth_feasibility(
             "if it doesn't, the real run's evidence depth check would "
             "reject it."
         )
-    elif (
-        depth == "build"
-        and sources is None
-        and build_info is None
-        and not has_compile_db
-    ):
+    elif depth == "build" and sources is None and build_info is None:
         result.block(
-            "--depth build was requested but no --sources/--build-info/-p "
+            "--depth build was requested but no --sources/--build-info "
             "was given -- the resolved evidence depth "
             "check_requested_depth_satisfied would raise on this: the "
             "real run would exit 1."
@@ -925,7 +917,6 @@ def _add_dump_depth_feasibility(
     elif (
         depth == "build"
         and sources is None
-        and build_info is None
         and has_compile_db
         and compile_db_matched is False
     ):
@@ -940,8 +931,8 @@ def _add_dump_depth_feasibility(
         # certainly reject this in the real run (parsed_with_build_context
         # never gets stamped), so this is a blocker, not a soft warning.
         result.block(
-            "--depth build was requested with -p/--compile-db, but the "
-            "compilation database has no entry matching the resolved "
+            "--depth build was requested and --build-info resolved to a "
+            "compilation database, but it has no entry matching the resolved "
             "headers (empty, entirely filtered-out, or malformed) -- the "
             "resolved evidence depth check_requested_depth_satisfied would "
             "raise on this: the real run would exit 1."
@@ -963,7 +954,6 @@ def render_dump_dry_run(
     has_compile_db: bool = False,
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
-    compile_db_reused_as_l3: bool = False,
     dump_manifest: Any | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
@@ -1067,17 +1057,14 @@ def render_dump_dry_run(
         "Build/source inputs",
         f"--sources: {sources}" if sources else None,
         f"--build-info: {build_info}" if build_info else None,
-        # AC-007: the real run reuses a matched -p/--compile-db as the L3 build
-        # source when no --build-info is given, so report that here and do not
-        # also claim "L0-L2 only" (Codex review).
-        "L3 build source: reused from -p/--compile-db (no --build-info needed)"
-        if compile_db_reused_as_l3
+        # AC-007: --build-info *is* the L3 build source now -- a compile
+        # database is read off it rather than promoted into it -- so there is
+        # no separate "reused as L3" state to report alongside it.
+        "L3 build source: --build-info resolved to a compilation database"
+        if has_compile_db
         else None,
         "no --sources/--build-info given -- L0-L2 only"
-        if sources is None
-        and build_info is None
-        and not compile_db_reused_as_l3
-        and collect_mode != "off"
+        if sources is None and build_info is None and collect_mode != "off"
         else None,
     )
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))

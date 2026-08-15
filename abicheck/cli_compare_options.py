@@ -83,6 +83,7 @@ def _reject_set_input_flags(
     secondary_fmt: str | None = None,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
+    use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
     audit_suppressions: bool = False,
     pack_paths: tuple[Path, ...] = (),
@@ -132,6 +133,14 @@ def _reject_set_input_flags(
             "directory/package (release) comparisons: the per-library "
             "fan-out has no plugin-host-contract scoping. Compare the "
             "specific library individually with --required-symbol."
+        )
+    if use_cases_manifest is not None:
+        raise click.UsageError(
+            "--use-cases is not supported for directory/package (release) "
+            "comparisons: attribution walks one pair's own call graphs, and "
+            "the per-library fan-out never builds them, so the manifest "
+            "would be accepted and attribute nothing. Compare the specific "
+            "library individually with --use-cases."
         )
     if diagnostic_comparison:
         raise click.UsageError(

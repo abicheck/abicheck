@@ -545,6 +545,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--suppress",
         "--surface-metrics",
         "--sysroot",
+        "--use-cases",
         "--used-by",
         "--verbose",
         "--write",

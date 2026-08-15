@@ -67,10 +67,11 @@ class UseCaseChange:
 class UseCaseImpact:
     """The ``use_case_impact`` report block.
 
-    *resolutions* is the manifest's own entrypoint resolution against the
-    OLD side's graph (what ``project validate-use-cases`` reports on its
-    own); *by_use_case* is this comparison's findings attributed to the use
-    cases whose entrypoints reach them; *unattributed_changes* is how many
+    *resolutions* is the manifest's own entrypoint resolution, unioned
+    across both sides' graphs the same way the attribution below is (what
+    ``project validate-use-cases`` reports against one graph on its own);
+    *by_use_case* is this comparison's findings attributed to the use cases
+    whose entrypoints reach them; *unattributed_changes* is how many
     findings no declared entrypoint could be shown to reach.
     """
 
@@ -107,6 +108,52 @@ def _source_graph(snapshot: AbiSnapshot | None) -> Any:
     return getattr(getattr(snapshot, "build_source", None), "source_graph", None)
 
 
+def _merge_resolutions(
+    definitions: Sequence[UseCaseDefinition],
+    old: Sequence[UseCaseResolution],
+    new: Sequence[UseCaseResolution],
+) -> tuple[UseCaseResolution, ...]:
+    """Union two sides' entrypoint resolutions, resolved-wins per entrypoint.
+
+    The same asymmetry the module docstring describes for attribution
+    reaches resolution too, and reporting only OLD's answer contradicts the
+    attribution sitting next to it: an entrypoint introduced on the NEW side
+    resolves only against NEW's graph, so an OLD-only resolution lists it as
+    unresolved beside a finding this run attributed *through* it -- and when
+    only NEW carries a graph, lists nothing at all while ``by_use_case`` is
+    populated. An entrypoint is therefore unresolved only when neither side
+    could resolve it. Declared order is preserved the way
+    :func:`resolve_use_case_entrypoints` preserves it -- by re-partitioning
+    each definition's own ``entrypoints`` tuple, not by concatenating a side's
+    two result tuples, which has already lost the interleaving between them.
+    """
+    from .use_cases import UseCaseResolution
+
+    if not old:
+        return tuple(new)
+    if not new:
+        return tuple(old)
+    resolved_anywhere = {
+        (r.use_case, entry)
+        for side in (old, new)
+        for r in side
+        for entry in r.resolved_entrypoints
+    }
+    return tuple(
+        UseCaseResolution(
+            use_case=d.use_case,
+            resolved_entrypoints=tuple(
+                e for e in d.entrypoints if (d.use_case, e) in resolved_anywhere
+            ),
+            unresolved_entrypoints=tuple(
+                e for e in d.entrypoints if (d.use_case, e) not in resolved_anywhere
+            ),
+            tests=d.tests,
+        )
+        for d in definitions
+    )
+
+
 def build_use_case_impact(
     definitions: Sequence[UseCaseDefinition],
     old_snapshot: AbiSnapshot,
@@ -130,10 +177,18 @@ def build_use_case_impact(
     if old_graph is None and new_graph is None:
         return None
 
-    resolutions = (
-        tuple(resolve_use_case_entrypoints(list(definitions), old_graph))
-        if old_graph is not None
-        else ()
+    resolutions = _merge_resolutions(
+        definitions,
+        (
+            resolve_use_case_entrypoints(list(definitions), old_graph)
+            if old_graph is not None
+            else []
+        ),
+        (
+            resolve_use_case_entrypoints(list(definitions), new_graph)
+            if new_graph is not None
+            else []
+        ),
     )
     symbols = {c.symbol for c in changes if c.symbol}
     mapping_old = (

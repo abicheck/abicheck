@@ -1269,7 +1269,7 @@ def _suppression_note(model: CommentModel) -> list[str]:
     if model.reclassified_count:
         n = model.reclassified_count
         parts.append(
-            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy-file`"
+            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy`"
         )
     if not parts:
         return []

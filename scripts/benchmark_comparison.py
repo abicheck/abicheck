@@ -964,14 +964,13 @@ def run_abicheck_full(
                 if case115_clang:
                     dump += ["--compiler", case115_clang]
             if header and header.exists():
-                # -H alone only feeds castxml which headers to parse; it does
-                # NOT mark them public for provenance classification (that's
-                # the separate, opt-in --public-header flag per ADR-015 D4).
-                # Without it every declaration's origin stays UNKNOWN, which
-                # demotes surface-scope confidence to "reduced"/"no-provenance"
-                # across the board. The benchmark's headers ARE the case's
-                # real public headers, so tell the classifier that.
-                dump += ["-H", str(header), "--public-header", str(header)]
+                # -H is now the whole provenance story: the separate, opt-in
+                # --public-header flag it used to need alongside it (ADR-015
+                # D4) is gone, and the headers -H names are classified as the
+                # library's own public headers directly. The benchmark's
+                # headers ARE the case's real public headers, so this is the
+                # classification it wants.
+                dump += ["-H", str(header)]
             dr = subprocess.run(
                 dump, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV
             )
@@ -1107,11 +1106,10 @@ def _run_abicheck_dump_compare(
             version,
         ]
         if header and header.exists():
-            # See run_abicheck_full's dump() for why --public-header is
-            # needed alongside -H: without it, origin stays UNKNOWN for
-            # every declaration (ADR-015 D4 opt-in), demoting surface-scope
-            # confidence to "reduced"/"no-provenance" across the board.
-            cmd += ["-H", str(header), "--public-header", str(header)]
+            # See run_abicheck_full's dump() for why -H alone now carries the
+            # provenance classification the removed --public-header flag used
+            # to have to opt into.
+            cmd += ["-H", str(header)]
         if case == "case115_bit_int_width_changed":
             # castxml's bundled Clang frontend (13.x as of castxml 0.4.5) does
             # not parse C23 _BitInt(N), independent of the GCC version used to
@@ -3181,11 +3179,14 @@ def _abicheck_tier_result(
             ver,
         ]
         if h and h.exists():
-            # See _run_abicheck_dump_compare's dump() for why --public-header
-            # is needed alongside -H (ADR-015 D4 opt-in provenance).
-            cmd += ["-H", str(h), "--public-header", str(h)]
+            # See _run_abicheck_dump_compare's dump() for why -H alone now
+            # carries the provenance classification.
+            cmd += ["-H", str(h)]
         if build_dir is not None:
-            cmd += ["-p", str(build_dir)]
+            # The removed -p/--build-dir spelling: a build directory is read
+            # off --build-info now, which resolves its compile_commands.json
+            # exactly as -p did.
+            cmd += ["--build-info", str(build_dir)]
         try:
             run = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV

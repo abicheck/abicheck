@@ -290,6 +290,9 @@ class TestD8Precedence:
     def test_an_explicit_severity_flag_outranks_a_gate_pack(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        # --severity-preset is the explicit severity flag that survived the
+        # per-category removals; D8's rule is about an explicitly *stated*
+        # value outranking a pack, not about which spelling states it.
         gate = _pack(
             tmp_path,
             "lenient.yml",
@@ -303,8 +306,8 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(gate),
-            "--severity-abi-breaking",
-            "error",
+            "--severity-preset",
+            "strict",
         )
         assert result.exit_code == 4, result.output
 
@@ -984,12 +987,7 @@ class TestNoPackChangesNothing:
         resolved = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None,
-            cli_severity_quality_issues=None,
-            cli_severity_addition=None,
             cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
         )
         assert resolved.exit_code_scheme == "legacy"
         application = PackApplication(

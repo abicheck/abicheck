@@ -23,6 +23,7 @@ scheme is explicit (D12): passing `--severity-*` no longer silently flips it.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -68,10 +69,7 @@ class TestConfigPrecedence:
     def test_default_when_nothing_set(self) -> None:
         r = resolve_compare_config(
             None,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
+            cli_severity_preset=None, cli_scope_public=None,
         )
         assert r.severity.abi_breaking == SeverityLevel.ERROR  # preset default
         assert r.scope_public is True
@@ -90,10 +88,7 @@ class TestConfigPrecedence:
         )
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
+            cli_severity_preset=None, cli_scope_public=None,
         )
         assert r.severity.abi_breaking == SeverityLevel.WARNING
         assert r.scope_public is False
@@ -105,6 +100,11 @@ class TestConfigPrecedence:
         assert r.exit_code_scheme == "severity"
 
     def test_cli_beats_config(self) -> None:
+        # Only the keys that still HAVE a CLI flag can be overridden from the
+        # command line. --severity-abi-breaking and --strict-suppressions were
+        # hidden duplicates of a config key and are gone, so the config value
+        # is now the whole answer for those two -- an override the resolver
+        # cannot express is the point, not an omission.
         cfg = BuildConfig(
             severity_abi_breaking="warning",
             scope_public=False,
@@ -113,37 +113,27 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_severity_abi_breaking="error",   # CLI override
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None,
             cli_scope_public=True,               # CLI override
-            cli_collapse_versioned_symbols=None,
-            cli_strict_suppressions=False,       # CLI override
         )
-        assert r.severity.abi_breaking == SeverityLevel.ERROR
         assert r.scope_public is True
-        assert r.strict_suppressions is False
+        assert r.severity.abi_breaking == SeverityLevel.WARNING
+        assert r.strict_suppressions is True
 
-    def test_public_symbols_merge_config_and_cli(self) -> None:
+    def test_public_symbols_come_from_config_only(self) -> None:
+        # The --public-symbol/--public-symbols-list overlay was removed with
+        # the rest of the hidden config duplicates; scope.public_symbols is
+        # the only source, so there is no CLI half left to merge.
         cfg = BuildConfig(public_symbols=["_Z3foov"])
         r = resolve_compare_config(
-            cfg,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
-            cli_public_symbols=("_Z3barv",),
+            cfg, cli_severity_preset=None, cli_scope_public=None,
         )
-        assert set(r.public_symbols) == {"_Z3foov", "_Z3barv"}
+        assert set(r.public_symbols) == {"_Z3foov"}
 
     def test_exit_scheme_cli_beats_config(self) -> None:
         cfg = BuildConfig(exit_code_scheme="legacy")
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
+            cli_severity_preset=None, cli_scope_public=None,
             cli_exit_code_scheme="severity",
         )
         assert r.exit_code_scheme == "severity"
@@ -151,10 +141,7 @@ class TestConfigPrecedence:
     def test_debug_and_show_redundant_default(self) -> None:
         r = resolve_compare_config(
             None,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
+            cli_severity_preset=None, cli_scope_public=None,
         )
         assert r.debug_format is None
         assert r.dwarf_only is False
@@ -170,10 +157,7 @@ class TestConfigPrecedence:
         )
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
+            cli_severity_preset=None, cli_scope_public=None,
         )
         assert r.debug_format == "dwarf"
         assert r.dwarf_only is True
@@ -200,17 +184,14 @@ class TestConfigPrecedence:
         )
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None, cli_severity_quality_issues=None,
-            cli_severity_addition=None, cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
+            cli_severity_preset=None, cli_scope_public=None,
             cli_debug_format="btf",       # CLI override
             cli_dwarf_only=False,         # CLI override (flag not passed → False here)
-            cli_show_redundant=False,     # CLI override
         )
         assert r.debug_format == "btf"
         assert r.dwarf_only is False
-        assert r.show_redundant is False
+        # --show-redundant is gone, so config keeps its value here.
+        assert r.show_redundant is True
 
 
 # ── round-trip ─────────────────────────────────────────────────────────────────
@@ -335,66 +316,55 @@ class TestFlagBudget:
             "raises are documented — add a ledger entry for the new flag."
         )
 
-    def test_demoted_families_are_hidden(self) -> None:
-        cmd = main.commands["compare"]
-        hidden = {
+    #: The hidden-flag families that became *removed* families. A hidden flag
+    #: is still a flag: it parses, it takes precedence over the config key it
+    #: duplicates, and every one of these duplicated a key `.abicheck.yml`
+    #: already owned. This PR deletes them outright rather than keeping a
+    #: second, invisible spelling of one setting, so the contract these tests
+    #: pin is absence, not concealment -- a stronger claim than the one they
+    #: made before, and the reason they are not simply deleted alongside the
+    #: flags: "hidden" is exactly the state a re-introduction would land in.
+    REMOVED_CONFIG_DUPLICATES = (
+        "--severity-abi-breaking", "--severity-potential-breaking",
+        "--severity-quality-issues", "--severity-addition",
+        "--strict-suppressions", "--require-justification",
+        "--collapse-versioned-symbols", "--public-symbol",
+        "--public-symbols-list", "--show-redundant", "--no-show-redundant",
+    )
+
+    @staticmethod
+    def _option_spellings(cmd: Any, *, hidden_only: bool = False) -> set[str]:
+        return {
             opt
             for p in cmd.params
-            if getattr(p, "param_type_name", None) == "option" and getattr(p, "hidden", False)
-            for opt in p.opts
+            if getattr(p, "param_type_name", None) == "option"
+            and (not hidden_only or getattr(p, "hidden", False))
+            for opt in (*p.opts, *p.secondary_opts)
         }
+
+    @pytest.mark.parametrize("command", ["compare", "scan"])
+    def test_demoted_families_are_gone(self, command: str) -> None:
+        spellings = self._option_spellings(main.commands[command])
+        for flag in self.REMOVED_CONFIG_DUPLICATES:
+            assert flag not in spellings, (
+                f"{flag} duplicates an .abicheck.yml key and was removed from "
+                f"{command}; re-adding it as a hidden flag is the drift this "
+                "pins against."
+            )
+
+    def test_debug_resolution_family_stays_hidden(self) -> None:
+        """The debug-resolution knobs are the ones that stayed: unlike the
+        families above they are per-run resolution inputs, not duplicates of a
+        setting a project pins once, so they keep their hidden CLI spelling
+        (ADR-040 Lever 2 Phase D) alongside the ``debug:`` config block."""
+        cmd = main.commands["compare"]
+        hidden = self._option_spellings(cmd, hidden_only=True)
         for flag in (
-            "--severity-abi-breaking", "--severity-quality-issues",
-            "--strict-suppressions", "--require-justification",
-            "--collapse-versioned-symbols", "--public-symbol",
-            # ADR-040 Lever 2 (Phase D): debug-resolution + show-redundant demotion
             "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
-            "--show-redundant",
+            # Two-way, so a one-off run can force false over a config true.
+            "--no-debuginfod", "--no-dwarf-only",
         ):
             assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
-
-    def test_scan_demoted_families_are_hidden(self) -> None:
-        """CLI audit PR 4/5: scan's own --strict-suppressions/--public-symbol/
-        --public-symbols-list mirror compare's already-demoted flags above
-        (same config keys, same CLI-beats-config precedence -- see
-        cli_scan.py's own `.abicheck.yml` compile:/scope:/suppression: comment)
-        but were never actually hidden until now. --exit-code-scheme is
-        deliberately excluded here -- see test_coarse_overrides_stay_visible,
-        which pins it staying visible on both commands."""
-        cmd = main.commands["scan"]
-        hidden = {
-            opt
-            for p in cmd.params
-            if getattr(p, "param_type_name", None) == "option" and getattr(p, "hidden", False)
-            for opt in p.opts
-        }
-        for flag in (
-            "--severity-abi-breaking", "--severity-quality-issues",
-            "--strict-suppressions", "--public-symbol", "--public-symbols-list",
-        ):
-            assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
-
-    def test_demoted_booleans_have_negative_override_forms(self) -> None:
-        """The demoted boolean toggles are two-way flags, so a one-off run can
-        force ``false`` over a config ``true`` (ADR-040 L2; Codex P2). Both the
-        positive and negative spellings must exist and stay hidden."""
-        cmd = main.commands["compare"]
-        all_opts = {
-            opt
-            for p in cmd.params
-            if getattr(p, "param_type_name", None) == "option"
-            for opt in (*p.opts, *p.secondary_opts)
-        }
-        hidden = {
-            opt
-            for p in cmd.params
-            if getattr(p, "param_type_name", None) == "option"
-            and getattr(p, "hidden", False)
-            for opt in (*p.opts, *p.secondary_opts)
-        }
-        for neg in ("--no-dwarf-only", "--no-debuginfod", "--no-show-redundant"):
-            assert neg in all_opts, f"{neg} negative override form is missing (Codex P2)"
-            assert neg in hidden, f"{neg} should be hidden like its positive form"
 
     def test_coarse_overrides_stay_visible(self) -> None:
         cmd = main.commands["compare"]

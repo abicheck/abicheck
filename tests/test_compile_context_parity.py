@@ -1100,8 +1100,8 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
             "-DBAR=2",
             "--ast-frontend",
             "castxml",
-            "--ast-frontend new=",
-            "clang",
+            "--ast-frontend",
+            "new=clang",
         ],
     )
     # gcc context on both sides...
@@ -1370,7 +1370,7 @@ def test_fallback_flag_is_scoped_to_one_cli_invocation(
     monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
 
     @click.command()
-    @compile_context_options
+    @compile_context_options()
     def probe(**_kwargs: object) -> None:
         click.echo(os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "unset"))
 
@@ -1395,7 +1395,7 @@ def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
     monkeypatch.delenv("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", raising=False)
 
     @click.command()
-    @compile_context_options
+    @compile_context_options()
     def probe(**_kwargs: object) -> None:
         click.echo(os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "unset"))
 
@@ -1425,7 +1425,7 @@ def _compile_context_probe():
     from abicheck.cli_options import resolve_compile_context
 
     @click.command()
-    @compile_context_options
+    @compile_context_options()
     @click.pass_context
     def probe(ctx: click.Context, **kwargs: object) -> None:
         cc, _includes = resolve_compile_context(

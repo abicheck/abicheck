@@ -383,9 +383,10 @@ def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[n
 
 
 def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """``dump --depth binary`` discards a -H + --compile-db invocation's L2 inputs:
+    """``dump --depth binary`` discards a -H + --build-info invocation's L2 inputs:
     it must NOT abort on the compile-DB header requirement just because binary depth
-    cleared the headers (Codex review)."""
+    cleared the headers (Codex review). The compile database now arrives through
+    --build-info, the removed --compile-db/-p flag's replacement."""
     hdr = tmp_path / "foo.h"
     hdr.write_text("int foo(void);\n", encoding="utf-8")
     cdb = tmp_path / "compile_commands.json"
@@ -393,7 +394,7 @@ def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore
     res = CliRunner().invoke(
         main,
         [
-            "dump", "/no/such/bin.so", "-H", str(hdr), "--compile-db", str(cdb),
+            "dump", "/no/such/bin.so", "-H", str(hdr), "--build-info", str(cdb),
             "--depth", "binary", "-o", str(tmp_path / "o.json"),
         ],
     )

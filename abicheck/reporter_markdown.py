@@ -1074,7 +1074,8 @@ def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
         lines.append("")
         lines.append(
             f"> ℹ️ {result.redundant_count} redundant change(s) hidden "
-            "(derived from root type changes). Use `--show-redundant` to show all."
+            "(derived from root type changes). Set `scope.show_redundant: true` in\n"
+            "> `.abicheck.yml` to show all."
         )
 
 

@@ -1029,6 +1029,7 @@ def _reject_flags_unsupported_for_set_inputs(
     diagnostic_comparison: bool, audit_suppressions: bool,
     pack_paths: tuple[Path, ...], include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
+    use_cases_manifest: Path | None = None,
 ) -> None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -1048,6 +1049,7 @@ def _reject_flags_unsupported_for_set_inputs(
     _reject_set_input_flags(
         exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
+        use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
         audit_suppressions=audit_suppressions,
         pack_paths=pack_paths,
@@ -1468,6 +1470,7 @@ def run_compare(
             pack_paths=pack_paths,
             include_labels=include_labels,
             require_complete_analysis=require_complete_analysis,
+            use_cases_manifest=use_cases_manifest,
         )
 
     # Parsed after the directory/package rejection above (not before, like an

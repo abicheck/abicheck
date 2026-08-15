@@ -803,7 +803,6 @@ class TestFieldForFieldParity:
             ("policy", ["--policy", "sdk_vendor"]),
             ("scope-off", ["--no-scope-public-headers"]),
             ("explicit-scope", ["--scope-public-headers"]),
-            ("forced-public-symbol", ["--public-symbol", "_Z3barv"]),
             ("contract-public", ["--contract", "public"]),
             ("contract-exports", ["--contract", "exports"]),
             ("contract-all", ["--contract", "all"]),
@@ -837,6 +836,30 @@ class TestFieldForFieldParity:
         # ChangeKind, contract relevance/reason/assurance/evidence side, and
         # the compatibility decision, per finding.
         assert rows_c == rows_s, label
+
+    def test_a_forced_public_symbol_is_identical_from_config(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The forced-public-symbol matrix cell, moved off its removed flag.
+
+        ``--public-symbol`` duplicated ``scope.public_symbols`` and was
+        removed with the rest of the hidden config duplicates, so the overlay
+        now reaches both commands through ``--config`` alone -- which is
+        exactly the parity §6.4 is about: one config surface, two commands,
+        identical records. A separate test rather than a matrix row because
+        the config file needs ``tmp_path``, which a parametrize list has no
+        access to.
+        """
+        old, new = mixed_pair
+        cfg = tmp_path / "public-symbol.abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [_Z3barv]\n", encoding="utf-8")
+        report, scan = _both(runner, old, new, ["--config", str(cfg)], tmp_path)
+
+        rows_c = _compare_rows(report)
+        rows_s = _scan_rows(scan["diff"])
+        assert not scan["diff"].get("findings_truncated")
+        assert rows_c, "no gating findings to compare"
+        assert rows_c == rows_s
 
     @pytest.mark.parametrize(
         "extra",
@@ -1251,7 +1274,6 @@ class TestScanResolvesTheSameTypedConfig:
         [
             (["--contract", "exports"], "contract.mode", "explicit_cli"),
             (["--policy", "sdk_vendor"], "policy.base", "legacy_alias"),
-            (["--public-symbol", "_Z3barv"], "surface.explicit_scope", "explicit_cli"),
         ],
     )
     def test_a_typed_flag_gets_its_real_d7_layer(
@@ -1270,6 +1292,24 @@ class TestScanResolvesTheSameTypedConfig:
         ctx = self._scan_context(runner, old, new, flag, tmp_path)
         prov = ctx["evaluation_context"]["field_provenance"][field]
         assert prov["layer"] == layer, prov
+
+    def test_a_config_only_field_gets_its_real_d7_layer(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """``surface.explicit_scope``'s own D7 layer, after its flag was removed.
+
+        The receipt's whole job is naming *which* layer chose a value. With
+        ``--public-symbol`` gone the honest answer for this field is
+        ``project_config``, not ``explicit_cli`` -- and a receipt that still
+        claimed the CLI layer would be exactly the useless-to-an-auditor
+        answer the sibling test above exists to prevent.
+        """
+        old, new = mixed_pair
+        cfg = tmp_path / "public-symbol.abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [_Z3barv]\n", encoding="utf-8")
+        ctx = self._scan_context(runner, old, new, ["--config", str(cfg)], tmp_path)
+        prov = ctx["evaluation_context"]["field_provenance"]["surface.explicit_scope"]
+        assert prov["layer"] == "project_config", prov
 
     @pytest.mark.parametrize("command", ["compare", "scan"])
     def test_contract_auto_evaluates_without_claiming_an_explicit_domain(

@@ -305,13 +305,29 @@ class TestEvidenceReading:
         assert not ev.ran_to_a_verdict(call)
 
     def test_every_real_severity_override_is_treated_as_re_scoring(self):
-        """There is no generic `--severity`; a stem matched none of these."""
-        for flag in (
-            "--severity-abi-breaking",
-            "--severity-potential-breaking",
-            "--severity-quality-issues",
-            "--severity-addition",
-        ):
+        """Every severity flag the CLI actually has must be recorded.
+
+        Stated against the live CLI rather than a hand-listed set of
+        spellings: the original list named the four per-category
+        `--severity-*` overrides, which have since been removed, and a
+        hardcoded list cannot tell "this flag is gone" from "this flag is
+        unrecorded" -- the second is the real failure and it would have gone
+        unnoticed. There is still no generic `--severity` option for a stem
+        to match, which is why the grader spells its flags out.
+        """
+        from abicheck.cli import main
+
+        severity_options = {
+            opt
+            for name in ("compare", "scan")
+            for p in main.commands[name].params
+            if getattr(p, "param_type_name", None) == "option"
+            for opt in p.opts
+            if opt.startswith("--severity")
+        }
+        assert severity_options, "no severity flag found -- the scan is vacuous"
+        for flag in sorted(severity_options):
+            assert flag in ev.SUPPRESSION_FLAGS, flag
             call = {"argv": ["compare", "a", "b", flag, "error"]}
             assert ev.suppression_flags(call) == [flag], flag
 
