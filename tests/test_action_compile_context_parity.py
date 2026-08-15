@@ -293,6 +293,29 @@ class TestCompileContextForwardingParity:
         assert '-DMSG="hello' not in cmd
         assert 'world"' not in cmd
 
+    def test_gcc_options_hash_character_is_not_treated_as_a_comment(self) -> None:
+        """Regression (Codex review, PR #774): an earlier revision of
+        add_flag_shlex_split()'s inline Python lexer disabled backslash
+        escaping via a hand-rolled shlex.shlex(escape=""), which left
+        shlex's default #-starts-a-comment behavior active and silently
+        truncated any token containing `#`, dropping every flag after it.
+        Mirrors abicheck._compiler_options.split_gcc_options's own
+        regression test for the identical Python-side fix."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-I/build/#generated -DOK=1"}
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 2
+        assert "-I/build/#generated" in cmd
+        assert "-DOK=1" in cmd
+
+    def test_gcc_options_backslash_escaped_space_is_honored(self) -> None:
+        """Sibling regression (Codex review, PR #774): the same hand-rolled
+        lexer broke a real POSIX backslash-escaped space into two tokens
+        instead of one."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": r"-DMSG=hello\ world"}
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 1
+        assert "-DMSG=hello world" in cmd
+
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,

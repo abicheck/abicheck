@@ -1,12 +1,55 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for forwarded compiler dialect option predicates."""
 
+import pytest
+
 from abicheck._compiler_options import (
     explicit_language_standard,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
+    split_gcc_options,
 )
+
+
+class TestSplitGccOptions:
+    """Regression coverage for the Windows quoted-value CI failure this
+    helper was added to fix (Codex review, PR #774), plus the two review
+    findings against an earlier revision that tried to *also* preserve a
+    literal Windows path's backslashes via a hand-rolled ``shlex.shlex``
+    with ``escape=""`` -- that revision broke both real POSIX escape
+    sequences and comment-character handling, so this class pins the exact
+    inputs that caught each regression."""
+
+    def test_quoted_value_with_embedded_space_stays_one_token(self) -> None:
+        # The original CI failure: shlex.split(..., posix=False) (the old
+        # Windows-only behavior) split this into three malformed tokens
+        # instead of two.
+        assert split_gcc_options('-DMSG="hello world" -DOK=1') == [
+            "-DMSG=hello world",
+            "-DOK=1",
+        ]
+
+    def test_backslash_escaped_space_is_honored(self) -> None:
+        # Codex review (P1): an escape=""-disabled lexer left a real
+        # backslash-escaped space as two separate tokens instead of one.
+        assert split_gcc_options(r"-DMSG=hello\ world") == ["-DMSG=hello world"]
+
+    def test_backslash_escaped_quote_is_honored(self) -> None:
+        assert split_gcc_options(r"-DVERSION=\"1.2\"") == ['-DVERSION="1.2"']
+
+    def test_hash_character_is_not_treated_as_a_comment(self) -> None:
+        # Codex review (P2): an escape=""-disabled shlex.shlex left the
+        # default #-starts-a-comment behavior active, silently truncating
+        # this token and dropping -DOK=1 entirely.
+        assert split_gcc_options("-I/build/#generated -DOK=1") == [
+            "-I/build/#generated",
+            "-DOK=1",
+        ]
+
+    def test_malformed_quoting_raises_value_error(self) -> None:
+        with pytest.raises(ValueError):
+            split_gcc_options('-DMSG="unterminated')
 
 
 def test_has_explicit_std_accepts_string_and_tokens() -> None:

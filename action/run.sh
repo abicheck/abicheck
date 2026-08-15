@@ -78,19 +78,18 @@ add_flag_shlex_split() {
 import shlex
 import sys
 
-# Always POSIX-style quote/whitespace-splitting rules, with escaping
-# disabled -- a plain posix=True split would treat backslash as an escape
-# character and corrupt a literal Windows path; posix=False on Windows
-# (the previous choice, mirroring abicheck itself before this fix) kept
-# backslashes literal but never collapsed a quoted value with an embedded
-# space into one token, breaking e.g. -DMSG="hello world" into three
-# malformed tokens instead of two. Disabling escaping keeps both
-# properties on every platform (see abicheck._compiler_options.
-# split_gcc_options, the identical fix on the Python side).
-lexer = shlex.shlex(sys.argv[1], posix=True)
-lexer.whitespace_split = True
-lexer.escape = ""
-for tok in lexer:
+# Always real POSIX shlex splitting, on every platform -- posix=False on
+# Windows (the previous choice, mirroring abicheck itself before this fix)
+# kept backslashes literal but never collapsed a quoted value with an
+# embedded space into one token, breaking e.g. -DMSG="hello world" into
+# three malformed tokens instead of two. A hand-rolled lexer with escaping
+# disabled was tried to *also* preserve a literal Windows path'\''s
+# backslashes, but that broke real POSIX escape sequences
+# (-DMSG=hello\ world) and left shlex'\''s default #-starts-a-comment
+# behavior active, silently truncating any token containing # (see
+# abicheck._compiler_options.split_gcc_options, the identical fix and its
+# own docstring for the full reasoning on the Python side).
+for tok in shlex.split(sys.argv[1], posix=True):
     print(tok)
 ' "$value")"
   while IFS= read -r item; do

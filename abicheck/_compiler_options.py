@@ -10,32 +10,42 @@ def split_gcc_options(text: str) -> list[str]:
     """Quote-aware split of a ``--gcc-options``-style compiler-flags string
     (e.g. ``-DMSG="hello world" -DOK=1``).
 
-    Always uses POSIX-style quote/whitespace-splitting rules, on every
-    platform, but with backslash escaping disabled: a plain POSIX
-    ``shlex.split`` would otherwise consume a backslash as an escape
-    character, corrupting a literal Windows path (``-IC:\\mypath\\include``)
-    that never intended one. Disabling escaping (rather than the previous
-    ``shlex.split(text, posix=os.name != "nt")`` split, which picked
-    quote-collapsing behavior on POSIX and backslash-preserving behavior on
-    Windows -- but never both on the same platform) keeps both properties
-    intact everywhere: a quoted value with an embedded space stays one
-    token *and* a Windows path's backslashes survive, regardless of which
-    OS this process happens to be running on. The previous per-platform
-    split silently broke a quoted value with a space into malformed tokens
+    Always uses real POSIX shlex splitting (``shlex.split(text,
+    posix=True)``), on every platform -- the previous
+    ``shlex.split(text, posix=os.name != "nt")`` picked quote-collapsing
+    behavior on POSIX and backslash-preserving behavior on Windows, but
+    never both on the same platform, so a quoted value with an embedded
+    space (``-DMSG="hello world"``) silently split into malformed tokens
     on Windows specifically (Codex review; see
     ``tests/test_action_compile_context_parity.py::
     TestCompileContextForwardingParity::test_gcc_options_quoted_value_stays_one_token``,
     which exercises ``action/run.sh``'s own bash mirror of this identical
     fix).
 
+    Deliberately plain ``shlex.split`` rather than a hand-rolled
+    ``shlex.shlex`` with ``escape=""`` disabled -- an earlier revision of
+    this helper tried that to *also* preserve a literal Windows path's
+    backslashes (``-IC:\\mypath\\include``) unconditionally, but that broke
+    two things a real POSIX-quoted ``--gcc-options`` value can legitimately
+    rely on (Codex review, both confirmed against real Python
+    ``shlex`` output): a real ``\\``-escaped character
+    (``-DMSG=hello\\ world``, ``-DVERSION=\\"1.2\\"``) stopped being
+    unescaped correctly, and disabling ``escape`` left ``shlex``'s default
+    ``#``-starts-a-comment behavior active, silently truncating any token
+    containing ``#`` (e.g. ``-I/build/#generated``) and dropping every
+    flag after it -- a far worse regression than the Windows-path
+    preservation it was trying to add. No existing caller or test ever
+    relied on that backslash preservation (it was speculative, not a
+    tested contract), so this reverts to plain ``posix=True`` -- the exact
+    behavior every ``gcc_options``/``--gcc-options`` splitting call site in
+    this codebase already had on POSIX platforms, now applied uniformly
+    regardless of host OS.
+
     Raises ``ValueError`` the same way ``shlex.split`` does on malformed
     input (e.g. an unbalanced quote) -- callers that need to tolerate that
     already catch it.
     """
-    lexer = shlex.shlex(text, posix=True)
-    lexer.whitespace_split = True
-    lexer.escape = ""
-    return list(lexer)
+    return shlex.split(text, posix=True)
 
 
 def has_explicit_std(
