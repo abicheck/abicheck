@@ -496,6 +496,18 @@ class TestConditionalRequirements:
         requirement = next(r for r in gate.REQUIREMENTS if r.key == "malicious-fixture")
         assert requirement.applies_to([path])
 
+    def test_pyproject_is_shipped_runtime_config(self) -> None:
+        """Build config, but three of its sections are installed behaviour:
+        `[project].dependencies`, `[project.scripts]` and
+        `[tool.setuptools.package-data]`. A fix to any of them changes what
+        users run with no `.py` touched, and the structural gate let it
+        through (Codex review)."""
+        assert gate.touches_shipped_code(["pyproject.toml"])
+
+    def test_other_root_toml_is_not_shipped(self) -> None:
+        """Negative control: the rule names one file, it is not "any TOML"."""
+        assert not gate.touches_shipped_code(["codecov.yml", "mkdocs.yml"])
+
     def test_a_packaged_policy_named_security_is_not_a_trust_boundary(self) -> None:
         """`abicheck/policies/security.yaml` is a packaged runtime policy
         profile, not an Action or a workflow. A bare `security` substring

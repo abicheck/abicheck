@@ -153,11 +153,16 @@ def run_step(
         text=True,
         timeout=120,
     )
-    lines = [
-        line
-        for line in github_output.read_text(encoding="utf-8").splitlines()
-        if line != ""
-    ]
+    # `$GITHUB_OUTPUT` is written by the step, not by us, so its bytes are
+    # whatever the runner's shell produced. On Windows a non-ASCII input
+    # reaches Git Bash through the ANSI code page and comes back as cp1252,
+    # and decoding it as UTF-8 raised — the harness failing on the hostile
+    # input instead of judging the step's answer about it. Decoding leniently
+    # does not weaken any assertion: an undecodable byte becomes U+FFFD, which
+    # is not alphanumeric, so a byte that survived sanitization still fails
+    # the checks that matter.
+    decoded = github_output.read_bytes().decode("utf-8", errors="replace")
+    lines = [line for line in decoded.splitlines() if line != ""]
     return StepResult(
         returncode=proc.returncode,
         stdout=proc.stdout,

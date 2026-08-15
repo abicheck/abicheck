@@ -109,7 +109,16 @@ _SHIPPED_PREFIXES = tuple(_SHIPPED_SUFFIXES_BY_PREFIX)
 #: and its executable steps — and it has dedicated coverage in
 #: `tests/test_action_reference.py` / `test_action_run_contract.py`, so a fix
 #: to it can and should carry a test (Codex review).
-_SHIPPED_FILES = frozenset({"action.yml"})
+#: `pyproject.toml` joins it for a different reason: it is build *config*, but
+#: three of its sections are installed runtime behaviour — `[project]
+#: .dependencies` (what a user's environment resolves), `[project.scripts]`
+#: (the `abicheck` entry point), and `[tool.setuptools.package-data]` (whether
+#: the packaged policy profiles and report schemas ship at all). A fix to any
+#: of those changes what users run with no `.py` touched, and the structural
+#: gate let it through (Codex review). `tests/test_toolchain_pins.py` and
+#: `tests/test_cli_root_surface.py` are where such a fix is asserted; a genuinely
+#: unassertable one takes the `skip-test-contract` label, same as any other.
+_SHIPPED_FILES = frozenset({"action.yml", "pyproject.toml"})
 
 #: Not shipped code, but the surface the malicious-fixture requirement is
 #: about: a workflow runs with the repository's permissions.

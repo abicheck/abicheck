@@ -281,7 +281,18 @@ def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
     missing entry is a dead lane, not a wrong number.
     """
     also_copy = set(_mutmut_config().get("also_copy", []))
-    required = {".github", "docs", "examples", "scripts", "skills-src", "agent-evals"}
+    required = {
+        ".github",
+        "agent-evals",
+        "docs",
+        "examples",
+        # Not a directory: `test_ai_readiness.py` and `test_docs_hooks.py`
+        # read this file directly, and it is the one repository *input* the
+        # directory entries do not carry (Codex review).
+        "repo_facts.json",
+        "scripts",
+        "skills-src",
+    }
     missing = required - also_copy
     assert not missing, (
         f"tests read these repository paths but mutmut would not copy them: "
@@ -327,23 +338,131 @@ def test_mutmut_config_uses_v3_key_names() -> None:
 
 
 def _ignored_test_files() -> list[str]:
-    """Test files mutmut is told to skip, from `--ignore=` in its pytest args."""
-    return [
-        arg.split("=", 1)[1]
-        for arg in _mutmut_config()["pytest_add_cli_args"]
-        if arg.startswith("--ignore=")
-    ]
+    """Test files mutmut is told to skip.
+
+    Both spellings, since they are the same decision at different
+    granularities: `--ignore=<file>` drops a whole module, `--deselect=<file>
+    ::<test>` drops one test from a module that otherwise runs. A check that
+    only knew about `--ignore` would let a deselect escape every guarantee
+    below.
+    """
+    files = []
+    for arg in _mutmut_config()["pytest_add_cli_args"]:
+        if arg.startswith("--ignore="):
+            files.append(arg.split("=", 1)[1])
+        elif arg.startswith("--deselect="):
+            files.append(arg.split("=", 1)[1].split("::", 1)[0])
+    return files
+
+
+def _package_of(path: Path) -> str:
+    """Dotted package a repository file lives in, e.g. `abicheck.buildsource`."""
+    rel = path.resolve().relative_to(REPO_ROOT)
+    return ".".join(rel.parts[:-1])
+
+
+def _first_party_imports(path: Path) -> set[str]:
+    """`abicheck.*` modules imported by *path*, relative imports resolved.
+
+    Resolving them is the whole point: inside the package almost every import
+    is relative (`from .diff_types import ...`), so a walk that only followed
+    absolute ones reported that `abicheck/checker.py` reaches nothing — and
+    the reachability check built on it would have been vacuous.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return set()
+    package = _package_of(path)
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            if not node.level:
+                if node.module:
+                    names.add(node.module)
+                continue
+            # `from . import x` / `from ..y import z`: climb `level - 1`
+            # packages from this file's own package.
+            parts = package.split(".") if package else []
+            base = parts[: len(parts) - (node.level - 1)]
+            if not base:
+                continue
+            prefix = ".".join(base)
+            names.add(f"{prefix}.{node.module}" if node.module else prefix)
+            if node.module is None:
+                names |= {f"{prefix}.{a.name}" for a in node.names}
+    return {n for n in names if n == "abicheck" or n.startswith("abicheck.")}
+
+
+def _module_file(module: str) -> Path | None:
+    direct = REPO_ROOT / (module.replace(".", "/") + ".py")
+    if direct.is_file():
+        return direct
+    package = REPO_ROOT / module.replace(".", "/") / "__init__.py"
+    return package if package.is_file() else None
+
+
+def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
+    """Every mutated module *path* can reach, directly or through its imports.
+
+    All of them, not the first one found: the walk visits a set, so "the first
+    mutated module reached" varied between runs and made the recorded cost
+    below flap between two equally true answers.
+    """
+    seen: set[str] = set()
+    found: set[str] = set()
+    stack = list(_first_party_imports(path))
+    while stack:
+        module = stack.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        if module in mutated:
+            found.add(module)
+        target = _module_file(module)
+        if target is not None:
+            stack.extend(_first_party_imports(target))
+    return frozenset(found)
+
+
+#: Exclusions that are *not* free: the file cannot run under mutmut, and it
+#: can also reach a mutated module, so skipping it loses whatever kills it
+#: would have contributed and inflates that module's survivor count.
+#:
+#: Recorded rather than hidden, with the module each one costs. The inflation
+#: is absorbed by the baseline (recorded under this same configuration), so
+#: drift gating stays valid; what it can distort is the absolute --diff-scoped
+#: gate, which may report a survivor that one of these tests would in fact
+#: have killed.
+_ACCEPTED_KILL_LOSS = {
+    # Drives `actions/check-target/run.sh`, which re-enters the mutated tree
+    # from a subprocess that has no mutmut config, so the import of any
+    # mutated module raises there. Reaches checker_policy via
+    # abicheck.aggregate.
+    "tests/test_action_check_target.py": frozenset(
+        {
+            "abicheck.checker_policy",
+            "abicheck.finding_identity",
+            "abicheck.name_classification",
+        }
+    ),
+}
 
 
 def test_no_ignored_test_file_can_kill_a_detector_mutant() -> None:
-    """The exclusions are free only while this holds.
+    """An exclusion is free only if the file reaches no mutated module.
 
     These files are skipped because they cannot run from `mutants/` at all —
     they read the real repository's git history, generated skill trees and
-    vendor adapters, none of which the copy carries, and `-x` makes any one of
-    them abort the lane. That is only acceptable while none of them imports a
-    mutated module: the moment one does, skipping it silently loses kills and
-    inflates the survivor count the baseline is recorded from.
+    vendor adapters, or drive a subprocess that re-enters the mutated tree
+    without mutmut's own config. With `-x`, any one of them ends the lane
+    before a mutant is measured, so skipping them is not optional.
+
+    Reachability is transitive, not direct: a test importing
+    `abicheck.aggregate` can kill a `checker_policy` mutant it never names,
+    and a direct-import check called exactly that exclusion free.
     """
     mutated_modules = {p.replace("/", ".").removesuffix(".py") for p in _only_mutate()}
     offenders = {}
@@ -351,27 +470,58 @@ def test_no_ignored_test_file_can_kill_a_detector_mutant() -> None:
         path = REPO_ROOT / rel
         if not path.is_file():
             continue
-        imported: set[str] = set()
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Import):
-                imported |= {a.name for a in node.names}
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module)
-        overlap = imported & mutated_modules
-        if overlap:
-            offenders[rel] = sorted(overlap)
+        reached = _reached_mutated_modules(path, mutated_modules)
+        if reached and _ACCEPTED_KILL_LOSS.get(rel) != reached:
+            offenders[rel] = sorted(reached)
     assert not offenders, (
-        f"ignored test file(s) import mutated modules, so skipping them now "
-        f"loses real kills: {offenders}"
+        f"ignored test file(s) reach mutated modules, so skipping them loses "
+        f"real kills: {offenders}. Fix the exclusion, or record the cost in "
+        "_ACCEPTED_KILL_LOSS with the reason it cannot run."
     )
 
 
+def test_no_accepted_kill_loss_entry_has_gone_stale() -> None:
+    """The acknowledgement list is only honest while every entry is still
+    needed: a file that stopped being ignored, or stopped reaching the module
+    it was recorded against, would otherwise sit there implying a cost that no
+    longer exists."""
+    mutated_modules = {p.replace("/", ".").removesuffix(".py") for p in _only_mutate()}
+    ignored = set(_ignored_test_files())
+    stale = {}
+    for rel, module in _ACCEPTED_KILL_LOSS.items():
+        if rel not in ignored:
+            stale[rel] = "no longer ignored"
+        elif _reached_mutated_modules(REPO_ROOT / rel, mutated_modules) != module:
+            stale[rel] = f"no longer reaches exactly {sorted(module)}"
+    assert not stale, f"stale _ACCEPTED_KILL_LOSS entries: {stale}"
+
+
 def test_every_ignored_test_file_exists() -> None:
-    """A stale `--ignore=` is silent: pytest accepts a path that is gone, so
-    the entry would sit there implying a coverage hole that no longer exists —
-    and the real file it was meant to skip would abort the lane."""
+    """A stale `--ignore=`/`--deselect=` is silent: pytest accepts a path that
+    is gone, so the entry would sit there implying a coverage hole that no
+    longer exists — and the real file it was meant to skip would abort the
+    lane."""
     missing = [rel for rel in _ignored_test_files() if not (REPO_ROOT / rel).is_file()]
-    assert not missing, f"[tool.mutmut] --ignore names missing files: {missing}"
+    assert not missing, f"[tool.mutmut] skip list names missing files: {missing}"
+
+
+def test_every_deselected_test_still_exists() -> None:
+    """A deselect names a specific test, so it rots in a second way the file
+    check cannot see: the file survives a rename of the test inside it, and
+    pytest does not complain about a `--deselect` that matches nothing."""
+    missing = []
+    for arg in _mutmut_config()["pytest_add_cli_args"]:
+        if not arg.startswith("--deselect="):
+            continue
+        rel, _, test_name = arg.split("=", 1)[1].partition("::")
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            missing.append(arg)
+            continue
+        source = path.read_text(encoding="utf-8")
+        if f"def {test_name.split('::')[-1]}(" not in source:
+            missing.append(arg)
+    assert not missing, f"[tool.mutmut] --deselect names missing tests: {missing}"
 
 
 def test_marker_exclusion_still_reaches_pytest() -> None:

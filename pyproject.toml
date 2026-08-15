@@ -328,6 +328,8 @@ also_copy = [
     "CLAUDE.md",
     "CONTRIBUTING.md",
     "README.md",
+    # Real repository inputs that tests read directly, not just directories.
+    "repo_facts.json",
     "action",
     "action.yml",
     "actions",
@@ -377,6 +379,13 @@ pytest_add_cli_args = [
     # tests/test_mutation_workflow_contract.py keeps that true — if one of
     # these ever starts importing one, the exclusion stops being free and
     # that test says so.
+    # Two AI-readiness tests validate the tree they run in, and a mutants
+    # tree is by construction full of 1M-line generated files — they cannot
+    # pass there and are not about the detector core. Deselected rather than
+    # ignored, so the rest of that file still runs.
+    "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
+    "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
+    "--ignore=tests/test_action_check_target.py",
     "--ignore=tests/test_publish_baseline_upload_step.py",
     "--ignore=tests/test_publish_baseline_upload_step_evidence.py",
     "--ignore=tests/test_publish_baseline_upload_step_generation.py",
