@@ -251,8 +251,21 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 # supports 3.10). A script with no `abicheck` import (e.g. the plain
 # `json`/`sys` JSON-parsing snippet elsewhere in this file) has nothing to
 # shadow and does not need this.
-_PY_SAFE_PATH='import sys
-sys.path = [p for p in sys.path if p not in ("", ".")]
+#
+# Filters by *resolved path*, not the literal strings ""/"." (Codex review,
+# fresh evidence: a caller with PYTHONPATH=. already has Python resolve
+# that "." into the checkout's own absolute path -- not the literal string
+# "." -- before this snippet ever runs, confirmed empirically
+# (PYTHONPATH=. python3 -c "import sys; print(sys.path)" puts the resolved
+# absolute CWD in sys.path, not "."), so the earlier string-equality check
+# left that vector open). os.path.realpath() also resolves a symlink'd
+# checkout root to the same real CWD, and (verified) resolves the bare
+# empty-string entry -c itself inserts to that same real CWD too, so one
+# check covers both shapes without a separate special case for "".
+_PY_SAFE_PATH='import os
+import sys
+_cwd = os.path.realpath(os.getcwd())
+sys.path = [p for p in sys.path if os.path.realpath(p) != _cwd]
 '
 
 # ---------------------------------------------------------------------------

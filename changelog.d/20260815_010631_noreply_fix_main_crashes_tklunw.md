@@ -37,5 +37,9 @@
   make one of these inline scripts import and execute that code instead of
   the real, pip-installed package. Every inline script that imports an
   `abicheck` module now strips the CWD entry from `sys.path` before doing
-  so; the one `-m abicheck.cli_pr_comment` invocation was converted to the
-  equivalent `-c`-based form so it could receive the same fix.
+  so — filtering by *resolved path* against the real current directory,
+  not by matching the literal strings `""`/`"."`, since a caller with
+  `PYTHONPATH=.` set already has Python resolve that `.` into the
+  checkout's own absolute path before the filter ever runs — and the one
+  `-m abicheck.cli_pr_comment` invocation was converted to the equivalent
+  `-c`-based form so it could receive the same fix.
