@@ -279,7 +279,6 @@ inputs:
       with required-symbol/required-symbols (the CLI rejects both being
       set). compare mode only.
     required: false
-    default: 'false'
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym

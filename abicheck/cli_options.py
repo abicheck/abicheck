@@ -920,7 +920,9 @@ def resolve_contract_evaluation(contract_mode: str | None) -> bool:
     return contract_mode is not None
 
 
-def resolve_contract_domain(contract_mode: str | None) -> str | None:
+def resolve_contract_domain(
+    contract_mode: str | None, ctx: click.Context | None = None
+) -> str | None:
     """Map ``--contract auto`` back to "no explicit domain stated".
 
     ``auto`` exists only to separate the two questions the one flag now
@@ -928,9 +930,28 @@ def resolve_contract_domain(contract_mode: str | None) -> str | None:
     Downstream, "the caller stated no domain" has always been spelled ``None``,
     and every D7 tier below ``explicit_cli`` keys off that -- so ``auto`` must
     not reach the resolver as a literal, or it would read as an explicit CLI
-    value outranking the very layers it exists to defer to.
+    value outranking the very layers it exists to defer to (and
+    ``contract_relevance_types.coerce_contract_mode`` would raise on it, since
+    ``auto`` is not a real ``ContractMode``).
+
+    Normalizing the local value alone is not enough: the two front ends read
+    the raw parameters differently -- ``compare`` hands
+    ``cli_compare_receipt.resolve_and_apply`` explicit values, but
+    ``cli_scan._resolve_scan_evaluation_config`` rebuilds its inputs from
+    ``ctx.params`` and its typed-parameter set from
+    ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied
+    there too, and the parameter source is demoted from ``COMMANDLINE`` to
+    ``DEFAULT`` -- ``auto`` is precisely the caller declining to state a
+    domain, so recording it as an explicit CLI value would re-create the
+    precedence bug this mapping exists to avoid (Codex review).
     """
-    return None if contract_mode == "auto" else contract_mode
+    if contract_mode != "auto":
+        return contract_mode
+    if ctx is not None:
+        if "contract_mode" in ctx.params:
+            ctx.params["contract_mode"] = None
+        ctx.set_parameter_source("contract_mode", click.core.ParameterSource.DEFAULT)
+    return None
 
 
 def resolve_compile_context(

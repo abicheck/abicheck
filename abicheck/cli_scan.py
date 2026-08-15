@@ -1753,7 +1753,9 @@ def scan_cmd(
     # in this function. The Tier-2 entry's (`service._validate_contract_mode`)
     # explicit-only contract stays untouched for direct Python API callers.
     contract_evaluation = resolve_contract_evaluation(contract_mode)
-    contract_mode = resolve_contract_domain(contract_mode)
+    contract_mode = resolve_contract_domain(
+        contract_mode, click.get_current_context()
+    )
 
     from .errors import AbicheckError
     from .service import load_env_matrix

@@ -1271,6 +1271,48 @@ class TestScanResolvesTheSameTypedConfig:
         prov = ctx["evaluation_context"]["field_provenance"][field]
         assert prov["layer"] == layer, prov
 
+    @pytest.mark.parametrize("command", ["compare", "scan"])
+    def test_contract_auto_evaluates_without_claiming_an_explicit_domain(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+        command: str,
+    ) -> None:
+        """``--contract auto`` asks for a decision without naming a domain.
+
+        Regression (Codex review): normalizing ``auto`` -> ``None`` in a local
+        variable was enough for `compare`, which hands `resolve_and_apply`
+        explicit values, but not for `scan`, which rebuilds its resolver
+        inputs from ``ctx.params`` and its typed set from
+        ``ctx.get_parameter_source``. There ``auto`` survived as a literal and
+        reached ``coerce_contract_mode``, which raised `ValueError` -- the
+        documented flag crashed instead of evaluating. Both front ends must
+        also record the field as *not* explicitly stated, since deferring is
+        the whole point of the value.
+        """
+        import json
+
+        old, new = mixed_pair
+        out = tmp_path / f"{command}-auto.json"
+        argv = (
+            ["compare", str(old), str(new)]
+            if command == "compare"
+            else ["scan", str(new), "--against", str(old)]
+        )
+        res = runner.invoke(
+            main, [*argv, "--contract", "auto", "--format", "json", "-o", str(out)]
+        )
+        assert res.exit_code in (0, 1, 2, 4), res.output
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        report = payload["diff"] if command == "scan" else payload
+        ctx = report["contract_context"]
+        # It really evaluated ...
+        assert set(ctx) >= {"contract_evidence", "evaluation_context"}
+        # ... and did not claim the CLI chose the domain.
+        prov = ctx["evaluation_context"]["field_provenance"]["contract.mode"]
+        assert prov["layer"] != "explicit_cli", prov
+
     def test_an_unstated_field_is_a_default_not_a_claim(
         self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
     ) -> None:

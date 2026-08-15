@@ -1372,7 +1372,7 @@ def run_compare(
     # already-resolved value and behaves exactly as if the caller had passed
     # contract_evaluation=True explicitly.
     contract_evaluation = resolve_contract_evaluation(contract_mode)
-    contract_mode = resolve_contract_domain(contract_mode)
+    contract_mode = resolve_contract_domain(contract_mode, ctx)
     _setup_verbosity(verbose)
 
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently

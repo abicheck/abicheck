@@ -956,13 +956,13 @@ def run_abicheck_full(
                 # dump() -- castxml's bundled Clang frontend can't parse C23
                 # _BitInt(N); this lane now dumps the same real binary that
                 # lane does (case180 fix above), so it hits the same gap.
-                # --gcc-path pins the actual discovered clang binary --
+                # --compiler pins the actual discovered clang binary --
                 # --ast-frontend alone falls back to a bare "clang" on PATH,
                 # absent on hosts that only ship a versioned clang-18.
                 case115_clang = _first_available_tool("clang-18", "clang")
                 dump += ["--ast-frontend", "clang"]
                 if case115_clang:
-                    dump += ["--gcc-path", case115_clang]
+                    dump += ["--compiler", case115_clang]
             if header and header.exists():
                 # -H alone only feeds castxml which headers to parse; it does
                 # NOT mark them public for provenance classification (that's
@@ -1120,14 +1120,14 @@ def _run_abicheck_dump_compare(
             # shells out to the installed system clang instead of castxml's
             # bundled one). This is the one case in the catalog where the
             # castxml frontend itself is the bottleneck, not the compiler.
-            # --gcc-path pins the actual discovered clang binary: --ast-frontend
+            # --compiler pins the actual discovered clang binary: --ast-frontend
             # only selects the clang backend, it does not resolve which clang to
             # run, and that resolution falls back to a bare "clang" on PATH --
             # absent on hosts that only ship a versioned clang-18.
             case115_clang = _first_available_tool("clang-18", "clang")
             cmd += ["--ast-frontend", "clang"]
             if case115_clang:
-                cmd += ["--gcc-path", case115_clang]
+                cmd += ["--compiler", case115_clang]
         run = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV
         )
