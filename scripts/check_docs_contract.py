@@ -1374,7 +1374,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " (--build-info already takes a build dir, a compile_commands.json,"
         " or a pack -- the one flag for that operand; --compile-db-filter"
         " still scopes it)",
-        ("--build-dir", "--compile-db "),
+        ("--build-dir", "--compile-db"),
         frozenset(
             {
                 "AGENTS.md",
@@ -1476,6 +1476,17 @@ def _check_retired_surfaces(f: Findings) -> None:
                         break
                     end = idx + len(pattern)
                     search_from = end
+                    # A flag pattern must match a whole token, so a retired
+                    # `--compile-db` is found in "`--compile-db`" and
+                    # "-p/--compile-db" but not inside the still-live
+                    # `--compile-db-filter`. Registering the trailing space
+                    # instead (the first attempt) matched only one of those
+                    # three and let punctuation-delimited live references
+                    # through the gate entirely (Codex review).
+                    if pattern.startswith("--") and end < len(text):
+                        nxt = text[end]
+                        if nxt.isalnum() or nxt in "-_":
+                            continue
                     if any(idx >= s and end <= e for s, e in reported_spans):
                         continue
                     reported_spans.append((idx, end))

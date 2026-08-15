@@ -349,6 +349,44 @@ class TestStatKeepsItsSummaryOnlyShape:
         assert result.exit_code == 64, result.output
         assert "--use-cases is not supported with --stat" in result.output
 
+    @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
+    def test_a_format_that_cannot_carry_the_block_is_rejected(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        """None of these renderers reads ``DiffResult.use_case_impact``, so
+        the attribution was resolved and then dropped -- an apparently
+        successful report with the requested data silently missing (Codex
+        review). Same reasoning as ``--stat``: a manifest that attributes
+        nothing, and says so nowhere, is the failure ``--use-cases`` is
+        already rejected for set inputs to avoid."""
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new), "--use-cases", str(manifest),
+                "--format", fmt, "-o", str(tmp_path / f"r.{fmt}"),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert f"--use-cases is not supported with --format {fmt}" in result.output
+
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "review"])
+    def test_the_carrying_formats_stay_accepted(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        # The rejection must be scoped to the formats that really drop it.
+        old, new = self._pair(tmp_path)
+        manifest = tmp_path / "uc.yaml"
+        manifest.write_text("use_cases: []\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old), str(new), "--use-cases", str(manifest),
+             "--format", fmt],
+        )
+        assert "--use-cases is not supported" not in result.output, result.output
+
     def test_stat_without_the_manifest_still_emits_the_summary(
         self, tmp_path: Path
     ) -> None:

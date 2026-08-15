@@ -1463,6 +1463,20 @@ def run_compare(
     # break for every CI consumer parsing it. Rejected rather than silently
     # dropped: a manifest that quietly attributes nothing is the same failure
     # --use-cases is rejected for set inputs to avoid (Codex review).
+    # sarif/junit/html have no place for the attribution and their renderers
+    # never read `DiffResult.use_case_impact`, so the block was computed and
+    # then dropped -- an apparently successful report with the requested data
+    # silently missing (Codex review). Rejected for the same reason as --stat
+    # below: a manifest that attributes nothing, and says so nowhere, is the
+    # failure --use-cases is already rejected for set inputs to avoid.
+    if use_cases_manifest is not None and fmt in ("sarif", "junit", "html"):
+        raise click.UsageError(
+            f"--use-cases is not supported with --format {fmt}: that format "
+            "carries no use-case attribution, so the manifest would be "
+            "resolved and its result dropped. Use --format json/markdown/"
+            f"review for the attribution, or --write {fmt}=PATH to get a "
+            f"{fmt} report alongside one that carries it."
+        )
     if stat and use_cases_manifest is not None:
         raise click.UsageError(
             "--use-cases is not supported with --stat: --stat emits only the "

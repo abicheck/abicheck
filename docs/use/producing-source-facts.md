@@ -85,7 +85,7 @@ run `dump` against the real binary as shown above.
 
 With just `--sources`, abicheck infers and runs the build-system query itself
 (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a `make -n`
-transcript). Pass `--compile-db` when you already have a `compile_commands.json`
+transcript). Pass `--build-info` when you already have a `compile_commands.json`
 that isn't under the tree — it is the most faithful input.
 
 ## Wrapper injection — the `abicheck-cc` compiler wrapper
