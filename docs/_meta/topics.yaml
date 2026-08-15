@@ -447,3 +447,48 @@ topics:
       - learn/abi-series/04-cpp-abi.md
       - learn/abi-api-handling.md
       - learn/exception-unwinding-abi.md
+
+  # Part 0 names build-profile comparability as one of the eight
+  # compatibility dimensions but historically had no narrative page of its
+  # own for it (docs/AGENTS.md criterion 2: a new mental model — "which
+  # outcome, not just which finding" — was missing a home).
+  build-profile-comparability:
+    canonical_page: learn/build-profile-comparability.md
+    fact_sources:
+      - abicheck/comparability.py
+      - abicheck/checker.py
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - learn/environment-drift.md
+
+  # A separate axis from the eight compatibility dimensions in Part 0 §2:
+  # "which shape is the consumer" rather than "which kind of promise broke".
+  # Part 0 §5's "Name your contract shape" section already covers four of
+  # these shapes narratively; this page formalizes all eight into one table
+  # and composes the axis with dimension/direction/surface/build-profile
+  # (docs/AGENTS.md criterion 2: a genuinely new mental model, not just
+  # another variant of an already-explained mechanism).
+  consumer-models:
+    canonical_page: learn/consumer-models.md
+    fact_sources:
+      - abicheck/appcompat.py
+      - abicheck/cli_compare_helpers.py
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - use/plugin-systems.md
+
+  # Parts 3-5 build their mental model from the Itanium C++ ABI, which
+  # Windows/MSVC does not use (docs/AGENTS.md criterion 2: a genuinely
+  # different mental model, not another Itanium variant). The exact
+  # capability facts stay owned by reference/platforms.md and Part 5's
+  # PE/COFF parallels table; this page is the narrative "why" companion.
+  msvc-pe-abi-model:
+    canonical_page: learn/msvc-pe-abi-model.md
+    fact_sources:
+      - abicheck/diff_cxx_rules.py
+      - abicheck/pdb_metadata.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/abi-series/05-linker-elf.md
