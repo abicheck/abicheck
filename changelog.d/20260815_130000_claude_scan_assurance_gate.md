@@ -41,4 +41,18 @@
   (an unanchored stderr grep; a `$CMD`-array token scan colliding with
   another input's own value; an `extra-args`-token scan colliding with an
   adjacent option's own value) with a design that structurally cannot
-  reproduce any of them.
+  reproduce any of them. Two more Codex findings on the new input itself:
+  the "Run abicheck" step's own `env:` block never mapped the declared
+  `require-complete-analysis` input to `INPUT_REQUIRE_COMPLETE_ANALYSIS`
+  at all, so a real Action invocation left it unset and every check in
+  `run.sh` read it as `false` regardless of what the workflow requested
+  (the existing tests missed this because they inject the env var
+  directly rather than going through `action.yml`'s own wiring — closed
+  by the pre-existing, now-passing `test_every_action_input_is_wired_to_
+  run_sh` contract test, not a new one-off check); and a directory/package
+  `compare` operand with the flag explicitly set used to silently drop it
+  rather than reject the unsupported combination, running a release
+  compare ungated despite the caller's explicit request — `run.sh` now
+  fails the step loudly for that shape instead, the same treatment its
+  own L2 compile-context and evidence-flag guards already give their own
+  release-incompatible inputs.

@@ -707,3 +707,64 @@ class TestEscalatedAssuranceGateIsNamedCorrectly:
         assert (
             "severity policy gated this run" not in outputs["_summary"]
         ), outputs["_summary"]
+
+
+class TestReleaseStyleCompareRejectsTheAssuranceInput:
+    """Codex review (P2): the CLI's per-library release fan-out has no
+    single `analysis_assurance` result to gate on and rejects
+    `--require-complete-analysis` outright for a directory/package
+    operand -- so `run.sh` used to just skip forwarding the flag for that
+    shape, silently running a release compare ungated even though the
+    caller explicitly asked for the assurance gate. Must fail loud (the
+    step itself errors) instead, the same "explicit unsupported request,
+    not a silent no-op" treatment the L2 compile-context and evidence-flag
+    guards already give their own release-incompatible inputs."""
+
+    def test_a_directory_old_library_with_the_flag_fails_the_step(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old_release"
+        old_dir.mkdir()
+        bindir = _stub_abicheck(tmp_path, exit_code=0, report={"verdict": "COMPATIBLE"})
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old_dir),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 1, outputs
+        assert "does not support require-complete-analysis" in outputs["_stdout"], (
+            outputs["_stdout"]
+        )
+
+    def test_a_single_pair_compare_with_the_flag_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Sanity: the new guard must not misfire for the ordinary
+        single-pair case the rest of this module already exercises."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "analysis_assurance": ASSURANCE_BLOCK,
+            },
+            stderr=ASSURANCE_STDERR,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs

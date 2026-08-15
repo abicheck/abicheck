@@ -615,11 +615,16 @@ inputs:
       Fail the step (P0.4's orthogonal ANALYSIS_INCOMPLETE axis) when
       analysis_assurance.status is not 'complete', independent of the
       compatibility verdict. Mirrors `compare`/`scan --against`'s own
-      --require-complete-analysis flag. Applies to compare and scan
-      (--against) modes; a dedicated input rather than routing through
-      extra-args, so this Action's own detection of whether the flag was
-      requested is never ambiguous with a value some other option in
-      extra-args happens to spell the same way.
+      --require-complete-analysis flag. Applies to single-pair compare
+      (old-library/new-library are individual files, not a directory or
+      package) and scan (--against) modes only -- rejected outright
+      (step fails) for a directory/package compare's per-library release
+      fan-out, which has no single analysis_assurance result to gate on,
+      and silently has no effect for an audit-only scan (no baseline),
+      same as --policy/--suppress. A dedicated input rather than routing
+      through extra-args, so this Action's own detection of whether the
+      flag was requested is never ambiguous with a value some other
+      option in extra-args happens to spell the same way.
     required: false
     default: 'false'
   jobs:
@@ -951,6 +956,7 @@ runs:
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
+        INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}

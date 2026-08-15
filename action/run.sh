@@ -1152,10 +1152,20 @@ elif [[ "$MODE" == "compare" ]]; then
 
   # P0.4: single-pair compares only -- the CLI itself rejects this flag
   # outright (a UsageError) for a directory/package release fan-out, which
-  # has no single analysis_assurance result to gate on.
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] \
-     && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+  # has no single analysis_assurance result to gate on. Fail loud rather
+  # than silently drop the request (Codex review): action.yml documents
+  # this input as applying to compare mode with no release-operand
+  # carve-out, so a release workflow that explicitly asks for the
+  # assurance gate must not run ungated without any indication the gate
+  # was never applied -- the same "explicit request, not silently
+  # ignorable" treatment the L2 compile-context and evidence-flag guards
+  # above already give their own release-incompatible inputs.
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
+    if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+       || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
+      exit 1
+    fi
     CMD+=(--require-complete-analysis)
   fi
 
