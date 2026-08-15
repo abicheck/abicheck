@@ -447,6 +447,57 @@ class TestCompileContextForwardingParity:
         assert "-DFOO=1" in cmd
         assert "-DBAR=2" in cmd
 
+    def test_gcc_options_glob_metacharacters_fail_loud_without_real_parser(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, third round: add_flag()'s own
+        unquoted `for item in $value` performs pathname (glob) EXPANSION,
+        not just whitespace splitting -- a value like `-DPATTERN=*` would
+        silently rewrite to whatever filenames exist in the current
+        directory (the analyzed, potentially PR-controlled checkout) at
+        the time this fallback runs. A value containing a glob
+        metacharacter must fail loud the same way a quoted/escaped one
+        does, not be treated as safe to fall back on."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_unusable_python(tmp_path),
+            "INPUT_GCC_OPTIONS": "-DPATTERN=*",
+        }
+        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "glob metacharacters" in result.stdout
+
+    def test_without_the_fix_glob_expansion_actually_reproduces(
+        self, tmp_path: Path
+    ) -> None:
+        """Proves the test above isn't vacuously passing -- add_flag()'s own
+        unquoted `for item in $value`, with no glob-metacharacter guard at
+        all, really does expand a glob pattern against files present in the
+        current directory rather than treating it as a literal value. The
+        whole token is the glob pattern (bash word-splits on whitespace
+        first, then glob-expands each resulting word), so the planted file
+        must match the *entire* value, matching the original finding's own
+        reproduction shape (a configured `-DPATTERN=*` rewritten by a
+        checked-out `-DPATTERN=x`)."""
+        (tmp_path / "-DPATTERN=PLANTED_FILE").write_text("")
+        script = (
+            "CMD=()\n"
+            + _add_flag_source()
+            + 'add_flag "--compiler-option" "-DPATTERN=*"\n'
+            + "printf '%s\\n' \"${CMD[@]}\"\n"
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "-DPATTERN=PLANTED_FILE" in result.stdout.splitlines()
+        assert "-DPATTERN=*" not in result.stdout.splitlines()
+
     def test_gcc_options_malformed_quoting_fails_loud(self) -> None:
         """Codex review, fresh evidence, second round: split_gcc_options()
         raises ValueError on malformed quoting (e.g. an unbalanced quote);

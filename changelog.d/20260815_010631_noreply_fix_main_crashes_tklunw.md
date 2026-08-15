@@ -66,15 +66,26 @@
   unbalanced quote) even when a working interpreter is available — both
   previously produced an apparently-successful comparison silently run
   under a different, wrong compile context instead of failing on the
-  invalid configuration. A value with no quoting/escaping at all still
-  falls back to plain whitespace splitting, since that's provably
+  invalid configuration; the same fallback also now rejects a value
+  containing a glob metacharacter (`*`, `?`, `[`), since `add_flag()`'s
+  own unquoted splitting performs pathname *expansion* too, not just
+  whitespace-splitting — a value like `-DPATTERN=*` could otherwise
+  silently rewrite to whatever filenames exist in the analyzed checkout
+  at the time it runs. A value with none of these special characters
+  still falls back to plain whitespace splitting, since that's provably
   identical to real parsing for that shape. The temporary directory's
   cleanup is now also registered immediately after it's created (rather
   than left to the script's main cleanup trap, installed much later), so
   an early exit — argument validation, a no-baseline dry-run success —
   can no longer leave it behind, accumulating private temporary
   directories across repeated invocations on a persistent self-hosted
-  runner.
+  runner. Separately, the baseline-set-archive temporary directory is now
+  canonicalized to an absolute path immediately after creation: `mktemp
+  -d` returns a path relative to `$TMPDIR` when that variable itself
+  holds a relative value, and every path derived from it is passed into
+  the same `$_PY_SAFE_DIR`-isolated invocations above, which would
+  otherwise resolve a relative path against the wrong directory and
+  misreport a perfectly valid archive as corrupt or missing.
 - **The Windows-only compiler-flags tokenizer (`--gcc-options`/
   `--compiler-option`) now follows the standard Windows command-line
   backslash/quote parsing rule** (the same one `CommandLineToArgvW` and

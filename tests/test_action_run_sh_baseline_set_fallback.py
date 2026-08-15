@@ -205,7 +205,7 @@ def _resolved_asset_name(env: dict[str, str]) -> str:
 
 
 def _run_bash_script(
-    script: str, env: dict[str, str]
+    script: str, env: dict[str, str], *, cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run *script* via a temp file, not ``bash -c "<script>"``.
 
@@ -227,6 +227,7 @@ def _run_bash_script(
             capture_output=True,
             text=True,
             env=env,
+            cwd=cwd,
             check=False,
         )
     finally:
@@ -240,6 +241,7 @@ def _run_baseline_fallback(
         '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-} '
         'AGAINST=${INPUT_AGAINST:-}"\n'
     ),
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, **env_extra}
     if env.get("FIXTURE_ARCHIVE") and "FIXTURE_ASSETS_JSON" not in env_extra:
@@ -254,13 +256,18 @@ def _run_baseline_fallback(
         + _baseline_region()
         + trailer
     )
-    return _run_bash_script(script, env)
+    return _run_bash_script(script, env, cwd=cwd)
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestBaselineSetFallback:
     def _run(self, env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return _run_baseline_fallback(env_extra)
+
+    def _run_with_cwd(
+        self, env_extra: dict[str, str], *, cwd: Path
+    ) -> subprocess.CompletedProcess[str]:
+        return _run_baseline_fallback(env_extra, cwd=cwd)
 
     def test_resolves_from_baseline_set_when_no_single_snapshot_asset(
         self, tmp_path: Path
@@ -280,6 +287,39 @@ class TestBaselineSetFallback:
         assert "OLD_LIBRARY=" in result.stdout
         # The resolved path lives under the mktemp'd BASELINE_DIR, ending in
         # exactly the snapshot filename the manifest recorded.
+        assert "libpvxs.abicheck.json" in result.stdout
+
+    def test_resolves_with_a_relative_tmpdir(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence: `mktemp -d` returns a path
+        relative to `$TMPDIR` when that variable itself holds a relative
+        value (a real, if unusual, self-hosted-runner configuration,
+        confirmed directly: `TMPDIR=relbase mktemp -d` really does emit a
+        relative path). Since baseline-set extraction now runs its Python
+        helpers through `$_PY_SAFE_DIR` isolation (a `(cd "$_PY_SAFE_DIR"
+        && ...)` wrapper), an un-canonicalized `$BASELINE_DIR` -- and every
+        path derived from it (`archive_path`/`extracted_dir`/
+        `manifest_root`) -- would resolve against the wrong directory once
+        inside that wrapper, misreporting a perfectly valid archive as
+        corrupt or missing. `BASELINE_DIR` is canonicalized to an absolute
+        path immediately after creation specifically to survive this."""
+        archive = _build_baseline_set_archive(tmp_path)
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        relative_tmpdir = "relative_tmp"
+        (work_dir / relative_tmpdir).mkdir()
+        result = self._run_with_cwd(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_BASELINE_PROFILE": PROFILE,
+                "INPUT_BASELINE_TARGET": "libpvxs",
+                "FIXTURE_ARCHIVE": str(archive),
+                "TMPDIR": relative_tmpdir,
+            },
+            cwd=work_dir,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "REACHED_END" in result.stdout
         assert "libpvxs.abicheck.json" in result.stdout
 
     def test_resolves_from_baseline_set_for_a_tag_release(self, tmp_path: Path) -> None:

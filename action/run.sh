@@ -94,8 +94,19 @@ add_flag_shlex_split() {
     return
   fi
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
-    if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* ]]; then
-      echo "::error::$flag value '$value' contains quoting/escaping that requires abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context."
+    # add_flag()'s own `for item in $value` is unquoted, so beyond just
+    # whitespace-splitting it also performs pathname (glob) EXPANSION --
+    # `*`/`?`/`[` are not provably safe to fall back on the same way
+    # quote/backslash characters aren't (Codex review, fresh evidence): a
+    # configured value like `-DPATTERN=*` would silently rewrite to
+    # whatever filenames exist in the current directory at the time this
+    # runs (the analyzed, potentially PR-controlled checkout -- unlike the
+    # real parser's own invocation, this naive fallback never `cd`s
+    # anywhere), letting untrusted checkout content influence the compile
+    # context.
+    if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* \
+          || "$value" == *'*'* || "$value" == *'?'* || "$value" == *'['* ]]; then
+      echo "::error::$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
       exit 1
     fi
     add_flag "$flag" "$value"
@@ -692,6 +703,20 @@ if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
    && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
   BASELINE_DIR=$(mktemp -d)
+  # Canonicalized to an absolute path immediately (Codex review, fresh
+  # evidence): `mktemp -d` returns a path relative to `$TMPDIR` when that
+  # variable itself holds a relative value (a real, if unusual, self-hosted
+  # runner configuration -- confirmed directly: `TMPDIR=relbase mktemp -d`
+  # really does emit a relative path). Every path derived from
+  # `$BASELINE_DIR` by string concatenation below (`set_download_dir`,
+  # `extracted_dir`, `archive_path`, `manifest_root`) is passed as a
+  # positional argument into a `(cd "$_PY_SAFE_DIR" && ...)`-wrapped Python
+  # invocation elsewhere in this function -- a relative path there resolves
+  # against the *new* CWD instead of the original one, making an otherwise
+  # valid baseline-set archive read as corrupt or missing. Resolving once
+  # here, at the source, fixes every path derived from it without touching
+  # each call site individually.
+  BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd)
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
   BASELINE_FILE=""
