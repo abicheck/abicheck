@@ -116,6 +116,16 @@
   value** (e.g. an unbalanced quote) — it now degrades the same way its
   sibling `explicit_language_standard` already does, instead of letting
   `split_gcc_options`'s `ValueError` escape and abort the dump.
+- **`_user_define_flags` (the ADR-039 build-context collector's global
+  `-D`/`-U` harvester, `cli_dump_helpers.py`) now tokenizes its
+  `--gcc-options` string with the shared `split_gcc_options`, not a bare
+  `shlex.split`.** On Windows, an unquoted path value (e.g.
+  `-IC:\sdk\ -UKEEP`) would tokenize differently between this collector
+  (POSIX-only `shlex.split`, corrupting the path/merging tokens) and the
+  real header-AST parse (already routed through `split_gcc_options`) —
+  letting the harvested define set silently diverge from what the actual
+  parse saw, which could make the reconciler add back a field the real
+  parse had already pruned (Codex review).
 - Fixed a genuine Windows CI regression surfaced by this PR's own review
   cycle: `TestSplitGccOptionsPosix` (pinning `split_gcc_options`'s plain,
   unmodified POSIX `shlex.split` behavior) ran unguarded on `windows-latest`,
