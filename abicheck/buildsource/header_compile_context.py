@@ -849,8 +849,41 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
     paths, other ABI-relevant flags) is untouched by *forced_language* --
     only the one field whose family can actually conflict with a forced
     language is ever omitted.
+
+    **Preserve an explicit ``--driver-mode=cl`` (P2 review, "Preserve
+    explicit CL driver mode during replay", fresh evidence).** A compile
+    unit can select MSVC/CL dialect via ``--driver-mode=cl`` on a
+    *generically-named* driver (``clang --driver-mode=cl /std:c++20 /c
+    t.cpp``) rather than via a CL-style binary name
+    (``clang-cl``/``dpcpp-cl``) -- :func:`_derived_gcc_path` then has no
+    ``clang-cl``-shaped token to record (:func:`~abicheck.buildsource.
+    adapters.base.msvc_driver_token` falls back to the bare ``argv[0]``,
+    ``"clang"``), and neither header command builder
+    (``dumper_ast_config._build_castxml_command``/
+    ``_build_clang_header_command``) infers CL mode from a plain ``clang``
+    binary name the way it does from ``clang-cl``'s own self-selecting
+    basename. Without ``--driver-mode=cl`` carried into the rendered
+    tokens, the reconstructed command invokes GNU-mode clang with the
+    retained ``/std:c++20`` survivor -- which GNU-mode clang treats as a
+    missing input file, not a language flag (confirmed empirically: the
+    original CL-mode command succeeds, the reconstructed GNU-mode one
+    fails). Mirrors the identical, already-established precedent in L4
+    replay's own command builder (``source_extractors.clang.
+    _clang_context_args``: ``if msvc: cmd.append("--driver-mode=cl")``) --
+    unconditional whenever the
+    compile unit is MSVC/clang-cl-dialect
+    (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`),
+    regardless of whether the resolved driver token's own basename already
+    implies CL mode. Harmless when it does (a real ``clang-cl`` invocation
+    already defaults to CL mode from its own basename; explicitly
+    reasserting ``--driver-mode=cl`` on top is a no-op), and load-bearing
+    exactly when it doesn't -- so this is emitted regardless of what
+    :func:`_derived_gcc_path` resolves for *cu*, not conditioned on its
+    result.
     """
     flags: list[str] = []
+    if _is_msvc_command(cu.argv):
+        flags.append("--driver-mode=cl")
     if cu.standard and not _standard_conflicts_with_forced_language(
         cu.standard, forced_language
     ):
@@ -1186,6 +1219,35 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     A **bare** PATH name (``clang-cl``, no path separator at all) is left
     unchanged -- resolving it against *directory* would be wrong, since a
     bare name is looked up on ``PATH``, not relative to any directory.
+
+    **Normalized before returning (P2 review, "Normalize resolved driver
+    paths before grouping", fresh evidence).** Two matched units in
+    different build subdirectories can spell the *same* executable through
+    a relative path containing ``..`` -- e.g.
+    ``/project/build/a/../../tool/clang-cl`` and
+    ``/project/build/b/../../tool/clang-cl`` both name
+    ``/project/tool/clang-cl`` once ``..`` segments are collapsed, but
+    joining each token onto its own unit ``directory`` alone (the fix this
+    function already applied for a prior finding) leaves the two joined
+    strings textually different -- resolving *only* the base directory does
+    not, by itself, provide a canonical comparison key. Since
+    :meth:`_EffectiveContextSignature.of` compares ``gcc_path`` by plain
+    string equality, the two textually-different-but-equivalent paths
+    grouped into two distinct signatures, raising a spurious
+    ``HeaderCompileContextAmbiguousError`` for units that in fact agree on
+    every ABI-relevant dimension. ``os.path.normpath`` (not ``Path.resolve()``)
+    matches this module's own existing precedent: every other path
+    normalization here (:func:`_resolve_cu_relative_path`,
+    :func:`_context_flags`'s ``-I``/``-isystem``/``--sysroot`` rendering)
+    is a lexical, symlink-blind join -- ``CompileUnit`` path fields are
+    already-redacted/relative labels for *display* and *replay-command*
+    purposes (a home-rooted path redacted to ``~/...``, ADR-032 D7), not
+    guaranteed to exist on abicheck's own filesystem at all (a persisted
+    build pack collected on a different machine), so resolving symlinks
+    against a path that may not even be present locally would raise or
+    silently produce nonsense -- a purely lexical normalization is safe
+    either way and is exactly what this signature comparison needs (collapse
+    equivalent *spellings*, not resolve real symlink targets).
     """
     expanded = os.path.expanduser(token)
     if "/" not in expanded and "\\" not in expanded:
@@ -1193,7 +1255,7 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     path = Path(expanded)
     if not path.is_absolute() and directory:
         path = Path(directory).expanduser() / path
-    return str(path)
+    return os.path.normpath(str(path))
 
 
 def _ambiguity_message(

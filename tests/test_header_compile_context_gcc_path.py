@@ -120,7 +120,16 @@ def test_resolve_derives_gcc_path_resolves_relative_driver_against_cu_directory(
     driver path like ``../llvm/bin/clang-cl`` is only meaningful relative to
     the compile unit's own ``directory`` -- resolving it against abicheck's
     own CWD (the pre-fix behavior) reports a genuinely executable compiler
-    as missing."""
+    as missing.
+
+    The joined path is also normalized (a later P2 review finding,
+    "Normalize resolved driver paths before grouping") -- ``os.path.
+    normpath`` collapses the ``build/..`` segment rather than leaving it in
+    the returned string verbatim, so this asserts against ``tmp_path /
+    "llvm/bin/clang-cl"`` (the canonical form), not the raw, unnormalized
+    join. See ``test_resolve_derives_gcc_path_normalizes_dotdot_segments_for_
+    ambiguity_grouping`` below for the ambiguity-grouping regression this
+    normalization exists to fix."""
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
     src = tmp_path / "widget.cpp"
@@ -136,7 +145,7 @@ def test_resolve_derives_gcc_path_resolves_relative_driver_against_cu_directory(
     ev = BuildEvidence(compile_units=[cu])
     result = resolve_header_compile_context(ev, [header])
     assert result.context is not None
-    assert result.context.gcc_path == str(build_dir / "../llvm/bin/clang-cl")
+    assert result.context.gcc_path == str(tmp_path / "llvm" / "bin" / "clang-cl")
 
 
 def test_resolve_derives_gcc_path_expands_home_redacted_driver_token(
@@ -368,6 +377,141 @@ def test_resolve_same_driver_units_are_not_ambiguous(tmp_path: Path) -> None:
     result = resolve_header_compile_context(ev, [header])
     assert result.context is not None
     assert result.context.gcc_path == "clang-cl"
+
+
+def test_resolve_preserves_explicit_driver_mode_cl_on_generic_binary_name(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding ("Preserve explicit CL driver mode during replay"):
+    a compile unit can select MSVC/CL dialect via ``--driver-mode=cl`` on a
+    generically-named driver (``clang``, not ``clang-cl``) -- there is no
+    CL-style basename for :func:`_derived_gcc_path` to record, so the
+    rendered context must instead carry ``--driver-mode=cl`` itself among
+    its ``gcc_option_tokens``, or the reconstructed command invokes
+    GNU-mode clang against a retained ``/std:`` survivor it cannot parse."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "t.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang", "--driver-mode=cl", "/std:c++20", "/c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert "--driver-mode=cl" in result.context.gcc_option_tokens
+    assert "/std:c++20" in result.context.gcc_option_tokens
+    # No CL-style basename to record here (argv[0] is the generic "clang"),
+    # so gcc_path is the bare fallback -- --driver-mode=cl is what actually
+    # carries the CL-dialect selection forward.
+    assert result.context.gcc_path == "clang"
+
+
+def test_resolve_driver_mode_cl_present_even_when_gcc_path_already_cl_style(
+    tmp_path: Path,
+) -> None:
+    """Companion case: for an already-CL-style-named driver (``clang-cl``),
+    emitting ``--driver-mode=cl`` too is harmless (a real ``clang-cl``
+    already self-selects CL mode from its own basename) -- this asserts the
+    unconditional emission (mirroring L4 replay's own ``if msvc:
+    cmd.append("--driver-mode=cl")`` precedent) doesn't regress the more
+    common clang-cl-named case."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "t.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert "--driver-mode=cl" in result.context.gcc_option_tokens
+    assert result.context.gcc_path == "clang-cl"
+
+
+def test_resolve_normalizes_dotdot_driver_paths_so_equivalent_units_are_not_ambiguous(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding ("Normalize resolved driver paths before
+    grouping"): two matched units in different build subdirectories can
+    spell the SAME executable through a relative path containing ``..`` --
+    e.g. ``a/../../tool/clang-cl`` and ``b/../../tool/clang-cl`` both name
+    ``<root>/tool/clang-cl`` once ``..`` segments collapse, but joining each
+    token onto its own unit ``directory`` alone (without normalizing) left
+    the two joined strings textually different, so
+    ``_EffectiveContextSignature``'s plain string comparison on ``gcc_path``
+    raised a spurious ``HeaderCompileContextAmbiguousError`` for units that
+    in fact agree on every ABI-relevant dimension."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    (tmp_path / "tool").mkdir()
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    build_a = tmp_path / "build" / "a"
+    build_a.mkdir(parents=True)
+    build_b = tmp_path / "build" / "b"
+    build_b.mkdir(parents=True)
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(build_a),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["../../tool/clang-cl", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(build_b),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["../../tool/clang-cl", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == str(tmp_path / "tool" / "clang-cl")
+
+
+def test_resolve_still_ambiguous_when_normalized_driver_paths_genuinely_differ(
+    tmp_path: Path,
+) -> None:
+    """Companion negative case: normalization must only collapse
+    equivalent spellings, never mask a genuine driver disagreement -- two
+    units resolving (after normalization) to two different real
+    executables must still raise."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    (tmp_path / "tool_a").mkdir()
+    (tmp_path / "tool_b").mkdir()
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    build_a = tmp_path / "build" / "a"
+    build_a.mkdir(parents=True)
+    build_b = tmp_path / "build" / "b"
+    build_b.mkdir(parents=True)
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(build_a),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["../../tool_a/clang-cl", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(build_b),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["../../tool_b/clang-cl", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        resolve_header_compile_context(ev, [header])
 
 
 def test_resolve_driver_disagreement_excused_when_caller_pins_explicit_gcc_path(

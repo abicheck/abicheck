@@ -324,12 +324,20 @@ def test_build_command_decodes_split_operand_abi_flag_survivor() -> None:
     # reject -- and must not let it be silently dropped by the (unrelated)
     # STRUCTURED_TOOLCHAIN_FLAG_PREFIXES filter just because it shares the
     # "-target" prefix with the already-structured target-triple survivor.
+    #
+    # Reconstructed as -Xclang-wrapped, not the bare two-token form (P2
+    # review, "Forward bare cc1 flags through the replay driver", fresh
+    # evidence): this bare internal encoding is what a direct `clang -cc1
+    # -target-abi aapcs` capture produces, but replay always drives an
+    # ordinary Clang driver, never -cc1 directly -- which rejects the bare
+    # two-token form outright.
     cmd = build_castxml_command(
         _cu(abi_relevant_flags=["-target-abi=aapcs"]),
         Path("a.cpp"),
         Path("o.xml"),
     )
-    assert cmd[cmd.index("-target-abi") + 1] == "aapcs"
+    idx = cmd.index("-Xclang")
+    assert cmd[idx : idx + 4] == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
 
 
 def test_build_command_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> None:

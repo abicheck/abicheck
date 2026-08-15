@@ -209,16 +209,39 @@ def split_operand_survivor(flag: str) -> list[str]:
     (``header_compile_context._split_operand_survivor``, a thin re-export)
     and L4 (:func:`_carry_abi_relevant_flags`) consumers now share, instead
     of drifting independently.
+
+    **Both the bare and the ``-Xclang``-wrapped internal encodings decode to
+    the SAME ``-Xclang``-wrapped output (P2 review, "Forward bare cc1 flags
+    through the replay driver", fresh evidence).** The two internal
+    encodings this function decodes record two different *original capture*
+    shapes -- the bare form (``<flag>=<value>``) is what
+    ``adapters.base.extract_abi_relevant_flags`` recorded for a direct
+    ``clang -cc1 -target-abi aapcs`` invocation (``-cc1`` mode accepts these
+    flags bare, no ``-Xclang`` wrapping needed), while the ``-Xclang
+    <flag>=<value>`` form is what it recorded when the *original* command
+    was already an ordinary-driver invocation forwarding the flag via
+    ``-Xclang`` on both sides. But every consumer of this function's return
+    value (:func:`~abicheck.buildsource.header_compile_context._context_flags`
+    for L2, :func:`_carry_abi_relevant_flags` below for L4) replays through
+    an **ordinary Clang driver, never ``-cc1`` directly** -- confirmed
+    empirically: installed ``clang -cc1 --help`` documents bare
+    ``-target-abi <value>``, but ``clang -target-abi aapcs`` (the ordinary
+    driver) rejects it outright ("unknown argument '-target-abi'; did you
+    mean '-Xclang -target-abi'"), requiring the ``-Xclang``-wrapped
+    four-token form regardless of which shape the flag was originally
+    captured in. Reconstructing the bare two-token form for the
+    bare-encoding branch (the previous behavior) therefore produced a
+    command that fails against the replay driver even though the *decode*
+    itself was correct -- the reconstructed shape simply doesn't match the
+    shape the replay driver accepts. Both branches now converge on the same
+    ``-Xclang``-wrapped output, computed from whichever encoding matched
+    (the ``-Xclang `` marker is stripped first, if present, before parsing
+    ``name``/``value``, so the two branches share one reconstruction).
     """
-    if flag.startswith(_XCLANG_WRAPPED_ABI_FLAG_MARKER):
-        remainder = flag[len(_XCLANG_WRAPPED_ABI_FLAG_MARKER) :]
-        name, sep, value = remainder.partition("=")
-        if sep and name in SPLIT_OPERAND_ABI_FLAGS:
-            return ["-Xclang", name, "-Xclang", value]
-        return [flag]
-    name, sep, value = flag.partition("=")
+    remainder = flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
+    name, sep, value = remainder.partition("=")
     if sep and name in SPLIT_OPERAND_ABI_FLAGS:
-        return [name, value]
+        return ["-Xclang", name, "-Xclang", value]
     return [flag]
 
 

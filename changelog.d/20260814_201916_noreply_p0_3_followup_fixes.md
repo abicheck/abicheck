@@ -385,3 +385,55 @@
   existing names for backward compatibility. Both replay paths now
   reconstruct the identical, real argv token(s) from one implementation
   instead of drifting independently.
+- **A sixteenth review round found three more gaps in the same CL-driver-
+  mode, driver-path-grouping, and split-operand-decode machinery.** (1) A
+  compile unit can select MSVC/CL dialect via an explicit
+  `--driver-mode=cl` on a *generically-named* driver (`clang
+  --driver-mode=cl /std:c++20 /c t.cpp`), not only via a CL-style binary
+  name (`clang-cl`) — `_derived_gcc_path()` then has no CL-style basename
+  to record (`msvc_driver_token()` falls back to the bare `argv[0]`,
+  `"clang"`), and neither header command builder infers CL mode from a
+  plain `clang` binary name the way it does from `clang-cl`'s own
+  self-selecting basename, so the reconstructed command invoked GNU-mode
+  clang against the retained `/std:c++20` survivor — confirmed empirically:
+  the original CL-mode command succeeds, the reconstructed GNU-mode one
+  fails, treating `/std:c++20` as a missing input file. `_context_flags()`
+  now unconditionally emits `--driver-mode=cl` among the rendered tokens
+  whenever the compile unit is MSVC/clang-cl-dialect
+  (`adapters.base._is_msvc_command()`), mirroring the identical,
+  already-established precedent in L4 replay's own command builder
+  (`source_extractors.clang._clang_context_args`: `if msvc:
+  cmd.append("--driver-mode=cl")`) — harmless when the driver's own
+  basename already implies CL mode, load-bearing when it doesn't. (2)
+  `header_compile_context._resolve_driver_token()` (from the thirteenth
+  round above) joined a relative driver token onto the compile unit's own
+  `directory` but never normalized the result — so two matched units in
+  different build subdirectories spelling the *same* executable through a
+  relative path containing `..` (`build/a/../../tool/clang-cl` and
+  `build/b/../../tool/clang-cl`, both naming `tool/clang-cl` once `..`
+  segments collapse) produced two textually-different joined strings,
+  which `_EffectiveContextSignature`'s plain string comparison on
+  `gcc_path` read as a genuine disagreement, raising a spurious
+  `HeaderCompileContextAmbiguousError` for units that in fact agree on
+  every ABI-relevant dimension. `_resolve_driver_token()` now normalizes
+  the joined path with `os.path.normpath()` — a purely lexical
+  normalization, not `Path.resolve()`, matching this module's own existing
+  precedent of never touching the filesystem for a `CompileUnit` path
+  field that may be redacted/relative and not guaranteed to exist locally
+  (a persisted build pack collected on a different machine). (3)
+  `source_extractors._argv.split_operand_survivor()` reconstructed two
+  different output shapes depending on which of the two internal
+  encodings it decoded: the bare `<flag>=<value>` form (what a direct
+  `clang -cc1 -target-abi aapcs` capture produces, since `-cc1` mode
+  accepts these flags bare) reconstructed into the bare two-token form
+  `["-target-abi", "aapcs"]`, while the `-Xclang`-wrapped form
+  reconstructed into the full four-token `-Xclang`-wrapped form. But every
+  consumer of this function replays through an **ordinary Clang driver,
+  never `-cc1` directly** — confirmed empirically: installed `clang -cc1
+  --help` documents bare `-target-abi <value>`, while `clang -target-abi
+  aapcs` (the ordinary driver) rejects it outright ("unknown argument
+  '-target-abi'; did you mean '-Xclang -target-abi'"), requiring the
+  `-Xclang`-wrapped four-token form regardless of the original capture
+  shape. Both branches now converge on the identical `-Xclang`-wrapped
+  reconstruction, computed from whichever internal encoding matched (the
+  `-Xclang ` marker is stripped first, if present, before parsing).

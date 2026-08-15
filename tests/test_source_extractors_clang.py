@@ -698,12 +698,22 @@ def test_replay_extra_flags_decodes_split_operand_abi_flag_survivor() -> None:
     ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` filter (it starts with
     ``-target``, the same prefix that filter drops as redundant for the
     unrelated, already-structured ``target_triple``/``sysroot`` survivors),
-    losing the flag outright rather than merely mis-encoding it."""
+    losing the flag outright rather than merely mis-encoding it.
+
+    **Reconstructed as ``-Xclang``-wrapped, not the bare two-token form**
+    (P2 review, "Forward bare cc1 flags through the replay driver", fresh
+    evidence): this bare internal encoding is what a direct ``clang -cc1
+    -target-abi aapcs`` capture produces, but ``replay_extra_flags`` always
+    drives an ordinary Clang *driver*, never ``-cc1`` directly -- and an
+    ordinary driver rejects bare ``-target-abi aapcs`` outright ("unknown
+    argument '-target-abi'; did you mean '-Xclang -target-abi'"), requiring
+    the ``-Xclang``-wrapped four-token form regardless of the original
+    capture shape."""
     from abicheck.buildsource.source_extractors._argv import replay_extra_flags
 
     cu = _cu(abi_relevant_flags=["-target-abi=aapcs"])
     extra = replay_extra_flags(cu, [], "gnu")
-    assert extra == ["-target-abi", "aapcs"]
+    assert extra == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
 
 
 def test_replay_extra_flags_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> (

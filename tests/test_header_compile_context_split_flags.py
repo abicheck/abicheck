@@ -216,14 +216,35 @@ def test_resolve_renders_xclang_wrapped_survivor_as_four_complete_argv_tokens(
     assert tokens[idx + 2] == "aapcs"
 
 
-def test_resolve_renders_split_operand_survivor_as_two_complete_argv_tokens(
+def test_split_operand_survivor_reconstructs_bare_capture_as_xclang_wrapped() -> None:
+    """P2 review finding, "Forward bare cc1 flags through the replay driver"
+    (fresh evidence): the BARE internal encoding (``<flag>=<value>``, what
+    ``extract_abi_relevant_flags`` records for a direct ``clang -cc1
+    -target-abi aapcs`` capture) must ALSO reconstruct into the
+    ``-Xclang``-wrapped four-token form, not the bare two-token form --
+    every replay path invokes an ordinary Clang driver, never ``-cc1``
+    directly, and an ordinary driver rejects bare ``-target-abi aapcs``
+    outright ("unknown argument '-target-abi'; did you mean '-Xclang
+    -target-abi'"). Both the bare and ``-Xclang``-wrapped internal
+    encodings must converge on the identical replayable output."""
+    assert _split_operand_survivor("-target-abi=aapcs") == [
+        "-Xclang",
+        "-target-abi",
+        "-Xclang",
+        "aapcs",
+    ]
+
+
+def test_resolve_renders_split_operand_survivor_as_xclang_wrapped_argv_tokens(
     tmp_path: Path,
 ) -> None:
     """The internal ``-target-abi=aapcs`` encoding (adapters.base.
-    extract_abi_relevant_flags's normalized output, see above) must be
-    reconstructed into two separate, literal argv tokens by the time it
-    reaches the rendered ``CompileContext`` -- a single ``-target-abi=aapcs``
-    token is not real clang syntax and would abort a replay."""
+    extract_abi_relevant_flags's normalized output for a bare ``-cc1``-style
+    capture, see above) must be reconstructed into the ``-Xclang``-wrapped,
+    driver-forwarded form by the time it reaches the rendered
+    ``CompileContext`` -- a single ``-target-abi=aapcs`` token is not real
+    clang syntax, and the bare two-token ``-target-abi aapcs`` form is
+    rejected by the ordinary driver every replay path actually invokes."""
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
     src = tmp_path / "widget.cpp"
@@ -236,12 +257,16 @@ def test_resolve_renders_split_operand_survivor_as_two_complete_argv_tokens(
     ev = BuildEvidence(compile_units=[cu])
     result = resolve_header_compile_context(ev, [header])
     assert result.context is not None
-    tokens = result.context.gcc_option_tokens
-    # Two separate, syntactically complete tokens -- never the combined,
-    # internal-only "-target-abi=aapcs" spelling.
+    tokens = list(result.context.gcc_option_tokens)
+    # -Xclang-wrapped, driver-forwarded tokens -- never the combined,
+    # internal-only "-target-abi=aapcs" spelling, and never the bare
+    # two-token form an ordinary driver invocation rejects.
     assert "-target-abi=aapcs" not in tokens
+    assert tokens.count("-Xclang") == 2
     idx = tokens.index("-target-abi")
-    assert tokens[idx + 1] == "aapcs"
+    assert tokens[idx - 1] == "-Xclang"
+    assert tokens[idx + 1] == "-Xclang"
+    assert tokens[idx + 2] == "aapcs"
 
 
 def test_resolve_disagreeing_target_abi_values_now_correctly_ambiguous(
