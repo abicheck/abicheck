@@ -592,6 +592,187 @@ def test_derive_l2_compile_context_swallows_non_ambiguous_errors(
 
 
 # ---------------------------------------------------------------------------
+# 2b. P0.3 continued: sharing one L3 collection between derive_l2_include_dirs
+# and derive_l2_compile_context (resolve_side_snapshot used to pay for an
+# identical collect_inline_pack(layers=("L3",)) call twice per side -- once
+# each -- via collect_l2_seed_evidence()'s evidence= parameter).
+# ---------------------------------------------------------------------------
+
+
+def _no_collection_allowed(*a: object, **k: object) -> None:
+    raise AssertionError(
+        "collect_inline_pack must not be called when evidence= is shared"
+    )
+
+
+def test_derive_l2_include_dirs_shared_evidence_skips_own_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.buildsource import l2_seed
+    from abicheck.buildsource.build_evidence import BuildEvidence
+
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _no_collection_allowed)
+    unit = _cu(include_paths=[str(tmp_path)])
+    evidence = BuildEvidence(compile_units=[unit])
+    dirs, cleanups = l2_seed.derive_l2_include_dirs(None, tmp_path, evidence=evidence)
+    assert dirs == [str(tmp_path)]
+    assert cleanups == []
+
+
+def test_derive_l2_include_dirs_shared_none_evidence_short_circuits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An explicit shared `None` (the caller's own collection found nothing)
+    # must not trigger a second, redundant collection attempt here.
+    from abicheck.buildsource import l2_seed
+
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _no_collection_allowed)
+    dirs, cleanups = l2_seed.derive_l2_include_dirs(None, tmp_path, evidence=None)
+    assert (dirs, cleanups) == ([], [])
+
+
+def test_derive_l2_compile_context_shared_evidence_skips_own_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.buildsource import l2_seed
+    from abicheck.buildsource.build_evidence import BuildEvidence
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _no_collection_allowed)
+    unit = _cu(source=str(src), directory=str(tmp_path), standard="c++20")
+    evidence = BuildEvidence(compile_units=[unit])
+    ctx, cleanups = l2_seed.derive_l2_compile_context(
+        [header], None, tmp_path, evidence=evidence
+    )
+    assert ctx is not None
+    assert "-std=c++20" in ctx.gcc_option_tokens
+    assert cleanups == []
+
+
+def test_derive_l2_compile_context_shared_none_evidence_short_circuits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.buildsource import l2_seed
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _no_collection_allowed)
+    ctx, cleanups = l2_seed.derive_l2_compile_context(
+        [header], None, tmp_path, evidence=None
+    )
+    assert (ctx, cleanups) == (None, [])
+
+
+def test_derive_l2_compile_context_ambiguous_error_propagates_with_shared_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The fail-closed contract (P0.3) must hold regardless of whether the
+    # evidence was freshly collected here or shared in -- ambiguity is a
+    # property of the evidence's own content, not of how it was obtained.
+    from abicheck.buildsource import l2_seed
+    from abicheck.buildsource.build_evidence import BuildEvidence
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _no_collection_allowed)
+    units = [
+        _cu(id="cu://a", source=str(src_a), directory=str(tmp_path), standard="c++17"),
+        _cu(id="cu://b", source=str(src_b), directory=str(tmp_path), standard="c++20"),
+    ]
+    evidence = BuildEvidence(compile_units=units)
+    with pytest.raises(HeaderCompileContextAmbiguousError):
+        l2_seed.derive_l2_compile_context([header], None, tmp_path, evidence=evidence)
+
+
+def test_collect_l2_seed_evidence_defaults_to_no_inferred_build_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Tier-2-API safety (mirrors seed_l2_includes' own contract): the shared
+    # entry point must default to the same restrictive setting the two
+    # independent calls it replaces already used.
+    from abicheck.buildsource import l2_seed
+
+    seen: dict[str, object] = {}
+    real = l2_seed.collect_inline_pack
+
+    def _spy(**kwargs: object) -> object:
+        seen["allow_inferred_build_query"] = kwargs["allow_inferred_build_query"]
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _spy)
+    l2_seed.collect_l2_seed_evidence(None, tmp_path)
+    assert seen["allow_inferred_build_query"] is False
+
+
+def test_collect_l2_seed_evidence_matches_independent_include_dirs_call(
+    tmp_path: Path,
+) -> None:
+    from abicheck.buildsource.inline import _run_cleanups
+    from abicheck.buildsource.l2_seed import (
+        collect_l2_seed_evidence,
+        derive_l2_include_dirs,
+    )
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    incdir = tmp_path / "inc"
+    incdir.mkdir()
+    _write_compile_db(tmp_path, src, [f"-I{incdir}"])
+
+    independent_dirs, independent_cleanups = derive_l2_include_dirs(None, tmp_path)
+    try:
+        shared_evidence, shared_cleanups = collect_l2_seed_evidence(None, tmp_path)
+        shared_dirs, _ = derive_l2_include_dirs(
+            None, tmp_path, evidence=shared_evidence
+        )
+        assert shared_dirs == independent_dirs
+    finally:
+        _run_cleanups(independent_cleanups)
+        _run_cleanups(shared_cleanups)
+
+
+def test_collect_l2_seed_evidence_matches_independent_compile_context_call(
+    tmp_path: Path,
+) -> None:
+    from abicheck.buildsource.inline import _run_cleanups
+    from abicheck.buildsource.l2_seed import (
+        collect_l2_seed_evidence,
+        derive_l2_compile_context,
+    )
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    _write_compile_db(tmp_path, src, ["-std=c++20", "-DFOO=1"])
+
+    independent_ctx, independent_cleanups = derive_l2_compile_context(
+        [header], None, tmp_path
+    )
+    try:
+        shared_evidence, shared_cleanups = collect_l2_seed_evidence(None, tmp_path)
+        shared_ctx, _ = derive_l2_compile_context(
+            [header], None, tmp_path, evidence=shared_evidence
+        )
+        assert shared_ctx is not None and independent_ctx is not None
+        assert set(shared_ctx.gcc_option_tokens) == set(
+            independent_ctx.gcc_option_tokens
+        )
+    finally:
+        _run_cleanups(independent_cleanups)
+        _run_cleanups(shared_cleanups)
+
+
+# ---------------------------------------------------------------------------
 # 3. service_input_resolution wiring
 # ---------------------------------------------------------------------------
 
@@ -831,6 +1012,73 @@ def test_resolve_side_snapshot_propagates_ambiguous_error(
             public_headers=[],
             public_header_dirs=[],
         )
+
+
+def test_resolve_side_snapshot_collects_l3_evidence_once_not_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0.3: the actual, root-cause regression guard for this fix.
+
+    Both the include-dir seeding and the compile-context seeding need L3
+    evidence for this side -- before this fix, each independently called
+    ``collect_inline_pack(layers=("L3",))``, so a real compile-DB resolution
+    ran twice per side for the exact same inputs. Counts calls whose
+    ``layers`` is the bare ``("L3",)`` L2-seeding shape specifically (not
+    ``embed_side_build_source``'s own, separately-collected, more permissive
+    L3+ call -- ``collect_mode="off"`` here keeps that one a no-op so it
+    can't hide a regression in the count either way).
+    """
+    from abicheck import service_input_resolution as sir
+    from abicheck.api_types import InputSpec
+    from abicheck.buildsource import l2_seed
+    from abicheck.model import AbiSnapshot
+    from abicheck.service_compare_evidence import SideEvidence
+
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    incdir = tmp_path / "inc"
+    incdir.mkdir()
+    _write_compile_db(tmp_path, src, ["-std=c++20", f"-I{incdir}"])
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    l3_seed_calls: list[dict[str, object]] = []
+    real_collect = l2_seed.collect_inline_pack
+
+    def _counting_collect(**kwargs: object) -> object:
+        if kwargs.get("layers") == ("L3",):
+            l3_seed_calls.append(kwargs)
+        return real_collect(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(l2_seed, "collect_inline_pack", _counting_collect)
+
+    def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
+        return AbiSnapshot(library="lib", version="1.0", from_headers=True)
+
+    import abicheck.service as service_mod
+
+    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+
+    # No explicit includes -> include seeding applies; a header referenced by
+    # the compile DB -> compile-context seeding also applies. Both paths are
+    # genuinely exercised, not just one of the two.
+    side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    sir.resolve_side_snapshot(
+        side,
+        evidence,
+        lang="c++",
+        header_backend="clang",
+        fmt="elf",
+        public_headers=[],
+        public_header_dirs=[],
+    )
+    assert len(l3_seed_calls) == 1
 
 
 # ---------------------------------------------------------------------------

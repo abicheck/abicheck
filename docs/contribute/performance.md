@@ -312,13 +312,37 @@ convention — root `AGENTS.md`):
   Bazel query, a lost L4 cache hit, an unexpected full-TU replay) be diagnosed
   from one run's own output instead of only from a before/after harness
   comparison.
-- **Repeated L3 collection under `dump --sources`/`--build-info` (P0.3).**
-  Include seeding and compile-context derivation each independently trigger
-  L3 collection, and build-source evidence is collected again for embedding —
-  up to three L3 collection passes per side for some input shapes. This is
-  documented as an accepted, known cost in root `AGENTS.md`'s "Known gaps"
-  entry for P0.3 (`abicheck/service_input_resolution.py`), not re-litigated
-  here; it is now at least in scope for the `classify` job's
+- **Repeated L3 collection under `dump --sources`/`--build-info` (P0.3) —
+  partially closed.** Include seeding and compile-context derivation each
+  used to independently trigger a full L3 collection
+  (`collect_inline_pack(layers=("L3",))`) for the exact same
+  `(sources, build_info)` inputs — up to three L3 collection passes per side
+  for some input shapes, counting the embed step's own separate collection.
+  `resolve_side_snapshot` (`abicheck/service_input_resolution.py`) now
+  collects that L3-only evidence **once** via
+  `buildsource.l2_seed.collect_l2_seed_evidence()` and shares it between the
+  two L2-seeding calls (`derive_l2_include_dirs`/`derive_l2_compile_context`,
+  both via a new `evidence=` parameter with a sentinel default distinguishing
+  "no shared evidence given" from "shared evidence is `None`" — see
+  `l2_seed.py`'s own `_Uncollected` docstring), cutting the redundant count
+  from up to three collections to at most two. The embed step's own
+  collection (`embed_build_source`) is **deliberately left unmerged**: unlike
+  the two opportunistic L2-parse improvements (which must never execute a
+  build system as a side effect of merely resolving an input — Tier-2 API
+  safety, `allow_inferred_build_query=False`), embed is the caller's explicit
+  request for L3+ evidence and always permits the inferred build query
+  (`cmake`/`bazel`/`make`) — folding it into the shared, restricted result
+  would either silently narrow embed's own permission (a real coverage
+  regression: a genuine `--sources` tree with no existing compile DB would
+  stop triggering the zero-config inferred query) or silently widen the two
+  L2-seeding calls' permission to run one when the caller asked for no build
+  evidence at all. Closing that third collection needs `collect_mode`-aware
+  gating of the shared call's own `allow_inferred_build_query`, verified
+  against real `--sources`-with-no-compile-DB and `depth="headers"`
+  scenarios — deliberately not attempted in the same pass as the two
+  unconditionally-safe merges (see
+  `buildsource.l2_seed.derive_l2_compile_context`'s own docstring for the
+  full reasoning). This is now in scope for the `classify` job's
   `PERF_SENSITIVE_PATTERNS` (see "CI integration" above), so a change to it
   will run this workflow even though no benchmark scenario targets its
   specific cost yet.

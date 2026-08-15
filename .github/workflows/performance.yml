@@ -101,7 +101,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
+            # --no-renames: with rename detection on (the default), `git
+            # diff --name-only` prints only a renamed file's DESTINATION
+            # path, silently dropping the source -- a perf-sensitive file
+            # renamed to a non-matching destination (e.g.
+            # abicheck/checker.py -> abicheck/core/checker.py) would then be
+            # invisible to classification even though the change is exactly
+            # as perf-sensitive as an in-place edit (Codex review, verified
+            # with a real R100 rename: --name-only printed only the new
+            # path, --no-renames printed both). Disabling detection reports
+            # a rename as a plain delete+add, so both paths always appear.
+            git diff --no-renames --name-only "${BASE_SHA}...${HEAD_SHA}" \
               | python scripts/classify_perf_paths.py \
                   --force-label performance --event-label "${EVENT_LABEL:-}"
           else

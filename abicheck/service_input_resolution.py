@@ -47,6 +47,7 @@ import os
 import shlex
 from typing import TYPE_CHECKING
 
+from .buildsource.l2_seed import _UNCOLLECTED
 from .errors import SnapshotError, ValidationError
 
 if TYPE_CHECKING:
@@ -54,6 +55,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .api_types import InputSpec
+    from .buildsource.build_evidence import BuildEvidence
+    from .buildsource.l2_seed import _Uncollected
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
@@ -106,7 +109,9 @@ def reject_hybrid_source_frontend(
 
 
 def _seeded_includes(
-    side: InputSpec, evidence: SideEvidence
+    side: InputSpec,
+    evidence: SideEvidence,
+    l3_evidence: BuildEvidence | None | _Uncollected = _UNCOLLECTED,
 ) -> tuple[list[Path], list[Callable[[], None]]]:
     """This input's include dirs, plus any the build already knows about.
 
@@ -124,6 +129,12 @@ def _seeded_includes(
     build system (cmake/make/bazel) as a side effect of resolving an input.
     That is a surprise a library caller cannot see coming, and the CLI only
     permits it because the user typed a command that says so.
+
+    ``l3_evidence`` (P0.3): ``resolve_side_snapshot``'s own already-collected
+    L3 evidence for this side, shared with ``_seeded_compile_context`` below
+    instead of each independently re-deriving it — forwarded to
+    ``seed_l2_includes``'s own ``evidence=`` parameter unchanged, sentinel
+    default included (a caller with nothing to share).
 
     Returns the cleanups the caller must run **after** the parse consumes the
     dirs — an inferred build dir may hold the generated headers they point at.
@@ -143,6 +154,7 @@ def _seeded_includes(
         gcc_options=ctx.gcc_options if ctx is not None else None,
         gcc_option_tokens=ctx.gcc_option_tokens if ctx is not None else (),
         allow_inferred_build_query=False,
+        evidence=l3_evidence,
     )
 
 
@@ -212,7 +224,9 @@ def _merge_l3_compile_context(
 
 
 def _seeded_compile_context(
-    side: InputSpec, evidence: SideEvidence
+    side: InputSpec,
+    evidence: SideEvidence,
+    l3_evidence: BuildEvidence | None | _Uncollected = _UNCOLLECTED,
 ) -> tuple[CompileContext | None, bool, list[Callable[[], None]]]:
     """Fold L3 ``CompileUnit``-derived ABI context onto this side (P0.3).
 
@@ -236,6 +250,10 @@ def _seeded_compile_context(
     True only when a real L3 context was found and folded in, which is what
     the caller uses to decide whether to stamp
     ``AbiSnapshot.parsed_with_build_context``.
+
+    ``l3_evidence`` (P0.3): forwarded to ``derive_l2_compile_context``'s own
+    ``evidence=`` parameter unchanged — see ``_seeded_includes``'s identical
+    parameter for the sharing this exists to enable.
     """
     if not (side.sources or side.build_info) or not evidence.headers:
         return evidence.compile, False, []
@@ -252,6 +270,7 @@ def _seeded_compile_context(
         # -std=c++20) excuses a same-field-only disagreement across matched
         # compile units instead of failing closed on it.
         explicit=evidence.compile,
+        evidence=l3_evidence,
     )
     if derived is None:
         return evidence.compile, False, cleanups
@@ -296,10 +315,38 @@ def resolve_side_snapshot(
     # _seeded_includes already created, instead of leaking them.
     cleanups: list[Callable[[], None]] = []
     try:
-        includes, includes_cleanups = _seeded_includes(side, evidence)
+        # P0.3: _seeded_includes and _seeded_compile_context each used to
+        # independently re-derive the same L3 evidence for this side --
+        # collect it ONCE here and hand it to both via l3_evidence=, instead
+        # of paying for an identical compile-DB resolution twice per side.
+        # Gated on the same condition both consumers already require before
+        # touching any L3 evidence at all (seed_l2_includes' own gate also
+        # needs headers, same as _seeded_compile_context's), so this never
+        # collects anything neither of them would have used anyway.
+        # allow_inferred_build_query stays this shared call's own False
+        # default (collect_l2_seed_evidence) -- the exact Tier-2-API-safety
+        # restriction both independent calls already used, so this is not a
+        # permission widening. embed_side_build_source below still runs its
+        # OWN, separate (and more permissive) collection: unlike these two
+        # opportunistic L2-parse improvements it is the caller's explicit
+        # request for L3+ evidence and always permits the inferred build
+        # query, so folding it into this shared, restricted result would
+        # either narrow its own permission (a real coverage regression) or
+        # widen these two calls' -- left deliberately unmerged, see
+        # buildsource.l2_seed.derive_l2_compile_context's own docstring.
+        l3_evidence: BuildEvidence | None | _Uncollected = _UNCOLLECTED
+        if (side.sources or side.build_info) and evidence.headers:
+            from .buildsource.l2_seed import collect_l2_seed_evidence
+
+            l3_evidence, l3_cleanups = collect_l2_seed_evidence(
+                side.build_info, side.sources
+            )
+            cleanups.extend(l3_cleanups)
+
+        includes, includes_cleanups = _seeded_includes(side, evidence, l3_evidence)
         cleanups.extend(includes_cleanups)
         compile_ctx, context_applied, context_cleanups = _seeded_compile_context(
-            side, evidence
+            side, evidence, l3_evidence
         )
         cleanups.extend(context_cleanups)
         snap = service.resolve_input(

@@ -219,3 +219,80 @@ class TestMain:
         )
         assert rc == 0
         assert "run=true" in out
+
+
+class TestRenameDetectionInvocation:
+    """Real-git regression guard for the workflow's own `git diff --no-renames
+    --name-only` invocation (Codex review, fresh evidence): with rename
+    detection on (git's default), `--name-only` prints only a renamed file's
+    DESTINATION path, silently dropping the source -- a perf-sensitive file
+    renamed to a non-matching destination would then be invisible to
+    classification even though the change is exactly as perf-sensitive as an
+    in-place edit. This exercises the real `git diff` command the workflow
+    step runs, not just the pure Python classifier, since the bug was in the
+    git invocation, not in `changed_files_are_perf_sensitive` itself.
+    """
+
+    def _git(self, cwd: Path, *args: str) -> str:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+
+    def _init_repo_with_rename(self, tmp_path: Path) -> tuple[Path, str, str]:
+        """A repo whose single commit renames abicheck/checker.py to a
+        non-sensitive destination, with enough of a content change to
+        actually trigger git's rename heuristic (a byte-identical rename
+        still reports 100% similarity and renames either way, but a real
+        PR's rename is rarely byte-identical). Returns (repo, base_sha, head_sha).
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.email", "test@example.com")
+        self._git(repo, "config", "user.name", "Test")
+        (repo / "abicheck").mkdir()
+        original = repo / "abicheck" / "checker.py"
+        original.write_text("def f():\n    pass\n" * 5, encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "base")
+        base_sha = self._git(repo, "rev-parse", "HEAD").strip()
+
+        (repo / "abicheck" / "core").mkdir()
+        renamed = repo / "abicheck" / "core" / "checker.py"
+        original.rename(renamed)
+        with renamed.open("a", encoding="utf-8") as f:
+            f.write("# a small addition\n")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "rename")
+        head_sha = self._git(repo, "rev-parse", "HEAD").strip()
+        return repo, base_sha, head_sha
+
+    def test_default_rename_detection_hides_the_source_path(
+        self, tmp_path: Path
+    ) -> None:
+        # Confirms the bug this fix closes actually reproduces with real git
+        # -- if this ever stops reproducing (a git behavior change), the
+        # --no-renames fix below would need re-justifying.
+        repo, base_sha, head_sha = self._init_repo_with_rename(tmp_path)
+        out = self._git(repo, "diff", "--name-only", f"{base_sha}...{head_sha}")
+        changed = [line for line in out.splitlines() if line]
+        assert "abicheck/checker.py" not in changed
+
+    def test_no_renames_reports_both_paths_and_classifies_sensitive(
+        self, tmp_path: Path
+    ) -> None:
+        repo, base_sha, head_sha = self._init_repo_with_rename(tmp_path)
+        out = self._git(
+            repo, "diff", "--no-renames", "--name-only", f"{base_sha}...{head_sha}"
+        )
+        changed = [line for line in out.splitlines() if line]
+        assert "abicheck/checker.py" in changed
+        assert "abicheck/core/checker.py" in changed
+        assert classify.changed_files_are_perf_sensitive(changed) is True
