@@ -40,6 +40,20 @@ def test_baseline_points_tolerates_garbage() -> None:
     assert perf_baseline.baseline_points_from_report({}) == {}
     assert perf_baseline.baseline_points_from_report({"scenarios": "nope"}) == {}
     assert perf_baseline.baseline_points_from_report({"scenarios": {"x": "bad"}}) == {}
+    assert perf_baseline.baseline_points_from_report(
+        {"scenarios": {"x": {"points": "nope"}}}
+    ) == {}
+
+
+def test_baseline_points_tolerates_non_dict_top_level() -> None:
+    # CodeRabbit review: a syntactically valid JSON document whose top level
+    # isn't an object (a bare list, a string, a number, ...) has no .get()
+    # and previously raised an unhandled AttributeError instead of degrading
+    # like every other malformed-shape case above.
+    assert perf_baseline.baseline_points_from_report([]) == {}
+    assert perf_baseline.baseline_points_from_report("nope") == {}
+    assert perf_baseline.baseline_points_from_report(1) == {}
+    assert perf_baseline.baseline_points_from_report(None) == {}
 
 
 def test_check_regressions_flags_slowdown() -> None:

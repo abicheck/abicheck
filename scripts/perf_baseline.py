@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 # No sys.path mutation here (CodeRabbit review): this is an imported helper
 # module, not a script entry point, so it must not have global side effects
@@ -49,19 +49,32 @@ class _TimedPoint(Protocol):
 
 
 def baseline_points_from_report(
-    baseline: dict[str, Any],
+    baseline: object,
 ) -> dict[tuple[str, int], float]:
     """Map ``(scenario, size) -> seconds`` from a ``benchmark_scaling.py``
     report's JSON (its own ``{"scenarios": {name: {"points": [...]}}}`` shape).
+
+    *baseline* is untyped ``object``, not ``dict[str, Any]`` (CodeRabbit
+    review): the caller's only guarantee is "valid JSON", and a syntactically
+    valid but structurally wrong top level -- a bare list (``[]``), a string,
+    a number -- has no ``.get()`` and previously raised an unhandled
+    ``AttributeError`` instead of degrading the same way every other
+    malformed-shape case here already does (an unknown-shaped ``scenarios``/
+    ``points``/point entry is skipped, not fatal).
     """
     out: dict[tuple[str, int], float] = {}
+    if not isinstance(baseline, dict):
+        return out
     scenarios = baseline.get("scenarios", {})
     if not isinstance(scenarios, dict):
         return out
     for name, body in scenarios.items():
         if not isinstance(body, dict):
             continue
-        for pt in body.get("points", []):
+        points = body.get("points", [])
+        if not isinstance(points, list):
+            continue
+        for pt in points:
             if isinstance(pt, dict) and "size" in pt and "seconds" in pt:
                 out[(name, int(pt["size"]))] = float(pt["seconds"])
     return out
