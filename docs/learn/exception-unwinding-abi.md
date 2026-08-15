@@ -7,6 +7,8 @@ canonical_for:
   - exception-unwinding-abi
 depends_on:
   - abicheck/diff_symbols.py
+  - abicheck/diff_platform.py
+  - abicheck/buildsource/build_diff.py
 lifecycle: active
 generated: false
 ---
@@ -142,8 +144,13 @@ remains.) We do not repeat that analysis here.
       toolchain/deployment risk when build context is captured (same row as
       the [modern hazards](modern-cpp-toolchain-hazards.md) table);
     - the presence/removal or visibility change of RTTI symbols
-      (`_ZTI…`/`_ZTS…`) and vtables (`_ZTV…`) at the ELF level — which is
-      exactly what lets a cross-DSO `catch` stop matching;
+      (`_ZTI…`/`_ZTS…`) and vtables (`_ZTV…`) at the ELF level. Read these
+      the way the section above qualifies them: an RTTI symbol genuinely
+      *removed* or stripped is what makes a cross-DSO `catch` stop matching,
+      while a *visibility* change alone is a risk finding — on the common
+      GCC/libstdc++ configuration the `type_info` name-string fallback still
+      matches, and only a pointer-identity-only runtime turns it into a real
+      failure;
     - the `noexcept`-driven library version requirement from
       [case15](../reference/examples/case15_noexcept_change.md).
 

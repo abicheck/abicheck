@@ -150,10 +150,11 @@ subset of the header a given consumer's own code actually reaches:
   a genuine gap in today's tooling, not a solved problem with an
   unintuitive flag combination**: `dump`'s no-binary path
   (`dump --sources`/`--build-info` with no artifact) produces an L3/L4/L5
-  source-fact snapshot whose own documented purpose is to be *combined*
-  with a binary-side dump — `dump libfoo.so -H include/ --sources . ...` —
-  not compared standalone against another source-only snapshot; there is no
-  binary to fold it onto for a library that never produces one. The closest
+  source-fact snapshot that is **diagnostic output with no supported
+  consumer today** — no user-facing command folds it onto a binary-side
+  snapshot (the `merge` command that once did was removed in ADR-043, and
+  nothing replaced it), and comparing two such snapshots against each other
+  isn't a supported path either. The closest
   practical workaround today is compiling a small stub translation unit
   that `#include`s and instantiates the public API into an actual `.so`,
   and dumping/comparing *that* — an ordinary binary+headers comparison, on
