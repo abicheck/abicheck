@@ -421,6 +421,20 @@ class RunPlan:
     project: str = ""
     head_sha: str = ""
     checks: list[RunPlanCheck] = field(default_factory=list)
+    #: The aggregate fan-in's gate policy (CLI cleanup phase two, PR 2),
+    #: carried on the plan so `to_aggregate_manifest()` can project it into
+    #: the manifest's own `gate` block -- the same mechanism a hand-authored
+    #: `--manifest` uses, so `--run-plan`/`--manifest` never diverge in what
+    #: they can express. Raw, unvalidated strings here (validated once, at
+    #: `ExpectedTargets.from_manifest_data()`, the same place a hand-authored
+    #: manifest's `gate` block is validated) -- this module stays free of an
+    #: `..aggregate` import for anything but the manifest version constant.
+    #: `None` (the default) means "the run-plan generator wasn't given an
+    #: explicit gate policy", not "apply a specific value" -- omitted from
+    #: the projected manifest entirely, same as an unset field anywhere else
+    #: in this dataclass.
+    gate_missing_required: str | None = None
+    gate_unexpected_target: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"schema": self.schema}
@@ -428,6 +442,13 @@ class RunPlan:
             d["project"] = self.project
         if self.head_sha:
             d["head_sha"] = self.head_sha
+        if self.gate_missing_required is not None or self.gate_unexpected_target is not None:
+            gate: dict[str, Any] = {}
+            if self.gate_missing_required is not None:
+                gate["missing_required"] = self.gate_missing_required
+            if self.gate_unexpected_target is not None:
+                gate["unexpected_target"] = self.gate_unexpected_target
+            d["gate"] = gate
         d["checks"] = [c.to_dict() for c in self.checks]
         return d
 
@@ -439,11 +460,15 @@ class RunPlan:
             if isinstance(checks_raw, list)
             else []
         )
+        gate_raw = d.get("gate")
+        gate = gate_raw if isinstance(gate_raw, dict) else {}
         return cls(
             schema=_opt_str(d.get("schema"), RUN_PLAN_SCHEMA),
             project=_opt_str(d.get("project")),
             head_sha=_opt_str(d.get("head_sha")),
             checks=checks,
+            gate_missing_required=_opt_str(gate.get("missing_required")) or None,
+            gate_unexpected_target=_opt_str(gate.get("unexpected_target")) or None,
         )
 
 
@@ -801,9 +826,18 @@ def generate_run_plan(
     project: str = "",
     head_sha: str = "",
     resolved_bindings: Mapping[str, str] | None = None,
+    gate_missing_required: str | None = None,
+    gate_unexpected_target: str | None = None,
 ) -> tuple[RunPlan, RunPlanGenerationReport]:
     """Derive the ordered :class:`RunPlan` from *config* + each contract
     profile's parsed ``build-output.json`` (keyed by profile id).
+
+    *gate_missing_required*/*gate_unexpected_target* (CLI cleanup phase two,
+    PR 2) are stamped onto the returned plan unvalidated -- this module has
+    no dependency on ``..aggregate``'s ``OnMissingRequired``/
+    ``OnUnexpectedTarget`` enums, so an invalid value surfaces once, at
+    ``ExpectedTargets.from_manifest_data()``, the same place a hand-authored
+    manifest's own ``gate`` block is validated.
 
     *resolved_bindings* (P1 toolchain-profile audit) is an optional
     already-loaded ``{binding_id: executable_path}`` mapping -- typically a
@@ -866,7 +900,13 @@ def generate_run_plan(
             "profile (nothing declared, or every profile is missing from "
             "build_outputs)."
         )
-    plan = RunPlan(project=project, head_sha=head_sha, checks=checks)
+    plan = RunPlan(
+        project=project,
+        head_sha=head_sha,
+        checks=checks,
+        gate_missing_required=gate_missing_required,
+        gate_unexpected_target=gate_unexpected_target,
+    )
     return plan, report
 
 
@@ -895,4 +935,14 @@ def to_aggregate_manifest(
     resolved_head_sha = head_sha if head_sha is not None else plan.head_sha
     if resolved_head_sha:
         manifest["head_sha"] = resolved_head_sha
+    # CLI cleanup phase two, PR 2: project the plan's own gate policy into
+    # the manifest's `gate` block -- the same field `--manifest` reads,
+    # so `--run-plan`/`--manifest` express identical policy shapes.
+    if plan.gate_missing_required is not None or plan.gate_unexpected_target is not None:
+        gate: dict[str, Any] = {}
+        if plan.gate_missing_required is not None:
+            gate["missing_required"] = plan.gate_missing_required
+        if plan.gate_unexpected_target is not None:
+            gate["unexpected_target"] = plan.gate_unexpected_target
+        manifest["gate"] = gate
     return manifest

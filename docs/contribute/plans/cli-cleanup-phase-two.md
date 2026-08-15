@@ -49,10 +49,16 @@ simplification).
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
 
 Everything above is a **breaking** change to the native CLI. Consistent with
-#770 and ADR-037's stance, none of it gets a deprecation alias: an old spelling
-must fail as `No such option` with exit `64`.
+the #770 cleanup and ADR-037's stance, none of it gets a deprecation alias:
+an old spelling must fail as `No such option` with exit `64`.
 
 ## PR 0 — restore a green CI baseline first
+
+**Status: verified, not separately actioned** — the "Verified state" below
+was confirmed current as of PR #779; the standing Windows lane failure is
+tracked as pre-existing and unrelated to this initiative's own changes, per
+that PR's own thread. The branch-protection/required-checks work (items 3–4
+below) has not been done as part of this initiative.
 
 This is a prerequisite, not a nicety: a breaking interface change cannot be
 evaluated against a red baseline.
@@ -96,6 +102,12 @@ standing red lane, not #770's regression.
 Windows, and a red required check demonstrably blocks a merge.
 
 ## PR 1 — presentation
+
+**Status: implemented** (PR #779) — `--stat`/`--recommend` are gone,
+`--profile quick` carries the one-line summary (including a fix for the
+`--used-by`/`--required-symbol` scoped-gate case, found by review after the
+first push), and the release recommendation is unconditional in
+`json`/`markdown`/`review` output.
 
 Removes `compare --stat` and `compare --recommend` only. `--annotate` /
 `--annotate-additions` are **not** in this PR — see PR 1b below for why they
@@ -292,6 +304,15 @@ not before.
 renderer move, and it changes what a release-operand Action run can observe.
 
 ## PR 2 — aggregate policy into the manifest schema
+
+**Status: implemented** (PR #779) — `aggregate_manifest_version` bumped to
+`2.0`, the manifest's `gate` block, `project plan --gate-missing-required`/
+`--gate-unexpected-target`, and `effective_policy` in the JSON output are all
+in place; `--on-missing-required`/`--on-unexpected-target` exit `64`. The
+`.abicheck.yml`-driven (rather than per-invocation-flag-driven) sourcing of
+`project plan`'s gate flags is not part of this slice — see that command's
+own `--gate-missing-required`/`--gate-unexpected-target` for the mechanism a
+future `.abicheck.yml` key would feed the same way.
 
 `aggregate` currently takes the expected target set from `--run-plan` /
 `--manifest` / `--discovered-only`, but takes the *policy for violating that

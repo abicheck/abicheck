@@ -752,7 +752,7 @@ class TestToAggregateManifest:
             ]
         )
         manifest = to_aggregate_manifest(plan)
-        assert manifest["aggregate_manifest_version"] == "1.0"
+        assert manifest["aggregate_manifest_version"] == "2.0"
         assert manifest["targets"] == [
             {"id": "libfoo@linux#release@headers", "required": True},
             {"id": "libfoo@mac#release@headers", "required": False},
@@ -778,6 +778,43 @@ class TestToAggregateManifest:
         )
         expected = ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
         assert expected.targets == {"libfoo@linux#release@headers": True}
+
+    def test_gate_policy_projects_into_the_manifest(self) -> None:
+        """CLI cleanup phase two, PR 2: a plan's own gate policy (stamped by
+        `generate_run_plan`'s `--gate-missing-required`/
+        `--gate-unexpected-target`) rides inside run-plan.json and projects
+        into `--run-plan`'s manifest the same way a hand-authored
+        `--manifest`'s own `gate` block does."""
+        from abicheck.aggregate import ExpectedTargets, OnMissingRequired
+
+        plan = RunPlan(
+            checks=[RunPlanCheck(check_id="libfoo@linux#release@headers")],
+            gate_missing_required="warn",
+            gate_unexpected_target="fail",
+        )
+        manifest = to_aggregate_manifest(plan)
+        assert manifest["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
+        expected = ExpectedTargets.from_manifest_data(manifest)
+        assert expected.gate_missing_required is OnMissingRequired.WARN
+
+    def test_no_gate_policy_omits_the_gate_key(self) -> None:
+        plan = RunPlan(checks=[RunPlanCheck(check_id="libfoo@linux#release@headers")])
+        assert "gate" not in to_aggregate_manifest(plan)
+
+    def test_gate_policy_round_trips_through_to_dict_from_dict(self) -> None:
+        plan = RunPlan(
+            checks=[],
+            gate_missing_required="warn",
+            gate_unexpected_target="ignore",
+        )
+        restored = RunPlan.from_dict(plan.to_dict())
+        assert restored.gate_missing_required == "warn"
+        assert restored.gate_unexpected_target == "ignore"
+
+    def test_from_dict_with_no_gate_key_leaves_fields_none(self) -> None:
+        restored = RunPlan.from_dict({"schema": RunPlan().schema, "checks": []})
+        assert restored.gate_missing_required is None
+        assert restored.gate_unexpected_target is None
 
 
 class TestProfileCompileOverlayProjection:
@@ -1357,6 +1394,38 @@ class TestRunPlanGenerateCli:
         assert [c["check_id"] for c in data["checks"]] == [
             "libfoo@linux#release@headers"
         ]
+
+    def test_gate_flags_stamp_the_generated_plan(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, PR 2: --gate-missing-required/
+        --gate-unexpected-target reach the generated run-plan.json's own
+        `gate` block through the real CLI."""
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "project", "plan", str(config),
+                "--build-output", f"linux={build_dir}",
+                "--gate-missing-required", "warn",
+                "--gate-unexpected-target", "fail",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
+
+    def test_no_gate_flags_omits_gate_key(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "project", "plan", str(config),
+                "--build-output", f"linux={build_dir}",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "gate" not in json.loads(result.stdout)
 
     def test_generate_exits_one_on_unresolved_explicit_profile(
         self, tmp_path: Path

@@ -106,6 +106,25 @@
         }
       }
     },
+    "effective_policy": {
+      "type": "object",
+      "description": "Added in schema 1.5 (CLI cleanup phase two, PR 2). Which missing_required/unexpected_target gate policy this run actually applied, and where it came from -- the manifest's (or run-plan-projected manifest's) own gate block, replacing the removed --on-missing-required/--on-unexpected-target CLI flags.",
+      "required": ["missing_required", "unexpected_target", "source"],
+      "properties": {
+        "missing_required": {
+          "type": "string",
+          "enum": ["fail", "warn"]
+        },
+        "unexpected_target": {
+          "type": "string",
+          "enum": ["include", "warn", "fail", "ignore"]
+        },
+        "source": {
+          "type": "string",
+          "description": "\"manifest\"/\"run-plan\" when that source's own gate block supplied at least one of the two fields above, \"default\" otherwise (including --discovered-only mode, where neither policy is applicable)."
+        }
+      }
+    },
     "targets": {
       "type": "array",
       "description": "Every expected target, in stable id order — analyzed or unavailable.",

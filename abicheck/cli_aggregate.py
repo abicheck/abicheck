@@ -44,8 +44,6 @@ from .aggregate import (
     DEFAULT_REPORT_PREFIX,
     AggregateError,
     ExpectedTargets,
-    OnMissingRequired,
-    OnUnexpectedTarget,
     aggregate_reports_dir,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
@@ -88,25 +86,6 @@ from .cli_options import output_options, verbose_option
     "declared target set the gate cannot tell a missing required target from "
     "an intentionally absent one.",
 )
-@click.option(
-    "--on-missing-required",
-    type=click.Choice(["fail", "warn"]),
-    default="fail",
-    show_default=True,
-    help="How an unavailable required target affects the exit code: 'fail' "
-    "makes incomplete required coverage a gate failure (exit 1); 'warn' "
-    "reports the gap but lets the per-target gate decisions alone decide.",
-)
-@click.option(
-    "--on-unexpected-target",
-    type=click.Choice(["include", "warn", "fail", "ignore"]),
-    default="include",
-    show_default=True,
-    help="How a report for a target not in the expected set is handled: "
-    "'include' counts its real findings in the gate (but not in coverage); "
-    "'warn' surfaces it without gating; 'fail' fails the gate on any such "
-    "target; 'ignore' drops it.",
-)
 @output_options(
     ["text", "json"],
     default="text",
@@ -118,8 +97,6 @@ def aggregate_cmd(
     manifest: Path | None,
     run_plan_path: Path | None,
     discovered_only: bool,
-    on_missing_required: str,
-    on_unexpected_target: str,
     fmt: str,
     output: Path | None,
     verbose: bool,
@@ -133,6 +110,16 @@ def aggregate_cmd(
     into ``--discovered-only`` to aggregate whatever is present with no
     coverage gate.
 
+    The gate policy for an unavailable required target
+    (``missing_required: fail|warn``) or a report outside the expected set
+    (``unexpected_target: include|warn|fail|ignore``) is no longer a pair of
+    CLI flags -- CLI cleanup phase two, PR 2 folded them into the manifest's
+    (or run-plan-projected manifest's) own ``gate`` block, so expectation and
+    the consequence of breaking it are one versioned contract instead of two
+    independently-typeable inputs. Omitting ``gate`` keeps the same defaults
+    this command always had (``fail``/``include``); see
+    ``docs/use/aggregate-reports.md`` for the manifest shape.
+
     Exit code: 0 pass / 1 required-coverage gap, a policy-blocked
     addition-or-quality finding, or a non-verdict per-report failure (e.g. a
     `scan` budget overflow) / 2 a source-API break / 4 an ABI break / 64 usage
@@ -141,15 +128,16 @@ def aggregate_cmd(
     """
     _setup_verbosity(verbose)
 
-    expected = _resolve_expected(manifest, run_plan_path, discovered_only)
+    expected, policy_source_hint = _resolve_expected(
+        manifest, run_plan_path, discovered_only
+    )
 
     try:
         result = aggregate_reports_dir(
             reports_dir,
             expected=expected,
             discovered_only=discovered_only,
-            on_missing_required=OnMissingRequired(on_missing_required),
-            on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
+            policy_source_hint=policy_source_hint,
             prefix=DEFAULT_REPORT_PREFIX,
         )
     except AggregateError as exc:
@@ -172,7 +160,7 @@ def _resolve_expected(
     manifest: Path | None,
     run_plan_path: Path | None,
     discovered_only: bool,
-) -> ExpectedTargets | None:
+) -> tuple[ExpectedTargets | None, str]:
     """Resolve the expected-target set from exactly one source, or usage error.
 
     Precedence is deliberately *exclusive*, not merging: ``--discovered-only``,
@@ -182,6 +170,12 @@ def _resolve_expected(
     an expected-target set is a file the plan job and the gate share, and
     retyping it on the command line was the drift the manifest exists to
     prevent.)
+
+    Returns the expected-target set plus a ``policy_source_hint`` label
+    (``"manifest"``/``"run-plan"``) naming which source it came from --
+    :func:`~.aggregate.resolve_gate_policy` reports this back in the
+    result's ``effective_policy.source`` whenever that source's own ``gate``
+    block actually supplied a value.
     """
     sources_given = sum([manifest is not None, run_plan_path is not None])
 
@@ -190,7 +184,7 @@ def _resolve_expected(
             raise click.UsageError(
                 "--discovered-only cannot be combined with --manifest/--run-plan"
             )
-        return None
+        return None, "default"
     if sources_given > 1:
         raise click.UsageError(
             "--manifest and --run-plan are mutually exclusive expected-target "
@@ -198,7 +192,7 @@ def _resolve_expected(
         )
     if manifest is not None:
         try:
-            return ExpectedTargets.from_manifest_file(manifest)
+            return ExpectedTargets.from_manifest_file(manifest), "manifest"
         except AggregateError as exc:
             raise click.UsageError(str(exc)) from exc
     if run_plan_path is not None:
@@ -212,7 +206,10 @@ def _resolve_expected(
             raise click.UsageError(f"{run_plan_path} must contain a JSON object.")
         plan = RunPlan.from_dict(raw)
         try:
-            return ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
+            return (
+                ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan)),
+                "run-plan",
+            )
         except AggregateError as exc:
             raise click.UsageError(
                 f"{run_plan_path}: {exc} — an empty run-plan.json has no "
