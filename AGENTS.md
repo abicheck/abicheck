@@ -1512,6 +1512,22 @@ Once a root command genuinely clears the bar above, pick the right home:
   is shared — each caller keeps its own basename derivation, since the
   adapter's is backslash-aware and `_argv`'s is not, and changing L4's would
   have been a behavior change outside this PR's scope.
+  (4) A fourth round found the file-hashing fix in (1) still missed the case
+  where a forced include is resolved only through the `-I` chain
+  (`-I /build/gen -include config`): the bare operand stats against
+  abicheck's own working directory rather than the build's, and the search
+  directory is walked only through the suffix-filtered
+  `iter_cache_header_files`, which skips an extensionless or `.def` name — so
+  nothing hashed the real file. `forced_include_operand_paths` now also emits
+  one candidate per include-search directory in the same token list, whether
+  or not it exists. Deliberate: `_cache_key` contributes a non-existent path's
+  string and moves on, a candidate that *starts* existing is a real change to
+  what the compiler resolves, and since the search is first-match-wins a
+  candidate under a directory the compiler would never reach can only
+  over-invalidate — a spurious miss, never a stale hit, which is the correct
+  direction for a cache key to err in. Worth noting how this one was found:
+  the previous round's own new test *pinned* the unresolved bare operand as
+  expected output, which made a real gap read as a settled decision.
   **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one

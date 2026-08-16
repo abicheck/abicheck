@@ -414,14 +414,54 @@ class TestForcedIncludeCacheKey:
             Path("/proj/gen"),
         }
 
-    def test_bare_forced_operand_contributes_only_the_file(self) -> None:
+    def test_bare_forced_operand_with_no_search_path_contributes_only_the_file(
+        self,
+    ) -> None:
         from abicheck.header_utils import forced_include_operand_paths
 
-        # No directory part to add: its resolution depends on the include
-        # search, whose dirs include_operand_dirs already covers.
+        # Nothing to resolve it against, and no directory part to add.
         assert forced_include_operand_paths(("-include", "config.h")) == (
             Path("config.h"),
         )
+
+    def test_bare_forced_operand_resolves_against_each_include_search_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: nothing else hashes a bare forced include's real file.
+
+        A forced include not found relative to the working directory is
+        resolved through the `-I` chain. The operand alone stats against
+        abicheck's own cwd (not the build's), and the search directory is
+        walked only through the suffix-filtered `iter_cache_header_files`,
+        which skips an extensionless or `.def` name — so without the
+        per-search-dir candidate, editing the real file leaves the key
+        unchanged.
+        """
+        from abicheck.dumper_ast_config import _cache_key
+        from abicheck.header_utils import (
+            cache_relevant_operand_paths,
+            forced_include_operand_paths,
+        )
+
+        gen = tmp_path / "gen"
+        gen.mkdir()
+        forced = gen / "config"  # extensionless: the directory walk skips it
+        forced.write_text("#define WIDTH 32\n", encoding="utf-8")
+        header = tmp_path / "widget.h"
+        header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        toks = ("-I", str(gen), "-include", "config")
+
+        assert forced in forced_include_operand_paths(toks)
+
+        def key() -> str:
+            return _cache_key(
+                [header], [], "c++", extra_hash_dirs=cache_relevant_operand_paths(toks)
+            )
+
+        before = key()
+        forced.write_text("#define WIDTH 64\n", encoding="utf-8")
+        os.utime(forced, (0, 0))
+        assert key() != before
 
     def test_non_header_suffixed_forced_file_is_itself_hashed(
         self, tmp_path: Path

@@ -43,7 +43,10 @@
   not just its directory, so a forced include whose suffix is not a
   recognised header suffix (`-imacros settings.def`, or an extensionless
   `-include generated/config`) is covered too — the directory walk is
-  deliberately suffix-filtered and would skip those. All four header-parse
+  deliberately suffix-filtered and would skip those. A forced include found
+  only through the `-I` chain is hashed at each candidate location, since the
+  bare operand alone resolves against abicheck's working directory rather than
+  the build's. All four header-parse
   cache keys — the primary dump parse, the header-graph second pass, the
   PE/Mach-O header-scoped parse, and the L2 seed's own derived paths — now
   share one definition of what affects staleness.

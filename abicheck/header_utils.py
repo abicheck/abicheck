@@ -708,12 +708,26 @@ def forced_include_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
     ``_cache_key`` hashes a non-directory entry's own mtime directly, the same
     way it already hashes ``headers``.
 
-    The parent is still returned alongside it, so a *neighbouring* header the
-    forced one pulls in relatively is covered too — that directory need not be
-    on the include search path, so nothing else would cover it. A bare operand
-    with no directory part contributes only the file, since its resolution
-    depends on the include search and those dirs are already covered by
-    :func:`include_operand_dirs`.
+    The parent is returned alongside it, so a *neighbouring* header the forced
+    one pulls in relatively is covered too — that directory need not be on the
+    include search path, so nothing else would cover it.
+
+    **A relative operand also contributes one candidate per include-search
+    directory in the same token list (Codex review, PR D, third round).** A
+    forced include is resolved through the ``-I`` chain when it is not found
+    relative to the working directory, so ``-I /build/gen -include config``
+    names ``/build/gen/config`` — and *nothing else* hashes that file: the
+    operand alone stats relative to abicheck's own working directory (the
+    build's, it is not), and ``/build/gen`` is walked only through the
+    suffix-filtered :func:`iter_cache_header_files`, which skips an
+    extensionless or ``.def`` name outright. The candidates are emitted
+    whether or not they exist, which is both harmless and deliberate:
+    ``_cache_key`` contributes a non-existent path's string and moves on, and
+    a candidate that *starts* existing is a real change to what the compiler
+    would resolve. Since the search order is first-match-wins, a candidate
+    under a directory the compiler would never reach can only ever over-
+    invalidate — a spurious cache miss, never a stale hit, which is the
+    correct direction for this channel to err in.
 
     Recognition is :func:`forced_include_operands` above, run over both
     dialects — the same tokens ``header_compile_context._context_flags``
@@ -721,6 +735,7 @@ def forced_include_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
     to the compiler.
     """
     toks = list(tokens)
+    search_dirs = include_operand_dirs(toks)
     paths: list[Path] = []
     for _option, operand in {
         *forced_include_operands(toks, msvc=False),
@@ -731,6 +746,8 @@ def forced_include_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
         parent = operand_path.parent
         if str(parent) not in (".", ""):
             paths.append(parent)
+        if not operand_path.is_absolute():
+            paths.extend(d / operand_path for d in search_dirs)
     return tuple(sorted(set(paths), key=str))
 
 
