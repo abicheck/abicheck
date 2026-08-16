@@ -305,12 +305,14 @@ topics:
       - abicheck/aggregate_findings.py
       - abicheck/cli_aggregate.py
       - abicheck/buildsource/run_plan.py
+      - abicheck/buildsource/project_targets.py
       - abicheck/schemas/aggregate_report.schema.json
     reference_page: reference/exit-codes.md
     task_pages:
       - use/github-action-recipes.md
       - integration/scenarios/multi-platform.md
       - reference/run-plan-schema.md
+      - reference/project-targets-schema.md
 
   suppressions:
     canonical_page: use/suppressions.md

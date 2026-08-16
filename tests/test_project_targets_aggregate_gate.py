@@ -96,6 +96,16 @@ def test_aggregate_gate_invalid_value_raises(key: str) -> None:
         ProjectTargetsConfig.from_dict({"aggregate": {"gate": {key: "bogus"}}})
 
 
+@pytest.mark.parametrize("key", ["missing_required", "unexpected_target"])
+def test_aggregate_gate_explicit_null_value_raises(key: str) -> None:
+    """An explicit YAML ``null`` for a `gate:` sub-key is a hard error, not
+    silently treated the same as the key being absent -- a malformed
+    ``aggregate: gate: {missing_required: null}`` block must not silently
+    fall back to the hard-coded 'fail'/'include' defaults (Codex review)."""
+    with pytest.raises(ValueError, match="must not be null"):
+        ProjectTargetsConfig.from_dict({"aggregate": {"gate": {key: None}}})
+
+
 def test_aggregate_valid_raw_config_has_no_validation_errors() -> None:
     raw = dict(_MINIMAL_VALID_RAW)
     raw["aggregate"] = {"gate": {"missing_required": "fail"}}

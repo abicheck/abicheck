@@ -1142,6 +1142,18 @@ class AggregateGateSpec:
         the same way :mod:`abicheck.buildsource.run_plan` keeps its own
         ``..aggregate_manifest`` reference lazy, so this leaf validation
         module carries no module-level dependency on it.
+
+        Key **absent** -> that field stays unset (``None``). Key **present**
+        with an explicit YAML ``null`` is a hard error, not silently treated
+        the same as absent (Codex review, fresh evidence) -- the two are
+        different author intents (never mentioned this field at all, vs.
+        stating it with a null value), and conflating them would let a
+        malformed ``aggregate: gate: {missing_required: null}`` block
+        silently fall back to the hard-coded ``fail``/``include`` defaults
+        instead of failing closed on the typo. Mirrors
+        :func:`abicheck.buildsource.run_plan._parse_run_plan_gate`'s
+        identical key/value distinction for the projected ``run-plan.json``
+        ``gate`` block this class feeds.
         """
         from ..aggregate_manifest import OnMissingRequired, OnUnexpectedTarget
 
@@ -1153,8 +1165,11 @@ class AggregateGateSpec:
         unknown = _unknown_keys(d, {"missing_required", "unexpected_target"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
-        missing_required = d.get("missing_required")
-        if missing_required is not None:
+        missing_required: str | None = None
+        if "missing_required" in d:
+            missing_required = d["missing_required"]
+            if missing_required is None:
+                raise ValueError(f"{where}.missing_required must not be null")
             if not isinstance(missing_required, str) or missing_required not in {
                 v.value for v in OnMissingRequired
             }:
@@ -1162,8 +1177,11 @@ class AggregateGateSpec:
                     f"{where}.missing_required must be one of "
                     f"{[v.value for v in OnMissingRequired]}, got {missing_required!r}"
                 )
-        unexpected_target = d.get("unexpected_target")
-        if unexpected_target is not None:
+        unexpected_target: str | None = None
+        if "unexpected_target" in d:
+            unexpected_target = d["unexpected_target"]
+            if unexpected_target is None:
+                raise ValueError(f"{where}.unexpected_target must not be null")
             if not isinstance(unexpected_target, str) or unexpected_target not in {
                 v.value for v in OnUnexpectedTarget
             }:
