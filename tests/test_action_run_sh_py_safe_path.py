@@ -386,8 +386,18 @@ class TestPySafeDirFailsClosedWhenMktempFails:
         _mark_executable(fake_mktemp)
 
         script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
-        env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
-        result = _run_bash_script(script, env=env, timeout=30)
+        # A *relative* PATH entry ("fakebin", with cwd anchored to its
+        # parent) rather than str(fake_bin)'s absolute native Windows form
+        # -- the same fix TestPyBinResolvedAsAbsolute needed: an absolute
+        # backslash Windows path spliced into PATH is not reliably
+        # recognized by Git-Bash's own PATH search on every runner, while a
+        # plain relative entry resolved against a real cwd is (confirmed:
+        # this test alone still failed on windows-latest CI after the
+        # chmod fix above, with the real system mktemp running instead of
+        # the fake shim -- the same root cause, reached from PATH-entry
+        # form rather than the executable bit).
+        env = {**os.environ, "PATH": f"fakebin{os.pathsep}{os.environ['PATH']}"}
+        result = _run_bash_script(script, cwd=tmp_path, env=env, timeout=30)
         assert result.returncode == 1
         assert "UNREACHABLE" not in result.stdout
         assert "::error::" in result.stdout
