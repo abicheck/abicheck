@@ -187,6 +187,7 @@ def _seeded_includes_and_compile_context(
 
     ctx = evidence.compile
     cleanups: list[Callable[[], None]] = []
+    effective_ctx: CompileContext | None
     includes, applied, effective_ctx, _derived_dirs = (
         seed_includes_and_fold_compile_context(
             headers=evidence.headers,
@@ -211,6 +212,18 @@ def _seeded_includes_and_compile_context(
             pending_cleanups=cleanups,
         )
     )
+    # seed_includes_and_fold_compile_context() always returns a real
+    # CompileContext for `effective_ctx` -- it's built fresh from the
+    # individual kwargs above, never literally `ctx` -- so a no-op fold
+    # (`applied=False`) with no caller-supplied context would otherwise
+    # silently turn a `None` into a default-valued CompileContext() here.
+    # That distinction is load-bearing: service_dump_cache._dump_is_cacheable
+    # only permits caching when `compile is None` (Codex review, fresh
+    # evidence) -- preserve `None` in exactly that case so an otherwise
+    # cacheable typed dump/compare operand doesn't lose caching merely
+    # because unrelated build evidence was supplied and matched nothing.
+    if not applied and ctx is None:
+        effective_ctx = None
     return includes, effective_ctx, applied, cleanups
 
 
