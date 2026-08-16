@@ -246,6 +246,44 @@ class TestForcedIncludesReachTheDerivedContext:
         toks = _tokens(resolve_header_compile_context(ev, [tmp_path / "widget.h"]))
         assert toks[-2:] == ["-include", "generated_config.h"]
 
+    @pytest.mark.parametrize("search_flag", ["-iquote", "/I", "-idirafter"])
+    def test_operand_found_only_via_an_argv_only_search_dir_is_pinned(
+        self, tmp_path: Path, search_flag: str
+    ) -> None:
+        """Codex review: the rendered command does not carry these dirs.
+
+        `_context_flags` emits only the structured `include_paths`/
+        `system_include_paths`, and the compile-DB adapter never parses
+        `-iquote`/`/I`/`-idirafter` into those — so a bare `-include config`
+        that only such a directory resolves would be emitted into a command
+        that cannot find it, turning a working parse into a hard failure.
+        Resolving through the unit's own full search chain pins it instead.
+        """
+        gen = tmp_path / "gen"
+        gen.mkdir()
+        forced = gen / "config.h"
+        forced.write_text("#define BUILD_ONLY 1\n", encoding="utf-8")
+        ev = self._matched_unit(tmp_path, [search_flag, "gen", "-include", "config.h"])
+
+        toks = _tokens(resolve_header_compile_context(ev, [tmp_path / "widget.h"]))
+        assert toks[-2:] == ["-include", forced.as_posix()]
+
+    def test_the_units_own_directory_still_wins_over_a_search_dir(
+        self, tmp_path: Path
+    ) -> None:
+        # GCC's documented order: the preprocessor's working directory first,
+        # then the -I chain. A same-named file in both must resolve to the
+        # working-directory one.
+        gen = tmp_path / "gen"
+        gen.mkdir()
+        (gen / "config.h").write_text("#define FROM_GEN 1\n", encoding="utf-8")
+        near = tmp_path / "config.h"
+        near.write_text("#define FROM_CWD 1\n", encoding="utf-8")
+        ev = self._matched_unit(tmp_path, ["-iquote", "gen", "-include", "config.h"])
+
+        toks = _tokens(resolve_header_compile_context(ev, [tmp_path / "widget.h"]))
+        assert toks[-2:] == ["-include", near.as_posix()]
+
     def test_imacros_is_rendered_under_its_own_spelling(self, tmp_path: Path) -> None:
         # -imacros takes only the macros, not the declarations, so it must not
         # be flattened into -include.

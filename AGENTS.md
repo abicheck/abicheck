@@ -1528,6 +1528,28 @@ Once a root command genuinely clears the bar above, pick the right home:
   direction for a cache key to err in. Worth noting how this one was found:
   the previous round's own new test *pinned* the unresolved bare operand as
   expected output, which made a real gap read as a settled decision.
+  (5) A fifth round found the rendered forced include could point at nothing:
+  `_context_flags` emits only the structured `include_paths`/
+  `system_include_paths`, and the compile-DB adapter parses only
+  `-I`/`-isystem` into those — so a unit resolving its forced include through
+  an argv-only `-iquote gen` or MSVC `/Igen` had that directory in neither
+  field, and a bare `-include config` was emitted into a command that could
+  not find it. That is *worse* than the pre-existing behaviour of not
+  forwarding the forced include at all: a hard "file not found", or silently
+  the wrong same-named file. Fixed by resolving the operand against the
+  unit's own full search chain (`_forced_include_search_dirs`: `directory`
+  first, then quote/normal/system/after-system buckets, each combining the
+  structured field with the argv-only spellings) and emitting the absolute
+  path of the first match — removing the dependency on the rendered search
+  order rather than betting on it. **Deliberately *not* done: rendering
+  argv-only search dirs into the derived context.** That is the wider,
+  pre-existing fidelity gap the same review names — a *transitively* included
+  header the build reaches through `-iquote` is still unreachable to the L2
+  parse — but closing it changes include search order for every matched unit,
+  a materially broader behaviour change than this function's own correctness
+  requires, and it interacts with the bucket-ordering gap `_split_include_
+  tokens` already documents (the sixth finding above). Recorded in
+  `_forced_include_flags`'s own docstring as a residual.
   **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one

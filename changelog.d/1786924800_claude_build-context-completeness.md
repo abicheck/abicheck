@@ -9,8 +9,10 @@
   different struct layouts — while still reporting a real compile-unit match
   and stamping `AbiSnapshot.parsed_with_build_context`. A relative operand is
   resolved against the compile unit's own directory when that names a real
-  file, and left relative otherwise so a generated header the build finds
-  through its `-I` chain still resolves; MSVC `/FI` renders as GNU
+  file — searching the compile unit's own include chain, so a header the
+  build reaches only through an argv-only `-iquote`/`/I` directory is pinned
+  to its real location rather than emitted as a bare name the rendered
+  command could not find; MSVC `/FI` renders as GNU
   `-include`, matching how every other derived field is rendered.
   `-include-pch` (locked to the compiler build that produced it) and `/FU`
   (managed C++/CLI `#using`, naming no C/C++ header) are deliberately not

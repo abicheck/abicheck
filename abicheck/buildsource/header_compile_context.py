@@ -756,6 +756,73 @@ def _standard_conflicts_with_forced_language(
 #: vocabulary at all for the same reason.
 _UNRENDERABLE_FORCED_INCLUDE_OPTS = frozenset({"-include-pch"})
 
+#: The compile unit's own include-search chain, in the order a real
+#: preprocessor consults it, expressed as the argv prefixes each bucket is
+#: spelled with. Only used to *locate* a forced pre-include (see
+#: :func:`_forced_include_search_dirs`); the structured ``include_paths``/
+#: ``system_include_paths`` fields are folded into the matching buckets by
+#: that function, since the compile-DB adapter parses ``-I``/``-isystem`` into
+#: them while leaving every other spelling in argv only.
+_FORCED_INCLUDE_SEARCH_BUCKETS: tuple[tuple[str, ...], ...] = (
+    ("-iquote",),
+    ("-I", "/I"),
+    ("-isystem", "-cxx-isystem", "/imsvc", "/external:I"),
+    ("-idirafter",),
+)
+
+
+def _forced_include_search_dirs(cu: CompileUnit) -> list[Path]:
+    """Where *cu*'s own compile command would look for a forced pre-include.
+
+    GCC and Clang both resolve ``-include foo`` against the preprocessor's
+    working directory first and the include-search chain after, so this is
+    that chain: the unit's ``directory``, then quote-bucket dirs, then the
+    normal ``-I`` bucket, then system dirs, then after-system dirs.
+
+    Both halves of each bucket are needed, and that is the point (Codex
+    review, PR D, fourth round): the compile-DB adapter parses only
+    ``-I``/``-isystem`` into the structured ``include_paths``/
+    ``system_include_paths`` fields, leaving ``-iquote``/``/I``/``-idirafter``
+    in argv alone — so a unit that resolves its forced include through
+    ``-iquote gen`` has that directory in *neither* structured field.
+    Consulting argv here is what lets :func:`_forced_include_flags` emit an
+    absolute, always-resolvable path instead of a bare operand the rendered
+    command could not find.
+
+    Deterministic: structured entries keep their recorded order, argv-derived
+    dirs within a bucket are sorted (``_build_context_include_dirs`` returns a
+    set), so the same compile unit always yields the same chain.
+    """
+    from ..header_utils import _build_context_include_dirs
+
+    argv = list(cu.argv)
+    structured: dict[str, list[str]] = {
+        "-I": list(cu.include_paths),
+        "-isystem": list(cu.system_include_paths),
+    }
+    dirs: list[Path] = []
+    if cu.directory:
+        dirs.append(Path(cu.directory).expanduser())
+    for bucket in _FORCED_INCLUDE_SEARCH_BUCKETS:
+        for prefix in bucket:
+            dirs.extend(
+                _resolve_cu_relative_path(d, cu.directory)
+                for d in structured.get(prefix, ())
+            )
+        if argv:
+            dirs.extend(
+                Path(d)
+                for d in sorted(
+                    _build_context_include_dirs(
+                        argv,
+                        base_dir=cu.directory or None,
+                        expand_user=True,
+                        prefixes=bucket,
+                    )
+                )
+            )
+    return dirs
+
 
 def _forced_include_flags(cu: CompileUnit) -> list[str]:
     """Render *cu*'s own forced pre-includes as literal clang argv tokens.
@@ -783,16 +850,41 @@ def _forced_include_flags(cu: CompileUnit) -> list[str]:
     (``dumper_ast_config``). See :data:`_UNRENDERABLE_FORCED_INCLUDE_OPTS` for
     the two spellings that are deliberately dropped instead.
 
-    The operand is resolved against ``cu.directory`` (the compile command's
-    own cwd, which abicheck's is not) **only when that resolves to a real
-    file**. A bare ``-include config.h`` naming a generated header the build
-    finds through its ``-I`` chain must stay relative, or pinning it to a
-    non-existent ``<directory>/config.h`` would turn a header the include
-    search would have found into a hard "file not found" — GCC documents
-    exactly this two-stage lookup ("first searched in the preprocessor's
-    working directory", then the ``-iquote``/``-I`` chain), and the second
-    stage is the one this fallback preserves.
+    The operand is resolved against the compile unit's **own search chain**
+    (:func:`_forced_include_search_dirs`) — its ``directory`` first, then the
+    include buckets in the order a real preprocessor consults them, exactly
+    the two-stage lookup GCC documents for ``-include`` ("first searched in
+    the preprocessor's working directory", then the ``-iquote``/``-I``
+    chain) — and emitted as the absolute path of the first existing match.
+
+    Resolving through the *whole* chain rather than ``directory`` alone is
+    load-bearing, not a refinement (Codex review, PR D, fourth round). This
+    function renders a forced include into a command whose include-search
+    flags are **not** the unit's own: ``_context_flags`` emits only the
+    structured ``include_paths``/``system_include_paths``, so an argv-only
+    ``-iquote gen`` or MSVC ``/Igen`` is absent from the rendered command
+    entirely. Emitting a bare ``-include config`` that only that missing
+    directory could resolve would turn a working parse into a hard "file not
+    found", or silently select a different same-named file — strictly worse
+    than the pre-existing behaviour of not forwarding the forced include at
+    all. Pinning the absolute path removes the dependency on the rendered
+    search order instead of betting on it.
+
+    An operand that matches nowhere in the chain is emitted as written: it may
+    still be found through a search path the caller supplies, and a bare
+    relative token is the only honest thing to say about a file this side
+    cannot locate.
+
+    **Residual, pre-existing and deliberately not fixed here:**
+    ``_context_flags`` still does not render argv-only include-search
+    directories at all, so a *transitively* included header that the real
+    build reaches through ``-iquote``/``/I`` remains unreachable to the L2
+    parse. That is a fidelity gap in the derived context predating forced
+    includes — closing it changes include search order for every matched
+    unit, which is a materially wider behaviour change than this function's
+    own correctness needs. See ``AGENTS.md``.
     """
+    search_dirs = _forced_include_search_dirs(cu)
     flags: list[str] = []
     for option, operand in forced_include_operands(
         cu.argv, msvc=_is_msvc_command(cu.argv)
@@ -800,9 +892,17 @@ def _forced_include_flags(cu: CompileUnit) -> list[str]:
         if option in _UNRENDERABLE_FORCED_INCLUDE_OPTS:
             continue
         rendered_option = "-include" if option == "/FI" else option
-        resolved = _resolve_cu_relative_path(operand, cu.directory)
+        operand_path = Path(operand).expanduser()
+        resolved: Path | None = None
+        if operand_path.is_absolute():
+            resolved = operand_path if operand_path.is_file() else None
+        else:
+            resolved = next(
+                (d / operand_path for d in search_dirs if (d / operand_path).is_file()),
+                None,
+            )
         flags.extend(
-            [rendered_option, resolved.as_posix() if resolved.is_file() else operand]
+            [rendered_option, resolved.as_posix() if resolved is not None else operand]
         )
     return flags
 
