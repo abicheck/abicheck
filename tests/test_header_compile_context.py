@@ -1515,14 +1515,58 @@ def test_merge_l3_compile_context_none_explicit_uses_derived() -> None:
 def test_seeded_compile_context_noop_without_sources(tmp_path: Path) -> None:
     from abicheck.api_types import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_compile_context
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
 
     side = InputSpec(path=tmp_path / "lib.so", headers=(tmp_path / "h.h",))
     evidence = SideEvidence(
         headers=[tmp_path / "h.h"], compile=None, collect_mode="off", dump_manifest=None
     )
-    ctx, applied, cleanups = _seeded_compile_context(side, evidence)
-    assert (ctx, applied, cleanups) == (None, False, [])
+    includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+        side, evidence
+    )
+    assert (includes, ctx, applied, cleanups) == ([], None, False, [])
+
+
+def test_seeded_includes_and_compile_context_preserves_none_on_no_op_fold(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: `seed_includes_and_fold_compile_context`
+    always returns a real `CompileContext` for its own `l3_effective_context`
+    (built fresh from individual kwargs, never literally the caller's
+    `evidence.compile`) -- so when the fold finds nothing (`applied=False`)
+    and the caller supplied no context of its own, the wrapper must convert
+    that fabricated default back to `None` rather than silently promoting a
+    `None` into a real object. `service_dump_cache._dump_is_cacheable` only
+    permits caching when `compile is None`, so losing this distinction would
+    silently disable caching for an otherwise-cacheable typed dump/compare
+    operand whenever unrelated build evidence was supplied and matched
+    nothing."""
+    from abicheck.api_types import InputSpec
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+
+    def _fake_seed(*, pending_cleanups, **kwargs):
+        # Mirrors the real primitive's own no-op-fold return shape: a fresh,
+        # default-valued CompileContext, not the caller's (here None) one.
+        return [], False, CompileContext(), ()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        _fake_seed,
+    )
+
+    header = tmp_path / "h.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    side = InputSpec(path=tmp_path / "lib.so", sources=tmp_path, headers=(header,))
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+        side, evidence
+    )
+    assert applied is False
+    assert ctx is None
 
 
 def test_resolve_side_snapshot_stamps_parsed_with_build_context(

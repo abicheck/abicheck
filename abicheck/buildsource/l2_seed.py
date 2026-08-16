@@ -288,7 +288,11 @@ def derive_l2_include_dirs(
         # (Codex review — this call used to live inside this try before the
         # shared-helper extraction, and moved ahead of it by mistake).
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db,
+            build_config,
+            sources,
+            build_info,
+            build_query,
+            build_compile_db,
             build_targets,
         )
         if args is None:
@@ -406,7 +410,11 @@ def derive_l2_compile_context(
         # corrupt/unreadable pack must degrade best-effort, not raise
         # (Codex review).
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db,
+            build_config,
+            sources,
+            build_info,
+            build_query,
+            build_compile_db,
             build_targets,
         )
         if args is None:
@@ -485,7 +493,9 @@ def _merge_l3_compile_context(
     import cycle once ``cli_dump_helpers`` needed it directly (AGENTS.md
     "What NOT to do" -- prefer a leaf module both sides can depend on over
     extending ``IMPORT_CYCLE_ALLOWLIST``). ``service_input_resolution``'s
-    own ``_seeded_compile_context`` now imports it from here instead.
+    own ``_seeded_includes_and_compile_context`` (PR C, typed dump/scan
+    convergence) reaches it indirectly through
+    :func:`seed_includes_and_fold_compile_context` below instead.
 
     "Derived leads, explicit wins" is *not* the right rule for an include
     search path (Codex review): unlike a macro/std/sysroot switch, which a
@@ -701,7 +711,11 @@ def seed_includes_and_fold_compile_context(
         # raise (Codex review) -- an earlier revision of this function had it
         # outside the try, which reintroduced exactly that regression.
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db,
+            build_config,
+            sources,
+            build_info,
+            build_query,
+            build_compile_db,
             build_targets,
         )
         if args is None:

@@ -564,18 +564,34 @@ class TestBuildDerivedIncludeSeeding:
     def test_seeds_when_evidence_is_present_and_includes_are_empty(
         self, snap_path: Path, tmp_path: Path, monkeypatch
     ):
+        """PR C (typed dump/scan convergence) merged the typed API's own
+        two-call include-seed/compile-context-fold path into the one
+        combined `seed_includes_and_fold_compile_context` primitive the
+        three CLI-side resolvers already used -- see
+        `service_input_resolution._seeded_includes_and_compile_context`'s
+        own docstring. This test now mocks that combined function instead
+        of the removed `seed_l2_includes`.
+        """
         from abicheck import service
 
         seen: dict[str, object] = {}
         seeded = tmp_path / "generated-include"
         seeded.mkdir()
+        # The combined primitive is a no-op with no headers to match against
+        # (mirrors seed_l2_includes'/derive_l2_compile_context's own real
+        # no-op-without-headers contract) -- a header is required to reach it.
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n", encoding="utf-8")
 
         def _fake_seed(**kwargs):
             seen["headers"] = list(kwargs["headers"])
-            seen["allow_inferred_build_query"] = kwargs["allow_inferred_build_query"]
-            return [seeded], []
+            seen["collect_mode"] = kwargs["collect_mode"]
+            return [seeded], False, None, ()
 
-        monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", _fake_seed)
+        monkeypatch.setattr(
+            "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+            _fake_seed,
+        )
         captured: dict[str, object] = {}
         original = service.resolve_input
 
@@ -585,21 +601,32 @@ class TestBuildDerivedIncludeSeeding:
 
         monkeypatch.setattr(service, "resolve_input", _spy)
         service.run_dump_request(
-            DumpRequest(input=InputSpec(path=snap_path, build_info=tmp_path))
+            DumpRequest(
+                input=InputSpec(
+                    path=snap_path, headers=(header,), build_info=tmp_path
+                )
+            )
         )
         assert captured["includes"] == [seeded]
         # A Tier-2 call must never *execute* a build system as a side effect of
-        # resolving an input — passive discovery only.
-        assert seen["allow_inferred_build_query"] is False
+        # resolving an input — passive discovery only ("off" maps to
+        # allow_inferred_build_query=False inside the combined primitive).
+        assert seen["collect_mode"] == "off"
 
     def test_no_evidence_means_no_seeding_call(self, snap_path: Path, monkeypatch):
         """Without sources/build_info the seed is skipped entirely."""
         from abicheck import service
 
         def _boom(**kwargs):  # pragma: no cover - must never run
-            raise AssertionError("seed_l2_includes reached without build evidence")
+            raise AssertionError(
+                "seed_includes_and_fold_compile_context reached without "
+                "build evidence"
+            )
 
-        monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", _boom)
+        monkeypatch.setattr(
+            "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+            _boom,
+        )
         snap = service.run_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         assert snap.library == "libfoo.so.1"
 
@@ -608,11 +635,19 @@ class TestBuildDerivedIncludeSeeding:
     ):
         """Seeded temp dirs are drained only after the parse consumed them."""
         from abicheck import service
+        from abicheck.compile_context import CompileContext
 
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n", encoding="utf-8")
         order: list[str] = []
+
+        def _fake_seed(*, pending_cleanups, **kwargs):
+            pending_cleanups.append(lambda: order.append("cleanup"))
+            return [], False, CompileContext(), ()
+
         monkeypatch.setattr(
-            "abicheck.buildsource.l2_seed.seed_l2_includes",
-            lambda **kw: ([], [lambda: order.append("cleanup")]),
+            "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+            _fake_seed,
         )
         original = service.resolve_input
 
@@ -622,7 +657,11 @@ class TestBuildDerivedIncludeSeeding:
 
         monkeypatch.setattr(service, "resolve_input", _spy)
         service.run_dump_request(
-            DumpRequest(input=InputSpec(path=snap_path, build_info=tmp_path))
+            DumpRequest(
+                input=InputSpec(
+                    path=snap_path, headers=(header,), build_info=tmp_path
+                )
+            )
         )
         assert order == ["resolve", "cleanup"]
 

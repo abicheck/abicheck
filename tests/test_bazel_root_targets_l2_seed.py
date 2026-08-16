@@ -36,10 +36,13 @@ Covers, bottom-up:
 * ``l2_seed.seed_includes_and_fold_compile_context`` -- the scoped
   ``BuildConfig`` reaches ``collect_inline_pack``'s own ``build_config``
   argument (which drives ``bazel_targets=tuple(cfg.targets)``).
-* ``service_input_resolution._seeded_compile_context`` -- the typed API's
-  ``InputSpec.build_targets`` reaches the same seed via
-  ``l2_seed.derive_l2_compile_context``.
+* ``service_input_resolution._seeded_includes_and_compile_context`` -- the
+  typed API's ``InputSpec.build_targets`` reaches the same seed via the
+  identical ``l2_seed.seed_includes_and_fold_compile_context`` call (PR C,
+  typed dump/scan convergence, merged this module's own former two-call
+  shape into the one the other three CLI-side resolvers already used).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -101,9 +104,7 @@ def test_seed_includes_and_fold_compile_context_scopes_collect_inline_pack(
         # test only needs the call to have happened with the right args.
         raise RuntimeError("stop before any real collection")
 
-    monkeypatch.setattr(
-        l2_seed_mod, "collect_inline_pack", _fake_collect_inline_pack
-    )
+    monkeypatch.setattr(l2_seed_mod, "collect_inline_pack", _fake_collect_inline_pack)
 
     seed_includes_and_fold_compile_context(
         headers=[header],
@@ -132,33 +133,42 @@ def test_seed_includes_and_fold_compile_context_scopes_collect_inline_pack(
     assert captured["build_config"].targets == ["//:math"]
 
 
-def test_seeded_compile_context_forwards_input_spec_build_targets(
+def test_seeded_includes_and_compile_context_forwards_input_spec_build_targets(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """The typed API side: InputSpec.build_targets reaches
-    derive_l2_compile_context (and therefore the same collect_inline_pack
-    scoping) through service_input_resolution._seeded_compile_context."""
+    """The typed API side: InputSpec.build_targets reaches the combined
+    seed_includes_and_fold_compile_context call (and therefore its single
+    collect_inline_pack scoping) through
+    service_input_resolution._seeded_includes_and_compile_context.
+
+    PR C (typed dump/scan convergence) merged the typed API's own two
+    separate call paths (``_seeded_includes`` -> ``seed_l2_includes`` ->
+    ``derive_l2_include_dirs``, and ``_seeded_compile_context`` ->
+    ``derive_l2_compile_context``) into this one combined call -- see
+    ``_seeded_includes_and_compile_context``'s own docstring for why running
+    ``collect_inline_pack`` twice per side was a latent self-deadlock risk,
+    the same one already fixed for `dump`/`scan`'s three CLI-side resolvers.
+    This test used to be two (one per now-removed helper); both exercised
+    the identical `build_targets` gap through the same underlying
+    `collect_inline_pack` call, so one test on the combined function covers
+    what both did.
+    """
     from abicheck.api_types import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_compile_context
+    from abicheck.service_input_resolution import (
+        _seeded_includes_and_compile_context,
+    )
     from abicheck.service_scan import CompileContext
 
     captured: dict = {}
 
-    def _fake_derive_l2_compile_context(*, build_targets=(), **kwargs):
-        captured["build_targets"] = build_targets
-        return None, []
+    def _fake_collect_inline_pack(*, build_config, **kwargs):
+        captured["build_config"] = build_config
+        raise RuntimeError("stop before any real collection")
 
     import abicheck.buildsource.l2_seed as l2_seed_mod
 
-    monkeypatch.setattr(
-        l2_seed_mod, "derive_l2_compile_context", _fake_derive_l2_compile_context
-    )
-    monkeypatch.setattr(
-        "abicheck.service_input_resolution.derive_l2_compile_context",
-        _fake_derive_l2_compile_context,
-        raising=False,
-    )
+    monkeypatch.setattr(l2_seed_mod, "collect_inline_pack", _fake_collect_inline_pack)
 
     src = tmp_path / "src"
     src.mkdir()
@@ -172,45 +182,14 @@ def test_seeded_compile_context_forwards_input_spec_build_targets(
         collect_mode="build",
         dump_manifest=None,
     )
-    _seeded_compile_context(side, evidence)
-    assert captured["build_targets"] == ("//:math",)
-
-
-def test_seeded_includes_forwards_input_spec_build_targets(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """The typed API's OWN, separate include-dir seed (_seeded_includes ->
-    seed_l2_includes -> derive_l2_include_dirs) has the identical gap as
-    _seeded_compile_context above -- a distinct call path, fixed the same
-    way."""
-    from abicheck.api_types import InputSpec
-    from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_includes
-    from abicheck.service_scan import CompileContext
-
-    captured: dict = {}
-
-    def _fake_derive_l2_include_dirs(*args, build_targets=(), **kwargs):
-        captured["build_targets"] = build_targets
-        return [], []
-
-    import abicheck.buildsource.l2_seed as l2_seed_mod
-
-    monkeypatch.setattr(
-        l2_seed_mod, "derive_l2_include_dirs", _fake_derive_l2_include_dirs
+    includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+        side, evidence
     )
-
-    src = tmp_path / "src"
-    src.mkdir()
-    header = src / "api.h"
-    header.write_text("void f();\n", encoding="utf-8")
-
-    side = InputSpec(path=src / "lib.so", sources=src, build_targets=("//:math",))
-    evidence = SideEvidence(
-        headers=[header],
-        compile=CompileContext(),
-        collect_mode="build",
-        dump_manifest=None,
-    )
-    _seeded_includes(side, evidence)
-    assert captured["build_targets"] == ("//:math",)
+    assert captured["build_config"].targets == ["//:math"]
+    # The best-effort try/except inside seed_includes_and_fold_compile_context
+    # (same "degrade, never fatal" contract as derive_l2_include_dirs/
+    # derive_l2_compile_context) swallows the injected RuntimeError and
+    # degrades to the no-op result -- this test only needs the call to have
+    # happened with the right build_config, same as its combined-function
+    # sibling above.
+    assert (includes, ctx, applied, cleanups) == ([], evidence.compile, False, [])
