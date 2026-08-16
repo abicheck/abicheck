@@ -16,9 +16,22 @@ interface contract), [ADR-043](../adr/043-cli-pre-1.0-surface-reset.md) /
 (root-surface admission),
 [ADR-047](../adr/047-github-actions-integration-model.md) (Action model),
 [ADR-056](../adr/056-multi-artifact-library-set-scan.md) (`scan --artifact-set`).
-**Effort:** L (seven independent PRs) · **Risk:** mixed — PR 1 is
+**Effort:** L (seven independent PRs, plus three convergence prerequisites
+added by the post-#780/#782 review) · **Risk:** mixed — PR 1 is
 presentation-only, PR 1b is gated on new persisted-report schema work, PR 4
 changes what a CI job's exit code means.
+
+> **Review checkpoint (2026-08-16, `main` at `410caf5`, after
+> [#779](https://github.com/abicheck/abicheck/pull/779),
+> [#780](https://github.com/abicheck/abicheck/pull/780) and
+> [#782](https://github.com/abicheck/abicheck/pull/782)).** PR 1 and PR 2 are
+> implemented and reviewed as correct. The rest of this plan's ordering is
+> **superseded** by the reviewed sequence in "Ordering" at the bottom: the next
+> step is **not** another hard-delete PR. Three shared contracts — one typed
+> `dump` resolution path, one effective pack/gate configuration, one canonical
+> exit decision — have to converge first, or deleting the flags merely freezes
+> today's divergence between parallel paths into the removed-flag baseline. The
+> per-PR sections below carry the prerequisites each one gained.
 
 ## Problem
 
@@ -41,7 +54,8 @@ simplification).
 
 | Candidate | Verdict | Action |
 |---|---|---|
-| `--exit-code-scheme` (compare, scan) | Remove, but reworked | Own ADR + semantics PR: keep two orthogonal axes, drop the *manual algorithm selector* |
+| `--exit-code-scheme` (compare, scan) | Remove, but reworked | Own ADR + semantics PR: keep the orthogonal axes, drop the *manual algorithm selector* — after pack parity and one canonical `ExitDecision` |
+| `--require-complete-analysis` (compare, scan; new in #780) | **Keep** | Real, distinct axis — but move its semantics into the resolved gate/assurance policy instead of leaving it a CLI-only boolean |
 | `compare --stat`, `compare --recommend` | Remove | `--format review` replaces `--stat`; recommendation becomes an unconditional renderer output |
 | `scan --artifact-set` | **Keep** | Refine the value syntax only (repeatable option / manifest); do not overload positional `DIRECTORY` |
 | `--annotate`, `--annotate-additions` | Remove from CLI (PR 1b, not PR 1) | Options on `compare` alone, shared by both operand shapes (no CLI-level split is possible) — blocked on a release-report persistence prerequisite; see PR 1b |
@@ -54,14 +68,34 @@ an old spelling must fail as `No such option` with exit `64`.
 
 ## PR 0 — restore a green CI baseline first
 
-**Status: verified, not separately actioned** — the "Verified state" below
-was confirmed current as of PR #779; the standing Windows lane failure is
-tracked as pre-existing and unrelated to this initiative's own changes, per
-that PR's own thread. The branch-protection/required-checks work (items 3–4
-below) has not been done as part of this initiative.
-
 This is a prerequisite, not a nicety: a breaking interface change cannot be
-evaluated against a red baseline.
+evaluated against a red baseline. **The review splits it in two**, because the
+code half and the governance half now have genuinely different statuses:
+
+| | Scope | Status |
+|---|---|---|
+| **PR 0A** | The Windows test failures themselves (items 1–2 below) | **Closed at the test level** — the Windows unit *and* integration lanes passed on PR #782; the specific MSYS/Git-Bash failures described under "Verified state" are no longer the current blocker |
+| **PR 0B** | Required checks / Ruleset + exact-merge-SHA verification (items 3–4) | **Still open, still P0** — this is what actually makes a red CI block a merge |
+
+**PR 0B is the one to do first, and it is the review's PR A.** The branch API
+still reports `protected: true` with
+`required_status_checks.enforcement_level: off` and empty `contexts`/`checks`.
+Unless an equivalent GitHub Ruleset supplies them, a red CI does not block a
+merge — so PR 0A's green lanes are green by convention, not by enforcement.
+Separately, the exact merge SHA of #782 did not run a full CI sweep on
+`push: main` in the returned workflow set (AgentReady completed; Examples
+Validation was still running; no separate full `ci.yml` run over that exact
+SHA), which is precisely what item 4 exists to make detectable.
+
+Required checks should cover at least: `CI`, `Examples Validation`, `Test
+GitHub Action`, `CLI Interface Check`, `Security & Quality`, `AgentReady`, and
+the docs/schema checks. Prefer **one stable aggregate required check per
+workflow** (or a Ruleset-compatible job) over requiring every matrix leg
+individually — a matrix-leg-level required list goes stale on every matrix
+edit and is the usual reason required checks get turned back off.
+
+The "Verified state" below is kept as the historical record of what PR 0A
+fixed; it describes `main` as of PR #779, not today.
 
 **Verified state** (`ci.yml`, run `31882605683`, head `13be967` on `main`):
 19 of 20 jobs pass; the single failure is
@@ -99,7 +133,8 @@ standing red lane, not #770's regression.
    run the checks it claimed is detectable after the fact.
 
 **Done when** a full `ci.yml` run on `main` is green on Linux, macOS and
-Windows, and a red required check demonstrably blocks a merge.
+Windows (**0A — done**), and a red required check demonstrably blocks a merge
+(**0B — outstanding**).
 
 ## PR 1 — presentation
 
@@ -108,6 +143,14 @@ Windows, and a red required check demonstrably blocks a merge.
 `--used-by`/`--required-symbol` scoped-gate case, found by review after the
 first push), and the release recommendation is unconditional in
 `json`/`markdown`/`review` output.
+
+**Closed — do not reopen.** The review's only remaining housekeeping is
+negative, not new work: the Tier-2 Python compatibility shims
+(`render_output(stat=..., show_recommendation=...)`) must not leak back into
+the CLI as flags, and whether those kwargs are themselves stable Python API or
+removable is a separate pre-1.0 decision, not part of this initiative. Do not
+add `summary`/`release` values to `--report-mode` merely to give the removed
+flags a home (see "`--report-mode` stays as-is" below).
 
 Removes `compare --stat` and `compare --recommend` only. `--annotate` /
 `--annotate-additions` are **not** in this PR — see PR 1b below for why they
@@ -298,9 +341,61 @@ persistence prerequisite completing first:
    workflow/recipe/doc snippet using `extra-args` for this, and state the
    `extra-args` → `annotate` input migration for external callers.
 
+**New invariant (post-#780), and it is the reason PR 1b became PR E in the
+reviewed ordering:**
+
+> The Action never infers a gate's identity or its reason from stderr when the
+> versioned report already carries it.
+
+#780 made this checkable rather than aspirational: reports now persist
+`analysis_assurance`, `analysis_assurance_exit_contribution` and
+`contract_coverage_exit_contribution`, so the *exact* number each orthogonal
+axis folded into the exit code is machine-readable. `action/run.sh`'s
+`_assurance_gated` is already JSON-first (a dedicated
+`require-complete-analysis` boolean input, then
+`analysis_assurance.status` from the report) with the stderr grep kept only as
+the no-readable-JSON fallback — so this is technical debt, not a live bug. But
+the debt is real in two directions and both are PR 1b/E's job:
+
+- the Action still re-derives "did this axis gate" from *input + status*
+  instead of reading the persisted contribution, which is the field that
+  actually decided the exit code;
+- for a release/package operand there is still no persisted report to read at
+  all (see the second wrong idea above), so the stderr fallback is not a
+  fallback there — it is the only path.
+
+So the prerequisite below is not just "uncap the findings": the persisted
+report must be the single source for *both* the annotations and the gate
+explanation, for both operand shapes.
+
+The shape the Action should be able to read, uniformly, for a single-library
+compare, a release/package compare, and `scan --against`:
+
+```json
+{
+  "compatibility": {"verdict": "COMPATIBLE"},
+  "gate": {"exit_code": 0, "blocking": false},
+  "contract_coverage_exit_contribution": 0,
+  "analysis_assurance_exit_contribution": 1,
+  "exit": {"code": 1, "reasons": ["analysis_assurance"]},
+  "findings": []
+}
+```
+
+With that in place the Action does not parse stderr, does not re-run any
+comparison, does not guess why the exit was `1`, renders annotations from the
+persisted findings and the Job Summary from the same object, and behaves
+identically for a single pair and a release fan-out. The `exit` block is the
+same object PR 4/G formalizes as `ExitDecision` — build it once, in PR G, and
+have PR E consume it rather than inventing a second, Action-shaped spelling.
+
 **Tests.** A saved report fixture (both a single-library and a release-style
 report) must produce, through the Action's renderer, byte-identical
-annotations to what the CLI emitted for the same report before the move.
+annotations to what the CLI emitted for the same report before the move. A
+report carrying a non-zero `analysis_assurance_exit_contribution` /
+`contract_coverage_exit_contribution` must produce the correct labelled
+verdict with `STDERR_CONTENT` empty — i.e. the stderr path is provably not
+load-bearing when a report exists.
 `compare --annotate` exits `64` with `No such option` only once step 3 lands —
 not before.
 
@@ -386,12 +481,78 @@ no external-tooling consumers analogous to the aggregate *report*'s
 schema remains future work if an external producer needs one, not part of
 this slice.
 
+**Follow-up, explicitly still open (review):** the policy moved to the right
+*lifecycle stage* (plan time, versioned, alongside the expected target set) but
+not yet to durable *project configuration*. Today it is still restated per
+invocation, via `project plan --gate-missing-required` /
+`--gate-unexpected-target`. A stable gate policy should not have to be re-typed
+on every `project plan` run:
+
+```yaml
+# .abicheck.yml
+aggregate:
+  gate:
+    missing_required: fail
+    unexpected_target: include
+```
+
+Once that key exists and `project plan` sources it, the two `project plan`
+gate flags should be removed too, leaving that command's CLI to project config,
+build outputs, head/project identity, and output. This is a small, independent
+slice — it does **not** block any other PR here, and it is deliberately not
+folded into PR B/PR G's configuration convergence, whose subject is the
+compare/scan gate, not the aggregate target-expectation gate.
+
 **Tests:** manifest-supplied policy; run-plan-supplied policy; default policy;
 missing required target; unexpected analyzed report; unreadable unexpected
 report; `effective_policy` preserved in aggregate JSON; incompatible manifest
 schema rejected; the removed flags exit `64`.
 
 ## PR 3 — build execution moves into trusted config
+
+**Split into three slices by the post-#782 review.** PR #782 fixed a real
+defect — a `dump` baseline and a `scan --against` candidate given the *same*
+`compile_commands.json` could resolve to non-comparable `CompileContext`s,
+because `dump` stored L3 evidence without applying it to its own L2 header
+parse — and it fixed it *additively*, by calling one shared folding primitive
+from three existing paths. That closed the symptom and simultaneously proved
+the structural problem: there are still three resolution paths.
+
+```text
+compare's implicit dump  → resolve_side_snapshot (typed, shared)
+native `dump` CLI        → cli_dump_helpers.perform_elf_dump (its own pipeline)
+scan candidate           → scan_engine._build_new_snapshot (a third)
+```
+
+Deleting `--build-query`/`--build-compile-db` before those converge would move
+the inputs into config while leaving three places that interpret them, so:
+config could apply differently in the CLI and the typed API, `--dry-run` could
+print a context the real run does not use, the L3→L2 fold could diverge again,
+and every future context field would need hand-threading through three
+pipelines a fourth time.
+
+- **PR 3A — typed `dump` convergence (the review's PR C).** One canonical path:
+  `Click parsing → DumpRequest → ResolvedDumpRequest → dry-run or execution →
+  DumpResult`, with `dump_cmd`/`perform_elf_dump` routing through
+  `service_dump_pipeline.run_dump_request` the way `compare`'s implicit-dump
+  operand already does. `DumpResult` states the snapshot, requested vs.
+  effective depth, the resolved compile context, the build-query decision, the
+  source scope, the dependency scope, diagnostics, and the storage result — and
+  `--dry-run` renders *that object*, so the printed plan and the executed run
+  cannot disagree. The root `AGENTS.md` "Known gaps" entry on
+  `service_dump_pipeline.py` is the same migration seen from the code side.
+- **PR 3B — build-context completeness (the review's PR D).** Two #782
+  follow-ups that change the *parsed public surface*, not just performance, so
+  they belong before the model is called finished: (1) compile-unit matching —
+  the L2 include-dir seed is still gathered from *every* `CompileUnit` rather
+  than the matched one(s), so an unrelated TU's colliding generated header can
+  shadow the matched TU's; (2) forced includes — `-include`, `-imacros`, `/FI`,
+  `/FU` are absent from `ABI_RELEVANT_FLAG_PREFIXES`, so a matched unit's
+  macro-controlling forced-include header never reaches the derived L2 context
+  even though the run reports a match and stamps `parsed_with_build_context`.
+  Both are already recorded as known gaps in the root `AGENTS.md`.
+- **PR 3C — the removal itself** (everything the rest of this section
+  describes), landing only after 3A and 3B.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
@@ -448,6 +609,40 @@ the parser to lists only — every existing trusted string config would break.
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.
 
+## New since the plan was written — `--require-complete-analysis`
+
+#780 added `--require-complete-analysis` to `compare` and `scan --against`. It
+does not touch the compatibility verdict; it contributes exit `1` when
+`analysis_assurance.status != complete`, folded with `max` exactly like
+`--contract`'s coverage axis. **Keep it** — it answers a real and distinct CI
+question ("was this comparison complete enough to trust at all?"), and it is
+not a duplicate spelling of anything.
+
+What it must **not** become is a permanent CLI-only axis. Today it is not part
+of `CompareRequest`/`ScanRequest`, the release/package fan-out rejects it
+outright, `project`'s run plan cannot express it as durable policy, and gate
+packs cannot set it. That is one boolean per assurance dimension, decided at
+the CLI, and it does not scale: the next assurance dimension would arrive as a
+second such boolean.
+
+So fold its *semantics* into the typed gate/assurance policy PR B/PR G build:
+
+```yaml
+assurance:
+  required_status: complete
+# or, equivalently addressed from the gate namespace:
+gate:
+  require_complete_analysis: true
+```
+
+with the ordinary precedence `explicit CLI > run plan > project config >
+built-in default`, resolving to a single field
+(`resolved_gate.require_complete_analysis`) that `compare`, `scan --against`,
+the release compare, `check-target` and `aggregate` all read. The flag itself
+stays as the advanced one-run override. **Do not add a further standalone
+boolean for any new assurance dimension** — add it to the resolved policy
+object instead.
+
 ## PR 4 — one gate algorithm (`--exit-code-scheme` removal)
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
@@ -486,6 +681,61 @@ The report keeps stating both halves explicitly, so the number is explainable:
  "gate": {"exit_code": 1, "blocking": true,
           "reason": "addition configured as error"}}
 ```
+
+**Two prerequisites the post-#780 review adds, both before the flag is
+removed.**
+
+**(1) Pack parity — the review's PR B, and the harder blocker.** `--pack` is
+accepted by a single-pair `compare`, rejected by the release fan-out, and only
+partially honoured by `scan` (`cli_scan.py` rejects a gate pack outright,
+having no gate of its own — see the root `AGENTS.md` on `pack_application.py`).
+A pack can assign `gate.exit_code_scheme` and `gate.severity.*`. Removing
+`--exit-code-scheme` while pack resolution still differs per front end leaves
+no answerable question about how a legacy pack migrates: the answer would be
+"depends which command reads it." Land first: packs resolved **once** into one
+immutable effective configuration (one `CompatibilityEvaluationConfig`, one
+`GateOptions`), the same object used by `compare`, the release fan-out, `scan`
+and the Action, with the same effective-config digest recorded in every
+report. This is also PR 1b/E's prerequisite, which is why it sits early in the
+reviewed ordering rather than inside PR 4.
+
+**(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
+this is no longer two axes but a set of them, and a flat `max()` is not the
+whole rule: `NOT_COMPARABLE` (`16`) must dominate; a removed required library
+(`8`) has its own release policy and is already checked ahead of the
+coverage-only fallback; scan budget overflow (`5`) is scan-only; usage error
+(`64`) is not a result at all and never appears in a report; and exit `1` has
+several distinct causes that a bare number cannot tell apart. Encode it once:
+
+```python
+@dataclass(frozen=True)
+class ExitDecision:
+    code: int
+    reasons: tuple[ExitReason, ...]
+    compatibility_contribution: int
+    policy_gate_contribution: int
+    contract_coverage_contribution: int
+    analysis_assurance_contribution: int
+    target_coverage_contribution: int
+```
+
+with an explicit precedence resolver, pinned by the ADR and by tests rather
+than distributed across CLI callbacks:
+
+```text
+usage/config error        → 64, outside the report
+not comparable            → 16
+removed required library  →  8  (release policy)
+budget exceeded           →  5  (scan)
+ABI / API / policy gate   →  4 / 2 / 1
+coverage & assurance floors → 1  (max-folded, never lowering the above)
+clean                     →  0
+```
+
+`reasons` is what makes a shared `1` explainable, and it is the same block PR
+1b/E has the Action read instead of inferring from stderr. `docs/reference/
+exit-codes.md` becomes a rendering of this resolver, not a parallel hand-kept
+table.
 
 **Atomic change set:** remove the flag from `compare` and `scan`; migrate the
 Action side — there is **no** `exit-code-scheme` input in `action.yml` to
@@ -551,7 +801,13 @@ the surrounding text already shows as a usage example.
 **Sequencing note:** the syntax cleanup is lower value than finishing set-mode
 *semantics* — expected provider DSO, a symbol moved between sibling libraries,
 duplicated providers, L4 symbol reconciliation, cost estimation, and a
-machine-readable dry-run. Do the semantics first if the two compete.
+machine-readable dry-run. Do the semantics first if the two compete. The
+review reaffirms this and sharpens it: the *only* part of this section that is
+worth doing on its own is replacing the comma-separated value with a repeatable
+option. `--artifact-set-manifest` is worth adding only when it carries a real
+domain contract — member identity, expected-provider ownership, external
+providers, cohort — never merely as nicer syntax. `--artifact-set` itself is an
+explicit safety boundary, not surplus surface; it stays.
 
 ## Merge criteria for every removal PR here
 
@@ -589,6 +845,51 @@ docs/schema gates all green.
 
 ## Ordering
 
+The original ordering (kept below for reference) sequenced by risk. The
+post-#780/#782 review re-sequences by *contract convergence*: every remaining
+removal depends on a shared contract that does not exist yet, so the
+convergence work comes first and each deletion becomes the last step of the
+slice that made it safe.
+
+**Current, authoritative sequence:**
+
+```text
+PR A  repository governance          = PR 0B — required checks / Ruleset,
+                                       exact-merge-SHA verification
+PR B  effective configuration parity — packs resolved once into one
+                                       CompatibilityEvaluationConfig +
+                                       GateOptions, shared by compare /
+                                       release / scan / Action, digest in
+                                       every report
+PR C  typed dump convergence          = PR 3A — DumpRequest →
+                                       ResolvedDumpRequest → DumpResult, one
+                                       resolver for CLI/Python/Action, JSON
+                                       dry-run rendered from that object
+PR D  build-context completeness      = PR 3B — matched compile-unit
+                                       selection, forced includes, provenance
+                                       tests
+PR E  Action machine-report           = PR 1b — uncapped persisted release
+                                       findings, no comparison re-run, no
+                                       stderr inference
+      └─ then DELETE --annotate, --annotate-additions
+PR F  trusted build config            = PR 3C — build.query / build.compile_db
+                                       only from an explicit --config, trust
+                                       receipt in --dry-run, fail closed
+      └─ then DELETE dump --build-query, dump --build-compile-db
+PR G  canonical exit decision         = PR 4 — ExitDecision + reasons + one
+                                       automatic gate algorithm, schema /
+                                       report / Action parity
+      └─ then DELETE --exit-code-scheme
+PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
+                                       duplicated symbols, cost and dry-run;
+                                       syntax refinement last
+```
+
+Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2
+(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up).
+
+**Superseded original ordering:**
+
 ```text
 PR 0   green CI + required checks     (prerequisite)
 PR 1   presentation                   (low risk)
@@ -598,3 +899,9 @@ PR 3   build execution → trusted config (trust)
 PR 4   gate semantics + ADR           (behavioural, highest risk)
 PR 5   artifact-set syntax refinement (optional, after set-mode semantics)
 ```
+
+The governing principle behind the change: **stop the mechanical CLI cleanup
+until the typed resolution, configuration, gate and report paths are unified.**
+The remaining flags are not the risk; several parallel implementations of the
+same contract are. Deleting a flag that three code paths interpret differently
+does not remove the divergence — it removes the only place a user could see it.
