@@ -70,3 +70,27 @@ def test_clean_downgrade_with_partial_analysis_is_reported_not_failed() -> None:
 
     assert false_positives == []
     assert errors == []
+
+
+def test_known_gap_clean_downgrade_is_reported_not_failed() -> None:
+    guard = _guard_module()
+    row = _row("complete")
+    row["platform"] = "linux"
+
+    false_positives, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "known_gap": "GCC omits calling-convention metadata",
+                "known_gap_toolchains": ["gcc"],
+            }
+        },
+        "release-headers",
+        {"compiler_c": "gcc"},
+    )
+
+    assert false_positives == []
+    assert errors == []
+    assert len(downgrades) == 1
+    assert "known_gap" in downgrades[0]

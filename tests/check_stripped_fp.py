@@ -123,14 +123,11 @@ def _classify_results(
         if status == "ERROR" or not got:
             errors.append(f"{case}: status={status} ({r.get('message', '')[:120]})")
             continue
-        # A case with a known_gap already reports BREAKING under *full* debug
-        # evidence too (validate_examples.py/test_example_autodiscovery.py
-        # XFAIL it there) -- this invariant only guards against a *reduced*
-        # mode manufacturing a break full evidence doesn't already show, so a
-        # known_gap case's BREAKING here isn't something this mode invented.
-        # Only exempt it when the gap is actually scoped to apply to this row
-        # (toolchain/platform/variant) -- a gap documented for e.g. macOS/clang
-        # only must not mask a genuine Linux/gcc regression on the same case.
+        # A scoped known_gap is an already-triaged mismatch in either verdict
+        # direction, not evidence loss introduced by this reduced-evidence
+        # mode. Only exempt it when the gap applies to this exact row
+        # (toolchain/platform/variant), so a macOS/clang gap cannot mask a
+        # genuine Linux/gcc regression on the same case.
         platform = r.get("platform") or data.get("platform", "")
         # _result_to_json (validate_examples.py) writes the artifact variant to
         # both "mode" and "variant" (mode is the JSON artifact schema's
@@ -138,11 +135,12 @@ def _classify_results(
         # carries one of the two still resolves correctly, only falling back
         # to the CLI label when a row has neither (Codex review).
         variant = r.get("mode") or r.get("variant") or label
-        if (
-            entry.get("known_gap")
-            and _gap_applies(entry, case, platform, variant, data)
-            and expected in _COMPATIBLE_EXPECTED
-            and got == "BREAKING"
+        known_gap_applies = entry.get("known_gap") and _gap_applies(
+            entry, case, platform, variant, data
+        )
+        if known_gap_applies and (
+            (expected in _COMPATIBLE_EXPECTED and got == "BREAKING")
+            or (expected == "BREAKING" and got in _COMPATIBLE_EXPECTED)
         ):
             downgrades.append(
                 f"{case}: {expected}→{got} (known_gap, not evidence loss in {label} mode)"
