@@ -1322,6 +1322,33 @@ Once a root command genuinely clears the bar above, pick the right home:
   to one review comment on this PR. Documented in `ABI_RELEVANT_FLAG_
   PREFIXES`'s own docstring alongside this entry.
 
+  **A fifteenth finding, from a further Codex review round (P1), on the
+  thirteenth finding's own header-equality fix — a real gap in the fix
+  itself, caught before merge (fresh evidence).** Comparing only the
+  resolved *header* lists was not sufficient: `cli_scan.py` builds
+  `baseline_include = include_both + include_old` completely
+  independently of `baseline_header = header_both + header_old`, so a
+  shared, bare `-H api.h` (no `old=` scoping — passing the thirteenth
+  finding's own equality check) combined with side-specific `-I
+  old=old-build -I new=new-build` shares one header list across both
+  sides while still routing each through a genuinely different include
+  tree. The header-only check let the new side's folded `-D`/`-std`/
+  sysroot/include context reach a baseline parsed through a different
+  include scope — parsing the old binary under the new build's own
+  configuration risks a bad parse or a false ABI diff on the old side,
+  the exact failure mode this whole fix exists to prevent. Fixed by also
+  requiring the old side's resolved include scope to match the
+  candidate's own effective includes (`not baseline_includes or
+  list(baseline_includes) == list(eff_includes)`, ANDed with the
+  existing header-equality check) before reusing the fold — a genuine
+  `-I old=PATH`/`-I new=PATH` override on either side now falls back to
+  the caller's plain, unfolded context, same as a genuine `-H old=PATH`
+  override already did. Regression test:
+  `tests/test_cli_scan.py::test_baseline_compare_with_side_aware_includes_keeps_unfolded_context`
+  (confirmed to fail against the pre-fix — header-equality-only — code,
+  which forwarded the folded sentinel even though the old side's
+  resolved include scope diverged from the candidate's).
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

@@ -169,3 +169,16 @@
   a correct fix needs a new spaced-value-flag extraction branch, not a
   bare addition to the prefix list — left as a known gap (see
   `ABI_RELEVANT_FLAG_PREFIXES`'s own docstring and `AGENTS.md`).
+
+- **A further regression in the header-list-equality fix above, caught by a
+  further Codex review round (fresh evidence).** Comparing only the
+  resolved *header* lists was not sufficient: `cli_scan.py` builds
+  `baseline_include` independently of `baseline_header`, so a shared, bare
+  `-H api.h` combined with side-specific `-I old=.../-I new=...` shares one
+  header list across both sides while still routing each through a
+  genuinely different include tree. The header-only check let the new
+  side's folded `-D`/`-std`/sysroot/include context reach a baseline parsed
+  through a different include scope, risking a bad parse or a false ABI
+  diff on the old binary. Fixed by also requiring the old side's resolved
+  include scope to match the candidate's own effective includes before
+  reusing the fold.

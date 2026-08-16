@@ -1199,10 +1199,29 @@ def run_scan_core(
                     # differ; there is no old-side build evidence to derive a
                     # matching fold for that case, so the caller's plain,
                     # unfolded compile_context is the correct fallback there.
+                    #
+                    # Header equality alone is not sufficient (Codex review,
+                    # fresh evidence): `-H api.h -I old=old-build -I
+                    # new=new-build` shares one header list across both sides
+                    # while still routing each side through a genuinely
+                    # different include tree via `baseline_includes` --
+                    # `cli_scan.py` builds that list independently of
+                    # `baseline_headers`. Forwarding the new side's folded
+                    # `-D`/`-std`/sysroot/include flags there would parse the
+                    # old binary under the new build's configuration, so the
+                    # fold is only reused when the old side's *resolved
+                    # include scope* also matches the candidate's own (no
+                    # side-specific include override at all).
                     compile_context=(
                         eff_compile_context
-                        if not baseline_headers
-                        or list(baseline_headers) == list(headers)
+                        if (
+                            not baseline_headers
+                            or list(baseline_headers) == list(headers)
+                        )
+                        and (
+                            not baseline_includes
+                            or list(baseline_includes) == list(eff_includes)
+                        )
                         else compile_context
                     ),
                     baseline_headers=baseline_headers,
