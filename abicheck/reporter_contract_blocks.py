@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .checker_types import Change, DiffResult
+    from .severity import SeverityConfig
 
 
 def add_contract_context(
@@ -41,6 +42,7 @@ def add_contract_context(
     displayed: Sequence[Change] | None = None,
     *,
     require_complete_analysis: bool = False,
+    severity_config: SeverityConfig | None = None,
 ) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
     ``analysis_assurance``/``analysis_assurance_exit_contribution``
@@ -75,6 +77,26 @@ def add_contract_context(
                 result, require_complete=require_complete_analysis
             )
         )
+    # CLI cleanup phase two, PR G1: the same canonical `ExitDecision`
+    # `cli._exit_with_severity_or_verdict` resolves for the real process
+    # exit, persisted here so a report reader doesn't have to re-derive it
+    # from `severity.exit_code`/`contract_coverage_exit_contribution`/
+    # `analysis_assurance_exit_contribution` separately. `severity_config
+    # is not None` is the same signal every other block in this module and
+    # in `reporter.py` already uses to mean "the severity-aware scheme is in
+    # effect" (`cli_compare_helpers.report_severity` is `None` whenever
+    # `resolved_cfg.exit_code_scheme != "severity"`), so this reproduces
+    # `_exit_with_severity_or_verdict`'s own scheme selection rather than
+    # guessing at a new one. Unconditional -- unlike `contract_context`
+    # below, every comparison has a compatibility contribution, so there is
+    # always a decision to report, not just under `--contract`.
+    from .exit_decision import resolve_compare_exit_decision
+
+    scheme = "severity" if severity_config is not None else "legacy"
+    d["exit"] = resolve_compare_exit_decision(
+        result, severity_config, scheme,
+        require_complete_analysis=require_complete_analysis,
+    ).to_dict()
     add_use_case_impact(d, result, displayed)
 
     ctx = result.contract_context

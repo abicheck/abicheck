@@ -548,7 +548,8 @@ def _to_json_leaf(
     _add_reconciled(d, result)
     _add_contract_context(
         d, result, _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis)
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config)
     # Codex review: full/root-cause mode call this; leaf mode never did,
     # silently dropping policy_overrides/policy_reclassify here.
     _add_policy_overrides(d, result)
@@ -749,7 +750,8 @@ def _to_json_root_cause(
     _add_reconciled(d, result)
     _add_contract_context(
         d, result, _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis)
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1197,7 +1199,8 @@ def to_json(
     _add_reconciled(d, result)
     _add_contract_context(
         d, result, _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis)
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)

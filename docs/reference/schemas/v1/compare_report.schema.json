@@ -44,7 +44,8 @@
           "evidence_tier",
           "evidence_tiers",
           "analysis_assurance",
-          "analysis_assurance_exit_contribution"
+          "analysis_assurance_exit_contribution",
+          "exit"
         ]
       }
     },
@@ -1117,6 +1118,53 @@
       ],
       "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under --require-complete-analysis \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when the flag was given and analysis_assurance.status is not \"complete\", 0 otherwise (including when the flag was never given). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
       "$comment": "aggregate.py's _analysis_assurance_exit reads this field directly rather than recomputing it."
+    },
+    "exit": {
+      "type": "object",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
+      "required": [
+        "code",
+        "reasons",
+        "compatibility_contribution",
+        "contract_coverage_contribution",
+        "analysis_assurance_contribution"
+      ],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The process exit code this decision resolves to, before any release/scan-specific axis (removed-library, budget, not_comparable) that this module does not yet cover."
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "compatibility_gate",
+              "contract_coverage",
+              "analysis_assurance",
+              "clean"
+            ]
+          },
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0."
+        },
+        "compatibility_contribution": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict)."
+        },
+        "contract_coverage_contribution": {
+          "type": "integer",
+          "enum": [0, 1],
+          "description": "Duplicated from the top-level contract_coverage_exit_contribution (present only under --contract) for a single self-contained decision object; 0 when no contract domain was selected."
+        },
+        "analysis_assurance_contribution": {
+          "type": "integer",
+          "enum": [0, 1],
+          "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when --require-complete-analysis was not given."
+        }
+      },
+      "$comment": "exit_decision.resolve_compare_exit_decision is the one function that builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for the real process exit, so the two cannot disagree."
     },
     "analysis_assurance": {
       "type": "object",

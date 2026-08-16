@@ -1046,48 +1046,45 @@ def _exit_with_severity_or_verdict(
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
-    ADR-049 Phase 7: the contract-coverage axis is folded in here rather than
-    at each call site, so a command cannot acquire a compatibility exit and
-    forget the orthogonal one. `fold_coverage_exit` reads the floor off
-    *result*'s own persisted context and is `0` when the run recorded none.
-
-    P0.4: the analysis-assurance axis (`--require-complete-analysis`) is
-    folded the same way, immediately after -- both are `max`-based orthogonal
-    floors, and folding this one here too means a caller cannot pick up one
-    axis's exit contribution and forget the other's, the same reasoning
-    ADR-049 Phase 7's docstring above already gives for its own axis. `0`
-    contribution, and this is a pure no-op, whenever the flag was not passed.
+    ADR-049 Phase 7 / P0.4: the contract-coverage and analysis-assurance axes
+    are folded in here rather than at each call site, so a command cannot
+    acquire a compatibility exit and forget an orthogonal one. Since CLI
+    cleanup phase two PR G1, the fold itself is
+    `exit_decision.resolve_compare_exit_decision` -- the one canonical
+    resolver, rather than three separately-called `max` folds -- so a
+    caller building the report's `exit` block (`reporter_contract_blocks.
+    add_contract_context`) and this function's own process exit read the
+    identical decision. The diagnostics below still read each axis's own
+    contribution straight off the resolved `ExitDecision`, so their wording
+    (and the final exit code) are unchanged from before this delegation.
     """
-    from .analysis_assurance import (
-        assurance_floor_diagnostic,
-        fold_analysis_assurance_exit,
+    from .analysis_assurance import assurance_floor_diagnostic
+    from .contract_coverage_exit import announce_coverage_floor
+    from .exit_decision import resolve_compare_exit_decision
+
+    decision = resolve_compare_exit_decision(
+        result, sev_config, scheme,
+        require_complete_analysis=require_complete_analysis,
     )
-    from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
-    from .severity import compute_exit_code, legacy_exit_code
-    if scheme == "severity":
-        assert sev_config is not None
-        eff_sets = result._effective_kind_sets()
-        exit_code = compute_exit_code(
-            result.changes,
-            sev_config,
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
-    else:
-        exit_code = legacy_exit_code(result.verdict)
-    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, secondary_fmt=secondary_fmt)
-    exit_code = fold_coverage_exit(exit_code, result)
+    announce_coverage_floor(
+        result, base_exit=decision.compatibility_contribution,
+        fmt=fmt, secondary_fmt=secondary_fmt,
+    )
+    # The pre-assurance exit is what the diagnostic's own wording describes
+    # ("floored to"/"contributes, below the compatibility axis's own exit"),
+    # so it excludes the assurance contribution itself rather than reading
+    # `decision.code` (which, when assurance is the winning axis, would be
+    # self-referential).
+    pre_assurance_exit = max(
+        decision.compatibility_contribution, decision.contract_coverage_contribution,
+    )
     diagnostic = assurance_floor_diagnostic(
-        result, require_complete=require_complete_analysis, base_exit=exit_code
+        result, require_complete=require_complete_analysis, base_exit=pre_assurance_exit
     )
     if diagnostic is not None:
         click.echo(diagnostic, err=True)
-    exit_code = fold_analysis_assurance_exit(
-        exit_code, result, require_complete=require_complete_analysis
-    )
-    if exit_code != 0:
-        sys.exit(exit_code)
+    if decision.code != 0:
+        sys.exit(decision.code)
 
 
 def _log_one_side_debug(
