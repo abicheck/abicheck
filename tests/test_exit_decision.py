@@ -101,19 +101,22 @@ class TestResolveExitDecision:
             ExitReason.CONTRACT_COVERAGE, ExitReason.ANALYSIS_ASSURANCE,
         }
 
-    def test_matches_manual_max_fold(self) -> None:
+    @pytest.mark.parametrize(
+        ("compat", "coverage", "assurance"),
+        [(0, 0, 0), (2, 0, 0), (0, 1, 0), (0, 0, 1), (4, 1, 1), (1, 1, 1)],
+    )
+    def test_matches_manual_max_fold(
+        self, compat: int, coverage: int, assurance: int
+    ) -> None:
         """`code` is exactly `max()` over the three contributions -- the
         identical value the pre-PR-G1 sequential fold chain computed.
         """
-        for compat, coverage, assurance in [
-            (0, 0, 0), (2, 0, 0), (0, 1, 0), (0, 0, 1), (4, 1, 1), (1, 1, 1),
-        ]:
-            decision = resolve_exit_decision(
-                compatibility_contribution=compat,
-                contract_coverage_contribution=coverage,
-                analysis_assurance_contribution=assurance,
-            )
-            assert decision.code == max(compat, coverage, assurance)
+        decision = resolve_exit_decision(
+            compatibility_contribution=compat,
+            contract_coverage_contribution=coverage,
+            analysis_assurance_contribution=assurance,
+        )
+        assert decision.code == max(compat, coverage, assurance)
 
     def test_to_dict_is_json_serializable(self) -> None:
         decision = resolve_exit_decision(

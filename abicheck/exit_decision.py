@@ -16,7 +16,7 @@
 """The canonical ``ExitDecision`` — CLI cleanup phase two, PR G1.
 
 ``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR 4 records that a
-single-pair `compare`/`scan --against` invocation's exit code is folded from
+single-pair `compare` invocation's exit code is folded from
 several independently-computed, orthogonal contributions today
 (`severity.compute_exit_code`/`severity.legacy_exit_code`,
 `contract_coverage_exit.fold_coverage_exit`,
@@ -176,12 +176,20 @@ def resolve_compare_exit_decision(
     """:func:`resolve_exit_decision`, deriving every contribution from
     *result* the same way `cli._exit_with_severity_or_verdict` does today.
 
-    The single call site a native `compare`/`scan --against` invocation
-    needs: it reproduces that function's exact fold order
-    (compatibility → coverage floor → assurance floor, each `max`-based) as
-    one canonical resolution, so a caller building the report's ``exit``
-    block and a caller computing the real process exit code cannot read
-    two different numbers for the same comparison.
+    The single call site a native `compare` invocation needs: it reproduces
+    that function's exact fold order (compatibility → coverage floor →
+    assurance floor, each `max`-based) as one canonical resolution, so a
+    caller building the report's ``exit`` block and a caller computing the
+    real process exit code cannot read two different numbers for the same
+    comparison.
+
+    **`scan --against` does not call this function yet (Codex review, fresh
+    evidence).** `scan_engine.py`/`cli_scan_baseline.py` compute their own
+    exit code and report contributions independently -- their comments
+    describe themselves as *mirroring* `compare`'s pattern, but neither
+    calls `resolve_compare_exit_decision` or emits a top-level ``exit``
+    object. Wiring `scan --against` through this resolver is scoped to a
+    later PR, not this one.
 
     **`--used-by`/`--required-symbol(s)` scoped gating overrides the
     compatibility axis entirely (Codex review, fresh evidence).**

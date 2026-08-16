@@ -1151,7 +1151,7 @@
         "compatibility_contribution": {
           "type": "integer",
           "minimum": 0,
-          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict) -- UNLESS --used-by/--required-symbol(s) scoping is in effect, in which case this is the already-folded scoped application/plugin-host contract's own exit code (cli_compare_helpers._apply_scoped_gating's result.scoped_exit_code), not the informational full-library gate; reasons carries scoped_gate rather than compatibility_gate in that case."
+          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict) -- UNLESS --used-by/--required-symbol(s) scoping is in effect, in which case this is the PRE-FOLD scoped application/plugin-host contract's own exit code (cli_compare_helpers._apply_scoped_gating's result.scoped_compatibility_contribution, captured before the coverage/assurance floors below are applied to it), not the informational full-library gate and not the already-folded result.scoped_exit_code -- so a genuine tie between the scoped gate and contract_coverage_contribution/analysis_assurance_contribution is visible here rather than hidden behind an already-maxed value; reasons carries scoped_gate rather than compatibility_gate in that case."
         },
         "contract_coverage_contribution": {
           "type": "integer",
