@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache
-from ._compiler_options import has_explicit_cpp_std
+from ._compiler_options import has_explicit_cpp_std, split_gcc_options
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -635,6 +635,26 @@ def _castxml_fallback_reason(
     return "castxml-direct-include-guard"
 
 
+def _configured_target_triple(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+) -> str | None:
+    """Return the effective explicit clang target, else its probed default.
+
+    This is deliberately limited to target selection already supplied to the
+    frontend.  It gives declaration parsing enough context to discard an
+    explicit default ``ms_abi``/``sysv_abi`` spelling without guessing from
+    the machine running abicheck.
+    """
+    args = [*gcc_option_tokens, *split_gcc_options(gcc_options or "")]
+    target: str | None = None
+    for index, arg in enumerate(args):
+        if arg.startswith("--target="):
+            target = arg.partition("=")[2] or None
+        elif arg in ("--target", "-target") and index + 1 < len(args):
+            target = args[index + 1] or None
+    return target or _tool_identity_metadata(clang_bin).get("target_triple")
+
+
 def _header_ast_parser(
     headers: list[Path],
     extra_includes: list[Path],
@@ -706,6 +726,9 @@ def _header_ast_parser(
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
+            target_triple=_configured_target_triple(
+                gcc_options, gcc_option_tokens, clang_bin
+            ),
         )
         stamped = cast(
             _ClangAstParser,

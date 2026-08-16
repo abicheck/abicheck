@@ -575,7 +575,33 @@ def _clang_attr_arg_tokens(child: dict[str, Any]) -> list[str]:
     return args
 
 
-def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
+def _target_default_abi_attribute(target_triple: str | None) -> str | None:
+    """Return a known x86-64 target's explicit default ABI attribute.
+
+    ``ms_abi`` and ``sysv_abi`` are useful facts only when they select a
+    non-default calling convention.  Clang preserves an explicit spelling even
+    when it merely repeats the target default, which would otherwise make two
+    ABI-identical headers appear different.  Do not extrapolate from an
+    unknown target (or from another architecture): those targets may assign a
+    distinct meaning to the attributes and must retain the spelling.
+    """
+    if not target_triple:
+        return None
+    parts = target_triple.lower().split("-")
+    if not parts or parts[0] not in {"x86_64", "amd64"}:
+        return None
+    if "windows" in parts:
+        return "ms_abi"
+    if any(os_name in parts for os_name in (
+        "linux", "android", "darwin", "freebsd", "netbsd", "openbsd", "solaris",
+    )):
+        return "sysv_abi"
+    return None
+
+
+def _clang_contract_attributes(
+    node: dict[str, Any], *, target_triple: str | None = None
+) -> list[str]:
     """Normalized contract/calling-convention attributes of a decl node.
 
     Argument-bearing attributes keep their operands in the token
@@ -611,6 +637,13 @@ def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
                     rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qualifiers
                 ):
                     tokens.add(spelling)
+    # An explicit spelling of the selected target's default is not an ABI
+    # selection.  Only normalize when the actual target is known; treating a
+    # host/default assumption as universal would erase real target-specific
+    # evidence from header-only scans.
+    default_abi = _target_default_abi_attribute(target_triple)
+    if default_abi is not None:
+        tokens.discard(default_abi)
     return sorted(tokens)
 
 
@@ -744,8 +777,13 @@ class _ClangAstParser:
         exported_static: set[str],
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
+        target_triple: str | None = None,
     ) -> None:
         self._root = root
+        # May be unavailable for synthetic/unit ASTs or an unprobeable
+        # compiler.  In that case attribute spelling remains evidence rather
+        # than being normalized against an assumed host ABI.
+        self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
         (
@@ -1341,7 +1379,9 @@ class _ClangAstParser:
                     # clang stamps "variadic": true on FunctionDecl; the
                     # qualtype spelling ("void (int, ...)") is the fallback.
                     is_variadic=bool(node.get("variadic")) or "..." in qualtype,
-                    contract_attributes=_clang_contract_attributes(node),
+                    contract_attributes=_clang_contract_attributes(
+                        node, target_triple=self._target_triple
+                    ),
                     exception_spec=_clang_exception_spec(quals),
                     deprecated=_clang_deprecated_message(node),
                     # G31 Phase C backend audit -- see _clang_method_is_override.

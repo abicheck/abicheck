@@ -231,14 +231,16 @@ def test_parse_functions_uses_desugared_outer_type_for_typedef_abi_attribute() -
     assert fn.contract_attributes == ["sysv_abi"]
 
 
-def test_parse_functions_does_not_normalize_unknown_platform_cc_spelling() -> None:
+def test_parse_functions_does_not_make_ignored_attribute_spelling_a_fact() -> None:
     root = _tu(
         {
             "kind": "FunctionDecl",
             "name": "api",
             "loc": {"file": "include/api.h", "line": 3},
             "mangledName": "api",
-            "type": {"qualType": "void () __attribute__((cdecl))"},
+            # Clang drops unknown/ignored spellings from its AST type.  The
+            # fallback must only recognize its two supported ABI spellings.
+            "type": {"qualType": "void () __attribute__((unknown_thing))"},
             "inner": [],
         }
     )
@@ -246,6 +248,54 @@ def test_parse_functions_does_not_normalize_unknown_platform_cc_spelling() -> No
     (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
 
     assert fn.contract_attributes == []
+
+
+def test_parse_functions_discards_explicit_sysv_default_for_known_target() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((sysv_abi))"}, "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(
+        root, {"api"}, set(), target_triple="x86_64-pc-linux-gnu"
+    ).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_discards_explicit_ms_default_for_known_target() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((ms_abi))"}, "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(
+        root, {"api"}, set(), target_triple="x86_64-pc-windows-msvc"
+    ).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_keeps_abi_spelling_without_known_x86_default() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((ms_abi))"}, "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(
+        root, {"api"}, set(), target_triple="aarch64-unknown-linux-gnu"
+    ).parse_functions()
+
+    assert fn.contract_attributes == ["ms_abi"]
 
 
 def test_parse_functions_ignores_non_string_qual_type_for_abi_fallback() -> None:
@@ -3601,6 +3651,27 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert isinstance(parser, _ClangAstParser)
     assert [f.name for f in parser.parse_functions()] == ["foo"]
+
+
+def test_header_ast_parser_passes_explicit_target_to_clang_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ast = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "api.h", "line": 1}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((sysv_abi))"},
+        }
+    )
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
+    parser = _header_ast_parser(
+        [], [], backend="clang", compiler="c++", gcc_path=None, gcc_prefix=None,
+        gcc_options="--target=x86_64-pc-linux-gnu", sysroot=None, nostdinc=False,
+        lang=None, exported_dynamic={"api"}, exported_static=set(),
+        public_header_paths=[], public_dir_paths=[],
+    )
+
+    assert [f.contract_attributes for f in parser.parse_functions()] == [[]]
 
 
 def test_header_ast_parser_clang_branch_records_abi_dialect(
