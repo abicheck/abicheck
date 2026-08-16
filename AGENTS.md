@@ -1496,6 +1496,60 @@ Once a root command genuinely clears the bar above, pick the right home:
   assertion catching `deferred` leaking into the fold's own explicit
   tokens and via the final ordering check).
 
+  **A nineteenth finding, from real Bazel/castxml CI evidence (not a
+  hand-built fixture) on `napetrov/abicheck-bazel-lab`'s diagnostic PR #14,
+  after repinning it to `abicheck/abicheck@84cf3d4` (PR #788) — a narrower
+  residual of this same topic survives the eighth/`_build_new_snapshot`
+  fold fix above, investigated but not fixed.** The lab's
+  `validate-two-fresh-mains.yml` workflow builds BASE and HEAD with real
+  Bazel, captures target-scoped cquery/aquery evidence for both, `dump`s
+  each fresh (`fresh-base.abi.json`/`fresh-head.abi.json`, same code,
+  identical `--sources`/`--build-info`), then separately `scan`s HEAD
+  `--against` the fresh BASE dump. `compare fresh-base fresh-head` (pure
+  `dump` vs `dump`) reads `COMPATIBLE`/`NO_CHANGE` with a complete
+  `analysis_assurance` — confirming `language_standard` parity holds, i.e.
+  the eighth-finding fix above genuinely works. But `scan HEAD --against
+  fresh-base.abi.json` (the same HEAD code, same `-H`/`--sources`/
+  `--build-info` inputs, `dump`'s baseline) still reads `NOT_COMPARABLE`:
+  `diff.reason` names exactly one differing field, `include_sequence` (not
+  `language_standard`, which no longer reproduces) — a narrower,
+  previously-undetected sibling of the field this whole topic exists to
+  close, confirmed via the run's own uploaded `two-fresh-mains-validation`
+  artifact (run
+  https://github.com/napetrov/abicheck-bazel-lab/actions/runs/31950549361,
+  job 95173233150, commit `a7f5a7f`). The most concrete, verified-by-
+  reading (not yet verified against a live repro — no `bazel`/`castxml` in
+  this pass's environment) structural asymmetry: `scan_engine.
+  _build_new_snapshot` passes its raw, **unexpanded** `headers` list
+  (`-H new=math.h -H new=include` — the directory entry still present as a
+  single item) into both `seed_includes_and_fold_compile_context` and
+  `service.resolve_input`, while `cli_dump_helpers.perform_elf_dump` first
+  calls `expand_header_inputs()` — which recursively expands a directory
+  via `header_utils.iter_directory_headers` into individual files, in a
+  deterministic order, with order-preserving dedup — and passes that
+  already-**expanded** `resolved_headers` list to the identical two calls
+  instead. `seed_includes_and_fold_compile_context`'s own use of `headers`
+  is confirmed harmless (`seed_l2_includes` only ever tests it for
+  truthiness, never iterates it), so the divergence — if this asymmetry is
+  indeed the cause, which is not yet confirmed — would have to originate
+  deeper, in whatever directory-expansion `service.resolve_input`/
+  `dumper.dump()`'s own ELF path performs internally on an unexpanded
+  directory entry, which may not traverse/order/dedup identically to
+  `expand_header_inputs`'s explicit, upfront pass. **Not fixed here**: the
+  hypothesis above is code-reading-only, this pass's environment has no
+  `bazel`/`castxml` to build a live repro and verify it, and even if
+  confirmed, the fix (either making `scan_engine._build_new_snapshot` call
+  `expand_header_inputs()` upfront the way `perform_elf_dump` already does,
+  or tracing the deeper internal expansion path to bring it in line) needs
+  the same real-repro verification discipline every other finding in this
+  topic already required, not a guess shipped without it. Consequence for
+  `napetrov/abicheck-bazel-lab`: PR #14's `fresh-to-fresh` control job
+  should be treated as still red on this one residual field, and the lab's
+  own checked-in `abi/math.abicheck.json` should **not** be regenerated
+  against the new core pin yet — doing so now would just encode a baseline
+  that a fresh `scan --against` still can't cleanly compare to, the same
+  problem this diagnostic exists to catch, not fix.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
