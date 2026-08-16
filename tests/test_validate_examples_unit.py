@@ -712,6 +712,7 @@ class TestArtifactVariants:
             1.25,
         )
 
+        result = result._replace(analysis_assurance={"status": "partial"})
         payload = _result_to_json(result)
 
         assert payload["component"] == "synthetic-example"
@@ -720,6 +721,7 @@ class TestArtifactVariants:
         assert payload["source_layers"] == ["L0", "L1", "L2", "L3", "L4", "L5"]
         assert payload["evidence_asymmetry"] == "symmetric"
         assert payload["seconds"] == 1.25
+        assert payload["analysis_assurance"] == {"status": "partial"}
 
     def test_source_layers_reflect_actual_headers(self, tmp_path: Path) -> None:
         header = tmp_path / "v1.h"

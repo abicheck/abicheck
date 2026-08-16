@@ -36,6 +36,16 @@ GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 # is still a spurious break the guard must catch.
 _COMPATIBLE_EXPECTED = {"COMPATIBLE", "NO_CHANGE", "COMPATIBLE_WITH_RISK"}
 
+# A reduced-evidence BREAKING -> clean result is only an expected downgrade
+# when the comparison receipt says the analysis was incomplete. Do not accept
+# ``not_requested``: it says this axis did not run, so it cannot substantiate
+# the claim that this particular clean verdict lost evidence.
+_EXPLICITLY_INCOMPLETE_ASSURANCE_STATUSES = {
+    "partial",
+    "failed",
+    "not_comparable",
+}
+
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -141,7 +151,21 @@ def _classify_results(
         if expected in _COMPATIBLE_EXPECTED and got == "BREAKING":
             false_positives.append(f"{case}: expected {expected} got {got}")
         elif expected == "BREAKING" and got in _COMPATIBLE_EXPECTED:
-            downgrades.append(f"{case}: {expected}→{got} (evidence lost in {label} mode)")
+            assurance = r.get("analysis_assurance")
+            assurance_status = (
+                assurance.get("status") if isinstance(assurance, dict) else None
+            )
+            if assurance_status in _EXPLICITLY_INCOMPLETE_ASSURANCE_STATUSES:
+                downgrades.append(
+                    f"{case}: {expected}→{got} (evidence lost in {label} mode; "
+                    f"analysis_assurance={assurance_status})"
+                )
+            else:
+                errors.append(
+                    f"{case}: {expected}→{got} without explicitly incomplete "
+                    "analysis_assurance "
+                    f"(status={assurance_status!r})"
+                )
     return false_positives, downgrades, errors
 
 

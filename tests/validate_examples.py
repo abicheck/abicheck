@@ -239,6 +239,11 @@ class CaseResult(NamedTuple):
     # KINDS_MISMATCH row can be diagnosed from the artifact alone, without
     # re-running the case locally.
     actual_kinds: tuple[str, ...] = ()
+    # The compare report's analysis-assurance receipt, retained verbatim in
+    # validation artifacts. Reduced-evidence validation consumers need this
+    # to distinguish an honest BREAKING -> clean evidence-loss downgrade from
+    # a regression that merely hid a break.
+    analysis_assurance: dict[str, object] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -655,20 +660,29 @@ def _build_compare_cmd(
 
 def _run_compare_and_parse(
     compare_cmd: list[str],
-) -> tuple[str | None, tuple[str, ...], str | None]:
-    """Run the compare command and parse its JSON verdict and change kinds.
+) -> tuple[str | None, tuple[str, ...], dict[str, object] | None, str | None]:
+    """Run the compare command and parse its JSON verdict, kinds, and receipt.
 
-    Returns ``(verdict, kinds, None)`` on success or ``(None, (), error_msg)``
-    on failure. *kinds* is every ``changes[].kind`` in the report, used to
-    check ``expected_kinds``/``expected_absent_kinds`` from ground_truth.json.
+    Returns ``(verdict, kinds, analysis_assurance, None)`` on success or
+    ``(None, (), None, error_msg)`` on failure. *kinds* is every
+    ``changes[].kind`` in the report, used to check
+    ``expected_kinds``/``expected_absent_kinds`` from ground_truth.json.
+    The assurance object is carried into the validation artifact without
+    interpretation; ``check_stripped_fp.py`` owns its validation policy.
     """
     rc = subprocess.run(compare_cmd, capture_output=True, text=True, timeout=60)
     try:
         data = json.loads(rc.stdout)
     except json.JSONDecodeError:
-        return None, (), f"invalid JSON from compare: {rc.stdout[:200]}"
+        return None, (), None, f"invalid JSON from compare: {rc.stdout[:200]}"
     kinds = tuple(c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict))
-    return data.get("verdict", "UNKNOWN"), kinds, None
+    assurance = data.get("analysis_assurance")
+    return (
+        data.get("verdict", "UNKNOWN"),
+        kinds,
+        assurance if isinstance(assurance, dict) else None,
+        None,
+    )
 
 
 def _build_compare_direct_cmd(
@@ -717,8 +731,8 @@ def _dump_and_compare(
     new_build_info: Path | None = None,
     sources: bool = False,
     pattern_verdicts: bool = False,
-) -> tuple[str | None, tuple[str, ...], str | None]:
-    """Run abicheck dump+compare. Returns (verdict, kinds, error_msg).
+) -> tuple[str | None, tuple[str, ...], dict[str, object] | None, str | None]:
+    """Run abicheck dump+compare. Returns (verdict, kinds, assurance, error_msg).
 
     On success *error_msg* is None. On failure *verdict* is None and *kinds*
     is empty.
@@ -760,7 +774,7 @@ def _dump_and_compare(
     )
     r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=120)
     if r1.returncode != 0:
-        return None, (), f"dump v1 failed: {r1.stderr[:200]}"
+        return None, (), None, f"dump v1 failed: {r1.stderr[:200]}"
 
     snap2 = tmp / "snap2.json"
     cmd2 = _build_dump_cmd(
@@ -774,7 +788,7 @@ def _dump_and_compare(
     )
     r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
     if r2.returncode != 0:
-        return None, (), f"dump v2 failed: {r2.stderr[:200]}"
+        return None, (), None, f"dump v2 failed: {r2.stderr[:200]}"
 
     compare_cmd = _build_compare_cmd(
         snap1=snap1,
@@ -1344,7 +1358,7 @@ def run_case(
             )
 
     # Dump + compare
-    got, got_kinds, dc_err = _dump_and_compare(
+    got, got_kinds, analysis_assurance, dc_err = _dump_and_compare(
         tmp, v1_so, v2_so, v1_hdr, v2_hdr,
         scope_public_headers=bool(entry.get("scope_public_headers", False)),
         old_build_source=old_build_source,
@@ -1392,6 +1406,7 @@ def run_case(
         kinds_strict=kinds_strict,
         kinds_strict_detail=kinds_detail,
         actual_kinds=tuple(sorted(set(got_kinds))),
+        analysis_assurance=analysis_assurance,
     )
 
 
@@ -1545,6 +1560,8 @@ def _result_to_json(r: CaseResult) -> dict[str, object]:
     d["manual_review_ok"] = r.status in {"XFAIL", "SKIP"}
     d["category_strict"] = r.category_strict
     d["actual_kinds"] = list(r.actual_kinds)
+    if r.analysis_assurance is not None:
+        d["analysis_assurance"] = r.analysis_assurance
     return d
 
 
