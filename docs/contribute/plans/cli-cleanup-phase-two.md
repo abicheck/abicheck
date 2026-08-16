@@ -87,7 +87,7 @@ code half and the governance half now have genuinely different statuses:
 | | Scope | Status |
 |---|---|---|
 | **PR 0A** | The Windows test failures themselves (items 1–2 below) | **Closed at the test level** — the Windows unit *and* integration lanes passed on PR #782; the specific MSYS/Git-Bash failures described under "Verified state" are no longer the current blocker |
-| **PR 0B** | Required checks / Ruleset + exact-merge-SHA verification (items 3–4) | **Still open, still P0** — this is what actually makes a red CI block a merge |
+| **PR 0B** | Required checks / Ruleset + exact-merge-SHA verification (items 3–4) | **Code side implemented; the Ruleset toggle itself is still an outstanding manual step** — see status note below |
 
 **PR 0B is the one to do first, and it is the review's PR A.** The branch API
 still reports `protected: true` with
@@ -98,6 +98,24 @@ Separately, the exact merge SHA of #782 did not run a full CI sweep on
 `push: main` in the returned workflow set (AgentReady completed; Examples
 Validation was still running; no separate full `ci.yml` run over that exact
 SHA), which is precisely what item 4 exists to make detectable.
+
+> **Status note.** Every code-side prerequisite for item 3 is implemented:
+> `.github/AGENTS.md`'s new "Required-status-check configuration" section
+> states the classification rule (superseding the hand-copied-list attempts
+> below, kept here as the historical record of why a rule beat a list) and
+> the concrete required-check name list it produces; `ci.yml` gained the two
+> neutral-aggregate gate jobs (`docs-pr-required`/`test-action-required`)
+> `test-action.yml`'s own `test-action-summary` aggregate they wrap, all
+> structurally guarded by `tests/test_required_checks_governance.py`. Item
+> 4's `verify-merge-checks.yml` (push-to-`main` exact-merge-SHA
+> verification) is implemented and tested the same way. **What remains is
+> exactly one manual action**: an account with repository-admin access must
+> actually configure the GitHub Ruleset (or classic branch protection) to
+> require the check names `.github/AGENTS.md`'s section lists — no tool
+> available to an automated PR reaches that surface (confirmed: neither the
+> GitHub MCP server's tool set nor any CLI available in this environment
+> exposes branch-protection/Ruleset administration). Once that toggle is
+> flipped, PR 0B is fully closed.
 
 **The required-check list must match `.github/AGENTS.md`'s own required-vs-
 informational classification, not the set of workflow names visible in a run

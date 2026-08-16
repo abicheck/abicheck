@@ -30,6 +30,92 @@ Not every workflow here blocks a merge. Before assuming a red check means
 | `test-action.yml` | Yes, when `action/**`/`action.yml` changes | See `action/AGENTS.md` |
 | `bugfix-test-contract.yml` | Yes, on `fix:`/`perf:`/`security:` PRs | Structural half: a fix changing shipped code must change a test. Declared half: the PR body must answer the bug-fix test contract, plus any conditional the diff triggers. Bypass with the `skip-test-contract` label. See `scripts/check_bugfix_test_contract.py` for what each answer is for. |
 | `publish.yml` / `pages.yml` | N/A (release/deploy only) | Not PR gates |
+| `verify-merge-checks.yml` | N/A (post-merge only, `push: main`) | Not a PR gate — see "Required-status-check configuration" below. |
+
+## Required-status-check configuration (CLI cleanup phase two, PR A / PR 0B)
+
+The table above states which workflows are *supposed to* gate a merge; this
+section is the mechanical rule for turning that into a real GitHub
+required-status-checks list (Ruleset or classic branch protection), and the
+two things this repo added so a path-filtered "Yes, when X changes" row can
+actually be required without stranding every PR that doesn't touch X.
+
+**The rule**, applied fresh against the table above at configuration time —
+not a hand-copied snapshot, which drifted wrong three times in a row before
+this was written down as a rule instead of a list (see the CLI cleanup
+phase-two plan's own PR 0B section for that history):
+
+1. For every workflow the table marks required (unconditionally or "when X
+   changes"), read its own `on: pull_request:` block.
+2. **No `paths:` filter** (the workflow always runs on a PR against `main`;
+   an internal diff check or label decides applicability instead) → require
+   its own check name directly. `changelog-check.yml`/`cli-interface-check.yml`/
+   `bugfix-test-contract.yml`/`dependency-review.yml`/`security.yml`/`ci.yml`
+   are all in this bucket.
+3. **Has a `paths:` filter** (the workflow may not run at all on an
+   unrelated PR) → never require its own check name directly — no native
+   GitHub mechanism (classic branch protection or a Ruleset's required-
+   status-checks rule) conditions "required" on which paths a given PR
+   touched, so doing so strands every PR that doesn't touch that path.
+   `docs-pr.yml` and `test-action.yml` are in this bucket, and each has a
+   **neutral-aggregate gate job living in `ci.yml`** instead
+   (`docs-pr-required`/`test-action-required`, both unconditioned like every
+   other `ci.yml` job): each re-evaluates the exact same `paths:` filter its
+   target workflow's own trigger uses; when the paths don't match, there is
+   nothing to gate and the job succeeds immediately; when they do match, the
+   target workflow is guaranteed to have been triggered by the same
+   `pull_request` event, so the gate job polls that workflow's own aggregate
+   check (`build-docs` for `docs-pr.yml`; the added `test-action-summary`
+   job's `test-action summary` check for `test-action.yml`, since that
+   workflow fans out to 17+ independent jobs with no single existing
+   pass/fail check to point at) for the same head SHA and mirrors its
+   conclusion. **Require `docs-pr-required`/`test-action-required` in the
+   Ruleset, never `build-docs`/`test-action summary` directly** — the whole
+   point is that the wrapper is unconditionally present while the wrapped
+   check may not be.
+4. Anything the table marks **not required** stays out of the required set
+   entirely — this rule does not change that classification.
+
+**The required-check list, applying this rule to the table above (2026-08,
+`main` at the CLI cleanup phase-two governance PR):** `ai-readiness`,
+`fair-metadata` (check name `FAIR metadata and packaging`), `lint-and-types`,
+`unit-tests (ubuntu-latest, 3.13, false)` (the canonical Linux/3.13 lane —
+not every matrix leg, see "one stable aggregate check" below),
+`packaging (ubuntu-latest)`, `packaging (windows-latest)`,
+`changelog-fragment`, `cli-interface-diff`, `test-contract`,
+`Dependency Review`, `Security Scan`, `CodeQL Analysis (python)`,
+`docs-pr-required`, `test-action-required`.
+
+**This document states the rule and the resulting list; it does not itself
+turn the list into an enforced Ruleset.** That configuration step is a
+repository-admin action (GitHub Settings → Rules, or the REST/GraphQL
+Rulesets API with an admin-scoped token) outside what an automated PR can
+carry out — apply the list above there by hand, or with `gh api` /
+equivalent tooling that holds that access, and re-derive it from this
+section's rule (not by re-copying this list verbatim) if the table above has
+since changed.
+
+**Prefer one stable aggregate required check per always-required workflow**
+over requiring every matrix leg individually — a matrix-leg-level required
+list goes stale on every matrix edit and is the usual reason required checks
+get turned back off. `test-action.yml`'s own `test-action-summary` job
+(`needs:` every job in that workflow, `if: always()`) is exactly this for a
+fan-out workflow with no single existing pass/fail check; `docs-pr.yml`
+already has only one job (`build-docs`) and needed no separate aggregate.
+
+**Exact-merge-SHA verification (item 4).** `verify-merge-checks.yml` runs on
+every push to `main` and looks up the PR GitHub associates with that commit
+(covers squash/merge/rebase merges alike), then re-checks that PR's own
+already-recorded *tested head SHA* — not the new merge commit, which most of
+the required workflows above never re-run against (`pull_request`-only
+triggers) and which wouldn't prove anything about what was reviewed even if
+they did — against the unconditional half of the required-check list above
+(the two neutral-aggregate checks are deliberately excluded; see the
+workflow's own header comment for why). It cannot block an already-completed
+merge; it fails loudly on `main`'s own Actions tab instead, which is what
+makes a merge that slipped through a misconfigured or momentarily-disabled
+Ruleset *detectable* rather than invisible — the exact gap that let the
+#782 merge SHA go out with no full `ci.yml` sweep having run against it.
 
 ## Local equivalence (CLAUDE.md "M0-3")
 
