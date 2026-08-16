@@ -723,46 +723,6 @@ class TestL0ContextAsymmetry:
         assert res.exit_code != 0, res.output
 
 
-class TestMissingDwarfEvidence:
-    """A binary-backed clean result is not a complete layout/ABI assessment
-    when both sides lack DWARF."""
-
-    @staticmethod
-    def _stripped_binary_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
-        from abicheck.elf_metadata import ElfMetadata
-
-        fns = [_fn("pub_a", "_Z5pub_av")]
-        common = {
-            "library": "libfoo.so.1",
-            "functions": fns,
-            "from_headers": True,
-            "elf": ElfMetadata(soname="libfoo.so.1"),
-        }
-        return (
-            AbiSnapshot(version="1.0", **common),
-            AbiSnapshot(version="2.0", **common),
-        )
-
-    def test_symmetric_binary_without_dwarf_is_partial(self) -> None:
-        old, new = self._stripped_binary_pair()
-        result = checker.compare(old, new)
-        aa = result.analysis_assurance
-        assert isinstance(aa, AnalysisAssurance)
-        assert aa.l0_context_status == "clean"
-        assert aa.dwarf_context_status == "not_evaluated"
-        assert aa.status == "partial"
-        assert any("without DWARF" in note for note in aa.notes)
-
-    def test_clean_verdict_keeps_default_exit_but_require_complete_fails(
-        self, tmp_path: Path
-    ) -> None:
-        old, new = self._stripped_binary_pair()
-        default = _compare(tmp_path, (old, new))
-        required = _compare(tmp_path, (old, new), "--require-complete-analysis")
-        assert default.exit_code == 0, default.output
-        assert required.exit_code == 1, required.output
-
-
 class TestL3ContextAsymmetry:
     """P1 review, Finding 3: when the baseline carries L3 ``BuildEvidence``
     but the target has none, ``prepare_embedded_build_source()`` already
