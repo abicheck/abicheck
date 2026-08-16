@@ -114,12 +114,16 @@ inputs:
       more `-H/--header` root, which is where `dump` reads declaration
       provenance from AND extracts headers from (a directory entry tags
       everything under it public and expands to every header inside). scan
-      mode forwards it both as `--public-header-dir` (scope only) and as a
-      bare `-H` root, so its own header extraction expands the same
-      directory `dump` does — keeping a `scan --against` a fresh `dump`
-      baseline of the same inputs comparable instead of drifting apart on
-      `include_sequence` for no real recipe difference (lab report). compare
-      has no equivalent flag.
+      mode forwards it both as `--public-header-dir` (scope only) and as an
+      `-H` root, so its own header extraction expands the same directory
+      `dump` does — keeping a `scan --against` a fresh `dump` baseline of
+      the same inputs comparable instead of drifting apart on
+      `include_sequence` for no real recipe difference (lab report). The
+      `-H` root is candidate-sided (`new=...`) for a scalar scan with a
+      resolved baseline — so it never leaks into the baseline/old side's
+      own header parse even when `old-header` is also given — and bare
+      (both-sided) for an audit-only or `--artifact-set` scan, which has no
+      old side to protect. compare has no equivalent flag.
     required: false
   build-target:
     description: >

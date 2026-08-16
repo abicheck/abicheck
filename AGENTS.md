@@ -855,6 +855,63 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
+- **`--build-target` silently does nothing when combined with a pre-captured
+  Bazel `--build-info` (an `aquery`/`cquery` jsonproto), on both `dump` and
+  `scan` — investigated, not fixed (Codex review, fresh evidence, P0.2
+  follow-up).** `BazelAdapter.collect()`'s `self.targets` scoping is applied
+  in exactly two places: gating whether a *live* `bazel query` subprocess
+  runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is
+  given and no pre-captured `aquery=`/`cquery=` path was supplied), and
+  populating the `TargetScope` report (`requested`/`resolved`/
+  `transitive_count`) on the returned `BuildEvidence`. Neither path filters
+  `ev.compile_units`/`ev.targets` themselves once a pre-captured file is
+  parsed — `_collect_aquery`/`_collect_cquery` walk the *entire* captured
+  action/target graph unconditionally. `buildsource/inline.py`'s
+  `_maybe_collect_bazel_build_info` (the function `collect_inline_pack`
+  routes a `--build-info` recognized as `bazel_aquery`/`bazel_cquery` through)
+  doesn't even accept a `targets` parameter, so `--build-target` isn't merely
+  unenforced here — it's never threaded to this call site at all, and no
+  diagnostic or `TargetScope` records that a scope was requested. Confirmed
+  by reading the code (no live Bazel repro run in this pass): `scan
+  --build-info saved-aquery.json --build-target //:lib` (or the identical
+  `dump` invocation) collects every TU in the captured workspace, with no
+  error, warning, or `TargetScope` entry showing the mismatch between what
+  was requested and what was actually scoped — unrelated targets can pollute
+  L3 evidence and any detector built on it. **Not fixed here, and the two
+  candidate fixes are not equally easy:** (1) *Actually filter* the captured
+  graph to the transitive closure of the requested roots. Feasible in
+  principle for `cquery` data, whose `Target.dependencies` already carries a
+  real label-to-label dependency edge list (`attrs.get("deps", ...)` in
+  `_collect_cquery`) a BFS could walk — but a `cquery`-only capture produces
+  no `compile_units` at all (only `_collect_aquery` does), so this alone
+  doesn't scope the TUs that actually matter. `aquery` data has no equivalent
+  target-level `deps` list — only a flat action list, each tagged with its own
+  `targetId` (`CompileUnit.target_id`) — so a correct closure would have to be
+  reconstructed from the action graph's own input-artifact edges
+  (`_AqueryGraph`'s depset walk), a materially different and more involved
+  algorithm than the `cquery` case, not a shared implementation. (2) *Reject*
+  the combination with a clear usage error instead — architecturally cleaner,
+  but `collect_inline_pack`/`_maybe_collect_bazel_build_info` sit in a shared
+  Tier-2 module used by both CLI and typed-API callers (`embed_build_source`,
+  in turn called from `cli_dump_helpers.py`, `scan_engine.py`, and
+  `service_input_resolution.py`), and raising there can only be a plain
+  `ValueError`/`AbicheckError` (per this codebase's Tier-1/Tier-2 separation —
+  Click-specific exceptions belong to the CLI layer only). Neither `dump_cmd`
+  nor `scan_cmd` currently wraps its `embed_build_source`/`run_scan_core` call
+  in a catch for that error class (confirmed by reading both), so today such
+  an error would propagate as an unhandled Python exception with a raw
+  traceback instead of a clean `click.UsageError`/exit 64 — fixing that
+  requires adding (and testing) a catch-and-reraise at every one of those call
+  sites, not a single choke point. Either option is a real, multi-call-site
+  feature needing its own dedicated design and test coverage, not a
+  same-session reactive patch under continued review pressure — per this
+  file's own "known gaps over risky reactive patches" convention. Until then,
+  the safe workaround is to only combine `--build-target` with a *live* query
+  (`--sources <workspace>` and no `--build-info`, letting `BazelAdapter` run
+  `bazel query deps(...)` itself, which does scope correctly) or to
+  pre-capture the `aquery`/`cquery` jsonproto already scoped to the desired
+  targets before passing it as `--build-info`.
+
 - **The native ELF `abicheck dump` path never applies L3 build context to its own
   L2 header parse, and this is now confirmed by an external end-to-end
   reproduction, not only by the pre-existing module-map note about the
