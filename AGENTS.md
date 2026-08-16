@@ -1541,28 +1541,46 @@ Once a root command genuinely clears the bar above, pick the right home:
   and `dump`'s header lists therefore converge on the identical expanded,
   deduped, deterministically-ordered file set before any header-AST parse
   runs; a raw-vs-expanded asymmetry cannot be the cause of the `include_
-  sequence` mismatch. **The real cause remains unidentified.** Two
-  unverified candidates worth checking first in a follow-up pass (neither
-  confirmed, both requiring the same live-repro discipline before trusting
-  either): `perform_elf_dump`'s and `scan_engine._build_new_snapshot`'s
-  calls to `seed_includes_and_fold_compile_context` seed `gcc_path`/
-  `gcc_prefix`/`gcc_options`/`gcc_option_tokens`/`sysroot`/`nostdinc`/
-  `frontend`/`frontend_context` from genuinely different starting points —
-  `dump`'s call reads its own already-resolved local variables (`gcc_path`,
-  `header_backend`, ...), while `scan`'s call reads them off a
-  `compile_context` object (`compile_context.gcc_path if compile_context
-  else None`, `compile_context.frontend if compile_context else "auto"`,
-  ...) that may not be populated identically for every field even when the
-  same CLI flags were given on both commands; and `build_query`/
-  `build_compile_db` are hard-coded `None` on `scan`'s call but forwarded
-  from the caller on `dump`'s, though neither is set by this specific
-  lab repro's own Action inputs, making it an unlikely match for *this*
-  reproduction specifically. **Not fixed here**: no confirmed hypothesis
-  exists yet to fix, this pass's environment has no `bazel`/`castxml` to
-  build and verify one, and per this file's own "known gaps over risky
-  reactive patches" convention, the next candidate needs the same
-  live-repro verification every other finding in this topic already
-  required before being trusted, let alone fixed. Consequence for
+  sequence` mismatch.
+
+  **A second Codex review round found the real mechanism: a genuine
+  ordering asymmetry in when each path classifies an inferred `-H` header
+  root relative to the L3→L2 fold, confirmed by reading both call
+  sequences in full.** `cli_dump_helpers.perform_elf_dump` calls
+  `header_utils.resolve_inferred_header_roots(headers, includes,
+  gcc_options=effective_gcc_options, gcc_option_tokens=tuple
+  (gcc_option_tokens))` — using its own pre-fold local variables — *before*
+  its later `seed_includes_and_fold_compile_context` call folds real L3
+  evidence into those variables. `scan_engine._build_new_snapshot` calls
+  `seed_includes_and_fold_compile_context` *first*, then passes the
+  returned, already-folded `compile_context` straight into
+  `service.resolve_input(..., compile=compile_context)`; `resolve_input`'s
+  own ELF dispatch, `_dump_elf`, makes its *own* internal
+  `resolve_inferred_header_roots(headers, includes, gcc_options=cc.
+  gcc_options, gcc_option_tokens=cc.gcc_option_tokens)` call reading `cc =
+  compile` — i.e. the already-folded context, not a pre-fold one.
+  `resolve_inferred_header_roots`'s own docstring states its bucket choice
+  depends on exactly this: plain `-I` (high priority) when there is no
+  build context, `-isystem` (lower priority, below build-context dirs) when
+  the compile context already supplies its own includes. So the identical
+  `-H` header root can be classified into a *different* search bucket
+  between the two paths purely because of *when*, relative to the fold,
+  each one asks — dump always asks with an empty/explicit-only context,
+  scan always asks with the real L3-derived one already folded in — which
+  is a directly plausible mechanism for the observed `include_sequence`
+  mismatch (a bucket reassignment changes a root's rendered position in the
+  sequence). **Not fixed here**: this mechanism is verified by reading, not
+  yet by a live repro (this pass's environment still has no `bazel`/
+  `castxml`), and a real fix means reordering one of two large, carefully-
+  sequenced pipelines (`perform_elf_dump` is at its 2000-line hard cap;
+  `scan_engine._build_new_snapshot`'s own ordering exists for the flock-
+  contention reason the "fifth finding" above already documents) — which
+  side should move, and what changes for a header root when no L3 evidence
+  exists at all, needs its own careful design and regression coverage, not
+  a same-round reactive patch — per this file's own "known gaps over risky
+  reactive patches" convention, the same live-repro verification every
+  other finding in this topic already required before being trusted, let
+  alone fixed. Consequence for
   `napetrov/abicheck-bazel-lab`: PR #14's `fresh-to-fresh` control job
   should be treated as still red on this one residual field, and the lab's
   own checked-in `abi/math.abicheck.json` should **not** be regenerated
