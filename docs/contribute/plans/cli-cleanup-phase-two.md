@@ -667,6 +667,47 @@ pipelines a fourth time.
   migration seen from the code side; that entry does not yet mention the scan
   side explicitly, so this plan is the tracking place for that half until it
   does.
+
+  > **Investigated in depth; one real, scoped slice landed, the full
+  > convergence NOT attempted (2026-08-16).** `service_input_resolution.
+  > _seeded_includes`/`_seeded_compile_context` — the per-input primitive
+  > `compare`'s implicit-dump operand and `dump`'s typed API
+  > (`run_dump_request`) already share — ran the L2 include-dir seed and the
+  > P0.3 L3→L2 compile-context fold as two independent `collect_inline_pack()`
+  > calls, diverging from `seed_includes_and_fold_compile_context()`, the one
+  > combined primitive the three CLI-side resolvers (`perform_elf_dump`,
+  > `handle_non_elf_dump`, `scan_engine._build_new_snapshot`) already
+  > converged on for exactly this reason (self-deadlock risk under an inferred
+  > build query — see the L3→L2-fold "Known gaps" entry's own fifth finding).
+  > Fixed: merged into one `_seeded_includes_and_compile_context()`, using the
+  > same shared primitive the other three call sites use — closing one real
+  > piece of drift, verified by the existing test suite plus `mypy`/`ruff`.
+  > **The rest of PR 3A — routing `perform_elf_dump`/`handle_non_elf_dump`
+  > and `scan_engine._build_new_snapshot` themselves through
+  > `run_dump_request`, and making `dump --dry-run` render a real
+  > `DumpResult` — was not attempted**, for three concrete reasons found by
+  > reading the code, not assumed: (1) `dump --dry-run`
+  > (`render_dump_dry_run`) is today a hand-written *second*
+  > implementation, not a dry pass of the same resolver — `run_dump_request`
+  > has no "resolve without executing" mode to render from yet; (2)
+  > `perform_elf_dump` runs three post-processing passes after the primary
+  > snapshot (ADR-039 build-context collector, the G31 header-graph second
+  > pass, the optional clang-layout-tool attach), each with its own
+  > hard-won correctness fixes already recorded in `AGENTS.md`'s L3→L2-fold
+  > entry (findings 9/10/17/18), and `run_dump_request` has no equivalent
+  > hook; (3) `scan_engine._build_new_snapshot`'s side-aware `-H
+  > old=PATH`/`-I old=PATH` baseline-reuse decision (findings 12/13/15 on
+  > the same entry) is inherently about *two* snapshots' relationship,
+  > which the single-input `DumpRequest` shape cannot express without a new
+  > pair-aware primitive — exactly the class of decision `service_
+  > compare_pipeline.py`'s own docstring already says was deliberately kept
+  > out of the per-input layer. Each of the three is a real, separate,
+  > multi-file design on its own, not a follow-up edit to this slice; see
+  > the root `AGENTS.md` "Known gaps" entry (search "PR C (typed
+  > `dump`/`scan` convergence") for the full accounting, including why
+  > forcing any of the three under continued session pressure risks
+  > reopening one of the already-fixed findings this same area has needed
+  > many prior review rounds to reach.
 - **PR 3B — build-context completeness (the review's PR D).** Two #782
   follow-ups that change the *parsed public surface*, not just performance, so
   they belong before the model is called finished: (1) compile-unit matching —

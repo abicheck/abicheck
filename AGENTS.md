@@ -3672,6 +3672,125 @@ Once a root command genuinely clears the bar above, pick the right home:
   patches" convention rather than attempted under review pressure on an
   unrelated PR.
 
+- **PR C (typed `dump`/`scan` convergence, CLI cleanup phase two's PR 3A) —
+  investigated in depth; one real, scoped, verified slice landed; the full
+  convergence the plan describes is NOT attempted, and here is exactly why.**
+  The plan (`docs/contribute/plans/cli-cleanup-phase-two.md`, "PR 3A") asks
+  for one canonical path -- `Click parsing → DumpRequest → ResolvedDumpRequest
+  → dry-run-or-execute → DumpResult` -- with **both** `dump_cmd`/
+  `perform_elf_dump` and `scan_engine._build_new_snapshot` routing through
+  `service_dump_pipeline.run_dump_request` (or the per-input primitives it
+  shares via `service_input_resolution.resolve_side_snapshot`), the way
+  `compare`'s implicit-dump operand already does, with `dump --dry-run`
+  rendering the same `DumpResult` object the real run executes rather than a
+  separately-computed preview. Read `run_dump_request`, `resolve_side_snapshot`
+  and siblings, `perform_elf_dump` (1999 lines), `handle_non_elf_dump`, and
+  `scan_engine._build_new_snapshot` in full before concluding this.
+
+  **Three independent, concrete reasons the full migration cannot be done
+  soundly in one pass, each confirmed by reading the actual code rather than
+  assumed:**
+
+  1. **`dump --dry-run` is not a projection of a resolved object today -- it
+     is a hand-written second implementation.** `cli_dump_helpers.
+     render_dump_dry_run()` re-derives the resolved depth/collect-mode/
+     compile-DB-match/backend from the *same raw inputs* `perform_elf_dump`
+     receives, independently, in its own function -- there is no shared
+     `DumpResult` either one builds from. Its own docstring is explicit
+     about the scope this implies: "Cheap, read-only resolution only ...
+     Never runs castxml/clang, a build query, or any I/O beyond stat()/PATH
+     lookups" -- i.e. it is *deliberately* a cheaper, narrower
+     re-implementation, not a dry pass of the same resolver the real run
+     uses. Making `--dry-run` render a genuine `DumpResult` therefore
+     requires `run_dump_request` (or a new sibling) to support a "resolve
+     without executing/writing" mode in the first place -- it does not have
+     one today, it always fully resolves and returns a snapshot.
+  2. **`perform_elf_dump` has real post-processing hooks with no equivalent
+     in `run_dump_request` at all.** After the primary header-AST/DWARF
+     snapshot, it runs, in a carefully established order: the ADR-039
+     build-context collector (`_attach_build_context`), the G31
+     `service._attach_header_graph` second pass (its own independent clang
+     re-invocation and AST cache key), and the optional
+     `ABICHECK_CLANG_LAYOUT_TOOL` clang-layout-tool attach -- each reusing
+     the L3→L2-folded `effective_compile_context` (PR #782) and each with
+     its own dedicated, hard-won correctness fixes recorded above in this
+     same "Known gaps" section (findings 9, 10, 17, 18 on the L3→L2-fold
+     entry alone). `run_dump_request` has no post-processing stage at all
+     -- it returns whatever `resolve_side_snapshot` produced. Routing
+     `perform_elf_dump` through it would mean either dropping these passes
+     (a real snapshot-completeness regression) or adding an equivalent
+     hook to `run_dump_request` and re-verifying all four passes'
+     already-fixed ordering/cache-key/flag-isolation bugs against the new
+     call shape -- itself a project the size of this whole PR, not a
+     rename.
+  3. **`scan_engine._build_new_snapshot` has scan-specific behavior
+     `DumpRequest` cannot express, and this file already documents two
+     multi-round bug hunts in exactly this area that a rushed reroute
+     would risk reopening.** Its own `-H old=PATH`/`-I old=PATH` side-aware
+     baseline handling (the twelfth/thirteenth/fifteenth findings on the
+     L3→L2-fold entry above) decides, per comparison, whether the
+     candidate's own L3-folded `compile_context` may be reused for the
+     baseline parse or must fall back to the caller's unfolded one -- a
+     decision inherently about *two* snapshots' relationship, which
+     `DumpRequest` (built for *one* input) has no field for. Forcing this
+     through a `DumpRequest`-shaped call would need a new pair-aware
+     concept alongside it, which is exactly the kind of design `service_
+     compare_pipeline.py`'s own module docstring already explains was
+     deliberately kept *out* of `service_input_resolution.py`'s per-input
+     primitives ("The pair-shaped decisions deliberately stayed behind...
+     neither means anything for a lone dump").
+
+  **What landed instead, safely and independently of all three blockers
+  above: `service_input_resolution._seeded_includes`/
+  `_seeded_compile_context` -- the shared per-input primitive `compare`'s
+  implicit-dump operand and `dump`'s typed API (`run_dump_request`) both
+  already use -- ran the L2 include-dir seed and the P0.3 L3→L2
+  compile-context fold as two independent calls, each capable of running
+  `buildsource.inline.collect_inline_pack()`.** That is the exact
+  self-deadlock shape already found and fixed, by name, for `perform_elf_
+  dump`/`handle_non_elf_dump`/`scan_engine._build_new_snapshot` in this same
+  section's L3→L2-fold entry (its "fifth finding"): a caller whose
+  `sources`/`build_info` genuinely needs the zero-config *inferred*
+  build-system query would have the include-dir seed's own inferred query
+  hold the deterministic build-dir lock until its cleanup runs --
+  deliberately deferred until after the L2 parse consumes the seeded dirs --
+  so the compile-context fold's own, separate inferred-query attempt would
+  contend on the identical lock. That fifth finding's fix,
+  `buildsource.l2_seed.seed_includes_and_fold_compile_context()`, was wired
+  into all three CLI-side resolvers at the time -- but never into
+  `resolve_side_snapshot`, the fourth, typed-API call site, which kept the
+  older two-call shape. `resolve_side_snapshot` never actually hit the
+  600s timeout (`collect_mode` is forced `"off"`/`allow_inferred_build_
+  query=False` here, matching every Tier-2 API caller's "never execute a
+  build system as a side effect" rule -- see `_seeded_includes`'s own
+  docstring), so this was real, avoidable duplicated work and a real
+  divergence from the one shared primitive the other three call sites had
+  already converged on, not a live self-deadlock. Fixed by replacing the
+  two separate helpers with one, `_seeded_includes_and_compile_context()`,
+  which calls the identical `seed_includes_and_fold_compile_context()` the
+  other three sites already use. This is a genuine, if narrow, piece of PR
+  3A's actual convergence goal -- one fewer place a change to how an input
+  resolves can drift -- landed without touching any of the three blockers
+  above. Verified via the existing `resolve_side_snapshot`/
+  `_seeded_compile_context` test coverage in `tests/test_header_compile_
+  context.py` and `tests/test_bazel_root_targets_l2_seed.py` (both updated
+  for the renamed/merged function, not weakened), plus the full fast unit
+  suite and `mypy`/`ruff` clean on both touched modules.
+
+  **What remains genuinely open, unattempted, and why forcing it further
+  would be reactive rather than sound**: all three blockers above, in full
+  -- a "resolve without executing" mode for `run_dump_request`, a
+  post-processing hook `perform_elf_dump`'s second-pass attaches can plug
+  into, and a pair-aware primitive `scan`'s baseline-reuse decision can
+  express -- are each their own real, multi-file design, not a follow-up
+  edit to this same PR. Given the density of prior review rounds already
+  recorded against this exact code (the L3→L2-fold entry above alone lists
+  eighteen numbered findings, several reverted-and-refixed), attempting any
+  of the three under continued session pressure risks reopening one of
+  them, which is precisely what this file's own "known gaps over risky
+  reactive patches" convention exists to avoid. See the plan doc's own PR C
+  section for a status note recording the same scope.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

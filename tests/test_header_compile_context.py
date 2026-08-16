@@ -1515,14 +1515,16 @@ def test_merge_l3_compile_context_none_explicit_uses_derived() -> None:
 def test_seeded_compile_context_noop_without_sources(tmp_path: Path) -> None:
     from abicheck.api_types import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_compile_context
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
 
     side = InputSpec(path=tmp_path / "lib.so", headers=(tmp_path / "h.h",))
     evidence = SideEvidence(
         headers=[tmp_path / "h.h"], compile=None, collect_mode="off", dump_manifest=None
     )
-    ctx, applied, cleanups = _seeded_compile_context(side, evidence)
-    assert (ctx, applied, cleanups) == (None, False, [])
+    includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+        side, evidence
+    )
+    assert (includes, ctx, applied, cleanups) == ([], None, False, [])
 
 
 def test_resolve_side_snapshot_stamps_parsed_with_build_context(
