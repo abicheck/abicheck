@@ -130,6 +130,55 @@ def test_dwarf_dependent_partial_downgrade_is_reported_not_failed() -> None:
     assert errors == []
 
 
+def test_symmetric_stripping_requires_per_side_dwarf_receipt() -> None:
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "dwarf_context_status": "not_evaluated",
+        "debug_evidence": {
+            "old": {"basic": "not_available"},
+            "new": {"basic": "not_available"},
+        },
+    }
+
+    false_positives, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["type_size_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
+    )
+
+    assert false_positives == []
+    assert len(downgrades) == 1
+    assert errors == []
+
+
+def test_symmetric_stripping_does_not_waive_without_per_side_receipt() -> None:
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "dwarf_context_status": "not_evaluated",
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {"case_break": {"expected": "BREAKING", "min_evidence": "L1"}},
+        "stripped-headers",
+        {},
+    )
+
+    assert downgrades == []
+    assert len(errors) == 1
+
+
 def test_text_only_known_gap_does_not_waive_full_cli_verdict() -> None:
     guard = _guard_module()
     row = _row("complete", result_status="XFAIL")

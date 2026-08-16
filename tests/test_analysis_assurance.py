@@ -44,7 +44,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.serialization import snapshot_from_dict, snapshot_to_json
+from abicheck.serialization import snapshot_to_json
 
 
 def _fn(name: str, mangled: str) -> Function:

@@ -111,7 +111,7 @@ def _is_l0_finding(entry: dict[str, Any]) -> bool:
 def _dwarf_evidence_loss_allows_downgrade(
     entry: dict[str, Any], assurance: object
 ) -> bool:
-    """Allow only the documented DWARF-asymmetry downgrade shape.
+    """Allow only a receipt proving the required DWARF capability was lost.
 
     The catalog's ``min_evidence`` says which capability establishes the
     canonical finding; the receipt says which capability this run actually
@@ -122,7 +122,23 @@ def _dwarf_evidence_loss_allows_downgrade(
         return False
     if assurance.get("status") != "partial":
         return False
-    if assurance.get("dwarf_context_status") != "asymmetric":
+    dwarf_context_status = assurance.get("dwarf_context_status")
+    if dwarf_context_status == "asymmetric":
+        dwarf_lost = True
+    elif dwarf_context_status == "not_evaluated":
+        # A stripped-vs-stripped comparison has no *asymmetry*, but it has
+        # still lost the L1 capability on both sides.  Do not trust the
+        # aggregate status alone: require each side's serialized capability
+        # receipt to prove basic DWARF was unavailable.
+        debug_evidence = assurance.get("debug_evidence")
+        dwarf_lost = isinstance(debug_evidence, dict) and all(
+            isinstance(debug_evidence.get(side), dict)
+            and debug_evidence[side].get("basic") == "not_available"
+            for side in ("old", "new")
+        )
+    else:
+        dwarf_lost = False
+    if not dwarf_lost:
         return False
     if entry.get("min_evidence") != _DWARF_DEPENDENT_MIN_EVIDENCE:
         return False
