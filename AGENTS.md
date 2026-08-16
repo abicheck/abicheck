@@ -3645,6 +3645,33 @@ Once a root command genuinely clears the bar above, pick the right home:
   abicheck version/pinned together, enforced or documented at the tooling
   level) — out of scope for a schema-shape fix and not attempted here.
 
+- **Bundle-level (cross-library) findings on a directory/package `compare`
+  never respect any policy override -- not `--policy`, not `--policy-file`,
+  not `--pack`, and this predates CLI cleanup phase two's "PR B" pack-parity
+  work entirely (Codex review on #791, fresh evidence).**
+  `bundle.compare_bundle()` computes `BundleDiffResult.bundle_verdict` via
+  `checker_policy.compute_verdict(changes)` with **no `policy=` argument at
+  all** -- always the hardcoded `strict_abi` default, regardless of what the
+  release comparison was actually configured with. `_run_bundle_analysis`/
+  `_collect_bundle_result` (`cli_compare_release_helpers.py`) don't accept a
+  policy/`PolicyFile` parameter either, so there is no path today for a
+  `BUNDLE_*` finding (`bundle_library_removed`, `bundle_intra_dep_removed`,
+  ...) to be reclassified by anything a user configured -- a release-wide
+  `--policy sdk_vendor`, an explicit `--policy-file` override, or (since PR B
+  slice 1) a `kind: policy` pack overriding a `BUNDLE_*` kind to `ignore` all
+  reach every *per-library* finding correctly but silently leave bundle-level
+  findings governed by the built-in policy, which can keep the release's
+  worst-of verdict at `BREAKING` even when every per-library finding was
+  demoted. **Not fixed as part of PR B slice 1**: closing it needs
+  `compute_verdict`/`compare_bundle`/`_run_bundle_analysis`/
+  `_collect_bundle_result` to accept and thread a policy (or a resolved
+  per-kind override map) through to `BundleFinding` classification -- a real,
+  separate feature addition to the bundle-analysis subsystem, not a
+  pack-specific follow-up, since the gap exists identically with zero packs
+  involved. Filed here per this file's own "known gaps over risky reactive
+  patches" convention rather than attempted under review pressure on an
+  unrelated PR.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

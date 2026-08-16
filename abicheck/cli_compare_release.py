@@ -84,6 +84,7 @@ from .model import AbiSnapshot
 from .reporter import to_json
 
 if TYPE_CHECKING:
+    from .pack_application import PackApplication
     from .severity import SeverityConfig
 
 # ---------------------------------------------------------------------------
@@ -111,6 +112,7 @@ def _run_compare_pair(
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    pack_application: PackApplication | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -128,6 +130,15 @@ def _run_compare_pair(
     contract-relevance pipeline internally when asked, so threading these two
     flags here is what makes a library compared through the release fan-out
     get the identical contract decision it would from comparing it alone.
+
+    *pack_application* (CLI cleanup phase two, "PR B" slice 1) is this run's
+    already-resolved ``--pack`` contribution (``resolve_release_pack_
+    application``, resolved once for the whole release, not per library) --
+    forwarded to ``service.run_compare`` as ``pack_policy_overrides``/
+    ``pack_internal_namespaces``, which ``service_compare_pipeline.
+    classify_compare_pair`` folds into *this pair's own* freshly-loaded
+    ``PolicyFile`` the same way a single-pair ``compare`` folds its packs
+    into its one ambient policy file.
     """
     from . import service
 
@@ -156,6 +167,12 @@ def _run_compare_pair(
         scope_to_public_surface=scope_to_public_surface,
         pattern_verdicts=pattern_verdicts,
         include_dependencies=include_dependencies,
+        pack_policy_overrides=(
+            dict(pack_application.policy_overrides) if pack_application else None
+        ),
+        pack_internal_namespaces=(
+            pack_application.internal_namespaces if pack_application else None
+        ),
     )
 
 
@@ -181,6 +198,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     str | None,
     "SeverityConfig | None",
+    "PackApplication | None",
 ]
 
 
@@ -224,6 +242,7 @@ def _compare_one_library(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     severity_config: SeverityConfig | None = None,
+    pack_application: PackApplication | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -269,6 +288,7 @@ def _compare_one_library(
             include_dependencies=include_dependencies,
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
+            pack_application=pack_application,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -466,6 +486,7 @@ def _compare_release_libraries(
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    pack_application: PackApplication | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -509,6 +530,7 @@ def _compare_release_libraries(
         contract_evaluation,
         contract_mode,
         severity_config,
+        pack_application,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -587,6 +609,7 @@ def _compare_release_libraries(
             worst_verdict=worst_verdict,
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
+            pack_application=pack_application,
         )
         diff_pairs.extend(extra_pairs)
         all_annotations.extend(extra_annotations)
@@ -721,6 +744,7 @@ def _collect_release_extras(
     worst_verdict: str = "NO_CHANGE",
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    pack_application: PackApplication | None = None,
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
     """Collect optional re-run artifacts for JUnit and annotations.
 
@@ -759,6 +783,7 @@ def _collect_release_extras(
                 include_dependencies=include_dependencies,
                 contract_evaluation=contract_evaluation,
                 contract_mode=contract_mode,
+                pack_application=pack_application,
             )
         except Exception as exc:
             click.echo(
@@ -816,6 +841,7 @@ def _collect_matrix_result(
     policy_file_path: Path | None = None,
     old_version: str = "",
     new_version: str = "",
+    pack_application: PackApplication | None = None,
 ) -> tuple[DiffResult | None, str]:
     """Load probe-matrix snapshots, run them through the compare pipeline, fold.
 
@@ -834,6 +860,13 @@ def _collect_matrix_result(
     override is honoured identically on both commands. The returned
     :class:`DiffResult` carries the post-suppression kept findings, which the
     report (JSON / markdown / JUnit) renders.
+
+    *pack_application* (CLI cleanup phase two, "PR B" slice 1) folds the
+    release's already-resolved ``--pack`` contribution into this pair's own
+    ``PolicyFile`` too -- these matrix findings go through the same
+    ``--policy-file`` per-kind overrides every other library does, so a
+    pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
+    identically, not only to the per-library comparisons.
     """
     from .cli import _load_probe_matrix_changes
 
@@ -845,6 +878,10 @@ def _collect_matrix_result(
     from .service import compare_snapshots
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if pack_application is not None:
+        from .pack_application import policy_file_with_packs
+
+        pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
     # Empty snapshots contribute no per-binary changes; the matrix findings
     # ride in as extra_changes and inherit the full post-processing pipeline.
     name = "<build-config matrix>"
@@ -1365,6 +1402,14 @@ def compare_release_cmd(
     release_exit_code_scheme: str | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    # CLI cleanup phase two, PR B slice 1: `compare`'s directory/package
+    # fan-out resolves any `--pack` once, ahead of dispatch
+    # (resolve_release_pack_application), and hands over the pack's
+    # policy/contract-surface contribution here -- same internal-parameter
+    # shape as severity_abi_breaking et al. above. `None` (the default) is a
+    # true no-op: every library is compared exactly as it was before this
+    # parameter existed.
+    pack_application: PackApplication | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1571,6 +1616,7 @@ def compare_release_cmd(
                 severity_config=severity_config,
                 contract_evaluation=contract_evaluation,
                 contract_mode=contract_mode,
+                pack_application=pack_application,
             )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
@@ -1650,6 +1696,7 @@ def compare_release_cmd(
                 policy_file_path=policy_file_path,
                 old_version=old_version,
                 new_version=new_version,
+                pack_application=pack_application,
             )
 
             # Fold release-global bundle/matrix findings into the severity exit so a

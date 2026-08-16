@@ -365,6 +365,27 @@ class TestCompareRequestReplace:
         assert changed.policy == req.policy
 
 
+class TestCompareRequestRuntimeResolvableAnnotations:
+    def test_get_type_hints_resolves_without_nameerror(self):
+        """Codex review, PR B slice 1 follow-up: with `from __future__ import
+        annotations` (PEP 563), every annotation is a string evaluated lazily
+        -- `typing.get_type_hints()` (used by schema generators, docs tools,
+        or any other API consumer introspecting this public dataclass) needs
+        every name it references to be resolvable in the *module's runtime
+        globals*, not merely under `TYPE_CHECKING`. `pack_policy_overrides`/
+        `pack_internal_namespaces` referenced `ChangeKind`/`Verdict`, which
+        were only imported under `TYPE_CHECKING` -- `get_type_hints()` raised
+        `NameError: name 'ChangeKind' is not defined`. Fixed by importing
+        both unconditionally (verified no import cycle: neither
+        `checker_policy` nor `change_registry_types` imports `api_types`,
+        directly or transitively)."""
+        import typing
+
+        hints = typing.get_type_hints(CompareRequest)
+        assert "pack_policy_overrides" in hints
+        assert "pack_internal_namespaces" in hints
+
+
 class TestOutputSpec:
     def test_defaults(self):
         out = OutputSpec()

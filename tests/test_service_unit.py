@@ -3077,12 +3077,29 @@ class TestContractEvaluationThreading:
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        # contract_mode (ADR-049 Phase 6's --contract) was appended after
-        # include_dependencies in turn, following the same rule.
-        assert params[-1] == "contract_mode"
-        assert params[-2] == "include_dependencies"
-        assert params[-3] == "contract_evaluation"
-        assert params[-4] == "diagnostic_comparison"
+        # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
+        # two, "PR B" slice 1) were appended after contract_mode in turn,
+        # following the same rule.
+        assert params[-1] == "pack_internal_namespaces"
+        assert params[-2] == "pack_policy_overrides"
+        assert params[-3] == "contract_mode"
+        assert params[-4] == "include_dependencies"
+        assert params[-5] == "contract_evaluation"
+        assert params[-6] == "diagnostic_comparison"
+
+    def test_get_type_hints_resolves_without_nameerror(self):
+        """Codex review: `run_compare` moved from `service.py` into
+        `service_compare_pipeline.py` in this same PR, and `Path` was only
+        imported there under `TYPE_CHECKING` -- with `from __future__ import
+        annotations` (PEP 563), `typing.get_type_hints(run_compare)` (a
+        schema generator or docs tool introspecting this public function)
+        raised `NameError: name 'Path' is not defined`. Fixed by importing
+        `pathlib.Path` unconditionally in `service_compare_pipeline.py`."""
+        import typing
+
+        hints = typing.get_type_hints(run_compare)
+        assert hints["old_input"] is Path
+        assert hints["new_input"] is Path
 
 
 class TestParallelOldNewExtraction:

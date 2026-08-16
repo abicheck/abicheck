@@ -52,6 +52,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
 | `lang_explicit` | `bool` | `False` |
+| `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
+| `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 
 ## `CompareResult`
 
@@ -481,6 +483,8 @@ Compare two ABI inputs and return the classified diff result.
 | `contract_evaluation` | `bool` | `False` |
 | `include_dependencies` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
+| `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |
+| `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 
 **Returns:** `CompareResult`
 

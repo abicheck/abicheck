@@ -921,22 +921,253 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert result.exit_code == 0, result.output
 
-    def test_pack_is_rejected_on_a_release_comparison(
+    def test_policy_pack_is_applied_to_a_release_comparison(
         self, tmp_path: Path, ignore_removals: Path
     ) -> None:
-        """The directory/package fan-out dispatches before the effective
-        configuration is resolved, so a pack there would be accepted and score
-        nothing -- the same reason `--contract` is rejected."""
+        """CLI cleanup phase two, "PR B" slice 1: a `kind: policy` pack now
+        configures the directory/package fan-out instead of being rejected
+        outright -- the first-assertion rule this whole module states in its
+        own docstring: an exit code that differs with and without the pack,
+        not just "the flag was accepted"."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        without_pack = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+        assert without_pack.exit_code == 4, without_pack.output
+        with_pack = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--pack", str(ignore_removals)],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+
+    def test_gate_pack_is_still_rejected_on_a_release_comparison(
+        self, tmp_path: Path
+    ) -> None:
+        """The release fan-out has no resolved gate-options wiring yet
+        (unlike `policy.overrides`/`surface.internal_namespaces`, which now
+        apply): a `kind: gate` pack must still fail loudly rather than be
+        silently accepted and score nothing."""
+        gate = _pack(
+            tmp_path,
+            "scheme.yml",
+            "id: scheme\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.exit_code_scheme: severity\n",
+        )
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         result = CliRunner().invoke(
-            main,
-            ["compare", str(old_dir), str(new_dir), "--pack", str(ignore_removals)],
+            main, ["compare", str(old_dir), str(new_dir), "--pack", str(gate)]
         )
         assert result.exit_code == 64, result.output
-        assert "--pack" in result.output
+        assert "kind: gate" in result.output
+
+    @pytest.mark.parametrize("with_contract", [True, False])
+    def test_contract_unresolved_pack_still_rejected_on_a_release_comparison(
+        self, tmp_path: Path, with_contract: bool
+    ) -> None:
+        """Codex review, fresh evidence: `contract.unresolved`'s consumer
+        (`contract_coverage_exit._accepts_unresolved`) reads a per-comparison
+        `PersistedContractContext` only `checker.compare`'s own
+        `record_resolved_config` installs -- which the release fan-out never
+        builds per library. Accepting the pack here would score nothing: an
+        incomplete coverage floor would still contribute 1 to every
+        library's exit code regardless of `contract.unresolved=warn`, the
+        exact decorative-``--pack`` failure this module exists to prevent.
+        Rejected unconditionally -- with or without --contract, since even
+        --contract does not make the release fan-out apply this field."""
+        pack = _pack(
+            tmp_path,
+            "unresolved.yml",
+            "id: unresolved\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.unresolved: warn\n",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        args = ["compare", str(old_dir), str(new_dir), "--pack", str(pack)]
+        if with_contract:
+            args += ["--contract", "public"]
+        result = CliRunner().invoke(main, args)
+        assert result.exit_code == 64, result.output
+        assert "contract.unresolved" in result.output
+        assert "cannot be applied to a directory/package" in result.output
+
+    def test_release_pack_resolution_direct_call_with_no_packs_is_a_no_op(
+        self,
+    ) -> None:
+        """Direct-call contract for the two release-pack resolvers: no
+        `--pack` means no Click/file access at all, and a bare `None` back --
+        the same "inert without a pack" property `TestNoPackChangesNothing`
+        asserts for the single-pair resolver."""
+        from abicheck.cli_compare_receipt import (
+            resolve_release_pack_application,
+            resolve_release_pack_application_from_ctx,
+        )
+
+        assert resolve_release_pack_application({"pack_paths": ()}) is None
+        assert (
+            resolve_release_pack_application_from_ctx(
+                ctx=None,
+                contract_mode=None,
+                scope_public_headers=True,
+                policy="strict_abi",
+                policy_file_path=None,
+                suppress=None,
+                require_justification=False,
+                exit_code_scheme=None,
+                severity_preset=None,
+                pack_paths=(),
+                contract_evaluation=False,
+                project_cfg=None,
+                project_path=None,
+                project_sha256=None,
+                policy_option=None,
+                policy_path=None,
+                policy_sha256=None,
+            )
+            is None
+        )
+
+    def test_broken_policy_document_is_a_clean_usage_error_on_release(
+        self, tmp_path: Path, ignore_removals: Path
+    ) -> None:
+        """Codex review, found while adding direct test coverage: unlike the
+        single-pair path (whose own `_load_suppression_and_policy` call
+        already converts a malformed `--policy` document to a clean error
+        *before* ever reaching the canonical resolver), the release fan-out
+        had no earlier guard -- `resolve_release_pack_application`'s own
+        `resolve_cli_config` call re-loads the document a second time (for
+        D7 provenance) and, unguarded, let a genuine `PolicyError` propagate
+        as a raw, uncaught exception instead of a clean `exit 64`. Fixed by
+        widening `resolve_release_pack_application_from_ctx`'s own except
+        clause. Reached only through `--pack` (the release fan-out never
+        called `resolve_cli_config` at all before PR B slice 1), so this is
+        a real regression relative to the pre-`--pack` release baseline, not
+        a pre-existing bug: without `--pack`, the identical broken `--policy`
+        document already degrades cleanly (verified separately)."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        # Syntactically valid YAML, semantically invalid as a policy (an
+        # unknown ChangeKind slug) -- PolicyFile.load raises PolicyError (a
+        # ValueError subclass), which is now caught here. A genuine YAML
+        # *syntax* error (yaml.YAMLError, not a ValueError) is a distinct
+        # failure mode, covered separately below by
+        # `test_yaml_syntax_error_is_a_clean_usage_error_on_release`.
+        broken_policy_file = tmp_path / "broken-policy.yml"
+        broken_policy_file.write_text(
+            "base_policy: strict_abi\noverrides:\n  not_a_real_kind: ignore\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                # ADR-037 D4: `--policy` takes both a built-in profile name
+                # and a document path -- there is no separate `--policy-file`.
+                "--policy",
+                str(broken_policy_file),
+                "--pack",
+                str(ignore_removals),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            "must be a clean click.UsageError exit, not an uncaught exception"
+        )
+        assert "not_a_real_kind" in result.output
+
+    def test_yaml_syntax_error_is_a_clean_usage_error_on_release(
+        self, tmp_path: Path, ignore_removals: Path
+    ) -> None:
+        """Codex review, P2 follow-up on the finding above: a genuinely
+        malformed YAML *document* (unbalanced flow-mapping brackets, not a
+        semantically-invalid-but-well-formed one) raises PyYAML's own
+        `yaml.YAMLError` from `resolve_release_pack_application`'s second,
+        provenance-only `--policy` reload -- not a `ValueError`, so the
+        earlier fix's `except (..., ValueError, OSError, ImportError)` still
+        let this specific shape through as a raw traceback. Fixed by adding
+        `yaml.YAMLError` to both `resolve_release_pack_application_from_ctx`'s
+        except clause and its own earlier best-effort `PolicyFile.load`
+        pre-read, which would otherwise raise the identical uncaught error
+        one step earlier, before ever reaching the later, wider guard."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        # Genuinely malformed YAML -- an unclosed flow mapping -- so
+        # `yaml.safe_load` itself raises `yaml.YAMLError` (a `ParserError`),
+        # never reaching `PolicyFile.load`'s own semantic validation.
+        syntax_error_file = tmp_path / "syntax-error-policy.yml"
+        syntax_error_file.write_text(
+            "base_policy: strict_abi\noverrides: {not_closed\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--policy",
+                str(syntax_error_file),
+                "--pack",
+                str(ignore_removals),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            "must be a clean click.UsageError exit, not an uncaught exception"
+        )
 
 
 class TestNoPackChangesNothing:

@@ -59,18 +59,17 @@ from __future__ import annotations
 import concurrent.futures
 import dataclasses
 import os
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareResult
+from .api_types import CompareRequest, CompareResult, InputSpec
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
 from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
-    from .api_types import CompareRequest, InputSpec
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
@@ -80,6 +79,8 @@ __all__ = [
     "classify_compare_pair",
     "resolve_compare_request",
     "resolve_sides_sequentially",
+    "run_compare",
+    "run_compare_request",
 ]
 
 
@@ -400,6 +401,27 @@ def classify_compare_pair(
     suppression, pf = service.load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
+    # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
+    # policy/contract-surface contributions into the loaded PolicyFile, the
+    # same way `pack_application.policy_file_with_packs` already does for the
+    # single-pair `compare` CLI. Every field is `None` for every pre-existing
+    # caller (the CLI's own single-pair path folds its packs before calling
+    # `compare_snapshots` directly and never sets these), so this is a no-op
+    # unless a caller -- today, the directory/package release fan-out --
+    # populated `CompareRequest.pack_policy_overrides`/
+    # `pack_internal_namespaces`. See `CompareRequest.pack_policy_overrides`'s
+    # own docstring for why this is the one chokepoint to apply it at.
+    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
+        from .pack_application import PackApplication, policy_file_with_packs
+
+        pf = policy_file_with_packs(
+            pf,
+            PackApplication(
+                policy_overrides=dict(request.pack_policy_overrides or {}),
+                internal_namespaces=request.pack_internal_namespaces,
+            ),
+            base_policy=request.policy,
+        )
     # The four Nones are the out-of-band pack-override params -- reusing the
     # raw sources/build_info paths would make `_resolve_side_pack` try (and
     # fail) to reload them as packs; None uses the embedded facts.
@@ -489,3 +511,143 @@ def classify_compare_pair(
     return CompareResult(
         diff=result, old_snapshot=old, new_snapshot=new, suppression=suppression
     )
+
+
+def run_compare_request(request: CompareRequest) -> CompareResult:
+    """Compare two ABI inputs described by a :class:`CompareRequest`.
+
+    The single classification chokepoint (ADR-037 D1/D2): every front-end
+    builds a ``CompareRequest`` and calls this, so defaults cannot diverge
+    between invocation paths. The keyword-argument :func:`run_compare` is a
+    thin shim that builds the request and delegates here.
+
+    Exactly the composition of this module's own two phases --
+    :func:`resolve_compare_request` then :func:`classify_compare_pair`. A
+    front end that must configure the run between them (the native
+    ``compare`` CLI's ADR-049 ``resolve_and_apply``, whose ``--pack`` can
+    move the policy file and severity levels the classification is scored
+    under) calls the two phases directly rather than keeping a second
+    resolution implementation.
+
+    Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
+    bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
+    gain a field without breaking positional callers, which a tuple cannot.
+    ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
+    wants it back in one line.
+
+    Raises:
+        ValidationError: If the request fails :meth:`CompareRequest.validate`.
+        SnapshotError: If either input cannot be loaded.
+
+    Moved here from ``service.py`` (CLI cleanup phase two, "PR B" slice 1,
+    alongside :func:`run_compare`) once the latter's two new pack-forwarding
+    parameters pushed that file over the AI-readiness file-size cap --
+    re-exported from ``service.py`` unchanged, the same pattern
+    ``resolve_compare_request``/``classify_compare_pair`` already use.
+    """
+    return classify_compare_pair(request, resolve_compare_request(request))
+
+
+def run_compare(
+    old_input: Path,
+    new_input: Path,
+    old_headers: list[Path] | None = None,
+    new_headers: list[Path] | None = None,
+    old_includes: list[Path] | None = None,
+    new_includes: list[Path] | None = None,
+    old_version: str = "",
+    new_version: str = "",
+    lang: str = "c++",
+    frontend: str = "auto",
+    suppress: Path | None = None,
+    policy: str = "strict_abi",
+    policy_file_path: Path | None = None,
+    old_pdb_path: Path | None = None,
+    new_pdb_path: Path | None = None,
+    old_debug_roots: list[Path] | None = None,
+    new_debug_roots: list[Path] | None = None,
+    enable_debuginfod: bool = False,
+    scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
+    public_surface_allowlist: set[str] | None = None,
+    debuginfod_url: str | None = None,
+    diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
+    include_dependencies: bool = True,
+    contract_mode: str | None = None,
+    pack_policy_overrides: dict[Any, Any] | None = None,
+    pack_internal_namespaces: tuple[str, ...] | None = None,
+) -> CompareResult:
+    """Compare two ABI inputs and return the classified diff result.
+
+    Keyword-argument shim over :func:`run_compare_request`: it assembles a
+    :class:`CompareRequest` from loose arguments and delegates, so existing
+    callers keep working while the typed request is the real chokepoint
+    (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
+    Trailing keyword-only params (``debuginfod_url`` onward) are appended
+    after every pre-existing one, never alongside a thematically-closer
+    neighbor, so a positional caller keeps binding each argument to the same
+    parameter it always did (Codex review, PR #551). ``include_dependencies``
+    applies to *both* sides — build a ``CompareRequest`` for a per-side override.
+
+    ``pack_policy_overrides``/``pack_internal_namespaces`` (CLI cleanup phase
+    two, "PR B" slice 1): an already-resolved ``--pack``'s
+    ``policy.overrides``/``surface.internal_namespaces`` contribution --
+    see ``CompareRequest.pack_policy_overrides``'s own docstring for what
+    folds them in and why. ``None``/empty on both is a no-op, matching every
+    pre-existing caller.
+
+    Returns:
+        A :class:`~abicheck.api_types.CompareResult`. This returned the bare
+        ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
+        shape back for a caller that unpacks positionally.
+    Raises:
+        SnapshotError: If either input cannot be loaded.
+        ValidationError: If inputs have unrecognised formats.
+    """
+    request = CompareRequest(
+        old=InputSpec(
+            path=old_input,
+            headers=tuple(old_headers or ()),
+            includes=tuple(old_includes or ()),
+            version=old_version,
+            pdb=old_pdb_path,
+            debug_roots=tuple(old_debug_roots or ()),
+            include_dependencies=include_dependencies,
+        ),
+        new=InputSpec(
+            path=new_input,
+            headers=tuple(new_headers or ()),
+            includes=tuple(new_includes or ()),
+            version=new_version,
+            pdb=new_pdb_path,
+            debug_roots=tuple(new_debug_roots or ()),
+            include_dependencies=include_dependencies,
+        ),
+        lang=lang,
+        frontend=frontend,
+        policy=policy,
+        policy_file_path=policy_file_path,
+        suppress=suppress,
+        scope_public=scope_to_public_surface,
+        force_public_symbols=(
+            frozenset(force_public_symbols) if force_public_symbols else None
+        ),
+        public_surface_allowlist=(
+            frozenset(public_surface_allowlist)
+            if public_surface_allowlist is not None
+            else None
+        ),
+        pattern_verdicts=pattern_verdicts,
+        enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
+        diagnostic_comparison=diagnostic_comparison,
+        contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
+        pack_policy_overrides=(
+            tuple(pack_policy_overrides.items()) if pack_policy_overrides else None
+        ),
+        pack_internal_namespaces=pack_internal_namespaces,
+    )
+    return run_compare_request(request)

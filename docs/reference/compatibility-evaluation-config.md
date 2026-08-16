@@ -252,11 +252,16 @@ recorded as active configuration (`abicheck.pack_application`). The same rule
 rejects a `kind: gate` pack on `scan`, whose exit code follows its
 compatibility verdict directly and so has no gate to move.
 
-Two further restrictions, both for the same "configure or reject" reason:
-`--pack` needs `--against` on `scan` (a pack's only application there is the
-baseline comparison's policy), and it is rejected on a directory/package
-(release) `compare`, whose per-library fan-out dispatches before the effective
-configuration is resolved.
+A further restriction, for the same "configure or reject" reason: `--pack`
+needs `--against` on `scan` (a pack's only application there is the baseline
+comparison's policy). On a directory/package (release) `compare`, a `kind:
+policy`/`kind: contract` pack's `policy.overrides`/`surface.
+internal_namespaces` now apply to every library uniformly; a `kind: gate`
+pack is still rejected there, since the release fan-out has no resolved
+gate-options wiring for `gate.exit_code_scheme`/`gate.severity.<category>`
+yet (CLI cleanup phase two, "PR B") — and so is `contract.unresolved`, with
+or without `--contract`: its consumer needs a per-comparison contract
+context the release fan-out never builds per library.
 
 ## The resolution receipt
 
