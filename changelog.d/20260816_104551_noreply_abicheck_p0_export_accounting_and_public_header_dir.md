@@ -20,7 +20,14 @@
   consumer reading `symbols_without_decl` inherited the same overlap.
   Fixed by folding `non_public`'s keys into `all_matched` in both
   functions, so a classified export is genuinely accounted for and no
-  longer independently counted as unaccounted.
+  longer independently counted as unaccounted. Follow-up (Codex review):
+  once `unaccounted` no longer double-counted a classified export,
+  `export_accounting.source_linked = total - unaccounted` started silently
+  counting every `internal`-classified export as ALSO `source_linked` —
+  arithmetically consistent, but wrong (a `dependency:stdlib` export is
+  definitionally not linked to *this* library's own source). Fixed by also
+  subtracting `internal`, so `source_linked + internal + unaccounted ==
+  total` is now a true three-way partition.
 
 - **Action `public-header-dir` input produced genuinely different header
   extraction (and therefore `include_sequence`) between `dump` and `scan`

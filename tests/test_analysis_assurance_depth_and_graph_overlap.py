@@ -473,7 +473,7 @@ class TestExportAccountingDoesNotDoubleCount:
     non-public, ``internal=6, unaccounted=6`` for a 12-export total).
     """
 
-    def test_end_to_end_via_real_link_source_abi(self) -> None:
+    def test_end_to_end_via_real_link_source_abi(self, tmp_path: Path) -> None:
         """Exercises the real ``link_source_abi`` entry point end to end on
         both sides -- not a hand-built ``SourceAbiSurface`` with
         already-disjoint fields, which can't reproduce this bug."""
@@ -495,7 +495,7 @@ class TestExportAccountingDoesNotDoubleCount:
             surface = link_source_abi([SourceAbiTu()], exported_symbols=exports)
             assert surface.unmatched["symbols_without_decl"] == []
             snap.build_source = BuildSourcePack(
-                root=Path("/tmp/nonexistent-pack-no-double-count"),
+                root=tmp_path / "nonexistent-pack-no-double-count",
                 source_abi=surface,
             )
 
@@ -504,4 +504,9 @@ class TestExportAccountingDoesNotDoubleCount:
         assert aa.export_accounting.total == len(exports) * 2
         assert aa.export_accounting.internal == len(exports) * 2
         assert aa.export_accounting.unaccounted == 0
-        assert aa.export_accounting.source_linked == len(exports) * 2
+        # Every export here is classified non-public -- none is genuinely
+        # linked to a public source declaration, so source_linked must be 0,
+        # not the total (Codex review: source_linked = total - unaccounted
+        # alone silently double-counted internal exports as ALSO
+        # source_linked once unaccounted correctly excluded them).
+        assert aa.export_accounting.source_linked == 0

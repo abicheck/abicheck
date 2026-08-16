@@ -964,6 +964,18 @@ def _export_accounting(
     EITHER side now always contributes to the combined ``export_accounting``
     rather than being silently shadowed by whichever side the old
     "new-first" selection happened to prefer.
+
+    Finding (Codex review, PR #788): once ``source_link.link_source_abi``
+    stopped leaving a classified ``non_public`` symbol in
+    ``symbols_without_decl`` too (the double-count fix this rollup exists
+    alongside), ``source_linked = total - unaccounted`` started silently
+    counting every ``internal``-classified export as ALSO ``source_linked``
+    -- correct arithmetically (the two no longer sum past ``total``), but
+    wrong in what ``source_linked`` claims: a ``dependency:stdlib`` export
+    is definitionally not linked to *this* library's own source. Fixed by
+    also subtracting ``internal``, so the three categories are now a true
+    partition of ``total`` (``source_linked + internal + unaccounted ==
+    total``), not just two of the three kept mutually exclusive.
     """
     total: int | None = None
     unaccounted: int | None = None
@@ -980,7 +992,7 @@ def _export_accounting(
         internal = (internal or 0) + side_internal
     if total is None:
         return ExportAccounting()
-    source_linked = max(0, total - (unaccounted or 0))
+    source_linked = max(0, total - (unaccounted or 0) - (internal or 0))
     return ExportAccounting(
         total=total,
         source_linked=source_linked,
