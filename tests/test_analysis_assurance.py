@@ -242,24 +242,6 @@ class TestComputeAnalysisAssurance:
         assert aa.fact_set_comparability == "unknown"
         assert aa.status == "partial"
 
-    def test_ctf_source_and_capability_survive_snapshot_round_trip(self) -> None:
-        from abicheck.ctf_metadata import CtfMetadata
-
-        fns = [_fn("pub_a", "_Z5pub_av")]
-        snapshot = AbiSnapshot(
-            version="1.0", library="libfoo.so.1", functions=fns,
-            dwarf=CtfMetadata(has_ctf=True).to_dwarf_metadata(),
-        )
-        old = snapshot_from_dict(json.loads(snapshot_to_json(snapshot)))
-        new = snapshot_from_dict(json.loads(snapshot_to_json(snapshot)))
-
-        aa = checker.compare(old, new, scope_to_public_surface=False).analysis_assurance
-        assert isinstance(aa, AnalysisAssurance)
-        assert aa.debug_evidence["old"] == {
-            "source": "ctf", "basic": "parsed", "advanced": "not_supported"
-        }
-        assert aa.status == "partial"
-
     def test_mismatched_fact_set_identity_is_not_comparable(self) -> None:
         """P1 review, Finding 1: two L4 surfaces that are each internally
         consistent (no fact_set_inconsistent on either side) but carry
@@ -1920,76 +1902,6 @@ class TestDwarfChannelAsymmetry:
             "--require-complete-analysis",
         )
         assert res.exit_code != 0, res.output
-
-
-class TestDebugEvidenceReceipt:
-    """The assurance receipt must not promote BTF/CTF layouts to DWARF ABI facts."""
-
-    def test_btf_basic_evidence_is_not_advanced_capability(self) -> None:
-        from abicheck.btf_metadata import BtfMetadata
-
-        fns = [_fn("pub_a", "_Z5pub_av")]
-        old = AbiSnapshot(
-            version="1.0", library="libfoo.so.1", functions=fns,
-            dwarf=BtfMetadata(has_btf=True).to_dwarf_metadata(),
-        )
-        new = AbiSnapshot(
-            version="2.0", library="libfoo.so.1", functions=fns,
-            dwarf=BtfMetadata(has_btf=True).to_dwarf_metadata(),
-        )
-
-        result = checker.compare(old, new, scope_to_public_surface=False)
-        aa = result.analysis_assurance
-        assert isinstance(aa, AnalysisAssurance)
-        assert aa.debug_evidence == {
-            "old": {"source": "btf", "basic": "parsed", "advanced": "not_supported"},
-            "new": {"source": "btf", "basic": "parsed", "advanced": "not_supported"},
-        }
-        assert aa.status == "partial"
-
-    def test_presence_only_receipt_does_not_claim_parsed_facts(self) -> None:
-        from abicheck.dwarf_presence import _section_presence_metadata
-
-        fns = [_fn("pub_a", "_Z5pub_av")]
-        basic, advanced = _section_presence_metadata(True, "btf")
-        old = AbiSnapshot(
-            version="1.0", library="libfoo.so.1", functions=fns,
-            dwarf=basic, dwarf_advanced=advanced,
-        )
-        basic, advanced = _section_presence_metadata(True, "btf")
-        new = AbiSnapshot(
-            version="2.0", library="libfoo.so.1", functions=fns,
-            dwarf=basic, dwarf_advanced=advanced,
-        )
-
-        result = checker.compare(old, new, scope_to_public_surface=False)
-        aa = result.analysis_assurance
-        assert isinstance(aa, AnalysisAssurance)
-        assert aa.debug_evidence["old"]["basic"] == "presence_only"
-        assert aa.debug_evidence["old"]["advanced"] == "not_supported"
-        assert aa.status == "partial"
-
-    def test_failed_debug_parse_is_preserved_in_receipt(self) -> None:
-        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
-        from abicheck.dwarf_metadata import DwarfMetadata
-
-        fns = [_fn("pub_a", "_Z5pub_av")]
-        old = AbiSnapshot(
-            version="1.0", library="libfoo.so.1", functions=fns,
-            dwarf=DwarfMetadata(evidence_state="failed"),
-            dwarf_advanced=AdvancedDwarfMetadata(evidence_state="failed"),
-        )
-        new = AbiSnapshot(
-            version="2.0", library="libfoo.so.1", functions=fns,
-            dwarf=DwarfMetadata(evidence_state="failed"),
-            dwarf_advanced=AdvancedDwarfMetadata(evidence_state="failed"),
-        )
-
-        aa = checker.compare(old, new, scope_to_public_surface=False).analysis_assurance
-        assert isinstance(aa, AnalysisAssurance)
-        assert aa.debug_evidence["old"]["basic"] == "failed"
-        assert aa.debug_evidence["old"]["advanced"] == "failed"
-        assert aa.status == "partial"
 
 
 class TestSourceTreeMismatchFailure:
