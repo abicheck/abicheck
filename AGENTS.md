@@ -1019,6 +1019,56 @@ Once a root command genuinely clears the bar above, pick the right home:
   mode. Fixed by treating `lang == "c"` as explicit, mirroring `perform_
   elf_dump`'s identical squash-guard rule elsewhere in this same area.
 
+  **A fifth finding, on the fold's own call shape rather than its logic: the
+  include-dir seed and the L3→L2 fold each independently collected L3
+  evidence, and a caller genuinely needing the inferred build query (no
+  existing compile database) could self-deadlock.** All three call sites
+  (`perform_elf_dump`, `handle_non_elf_dump`, `scan_engine._build_new_
+  snapshot`) called `seed_l2_includes()` and then, immediately after,
+  `fold_l3_compile_context()` — each independently calling
+  `buildsource.inline.collect_inline_pack()`. Harmless when at most one call
+  can trigger the zero-config *inferred* build-system query (cmake/make/
+  bazel, gated by `allow_inferred_build_query`/`collect_mode`), but a real
+  inferred query is a `flock`-protected, deterministic per-source-tree temp
+  build dir (`build_query._claim_inferred_build_dir`) held until its own
+  *cleanup* runs — deliberately deferred until after the header parse
+  consumes the seeded dirs, i.e. long after the seed call returns. The
+  second call's own inferred-query attempt then contends on the identical
+  lock the first call is still holding, and — being the *same process*
+  reopening the same lock file, not a different one — `flock`'s
+  per-open-file-description semantics mean this is genuine self-contention,
+  not a race with some other process: it blocks for up to
+  `INFERRED_QUERY_TIMEOUT_S` (600s) before falling back to a throwaway
+  sibling dir (Codex review). Fixed by collapsing the two into one
+  collection: `buildsource.l2_seed.seed_includes_and_fold_compile_context()`
+  runs `collect_inline_pack()` exactly once and derives both the include-dir
+  seed (mirroring `seed_l2_includes`'s own gating and directory derivation)
+  and the compile-context fold (mirroring `derive_l2_compile_context`'s
+  resolution + merge) from that single `BuildEvidence`, so only one inferred
+  query — if any — ever runs per call. All three call sites now call this
+  one combined function instead of the two separate ones; `seed_l2_includes`
+  and `fold_l3_compile_context` themselves are unchanged and still used
+  independently elsewhere (each is well-defined on its own — the bug was
+  specifically two independent *collections* of the same evidence in one
+  logical operation, not either function individually). Verified against
+  the same real `compile_commands.json` fixtures the fourth finding's own
+  regression tests use, now exercised through the combined entry point.
+
+  **A sixth finding, on `_split_include_tokens` itself, documented as a
+  residual gap rather than fixed here (Codex review).** The split
+  distinguishes include-vs-non-include tokens and preserves relative order
+  within each group, but not GCC/Clang's distinct include-search *buckets*
+  (`-iquote` > `-I` > `-isystem` > `-idirafter`, each a separate search
+  class the compiler consults in that fixed order regardless of argv
+  position). An explicit `-isystem` therefore still searches ahead of a
+  derived `-iquote`/`-I` after the split, even though a real compiler
+  would consult the quote/regular buckets first regardless of flag order.
+  A correct fix needs the merge to track bucket membership, not just
+  include-vs-non-include — a real, if narrow, redesign of the function's
+  output shape, not a follow-up to the explicit-vs-derived ordering fix
+  (the fourth finding above) this function exists for. See the function's
+  own docstring for the same note.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

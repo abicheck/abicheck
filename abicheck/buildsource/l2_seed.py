@@ -510,6 +510,18 @@ def _split_include_tokens(
     next token as its directory operand, so both travel together into
     *include*; an attached form (``-Idir``) is self-contained. Mirrors
     ``header_utils._flag_tokens``'s identical spaced-vs-attached distinction.
+
+    Known gap (Codex review, not fixed): this preserves the relative order
+    *within* the derived include tokens, but does not distinguish GCC/Clang's
+    distinct include-search *buckets* (``-iquote`` > ``-I`` > ``-isystem`` >
+    ``-idirafter``, each a separate search class regardless of argv
+    position) from a plain flat list. An explicit ``-isystem`` therefore
+    still searches ahead of a derived ``-iquote``/``-I`` after this split,
+    even though a real compiler would consult the quote/regular buckets
+    first regardless of flag order. Closing this needs the merge to track
+    bucket membership, not just include-vs-non-include -- a real, if narrow,
+    redesign of this function's output shape, not a follow-up to the
+    explicit-vs-derived ordering fix this function exists for.
     """
     from ..header_utils import _INCLUDE_FLAG_PREFIXES
 
@@ -651,6 +663,145 @@ def fold_l3_compile_context(
     merged = _merge_l3_compile_context(explicit_ctx, derived)
     assert merged is not None  # both args non-None -> _merge_l3_compile_context always merges
     return True, merged, _include_operand_dirs(derived.gcc_option_tokens)
+
+
+def seed_includes_and_fold_compile_context(
+    *,
+    headers: list[Path] | tuple[Path, ...],
+    includes: list[Path] | tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    build_config: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+    collect_mode: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    frontend: str,
+    frontend_context: str,
+    lang: str,
+    lang_explicit: bool,
+    pending_cleanups: list[Callable[[], None]],
+) -> tuple[list[Path], bool, CompileContext, tuple[Path, ...]]:
+    """``seed_l2_includes()`` + :func:`fold_l3_compile_context` combined into
+    one L3 collection (Codex review, PR #782).
+
+    The two were originally two independent calls, each running its own
+    :func:`~abicheck.buildsource.inline.collect_inline_pack` -- harmless when
+    at most one can trigger the zero-config *inferred* build-system query
+    (cmake/make/bazel), but a caller passing the same ``--sources`` tree
+    through both, with an inferred query genuinely needed (no existing
+    compile database), hit a real deadlock-shaped bug: the first call's
+    claim on the deterministic build-dir lock (``build_query.
+    _claim_inferred_build_dir``) is a real ``flock`` held until its own
+    *cleanup* runs -- which is deliberately deferred until after the L2
+    header parse has consumed the seeded dirs, i.e. long after this
+    function returns -- so the second call's own inferred-query attempt
+    would contend on the identical lock and wait up to the 600s timeout
+    before falling back to a throwaway sibling dir. This function collects
+    the L3 evidence exactly once and derives both results from it, so only
+    one inferred query -- if any -- ever runs.
+
+    Returns ``(includes, l3_context_applied, l3_effective_context,
+    derived_include_dirs)`` -- ``includes`` is *includes* augmented with any
+    build-derived seed dirs (mirrors ``seed_l2_includes``'s own return); the
+    remaining three mirror :func:`fold_l3_compile_context`'s return exactly.
+    Any temp-build-dir cleanups are appended to *pending_cleanups* in place,
+    to be drained only after the L2 parse has consumed both the seeded
+    include dirs and the derived compile context's own directories.
+    """
+    from ..errors import HeaderCompileContextAmbiguousError
+    from ..header_utils import _context_tokens, _has_include_build_context
+    from .header_compile_context import resolve_header_compile_context
+
+    explicit_ctx = CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=frontend,
+        frontend_context=frontend_context,
+    )
+    incs = list(includes)
+    # Mirrors seed_l2_includes' own gating exactly: an explicit -I list OR
+    # include dirs supplied through --compiler-option both suppress the
+    # include-dir fallback so the user's own search precedence is kept.
+    user_gave_includes = bool(incs) or _has_include_build_context(
+        _context_tokens(gcc_options, gcc_option_tokens)
+    )
+    want_seed = bool(headers) and not user_gave_includes
+    if (sources is None and build_info is None) or (not want_seed and not headers):
+        return incs, False, explicit_ctx, ()
+
+    args = _resolve_l2_seed_pack_args(
+        build_config, sources, build_info, build_query, build_compile_db
+    )
+    if args is None:
+        return incs, False, explicit_ctx, ()
+
+    cleanups: list[Callable[[], None]] = []
+    try:
+        pack = collect_inline_pack(
+            sources=args.sources,
+            build_info=args.build_info,
+            build_config=args.build_config,
+            build_config_trusted_for_query=args.build_config_trusted_for_query,
+            compile_db_explicit=args.compile_db_explicit,
+            allow_inferred_build_query=collect_mode != "off",
+            base_build=args.base_build,
+            layers=("L3",),
+            defer_cleanup=cleanups,
+        )
+        build_evidence = pack.build_evidence if pack is not None else None
+        units = build_evidence.compile_units if build_evidence is not None else []
+
+        if want_seed:
+            seeded_dirs = _existing_include_dirs(units)
+            if seeded_dirs:
+                logger.info(
+                    "L2 header parse: seeded %d include dir(s) from the "
+                    "build's compile database (no -I given).",
+                    len(seeded_dirs),
+                )
+                incs = incs + [Path(d) for d in seeded_dirs]
+
+        if not headers:
+            if cleanups:
+                pending_cleanups.extend(cleanups)
+            return incs, False, explicit_ctx, ()
+        resolution = resolve_header_compile_context(
+            build_evidence,
+            list(headers),
+            explicit=explicit_ctx,
+            lang=lang,
+            lang_explicit=lang_explicit,
+        )
+        if cleanups:
+            pending_cleanups.extend(cleanups)
+        if resolution.context is None:
+            return incs, False, explicit_ctx, ()
+        merged = _merge_l3_compile_context(explicit_ctx, resolution.context)
+        assert merged is not None  # both args non-None -> always merges
+        return (
+            incs,
+            True,
+            merged,
+            _include_operand_dirs(resolution.context.gcc_option_tokens),
+        )
+    except HeaderCompileContextAmbiguousError:
+        # P0.3's fail-closed case: release any temp build dir this attempt
+        # created, then propagate -- never resolved by silently guessing.
+        _run_cleanups(cleanups)
+        raise
+    except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
+        _run_cleanups(cleanups)
+        return list(includes), False, explicit_ctx, ()
 
 
 def seed_l2_includes(

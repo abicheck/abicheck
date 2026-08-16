@@ -232,65 +232,49 @@ def _build_new_snapshot(
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
     """
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
     from .errors import AbicheckError
     from .service import resolve_input
 
-    # L2 include fallback: when headers are given but the user passed no explicit
-    # -I, seed the build's include dirs so the aggregate public-header parse can
-    # resolve dependency headers (e.g. pvxs headers include EPICS Base's
-    # <epicsTime.h>). Shared with the dump path via seed_l2_includes.
+    # L2 include fallback + P0.3 L3->L2 fold, combined into one L3 collection
+    # (Codex review, PR #782 -- see seed_includes_and_fold_compile_context's own
+    # docstring for why the two were merged: two independent
+    # collect_inline_pack() calls each capable of triggering the zero-config
+    # inferred build-system query would contend on the same exclusive
+    # flock, one waiting up to the 600s timeout on the other's still-held
+    # lock). This also closes scan's own candidate-resolution side of the
+    # AGENTS.md "The native ELF `abicheck dump` path never applies L3 build
+    # context..." known gap: this function calls service.resolve_input
+    # directly, not resolve_side_snapshot, so compare's/dump's own fold never
+    # ran here either -- folding the real L3 CompileUnit-derived context into
+    # the already-resolved compile_context so a scan candidate and a
+    # dump-produced baseline of the same project agree on
+    # language_standard/include_sequence instead of NOT_COMPARABLE for
+    # reasons neither diagnostics named.
     #
-    # Keep the seed's temp-build-dir cleanups LOCAL (defer_cleanup=None), not on the
-    # outer scan list: the seed may run the inferred-CMake query, whose build dir is
-    # held under an exclusive flock until its cleanup runs. embed_build_source()
-    # below runs its *own* inferred query in the same function, so if we deferred the
-    # release to the outer drain (which happens after embed) that second query would
-    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s) before
-    # falling back to a fresh dir. The finally below drains _l2_local_cleanups right
-    # after resolve_input() has consumed the seeded dirs, releasing the lock before
-    # L3/L4 collection replays the query (Codex review).
-    includes, _l2_local_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        # -I dirs the user gave through --compiler-option (carried on the
-        # CompileContext) are explicit too — pass them so the seed stays a no-op
-        # and the user's include search precedence is preserved (Codex review).
-        gcc_options=compile_context.gcc_options if compile_context else None,
-        gcc_option_tokens=(
-            compile_context.gcc_option_tokens if compile_context else ()
-        ),
-        # L2-only pins (--depth headers → collect_mode "off") requested no build/
-        # source evidence, so the include-dir seed must not run a build system just
-        # to hint headers. Passive DB discovery still applies; only the zero-config
-        # inferred cmake/make/bazel query is gated (Codex review).
-        allow_inferred_build_query=collect_mode != "off",
-    )
-
+    # Keep the seed's temp-build-dir cleanups LOCAL (pending_cleanups=
+    # _l2_local_cleanups), not on the outer scan list: the seed may run the
+    # inferred-CMake query, whose build dir is held under an exclusive flock
+    # until its cleanup runs. embed_build_source() below runs its *own*
+    # inferred query in the same function, so if we deferred the release to
+    # the outer drain (which happens after embed) that second query would
+    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s)
+    # before falling back to a fresh dir. The finally below drains
+    # _l2_local_cleanups right after resolve_input() has consumed the seeded
+    # dirs, releasing the lock before L3/L4 collection replays the query
+    # (Codex review).
+    _l2_local_cleanups: list[Callable[[], None]] = []
     try:
-        # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path
-        # never applies L3 build context..." known gap -- scan's own
-        # candidate resolution shared the identical gap: this function calls
-        # service.resolve_input directly, not resolve_side_snapshot, so
-        # compare's/dump's own fold never ran here either). Folds the real L3
-        # CompileUnit-derived context into the already-resolved
-        # compile_context, mirroring perform_elf_dump's identical fold -- so
-        # a scan candidate and a dump-produced baseline of the same project
-        # agree on language_standard/include_sequence instead of
-        # NOT_COMPARABLE for reasons neither diagnostics named. Inside this
-        # try block so a genuine HeaderCompileContextAmbiguousError surfaces
-        # as the same clean click.ClickException resolve_input's own errors
-        # do below.
-        from .buildsource.l2_seed import fold_l3_compile_context
-
-        l3_context_applied, compile_context, _l3_include_dirs = fold_l3_compile_context(
+        (
+            includes,
+            l3_context_applied,
+            compile_context,
+            _l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
             headers=headers,
-            build_info=build_info,
+            includes=includes,
             sources=sources,
+            build_info=build_info,
             build_config=build_config,
             build_query=None,
             build_compile_db=None,

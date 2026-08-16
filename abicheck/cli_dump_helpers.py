@@ -1269,35 +1269,30 @@ def handle_non_elf_dump(
     # (--depth headers/binary) gates the executing inferred build query. dump has no
     # defer_cleanup channel, so temp-build-dir cleanups come back pending and run in
     # the finally, after the header parse has consumed the dirs.
+    #
+    # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path never
+    # applies L3 build context..." known gap; PE/Mach-O shared the identical
+    # gap) is combined into the SAME collection as the include seed above
+    # (seed_includes_and_fold_compile_context, not two separate calls) --
+    # two independent collect_inline_pack calls for the same --sources tree
+    # could otherwise contend on the same inferred-build-query lock and wait
+    # up to its 600s timeout (Codex review; see that function's own
+    # docstring).
     from .buildsource.inline import _run_cleanups
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
-    eff_includes, _l2_pending_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        gcc_options=getattr(compile_context, "gcc_options", None),
-        gcc_option_tokens=getattr(compile_context, "gcc_option_tokens", ()),
-        allow_inferred_build_query=collect_mode != "off",
-    )
+    _l2_pending_cleanups: list[Callable[[], None]] = []
     try:
-        # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path
-        # never applies L3 build context..." known gap; PE/Mach-O shared the
-        # identical gap -- see fold_l3_compile_context's own docstring for
-        # perform_elf_dump's twin of this call). Inside this try block so a
-        # genuine HeaderCompileContextAmbiguousError surfaces as the same
-        # clean click.ClickException the header-parse failure below does.
-        from .buildsource.l2_seed import fold_l3_compile_context
-
-        l3_context_applied, l3_effective_ctx, _l3_include_dirs = fold_l3_compile_context(
+        (
+            eff_includes,
+            l3_context_applied,
+            l3_effective_ctx,
+            _l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
             headers=headers,
-            build_info=build_info,
+            includes=includes,
             sources=sources,
+            build_info=build_info,
             build_config=build_config,
             build_query=build_query,
             build_compile_db=build_compile_db,
@@ -1665,47 +1660,38 @@ def perform_elf_dump(
     # headers that reach into a dependency SDK (the pvxs/EPICS case). dump has no
     # defer_cleanup channel, so any inferred temp-build-dir cleanups come back as
     # pending and are run below, after the header parse has consumed the dirs.
+    #
+    # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path never
+    # applies L3 build context..." known gap) is combined into the SAME
+    # collection as the include seed above (seed_includes_and_fold_
+    # compile_context, not two separate calls) -- two independent
+    # collect_inline_pack calls for the same --sources tree could otherwise
+    # contend on the same inferred-build-query lock and wait up to its 600s
+    # timeout (Codex review; see that function's own docstring).
     from .buildsource.inline import _run_cleanups
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
-    eff_includes, _l2_pending_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        # Include dirs supplied via --compiler-option are as explicit as
-        # -I and must suppress the seed so the user's search precedence is kept.
-        gcc_options=effective_gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        # An L2-only dump (--depth headers → collect_mode "off") requested no build/
-        # source evidence, so don't let the include-dir seed run a build system;
-        # only the zero-config inferred query is gated, passive discovery stays
-        # (Codex review).
-        allow_inferred_build_query=collect_mode != "off",
-    )
+    _l2_pending_cleanups: list[Callable[[], None]] = []
     try:
-        # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path
-        # never applies L3 build context..." known gap) -- see
-        # fold_l3_compile_context's own docstring. Inside this try block (not
-        # before it) so a genuine HeaderCompileContextAmbiguousError surfaces
-        # as the same clean click.ClickException the header-parse failure
-        # below does, rather than an unhandled traceback.
-        from .buildsource.l2_seed import fold_l3_compile_context
-
-        l3_context_applied, l3_effective_ctx, l3_include_dirs = fold_l3_compile_context(
+        (
+            eff_includes,
+            l3_context_applied,
+            l3_effective_ctx,
+            l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
             headers=resolved_headers,
-            build_info=build_info,
+            includes=includes,
             sources=sources,
+            build_info=build_info,
             build_config=build_config,
             build_query=build_query,
             build_compile_db=build_compile_db,
             collect_mode=collect_mode,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
+            # Include dirs supplied via --compiler-option are as explicit as
+            # -I and must suppress the seed so the user's search precedence
+            # is kept.
             gcc_options=effective_gcc_options,
             gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
             sysroot=sysroot,

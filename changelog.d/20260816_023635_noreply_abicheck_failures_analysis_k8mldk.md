@@ -65,3 +65,19 @@
   derived standard reach a parse being forced into C mode; `lang == "c"`
   (never `scan`'s own default) is now treated as explicit, mirroring
   `perform_elf_dump`'s identical squash-guard rule.
+
+- **A self-deadlock risk in the same L3→L2 fold (Codex review): the
+  include-dir seed and the fold each independently collected L3 evidence,
+  so a caller needing the zero-config inferred build query (cmake/make/
+  bazel, no existing compile database) could contend on its own
+  still-held lock.** The inferred query's temp build dir is held under an
+  exclusive `flock` until its cleanup runs — deliberately deferred until
+  after the header parse consumes the seeded dirs — so a second,
+  independent collection immediately after the first would block on that
+  same lock for up to 600s before falling back to a throwaway dir. Fixed
+  with `buildsource.l2_seed.seed_includes_and_fold_compile_context()`,
+  which collects the L3 evidence exactly once and derives both the
+  include-dir seed and the compile-context fold from it; all three call
+  sites (`perform_elf_dump`, `handle_non_elf_dump`,
+  `scan_engine._build_new_snapshot`) now call this combined function
+  instead of the two separate ones.

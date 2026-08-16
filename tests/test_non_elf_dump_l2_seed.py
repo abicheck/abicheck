@@ -19,6 +19,7 @@ resolve dependency headers and falls back to export-table mode (Codex review).""
 from __future__ import annotations
 
 from abicheck.cli_dump_helpers import handle_non_elf_dump
+from abicheck.compile_context import CompileContext
 from abicheck.model import AbiSnapshot
 
 
@@ -27,18 +28,32 @@ def test_non_elf_dump_seeds_includes_and_runs_cleanup(monkeypatch, tmp_path):
     events: list[str] = []
     seeded_dir = tmp_path / "buildinc"
 
-    def fake_seed(**kwargs):
+    def fake_seed_and_fold(**kwargs):
         events.append("seed")
         captured["seed_kwargs"] = kwargs
         # Return a build-derived include dir + a pending temp-dir cleanup.
-        return [seeded_dir], [lambda: events.append("cleanup")]
+        kwargs["pending_cleanups"].append(lambda: events.append("cleanup"))
+        explicit_ctx = CompileContext(
+            gcc_path=kwargs["gcc_path"],
+            gcc_prefix=kwargs["gcc_prefix"],
+            gcc_options=kwargs["gcc_options"],
+            gcc_option_tokens=kwargs["gcc_option_tokens"],
+            sysroot=kwargs["sysroot"],
+            nostdinc=kwargs["nostdinc"],
+            frontend=kwargs["frontend"],
+            frontend_context=kwargs["frontend_context"],
+        )
+        return [seeded_dir], False, explicit_ctx, ()
 
     def fake_dump_native(so_path, binary_fmt, headers, includes, version, lang, **kw):
         events.append("dump")
         captured["includes"] = includes
         return AbiSnapshot(library="l", version=version)
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
 
     handle_non_elf_dump(
         so_path=tmp_path / "foo.dll",
@@ -71,11 +86,24 @@ def test_non_elf_dump_gates_inferred_query_for_l2_only(monkeypatch, tmp_path):
     # the PE/Mach-O seed too — the flag is threaded from collect_mode.
     captured: dict = {}
 
-    def fake_seed(**kwargs):
-        captured["allow"] = kwargs["allow_inferred_build_query"]
-        return list(kwargs["includes"]), []
+    def fake_seed_and_fold(**kwargs):
+        captured["allow"] = kwargs["collect_mode"] != "off"
+        explicit_ctx = CompileContext(
+            gcc_path=kwargs["gcc_path"],
+            gcc_prefix=kwargs["gcc_prefix"],
+            gcc_options=kwargs["gcc_options"],
+            gcc_option_tokens=kwargs["gcc_option_tokens"],
+            sysroot=kwargs["sysroot"],
+            nostdinc=kwargs["nostdinc"],
+            frontend=kwargs["frontend"],
+            frontend_context=kwargs["frontend_context"],
+        )
+        return list(kwargs["includes"]), False, explicit_ctx, ()
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
 
     handle_non_elf_dump(
         so_path=tmp_path / "foo.dylib",

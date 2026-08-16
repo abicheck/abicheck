@@ -502,6 +502,28 @@ def _elf_dump_callables():  # noqa: ANN202
     return events, _stamp, _write, _expand, _populate
 
 
+_CC_FIELDS = (
+    "gcc_path", "gcc_prefix", "gcc_options", "gcc_option_tokens",
+    "sysroot", "nostdinc", "frontend", "frontend_context",
+)
+
+
+def _fake_seed_and_fold(seeded_dirs, on_cleanup=None):  # noqa: ANN001, ANN202
+    """Stand-in for ``seed_includes_and_fold_compile_context`` -- mirrors its
+    ``(includes, l3_context_applied, context, dirs)`` return shape and pushes
+    a pending cleanup, for tests that only care about the include-dir seed
+    half (no real L3 fold); replaces the pre-merge ``seed_l2_includes`` fakes."""
+    from abicheck.compile_context import CompileContext
+
+    def _fake(**kwargs):  # noqa: ANN003
+        if on_cleanup is not None:
+            kwargs["pending_cleanups"].append(on_cleanup)
+        ctx = CompileContext(**{k: kwargs[k] for k in _CC_FIELDS})
+        return list(seeded_dirs), False, ctx, ()
+
+    return _fake
+
+
 def test_perform_elf_dump_stamps_build_context_and_attaches(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -669,14 +691,11 @@ def test_perform_elf_dump_hashes_derived_include_dirs_into_ast_cache_key(
 
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _dump_stub)
     monkeypatch.setattr("abicheck.service._attach_header_graph", lambda snap, *_a, **_k: snap)
-    # seed_l2_includes' own compile-DB fallback would independently discover
-    # the identical build_inc dir and add it to extra_includes (which is
-    # already hashed) -- disabled here so the only source of build_inc in
-    # this test is the new L3 fold + extra_hash_dirs threading being tested.
-    monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_l2_includes",
-        lambda **kwargs: (list(kwargs["includes"]), []),
-    )
+    # The seed and fold now share one collect_inline_pack() call (Codex
+    # review, PR #782) and can no longer be disabled independently -- this
+    # test still asserts build_inc lands in extra_hash_dirs specifically
+    # (not just extra_includes), carried there via the derived compile-
+    # context's own include-operand extraction.
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
@@ -1259,8 +1278,8 @@ def test_perform_elf_dump_header_graph_receives_seeded_includes(
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_l2_includes",
-        lambda **_kw: ([seeded], []),
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        _fake_seed_and_fold([seeded]),
     )
 
     captured: dict[str, object] = {}
@@ -1436,17 +1455,24 @@ def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
     captured: dict = {}
     events: list[str] = []
 
-    def fake_seed(**kwargs):
+    def fake_seed_and_fold(**kwargs):
         # collect_mode gates the inferred build query; assert it is threaded.
-        captured["allow"] = kwargs["allow_inferred_build_query"]
-        return [seeded], [lambda: events.append("cleanup")]
+        captured["allow"] = kwargs["collect_mode"] != "off"
+        kwargs["pending_cleanups"].append(lambda: events.append("cleanup"))
+        from abicheck.compile_context import CompileContext
+
+        ctx = CompileContext(**{k: kwargs[k] for k in _CC_FIELDS})
+        return [seeded], False, ctx, ()
 
     def fake_dump(**kw):
         captured["extra_includes"] = kw.get("extra_includes")
         events.append("dump")
         return AbiSnapshot(library="lib.so", version="1.0")
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
     _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -1484,8 +1510,9 @@ def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
     events: list[str] = []
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
 
-    def fake_seed(**kwargs):
-        return [seeded], [lambda: events.append("cleanup")]
+    fake_seed_and_fold = _fake_seed_and_fold(
+        [seeded], on_cleanup=lambda: events.append("cleanup")
+    )
 
     def fake_dump(**kw):
         events.append("dump")
@@ -1495,7 +1522,10 @@ def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
         events.append("attach")
         return plain_snap
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
 
@@ -1527,8 +1557,9 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
     events: list[str] = []
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
 
-    def fake_seed(**kwargs):
-        return [seeded], [lambda: events.append("cleanup")]
+    fake_seed_and_fold = _fake_seed_and_fold(
+        [seeded], on_cleanup=lambda: events.append("cleanup")
+    )
 
     def fake_dump(**kw):
         events.append("dump")
@@ -1541,7 +1572,10 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
     def fake_attach(*a, **k):  # noqa: ANN002, ANN003
         raise AssertionError("_attach_header_graph must not be reached")
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
     monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _raise_ext)
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
@@ -1575,8 +1609,9 @@ def test_perform_elf_dump_cleanup_still_runs_after_header_graph_with_no_flags(
     events: list[str] = []
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
 
-    def fake_seed(**kwargs):
-        return [seeded], [lambda: events.append("cleanup")]
+    fake_seed_and_fold = _fake_seed_and_fold(
+        [seeded], on_cleanup=lambda: events.append("cleanup")
+    )
 
     def fake_dump(**kw):
         events.append("dump")
@@ -1586,7 +1621,10 @@ def test_perform_elf_dump_cleanup_still_runs_after_header_graph_with_no_flags(
         events.append("attach")
         return plain_snap
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
 
@@ -1806,14 +1844,18 @@ def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
 
     events: list[str] = []
 
-    def fake_seed(**kwargs):
-        return [seeded], [lambda: events.append("cleanup")]
+    fake_seed_and_fold = _fake_seed_and_fold(
+        [seeded], on_cleanup=lambda: events.append("cleanup")
+    )
 
     def _raise(**_kw):
         events.append("dump")
         raise AbicheckError("castxml exploded")
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _raise)
 
     _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
