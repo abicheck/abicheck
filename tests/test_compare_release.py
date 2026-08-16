@@ -798,6 +798,72 @@ class TestOutputDir:
         assert (out_dir / "libfoo.json").exists()
         assert (out_dir / "summary.json").exists()
 
+    def test_per_library_report_exit_block_honors_release_severity(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR G1 follow-up (fresh evidence): ``_compare_one_
+        library`` wrote each per-library ``--output-dir`` report via
+        ``to_json(result)`` with no ``severity_config``, so the persisted
+        ``exit`` block (schema 2.41, ``exit_decision.ExitDecision``) always
+        used the legacy verdict-based scheme regardless of whether the
+        release itself resolved and gated on a severity configuration.
+        Reproduced with ``--severity-preset strict`` (additions are error):
+        the release process exits ``1``, but the per-library report's own
+        ``exit.code`` read ``0``/``reasons: ["clean"]`` before this fix --
+        disagreeing with the process it was supposedly explaining.
+        """
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        out_dir = tmp_path / "reports"
+        old = _snap(
+            "1.0",
+            [
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="bar",
+                    mangled="_Z3barv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, _ = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--output-dir",
+            str(out_dir),
+            "--severity-preset",
+            "strict",
+        )
+        assert code == 1
+        report = json.loads((out_dir / "libfoo.json").read_text())
+        # The addition-error gate is severity-scheme-only -- a report built
+        # under the legacy scheme's ExitDecision would read code 0, reasons
+        # ["clean"], disagreeing with the real (severity-gated) release exit.
+        assert report["exit"]["code"] == 1
+        assert "compatibility_gate" in report["exit"]["reasons"]
+
     def test_summary_json_structure(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         old_dir.mkdir()

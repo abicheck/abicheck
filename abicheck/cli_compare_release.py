@@ -180,6 +180,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     str | None,
+    "SeverityConfig | None",
 ]
 
 
@@ -222,6 +223,7 @@ def _compare_one_library(
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -233,6 +235,15 @@ def _compare_one_library(
     the ``"_diff_result"`` key. Callers that need the full diff (the
     bundle layer, JUnit aggregation) pop it from the entry before
     JSON-serialising — keeps the per-library compare a single-pass.
+
+    *severity_config* is forwarded to the per-library ``--output-dir`` JSON
+    write below (Codex review, fresh evidence): without it, that write
+    always used the legacy exit-code scheme's ``ExitDecision`` regardless of
+    whether the release itself resolved and gates on a severity
+    configuration — so a severity-aware release (``severity.addition:
+    error``, say) could exit non-zero at the release level while every
+    per-library report it wrote said ``exit.code: 0``, ``reasons:
+    ["clean"]``, disagreeing with the release's own real exit.
     """
     old_path = old_map[key]
     new_path = new_map[key]
@@ -308,7 +319,9 @@ def _compare_one_library(
             entry["filtered_internal_count"] = result.out_of_surface_count
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
-            _safe_write_output(lib_report_path, to_json(result))
+            _safe_write_output(
+                lib_report_path, to_json(result, severity_config=severity_config)
+            )
         return entry
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         # ADR-050 D2 — ordered before the generic except Exception below.
@@ -350,6 +363,7 @@ def _suppress_lockstep_soname_findings(
     library_results: list[dict[str, object]],
     worst_verdict: str,
     output_dir: Path | None,
+    severity_config: SeverityConfig | None = None,
 ) -> int:
     """Drop ``SONAME_BUMP_UNNECESSARY`` when the release is a coordinated break.
 
@@ -359,7 +373,14 @@ def _suppress_lockstep_soname_findings(
     SONAME in lockstep is the correct, intentional practice — so the per-library
     "unnecessary" signal is a false positive at the release level. Mutates the
     affected per-library results (and re-writes their JSON when ``output_dir`` is
-    set) and returns the number of findings suppressed.
+    set) and returns the number of findings suppressed. *severity_config* is
+    forwarded to that re-write's own ``to_json`` call (Codex review, fresh
+    evidence): without it, a severity-aware release's per-library report file
+    would revert to the legacy exit-code scheme's ``exit`` block on this
+    second write, even though ``_compare_one_library``'s first write already
+    used the severity-aware one — so which scheme a report's ``exit`` block
+    reflects would depend on whether this suppression fired, not on the
+    release's actual configuration.
 
     Only a binary-incompatible (``BREAKING``) finding justifies a SONAME bump; a
     source-only ``API_BREAK`` does not, so the warning is preserved in that case.
@@ -394,7 +415,9 @@ def _suppress_lockstep_soname_findings(
         )
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
-            _safe_write_output(lib_report_path, to_json(result))
+            _safe_write_output(
+                lib_report_path, to_json(result, severity_config=severity_config)
+            )
     return suppressed
 
 
@@ -485,6 +508,7 @@ def _compare_release_libraries(
         include_dependencies,
         contract_evaluation,
         contract_mode,
+        severity_config,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -523,6 +547,7 @@ def _compare_release_libraries(
         library_results,
         worst_verdict,
         output_dir,
+        severity_config,
     )
     if suppressed_soname:
         click.echo(

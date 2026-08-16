@@ -10,7 +10,11 @@
   and the real process exit is computed through the same resolver, so a
   report reader and the CLI cannot disagree about why a comparison exited the
   way it did. `compat check`'s JSON output (its own ABICC 0/1/2 exit scheme)
-  omits the block rather than emit a disagreeing `code`. No CLI flag changes
-  and no change to any existing exit code -- this is the first, additive step
-  toward the phase-two plan's `--exit-code-scheme` consolidation, not a
-  behavioural change on its own.
+  omits the block rather than emit a disagreeing `code`. A directory/package
+  release compare's per-library `--output-dir` report now also forwards the
+  release's own resolved `--severity-preset`/severity config into its `exit`
+  block, so a severity-aware release's per-library reports agree with the
+  release's real exit code instead of always falling back to the legacy
+  verdict-based scheme. No CLI flag changes and no change to any existing
+  exit code -- this is the first, additive step toward the phase-two plan's
+  `--exit-code-scheme` consolidation, not a behavioural change on its own.
