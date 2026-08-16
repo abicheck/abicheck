@@ -2471,11 +2471,13 @@ class TestUsedByScoping:
     # (`to_stat_json`'s stale-summary-vs-recomputed-verdict contradiction),
     # a CLI combination that no longer exists -- `--stat` was removed, and
     # the CLI never sets `stat=True` on any `reporter.to_json` call anywhere
-    # any more (verified: `to_stat_json` is now reachable only via
-    # `reporter.to_json`'s own public `stat=` parameter, called by nothing in
-    # `abicheck/*.py` outside `reporter.py` itself). The bug class this test
-    # guarded against is provably unreachable from the CLI now, not merely
-    # untested. The sibling non-stat case,
+    # any more. `to_stat_json` itself is still directly reachable from a
+    # Tier-2 Python API caller via `abicheck.service_render.render_output(
+    # ..., stat=True)`'s own `fmt="json"` branch (the documented compat
+    # shim for the removed CLI flag) -- this comment is only about the CLI
+    # surface, not about `to_stat_json` becoming unreachable altogether. The
+    # bug class this test guarded against is provably unreachable from the
+    # CLI now, not merely untested. The sibling non-stat case,
     # test_json_summary_reflects_scoped_only_and_missing_findings above,
     # covers the still-live path.
 

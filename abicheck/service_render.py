@@ -193,14 +193,19 @@ def render_output(
             f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
         )
 
-    # Default: markdown. show_recommendation defaults to True (CLI cleanup
-    # phase two, PR 1: --recommend removed as a CLI flag -- the CLI's own
-    # wrapper never passes this keyword, so its own output stays
-    # unconditional, matching review's own unconditional inclusion above and
-    # JSON's unconditional release_recommendation field). A direct Tier-2
-    # caller passing show_recommendation=False explicitly still suppresses
-    # it here, same as before this PR (Codex review, fresh evidence -- an
-    # earlier revision hard-coded True regardless of the caller's own value).
+    # Default: markdown. show_recommendation defaults to False here (CLI
+    # cleanup phase two, PR 1: --recommend removed as a CLI flag -- this
+    # function's own default stays the exact pre-removal Tier-2 Python API
+    # value, per this docstring's own explanation above). The CLI's own
+    # wrapper (cli._render_output) explicitly passes
+    # show_recommendation=True, so its output stays unconditional, matching
+    # review's own unconditional inclusion above and JSON's unconditional
+    # release_recommendation field -- but that is an explicit override at
+    # the CLI's own call site, not this function's default. A direct Tier-2
+    # caller omitting the keyword (or passing show_recommendation=False
+    # explicitly) still gets it suppressed here, same as before this PR
+    # (Codex review, fresh evidence -- an earlier revision hard-coded True
+    # regardless of the caller's own value).
     md = to_markdown(
         result,
         show_only=show_only,

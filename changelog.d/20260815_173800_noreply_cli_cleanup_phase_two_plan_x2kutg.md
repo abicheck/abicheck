@@ -7,9 +7,9 @@
   compatibility-shim revision hard-coded `True` into the underlying
   `to_markdown()` call regardless of what the caller passed, silently
   reintroducing the recommendation for a direct Tier-2 caller that
-  explicitly asked it be suppressed. The CLI's own wrapper never passes
-  this keyword, so its default (`True`) and therefore its own output are
-  unaffected.
+  explicitly asked it be suppressed. The CLI's own wrapper explicitly
+  passes `show_recommendation=True` at its own call site, so its output is
+  unaffected either way.
 - **`compare --profile quick`'s printed one-line count no longer disagrees
   with its own exit code under `--show-only`.** The scoped-only/
   missing-contract findings that decide the count were filtered by
