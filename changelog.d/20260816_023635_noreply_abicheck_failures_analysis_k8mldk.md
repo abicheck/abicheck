@@ -15,8 +15,8 @@
   the comparison as `NOT_COMPARABLE` — not because evidence was missing,
   but because the two commands extracted under non-comparable recipes for
   reasons neither command's own diagnostics named. Fixed with a new,
-  shared `buildsource.l2_seed.fold_l3_compile_context()`, called from both
-  `perform_elf_dump` (ELF) and `handle_non_elf_dump` (PE/Mach-O, which
+  shared `buildsource.l2_seed.seed_includes_and_fold_compile_context()`,
+  called from both `perform_elf_dump` (ELF) and `handle_non_elf_dump` (PE/Mach-O, which
   shared the identical gap) — folding the real L3 `CompileUnit`-derived
   context (`-std=`, ABI-relevant `-D`/`-U`, target, sysroot) into the same
   explicit context CLI flags/`.abicheck.yml` already resolved, the exact
@@ -35,8 +35,8 @@
   parse never received real build context either — a same-project
   `scan --against` a `dump`-produced baseline still returned
   `NOT_COMPARABLE` even after the `dump`-path fix above. Fixed the same
-  way: `_build_new_snapshot` now calls `fold_l3_compile_context` before
-  `resolve_input` and stamps `parsed_with_build_context` accordingly. A
+  way: `_build_new_snapshot` now calls the combined seed+fold function
+  before `resolve_input` and stamps `parsed_with_build_context` accordingly. A
   real `dump` baseline → `scan --against` repro (a `g++`-compiled library +
   `compile_commands.json`) now produces `NO_CHANGE` end to end.
 
@@ -57,7 +57,7 @@
   as an opaque `gcc_option_tokens` string, which the AST cache key's own
   directory-mtime hashing (`extra_includes`/`extra_hash_dirs`) never
   inspected — so editing a header under a derived include dir could reuse
-  a stale cached AST on the ELF `dump` path. `fold_l3_compile_context()`
+  a stale cached AST on the ELF `dump` path. The combined seed+fold function
   now also returns the derived include directories, threaded into
   `perform_elf_dump`'s existing `extra_hash_dirs`. Separately, `scan`'s own
   fold call hard-coded `lang_explicit=False`, so an explicit `scan --lang
@@ -102,3 +102,14 @@
   degrades to a no-op instead of raising — fixed to match. The now-unused
   standalone `fold_l3_compile_context()` wrapper (superseded once all three
   call sites moved to the combined function) was removed as dead code.
+
+- **A stale-AST-cache-key gap in `service._attach_header_graph`'s own
+  independent second header parse (Codex review).** Its `extra_hash_dirs`
+  computation only covered inferred-root deferred directories, never any
+  include-search directory riding in the compile context's own
+  `gcc_option_tokens` (an explicit `-I`, or — since the L3 fold above — a
+  compile-DB-derived one), so editing a header under such a directory
+  could silently reuse a stale cached graph even though the primary
+  snapshot pass re-parsed correctly. Fixed by extracting the include-dir
+  extraction logic into a new shared `header_utils.include_operand_dirs()`
+  and folding it into this pass's own cache key too.

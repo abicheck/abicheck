@@ -1142,6 +1142,69 @@ Once a root command genuinely clears the bar above, pick the right home:
   `_attach_build_context` at all — the ADR-039 collector is ELF-only — so
   finding 9 has no PE/Mach-O counterpart.
 
+  **A tenth finding, from the same Codex review round (P1), on
+  `service._attach_header_graph`'s own second, independent
+  `_clang_header_dump` pass — real and fixed.** That pass has its own AST
+  cache key, computed from its own `deferred_dirs`, which only covered
+  `resolve_inferred_header_roots`'s own deferred roots — never any
+  include-search directory riding in `compile.gcc_option_tokens` itself
+  (an explicit `--gcc-options`/`--compiler-option -I`, or — since the
+  P0.3 fold — a compile-DB-derived one). A directory the primary snapshot
+  pass already hashes into its own cache key was therefore invisible to
+  this second pass's key, so editing a header under it could silently
+  reuse a stale cached graph even though the primary snapshot re-parsed
+  correctly and picked up the change. Fixed by extracting
+  `l2_seed._include_operand_dirs`'s logic into a new, shared
+  `header_utils.include_operand_dirs()` (a leaf module both `l2_seed.py`
+  and `service.py` already import from) and folding its result into
+  `_attach_header_graph`'s own `deferred_dirs` — closing the gap
+  generically for *any* include-search token the merged context carries,
+  not just an L3-derived one, since `_attach_header_graph` has no way to
+  distinguish the two once they're both flattened into
+  `gcc_option_tokens`. `l2_seed._include_operand_dirs` itself is now a
+  thin alias forwarding to the shared function, so existing callers/tests
+  needed no changes. Regression tests:
+  `tests/test_service_unit.py::TestAttachHeaderGraphHashesIncludeSearchTokens`
+  (both confirmed to fail against the pre-fix code — the positive case
+  asserting a `gcc_option_tokens`-carried `-I` dir reaches
+  `_clang_header_dump`'s own `extra_hash_dirs`, the negative case pinning
+  the no-tokens baseline stays `()`).
+
+  **Several smaller findings from the same CodeRabbit review round, all
+  fixed alongside the above.** (1) The changelog fragment's early entries
+  still named the now-removed `fold_l3_compile_context()` wrapper as the
+  shipped fix — corrected to the combined function's real name (this
+  file's own narrative-history style is left as-is, since later
+  paragraphs already record the removal). (2) `seed_includes_and_fold_
+  compile_context`'s own guard (`(sources is None and build_info is
+  None) or (not want_seed and not headers)`) had a redundant second
+  clause — `not want_seed and not headers` always reduces to `not
+  headers`, since `want_seed = bool(headers) and ...` is already `False`
+  whenever `headers` is empty — leaving a genuinely unreachable `if not
+  headers:` guard a few lines further down; both simplified/removed. (3)
+  The same function's `pending_cleanups.extend(cleanups)` ran before
+  `_merge_l3_compile_context`/`_include_operand_dirs`, so either raising
+  would have the `except Exception` branch's `_run_cleanups(cleanups)`
+  remove the same already-handed-off thunks a second time — not fatal
+  (`_run_cleanups` logs rather than raises on an already-closed handle),
+  but a real, avoidable double-removal; moved the extend to after every
+  remaining fallible step succeeds. (4) A genuinely weakened test
+  assertion in `test_scan_l2_cleanup_ordering.py`
+  (`test_scan_l2_seed_cleanup_runs_before_embed`): `assert seed_kwargs.
+  get("pending_cleanups") is not None` also passes for the outer scan
+  list itself (`defer_cleanup=[]` is never `None` either), so it would
+  not have caught a regression that reused it — fixed to assert identity
+  against the outer list directly. (5) Two cosmetic-only cleanups: a
+  redundant local `import json` shadowing the same module-level import,
+  and an unparenthesized chained `and`/`or` (ruff `RUF021`, not in this
+  repo's enabled rule set but still real and fixed) in `perform_elf_dump`'s
+  `parsed_with_build_context` stamp condition. (6) The three fake
+  `seed_includes_and_fold_compile_context` implementations in
+  `test_scan_l2_cleanup_ordering.py` each hand-built an identical
+  `CompileContext` from the same eight kwargs — extracted into one shared
+  `_CC_FIELDS`/`_explicit_ctx_from_kwargs()` helper, mirroring the
+  identical pattern `test_cli_dump_helpers_coverage.py` already used.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

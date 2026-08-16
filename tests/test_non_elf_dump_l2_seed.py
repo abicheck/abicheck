@@ -140,8 +140,6 @@ def test_non_elf_dump_folds_l3_compile_context_into_header_parse(tmp_path):
     whose compile database resolves a real -std=/-D for these headers must
     reach the native dumper's own `compile=` context, not just the L2
     include-dir fallback. Also stamps `parsed_with_build_context`."""
-    import json
-
     hdr = tmp_path / "widget.h"
     hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
     src = tmp_path / "widget.cpp"

@@ -547,29 +547,16 @@ def _split_include_tokens(
 def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
     """The directory operand of every include-search token in *tokens*.
 
-    Mirrors :func:`_split_include_tokens`'s spaced-vs-attached pairing, but
-    returns the resolved directory :class:`Path` objects rather than the raw
-    token pair -- the AST cache key's ``extra_hash_dirs`` channel (Codex
-    review) needs real paths to stat, not token strings.
+    Thin alias for :func:`~abicheck.header_utils.include_operand_dirs` --
+    moved there (a leaf module ``service.py`` already imports from too) once
+    ``service._attach_header_graph``'s own independent second header parse
+    needed the identical extraction for its own ``gcc_option_tokens``
+    (Codex review); kept here under its original private name so this
+    module's own callers/tests don't need updating.
     """
-    from ..header_utils import _INCLUDE_FLAG_PREFIXES
+    from ..header_utils import include_operand_dirs
 
-    dirs: list[Path] = []
-    i = 0
-    n = len(tokens)
-    while i < n:
-        t = tokens[i]
-        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
-            dirs.append(Path(tokens[i + 1]))
-            i += 2
-            continue
-        matched_prefix = next(
-            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p) and t != p), None
-        )
-        if matched_prefix is not None:
-            dirs.append(Path(t[len(matched_prefix) :]))
-        i += 1
-    return tuple(dirs)
+    return include_operand_dirs(tokens)
 
 
 def seed_includes_and_fold_compile_context(
@@ -666,7 +653,12 @@ def seed_includes_and_fold_compile_context(
         _context_tokens(gcc_options, gcc_option_tokens)
     )
     want_seed = bool(headers) and not user_gave_includes
-    if (sources is None and build_info is None) or (not want_seed and not headers):
+    # The second clause reduces to `not headers`: want_seed is False whenever
+    # headers is empty (bool(headers) is its first operand), so "not want_seed
+    # and not headers" can only ever equal "not headers" -- confirmed via
+    # CodeRabbit review, which also flagged the now-removed `if not headers:`
+    # guard a few lines below as unreachable for the identical reason.
+    if (sources is None and build_info is None) or not headers:
         return incs, False, explicit_ctx, ()
 
     cleanups: list[Callable[[], None]] = []
@@ -705,10 +697,6 @@ def seed_includes_and_fold_compile_context(
                 )
                 incs = incs + [Path(d) for d in seeded_dirs]
 
-        if not headers:
-            if cleanups:
-                pending_cleanups.extend(cleanups)
-            return incs, False, explicit_ctx, ()
         resolution = resolve_header_compile_context(
             build_evidence,
             list(headers),
@@ -716,18 +704,26 @@ def seed_includes_and_fold_compile_context(
             lang=lang,
             lang_explicit=lang_explicit,
         )
-        if cleanups:
-            pending_cleanups.extend(cleanups)
         if resolution.context is None:
+            if cleanups:
+                pending_cleanups.extend(cleanups)
             return incs, False, explicit_ctx, ()
+        # Hand *cleanups* over to the caller's own list only after every
+        # remaining fallible step has succeeded -- extending earlier (an
+        # earlier revision did it right after resolve_header_compile_context)
+        # left the same thunks in both pending_cleanups and this function's
+        # own `cleanups`, so a _merge_l3_compile_context/_include_operand_dirs
+        # failure below would have the except branch's _run_cleanups(cleanups)
+        # remove them a second time -- not fatal (_run_cleanups logs rather
+        # than raises on an already-closed handle), but still a real, visible
+        # double-removal a caller's own debug log would show (Codex/
+        # CodeRabbit review).
         merged = _merge_l3_compile_context(explicit_ctx, resolution.context)
         assert merged is not None  # both args non-None -> always merges
-        return (
-            incs,
-            True,
-            merged,
-            _include_operand_dirs(resolution.context.gcc_option_tokens),
-        )
+        dirs = _include_operand_dirs(resolution.context.gcc_option_tokens)
+        if cleanups:
+            pending_cleanups.extend(cleanups)
+        return incs, True, merged, dirs
     except HeaderCompileContextAmbiguousError:
         # P0.3's fail-closed case: release any temp build dir this attempt
         # created, then propagate -- never resolved by silently guessing.

@@ -24,6 +24,19 @@ still-held lock until the 600s timeout (Codex review)."""
 from __future__ import annotations
 
 from abicheck.cli_scan import _build_new_snapshot
+from abicheck.compile_context import CompileContext
+
+#: Keyword names shared verbatim between seed_includes_and_fold_compile_context's
+#: own signature and CompileContext's fields -- one place to update if either
+#: gains a field, instead of three hand-copied constructors (CodeRabbit review).
+_CC_FIELDS = (
+    "gcc_path", "gcc_prefix", "gcc_options", "gcc_option_tokens",
+    "sysroot", "nostdinc", "frontend", "frontend_context",
+)
+
+
+def _explicit_ctx_from_kwargs(kwargs: dict) -> CompileContext:
+    return CompileContext(**{k: kwargs[k] for k in _CC_FIELDS})
 
 
 def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
@@ -39,19 +52,8 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
         # must keep LOCAL (its own fresh list, never the outer scan
         # defer_cleanup) and drain in its finally, before embed_build_source
         # below replays its own inferred query on the same lock.
-        from abicheck.compile_context import CompileContext
-
         kwargs["pending_cleanups"].append(lambda: events.append("cleanup"))
-        explicit_ctx = CompileContext(
-            gcc_path=kwargs["gcc_path"],
-            gcc_prefix=kwargs["gcc_prefix"],
-            gcc_options=kwargs["gcc_options"],
-            gcc_option_tokens=kwargs["gcc_option_tokens"],
-            sysroot=kwargs["sysroot"],
-            nostdinc=kwargs["nostdinc"],
-            frontend=kwargs["frontend"],
-            frontend_context=kwargs["frontend_context"],
-        )
+        explicit_ctx = _explicit_ctx_from_kwargs(kwargs)
         return list(kwargs["includes"]), False, explicit_ctx, ()
 
     def fake_resolve(*args, **kwargs):
@@ -70,6 +72,7 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
 
     sources = tmp_path / "src"
     sources.mkdir()
+    outer_cleanups: list = []
     _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[tmp_path / "h.h"],
@@ -78,11 +81,15 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
         collect_mode="build",  # non-"off" → embed_build_source runs
         lang="c++",
         allow_build_query=False,
-        defer_cleanup=[],  # the outer scan list — the seed must NOT use it
+        defer_cleanup=outer_cleanups,  # the outer scan list — the seed must NOT use it
     )
 
-    # The seed+fold's pending cleanups were never the outer scan list.
-    assert seed_kwargs.get("pending_cleanups") is not None
+    # The seed+fold's pending cleanups were a genuinely different list object
+    # from the outer scan list (Codex review: `is not None` alone also
+    # passes for the outer list itself, since defer_cleanup=[] is never None
+    # either — this must catch a regression that reuses it).
+    assert seed_kwargs["pending_cleanups"] is not outer_cleanups
+    assert outer_cleanups == []
     # Ordering invariant: seed → resolve → cleanup (flock release) → embed.
     assert events == ["seed", "resolve", "cleanup", "embed"]
     assert events.index("cleanup") < events.index("embed")
@@ -235,19 +242,7 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
 
     def fake_seed_and_fold(**kwargs):
         # seed adds a build-derived dir, no cleanup
-        from abicheck.compile_context import CompileContext
-
-        explicit_ctx = CompileContext(
-            gcc_path=kwargs["gcc_path"],
-            gcc_prefix=kwargs["gcc_prefix"],
-            gcc_options=kwargs["gcc_options"],
-            gcc_option_tokens=kwargs["gcc_option_tokens"],
-            sysroot=kwargs["sysroot"],
-            nostdinc=kwargs["nostdinc"],
-            frontend=kwargs["frontend"],
-            frontend_context=kwargs["frontend_context"],
-        )
-        return [seeded], False, explicit_ctx, ()
+        return [seeded], False, _explicit_ctx_from_kwargs(kwargs), ()
 
     monkeypatch.setattr(
         "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
@@ -277,19 +272,8 @@ def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_pat
     events: list[str] = []
 
     def fake_seed_and_fold(**kwargs):
-        from abicheck.compile_context import CompileContext
-
         kwargs["pending_cleanups"].append(lambda: events.append("cleanup"))
-        explicit_ctx = CompileContext(
-            gcc_path=kwargs["gcc_path"],
-            gcc_prefix=kwargs["gcc_prefix"],
-            gcc_options=kwargs["gcc_options"],
-            gcc_option_tokens=kwargs["gcc_option_tokens"],
-            sysroot=kwargs["sysroot"],
-            nostdinc=kwargs["nostdinc"],
-            frontend=kwargs["frontend"],
-            frontend_context=kwargs["frontend_context"],
-        )
+        explicit_ctx = _explicit_ctx_from_kwargs(kwargs)
         return list(kwargs["includes"]), False, explicit_ctx, ()
 
     def fake_resolve(*args, **kwargs):

@@ -1798,9 +1798,7 @@ def perform_elf_dump(
         # context for these headers is enough; mirrors resolve_side_snapshot's own
         # "context_applied and snap.from_headers" condition for the typed pipeline.
         if (
-            effective_compile_db
-            and resolved_headers
-            and compile_db_context_matched
+            (effective_compile_db and resolved_headers and compile_db_context_matched)
             or l3_context_applied
         ) and snap.from_headers:
             snap.parsed_with_build_context = True

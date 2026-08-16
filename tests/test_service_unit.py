@@ -4361,6 +4361,70 @@ class TestAttachHeaderGraphCompilerSelection:
         assert mock_extractor.return_value.extract.call_args.kwargs["language"] == "C"
 
 
+class TestAttachHeaderGraphHashesIncludeSearchTokens:
+    """Codex review, PR #782: _attach_header_graph's own independent second
+    _clang_header_dump call has its own AST cache key, but its extra_hash_dirs
+    computation only covered resolve_inferred_header_roots's own deferred
+    roots -- never any include-search directory riding in
+    compile.gcc_option_tokens itself (an explicit --gcc-options/
+    --compiler-option -I, or -- since the P0.3 L3->L2 fold -- a compile-DB-
+    derived one). A directory the primary snapshot pass already hashes into
+    its own cache key must be hashed here too, or an edit under it would
+    silently reuse a stale cached graph even though the primary snapshot
+    re-parsed correctly."""
+
+    def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path: Path):
+        from abicheck.service import _attach_header_graph
+        from abicheck.service_scan import CompileContext
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        build_inc = tmp_path / "buildinc"
+        build_inc.mkdir()
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with patch(
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+        ) as mock_ast:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=False,
+                headers=[header],
+                includes=[],
+                lang="c++",
+                compile=CompileContext(
+                    gcc_option_tokens=("-I", str(build_inc))
+                ),
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert build_inc in mock_ast.call_args.kwargs["extra_hash_dirs"]
+
+    def test_no_include_tokens_hashes_nothing_extra(self, tmp_path: Path):
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with patch(
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+        ) as mock_ast:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=False,
+                headers=[header],
+                includes=[],
+                lang="c++",
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert mock_ast.call_args.kwargs["extra_hash_dirs"] == ()
+
+
 class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
 
