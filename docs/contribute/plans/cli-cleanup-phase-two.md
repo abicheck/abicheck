@@ -632,23 +632,32 @@ packs cannot set it. That is one boolean per assurance dimension, decided at
 the CLI, and it does not scale: the next assurance dimension would arrive as a
 second such boolean.
 
-So fold its *semantics* into the typed gate/assurance policy PR B/PR G build:
+So fold its *semantics* into the typed gate/assurance policy PR B/PR G build —
+**one persisted key, not two**: an earlier draft of this section showed
+`assurance.required_status` and `gate.require_complete_analysis` as
+interchangeable spellings, which recreates exactly the duplicate-configuration
+surface this cleanup exists to remove and leaves schema authors to guess which
+one is canonical (Codex review). Pick `assurance.required_status` — it is the
+extensible form (a status enum, not a boolean, so a future partial-assurance
+tier is a new value, not a new key) — and treat everything else as an alias
+into it, never a second key:
 
 ```yaml
 assurance:
   required_status: complete
-# or, equivalently addressed from the gate namespace:
-gate:
-  require_complete_analysis: true
 ```
 
-with the ordinary precedence `explicit CLI > run plan > project config >
-built-in default`, resolving to a single field
-(`resolved_gate.require_complete_analysis`) that `compare`, `scan --against`,
-the release compare, `check-target` and `aggregate` all read. The flag itself
-stays as the advanced one-run override. **Do not add a further standalone
-boolean for any new assurance dimension** — add it to the resolved policy
-object instead.
+`--require-complete-analysis` stays as the CLI spelling (the advanced one-run
+override), but resolves into `assurance.required_status: complete`, not into a
+parallel `gate.require_complete_analysis` field — the boolean is a resolver
+*input alias*, not a second place the value can live. Ordinary precedence
+`explicit CLI > run plan > project config > built-in default` resolves to one
+field (`resolved_gate.assurance_required_status`) that `compare`,
+`scan --against`, the release compare, `check-target` and `aggregate` all
+read. **Do not add a further standalone boolean for any new assurance
+dimension** — extend the `assurance.required_status` value set, or add a
+sibling key under the same `assurance` namespace, never a second top-level
+spelling of the same fact.
 
 ## PR 4 — one gate algorithm (`--exit-code-scheme` removal)
 
