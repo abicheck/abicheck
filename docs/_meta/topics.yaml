@@ -520,3 +520,16 @@ topics:
       - abicheck/cli_dump_helpers.py
       - abicheck/scan_engine.py
       - abicheck/service_scan.py
+      - action.yml
+      - action/run.sh
+      - action/validate-inputs.sh
+    # --build-target is primarily a CLI concept (cli-reference.md), extended
+    # identically to the typed API and the Action -- both already-registered
+    # generated references (cli-surface/python-api/github-actions-surface
+    # each own one), reused here the same way reference/exit-codes.md is
+    # already shared by two other topics above (no reference_page uniqueness
+    # constraint; Codex review, fresh evidence after the first fix).
+    reference_page: reference/cli-reference.md
+    task_pages:
+      - reference/python-api-reference.md
+      - reference/github-action-inputs.md

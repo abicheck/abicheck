@@ -273,7 +273,13 @@ class ExportAccounting:
     matching source declaration found), and
     ``mappings["non_public_symbol_to_reason"]`` (internal -- an export the
     source linker itself classified as non-public). ``source_linked`` is
-    ``total - unaccounted`` when both are known. All fields stay ``None``
+    ``total - unaccounted - internal`` when all three are known -- a true
+    three-way partition (``source_linked + internal + unaccounted ==
+    total``), not merely "not unaccounted" (Codex review: an earlier
+    ``total - unaccounted`` formula silently double-counted every
+    ``internal`` export as ALSO ``source_linked`` once ``unaccounted`` no
+    longer overlapped it; see :func:`_export_accounting`'s own docstring for
+    the full history). All fields stay ``None``
     when no L4 source-ABI surface was linked (the ordinary case for a plain
     ELF/DWARF/header comparison) -- this is a rollup of the existing L4
     linker output, not a new detector, so it has nothing to report without
