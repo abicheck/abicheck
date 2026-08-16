@@ -468,12 +468,10 @@ class _CastxmlParser:
         if tag == "AtomicType" or (
             tag == "Unimplemented" and el.get("type_class") == "Atomic"
         ):
-            # CastXML's C11 _Atomic node is schema-version dependent: older
-            # versions emit Unimplemented/type_class=Atomic, newer versions
-            # emit a bare AtomicType. Neither exposes the wrapped type, so use
-            # one stable sentinel instead of leaking the parser tag into the
-            # ABI model. This lets diff_atomic detect qualifier transitions.
-            return "_Atomic"
+            # CastXML emits either AtomicType or legacy Unimplemented/Atomic.
+            # Preserve a wrapped type when present; retain a bare fallback.
+            inner_id = el.get("type")
+            return f"_Atomic({self._type_name(inner_id, depth + 1)})" if inner_id else "_Atomic"
         return el.get("name", tag)
 
     def _cv_qualifies_pointer_value(self, type_id: str) -> bool:
