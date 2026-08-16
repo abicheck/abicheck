@@ -290,3 +290,14 @@ class TestVerifyMergeChecksWorkflow:
         raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
         assert "pr.merged_at" in raw
         assert "pr.base.ref === 'main'" in raw
+
+    def test_empty_candidates_does_not_fall_back_to_an_unfiltered_pr(self) -> None:
+        """If every commit<->PR association GitHub returns is ineligible (not
+        merged, or not based against `main`), the workflow must treat that
+        the same as "no PR associated" rather than silently falling back to
+        `prs[0]` -- an unfiltered fallback can validate a completely
+        unrelated PR's head SHA and read as green or red for reasons that
+        have nothing to do with the actual merge being verified."""
+        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
+        assert "candidates.length === 0" in raw
+        assert "|| prs[0]" not in raw

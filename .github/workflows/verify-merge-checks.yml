@@ -104,10 +104,23 @@ jobs:
             const candidates = prs.filter(
               pr => pr.merged_at && pr.base && pr.base.ref === 'main'
             );
+
+            if (candidates.length === 0) {
+              // No association is actually eligible (e.g. this push's commit
+              // is also present in some open, unmerged, or differently-based
+              // PR) -- there's nothing real to verify. Falling back to an
+              // unfiltered `prs[0]` here would silently validate an unrelated
+              // PR's head SHA instead, which could read as green or red for
+              // reasons that have nothing to do with this actual merge.
+              core.warning(
+                `Merge commit ${sha} has ${prs.length} associated PR(s), none merged to ` +
+                `\`main\` -- nothing eligible to verify; not failing on that alone.`
+              );
+              return;
+            }
+
             const target =
-              candidates.find(pr => pr.merge_commit_sha === sha) ||
-              candidates[0] ||
-              prs[0];
+              candidates.find(pr => pr.merge_commit_sha === sha) || candidates[0];
             const headSha = target.head.sha;
 
             core.info(`Merge commit ${sha} <- PR #${target.number}, tested head ${headSha}`);
