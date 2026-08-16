@@ -565,6 +565,76 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert "populated" not in events  # follow_deps was False
 
 
+def test_perform_elf_dump_folds_l3_compile_context_into_header_parse(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """P0.3 L3->L2 fold (AGENTS.md's former "The native ELF `abicheck dump`
+    path never applies L3 build context to its own L2 header parse" known
+    gap, closed here): a --sources dump whose compile database resolves a
+    real -std=/-D for these headers must fold those ABI-relevant flags into
+    the *primary* header-AST parse (dump()'s own gcc_option_tokens), not
+    just the L2 include-dir fallback seed_l2_includes already provides --
+    and must stamp snapshot.parsed_with_build_context accordingly, the same
+    stamp resolve_side_snapshot already applies for compare/scan's
+    implicit-dump path. Without this fix a dump-produced baseline and a
+    scan/compare candidate of the same project resolved under genuinely
+    different extraction recipes (profile_fingerprint mismatch on
+    include_sequence/language_standard) and `scan --against` refused the
+    comparison as NOT_COMPARABLE for reasons neither command's own
+    diagnostics named."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20", "-DFOO=1"],
+        }]),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _dump_stub(**kw):  # noqa: ANN003
+        captured["gcc_option_tokens"] = kw["gcc_option_tokens"]
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _dump_stub)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", lambda snap, *_a, **_k: snap)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    snap_holder: dict[str, object] = {}
+
+    def _write_and_capture(snap, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        snap_holder["snap"] = snap
+        _write(snap, *a, **k)
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None, None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None, False,  # sysroot, nostdinc
+        False, None,  # dwarf_only, effective_debug_format
+        (), (),  # public_headers, public_header_dirs
+        None,  # effective_compile_db -- the OLD -p/--compile-db mechanism, unused here
+        False, (), "",  # follow_deps, search_paths, ld_library_path
+        None, None, False,  # git_tag, build_id, no_git
+        None, None,
+        tmp_path,  # build_info=None, sources=tmp_path (auto-discovers compile_commands.json)
+        None, False,
+        "source-target",  # build_config, allow_build_query, collect_mode
+        _expand, _populate, _stamp, _write_and_capture,
+    )
+
+    tokens = captured["gcc_option_tokens"]
+    assert "-std=c++20" in tokens
+    assert "-DFOO=1" in tokens
+    written = snap_holder["snap"]
+    assert written.parsed_with_build_context is True
+
+
 def test_perform_elf_dump_scopes_primary_dump_for_ast_memo_reuse(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -826,11 +896,21 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
     includes (see test_perform_elf_dump_header_graph_receives_seeded_includes
     for the seeded-vs-raw distinction), compile_context/public_headers/
     public_header_dirs it was given, and writes the wrapper's returned
-    (possibly different) snapshot object. compile_context is passed through
-    unmodified here because effective_gcc_options (None, no -p/--compile-db
-    in this call) already matches compile_context.gcc_options — see
-    test_perform_elf_dump_header_graph_gets_compile_db_flags for the case
-    where they differ and a replacement context is built.
+    (possibly different) snapshot object. The context this call receives is
+    the fully-merged ``l3_effective_ctx`` (P0.3 fold, AGENTS.md's former
+    "dump path never applies L3 build context" known gap) built from the
+    actual resolved parse parameters -- gcc_path/gcc_prefix/gcc_options/
+    gcc_option_tokens/sysroot/nostdinc/frontend, plus any L3-derived
+    context when --sources/--build-info is given (not here: no sources) --
+    not the caller-supplied ``compile_context`` object forwarded unmodified.
+    That is a deliberate correction, not a regression: the old
+    gcc_options-string-only comparison could silently forward a
+    ``compile_context`` whose own nostdinc/sysroot disagreed with what the
+    primary dump() call actually used (this test's own ``nostdinc=True``
+    positional argument against ``sentinel_cc``'s default ``nostdinc=False``
+    is exactly that latent inconsistency) — see
+    test_perform_elf_dump_header_graph_gets_compile_db_flags for the
+    -p/--compile-db case.
 
     ``lang`` here is "c++" with ``lang_explicit`` left at its default
     (``False``) — i.e. Click's own ``LANG_DEFAULT``, not a genuine
@@ -923,7 +1003,14 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
     assert captured["header_graph_includes"] is True
     assert captured["headers"] == [hdr]
     assert captured["lang"] is None
-    assert captured["compile_context"] is sentinel_cc
+    # Not `is sentinel_cc` -- the effective context is freshly built from the
+    # actual resolved parse parameters (P0.3 fold), which is what fixes the
+    # latent nostdinc inconsistency: this call's own positional nostdinc=True
+    # must reach the header-graph pass even though sentinel_cc itself defaults
+    # nostdinc=False.
+    from abicheck.compile_context import CompileContext as _CC
+
+    assert captured["compile_context"] == _CC(nostdinc=True)
     assert captured["snap"] is plain_snap
     # The wrapper's returned snapshot (not the original) is what gets written.
     assert captured["written_snap"] is graphed_snap

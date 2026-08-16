@@ -901,6 +901,57 @@ Once a root command genuinely clears the bar above, pick the right home:
   `_dump_pe`/`_dump_macho` mirrors) were not independently checked for the
   identical gap in this pass.
 
+  **Closed, additively, without the `run_dump_request` migration this entry
+  originally called for.** Full migration would have meant rewriting
+  `perform_elf_dump`'s already-large, carefully-ordered pipeline (header
+  parse, ADR-039 build-context harvest, G14/G23/G26 Python/NumPy attach,
+  the header-graph and clang-layout-tool second passes) around a
+  fundamentally different call shape — real, but out of proportion to the
+  actual gap, which is narrowly "the L3→L2 fold never runs on this path,"
+  not "this path's whole architecture is wrong." The fix is additive
+  instead: `buildsource/l2_seed.fold_l3_compile_context()` — a new, shared
+  wrapper around the already-correct `derive_l2_compile_context()` +
+  `_merge_l3_compile_context()` pair (the latter *moved* into `l2_seed.py`
+  from `service_input_resolution.py`; see that function's own docstring for
+  why — leaving it in place would have closed an
+  `l2_seed -> service_input_resolution -> cli_dump_helpers -> l2_seed`
+  import cycle the AI-readiness gate correctly rejects once
+  `cli_dump_helpers` needed it directly) — called from both
+  `perform_elf_dump` (ELF) and `handle_non_elf_dump` (PE/Mach-O, which
+  shared the identical gap: confirmed by reading `service.run_dump`'s own
+  `compile` parameter never receiving anything beyond the CLI/config-
+  resolved context either). Both call sites now fold the real L3
+  `CompileUnit`-derived context (`-std=`, ABI-relevant `-D`/`-U`, target,
+  sysroot) into the *same* explicit context CLI flags/`.abicheck.yml`
+  already built, exactly mirroring what `_seeded_compile_context` already
+  does for `compare`'s implicit-dump and `scan` paths via
+  `resolve_side_snapshot` — so all three commands now fold under one
+  shared primitive, even though `dump`'s own CLI pipeline still doesn't
+  route through `run_dump_request`. `perform_elf_dump`'s two independent
+  second-pass clang re-parses (the header-graph attach and the
+  clang-layout-tool attach) also now receive this same fully-merged
+  context via `effective_compile_context = l3_effective_ctx`, closing a
+  narrower, previously-undocumented sibling gap where those passes' own
+  `gcc_options`-string-only re-derivation never looked at
+  `gcc_option_tokens`/`sysroot`/`nostdinc`/deferred include roots at all —
+  so a real disagreement on any of those between the primary parse and the
+  second passes could previously have gone unnoticed even without any L3
+  evidence in play. `AbiSnapshot.parsed_with_build_context` is now stamped
+  from either this fold or the older `-p`/`--compile-db` mechanism
+  (OR'd, matching `resolve_side_snapshot`'s own rule), on both the ELF and
+  PE/Mach-O paths. Verified end-to-end against a real `compile_commands.json`
+  fixture through the actual `perform_elf_dump`/`handle_non_elf_dump`
+  entry points (not a hand-built `CompileContext`) — see
+  `tests/test_cli_dump_helpers_coverage.py::
+  test_perform_elf_dump_folds_l3_compile_context_into_header_parse` and
+  `tests/test_non_elf_dump_l2_seed.py::
+  test_non_elf_dump_folds_l3_compile_context_into_header_parse` — confirming
+  the derived `-std=`/`-D` flags reach the primary header-AST parse and
+  `parsed_with_build_context` is stamped. Full test suite (28k+ tests)
+  green; no import-cycle or file-size regression (`cli_dump_helpers.py`
+  stayed under its 2000-line hard cap by moving the shared fold logic into
+  `l2_seed.py` rather than duplicating it inline for both call sites).
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

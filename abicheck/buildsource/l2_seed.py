@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from .._compiler_options import split_gcc_options
 from ..compile_context import CompileContext
 from .inline import (
     BuildConfig,
@@ -410,6 +411,164 @@ def derive_l2_compile_context(
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
         _run_cleanups(cleanups)
         return None, []
+
+
+def _merge_l3_compile_context(
+    explicit: CompileContext | None, derived: CompileContext | None
+) -> CompileContext | None:
+    """Fold *derived* (L3-derived, P0.3) ahead of *explicit* (user-supplied).
+
+    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``
+    (``cli_helpers_compare._merge_gcc_options``): the build-derived flags lead
+    and the caller's own explicit representation is appended after — so an
+    explicit, later token still wins any literal redefinition (e.g. a
+    caller's own ``-DFOO=2`` after a derived ``-DFOO=1`` — the compiler uses
+    the last ``-D`` for a given macro) without this function needing to know
+    which tokens actually conflict. ``derived`` with no tokens at all (a
+    matched compile unit with nothing ABI-relevant to forward — still real
+    evidence, see ``header_compile_context``'s own docstring) is a no-op here;
+    the caller still stamps ``parsed_with_build_context`` in that case since
+    context genuinely *was* resolved and applied (as the empty flag list).
+
+    Finding 2: "derived leads, explicit wins" only holds if *every*
+    representation of the explicit value actually lands after every derived
+    token in the rendered command — not just ``gcc_option_tokens`` entries.
+    Both header command builders (``dumper_ast_config._build_castxml_command``/
+    ``_build_clang_header_command``) render the structured ``sysroot`` field
+    and the free-form ``gcc_options`` string *before* ``gcc_option_tokens``,
+    so merely prepending ``derived.gcc_option_tokens`` to
+    ``explicit.gcc_option_tokens`` (as before) left ``explicit.sysroot``/
+    ``explicit.gcc_options`` — rendered earlier in the command — silently
+    overridden by a later, conflicting derived token instead of winning.
+    Folding both structured representations into trailing tokens (and
+    clearing the structured fields, so the command builders no longer also
+    emit them in their old, too-early position) puts every explicit
+    representation strictly after every derived one, regardless of which of
+    the three explicit channels (``sysroot``, ``gcc_options``,
+    ``gcc_option_tokens``) it came through.
+
+    Moved here from ``service_input_resolution.py`` (P0.3 dump-path fold):
+    that module already imports :func:`derive_l2_compile_context` from this
+    one, so this function living there too would have closed a
+    ``l2_seed -> service_input_resolution -> cli_dump_helpers -> l2_seed``
+    import cycle once ``cli_dump_helpers`` needed it directly (AGENTS.md
+    "What NOT to do" -- prefer a leaf module both sides can depend on over
+    extending ``IMPORT_CYCLE_ALLOWLIST``). ``service_input_resolution``'s
+    own ``_seeded_compile_context`` now imports it from here instead.
+    """
+    if derived is None:
+        return explicit
+    if explicit is None:
+        return derived
+    explicit_tail: list[str] = []
+    if explicit.sysroot is not None:
+        explicit_tail.append(f"--sysroot={explicit.sysroot.as_posix()}")
+    if explicit.gcc_options:
+        try:
+            explicit_tail.extend(split_gcc_options(explicit.gcc_options))
+        except ValueError:
+            # Malformed --gcc-options must not abort the merge (mirrors
+            # _compiler_options.explicit_language_standard's own handling of
+            # the identical failure mode) -- fall back to forwarding it
+            # verbatim as one token so it is at least still present, rather
+            # than silently dropped.
+            explicit_tail.append(explicit.gcc_options)
+    return dataclasses.replace(
+        explicit,
+        sysroot=None,
+        gcc_options=None,
+        gcc_option_tokens=(
+            *derived.gcc_option_tokens,
+            *explicit_tail,
+            *explicit.gcc_option_tokens,
+        ),
+    )
+
+
+def fold_l3_compile_context(
+    *,
+    headers: list[Path] | tuple[Path, ...],
+    build_info: Path | None,
+    sources: Path | None,
+    build_config: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+    collect_mode: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    frontend: str,
+    frontend_context: str,
+    lang: str,
+    lang_explicit: bool,
+    pending_cleanups: list[Callable[[], None]],
+) -> tuple[bool, CompileContext]:
+    """P0.3 L3->L2 fold for a raw-parameter caller (shared by the ELF and
+    PE/Mach-O ``dump`` CLI paths, AGENTS.md's former "the native ELF
+    `abicheck dump` path never applies L3 build context to its own L2
+    header parse" known gap).
+
+    A thin wrapper: builds one explicit :class:`CompileContext` from the
+    caller's already-resolved values (CLI flags, ``.abicheck.yml``'s
+    ``compile:`` block, and any older compile-DB-derived flags already
+    folded into ``gcc_options``), calls :func:`derive_l2_compile_context`
+    with it as ``explicit`` (so an already-pinned dimension excuses a
+    same-field-only disagreement across matched compile units -- Finding
+    3), then folds the result in with this module's own
+    :func:`_merge_l3_compile_context` -- the exact same two-step fold
+    ``service_input_resolution._seeded_compile_context`` already applies for scan/compare's
+    implicit-dump path via ``resolve_side_snapshot``. Without this fold, a
+    dump baseline and a scan/compare candidate of the same project resolve
+    under genuinely different extraction recipes and ``scan --against``
+    correctly (per ADR-050 D2) refuses the comparison as ``NOT_COMPARABLE``
+    for reasons neither command's own diagnostics name.
+
+    Returns ``(applied, effective_context)``: ``applied`` is ``True`` only
+    when a real L3 context was found and folded in (the caller's signal for
+    stamping ``AbiSnapshot.parsed_with_build_context``); ``effective_context``
+    is always real -- the explicit one unchanged when nothing was found, or
+    the merged result otherwise. Any temp-build-dir cleanups an inferred
+    build query created are appended to *pending_cleanups* in place (the
+    caller's own list, drained only after the L2 parse has consumed them).
+
+    May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
+    when the matched compile units genuinely disagree on an unpinned
+    ABI-relevant dimension -- callers should run this inside the same
+    ``try`` block that converts the main header-AST parse's own errors to a
+    ``click.ClickException``.
+    """
+    explicit_ctx = CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=frontend,
+        frontend_context=frontend_context,
+    )
+    derived, cleanups = derive_l2_compile_context(
+        headers=list(headers),
+        build_info=build_info,
+        sources=sources,
+        build_config=build_config,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
+        allow_inferred_build_query=collect_mode != "off",
+        explicit=explicit_ctx,
+        lang=lang,
+        lang_explicit=lang_explicit,
+    )
+    if cleanups:
+        pending_cleanups.extend(cleanups)
+    if derived is None:
+        return False, explicit_ctx
+    merged = _merge_l3_compile_context(explicit_ctx, derived)
+    assert merged is not None  # both args non-None -> _merge_l3_compile_context always merges
+    return True, merged
 
 
 def seed_l2_includes(

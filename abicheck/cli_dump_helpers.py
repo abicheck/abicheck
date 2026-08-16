@@ -1286,6 +1286,34 @@ def handle_non_elf_dump(
         allow_inferred_build_query=collect_mode != "off",
     )
     try:
+        # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path
+        # never applies L3 build context..." known gap; PE/Mach-O shared the
+        # identical gap -- see fold_l3_compile_context's own docstring for
+        # perform_elf_dump's twin of this call). Inside this try block so a
+        # genuine HeaderCompileContextAmbiguousError surfaces as the same
+        # clean click.ClickException the header-parse failure below does.
+        from .buildsource.l2_seed import fold_l3_compile_context
+
+        l3_context_applied, l3_effective_ctx = fold_l3_compile_context(
+            headers=headers,
+            build_info=build_info,
+            sources=sources,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
+            collect_mode=collect_mode,
+            gcc_path=getattr(compile_context, "gcc_path", None),
+            gcc_prefix=getattr(compile_context, "gcc_prefix", None),
+            gcc_options=getattr(compile_context, "gcc_options", None),
+            gcc_option_tokens=getattr(compile_context, "gcc_option_tokens", ()),
+            sysroot=getattr(compile_context, "sysroot", None),
+            nostdinc=getattr(compile_context, "nostdinc", False),
+            frontend=header_backend,
+            frontend_context=getattr(compile_context, "frontend_context", "host"),
+            lang=lang,
+            lang_explicit=lang_explicit,
+            pending_cleanups=_l2_pending_cleanups,
+        )
         snap = dump_native_binary(
             so_path,
             binary_fmt,
@@ -1298,7 +1326,7 @@ def handle_non_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
-            compile=compile_context,
+            compile=l3_effective_ctx,
         )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.
@@ -1323,7 +1351,13 @@ def handle_non_elf_dump(
     # matched compile DB, but the snapshot that was actually written never
     # used either, so stamping build-context evidence on it would let
     # `--depth build` accept a plain export-table dump (Codex review).
-    if headers and compile_db_context_matched and snap.from_headers:
+    # `l3_context_applied` (P0.3 fold, above) is an independent OR'd source
+    # for this same stamp, mirroring perform_elf_dump's identical rule.
+    if (
+        headers
+        and (compile_db_context_matched or l3_context_applied)
+        and snap.from_headers
+    ):
         snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     from .dumper_clang import resolve_source_frontend_clang_bin
@@ -1649,6 +1683,47 @@ def perform_elf_dump(
         allow_inferred_build_query=collect_mode != "off",
     )
     try:
+        # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path
+        # never applies L3 build context..." known gap) -- see
+        # fold_l3_compile_context's own docstring. Inside this try block (not
+        # before it) so a genuine HeaderCompileContextAmbiguousError surfaces
+        # as the same clean click.ClickException the header-parse failure
+        # below does, rather than an unhandled traceback.
+        from .buildsource.l2_seed import fold_l3_compile_context
+
+        l3_context_applied, l3_effective_ctx = fold_l3_compile_context(
+            headers=resolved_headers,
+            build_info=build_info,
+            sources=sources,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
+            collect_mode=collect_mode,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=effective_gcc_options,
+            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            frontend=header_backend,
+            frontend_context=(
+                compile_context.frontend_context
+                if compile_context is not None
+                else "host"
+            ),
+            lang=lang,
+            lang_explicit=lang_explicit,
+            pending_cleanups=_l2_pending_cleanups,
+        )
+        if l3_context_applied:
+            gcc_path = l3_effective_ctx.gcc_path
+            gcc_prefix = l3_effective_ctx.gcc_prefix
+            effective_gcc_options = l3_effective_ctx.gcc_options
+            gcc_option_tokens = l3_effective_ctx.gcc_option_tokens
+            sysroot = l3_effective_ctx.sysroot
+            nostdinc = l3_effective_ctx.nostdinc
+            deferred = []
+
         # Scoped so a clang primary parse is handed off in-process to the
         # `_attach_header_graph` pass below (G31 Phase C) -- this ELF `dump`
         # CLI path reaches `dumper.dump` directly, not `service.run_dump`,
@@ -1712,13 +1787,16 @@ def perform_elf_dump(
         # returns a DWARF-built snapshot with from_headers left False), so a -p compile
         # database matching the originally *requested* headers must not be recorded as
         # real build-context evidence for a snapshot that never actually parsed them
-        # (Codex review).
+        # (Codex review). ``l3_context_applied`` (P0.3 fold, above) is an independent
+        # OR'd source for this same stamp -- either mechanism finding real build
+        # context for these headers is enough; mirrors resolve_side_snapshot's own
+        # "context_applied and snap.from_headers" condition for the typed pipeline.
         if (
             effective_compile_db
             and resolved_headers
             and compile_db_context_matched
-            and snap.from_headers
-        ):
+            or l3_context_applied
+        ) and snap.from_headers:
             snap.parsed_with_build_context = True
 
         # ADR-039 collection layer — when a compile DB is available, harvest the
@@ -1800,22 +1878,19 @@ def perform_elf_dump(
         # (Codex review). Shared by BOTH post-processing steps below, since
         # each runs its own independent second clang pass over the same
         # headers and needs the identical fix for the identical reason.
-        effective_compile_context = compile_context
-        if effective_gcc_options != (
-            compile_context.gcc_options if compile_context is not None else None
-        ):
-            import dataclasses
-
-            if compile_context is not None:
-                effective_compile_context = dataclasses.replace(
-                    compile_context, gcc_options=effective_gcc_options
-                )
-            else:
-                from .service_scan import CompileContext
-
-                effective_compile_context = CompileContext(
-                    gcc_options=effective_gcc_options
-                )
+        #
+        # l3_effective_ctx (P0.3 fold, above) already IS that fully-merged
+        # context -- gcc_path/gcc_prefix/gcc_options/gcc_option_tokens/
+        # sysroot/nostdinc/frontend/frontend_context all reflect exactly
+        # what the main dump() call above just used, deferred roots and any
+        # L3-derived ABI-relevant flags included. Using it directly here
+        # (rather than re-deriving from compile_context/effective_gcc_options
+        # by hand) is a strict superset of the old gcc_options-string-only
+        # comparison: it also carries deferred and any L3-derived
+        # gcc_option_tokens/sysroot the old comparison never looked at, so
+        # this second clang pass can no longer silently disagree with the
+        # primary one on those either.
+        effective_compile_context = l3_effective_ctx
 
         from .service import (
             _HEADER_GRAPH_ENABLED,

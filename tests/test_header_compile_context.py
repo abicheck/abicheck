@@ -1378,7 +1378,7 @@ def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
 
 
 def test_merge_l3_compile_context_derived_leads_explicit_wins() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("-DFOO=1", "-fPIC"))
     explicit = CompileContext(gcc_option_tokens=("-DFOO=2",), sysroot=Path("/x"))
@@ -1401,7 +1401,7 @@ def test_merge_l3_compile_context_explicit_gcc_options_string_folded_after_deriv
 ):
     """Finding 2: the free-form ``gcc_options`` string channel, not just
     ``sysroot``, must also land after every derived token."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("-DFOO=1",))
     explicit = CompileContext(gcc_options="-DFOO=2 -DBAR=3")
@@ -1418,8 +1418,8 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
     context carrying a derived AND an explicit, conflicting sysroot, and
     assert the *last* --sysroot= token (the one that wins under real
     compiler last-flag-wins semantics) is the explicit one."""
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
     from abicheck.dumper_ast_config import _build_castxml_command
-    from abicheck.service_input_resolution import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("--sysroot=/derived",))
     explicit = CompileContext(sysroot=Path("/explicit"))
@@ -1442,14 +1442,14 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
 
 
 def test_merge_l3_compile_context_none_derived_is_noop() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     explicit = CompileContext(gcc_options="-DX=1")
     assert _merge_l3_compile_context(explicit, None) is explicit
 
 
 def test_merge_l3_compile_context_none_explicit_uses_derived() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("-std=c++20",))
     assert _merge_l3_compile_context(None, derived) is derived

@@ -97,3 +97,75 @@ def test_non_elf_dump_gates_inferred_query_for_l2_only(monkeypatch, tmp_path):
         collect_mode="off",  # --depth headers → no inferred build
     )
     assert captured["allow"] is False
+
+
+def test_non_elf_dump_folds_l3_compile_context_into_header_parse(tmp_path):
+    """P0.3 L3->L2 fold (AGENTS.md's former "The native ELF `abicheck dump`
+    path never applies L3 build context..." known gap -- PE/Mach-O shared
+    the identical gap and is closed here alongside it): a --sources dump
+    whose compile database resolves a real -std=/-D for these headers must
+    reach the native dumper's own `compile=` context, not just the L2
+    include-dir fallback. Also stamps `parsed_with_build_context`."""
+    import json
+
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": [
+                        "c++",
+                        "-c",
+                        str(src),
+                        "-o",
+                        "out.o",
+                        "-std=c++20",
+                        "-DFOO=1",
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    def fake_dump_native(so_path, binary_fmt, headers, includes, version, lang, **kw):
+        captured["compile"] = kw["compile"]
+        return AbiSnapshot(library="l", version=version, from_headers=True)
+
+    written: dict = {}
+
+    def fake_write(snap, *a, **k):  # noqa: ANN002, ANN003
+        written["snap"] = snap
+
+    handle_non_elf_dump(
+        so_path=tmp_path / "foo.dll",
+        binary_fmt="pe",
+        headers=(hdr,),
+        includes=(),
+        version="1",
+        lang="c++",
+        pdb_path=None,
+        follow_deps=False,
+        git_tag=None,
+        build_id=None,
+        no_git=True,
+        output=None,
+        dump_native_binary=fake_dump_native,
+        stamp_provenance=lambda *a, **k: None,
+        write_snapshot_output=fake_write,
+        sources=tmp_path,
+        collect_mode="source-target",
+        compile_db_context_matched=False,
+    )
+
+    tokens = captured["compile"].gcc_option_tokens
+    assert "-std=c++20" in tokens
+    assert "-DFOO=1" in tokens
+    assert written["snap"].parsed_with_build_context is True

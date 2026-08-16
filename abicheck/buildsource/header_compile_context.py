@@ -253,7 +253,7 @@ class _ExplicitPin:
     to compute what the *effective* value of a pinned field ends up being
     (that's ``dataclasses.replace``/last-flag-wins compiler semantics once
     the derived and explicit contexts are actually merged and rendered,
-    handled by ``service_input_resolution._merge_l3_compile_context``) --
+    handled by ``buildsource.l2_seed._merge_l3_compile_context``) --
     only whether the caller stated an opinion on it at all.
     """
 
