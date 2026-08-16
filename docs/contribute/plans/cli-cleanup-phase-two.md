@@ -87,12 +87,42 @@ Separately, the exact merge SHA of #782 did not run a full CI sweep on
 Validation was still running; no separate full `ci.yml` run over that exact
 SHA), which is precisely what item 4 exists to make detectable.
 
-Required checks should cover at least: `CI`, `Examples Validation`, `Test
-GitHub Action`, `CLI Interface Check`, `Security & Quality`, `AgentReady`, and
-the docs/schema checks. Prefer **one stable aggregate required check per
-workflow** (or a Ruleset-compatible job) over requiring every matrix leg
-individually — a matrix-leg-level required list goes stale on every matrix
-edit and is the usual reason required checks get turned back off.
+**The required-check list must match `.github/AGENTS.md`'s own required-vs-
+informational classification, not the set of workflow names visible in a run
+(Codex review caught an earlier draft that didn't).** `Examples Validation`
+and `agentready.yml` are both explicitly `No (informational)` there, and
+`test-action.yml` is conditional — it runs only when `action/**`/`action.yml`
+changes, path-filtered like several other workflows in that same table. A
+required check that a path-filtered workflow never starts is not "green by
+default" on an unrelated PR — GitHub blocks merge on a required check that
+never reports at all, the same as on a failing one, so requiring any of these
+three as written would strand every PR that doesn't touch their paths. Cover:
+
+- always-required: `CI` (or its constituent jobs), `Security & Quality`
+  (`security.yml`), `dependency-review.yml`, and the docs/schema checks that
+  run unconditionally.
+- conditionally-required, **only if the branch protection / Ruleset
+  mechanism used actually supports a path-scoped required check** (GitHub
+  Rulesets do; classic branch protection's required-status-checks list does
+  not distinguish "didn't run" from "should have run and didn't"): `CLI
+  Interface Check` when the CLI surface changed, `Test GitHub Action` when
+  `action/**`/`action.yml` changed.
+- **not required**: `Examples Validation`, `AgentReady` — both stay
+  informational, matching `.github/AGENTS.md`; PR 0B does not change that
+  classification, only enforces the subset the table already calls required.
+
+If the chosen mechanism cannot express "required only when triggered,"
+the safer fallback is an always-running **neutral aggregate status** (a thin
+job that reports success on every PR regardless of whether the conditional
+workflows ran) rather than requiring the conditional workflows' own checks
+directly — the "one stable aggregate check per workflow" rule below still
+holds *within* the always-required set, but must not be used to paper over a
+genuinely conditional workflow.
+
+Prefer **one stable aggregate required check per always-required workflow**
+(or a Ruleset-compatible job) over requiring every matrix leg individually —
+a matrix-leg-level required list goes stale on every matrix edit and is the
+usual reason required checks get turned back off.
 
 The "Verified state" below is kept as the historical record of what PR 0A
 fixed; it describes `main` as of PR #779, not today.
