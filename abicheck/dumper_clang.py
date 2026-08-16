@@ -513,140 +513,6 @@ def _is_noexcept_qualifier(quals: str) -> bool:
     return expr.strip() not in ("false", "0")
 
 
-#: clang attribute node kinds → normalized contract-attribute tokens (matching
-#: the castxml spellings so cross-frontend snapshots stay comparable).
-_CLANG_ATTR_TOKENS: dict[str, str] = {
-    "NoReturnAttr": "noreturn",
-    "C11NoReturnAttr": "noreturn",
-    "NonNullAttr": "nonnull",
-    "ReturnsNonNullAttr": "returns_nonnull",
-    "RestrictAttr": "malloc",
-    "FormatAttr": "format",
-    "FormatArgAttr": "format_arg",
-    "AllocSizeAttr": "alloc_size",
-    "AllocAlignAttr": "alloc_align",
-    "WarnUnusedResultAttr": "warn_unused_result",
-    "SentinelAttr": "sentinel",
-    "CDeclAttr": "cdecl",
-    "StdCallAttr": "stdcall",
-    "FastCallAttr": "fastcall",
-    "ThisCallAttr": "thiscall",
-    "VectorCallAttr": "vectorcall",
-    "MSABIAttr": "ms_abi",
-    "SysVABIAttr": "sysv_abi",
-    "RegparmAttr": "regparm",
-}
-
-
-def _clang_attr_arg_tokens(child: dict[str, Any]) -> list[str]:
-    """Ordered ABI-significant argument scalars of a clang attribute node.
-
-    clang ``-ast-dump=json`` nests an argument-bearing attribute's operands as
-    ``ConstantExpr`` / ``IntegerLiteral`` / ``StringLiteral`` children carrying
-    an evaluated ``value``. Collect those scalars in document order so the
-    normalized token keeps the same arguments castxml preserves — otherwise
-    ``nonnull(1)`` → ``nonnull(2)``, ``format(printf,1,2)`` → ``format(printf,2,3)``
-    or ``regparm(2)`` → ``regparm(3)`` would collapse to identical bare tokens
-    and the contract / calling-convention detectors would never fire (and the
-    two frontends would disagree). Once a node yields a ``value`` we do not
-    descend into it — clang wraps a literal inside its ``ConstantExpr`` with the
-    same value, so recursing would double-count it.
-    """
-    args: list[str] = []
-
-    def _walk(nodes: Any) -> None:
-        for sub in nodes or []:
-            if not isinstance(sub, dict):
-                continue
-            value = sub.get("value")
-            if isinstance(value, bool):
-                # JSON booleans are ints in Python; skip — not an ABI arg.
-                _walk(sub.get("inner", []))
-            elif isinstance(value, int):
-                args.append(str(value))
-            elif isinstance(value, str) and value:
-                # StringLiteral values arrive quoted (e.g. "printf"); strip them
-                # so the token matches castxml's bare-identifier spelling.
-                args.append(value.strip('"'))
-            else:
-                _walk(sub.get("inner", []))
-
-    _walk(child.get("inner", []))
-    return args
-
-
-def _target_default_abi_attribute(target_triple: str | None) -> str | None:
-    """Return a known x86-64 target's explicit default ABI attribute.
-
-    ``ms_abi`` and ``sysv_abi`` are useful facts only when they select a
-    non-default calling convention.  Clang preserves an explicit spelling even
-    when it merely repeats the target default, which would otherwise make two
-    ABI-identical headers appear different.  Do not extrapolate from an
-    unknown target (or from another architecture): those targets may assign a
-    distinct meaning to the attributes and must retain the spelling.
-    """
-    if not target_triple:
-        return None
-    parts = target_triple.lower().split("-")
-    if not parts or parts[0] not in {"x86_64", "amd64"}:
-        return None
-    if "windows" in parts:
-        return "ms_abi"
-    if any(os_name in parts for os_name in (
-        "linux", "android", "darwin", "freebsd", "netbsd", "openbsd", "solaris",
-    )):
-        return "sysv_abi"
-    return None
-
-
-def _clang_contract_attributes(
-    node: dict[str, Any], *, target_triple: str | None = None
-) -> list[str]:
-    """Normalized contract/calling-convention attributes of a decl node.
-
-    Argument-bearing attributes keep their operands in the token
-    (``nonnull(1)``, ``format(printf,1,2)``), matching the castxml frontend, so
-    an argument-only change is still a detectable contract change.
-    """
-    tokens: set[str] = set()
-    for child in node.get("inner", []) or []:
-        if not isinstance(child, dict):
-            continue
-        token = _CLANG_ATTR_TOKENS.get(str(child.get("kind", "")))
-        if token:
-            arg_tokens = _clang_attr_arg_tokens(child)
-            if arg_tokens:
-                token = f"{token}({','.join(arg_tokens)})"
-            tokens.add(token)
-
-    # Current Clang JSON sometimes preserves these two ABI attributes only in
-    # the function type.  Inspect only its *outer* trailing qualifiers: a
-    # whole-qualType search would incorrectly assign a callback parameter's
-    # (or a nested function return type's) convention to this declaration.
-    # A typedef can hide the effective function type in qualType, while clang
-    # provides its expanded spelling in desugaredQualType.
-    type_obj = node.get("type")
-    if isinstance(type_obj, dict):
-        effective_type = type_obj.get("desugaredQualType")
-        if not isinstance(effective_type, str) or not effective_type:
-            effective_type = type_obj.get("qualType")
-        if isinstance(effective_type, str):
-            qualifiers = _function_qualifiers(effective_type)
-            for spelling in ("ms_abi", "sysv_abi"):
-                if re.search(
-                    rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qualifiers
-                ):
-                    tokens.add(spelling)
-    # An explicit spelling of the selected target's default is not an ABI
-    # selection.  Only normalize when the actual target is known; treating a
-    # host/default assumption as universal would erase real target-specific
-    # evidence from header-only scans.
-    default_abi = _target_default_abi_attribute(target_triple)
-    if default_abi is not None:
-        tokens.discard(default_abi)
-    return sorted(tokens)
-
-
 def _clang_exception_spec(quals: str) -> str:
     """The dynamic exception-specification spelling from trailing qualifiers.
 
@@ -758,6 +624,9 @@ def _function_qualifiers(qualtype: str) -> str:
                 j += 1
             return qualtype[j:]
     return ""
+
+
+from .dumper_clang_attributes import _clang_contract_attributes
 
 
 class _ClangAstParser:
