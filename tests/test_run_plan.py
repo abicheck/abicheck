@@ -45,7 +45,6 @@ from abicheck.buildsource.run_plan import (
     _compose_gcc_options,
     _scheduling_fields_for_profile,
     generate_run_plan,
-    to_aggregate_manifest,
 )
 from abicheck.cli import main
 
@@ -735,51 +734,6 @@ class TestRunPlanRoundTrip:
         assert "consumer_compile_ast_frontend" not in d
 
 
-class TestToAggregateManifest:
-    def test_uses_check_id_not_bare_name(self) -> None:
-        plan = RunPlan(
-            checks=[
-                RunPlanCheck(
-                    check_id="libfoo@linux#release@headers",
-                    name="libfoo",
-                    required=True,
-                ),
-                RunPlanCheck(
-                    check_id="libfoo@mac#release@headers",
-                    name="libfoo",
-                    required=False,
-                ),
-            ]
-        )
-        manifest = to_aggregate_manifest(plan)
-        assert manifest["aggregate_manifest_version"] == "1.0"
-        assert manifest["targets"] == [
-            {"id": "libfoo@linux#release@headers", "required": True},
-            {"id": "libfoo@mac#release@headers", "required": False},
-        ]
-        assert "head_sha" not in manifest
-
-    def test_head_sha_comes_from_the_plan_unless_overridden(self) -> None:
-        plan = RunPlan(head_sha="deadbeef", checks=[])
-        assert to_aggregate_manifest(plan)["head_sha"] == "deadbeef"
-        assert (
-            to_aggregate_manifest(plan, head_sha="cafef00d")["head_sha"] == "cafef00d"
-        )
-
-    def test_produces_a_manifest_aggregate_itself_accepts(self) -> None:
-        """Not just shape-compatible on paper -- feed it straight into
-        aggregate.ExpectedTargets, the real reader."""
-        from abicheck.aggregate import ExpectedTargets
-
-        plan = RunPlan(
-            checks=[
-                RunPlanCheck(check_id="libfoo@linux#release@headers", required=True),
-            ]
-        )
-        expected = ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
-        assert expected.targets == {"libfoo@linux#release@headers": True}
-
-
 class TestProfileCompileOverlayProjection:
     """P1 toolchain-profile audit: profiles.<id>.compile reaches the
     generated cell as compile_gcc_path/compile_gcc_options."""
@@ -1357,6 +1311,38 @@ class TestRunPlanGenerateCli:
         assert [c["check_id"] for c in data["checks"]] == [
             "libfoo@linux#release@headers"
         ]
+
+    def test_gate_flags_stamp_the_generated_plan(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, PR 2: --gate-missing-required/
+        --gate-unexpected-target reach the generated run-plan.json's own
+        `gate` block through the real CLI."""
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "project", "plan", str(config),
+                "--build-output", f"linux={build_dir}",
+                "--gate-missing-required", "warn",
+                "--gate-unexpected-target", "fail",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
+
+    def test_no_gate_flags_omits_gate_key(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "project", "plan", str(config),
+                "--build-output", f"linux={build_dir}",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "gate" not in json.loads(result.stdout)
 
     def test_generate_exits_one_on_unresolved_explicit_profile(
         self, tmp_path: Path

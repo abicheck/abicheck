@@ -195,9 +195,25 @@ cannot tell a missing required target from an intentionally absent one):
   analysis-assurance domain still floors the exit at `1`, the same as in
   the declared-target-set modes.
 
-`--on-missing-required warn` downgrades a coverage gap to advisory.
-`--on-unexpected-target` (`include`/`warn`/`fail`/`ignore`, default
-`include`) controls a report whose target isn't in the expected set.
+The gate policy for a coverage gap or an unexpected report is the manifest's
+(or run-plan-projected manifest's) own `gate` block (CLI cleanup phase two,
+PR 2 — replacing the former `--on-missing-required`/`--on-unexpected-target`
+CLI flags):
+
+```json
+{"aggregate_manifest_version": "2.0",
+ "targets": [{"id": "linux-x86_64", "required": true}],
+ "gate": {"missing_required": "warn", "unexpected_target": "fail"}}
+```
+
+`missing_required: warn` downgrades a coverage gap to advisory.
+`unexpected_target` (`include`/`warn`/`fail`/`ignore`, default `include`)
+controls a report whose target isn't in the expected set. Omitting `gate`
+keeps the same defaults (`missing_required: fail`, `unexpected_target:
+include`) this command always had; the resolved policy and its source
+(`manifest`/`run-plan`/`explicit`/`default`) are reported back in
+`effective_policy` — `explicit` only appears for a direct Python-API caller
+of `aggregate()` forcing a value (there is no CLI spelling for it).
 
 ## Reconciling findings across compiler/build profiles
 
@@ -331,18 +347,14 @@ above. The full field list for both blocks is in
 ```bash
 abicheck aggregate REPORTS_DIR \
   --manifest abi-targets.json \
-  --on-missing-required fail \
-  --on-unexpected-target include \
   --format json -o aggregate.json
 ```
 
 | Flag | Default | Notes |
 |---|:---:|---|
-| `--manifest PATH` | — | The single source of truth for the expected-target set. |
-| `--run-plan PATH` | — | Alternative to `--manifest`: a `project plan` run-plan.json. |
+| `--manifest PATH` | — | The single source of truth for the expected-target set; its own `gate` block sets the missing-required/unexpected-target policy. |
+| `--run-plan PATH` | — | Alternative to `--manifest`: a `project plan` run-plan.json, whose projected manifest can carry the same `gate` block. |
 | `--discovered-only` | — | No required-target coverage gate (contract coverage still applies). |
-| `--on-missing-required` | `fail` | `fail` \| `warn`. |
-| `--on-unexpected-target` | `include` | `include` \| `warn` \| `fail` \| `ignore`. |
 | `--format` | `text` | `text` \| `json`. |
 
 Full generated flag reference, pulled from the live `--help` output: [CLI

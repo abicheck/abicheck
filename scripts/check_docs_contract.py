@@ -1431,6 +1431,33 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--against-new",),
         frozenset({"AGENTS.md"}),
     ),
+    (
+        "compare --stat/--recommend (CLI cleanup phase two, PR 1): --stat's"
+        " one-line summary moved to the built-in --profile quick; the"
+        " release recommendation is now unconditional in json/markdown/"
+        " review output, so --recommend has nothing left to opt into",
+        ("--stat", "--recommend"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # A point-in-time design review, same reasoning as the
+                # --show-impact entry above: §3.3 describes the surface as
+                # it was, so it names the retired flags in its own
+                # historical-record capacity rather than as live usage.
+                "contribute/config-key-review.md",
+                # Explicit migration notes naming the retired flag and its
+                # replacement in the same breath ("--stat was removed ...
+                # use --profile quick instead"), not stale live usage.
+                "use/output-formats.md",
+                "tests/scenarios/ci_gating.yaml",
+                # The *left* column of a libabigail-to-abicheck migration
+                # table: libabigail's own `--stat` flag (a different tool,
+                # same spelling), mapped to abicheck's `--profile quick` in
+                # the very next column -- not a stale abicheck mention.
+                "use/from-libabigail.md",
+            }
+        ),
+    ),
 )
 
 

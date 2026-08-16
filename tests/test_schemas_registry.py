@@ -21,7 +21,7 @@ import pytest
 from abicheck import schemas
 from abicheck.aggregate import AGGREGATE_SCHEMA_VERSION
 from abicheck.buildsource.build_output import BUILD_OUTPUT_SCHEMA
-from abicheck.buildsource.run_plan import RUN_PLAN_SCHEMA
+from abicheck.buildsource.run_plan import RUN_PLAN_SCHEMA_GATE
 from abicheck.serialization import SCHEMA_VERSION
 
 
@@ -34,7 +34,10 @@ class TestSchemasCurrent:
             ("scan", schemas.SCAN_SCHEMA_VERSION),
             ("aggregate", AGGREGATE_SCHEMA_VERSION),
             ("build-output", BUILD_OUTPUT_SCHEMA),
-            ("run-plan", RUN_PLAN_SCHEMA),
+            # The highest version abicheck can emit (gate-bearing), not the
+            # base RUN_PLAN_SCHEMA a gate-less plan still uses -- see
+            # schemas.current()'s own run-plan branch for why.
+            ("run-plan", RUN_PLAN_SCHEMA_GATE),
         ],
     )
     def test_current_matches_the_owning_constant(self, name, expected):

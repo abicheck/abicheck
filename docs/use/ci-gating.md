@@ -114,9 +114,9 @@ CI, and they should not be collapsed into one mental "ignored" bucket —
 each is visible in the report under a different field
 (`contract_relevance`, `suppressed_count`, `contract_coverage_failures`).
 
-**Display filtering is outside the pipeline.** `--show-only`, `--stat`,
-`--report-mode`, and `--format` change what the report *renders*, never the
-verdict or the exit code.
+**Display filtering is outside the pipeline.** `--show-only`, `--profile
+quick`'s one-line summary, `--report-mode`, and `--format` change what the
+report *renders*, never the verdict or the exit code.
 
 !!! tip "Shortcut: `--profile ci-gate`"
     A single `--profile ci-gate` bundles the common gating knobs

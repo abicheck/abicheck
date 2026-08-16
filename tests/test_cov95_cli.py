@@ -608,15 +608,24 @@ class TestCollectReleaseInputs:
 
 class TestExitSchemeHelpers:
     def test_announce_suppressed_for_json(self, capsys) -> None:
-        _announce_exit_scheme("legacy", fmt="json", stat=False)
+        _announce_exit_scheme("legacy", fmt="json")
+        assert capsys.readouterr().err == ""
+
+    def test_announce_suppressed_for_oneline(self, capsys) -> None:
+        # The internal one-line format (service_render.ONELINE_FORMAT,
+        # reached via --profile quick) is suppressed the same way json/sarif/
+        # junit are -- it isn't one of the three human-readable format names,
+        # so the same `fmt not in {...}` check covers it with no separate
+        # boolean (CLI cleanup phase two, PR 1: --stat removed).
+        _announce_exit_scheme("legacy", fmt="oneline")
         assert capsys.readouterr().err == ""
 
     def test_announce_legacy_scheme(self, capsys) -> None:
-        _announce_exit_scheme("legacy", fmt="markdown", stat=False)
+        _announce_exit_scheme("legacy", fmt="markdown")
         assert "legacy verdict" in capsys.readouterr().err
 
     def test_announce_severity_scheme(self, capsys) -> None:
-        _announce_exit_scheme("severity", fmt="markdown", stat=False)
+        _announce_exit_scheme("severity", fmt="markdown")
         assert "severity-aware" in capsys.readouterr().err
 
     def test_exit_verdict_breaking(self) -> None:
@@ -821,12 +830,24 @@ class TestCompareCommand:
         assert result.exit_code == 0
         assert "$schema" in result.output or "sarif" in result.output.lower()
 
-    def test_stat_summary(self, tmp_path: Path) -> None:
+    def test_stat_flag_removed(self, tmp_path: Path) -> None:
+        # --stat itself is gone (CLI cleanup phase two, PR 1) -- exits 64 with
+        # a Click "no such option" usage error, not a comparison result.
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
         result = _invoke("compare", str(old_f), str(new_f), "--stat")
+        assert result.exit_code == 64
+        assert "No such option" in result.output
+
+    def test_quick_profile_one_line_summary(self, tmp_path: Path) -> None:
+        # --profile quick is --stat's sole surviving one-line-summary use.
+        old, new = _breaking_pair()
+        old_f = _write_snap(tmp_path / "old.json", old)
+        new_f = _write_snap(tmp_path / "new.json", new)
+        result = _invoke("compare", str(old_f), str(new_f), "--profile", "quick")
         assert result.exit_code == 4
+        assert "\n" not in result.output.strip()
 
     def test_probe_matrix_one_side_usage_error(self, tmp_path: Path) -> None:
         snap = _snap()
@@ -1689,7 +1710,169 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
         assert "Scoped verdict: COMPATIBLE" in result.stdout
-        assert "full library verdict above is BREAKING" in result.stdout
+
+    def test_quick_profile_one_liner_states_scoped_verdict_not_full(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """CLI cleanup phase two, PR 1 (Codex review, fresh evidence): the
+        internal one-line format (``--profile quick``) used to fall through
+        ``_fold_scoped_compat_into_text``'s dispatch untouched, so the
+        printed one-liner showed the full-library BREAKING verdict/counts
+        even though the process exits 0 on the scoped-compatible result --
+        the identical setup as
+        ``test_markdown_states_scoped_verdict_when_it_disagrees_with_full``
+        above, just through the one-line renderer instead of markdown."""
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick",
+        )
+        assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
+        # The verdict label leads with the scoped result (COMPATIBLE), the
+        # same swap `into_json`'s `payload["verdict"]` makes -- not the
+        # full-library BREAKING that would exit 4. Unlike `--format json`
+        # (which keeps the full-library "1 breaking" count alongside a
+        # `changes` array a reader can inspect for context -- see
+        # test_json_severity_block_reflects_scoped_gate_not_full_library
+        # above), the one-line format has no room for that context, so its
+        # counts are recomputed from only what the scoped gate actually
+        # rests on (Codex review, fresh evidence): the removed symbol isn't
+        # one of the app's required symbols, so there are no scoped-only
+        # findings and no missing-contract labels, and the one-liner
+        # correctly shows "no changes" instead of an unexplained "1
+        # breaking" next to a COMPATIBLE verdict.
+        assert result.stdout.strip() == "COMPATIBLE: no changes (0 total)"
+
+    def test_quick_profile_one_liner_counts_the_scoped_only_finding(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The mirror case of the test above: a scoped-only finding (one with
+        no backing full-library `Change`, e.g. a synthesized
+        `PE_ORDINAL_RETARGETED`) is the *only* thing making this run
+        BREAKING -- the full library itself is unchanged (`NO_CHANGE`).
+        The one-liner must count it, not print "no changes" just because
+        `result.changes` is empty (Codex review, fresh evidence)."""
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick",
+        )
+        assert result.exit_code == 4
+        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+
+    def test_quick_profile_one_liner_counts_scoped_only_finding_under_show_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review, fresh evidence: `_scoped_gate_findings()` applies
+        `--show-only` to `scoped_only`/`missing_labels` for *display*
+        purposes elsewhere, but this method's own printed counts must track
+        what actually decided the scoped verdict/exit code -- which
+        `--show-only` never changes. Filtering the count inputs by
+        `--show-only compatible` here let a purely-breaking scoped-only
+        finding (this test's `PE_ORDINAL_RETARGETED`) get silently excluded
+        from the count while the process still exited 4, printing the
+        self-contradictory "BREAKING: no changes (0 total)"."""
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick", "--show-only", "compatible",
+        )
+        assert result.exit_code == 4
+        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+
+    def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The far more common shape than either test above: an ordinary
+        full-library finding (a real `FUNC_REMOVED` already in
+        `result.changes`) that is ALSO scoped-relevant, because the removed
+        symbol is one `--used-by` actually calls. This is marked via
+        `result.scoped_relevant_finding_ids`, not `scoped_only_changes`
+        (which only covers *synthesized* scoped-only findings with no
+        backing `Change`) -- omitting that set from the one-liner's count
+        reproduced exactly the "no changes" bug this whole fix exists to
+        close, just for the ordinary case rather than the edge case (Codex
+        review, fresh evidence, third round)."""
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+
+        # Use the REAL diff's own Change (not a hand-built stub) so its
+        # finding id genuinely matches the one in result.changes -- same
+        # discipline as test_sarif_missing_symbol_covered_by_change_not_
+        # double_synthesized above.
+        def _scoped_for(diff, *_args, **_kwargs):
+            from abicheck.appcompat import AppCompatResult
+
+            real_change = next(
+                c for c in diff.changes if c.kind == ChangeKind.FUNC_REMOVED
+            )
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old), new_lib_path=str(new),
+                required_symbols={"_Z7removedv"}, required_symbol_count=1,
+                breaking_for_app=[real_change], verdict=Verdict.BREAKING,
+            )
+
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--profile", "quick",
+        )
+        assert result.exit_code == 4
+        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch
@@ -2283,30 +2466,20 @@ class TestUsedByScoping:
 
         jsonschema.validate(instance=data, schema=load_compare_report_schema())
 
-    def test_stat_json_summary_reflects_scoped_only_and_missing_findings(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        """Codex review: `--format json --stat` (to_stat_json) emits a
-        summary-only payload with no `changes` array at all, so the
-        changes_list-gated recompute above never ran for it -- `verdict`
-        still swapped to the scoped gate result, but `summary` stayed the
-        stale full-library counts and no `full_summary` was added. Same
-        contradiction as the non-stat case
-        (test_json_summary_reflects_scoped_only_and_missing_findings), just
-        reachable via --stat too."""
-        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
-        app, old, new = self._setup(tmp_path, monkeypatch)
-        self._patch_scope(monkeypatch, res)
-        result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--stat",
-        )
-        data = json.loads(result.stdout)
-        assert "changes" not in data
-        assert data["verdict"] == "BREAKING"
-        assert data["summary"]["total_changes"] == 1
-        assert data["summary"]["breaking"] == 1
-        assert data["full_summary"]["total_changes"] == 0
+    # test_stat_json_summary_reflects_scoped_only_and_missing_findings removed
+    # (CLI cleanup phase two, PR 1): it exercised `--format json --stat`
+    # (`to_stat_json`'s stale-summary-vs-recomputed-verdict contradiction),
+    # a CLI combination that no longer exists -- `--stat` was removed, and
+    # the CLI never sets `stat=True` on any `reporter.to_json` call anywhere
+    # any more. `to_stat_json` itself is still directly reachable from a
+    # Tier-2 Python API caller via `abicheck.service_render.render_output(
+    # ..., stat=True)`'s own `fmt="json"` branch (the documented compat
+    # shim for the removed CLI flag) -- this comment is only about the CLI
+    # surface, not about `to_stat_json` becoming unreachable altogether. The
+    # bug class this test guarded against is provably unreachable from the
+    # CLI now, not merely untested. The sibling non-stat case,
+    # test_json_summary_reflects_scoped_only_and_missing_findings above,
+    # covers the still-live path.
 
 
 class TestFoldEvidenceDepthOutOfBandPack:

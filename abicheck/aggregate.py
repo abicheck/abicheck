@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -73,6 +73,14 @@ from .aggregate_findings import (
     build_finding_matrix,
     parse_report_findings,
     render_finding_matrix_lines,
+)
+from .aggregate_manifest import (
+    AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
+    AggregateError as AggregateError,
+    ExpectedTargets as ExpectedTargets,
+    OnMissingRequired as OnMissingRequired,
+    OnUnexpectedTarget as OnUnexpectedTarget,
+    resolve_gate_policy as resolve_gate_policy,
 )
 from .change_registry_types import Verdict
 
@@ -110,7 +118,16 @@ from .change_registry_types import Verdict
 #: ``1.3`` was not: the contribution folds into ``gate.exit_code``, so a
 #: matrix whose targets exited 1 for incomplete analysis assurance no
 #: longer aggregates to 0.
-AGGREGATE_SCHEMA_VERSION = "1.5"
+#:
+#: ``1.6`` (CLI cleanup phase two, PR 2) adds ``effective_policy`` -- which of
+#: ``missing_required``/``unexpected_target`` this run actually applied, and
+#: where each came from (``manifest``/``run-plan``/``default``). Additive and
+#: inert the same way: a ``1.5``-shaped consumer ignoring unknown keys still
+#: reads a ``1.6`` document correctly. Landed after ``1.5`` merged to
+#: ``main`` under the same version number for a different field -- bumped to
+#: ``1.6`` on rebase rather than reusing ``1.5`` for two distinct additive
+#: shapes, per this codebase's own schema-versioning discipline.
+AGGREGATE_SCHEMA_VERSION = "1.6"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -160,13 +177,6 @@ def parse_check_id(target_id: str) -> CheckIdParts | None:
         requested_depth=m.group("depth"),
     )
 
-
-#: SemVer-style (MAJOR.MINOR) version of the expected-target *manifest* input
-#: (``--manifest``). Independent of the report-output schema above. A manifest
-#: may carry ``"aggregate_manifest_version"``; a MAJOR component newer than this
-#: is rejected (the reader cannot know the newer structure), a matching or older
-#: one is accepted (additive-only within a MAJOR).
-AGGREGATE_MANIFEST_VERSION = "1.0"
 
 #: Legacy verdict → gate exit code, used only for reports that carry no
 #: ``severity`` gate block (i.e. produced without a severity policy).
@@ -228,60 +238,12 @@ _BOOTSTRAP_VERDICT = "NO_BASELINE"
 _NEW_TARGET_VERDICT = "NEW_TARGET"
 
 
-def _check_manifest_version(raw: Any) -> None:
-    """Validate an optional manifest ``aggregate_manifest_version`` field.
-
-    Absent → accepted (an unversioned manifest is treated as the current
-    MAJOR). Present → must be a ``"MAJOR.MINOR"`` string whose MAJOR component
-    does not exceed :data:`AGGREGATE_MANIFEST_VERSION`'s (a newer MAJOR carries
-    structure this reader cannot interpret; fail loud rather than silently
-    mis-read it).
-    """
-    if raw is None:
-        return
-    if not isinstance(raw, str) or not raw:
-        raise AggregateError("manifest 'aggregate_manifest_version' must be a string")
-    try:
-        major = int(raw.split(".", 1)[0])
-        supported = int(AGGREGATE_MANIFEST_VERSION.split(".", 1)[0])
-    except ValueError as exc:
-        raise AggregateError(
-            f"manifest 'aggregate_manifest_version' is not a MAJOR.MINOR "
-            f"version: {raw!r}"
-        ) from exc
-    if major > supported:
-        raise AggregateError(
-            f"manifest 'aggregate_manifest_version' {raw!r} is newer than this "
-            f"tool supports (max major {supported}); upgrade abicheck"
-        )
-
-
 class CoverageStatus(str, Enum):
     """Was every *required* expected target actually analyzed?"""
 
     COMPLETE = "complete"  # every required target reported
     PARTIAL = "partial"  # at least one required target is unavailable
     EMPTY = "empty"  # no target could be analyzed at all
-
-
-class OnMissingRequired(str, Enum):
-    """Gate policy for a required target that never reported."""
-
-    FAIL = "fail"  # incomplete required coverage fails the gate (default)
-    WARN = "warn"  # report the gap but do not fail on coverage alone
-
-
-class OnUnexpectedTarget(str, Enum):
-    """Gate policy for a report whose target is not in the expected set."""
-
-    INCLUDE = "include"  # count its real findings in the gate, not in coverage
-    WARN = "warn"  # surface it and warn, but never fail the gate on it
-    FAIL = "fail"  # any unexpected target fails the gate
-    IGNORE = "ignore"  # drop it entirely
-
-
-class AggregateError(ValueError):
-    """A malformed input the caller must fix (usage error / exit 64)."""
 
 
 class _MalformedGate(ValueError):
@@ -667,6 +629,14 @@ class AggregateResult:
     #: True when the caller ran in explicit discovered-only mode (no declared
     #: expected set), so coverage is not gated.
     discovered_only: bool = False
+    #: Where `on_missing_required`/`on_unexpected_target` (above) actually came
+    #: from (CLI cleanup phase two, PR 2) -- ``"manifest"``/``"run-plan"`` when
+    #: the expected-target source's own ``gate`` block set at least one of
+    #: them, ``"default"`` otherwise (including discovered-only mode, where
+    #: neither field is applicable). Purely descriptive, reported in
+    #: `to_dict()`'s `effective_policy` block so a reader can tell *why* this
+    #: run applied the policy it did, not just what the policy was.
+    policy_source: str = "default"
 
     # --- membership helpers -------------------------------------------------
     @property
@@ -1322,6 +1292,18 @@ class AggregateResult:
                 "exit_contribution": self.analysis_assurance_exit,
                 "incomplete_targets": list(self.analysis_assurance_targets),
             },
+            # CLI cleanup phase two, PR 2: the resolved gate policy this run
+            # actually applied, and where it came from -- expectation and the
+            # consequence of breaking it are now one versioned contract
+            # (the manifest's/run-plan's own `gate` block) rather than two
+            # separately-typed CLI flags, so the report states which policy
+            # value was live for this run instead of leaving a reader to
+            # infer it from `blocking`/`exit_code` alone.
+            "effective_policy": {
+                "missing_required": self.on_missing_required.value,
+                "unexpected_target": self.on_unexpected_target.value,
+                "source": self.policy_source,
+            },
             "targets": [t.to_dict() for t in self.targets],
             "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
             "profile_matrix": [e.to_dict() for e in self.profile_matrix],
@@ -1809,84 +1791,39 @@ def collect_reports(
     return found
 
 
-# --- expected-set specification --------------------------------------------
-
-
-@dataclass(frozen=True)
-class ExpectedTargets:
-    """The declared expected-target set (from a manifest or CLI flags)."""
-
-    #: target_id → required
-    targets: Mapping[str, bool]
-    head_sha: str | None = None
-
-    @classmethod
-    def from_manifest_file(cls, path: Path) -> ExpectedTargets:
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, ValueError) as exc:
-            raise AggregateError(f"cannot read manifest {path}: {exc}") from exc
-        return cls.from_manifest_data(data)
-
-    @classmethod
-    def from_manifest_data(cls, data: Any) -> ExpectedTargets:
-        if not isinstance(data, dict):
-            raise AggregateError("manifest must be a JSON object")
-        _check_manifest_version(data.get("aggregate_manifest_version"))
-        raw = data.get("targets")
-        if not isinstance(raw, list) or not raw:
-            raise AggregateError("manifest 'targets' must be a non-empty list")
-        targets: dict[str, bool] = {}
-        for entry in raw:
-            if not isinstance(entry, dict):
-                raise AggregateError(f"manifest target must be an object: {entry!r}")
-            tid = entry.get("id")
-            if not isinstance(tid, str) or not tid:
-                raise AggregateError(f"manifest target needs a string 'id': {entry!r}")
-            if tid in targets:
-                raise AggregateError(f"duplicate manifest target id: {tid!r}")
-            required = entry.get("required", True)
-            if not isinstance(required, bool):
-                raise AggregateError(
-                    f"manifest target 'required' must be a boolean: {entry!r}"
-                )
-            targets[tid] = required
-        head_sha = data.get("head_sha")
-        if "head_sha" in data and (not isinstance(head_sha, str) or not head_sha):
-            # A present-but-malformed head_sha must not silently become None —
-            # that would disable the commit-identity guard the manifest asked
-            # for. Fail loud instead.
-            raise AggregateError("manifest 'head_sha' must be a non-empty string")
-        return cls(targets=targets, head_sha=head_sha)
-
-    @classmethod
-    def from_lists(
-        cls, required: Iterable[str], optional: Iterable[str] = ()
-    ) -> ExpectedTargets:
-        targets: dict[str, bool] = {tid: False for tid in optional}
-        for tid in required:
-            targets[tid] = True
-        if not targets:
-            raise AggregateError("no expected targets given")
-        return cls(targets=targets)
-
-
 # --- the aggregation itself -------------------------------------------------
+#
+# ExpectedTargets (the manifest input) and resolve_gate_policy live in
+# aggregate_manifest.py -- imported above, re-exported from this module's own
+# namespace for every existing importer.
 
 
 def aggregate(
     expected: ExpectedTargets | None,
     found: Mapping[str, _LoadedReport],
     *,
-    on_missing_required: OnMissingRequired = OnMissingRequired.FAIL,
-    on_unexpected_target: OnUnexpectedTarget = OnUnexpectedTarget.INCLUDE,
+    on_missing_required: OnMissingRequired | None = None,
+    on_unexpected_target: OnUnexpectedTarget | None = None,
+    policy_source_hint: str = "manifest",
 ) -> AggregateResult:
     """Reconcile an expected-target set against the reports found.
 
     *expected* is ``None`` only in discovered-only mode, where the reports
     present *are* the expected set and coverage is not gated.
+
+    *on_missing_required*/*on_unexpected_target* default to ``None``, meaning
+    "resolve via :func:`resolve_gate_policy`" (the manifest's own ``gate``
+    block, falling back to the hard-coded default) rather than to a fixed
+    enum value -- a caller that passes an explicit value here still forces
+    it, same as before this function grew manifest-awareness.
     """
     discovered_only = expected is None
+    on_missing_required, on_unexpected_target, policy_source = resolve_gate_policy(
+        expected,
+        explicit_missing_required=on_missing_required,
+        explicit_unexpected_target=on_unexpected_target,
+        source_hint=policy_source_hint,
+    )
     if expected is None:
         expected = ExpectedTargets(targets={tid: True for tid in found}, head_sha=None)
 
@@ -1956,6 +1893,11 @@ def aggregate(
         on_missing_required=on_missing_required,
         on_unexpected_target=on_unexpected_target,
         discovered_only=discovered_only,
+        # `resolve_gate_policy` was called above against the ORIGINAL
+        # `expected` (before the discovered-only substitution just below its
+        # call), so it already reads "default" here -- discovered-only mode
+        # has no expected-target source to carry a `gate` block at all.
+        policy_source=policy_source,
     )
 
 
@@ -1964,8 +1906,9 @@ def aggregate_reports_dir(
     *,
     expected: ExpectedTargets | None = None,
     discovered_only: bool = False,
-    on_missing_required: OnMissingRequired = OnMissingRequired.FAIL,
-    on_unexpected_target: OnUnexpectedTarget = OnUnexpectedTarget.INCLUDE,
+    on_missing_required: OnMissingRequired | None = None,
+    on_unexpected_target: OnUnexpectedTarget | None = None,
+    policy_source_hint: str = "manifest",
     prefix: str = DEFAULT_REPORT_PREFIX,
 ) -> AggregateResult:
     """Load a reports dir and aggregate against an expected set.
@@ -1975,6 +1918,14 @@ def aggregate_reports_dir(
     coverage is not gated — the caller must opt into that explicitly, since it
     cannot detect a missing target. Raises :class:`AggregateError` for
     malformed input (a usage error, exit 64).
+
+    *on_missing_required*/*on_unexpected_target* default to ``None`` (resolve
+    via *expected*'s own manifest ``gate`` block, falling back to the
+    hard-coded default -- see :func:`resolve_gate_policy`); an explicit value
+    here still forces it. *policy_source_hint* names which expected-target
+    source *expected* came from (``"manifest"``/``"run-plan"``), reported
+    back in the result's ``effective_policy.source`` when that source's
+    ``gate`` block actually supplied a value.
     """
     if discovered_only and expected is not None:
         # Exactly one mode — never silently drop the expected set (which would
@@ -1993,4 +1944,5 @@ def aggregate_reports_dir(
         found,
         on_missing_required=on_missing_required,
         on_unexpected_target=on_unexpected_target,
+        policy_source_hint=policy_source_hint,
     )

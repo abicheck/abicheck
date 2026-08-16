@@ -2523,9 +2523,12 @@ _can_reuse_primary_json() {
   # falls back from $OUTPUT_FILE through the stdout-mode $_STDOUT_JSON_FILE;
   # its middle fallback, $PR_JSON, is always empty at this call site, since
   # the caller only reaches here after its own "already populated" check on
-  # PR_JSON came back empty), and free of display filters (--show-only /
-  # --stat) that hide gated changes from the comment (which _build_json_cmd
-  # strips for exactly that reason).
+  # PR_JSON came back empty), and free of the --show-only display filter
+  # that hides gated changes from the comment (which _build_json_cmd strips
+  # for exactly that reason). --stat no longer exists as a CLI flag (CLI
+  # cleanup phase two, PR 1) -- a $CMD array containing it would already
+  # have failed the abicheck invocation itself before this script's
+  # post-processing logic ever ran, so there is nothing left to check here.
   #
   # Codex review: the stdout-JSON case (format: json, no output-file) used
   # to fall through this check — it only ever looked at $OUTPUT_FILE, never
@@ -2538,7 +2541,7 @@ _can_reuse_primary_json() {
   local arg
   for arg in ${CMD[@]+"${CMD[@]}"}; do
     case "$arg" in
-      --show-only | --show-only=* | --stat) return 1 ;;
+      --show-only | --show-only=*) return 1 ;;
     esac
   done
   return 0
@@ -2561,10 +2564,6 @@ _build_json_cmd() {
         ;;
       --show-only=*)
         : # same display filter, inline value form — drop it for the re-run.
-        ;;
-      --stat)
-        : # display-only flag (no value); it suppresses the changes array in
-          # JSON, which the comment parser needs — drop it for the re-run.
         ;;
       *)
         PR_CMD_JSON+=("${CMD[$i]}")

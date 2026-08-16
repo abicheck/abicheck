@@ -189,8 +189,8 @@ loads *every* `*.json` in it, so do not point it at the directory-mode
 comparison's `--output-dir`: that directory also holds the release
 `summary.json` the fan-out writes, which `aggregate` would then read as an
 extra, unexpected target — distorting the matrix, or failing outright under
-`--on-unexpected-target fail`. Collect the per-target reports into their own
-directory.
+a manifest/run-plan `gate.unexpected_target: fail` policy. Collect the
+per-target reports into their own directory.
 
 Two things are required, not optional, and omitting either exits 64:
 

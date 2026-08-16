@@ -86,9 +86,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--output",
                 "--format",
                 "--demangle",
-                "--stat",
                 "--report-mode",
-                "--recommend",
                 "--show-only",
                 "--annotate",
                 "--annotate-additions",
@@ -408,7 +406,6 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "output",
         "fmt",
         "show_only",
-        "stat",
         "demangle",
         # Policy & severity
         "config",
