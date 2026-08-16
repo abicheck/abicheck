@@ -182,20 +182,32 @@ own inputs).
 
 ## Top-level `gate` block and the `schema` discriminator
 
-`project plan --gate-missing-required fail|warn` and
-`--gate-unexpected-target include|warn|fail|ignore` (CLI cleanup phase two,
-PR 2) stamp an optional top-level `gate` block onto the generated
-`run-plan.json` — the same policy shape a hand-authored `--manifest` carries
-in its own `gate` block (see
-[Aggregate Reports](../use/aggregate-reports.md)):
+`CONFIG`'s optional `aggregate: gate:` block (CLI cleanup phase two, PR 2's
+original manifest-carried policy, and its PR 2 follow-up moving the source
+from a pair of `project plan` flags into durable project config) stamps an
+optional top-level `gate` block onto the generated `run-plan.json` — the
+same policy shape a hand-authored `--manifest` carries in its own `gate`
+block (see [Aggregate Reports](../use/aggregate-reports.md)):
+
+```yaml
+# .abicheck.yml
+aggregate:
+  gate:
+    missing_required: fail       # fail | warn
+    unexpected_target: include   # include | warn | fail | ignore
+```
 
 ```json
 {"gate": {"missing_required": "fail", "unexpected_target": "include"}}
 ```
 
-Only present when at least one of the two flags was given; a plan generated
-without them omits `gate` entirely, and `aggregate --run-plan` then applies
-the hard-coded default policy, same as before this option existed.
+Both sub-keys are independently optional; only present when at least one was
+set. A plan generated from a `CONFIG` with no `aggregate: gate:` block (or
+neither sub-key set) omits `gate` entirely, and `aggregate --run-plan` then
+applies the hard-coded default policy, same as before this option existed.
+There is no per-invocation CLI override — `project plan`'s former
+`--gate-missing-required`/`--gate-unexpected-target` flags were removed (no
+CLI alias); set the policy in `CONFIG` directly.
 
 **A plan carrying `gate` is always stamped `"schema": "abicheck.run-plan/v1"`
 is wrong — it is stamped `"schema": "abicheck.run-plan/v2"` instead.** This
@@ -216,8 +228,6 @@ string is rejected as malformed input, not silently honored.
 ```bash
 abicheck project plan [CONFIG] [--build-output PROFILE=DIR ...] \
     [--project OWNER/REPO] [--head-sha SHA] [--allow-empty] \
-    [--gate-missing-required fail|warn] \
-    [--gate-unexpected-target include|warn|fail|ignore] \
     [--format json|text] [-o OUTPUT]
 ```
 

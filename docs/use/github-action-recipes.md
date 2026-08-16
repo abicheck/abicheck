@@ -293,7 +293,9 @@ then guarantees the properties the old hand-written gate loop silently violated:
     ships only at that major — an older-versioned manifest carrying `gate`
     is rejected as malformed rather than silently honored) and setting
     `"gate": {"missing_required": "warn"}` (or run-plan-projected manifest,
-    via `project plan --gate-missing-required warn`) if you want a missing
+    via `.abicheck.yml`'s `aggregate: gate: {missing_required: warn}` block —
+    `project plan` sources this policy from project config, not a CLI flag)
+    if you want a missing
     required target to be reported but not fail the gate on that account
     alone (contract-coverage evidence and other analyzed targets' own gate
     decisions remain independent axes that can still produce a failing exit

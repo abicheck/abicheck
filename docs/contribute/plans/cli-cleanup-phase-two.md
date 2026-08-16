@@ -595,12 +595,12 @@ no external-tooling consumers analogous to the aggregate *report*'s
 schema remains future work if an external producer needs one, not part of
 this slice.
 
-**Follow-up, explicitly still open (review):** the policy moved to the right
-*lifecycle stage* (plan time, versioned, alongside the expected target set) but
-not yet to durable *project configuration*. Today it is still restated per
-invocation, via `project plan --gate-missing-required` /
-`--gate-unexpected-target`. A stable gate policy should not have to be re-typed
-on every `project plan` run:
+**Follow-up: implemented.** The policy moved to the right *lifecycle stage*
+(plan time, versioned, alongside the expected target set) in the slice above,
+and now to durable *project configuration* too: `.abicheck.yml`'s optional
+`aggregate: gate:` block (parsed by `buildsource/project_targets.py`'s new
+`AggregateGateSpec`, validated against the same `OnMissingRequired`/
+`OnUnexpectedTarget` enum vocabulary the manifest's own `gate` block is) —
 
 ```yaml
 # .abicheck.yml
@@ -610,12 +610,18 @@ aggregate:
     unexpected_target: include
 ```
 
-Once that key exists and `project plan` sources it, the two `project plan`
-gate flags should be removed too, leaving that command's CLI to project config,
-build outputs, head/project identity, and output. This is a small, independent
-slice — it does **not** block any other PR here, and it is deliberately not
-folded into PR B/PR G's configuration convergence, whose subject is the
-compare/scan gate, not the aggregate target-expectation gate.
+— is sourced by `project plan`, which stamps it onto the generated
+`run-plan.json`'s own `gate` block exactly as before. The two `project plan`
+`--gate-missing-required`/`--gate-unexpected-target` flags are removed (no
+CLI alias, same "no deprecation window" stance as the rest of this cleanup),
+leaving that command's CLI to project config, build outputs, head/project
+identity, and output. `check-project.yml`'s own former `on-missing-required`/
+`on-unexpected-target` workflow-call inputs (the pass-through this reusable
+workflow used to convert into the now-removed CLI flags) are removed too —
+set the policy in the project's `.abicheck.yml` directly. This was a small,
+independent slice — it did **not** block any other PR here, and was
+deliberately not folded into PR B/PR G's configuration convergence, whose
+subject is the compare/scan gate, not the aggregate target-expectation gate.
 
 **Tests:** manifest-supplied policy; run-plan-supplied policy; default policy;
 missing required target; unexpected analyzed report; unreadable unexpected
