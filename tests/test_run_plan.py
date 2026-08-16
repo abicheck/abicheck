@@ -1338,6 +1338,11 @@ class TestRunPlanGenerateCli:
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
         assert data["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
+        # A `gate`-carrying plan must be stamped v2 (RUN_PLAN_SCHEMA_GATE) --
+        # a v1-stamped plan with `gate` present would let an old, pre-gate
+        # reader's `RunPlan.from_dict()` silently ignore the block and apply
+        # the wrong hard-coded default policy instead (CodeRabbit review).
+        assert data["schema"] == "abicheck.run-plan/v2"
 
     def test_no_aggregate_gate_config_omits_gate_key(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
@@ -1353,7 +1358,12 @@ class TestRunPlanGenerateCli:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "gate" not in json.loads(result.stdout)
+        data = json.loads(result.stdout)
+        assert "gate" not in data
+        # No gate policy configured -> the plan keeps the unchanged v1
+        # schema string, not the gate-bearing v2 (mirrors the assertion in
+        # the sibling configured-gate test above, CodeRabbit review).
+        assert data["schema"] == "abicheck.run-plan/v1"
 
     def test_gate_flags_removed_no_cli_alias(self, tmp_path: Path) -> None:
         """CLI cleanup phase two, PR 2 follow-up: --gate-missing-required/
