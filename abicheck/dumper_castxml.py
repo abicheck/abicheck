@@ -470,7 +470,7 @@ class _CastxmlParser:
         ):
             # CastXML emits either AtomicType or legacy Unimplemented/Atomic.
             # Preserve a wrapped type when present; retain a bare fallback.
-            inner_id = el.get("type")
+            inner_id = el.get("type", "")
             return f"_Atomic({self._type_name(inner_id, depth + 1)})" if inner_id else "_Atomic"
         return el.get("name", tag)
 
