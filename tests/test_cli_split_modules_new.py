@@ -229,6 +229,21 @@ class TestCastxmlEnumHexInit:
         assert {m.name: m.value for m in e.members} == {"A": 16, "B": 32, "C": -1}
 
 
+class TestCastxmlAtomicType:
+    """CastXML schema compatibility for C11 _Atomic nodes."""
+
+    def test_atomic_type_spells_stable_atomic_sentinel(self) -> None:
+        from xml.etree.ElementTree import Element
+
+        from abicheck.dumper_castxml import _CastxmlParser
+
+        root = Element("CastXML")
+        root.append(Element("AtomicType", id="a1"))
+        parser = _CastxmlParser(root, set(), set())
+
+        assert parser._type_name("a1") == "_Atomic"
+
+
 class TestCastxmlVtableUnindexed:
     """Regression test: multiple virtuals without vtable_index must not collapse."""
 

@@ -465,12 +465,14 @@ class _CastxmlParser:
             max_ = el.get("max", "")
             base = self._type_name(el.get("type", ""), depth + 1)
             return f"{base}[{max_}]" if max_ else f"{base}[]"
-        if tag == "Unimplemented" and el.get("type_class") == "Atomic":
-            # castxml cannot model C11 _Atomic: it emits a bare Unimplemented
-            # node with no `type` reference to the wrapped type at all, so the
-            # inner type name can't be recovered here. Spell it "_Atomic" (not
-            # the literal tag name) so diff_atomic.py's _has_atomic() can still
-            # detect the qualifier being added/removed on this slot.
+        if tag == "AtomicType" or (
+            tag == "Unimplemented" and el.get("type_class") == "Atomic"
+        ):
+            # CastXML's C11 _Atomic node is schema-version dependent: older
+            # versions emit Unimplemented/type_class=Atomic, newer versions
+            # emit a bare AtomicType. Neither exposes the wrapped type, so use
+            # one stable sentinel instead of leaking the parser tag into the
+            # ABI model. This lets diff_atomic detect qualifier transitions.
             return "_Atomic"
         return el.get("name", tag)
 
