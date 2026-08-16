@@ -652,12 +652,34 @@ override), but resolves into `assurance.required_status: complete`, not into a
 parallel `gate.require_complete_analysis` field — the boolean is a resolver
 *input alias*, not a second place the value can live. Ordinary precedence
 `explicit CLI > run plan > project config > built-in default` resolves to one
-field (`resolved_gate.assurance_required_status`) that `compare`,
-`scan --against`, the release compare, `check-target` and `aggregate` all
-read. **Do not add a further standalone boolean for any new assurance
-dimension** — extend the `assurance.required_status` value set, or add a
-sibling key under the same `assurance` namespace, never a second top-level
-spelling of the same fact.
+field (`resolved_gate.assurance_required_status`) that the **comparison-
+producing** front ends read directly: `compare`, `scan --against`,
+the release compare, and `check-target`.
+
+**`aggregate` does not join that list, and must not (Codex review).**
+`aggregate.py` already has this invariant for the sibling contract-coverage
+axis, stated in `_contract_coverage_exit`'s own docstring: "read, not
+recomputed... a per-target run that accepted incomplete coverage must not
+have the aggregate re-impose it." `_analysis_assurance_exit` follows the same
+rule for this axis, folding each report's own persisted
+`analysis_assurance_exit_contribution`. That has to stay true here too — a
+matrix leg and the trailing `aggregate` invocation can resolve differing
+project/run-plan settings, so if `aggregate` recomputed
+`resolved_gate.assurance_required_status` from its own config instead of
+folding what each report already decided, two failure modes open at once: a
+target report that legitimately exited `1` could aggregate green (its
+contribution silently overridden by a looser aggregate-time policy), or a
+report that explicitly accepted partial assurance could be newly failed
+downstream by a stricter one. If a future need for `aggregate` to *verify*
+consistent assurance policy across targets emerges, that is a configuration-
+digest check against `effective_policy` (PR 2's field), not a second
+resolution — never a value the aggregate derives from its own gate policy and
+substitutes for what each report already recorded.
+
+**Do not add a further standalone boolean for any new assurance dimension**
+on the comparison-producing side — extend the `assurance.required_status`
+value set, or add a sibling key under the same `assurance` namespace, never a
+second top-level spelling of the same fact.
 
 ## PR 4 — one gate algorithm (`--exit-code-scheme` removal)
 
