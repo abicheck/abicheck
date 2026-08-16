@@ -133,6 +133,46 @@ def test_parse_functions_signature_and_qualifiers() -> None:
     assert fn.params[1].default == "1"
 
 
+@pytest.mark.parametrize("attr_kind, expected", [
+    ("MSABIAttr", "ms_abi"),
+    ("SysVABIAttr", "sysv_abi"),
+])
+def test_parse_functions_preserves_x86_64_abi_attributes(
+    attr_kind: str, expected: str,
+) -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": attr_kind}],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == [expected]
+
+
+def test_parse_functions_recovers_ms_abi_from_qual_type_when_attr_node_is_omitted() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void (int) __attribute__((ms_abi))"},
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == ["ms_abi"]
+
+
 def test_parse_functions_method_const_and_access() -> None:
     root = _tu(
         {

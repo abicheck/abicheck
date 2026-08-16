@@ -399,6 +399,23 @@ def _backfill_function_facts(
         )
         if value != getattr(f, attr):
             updates[attr] = value
+    # CastXML can omit GNU x86-64 ABI attributes from its ``attributes``
+    # string even though clang's AST records them. These are parameter-
+    # passing facts, so retain the clang evidence on the CastXML-primary
+    # declaration rather than losing it during the hybrid merge. Deliberately
+    # limit this to the two attributes CastXML drops: the rest of the contract
+    # attributes remain CastXML-owned as documented for this merge.
+    if clang_f is not None and clang_f.contract_attributes is not None:
+        clang_cc = {
+            attr
+            for attr in clang_f.contract_attributes
+            if attr.split("(", 1)[0] in {"ms_abi", "sysv_abi"}
+        }
+        if clang_cc:
+            own_attrs = f.contract_attributes or []
+            merged_attrs = sorted(set(own_attrs) | clang_cc)
+            if merged_attrs != f.contract_attributes:
+                updates["contract_attributes"] = merged_attrs
     # ELF-sourced facts (elf_binding/elf_visibility) are independent of
     # which AST backend produced the declaration -- both backends'
     # dumper_elf_symbols._populate_elf_visibility reads the same .dynsym

@@ -592,6 +592,18 @@ def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
             if arg_tokens:
                 token = f"{token}({','.join(arg_tokens)})"
             tokens.add(token)
+
+    # Clang's JSON AST does not consistently materialize MSABIAttr/SysVABIAttr
+    # children.  On current clang they are preserved only in FunctionDecl's
+    # ``qualType`` (for example ``void (int) __attribute__((ms_abi))``).
+    # Read those two calling-convention spellings from the compiler-produced
+    # type; this is deliberately narrow and complements, rather than replaces,
+    # attribute-node parsing above.
+    qual_type = node.get("type", {}).get("qualType", "")
+    if isinstance(qual_type, str):
+        for spelling in ("ms_abi", "sysv_abi"):
+            if re.search(rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qual_type):
+                tokens.add(spelling)
     return sorted(tokens)
 
 
