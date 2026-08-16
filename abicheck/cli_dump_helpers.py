@@ -1700,9 +1700,11 @@ def perform_elf_dump(
             gcc_prefix=gcc_prefix,
             # Include dirs supplied via --compiler-option are as explicit as
             # -I and must suppress the seed so the user's search precedence
-            # is kept.
+            # is kept. `deferred` excluded (Codex review): already implied
+            # by these tokens when non-empty, and including it would wrongly
+            # rank it ahead of L3-derived includes -- appended back below.
             gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
+            gcc_option_tokens=tuple(gcc_option_tokens),
             sysroot=sysroot,
             nostdinc=nostdinc,
             frontend=header_backend,
@@ -1719,7 +1721,7 @@ def perform_elf_dump(
             gcc_path = l3_effective_ctx.gcc_path
             gcc_prefix = l3_effective_ctx.gcc_prefix
             effective_gcc_options = l3_effective_ctx.gcc_options
-            gcc_option_tokens = l3_effective_ctx.gcc_option_tokens
+            gcc_option_tokens = l3_effective_ctx.gcc_option_tokens + tuple(deferred)
             sysroot = l3_effective_ctx.sysroot
             nostdinc = l3_effective_ctx.nostdinc
             deferred = []

@@ -1414,6 +1414,31 @@ Once a root command genuinely clears the bar above, pick the right home:
   (confirmed to fail against the pre-fix code, which never hashed the
   directory into `extra_hash_dirs`).
 
+  **An eighteenth finding, from a further Codex review round (P2), on a
+  real ordering bug in `perform_elf_dump`'s own composition — distinct
+  from `_merge_l3_compile_context`'s already-fixed explicit-vs-derived
+  split — and fixed.** `resolve_inferred_header_roots`'s own `deferred`
+  tokens (the inferred `-H` header root, emitted in a search bucket that
+  defers below any *existing* build context) were folded into the
+  "explicit" side of the L3 fold purely to suppress the fold's own
+  internal broad include-dir seed — but `_merge_l3_compile_context` has no
+  way to tell a synthetic deferred marker apart from a genuine user token,
+  so it ranked `deferred` ahead of the L3-derived include tokens too. A
+  colliding generated header under the L3-derived directory could then be
+  shadowed by the inferred root — the exact inversion "deferred" exists to
+  prevent. Fixed by excluding `deferred` from the tokens passed into the
+  fold and appending it back at its correct lowest-priority position
+  (after the L3-derived includes) once the fold result is known. Verified
+  this doesn't break the suppression it was providing: `deferred` is
+  non-empty only when the *original* tokens (unmodified, still passed to
+  the fold) already showed build-context evidence, which the fold's own
+  suppression check reads directly — so nothing is lost by leaving
+  `deferred` itself out. Regression test:
+  `tests/test_non_elf_dump_l2_seed.py::test_perform_elf_dump_keeps_deferred_inferred_root_below_l3_derived_includes`
+  (confirmed to fail against the pre-fix code, both via an internal
+  assertion catching `deferred` leaking into the fold's own explicit
+  tokens and via the final ordering check).
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

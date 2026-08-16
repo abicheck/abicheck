@@ -269,6 +269,94 @@ def test_perform_elf_dump_keeps_l3_derived_flags_out_of_build_context_collector(
     )
 
 
+def test_perform_elf_dump_keeps_deferred_inferred_root_below_l3_derived_includes(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #782 (P2): resolve_inferred_header_roots's own
+    ``deferred`` tokens exist specifically to search BELOW any existing
+    build context (that's the whole point of their -isystem/-idirafter
+    bucket choice) -- folding them into the "explicit" side of the P0.3 L3
+    fold let _merge_l3_compile_context rank them ahead of a real L3-derived
+    include dir for a colliding header, the exact inversion "deferred" is
+    meant to prevent."""
+    from abicheck.compile_context import CompileContext
+    from abicheck.model import AbiSnapshot
+
+    so = tmp_path / "lib.so"
+    root = tmp_path / "include"
+    (root / "oneapi").mkdir(parents=True)
+    umb = root / "oneapi" / "tbb.h"
+    umb.write_text("// umbrella", encoding="utf-8")
+    existing_build_inc = tmp_path / "existingbuild"
+    existing_build_inc.mkdir()
+    generated_inc = tmp_path / "generated"
+    generated_inc.mkdir()
+
+    captured: dict = {}
+
+    def fake_dump(**kwargs):
+        captured["gcc_option_tokens"] = kwargs["gcc_option_tokens"]
+        return AbiSnapshot(library="lib", version="1.0", from_headers=True)
+
+    def fake_seed_and_fold(**kwargs):
+        # A minimal stand-in for a real L3 fold: derive an -isystem
+        # <generated_inc> ahead of the caller's own explicit tokens, and
+        # confirm those explicit tokens do NOT already carry the deferred
+        # inferred-root token (this fix's whole point).
+        explicit_tokens = kwargs["gcc_option_tokens"]
+        assert str(root) not in explicit_tokens, (
+            "the deferred inferred-root token must not be folded into the "
+            "'explicit' side of the L3 merge -- it would then rank ahead "
+            "of a real L3-derived include dir"
+        )
+        merged = CompileContext(
+            gcc_path=kwargs["gcc_path"],
+            gcc_prefix=kwargs["gcc_prefix"],
+            gcc_options=None,
+            gcc_option_tokens=(*explicit_tokens, "-isystem", str(generated_inc)),
+            sysroot=kwargs["sysroot"],
+            nostdinc=kwargs["nostdinc"],
+            frontend=kwargs["frontend"],
+            frontend_context=kwargs["frontend_context"],
+        )
+        return list(kwargs["includes"]), True, merged, (generated_inc,)
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr(
+        "abicheck.service._attach_header_graph", lambda snap, *_a, **_k: snap
+    )
+
+    perform_elf_dump(
+        so, (umb,), (), "1.0", "c++", None, None, None,
+        ("-isystem", str(existing_build_inc)),  # gcc_option_tokens: existing context
+        None, False,
+        False, None,
+        (), (),
+        None,  # effective_compile_db
+        False, (), "", None, None, False, None,
+        None,  # build_info
+        tmp_path,  # sources -> attempts the (mocked) L3 fold
+        None, False,
+        "source-target",
+        lambda inputs: list(inputs),
+        lambda *a, **k: None,
+        lambda *a, **k: None,
+        lambda *a, **k: None,
+    )
+
+    toks = list(captured["gcc_option_tokens"])
+    assert str(root) in toks, "the inferred header root must still be present"
+    assert str(generated_inc) in toks
+    # The L3-derived include dir must be searched BEFORE the deferred
+    # inferred root -- an inferred root outranking a real build's own
+    # generated header dir would shadow it for a colliding header.
+    assert toks.index(str(generated_inc)) < toks.index(str(root))
+
+
 # ── seed_includes_and_fold_compile_context branch coverage ──────────────────
 
 

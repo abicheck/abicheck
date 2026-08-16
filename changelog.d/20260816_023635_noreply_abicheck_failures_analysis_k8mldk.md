@@ -213,3 +213,22 @@
   declarations and embedded graph describe different source states. Fixed
   by folding `include_operand_dirs(cc.gcc_option_tokens)` into `_dump_elf`'s
   `deferred_dirs` too, mirroring `_attach_header_graph`'s identical fold.
+
+- **A real ordering bug in `perform_elf_dump`'s own composition of the L3
+  fold, distinct from `_merge_l3_compile_context`'s already-fixed explicit-
+  vs-derived split (Codex review).** `resolve_inferred_header_roots`'s own
+  `deferred` tokens (the inferred `-H` header root, emitted in a search
+  bucket that defers below any *existing* build context) were folded into
+  the "explicit" side of the L3 fold purely to suppress the fold's own
+  internal broad include-dir seed — but that also made
+  `_merge_l3_compile_context` rank `deferred` ahead of the L3-derived
+  include tokens, since it has no way to tell a synthetic deferred marker
+  apart from a genuine user token. A colliding generated header under the
+  L3-derived directory could then be shadowed by the inferred root — the
+  exact inversion "deferred" exists to prevent. Fixed by excluding
+  `deferred` from the tokens passed into the fold (verified this doesn't
+  break suppression: `deferred` is non-empty only when the *original*
+  tokens already showed build-context evidence, which the fold's own
+  suppression check reads too) and appending it back at its correct
+  lowest-priority position — after the L3-derived includes — once the fold
+  result is known.
