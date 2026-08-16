@@ -3087,6 +3087,20 @@ class TestContractEvaluationThreading:
         assert params[-5] == "contract_evaluation"
         assert params[-6] == "diagnostic_comparison"
 
+    def test_get_type_hints_resolves_without_nameerror(self):
+        """Codex review: `run_compare` moved from `service.py` into
+        `service_compare_pipeline.py` in this same PR, and `Path` was only
+        imported there under `TYPE_CHECKING` -- with `from __future__ import
+        annotations` (PEP 563), `typing.get_type_hints(run_compare)` (a
+        schema generator or docs tool introspecting this public function)
+        raised `NameError: name 'Path' is not defined`. Fixed by importing
+        `pathlib.Path` unconditionally in `service_compare_pipeline.py`."""
+        import typing
+
+        hints = typing.get_type_hints(run_compare)
+        assert hints["old_input"] is Path
+        assert hints["new_input"] is Path
+
 
 class TestParallelOldNewExtraction:
     """run_compare_request resolves old/new concurrently (two threads) since

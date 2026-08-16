@@ -59,6 +59,7 @@ from __future__ import annotations
 import concurrent.futures
 import dataclasses
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .api_types import CompareRequest, CompareResult, InputSpec
@@ -68,7 +69,6 @@ from .service_input_resolution import enforce_requested_depth, resolve_side_snap
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from .compile_context import CompileContext
     from .model import AbiSnapshot

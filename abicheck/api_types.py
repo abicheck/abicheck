@@ -59,11 +59,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .change_registry_types import Verdict
+from .checker_policy import ChangeKind
 from .errors import ValidationError
 
 if TYPE_CHECKING:
-    from .change_registry_types import Verdict
-    from .checker_policy import ChangeKind
     from .checker_types import DiffResult
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
