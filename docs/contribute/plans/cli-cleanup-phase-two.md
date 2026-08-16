@@ -358,7 +358,10 @@ MAJOR an old reader is guaranteed to reject: `major > supported` raises
 `aggregate_manifest_version: "2.0"` and bump `AGGREGATE_MANIFEST_VERSION`
 accordingly, so an old reader fails loud rather than misapplying policy.
 
-`project plan` emits the same fields into `run-plan.json` from `.abicheck.yml`.
+`project plan` emits the same fields into `run-plan.json` from its own
+`--gate-missing-required`/`--gate-unexpected-target` flags (implemented: CLI
+flags only — `.abicheck.yml`-driven sourcing of the same fields is future
+work, not part of this slice; see the "Status: implemented" note above).
 
 - Defaults are unchanged (`missing_required: fail`, `unexpected_target: include`)
   when the manifest omits `gate`.
