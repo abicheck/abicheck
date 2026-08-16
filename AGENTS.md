@@ -1613,9 +1613,13 @@ Once a root command genuinely clears the bar above, pick the right home:
   "known gaps over risky reactive patches" convention applies doubly here,
   given how many single-paragraph "found it" claims this same footnote has
   already had to walk back. Consequence for
-  `napetrov/abicheck-bazel-lab`: PR #14's `fresh-to-fresh` control job
-  should be treated as still red on this one residual field, and the lab's
-  own checked-in `abi/math.abicheck.json` should **not** be regenerated
+  `napetrov/abicheck-bazel-lab`: PR #14's `fresh-to-fresh` job (its real
+  workflow-job name) genuinely fails overall — its own
+  `compare fresh-base fresh-head` step passes, but its separate
+  `scan HEAD --against fresh-base.abi.json` step is the one that returns
+  `NOT_COMPARABLE` and fails the job — so it should be treated as still red
+  on this one residual field, and the lab's own checked-in
+  `abi/math.abicheck.json` should **not** be regenerated
   against the new core pin yet — doing so now would just encode a baseline
   that a fresh `scan --against` still can't cleanly compare to, the same
   problem this diagnostic exists to catch, not fix.
