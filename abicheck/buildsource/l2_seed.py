@@ -218,19 +218,22 @@ def _existing_include_dirs(units: Iterable[Any]) -> list[str]:
     existence check — otherwise every home-rooted include dir (the common CI
     case this fallback targets) would be silently dropped.
 
-    Known gap (Codex review, not fixed here): deliberately scans *every*
-    compile unit, not only the one(s) ``resolve_header_compile_context``
-    matches to the headers actually being parsed -- ``HeaderCompileContext
-    Resolution`` exposes only a ``matched_unit_count``, not which units
-    matched, so there is no narrower set to restrict to without widening
-    that return shape. In a multi-TU build an unrelated TU's own generated
-    header directory (e.g. a colliding ``config.h``) can therefore ride
-    along in this seed and shadow the matched TU's own header for a caller
-    that also stamps ``parsed_with_build_context`` from the (separate)
-    successful fold — same pre-existing shape as ``service_input_
-    resolution._seeded_includes``/``_seeded_compile_context``, which
-    `compare`'s implicit-dump path already combines identically. See
-    AGENTS.md's "Known gaps" entry for the same note.
+    Scans exactly the *units* it is handed, and it is the caller's job to hand
+    it the narrowest honest set. :func:`seed_includes_and_fold_compile_context`
+    passes ``HeaderCompileContextResolution.matched_units`` whenever the fold
+    matched any (plan PR 3B / PR D), closing the gap where an unrelated TU's
+    own generated-header directory could ride along in this seed and shadow
+    the matched TU's own colliding header — on a run that then stamped
+    ``parsed_with_build_context`` from the (separate) successful fold, so it
+    read as *more* authoritative than the seed actually was. It falls back to
+    every compile unit only when nothing matched, which is the case this seed
+    was built for in the first place (a public header the compile DB does not
+    cover, reaching into a dependency SDK) and where there is no narrower set
+    to prefer.
+
+    :func:`derive_l2_include_dirs` still passes every unit, and correctly so:
+    it takes no ``headers`` argument at all, so it has nothing to match
+    against.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -586,18 +589,21 @@ def _split_include_tokens(
 
 
 def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
-    """The directory operand of every include-search token in *tokens*.
+    """Every directory in *tokens* an AST cache key must cover for staleness.
 
-    Thin alias for :func:`~abicheck.header_utils.include_operand_dirs` --
-    moved there (a leaf module ``service.py`` already imports from too) once
-    ``service._attach_header_graph``'s own independent second header parse
-    needed the identical extraction for its own ``gcc_option_tokens``
-    (Codex review); kept here under its original private name so this
-    module's own callers/tests don't need updating.
+    Thin alias for :func:`~abicheck.header_utils.cache_relevant_operand_dirs`
+    -- the extraction moved to ``header_utils`` (a leaf module ``service.py``
+    already imports from too) once ``service._attach_header_graph``'s own
+    independent second header parse needed the identical extraction for its
+    own ``gcc_option_tokens`` (Codex review), and widened from include-search
+    dirs alone to their union with the dirs holding forced pre-included
+    headers once the L3->L2 fold started deriving those too (plan PR 3B /
+    PR D). Kept here under its original private name so this module's own
+    callers/tests don't need updating.
     """
-    from ..header_utils import include_operand_dirs
+    from ..header_utils import cache_relevant_operand_dirs
 
-    return include_operand_dirs(tokens)
+    return cache_relevant_operand_dirs(tokens)
 
 
 def seed_includes_and_fold_compile_context(
@@ -734,16 +740,11 @@ def seed_includes_and_fold_compile_context(
         build_evidence = pack.build_evidence if pack is not None else None
         units = build_evidence.compile_units if build_evidence is not None else []
 
-        if want_seed:
-            seeded_dirs = _existing_include_dirs(units)
-            if seeded_dirs:
-                logger.info(
-                    "L2 header parse: seeded %d include dir(s) from the "
-                    "build's compile database (no -I given).",
-                    len(seeded_dirs),
-                )
-                incs = incs + [Path(d) for d in seeded_dirs]
-
+        # Resolve *before* seeding, so the seed can be restricted to the
+        # compile unit(s) that actually compile these headers (plan PR 3B /
+        # PR D). Ordering is otherwise unobservable: the one path that does
+        # not fall through to the seed below is the fail-closed ambiguity
+        # raise, which aborts the whole call either way.
         resolution = resolve_header_compile_context(
             build_evidence,
             list(headers),
@@ -751,6 +752,23 @@ def seed_includes_and_fold_compile_context(
             lang=lang,
             lang_explicit=lang_explicit,
         )
+
+        if want_seed:
+            seed_units = list(resolution.matched_units) or units
+            seeded_dirs = _existing_include_dirs(seed_units)
+            if seeded_dirs:
+                logger.info(
+                    "L2 header parse: seeded %d include dir(s) from %s (no -I given).",
+                    len(seeded_dirs),
+                    (
+                        f"the {len(resolution.matched_units)} compile unit(s) "
+                        "matching these headers"
+                        if resolution.matched_units
+                        else "the build's compile database"
+                    ),
+                )
+                incs = incs + [Path(d) for d in seeded_dirs]
+
         if resolution.context is None:
             if cleanups:
                 pending_cleanups.extend(cleanups)

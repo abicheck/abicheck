@@ -13,12 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pure path helpers for header (``-H``) inputs.
+"""Pure path and compiler-include-flag helpers for header (``-H``) inputs.
 
 A leaf module (stdlib-only) so both the service layer (``service._dump_elf``)
 and the ``dump`` CLI helper (``cli_dump_helpers.perform_elf_dump``) can share the
 include-root derivation without an import cycle (``cli`` → ``cli_dump_helpers`` →
 ``service`` → … → ``cli``).
+
+Being that leaf is also why this module, rather than ``buildsource``, owns the
+compiler include-flag vocabulary the whole codebase reads
+(:data:`_INCLUDE_FLAG_PREFIXES` and the forced-include recognizer below): every
+consumer — the L2 header parse (``buildsource.header_compile_context``), the L4
+replay command builder (``buildsource.source_extractors._argv``), the L2 seed
+and the AST cache keys — already sits above it, so one shared implementation
+costs no new import edge in any direction. Keep it stdlib-only: an upward
+import from here would invert that.
 """
 
 from __future__ import annotations
@@ -510,6 +519,170 @@ def include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
             dirs.append(Path(t[len(matched_prefix) :]))
         i += 1
     return tuple(dirs)
+
+
+#: GNU/clang forced-include options in their **separate**-operand spelling
+#: (``-include foo.h``): the following argv token is the operand.
+#: ``-include-pch`` is here but deliberately absent from
+#: :data:`GNU_JOINED_FORCED_INCLUDE_OPTS` below — clang accepts no joined
+#: ``-include-pchfile`` spelling.
+GNU_SEPARATE_FORCED_INCLUDE_OPTS: frozenset[str] = frozenset(
+    {"-include", "-imacros", "-include-pch"}
+)
+#: The subset that additionally accepts a **joined** operand
+#: (``-includefoo.h``/``-imacrosfoo.h``).
+GNU_JOINED_FORCED_INCLUDE_OPTS: frozenset[str] = frozenset({"-include", "-imacros"})
+#: MSVC/clang-cl forced-include options in their separate-operand spelling
+#: (``/FI file`` or ``-FI file``); the joined ``/FIfile``/``-FIfile`` form is
+#: matched by prefix instead. ``/FU`` (forced ``#using`` of a managed
+#: assembly, C++/CLI) is **not** here: it names no C/C++ header, so it has no
+#: meaning for either an L4 replay or an L2 header parse.
+MSVC_SEPARATE_FORCED_INCLUDE_OPTS: frozenset[str] = frozenset({"/FI", "-FI"})
+
+#: Longest-first, so a joined-spelling scan never truncates one option at a
+#: shorter sibling's boundary.
+_GNU_JOINED_FORCED_INCLUDE_ORDER: tuple[str, ...] = tuple(
+    sorted(GNU_JOINED_FORCED_INCLUDE_OPTS, key=len, reverse=True)
+)
+
+
+def match_gnu_forced_include(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> tuple[int, str, str]:
+    """Try to match a GNU forced-include token (``-include``/``-imacros``/``-include-pch``).
+
+    Appends the matched token(s) to *out* **verbatim** (a joined spelling stays
+    joined — an L4 replay hands them straight back to the real compiler) and
+    returns ``(new_i, option, operand)``: the index past what was consumed plus
+    the *normalized* option spelling and its operand, for a caller that needs
+    to re-render rather than replay. Returns ``(i, "", "")`` when *tok* matches
+    neither the separate- nor the joined-operand form.
+    """
+    if tok in GNU_SEPARATE_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
+        return i + 2, tok, argv[i + 1]
+    if tok not in GNU_SEPARATE_FORCED_INCLUDE_OPTS:
+        for opt in _GNU_JOINED_FORCED_INCLUDE_ORDER:
+            if tok.startswith(opt) and len(tok) > len(opt):
+                out.append(tok)  # -includefile / -imacrosfile (joined)
+                return i + 1, opt, tok[len(opt) :]
+    return i, "", ""
+
+
+def match_msvc_forced_include(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> tuple[int, str, str]:
+    """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
+
+    Same contract as :func:`match_gnu_forced_include`; both the separate
+    (``/FI file``) and joined (``/FIfile``, ``-FIfile``) spellings are handled,
+    and the returned option is normalized to ``/FI`` for either.
+    """
+    if tok in MSVC_SEPARATE_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # /FI file (separate operand)
+        return i + 2, "/FI", argv[i + 1]
+    if len(tok) > 3 and (tok.startswith("/FI") or tok.startswith("-FI")):
+        out.append(tok)  # /FIfile (joined)
+        return i + 1, "/FI", tok[3:]
+    return i, "", ""
+
+
+def forced_include_operands(
+    argv: Sequence[str], *, msvc: bool
+) -> list[tuple[str, str]]:
+    """Every forced pre-include in *argv* as ``(option, operand)``, in order.
+
+    The normalized read view of :func:`match_gnu_forced_include`/
+    :func:`match_msvc_forced_include` — same recognizer, same option
+    vocabulary, same separate/joined spellings, but reporting *what was asked
+    for* rather than the verbatim tokens an L4 replay hands back to the real
+    compiler. ``option`` is one of ``-include``/``-imacros``/``-include-pch``/
+    ``/FI``; ``operand`` is the header the build forces in, exactly as the
+    build spelled it (still relative to the compile unit's own ``directory``
+    when relative, and still subject to the include search when bare).
+
+    *msvc* enables the ``/FI``/``-FI`` family, gated the same way
+    ``source_extractors._argv._scan_argv_for_extra_flags`` gates it (on the
+    resolved compiler dialect) so a GNU ``-F``-family flag is never read as one.
+
+    Lives here, in the leaf that already owns this codebase's include-flag
+    vocabulary (:data:`_INCLUDE_FLAG_PREFIXES` and friends), rather than in
+    ``buildsource``: both consumers are above it — the L4 replay path reaches
+    the matchers through ``source_extractors._argv``, and the L2 header parse
+    reaches this view through ``buildsource.header_compile_context.
+    _context_flags`` — so one shared implementation costs no new import edge in
+    either direction. See ``adapters.base.ABI_RELEVANT_FLAG_PREFIXES``'s own
+    comment for why these deliberately never travel via
+    ``CompileUnit.abi_relevant_flags``.
+    """
+    tokens = list(argv)
+    scratch: list[str] = []
+    out: list[tuple[str, str]] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        new_i, option, operand = match_gnu_forced_include(tok, tokens, i, scratch)
+        if new_i == i and msvc:
+            new_i, option, operand = match_msvc_forced_include(tok, tokens, i, scratch)
+        if new_i == i:
+            i += 1
+            continue
+        # A joined spelling whose "operand" is itself option-shaped is not a
+        # real file operand (``-include-pchfoo`` reaches the joined ``-include``
+        # branch with ``-pchfoo``); replaying it verbatim is harmless, but
+        # re-rendering it as a forced include would not be.
+        if operand and not operand.startswith("-"):
+            out.append((option, operand))
+        i = new_i
+    return out
+
+
+def forced_include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """The *containing directory* of every forced pre-include in *tokens*.
+
+    Sibling of :func:`include_operand_dirs`, for the same AST-cache-key
+    channel and the same reason — a forced-include header
+    (``-include config.h``) reaches the parse only as an opaque
+    ``gcc_option_tokens`` string, so editing that header would otherwise reuse
+    a stale cached AST even though it is exactly the macro-controlling input
+    the parse depends on most. The cache key's channel takes *directories*
+    (``extra_hash_dirs``, mtime-walked via :func:`iter_cache_header_files`),
+    so the operand's parent is what is returned; a bare operand with no
+    directory part contributes nothing, since its resolution depends on the
+    include search and the searched dirs are already covered by
+    :func:`include_operand_dirs`.
+
+    Recognition is :func:`forced_include_operands` above, run over both
+    dialects — the same tokens ``header_compile_context._context_flags``
+    renders — so the set hashed here cannot drift from the set actually passed
+    to the compiler.
+    """
+    toks = list(tokens)
+    dirs: list[Path] = []
+    for _option, operand in {
+        *forced_include_operands(toks, msvc=False),
+        *forced_include_operands(toks, msvc=True),
+    }:
+        parent = Path(operand).parent
+        if str(parent) not in (".", ""):
+            dirs.append(parent)
+    return tuple(sorted(set(dirs), key=str))
+
+
+def cache_relevant_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """Every directory in *tokens* whose contents an AST cache key must cover.
+
+    The union of :func:`include_operand_dirs` (include-*search* dirs) and
+    :func:`forced_include_operand_dirs` (the dirs holding forced pre-included
+    headers). One function so the three header-parse cache keys that consume
+    it — the primary ``service._dump_elf`` parse, ``service.
+    _attach_header_graph``'s independent second parse, and the L2 seed's own
+    ``derived_include_dirs`` return — cannot disagree about what staleness
+    means for the same ``gcc_option_tokens``; two of those three have already
+    each needed their own individual fix for exactly that divergence
+    (``AGENTS.md``'s tenth and seventeenth L3->L2-fold findings).
+    """
+    return include_operand_dirs(tokens) + forced_include_operand_dirs(tokens)
 
 
 def iter_cache_header_files(directory: Path) -> list[Path]:

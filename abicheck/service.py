@@ -45,8 +45,8 @@ from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
+    cache_relevant_operand_dirs,
     deferred_token_dirs,
-    include_operand_dirs,
     resolve_inferred_header_roots,
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
@@ -1049,9 +1049,9 @@ def _attach_header_graph(
             # pass already hashes must be hashed here too, or an edit under
             # it would silently reuse a stale cached graph even though the
             # primary snapshot re-parsed correctly (Codex review).
-            deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
-                cc.gcc_option_tokens
-            )
+            deferred_dirs = tuple(
+                deferred_token_dirs(deferred)
+            ) + cache_relevant_operand_dirs(cc.gcc_option_tokens)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -1325,9 +1325,9 @@ def _dump_elf(
         # this PRIMARY parse's cache key stays aligned with _attach_header_graph's
         # own identical fold above -- else the two passes could disagree on
         # staleness for the same header (Codex review).
-        deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
-            cc.gcc_option_tokens
-        )
+        deferred_dirs = tuple(
+            deferred_token_dirs(deferred)
+        ) + cache_relevant_operand_dirs(cc.gcc_option_tokens)
 
     compiler = "cc" if lang == "c" else "c++"
     try:

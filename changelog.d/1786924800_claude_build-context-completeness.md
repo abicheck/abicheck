@@ -1,0 +1,46 @@
+### Fixed
+
+- **The L2 header parse now applies a matched compile unit's own forced
+  pre-includes (`-include`/`-imacros`/`/FI`).** A build that forces a
+  macro-controlling header in parses its own public headers with that
+  header's macros already defined; abicheck's derived L2 `CompileContext`
+  never carried it, so `dump`/`scan`/`compare`'s implicit-dump path could
+  parse a materially different translation unit — different `#if` branches,
+  different struct layouts — while still reporting a real compile-unit match
+  and stamping `AbiSnapshot.parsed_with_build_context`. A relative operand is
+  resolved against the compile unit's own directory when that names a real
+  file, and left relative otherwise so a generated header the build finds
+  through its `-I` chain still resolves; MSVC `/FI` renders as GNU
+  `-include`, matching how every other derived field is rendered.
+  `-include-pch` (locked to the compiler build that produced it) and `/FU`
+  (managed C++/CLI `#using`, naming no C/C++ header) are deliberately not
+  forwarded. L4 source-ABI replay is unchanged: it already carried forced
+  includes from raw argv, and the two paths now share one recognizer rather
+  than the L2 fix routing through `CompileUnit.abi_relevant_flags`, which
+  would have made replay emit every forced include twice.
+- **A forced pre-include is now part of the compile-context ambiguity check.**
+  Two translation units that reference the same public header but force in
+  *different* macro-controlling headers previously collapsed into one
+  context, silently applying whichever grouped first; they now fail closed
+  with `HeaderCompileContextAmbiguousError`, the same way a `-std=`/target/
+  define disagreement already did, and the error lists each conflicting
+  translation unit's forced includes so the differing dimension is visible
+  rather than leaving two apparently-identical rows. Two spellings of the
+  *same* forced header (separate vs. joined, relative vs. absolute) still
+  agree.
+- **A forced pre-include is now hashed into the header-AST cache key.**
+  Editing the forced header — the one macro-controlling input a parse depends
+  on most — previously reused a stale cached AST, because it reached the
+  parse only as an opaque compiler-option string. All three header-parse
+  cache keys (the primary dump parse, the header-graph second pass, and the
+  L2 seed's own derived directories) now share one definition of which
+  directories affect staleness.
+- **The L2 include-directory seed is restricted to the compile units that
+  actually compile the headers being parsed.** When no explicit `-I` is
+  given, abicheck seeds include directories from the build's compile
+  database; it gathered them from every translation unit, so in a multi-TU
+  build an unrelated TU's own generated-header directory could shadow the
+  matched TU's own colliding header (a stray `config.h`) on a run that then
+  reported build context as applied. It now seeds from the matched units,
+  falling back to every unit only when no unit matches — the case the seed
+  was built for, where there is no narrower set to prefer.

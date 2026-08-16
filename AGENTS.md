@@ -1299,6 +1299,31 @@ Once a root command genuinely clears the bar above, pick the right home:
   scoped fix reactive to one review comment on one PR. Documented in
   `_existing_include_dirs`'s own docstring alongside this entry.
 
+  **Closed by PR D (plan "PR 3B", build-context completeness), and the
+  cross-cutting worry above turned out to be obsolete rather than
+  addressed.** The entry says the fix needs restricting "both
+  `_existing_include_dirs`'s caller here *and* `_seeded_includes` in
+  `service_input_resolution.py`" — two independent call sites. That was
+  true when written; PR C (#795) since merged those two into one, so
+  `service_input_resolution._seeded_includes_and_compile_context` and all
+  three CLI-side resolvers now reach the seed through the single
+  `l2_seed.seed_includes_and_fold_compile_context`. There was one call site
+  left to restrict, not two. `HeaderCompileContextResolution` gained
+  `matched_units` (the tuple; `matched_unit_count` stays as a derived
+  property, so the two cannot drift), and the combined primitive now
+  resolves the compile context *before* seeding and passes
+  `resolution.matched_units` to `_existing_include_dirs` — falling back to
+  every unit only when nothing matched, which is the case the seed was
+  built for in the first place (a public header the compile DB does not
+  cover, reaching into a dependency SDK) and where there is no narrower set
+  to prefer. Reordering is otherwise unobservable: the one path that skips
+  the seed is the fail-closed ambiguity raise, which aborts the call either
+  way. Regression coverage:
+  `tests/test_build_context_completeness.py::TestIncludeSeedIsRestrictedToMatchedUnits`
+  (the positive case, the no-match fallback, and the `matched_units`/
+  `matched_unit_count` consistency), verified to fail against the pre-fix
+  `seed_units = units`.
+
   **A twelfth finding, from a further Codex review round (P1), on
   `run_scan_core`'s own forwarding of the folded context to the baseline
   parse — real and fixed.** The eighth finding above fixed `run_scan_core`
@@ -1387,6 +1412,78 @@ Once a root command genuinely clears the bar above, pick the right home:
   other pre-existing paths already depend on, not a scoped fix reactive
   to one review comment on this PR. Documented in `ABI_RELEVANT_FLAG_
   PREFIXES`'s own docstring alongside this entry.
+
+  **Closed by PR D (plan "PR 3B"), but *not* by the fix this entry
+  proposed — that fix was investigated and found to be actively wrong,
+  which is the part worth not rediscovering.** The gap is real and the
+  consequence stated above is accurate: the derived L2 `CompileContext`
+  never carried a matched compile unit's own macro-controlling
+  forced-include header, so the header parse saw a materially different
+  translation unit while still reporting a real match and stamping
+  `parsed_with_build_context`. But routing the fix through
+  `ABI_RELEVANT_FLAG_PREFIXES`/`extract_abi_relevant_flags`, as this entry
+  proposed, would have **broken L4 replay**, which already handles forced
+  includes correctly and by a different route:
+  `source_extractors._argv.replay_extra_flags` carries
+  `abi_relevant_flags` through (`_carry_abi_relevant_flags`) *and*,
+  separately and unconditionally, re-scans the unit's raw `argv` for
+  forced-include/include-search tokens (`_scan_argv_for_extra_flags`,
+  which is deliberately **not** passed the `seen` set the first pass
+  builds — see that function's own docstring for why deduping there was
+  itself a reverted bug). Capturing a forced include into
+  `abi_relevant_flags` would therefore have made every L4 replay command
+  carry `-include config.h` twice: a silent double inclusion that a header
+  without include guards turns into a hard redefinition error. The general
+  shape is worth naming, since this list has now attracted two fixes aimed
+  at it: `ABI_RELEVANT_FLAG_PREFIXES` is not the only channel a compile
+  unit's flags reach a consumer through, so "the flag is missing from the
+  list" is not by itself evidence that adding it to the list is the fix —
+  check which consumers already reach the same fact by another route first.
+  Closed at the layer that actually had the gap instead:
+  `header_utils.forced_include_operands` is now the one shared recognizer
+  (the same option vocabulary and the same separate/joined spellings
+  `_argv`'s replay matchers use, since `match_gnu_forced_include`/
+  `match_msvc_forced_include` moved into that leaf — the one that already
+  owns this codebase's include-flag vocabulary and that both consumers
+  already sit above, so sharing costs no new import edge — and `_argv`
+  imports them), and `header_compile_context._forced_include_flags` renders its
+  result into the L2 command straight from `cu.argv`, never through
+  `abi_relevant_flags` — so L4 replay is bit-for-bit untouched. Three
+  rendering decisions carry their own reasoning in the code: a relative
+  operand is pinned to the compile unit's own `directory` **only when that
+  resolves to a real file** (GCC documents a two-stage lookup, and pinning
+  a generated header the build finds through its `-I` chain to a
+  non-existent path would turn a header that would have been found into a
+  hard "file not found"); MSVC `/FI` renders as GNU `-include`, matching
+  what this module already does for `-D`/`-I`/`--sysroot=`, since the
+  consumer is always a GNU-driver castxml/clang invocation; and
+  `-include-pch` (version-locked to the compiler build that produced it,
+  which L2's castxml-bundled/host clang is not) plus `/FU` (managed C++/CLI
+  `#using`, naming no C/C++ header at all) are deliberately dropped rather
+  than rendered. Two consequences beyond the rendering itself: a forced
+  include now participates in `_EffectiveContextSignature`, so two units
+  forcing *different* macro-controlling headers fail closed instead of
+  silently applying whichever grouped first (equivalent spellings of the
+  *same* header still agree, since the signature compares the rendered
+  tokens); and `header_utils.cache_relevant_operand_dirs` — the union of
+  `include_operand_dirs` with the new `forced_include_operand_dirs`, now
+  used by all three header-parse cache keys (`service._dump_elf`,
+  `service._attach_header_graph`, the L2 seed's own `derived_include_dirs`
+  return) — covers the forced header's directory, closing for this input
+  the same staleness class the tenth and seventeenth findings above each
+  had to close individually. **Residual, deliberately unclosed:** because a
+  forced include still never enters `abi_relevant_flags`, it is still not
+  projected into a `BuildOption` by `derive_build_options`, so swapping one
+  build's forced-include header for another does not raise
+  `ABI_RELEVANT_BUILD_FLAG_CHANGED` (ADR-029 D9's build-evidence drift
+  signal). Closing *that* half needs a structured `CompileUnit` field every
+  adapter populates, a `BUILD_EVIDENCE_VERSION` bump and `build_diff`
+  wiring — a schema slice of its own, not a follow-on to the L2 rendering
+  fix, and specifically not another attempt to route it through this list.
+  Regression coverage: `tests/test_build_context_completeness.py` (the
+  recognizer, the rendered context, the ambiguity signature, the cache-key
+  union, and — as the executable record of the wrong fix —
+  `TestReplayStillEmitsForcedIncludesExactlyOnce`).
 
   **A fifteenth finding, from a further Codex review round (P1), on the
   thirteenth finding's own header-equality fix — a real gap in the fix

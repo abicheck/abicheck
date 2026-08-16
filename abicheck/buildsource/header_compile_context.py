@@ -78,7 +78,7 @@ from typing import TYPE_CHECKING
 from .._compiler_options import explicit_language_standard, split_gcc_options
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
-from ..header_utils import iter_directory_headers
+from ..header_utils import forced_include_operands, iter_directory_headers
 from .adapters.base import _is_msvc_command
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
@@ -549,6 +549,16 @@ class _EffectiveContextSignature:
     flag that produced it differently (``--target=X`` vs. ``-target X``)
     compare equal here instead of falsely disagreeing, whether or not the
     caller pinned anything.
+
+    ``forced_includes`` (plan PR 3B / PR D) compares exactly the tokens
+    :func:`_forced_include_flags` would *render*, not the raw argv spellings —
+    so two units forcing the same header in through a different-but-equivalent
+    spelling (``-include cfg.h`` vs. ``/FIcfg.h``, or a relative vs. absolute
+    operand resolving to the same real file) agree, while two units forcing in
+    genuinely *different* macro-controlling headers now disagree and fail
+    closed. Before this field existed a forced include was invisible to the
+    whole comparison, so that second case silently applied whichever unit
+    happened to group first.
     """
 
     language: str
@@ -560,6 +570,7 @@ class _EffectiveContextSignature:
     include_paths: tuple[str, ...]
     system_include_paths: tuple[str, ...]
     abi_relevant_flags: tuple[str, ...]
+    forced_includes: tuple[str, ...] = ()
 
     @classmethod
     def of(
@@ -585,6 +596,7 @@ class _EffectiveContextSignature:
                     msvc=_is_msvc_command(cu.argv),
                 )
             ),
+            forced_includes=tuple(_forced_include_flags(cu)),
         )
 
 
@@ -728,6 +740,73 @@ def _standard_conflicts_with_forced_language(
     return derived_family is not None and derived_family != forced_language
 
 
+#: Forced-include options :func:`_forced_include_flags` deliberately does NOT
+#: render into the L2 header-parse command, mapped to the reason:
+#:
+#: ``-include-pch`` — a precompiled header is locked to the exact compiler
+#: build that produced it. L2 parses with castxml's own bundled Clang or the
+#: host ``clang``, never necessarily the build's compiler, so replaying a
+#: ``.pch`` is a hard parse failure far more often than it is a fidelity win.
+#: L4 replay, which *does* use the real compiler, still carries it
+#: (``_argv.replay_extra_flags``).
+#:
+#: ``/FU`` — MSVC's forced ``#using`` of a managed (C++/CLI) assembly. It
+#: names no C/C++ header and has no GNU-driver equivalent to render as, so
+#: there is nothing to forward. It is not in ``adapters.base``'s recognizer
+#: vocabulary at all for the same reason.
+_UNRENDERABLE_FORCED_INCLUDE_OPTS = frozenset({"-include-pch"})
+
+
+def _forced_include_flags(cu: CompileUnit) -> list[str]:
+    """Render *cu*'s own forced pre-includes as literal clang argv tokens.
+
+    A build that forces a macro-controlling header in (``-include config.h``,
+    ``/FIconfig.h``) parses its own headers with that header's macros already
+    defined; an L2 header parse that omits it sees a materially different
+    translation unit — different ``#if`` branches taken, different struct
+    layouts — while still reporting a real compile-unit match and stamping
+    ``AbiSnapshot.parsed_with_build_context``. That is the gap this closes
+    (plan PR 3B / PR D, "build-context completeness").
+
+    Read straight from ``cu.argv`` via the shared recognizer in
+    :func:`~abicheck.header_utils.forced_include_operands`, **not**
+    from ``cu.abi_relevant_flags``: routing forced includes through that list
+    instead would double-emit them on every L4 replay command, since
+    ``_argv.replay_extra_flags`` both carries ``abi_relevant_flags`` and
+    independently re-scans raw argv for the same tokens. See
+    ``ABI_RELEVANT_FLAG_PREFIXES``'s own comment for the full accounting.
+
+    MSVC's ``/FI`` renders as GNU ``-include``, matching what this module
+    already does for every other field — ``-D``/``-I``/``--sysroot=`` are all
+    rendered GNU-style regardless of the recorded command's dialect, because
+    the consumer is always a GNU-driver castxml/clang invocation
+    (``dumper_ast_config``). See :data:`_UNRENDERABLE_FORCED_INCLUDE_OPTS` for
+    the two spellings that are deliberately dropped instead.
+
+    The operand is resolved against ``cu.directory`` (the compile command's
+    own cwd, which abicheck's is not) **only when that resolves to a real
+    file**. A bare ``-include config.h`` naming a generated header the build
+    finds through its ``-I`` chain must stay relative, or pinning it to a
+    non-existent ``<directory>/config.h`` would turn a header the include
+    search would have found into a hard "file not found" — GCC documents
+    exactly this two-stage lookup ("first searched in the preprocessor's
+    working directory", then the ``-iquote``/``-I`` chain), and the second
+    stage is the one this fallback preserves.
+    """
+    flags: list[str] = []
+    for option, operand in forced_include_operands(
+        cu.argv, msvc=_is_msvc_command(cu.argv)
+    ):
+        if option in _UNRENDERABLE_FORCED_INCLUDE_OPTS:
+            continue
+        rendered_option = "-include" if option == "/FI" else option
+        resolved = _resolve_cu_relative_path(operand, cu.directory)
+        flags.extend(
+            [rendered_option, resolved.as_posix() if resolved.is_file() else operand]
+        )
+    return flags
+
+
 def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> list[str]:
     """Render one ``CompileUnit``'s context as literal castxml/clang argv tokens.
 
@@ -827,6 +906,11 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
             f, cu_standard=cu.standard, msvc=_is_msvc_command(cu.argv)
         )
     )
+    # Last, so a forced header resolves through the include search this
+    # function just rendered above it. Order within the group is the build's
+    # own: forced includes are cumulative, never last-one-wins, so none of
+    # the override reasoning that governs the tokens above applies here.
+    flags.extend(_forced_include_flags(cu))
     return flags
 
 
@@ -837,14 +921,28 @@ class HeaderCompileContextResolution:
     ``context`` is ``None`` whenever there was nothing to apply (no L3
     evidence, or no ``CompileUnit`` references any of the requested headers)
     — a plain, silent degrade to the pre-P0.3 behavior, never an error.
-    ``matched_unit_count`` is the number of distinct ``CompileUnit``s found to
-    reference the requested headers, always > 0 when ``context`` is not
-    ``None`` (used by callers to decide whether to stamp
-    ``AbiSnapshot.parsed_with_build_context``).
+
+    ``matched_units`` are the distinct ``CompileUnit``s found to reference the
+    requested headers (after any explicit-language narrowing), always
+    non-empty when ``context`` is not ``None``. Exposing the units themselves
+    — not just how many there were — is what lets a caller restrict *other*
+    build-derived L2 inputs to the same set: ``l2_seed``'s include-dir seed
+    used to gather dirs from every compile unit in the build, so in a
+    multi-TU project an unrelated TU's own generated-header directory could
+    ride along and shadow the matched TU's own colliding header, on a run
+    that then stamped ``parsed_with_build_context`` from this (separate)
+    successful resolution (plan PR 3B / PR D).
+
+    ``matched_unit_count`` stays as the derived read view callers already use
+    to decide whether to stamp ``AbiSnapshot.parsed_with_build_context``.
     """
 
     context: CompileContext | None = None
-    matched_unit_count: int = 0
+    matched_units: tuple[CompileUnit, ...] = ()
+
+    @property
+    def matched_unit_count(self) -> int:
+        return len(self.matched_units)
 
     @property
     def matched(self) -> bool:
@@ -967,9 +1065,7 @@ def resolve_header_compile_context(
     ((_sig, units),) = by_signature.items()
     flags = _context_flags(units[0], forced_language=forced_language)
     context = CompileContext(gcc_option_tokens=tuple(flags))
-    return HeaderCompileContextResolution(
-        context=context, matched_unit_count=len(matched)
-    )
+    return HeaderCompileContextResolution(context=context, matched_units=tuple(matched))
 
 
 def _ambiguity_message(
@@ -981,18 +1077,24 @@ def _ambiguity_message(
         f"Public header(s) [{header_names}] are compiled under "
         f"{len(by_signature)} materially different, ABI-relevant compile "
         "contexts across the available L3 build evidence (differing "
-        "-std=/target/defines/include-search-order/sysroot/ABI-relevant "
-        "flags); abicheck cannot pick one context over another without "
-        "guessing. Narrow the input (--compile-db-filter / a project "
+        "-std=/target/defines/include-search-order/sysroot/forced-includes/"
+        "ABI-relevant flags); abicheck cannot pick one context over another "
+        "without guessing. Narrow the input (--compile-db-filter / a project "
         "compile: block / --compiler-option pinning the ambiguous field(s)) or "
         "compare a header per contract at a time. Conflicting translation "
         "units:",
     ]
+    # Only shown when some signature actually has one, so the common
+    # (forced-include-free) message is unchanged -- but shown for *every*
+    # signature once any does, since "this one forces nothing" is exactly
+    # half of that disagreement and an omitted field reads as agreement.
+    show_forced = any(sig.forced_includes for sig in by_signature)
     for sig, units in sorted(by_signature.items(), key=lambda kv: kv[0].standard):
         sample = units[0]
+        forced = f" forced_includes={list(sig.forced_includes)}" if show_forced else ""
         lines.append(
             f"  - {sample.source or sample.id!r}: std={sig.standard or '(default)'} "
             f"target={sig.target_triple or '(default)'} "
-            f"abi_flags={list(sig.abi_relevant_flags)}"
+            f"abi_flags={list(sig.abi_relevant_flags)}{forced}"
         )
     return "\n".join(lines)

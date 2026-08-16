@@ -733,16 +733,64 @@ pipelines a fourth time.
   > forcing any of the three under continued session pressure risks
   > reopening one of the already-fixed findings this same area has needed
   > many prior review rounds to reach.
-- **PR 3B — build-context completeness (the review's PR D).** Two #782
-  follow-ups that change the *parsed public surface*, not just performance, so
-  they belong before the model is called finished: (1) compile-unit matching —
-  the L2 include-dir seed is still gathered from *every* `CompileUnit` rather
-  than the matched one(s), so an unrelated TU's colliding generated header can
-  shadow the matched TU's; (2) forced includes — `-include`, `-imacros`, `/FI`,
-  `/FU` are absent from `ABI_RELEVANT_FLAG_PREFIXES`, so a matched unit's
-  macro-controlling forced-include header never reaches the derived L2 context
-  even though the run reports a match and stamps `parsed_with_build_context`.
-  Both are already recorded as known gaps in the root `AGENTS.md`.
+- **PR 3B — build-context completeness (the review's PR D). Implemented.**
+  Two #782 follow-ups that change the *parsed public surface*, not just
+  performance, so they belong before the model is called finished: (1)
+  compile-unit matching — the L2 include-dir seed is still gathered from
+  *every* `CompileUnit` rather than the matched one(s), so an unrelated TU's
+  colliding generated header can shadow the matched TU's; (2) forced includes
+  — `-include`, `-imacros`, `/FI`, `/FU` are absent from
+  `ABI_RELEVANT_FLAG_PREFIXES`, so a matched unit's macro-controlling
+  forced-include header never reaches the derived L2 context even though the
+  run reports a match and stamps `parsed_with_build_context`. Both were
+  recorded as known gaps in the root `AGENTS.md`, which now carries the full
+  closure notes.
+
+  > **Landed (2026-08-16).** (1) `HeaderCompileContextResolution` gained
+  > `matched_units` (`matched_unit_count` stays as a derived property, so the
+  > two cannot drift), and `l2_seed.seed_includes_and_fold_compile_context`
+  > now resolves the compile context *before* seeding and restricts
+  > `_existing_include_dirs` to that set — falling back to every unit only
+  > when nothing matched, which is the case the seed was built for (a public
+  > header the compile DB does not cover) and where there is no narrower set
+  > to prefer. The entry's own "two independent call sites" worry
+  > (`_existing_include_dirs`'s caller *and*
+  > `service_input_resolution._seeded_includes`) was obsolete rather than
+  > addressed: PR C merged those two into one, so there was one site left to
+  > restrict.
+  >
+  > (2) **The forced-include fix the `AGENTS.md` entry proposed — a
+  > spaced-value branch in `extract_abi_relevant_flags` — was investigated
+  > and found to be actively wrong, and this is the part worth not
+  > rediscovering.** `source_extractors._argv.replay_extra_flags` already
+  > handles forced includes for L4 by a *different* route: it carries
+  > `abi_relevant_flags` through **and**, separately, re-scans raw `argv` for
+  > the same tokens without consulting the first pass's `seen` set. Capturing
+  > a forced include into that list would therefore have made every L4 replay
+  > command carry `-include config.h` twice — a silent double inclusion that
+  > a header without include guards turns into a hard redefinition error.
+  > Closed at the layer that actually had the gap instead:
+  > `header_utils.forced_include_operands` is the one shared recognizer (the
+  > replay matchers moved into that leaf — the one already owning this
+  > codebase's include-flag vocabulary, which both consumers already sit
+  > above — so L2 and L4 recognize the same spellings from one
+  > implementation) and
+  > `header_compile_context._forced_include_flags` renders it into the L2
+  > command straight from `cu.argv`, leaving L4 bit-for-bit unchanged. Forced
+  > includes also now participate in the ambiguity signature (two units
+  > forcing *different* macro-controlling headers fail closed rather than
+  > silently applying whichever grouped first) and in the AST cache key
+  > (`header_utils.cache_relevant_operand_dirs`, now shared by all three
+  > header-parse cache keys). `-include-pch` and `/FU` are deliberately not
+  > rendered; the ADR-029 D9 *drift-detection* half — a changed forced-include
+  > header does not raise `ABI_RELEVANT_BUILD_FLAG_CHANGED` — stays open,
+  > since closing it needs a structured `CompileUnit` field, a
+  > `BUILD_EVIDENCE_VERSION` bump and `build_diff` wiring, and specifically
+  > *not* another attempt to route it through `ABI_RELEVANT_FLAG_PREFIXES`.
+  > Tests: `tests/test_build_context_completeness.py` (20 cases; 9 verified to
+  > fail against the pre-fix code, and
+  > `TestReplayStillEmitsForcedIncludesExactlyOnce` kept as the executable
+  > record of the rejected fix).
 - **PR 3C — the removal itself** (everything the rest of this section
   describes), landing only after **all three** resolvers converge — 3A (both
   `dump` and `scan`) and 3B. 3C must not land on 3A-covers-`dump`-only; a
@@ -1279,7 +1327,7 @@ PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        resolution, JSON dry-run rendered
                                        from that object
 PR D  build-context completeness      = PR 3B — matched compile-unit
-                                       selection, forced includes, provenance
+      (DONE)                           selection, forced includes, provenance
                                        tests
 PR G1 canonical exit decision, part 1 — ExitDecision + reasons + the report
                                        block, precedence pinned by ADR and

@@ -46,27 +46,42 @@ _LANG_BY_EXT: dict[str, str] = {
 #: toolchain flag with a dedicated finding). Per ADR-028 D3 these are risk/
 #: source-level signals — the artifact diff proves any concrete break.
 #:
-#: Known gap (Codex review, AGENTS.md's L3->L2 fold entry, not fixed here):
-#: does not include GNU/clang ``-include``/``-imacros`` or MSVC ``/FI``/``/FU``
-#: (forced pre-include) -- SOURCE_OPERAND_FLAGS below already recognizes these
-#: as value-taking for a *different* purpose (not mistaking the operand for
-#: the TU source file), but that recognition never feeds this list, so a
-#: matched compile unit's own forced-include header is silently absent from
-#: ``CompileUnit.abi_relevant_flags`` and therefore from
-#: ``header_compile_context``'s derived L2 ``CompileContext`` -- the P0.3
-#: L3->L2 fold (``buildsource.l2_seed.resolve_header_compile_context``,
-#: reached from ``dump``/``scan``/``compare``'s implicit-dump path alike)
-#: can report a real match (``matched_unit_count > 0``, ``parsed_with_
-#: build_context`` stamped) while still parsing without a macro-controlling
-#: forced-include header the real build always applies. Unlike this
-#: tuple's other prefix-only entries, ``-include``/``-imacros``/``/FI``
-#: always carry a required following value that must travel with them, so
-#: adding the bare prefix alone (the pattern every other entry here uses)
-#: would append only the flag, silently dropping the header filename that
-#: is the entire point -- a correct fix needs a new spaced-value-flag
-#: branch in :func:`extract_abi_relevant_flags` (mirroring, but distinct
-#: from, its existing ``-D``/``/D`` split-form handling), not a bare
-#: addition to this tuple.
+#: **Forced pre-includes (``-include``/``-imacros``/``/FI``) are deliberately
+#: NOT in this tuple, and the fix an earlier draft of this comment proposed --
+#: "a new spaced-value-flag branch in :func:`extract_abi_relevant_flags`" --
+#: was investigated and found to be actively wrong (PR D / plan PR 3B).** The
+#: L2 gap it described is real: ``header_compile_context``'s derived L2
+#: ``CompileContext`` never saw a matched compile unit's own macro-controlling
+#: forced-include header, so the P0.3 L3->L2 fold could report a real match
+#: (``matched_unit_count > 0``, ``parsed_with_build_context`` stamped) while
+#: still parsing without it. But routing the fix through *this* list would
+#: have broken L4 replay, which already handles forced includes correctly and
+#: by a different route: ``source_extractors._argv.replay_extra_flags``
+#: carries ``abi_relevant_flags`` through
+#: (``_carry_abi_relevant_flags``) **and**, separately and unconditionally,
+#: re-scans the unit's raw ``argv`` for forced-include/include-search tokens
+#: (``_scan_argv_for_extra_flags``, which is not passed the ``seen`` set the
+#: first pass builds). Capturing a forced include here would therefore have
+#: made every L4 replay command carry ``-include config.h`` **twice** -- a
+#: silent double-inclusion that a header without include guards turns into a
+#: hard redefinition error.
+#:
+#: The gap is closed at the layer that actually had it instead:
+#: ``header_utils.forced_include_operands`` is the one shared recognizer (the
+#: same option vocabulary and the same separate/joined spellings ``_argv``'s
+#: own replay matchers use, since those matchers live there now too), and
+#: ``header_compile_context._context_flags`` renders its result into the L2
+#: command directly from ``cu.argv`` -- never through
+#: ``abi_relevant_flags``, so L4 replay is untouched.
+#:
+#: Residual, deliberately-unclosed half: because a forced include is not in
+#: this tuple, it is still not projected into a ``BuildOption`` by
+#: :func:`derive_build_options`, so swapping one build's forced-include header
+#: for another does not raise ``ABI_RELEVANT_BUILD_FLAG_CHANGED`` (ADR-029
+#: D9's build-evidence drift signal). Closing *that* needs a structured
+#: ``CompileUnit`` field every adapter populates plus a
+#: ``BUILD_EVIDENCE_VERSION`` bump and ``build_diff`` wiring -- a schema slice
+#: of its own, not a follow-on to the L2 rendering fix. See ``AGENTS.md``.
 ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-std=", "/std:", "-stdlib=",
     "--target=", "-target", "-mabi=", "/arch:", "-m32", "-m64",
@@ -265,7 +280,6 @@ SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset({
     "-I", "-isystem", "-iquote", "-idirafter", "-D", "-U",
     "/FI", "/FU",
 })
-
 
 def _is_bare_input(arg: str, msvc: bool) -> bool:
     """Like :func:`_is_source_token` but without the known-extension requirement.

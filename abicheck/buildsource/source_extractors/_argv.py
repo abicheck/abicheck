@@ -33,6 +33,7 @@ import os
 import re
 from collections.abc import Sequence
 
+from ...header_utils import match_gnu_forced_include, match_msvc_forced_include
 from ..build_evidence import CompileUnit
 
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
@@ -83,15 +84,15 @@ MACRO_DEFINITION_PREFIXES = ("-D", "-U", "/D", "/U")
 #: split spelling (``-isysroot /sdk`` → just ``-isysroot``, operand dropped), so
 #: re-appending it dangles and swallows the following argv token.
 STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-target")
-#: GNU forced-include options. Only ``-include``/``-imacros`` also have a joined
-#: ``-include<file>`` spelling; ``-include-pch`` is separate-operand only (clang
-#: ``-include-pch <file>``) and must not be read as a joined ``-include``.
-_GNU_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
-_GNU_SEPARATE_INCLUDE_OPTS = frozenset({"-include", "-imacros", "-include-pch"})
-#: MSVC/clang-cl forced-include options in their separate-operand spelling
-#: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
-#: prefix.
-_MSVC_FORCED_INCLUDE_OPTS = frozenset({"/FI", "-FI"})
+#: The forced-include option vocabulary and its two matchers now live in
+#: ``abicheck.header_utils`` (the leaf that already owns this codebase's
+#: include-flag vocabulary, and which both this module and
+#: ``buildsource.header_compile_context`` already sit above), so the L4 replay
+#: path here and the L2 header-parse path there recognize exactly the same
+#: spellings from one implementation. Re-bound to the historical private names
+#: so the call sites below read unchanged.
+_match_gnu_forced_include = match_gnu_forced_include
+_match_msvc_forced_include = match_msvc_forced_include
 #: GNU include-search options that take a directory operand and are NOT
 #: normalized into the structured ``include_paths``/``system_include_paths``
 #: buckets (those cover ``-I``/``-isystem`` only). Dropping them makes the
@@ -312,24 +313,6 @@ def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str])
     return i
 
 
-def _match_gnu_forced_include(tok: str, argv: list[str], i: int, out: list[str]) -> int:
-    """Try to match a GNU forced-include token (``-include``/``-imacros``/``-include-pch``).
-
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    The separate-operand spelling (all three options) and the joined spelling
-    (``-include``/``-imacros`` only, never ``-include-pch``) are both handled.
-    """
-    if tok in _GNU_SEPARATE_INCLUDE_OPTS and i + 1 < len(argv):
-        out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
-        return i + 2
-    if tok not in _GNU_SEPARATE_INCLUDE_OPTS and any(
-        tok.startswith(opt) and len(tok) > len(opt) for opt in _GNU_FORCED_INCLUDE_OPTS
-    ):
-        out.append(tok)  # -includefile / -imacrosfile (joined)
-        return i + 1
-    return i
-
-
 def _match_msvc_include_search(
     tok: str, argv: list[str], i: int, out: list[str]
 ) -> int:
@@ -347,24 +330,6 @@ def _match_msvc_include_search(
     return i
 
 
-def _match_msvc_forced_include(
-    tok: str, argv: list[str], i: int, out: list[str]
-) -> int:
-    """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
-
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    Both the separate (``/FI file``) and joined (``/FIfile``, ``-FIfile``)
-    spellings are handled.
-    """
-    if tok in _MSVC_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
-        out += [tok, argv[i + 1]]  # /FI file (separate operand)
-        return i + 2
-    if len(tok) > 3 and (tok.startswith("/FI") or tok.startswith("-FI")):
-        out.append(tok)  # /FIfile (joined)
-        return i + 1
-    return i
-
-
 def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> None:
     """Walk ``argv`` and append forced-include / include-search tokens to ``out``.
 
@@ -375,13 +340,17 @@ def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> N
     i = 0
     while i < len(argv):
         tok = argv[i]
-        new_i = _match_gnu_forced_include(tok, argv, i, out)
+        # The two forced-include matchers are shared with the L2 header-parse
+        # path (header_utils) and return (new_i, option, operand); only the
+        # index matters here, since replay hands `out`'s verbatim tokens
+        # straight back to the real compiler.
+        new_i, _opt, _operand = _match_gnu_forced_include(tok, argv, i, out)
         if new_i == i:
             new_i = _match_gnu_include_search(tok, argv, i, out)
         if new_i == i and cc_id == "msvc":
             new_i = _match_msvc_include_search(tok, argv, i, out)
         if new_i == i and cc_id == "msvc":
-            new_i = _match_msvc_forced_include(tok, argv, i, out)
+            new_i, _opt, _operand = _match_msvc_forced_include(tok, argv, i, out)
         i = new_i if new_i != i else i + 1
 
 
