@@ -911,9 +911,21 @@ report.
 > "effective-config digest recorded in every report" half of PR B's stated
 > goal is attempted in this slice — both remain open, and both need the
 > `GateOptions` unification above as a prerequisite, same as the gate-pack gap.
+> A review round on the PR that landed this slice caught two further gaps,
+> both closed the same way as the gate-pack one — reject rather than accept
+> and silently score nothing: `contract.unresolved` is now also rejected for
+> a release comparison unconditionally (with or without `--contract`), since
+> its consumer reads a per-comparison `PersistedContractContext` the release
+> fan-out never builds per library. The review's second finding — bundle-
+> level (cross-library) findings never respecting *any* policy override, pack
+> or not — turned out to be a pre-existing gap unrelated to `--pack`, not a
+> gap this slice introduced; recorded in the root `AGENTS.md`'s "Known gaps"
+> instead of fixed here, since it's a real feature addition to the bundle-
+> analysis subsystem, not a pack-specific follow-up.
 > Tests: `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
-> (`test_policy_pack_is_applied_to_a_release_comparison`, `test_gate_pack_is_
-> still_rejected_on_a_release_comparison`).
+> (`test_policy_pack_is_applied_to_a_release_comparison`,
+> `test_gate_pack_is_still_rejected_on_a_release_comparison`,
+> `test_contract_unresolved_pack_still_rejected_on_a_release_comparison`).
 
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.

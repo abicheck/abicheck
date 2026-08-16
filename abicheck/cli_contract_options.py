@@ -61,34 +61,41 @@ def pack_option(f: F) -> F:
     # Assigned rather than returned inline, matching `contract_options` below:
     # the click decorator is untyped, so returning its result directly is an
     # `Any` return from a function declared to return `F` (mypy no-any-return).
-    f = click.option("--pack", "pack_paths", multiple=True,
-                  type=click.Path(exists=True, dir_okay=False, path_type=Path),
-                  help="Select an ADR-049 D8 pack manifest (repeatable). A pack is a "
-                       "small versioned YAML document (id/version/kind/assignments) "
-                       "carrying one reusable piece of configuration. 'kind: policy' "
-                       "assigns ChangeKind slugs to break/warn/risk/ignore, exactly as "
-                       "--policy's overrides do; 'kind: contract' assigns "
-                       "surface.internal_namespaces and contract.unresolved (the "
-                       "latter needs --contract, which is what computes "
-                       "the coverage it configures); 'kind: gate' assigns "
-                       "gate.exit_code_scheme and gate.severity.<category>. Composition "
-                       "is D8's: an explicitly stated value (--policy, "
-                       "--exit-code-scheme, --severity-preset, a --profile, or .abicheck.yml) "
-                       "always outranks a pack, and two selected packs assigning "
-                       "different values to the same field are a usage error unless "
-                       "something else already states it. A manifest assigning a field "
-                       "this build resolves but does not yet apply is rejected rather "
-                       "than silently recorded. On a directory/package (release) "
-                       "comparison, a 'kind: policy'/'kind: contract' pack's "
-                       "policy.overrides/surface.internal_namespaces apply to every "
-                       "library uniformly, but a 'kind: gate' pack is rejected: the "
-                       "release fan-out has no resolved gate-options wiring for "
-                       "gate.exit_code_scheme/gate.severity.<category> yet. On `scan` "
-                       "this requires --against (a pack's only application there is "
-                       "the baseline comparison) and a 'kind: gate' pack is rejected: "
-                       "`scan --against` does honour --severity-preset/--exit-code-scheme "
-                       "given directly, but does not yet fold a gate pack's gate.* "
-                       "assignments, so pass those settings directly instead.")(f)
+    f = click.option(
+        "--pack",
+        "pack_paths",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Select an ADR-049 D8 pack manifest (repeatable). A pack is a "
+        "small versioned YAML document (id/version/kind/assignments) "
+        "carrying one reusable piece of configuration. 'kind: policy' "
+        "assigns ChangeKind slugs to break/warn/risk/ignore, exactly as "
+        "--policy's overrides do; 'kind: contract' assigns "
+        "surface.internal_namespaces and contract.unresolved (the "
+        "latter needs --contract, which is what computes "
+        "the coverage it configures); 'kind: gate' assigns "
+        "gate.exit_code_scheme and gate.severity.<category>. Composition "
+        "is D8's: an explicitly stated value (--policy, "
+        "--exit-code-scheme, --severity-preset, a --profile, or .abicheck.yml) "
+        "always outranks a pack, and two selected packs assigning "
+        "different values to the same field are a usage error unless "
+        "something else already states it. A manifest assigning a field "
+        "this build resolves but does not yet apply is rejected rather "
+        "than silently recorded. On a directory/package (release) "
+        "comparison, a 'kind: policy'/'kind: contract' pack's "
+        "policy.overrides/surface.internal_namespaces apply to every "
+        "library uniformly, but a 'kind: gate' pack is rejected (the "
+        "release fan-out has no resolved gate-options wiring for "
+        "gate.exit_code_scheme/gate.severity.<category> yet) and so is "
+        "contract.unresolved, with or without --contract (its consumer "
+        "needs a per-comparison contract context the release fan-out "
+        "never builds per library). On `scan` "
+        "this requires --against (a pack's only application there is "
+        "the baseline comparison) and a 'kind: gate' pack is rejected: "
+        "`scan --against` does honour --severity-preset/--exit-code-scheme "
+        "given directly, but does not yet fold a gate pack's gate.* "
+        "assignments, so pass those settings directly instead.",
+    )(f)
     return f
 
 
@@ -96,51 +103,60 @@ def pack_option(f: F) -> F:
 #: module's docstring for why they live here rather than in ``cli.py``.
 def contract_options(f: F) -> F:
     """Attach ``--contract`` / ``--audit-suppressions``."""
-    f = click.option("--audit-suppressions", "audit_suppressions", is_flag=True, default=False,
-                  help="Audit the --suppress rule file against this run's findings: which "
-                       "rules matched nothing (stale), matched a BREAKING change (high "
-                       "risk), are expired, or expire soon. Requires --suppress. Adds a "
-                       "suppression_audit key in --format json, a '## Suppression Audit' "
-                       "section in markdown/review. Advisory only.")(f)
-    f = click.option("--contract", "contract_mode",
-                  type=click.Choice(["public", "exports", "all", "auto"]), default=None,
-                  help="Which evidence domain each finding is judged against "
-                       "(ADR-049 Phase 6), and the flag that turns the contract "
-                       "evaluator on -- omit it and nothing about the run changes. "
-                       "'public': the header-derived declared surface. 'exports': the "
-                       "binary's own export table (ELF .dynsym / PE export directory / "
-                       "Mach-O export trie) plus the raw type closure reachable from it "
-                       "-- a private-header type reached from a real export is inside "
-                       "this contract, an unexported public-header declaration is not. "
-                       "'all': every entity, no root or closure evidence required. "
-                       "'auto': evaluate, but let the domain be chosen by the D7 "
-                       "precedence chain below an explicit CLI value -- the "
-                       "--scope-public-headers/--no-scope-public-headers legacy alias, "
-                       "then .abicheck.yml. "
-                       "Each finding is stamped with a contract_relevance (IN_CONTRACT/"
-                       "PROVEN_OUT_OF_CONTRACT/UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/"
-                       "NOT_APPLICABLE), a contract_reason_code and -- when resolved -- "
-                       "a contract_assurance, rendered per finding in --format json/"
-                       "markdown, in sarif/junit properties, and as an html badge; "
-                       "--format review's compact digest renders it only in the "
-                       "--used-by/--required-symbol scoped-gate appendix. --format json "
-                       "additionally carries contract_evidence_refs per finding (which "
-                       "evidence records the decision rests on) and a top-level "
-                       "contract_context block (observed provider evidence, resolved "
-                       "evaluation context, decision receipt), so a decision can be "
-                       "replayed or re-evaluated later without re-reading the binaries. "
-                       "**The decisions are authoritative** (ADR-049 Phase 7): relevance "
-                       "is classified before compatibility policy, and policy scores only "
-                       "IN_CONTRACT/NOT_APPLICABLE findings -- so this changes verdicts "
-                       "and exit codes. Nothing is hidden: an excluded finding stays in "
-                       "the report with the relevance and reason that explain why it did "
-                       "not gate. Uncertainty is not treated as compatible either -- if "
-                       "the selected domain's required evidence is incomplete, the "
-                       "orthogonal contract-coverage ledger contributes exit 1, folded "
-                       "with max so it never lowers an ABI break's 2/4. Set "
-                       "contract.unresolved=warn (e.g. via a `kind: contract` --pack) to "
-                       "accept incomplete coverage: that zeroes the contribution while "
-                       "still reporting every failure. Applies to a directory/package "
-                       "(release) comparison too -- each library's own coverage floor is "
-                       "max()-folded into the release's exit code the same way.")(f)
+    f = click.option(
+        "--audit-suppressions",
+        "audit_suppressions",
+        is_flag=True,
+        default=False,
+        help="Audit the --suppress rule file against this run's findings: which "
+        "rules matched nothing (stale), matched a BREAKING change (high "
+        "risk), are expired, or expire soon. Requires --suppress. Adds a "
+        "suppression_audit key in --format json, a '## Suppression Audit' "
+        "section in markdown/review. Advisory only.",
+    )(f)
+    f = click.option(
+        "--contract",
+        "contract_mode",
+        type=click.Choice(["public", "exports", "all", "auto"]),
+        default=None,
+        help="Which evidence domain each finding is judged against "
+        "(ADR-049 Phase 6), and the flag that turns the contract "
+        "evaluator on -- omit it and nothing about the run changes. "
+        "'public': the header-derived declared surface. 'exports': the "
+        "binary's own export table (ELF .dynsym / PE export directory / "
+        "Mach-O export trie) plus the raw type closure reachable from it "
+        "-- a private-header type reached from a real export is inside "
+        "this contract, an unexported public-header declaration is not. "
+        "'all': every entity, no root or closure evidence required. "
+        "'auto': evaluate, but let the domain be chosen by the D7 "
+        "precedence chain below an explicit CLI value -- the "
+        "--scope-public-headers/--no-scope-public-headers legacy alias, "
+        "then .abicheck.yml. "
+        "Each finding is stamped with a contract_relevance (IN_CONTRACT/"
+        "PROVEN_OUT_OF_CONTRACT/UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/"
+        "NOT_APPLICABLE), a contract_reason_code and -- when resolved -- "
+        "a contract_assurance, rendered per finding in --format json/"
+        "markdown, in sarif/junit properties, and as an html badge; "
+        "--format review's compact digest renders it only in the "
+        "--used-by/--required-symbol scoped-gate appendix. --format json "
+        "additionally carries contract_evidence_refs per finding (which "
+        "evidence records the decision rests on) and a top-level "
+        "contract_context block (observed provider evidence, resolved "
+        "evaluation context, decision receipt), so a decision can be "
+        "replayed or re-evaluated later without re-reading the binaries. "
+        "**The decisions are authoritative** (ADR-049 Phase 7): relevance "
+        "is classified before compatibility policy, and policy scores only "
+        "IN_CONTRACT/NOT_APPLICABLE findings -- so this changes verdicts "
+        "and exit codes. Nothing is hidden: an excluded finding stays in "
+        "the report with the relevance and reason that explain why it did "
+        "not gate. Uncertainty is not treated as compatible either -- if "
+        "the selected domain's required evidence is incomplete, the "
+        "orthogonal contract-coverage ledger contributes exit 1, folded "
+        "with max so it never lowers an ABI break's 2/4. Set "
+        "contract.unresolved=warn (e.g. via a `kind: contract` --pack) to "
+        "accept incomplete coverage: that zeroes the contribution while "
+        "still reporting every failure. Applies to a directory/package "
+        "(release) comparison too -- each library's own coverage floor is "
+        "max()-folded into the release's exit code the same way.",
+    )(f)
     return f

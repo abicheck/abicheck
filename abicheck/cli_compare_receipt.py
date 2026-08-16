@@ -426,15 +426,37 @@ def resolve_release_pack_application(
     ``gate.severity.*`` need their own resolved gate-options wiring the release
     fan-out does not have yet (CLI cleanup phase two, "PR B").
 
+    Also rejects ``contract.unresolved`` unconditionally -- not merely when
+    ``contract_evaluation`` is false, the way :func:`~abicheck.
+    pack_application.check_resolved_config_applies_packs`'s own
+    ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair path.
+    That field's consumer (``contract_coverage_exit._accepts_unresolved``)
+    reads it off a per-comparison ``PersistedContractContext`` that only
+    ``checker.compare``'s own ``record_resolved_config`` installs -- which the
+    release fan-out never builds per library (only ``contract_evaluation``/
+    ``contract_mode`` booleans reach ``service.run_compare``, never a full
+    resolved contract configuration). A pack asserting
+    ``contract.unresolved=warn`` under ``--contract`` on a release comparison
+    would therefore be accepted and silently score nothing -- an incomplete
+    coverage floor would still contribute 1 to every library's exit code
+    regardless of the pack -- exactly the decorative-``--pack`` failure this
+    whole module exists to prevent (Codex review, fresh evidence).
+
     Raises what the canonical resolver and the pack loader raise (a D7
-    same-tier conflict, a D8 pack conflict, an inapplicable or gate-only
-    pack); mapping those onto exit 64 is the caller's job.
+    same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
+    unresolved-only pack); mapping those onto exit 64 is the caller's job.
     """
     pack_paths = tuple(params.get("pack_paths") or ())
     if not pack_paths:
         return None
     config = resolve_cli_config(params, **kwargs)
-    from .pack_application import check_resolved_config_applies_packs, pack_application
+    from .errors import PackManifestError
+    from .pack_application import (
+        PACK_SOURCE_KIND,
+        _supplying_pack,
+        check_resolved_config_applies_packs,
+        pack_application,
+    )
 
     check_resolved_config_applies_packs(
         config,
@@ -446,8 +468,24 @@ def resolve_release_pack_application(
             "severity settings directly instead, or compare the specific "
             "library individually with --pack"
         ),
-        contract_evaluation=contract_evaluation,
+        # `contract_evaluation=True` here is deliberate, not a copy-paste of
+        # the release-wide value: it only widens what the *shared* resolver
+        # accepts (so `--contract` genuinely unlocks `contract.unresolved`
+        # there), and the unconditional check just below closes the release-
+        # specific gap that widening reopens.
+        contract_evaluation=True,
     )
+    unresolved_provenance = getattr(config, "provenance", {}).get("contract.unresolved")
+    if getattr(unresolved_provenance, "source_kind", None) == PACK_SOURCE_KIND:
+        raise PackManifestError(
+            f"{_supplying_pack(config, 'contract.unresolved')}: "
+            "'contract.unresolved' cannot be applied to a directory/package "
+            "(release) comparison yet: the per-library fan-out has no "
+            "persisted contract-coverage context to fold it into (unlike "
+            "policy.overrides/surface.internal_namespaces, which do apply "
+            "uniformly). Compare the specific library individually with "
+            "--pack to use it."
+        )
     return pack_application(config, policy_file=kwargs.get("policy_file"))
 
 
@@ -545,7 +583,26 @@ def resolve_release_pack_application_from_ctx(
             project_sha256=project_sha256,
             symbols_list=None,
         )
-    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+    except (
+        FieldResolutionError,
+        PackConflictError,
+        PackManifestError,
+        # `resolve_release_pack_application`'s own `resolve_cli_config` call
+        # loads `--policy`'s document a *second* time (for D7 provenance,
+        # via `compatibility_evaluation_frontend`), independently of the
+        # already-guarded pre-read a few lines up -- a genuinely malformed
+        # policy document (an unknown ChangeKind slug, a non-mapping
+        # `overrides:`, an unreadable file) raises `PolicyError`/`OSError`/
+        # `ImportError` there, uncaught, unlike the single-pair path (whose
+        # own `_load_suppression_and_policy` call already converts the
+        # identical failure to a clean error *before* ever reaching this
+        # resolver, so it never hits this second load at all). Caught here
+        # instead of left to propagate as a raw traceback (Codex review,
+        # found while adding direct test coverage for this function).
+        ValueError,
+        OSError,
+        ImportError,
+    ) as exc:
         raise click.UsageError(str(exc)) from exc
 
 

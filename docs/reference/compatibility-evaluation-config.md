@@ -259,7 +259,9 @@ policy`/`kind: contract` pack's `policy.overrides`/`surface.
 internal_namespaces` now apply to every library uniformly; a `kind: gate`
 pack is still rejected there, since the release fan-out has no resolved
 gate-options wiring for `gate.exit_code_scheme`/`gate.severity.<category>`
-yet (CLI cleanup phase two, "PR B").
+yet (CLI cleanup phase two, "PR B") — and so is `contract.unresolved`, with
+or without `--contract`: its consumer needs a per-comparison contract
+context the release fan-out never builds per library.
 
 ## The resolution receipt
 
