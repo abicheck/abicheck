@@ -372,31 +372,28 @@ class TestPySafeDirFailsClosedWhenMktempFails:
     def test_mktemp_failure_exits_nonzero_with_a_clear_error(
         self, tmp_path: Path
     ) -> None:
-        fake_bin = tmp_path / "fakebin"
-        fake_bin.mkdir()
-        fake_mktemp = fake_bin / "mktemp"
-        fake_mktemp.write_text("#!/bin/bash\nexit 1\n")
-        # Marked executable via bash's own `chmod +x`, not Python's
-        # `os.chmod(0o755)` -- on a Windows Git-Bash host, Python's native
-        # `os.chmod` does not reliably set the executable bit Git-Bash's
-        # own PATH search (`command -v` and this shim's implicit lookup of
-        # `mktemp`) checks, so the fake shim would be silently invisible to
-        # PATH resolution and the real system `mktemp` would run instead
-        # (Codex review, fresh evidence).
-        _mark_executable(fake_mktemp)
-
+        # Forces a REAL `mktemp -d` failure via `$TMPDIR` pointing at a
+        # plain file (mktemp then fails with "Not a directory") rather than
+        # shadowing `mktemp` itself with a fake PATH-prioritized shim --
+        # two earlier revisions of this test tried exactly that (first with
+        # `os.chmod`, then with bash's own `chmod +x` plus a relative PATH
+        # entry, mirroring the fix that worked for `TestPyBinResolvedAs
+        # Absolute` one class up) and BOTH still failed identically on
+        # windows-latest CI: a bareword `mktemp -d` invocation kept
+        # resolving the real system `mktemp` regardless, even though the
+        # identical PATH-priority mechanism was independently confirmed
+        # working for `command -v python3` elsewhere in this same file --
+        # the exact reason for the difference could not be root-caused
+        # remotely. Driving a genuine failure in the real `mktemp` binary
+        # sidesteps the whole PATH-shadowing question entirely, and is
+        # arguably a more faithful test of this fail-closed behavior than
+        # a fake shim would have been anyway. Verified locally that GNU
+        # coreutils' `mktemp -d` genuinely fails (exit 1, "Not a
+        # directory") when `$TMPDIR` names an existing plain file, both
+        # with an absolute and a relative `$TMPDIR` value.
+        (tmp_path / "not_a_directory").write_text("")
         script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
-        # A *relative* PATH entry ("fakebin", with cwd anchored to its
-        # parent) rather than str(fake_bin)'s absolute native Windows form
-        # -- the same fix TestPyBinResolvedAsAbsolute needed: an absolute
-        # backslash Windows path spliced into PATH is not reliably
-        # recognized by Git-Bash's own PATH search on every runner, while a
-        # plain relative entry resolved against a real cwd is (confirmed:
-        # this test alone still failed on windows-latest CI after the
-        # chmod fix above, with the real system mktemp running instead of
-        # the fake shim -- the same root cause, reached from PATH-entry
-        # form rather than the executable bit).
-        env = {**os.environ, "PATH": f"fakebin{os.pathsep}{os.environ['PATH']}"}
+        env = {**os.environ, "TMPDIR": "not_a_directory"}
         result = _run_bash_script(script, cwd=tmp_path, env=env, timeout=30)
         assert result.returncode == 1
         assert "UNREACHABLE" not in result.stdout
