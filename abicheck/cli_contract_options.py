@@ -155,8 +155,10 @@ def contract_options(f: F) -> F:
         "with max so it never lowers an ABI break's 2/4. Set "
         "contract.unresolved=warn (e.g. via a `kind: contract` --pack) to "
         "accept incomplete coverage: that zeroes the contribution while "
-        "still reporting every failure. Applies to a directory/package "
-        "(release) comparison too -- each library's own coverage floor is "
-        "max()-folded into the release's exit code the same way.",
+        "still reporting every failure. The coverage floor itself applies "
+        "to a directory/package (release) comparison too -- each library's "
+        "own floor is max()-folded into the release's exit code the same "
+        "way -- but a pack-supplied contract.unresolved is rejected on a "
+        "release comparison specifically (see --pack's own help).",
     )(f)
     return f
