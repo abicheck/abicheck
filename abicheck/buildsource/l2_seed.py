@@ -572,99 +572,6 @@ def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
     return tuple(dirs)
 
 
-def fold_l3_compile_context(
-    *,
-    headers: list[Path] | tuple[Path, ...],
-    build_info: Path | None,
-    sources: Path | None,
-    build_config: Path | None,
-    build_query: str | None,
-    build_compile_db: str | None,
-    collect_mode: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
-    sysroot: Path | None,
-    nostdinc: bool,
-    frontend: str,
-    frontend_context: str,
-    lang: str,
-    lang_explicit: bool,
-    pending_cleanups: list[Callable[[], None]],
-) -> tuple[bool, CompileContext, tuple[Path, ...]]:
-    """P0.3 L3->L2 fold for a raw-parameter caller (shared by the ELF and
-    PE/Mach-O ``dump`` CLI paths, AGENTS.md's former "the native ELF
-    `abicheck dump` path never applies L3 build context to its own L2
-    header parse" known gap).
-
-    A thin wrapper: builds one explicit :class:`CompileContext` from the
-    caller's already-resolved values (CLI flags, ``.abicheck.yml``'s
-    ``compile:`` block, and any older compile-DB-derived flags already
-    folded into ``gcc_options``), calls :func:`derive_l2_compile_context`
-    with it as ``explicit`` (so an already-pinned dimension excuses a
-    same-field-only disagreement across matched compile units -- Finding
-    3), then folds the result in with this module's own
-    :func:`_merge_l3_compile_context` -- the exact same two-step fold
-    ``service_input_resolution._seeded_compile_context`` already applies for scan/compare's
-    implicit-dump path via ``resolve_side_snapshot``. Without this fold, a
-    dump baseline and a scan/compare candidate of the same project resolve
-    under genuinely different extraction recipes and ``scan --against``
-    correctly (per ADR-050 D2) refuses the comparison as ``NOT_COMPARABLE``
-    for reasons neither command's own diagnostics name.
-
-    Returns ``(applied, effective_context, derived_include_dirs)``: ``applied``
-    is ``True`` only when a real L3 context was found and folded in (the
-    caller's signal for stamping ``AbiSnapshot.parsed_with_build_context``);
-    ``effective_context`` is always real -- the explicit one unchanged when
-    nothing was found, or the merged result otherwise. ``derived_include_dirs``
-    is every directory a derived ``-I``/``-isystem``/etc. token names (empty
-    when nothing was found) -- since these dirs reach the header parse only
-    as opaque ``gcc_option_tokens`` strings, not as ``extra_includes``, the
-    AST cache key's own directory-mtime hashing never covered them without
-    the caller separately threading them into ``extra_hash_dirs`` (Codex
-    review): editing a header under a derived include dir would otherwise
-    reuse a stale cached AST. Any temp-build-dir cleanups an inferred build
-    query created are appended to *pending_cleanups* in place (the caller's
-    own list, drained only after the L2 parse has consumed them).
-
-    May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
-    when the matched compile units genuinely disagree on an unpinned
-    ABI-relevant dimension -- callers should run this inside the same
-    ``try`` block that converts the main header-AST parse's own errors to a
-    ``click.ClickException``.
-    """
-    explicit_ctx = CompileContext(
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        frontend=frontend,
-        frontend_context=frontend_context,
-    )
-    derived, cleanups = derive_l2_compile_context(
-        headers=list(headers),
-        build_info=build_info,
-        sources=sources,
-        build_config=build_config,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        allow_inferred_build_query=collect_mode != "off",
-        explicit=explicit_ctx,
-        lang=lang,
-        lang_explicit=lang_explicit,
-    )
-    if cleanups:
-        pending_cleanups.extend(cleanups)
-    if derived is None:
-        return False, explicit_ctx, ()
-    merged = _merge_l3_compile_context(explicit_ctx, derived)
-    assert merged is not None  # both args non-None -> _merge_l3_compile_context always merges
-    return True, merged, _include_operand_dirs(derived.gcc_option_tokens)
-
-
 def seed_includes_and_fold_compile_context(
     *,
     headers: list[Path] | tuple[Path, ...],
@@ -687,10 +594,12 @@ def seed_includes_and_fold_compile_context(
     lang_explicit: bool,
     pending_cleanups: list[Callable[[], None]],
 ) -> tuple[list[Path], bool, CompileContext, tuple[Path, ...]]:
-    """``seed_l2_includes()`` + :func:`fold_l3_compile_context` combined into
-    one L3 collection (Codex review, PR #782).
+    """The L2 include-dir seed and the P0.3 L3->L2 compile-context fold,
+    combined into one L3 collection (Codex review, PR #782).
 
-    The two were originally two independent calls, each running its own
+    The two were originally two independent calls -- an inline
+    ``seed_l2_includes()`` call followed immediately by a since-removed
+    ``fold_l3_compile_context()`` helper -- each running its own
     :func:`~abicheck.buildsource.inline.collect_inline_pack` -- harmless when
     at most one can trigger the zero-config *inferred* build-system query
     (cmake/make/bazel), but a caller passing the same ``--sources`` tree
@@ -704,15 +613,36 @@ def seed_includes_and_fold_compile_context(
     would contend on the identical lock and wait up to the 600s timeout
     before falling back to a throwaway sibling dir. This function collects
     the L3 evidence exactly once and derives both results from it, so only
-    one inferred query -- if any -- ever runs.
+    one inferred query -- if any -- ever runs. All three ``dump``/``scan``
+    call sites that previously chained the two separate helpers now call
+    this one instead, which is why the older ``fold_l3_compile_context``
+    wrapper (once the shared primitive behind all three) was removed
+    entirely rather than left as dead code alongside it.
 
     Returns ``(includes, l3_context_applied, l3_effective_context,
     derived_include_dirs)`` -- ``includes`` is *includes* augmented with any
-    build-derived seed dirs (mirrors ``seed_l2_includes``'s own return); the
-    remaining three mirror :func:`fold_l3_compile_context`'s return exactly.
-    Any temp-build-dir cleanups are appended to *pending_cleanups* in place,
-    to be drained only after the L2 parse has consumed both the seeded
-    include dirs and the derived compile context's own directories.
+    build-derived seed dirs (mirrors ``seed_l2_includes``'s own return);
+    ``l3_context_applied`` is ``True`` only when a real L3 context was found
+    and folded in (the caller's signal for stamping
+    ``AbiSnapshot.parsed_with_build_context``); ``l3_effective_context`` is
+    always real -- the explicit one unchanged when nothing was found, or the
+    merged result otherwise; ``derived_include_dirs`` is every directory a
+    derived ``-I``/``-isystem``/etc. token names (empty when nothing was
+    found), for a caller to fold into its own AST cache key's
+    ``extra_hash_dirs`` -- these dirs reach the header parse only as opaque
+    ``gcc_option_tokens`` strings, not as ``extra_includes``, so the cache
+    key's directory-mtime hashing would otherwise never cover them (Codex
+    review): editing a header under a derived include dir would otherwise
+    reuse a stale cached AST. Any temp-build-dir cleanups are appended to
+    *pending_cleanups* in place, to be drained only after the L2 parse has
+    consumed both the seeded include dirs and the derived compile context's
+    own directories.
+
+    May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
+    when the matched compile units genuinely disagree on an unpinned
+    ABI-relevant dimension -- callers should run this inside the same
+    ``try`` block that converts the main header-AST parse's own errors to a
+    ``click.ClickException``.
     """
     from ..errors import HeaderCompileContextAmbiguousError
     from ..header_utils import _context_tokens, _has_include_build_context
@@ -739,14 +669,18 @@ def seed_includes_and_fold_compile_context(
     if (sources is None and build_info is None) or (not want_seed and not headers):
         return incs, False, explicit_ctx, ()
 
-    args = _resolve_l2_seed_pack_args(
-        build_config, sources, build_info, build_query, build_compile_db
-    )
-    if args is None:
-        return incs, False, explicit_ctx, ()
-
     cleanups: list[Callable[[], None]] = []
     try:
+        # Pack resolution stays inside this protected section, mirroring
+        # derive_l2_include_dirs's/derive_l2_compile_context's own identical
+        # comment: a corrupt/unreadable pack must degrade best-effort, not
+        # raise (Codex review) -- an earlier revision of this function had it
+        # outside the try, which reintroduced exactly that regression.
+        args = _resolve_l2_seed_pack_args(
+            build_config, sources, build_info, build_query, build_compile_db
+        )
+        if args is None:
+            return incs, False, explicit_ctx, ()
         pack = collect_inline_pack(
             sources=args.sources,
             build_info=args.build_info,

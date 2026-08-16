@@ -81,3 +81,24 @@
   sites (`perform_elf_dump`, `handle_non_elf_dump`,
   `scan_engine._build_new_snapshot`) now call this combined function
   instead of the two separate ones.
+
+- **Two more Codex-review findings on the combined function above, both
+  real and both fixed.** `scan --against` a native library could still
+  reach `NOT_COMPARABLE`/produce false ABI differences: the candidate's own
+  header parse folded real L3 build context, but `run_scan_core` forwarded
+  its original, un-folded `compile_context` to `_run_baseline_compare`, so
+  the *baseline*'s native-library header parse never received the same
+  fold — `_build_new_snapshot` now also returns the effective
+  (fold-applied) compile context, and `run_scan_core` forwards that instead.
+  Separately, `perform_elf_dump`'s ADR-039 build-context collector has its
+  own explicit rule against unioning the auto-derived, per-header build
+  context snapshot-wide — the L3 fold's reassignment of the identically-
+  named `gcc_option_tokens` local silently defeated that rule; fixed by
+  capturing the user's own tokens before the fold and passing those to the
+  collector instead. A third finding, from writing direct unit tests for
+  the combined function itself: its own pack-resolution call sat outside
+  the try/except that both sibling functions explicitly keep it inside
+  (per their own comments) so a corrupt/unreadable build-source pack
+  degrades to a no-op instead of raising — fixed to match. The now-unused
+  standalone `fold_l3_compile_context()` wrapper (superseded once all three
+  call sites moved to the combined function) was removed as dead code.

@@ -157,7 +157,7 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
 
-    snap, _eff_includes = _build_new_snapshot(
+    snap, _eff_includes, _eff_ctx = _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[hdr],
         includes=[],
@@ -258,7 +258,7 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
 
-    snap, eff_includes = _build_new_snapshot(
+    snap, eff_includes, _eff_ctx = _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[tmp_path / "h.h"],
         includes=[],

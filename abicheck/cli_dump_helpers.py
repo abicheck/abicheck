@@ -1671,6 +1671,15 @@ def perform_elf_dump(
     from .buildsource.inline import _run_cleanups
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
+    # The ADR-039 collector's _user_define_flags() call below must see only
+    # the *user's own* global tokens, never the L3 fold's per-header-matched
+    # derived ones (Codex review) -- the same "deliberately excluded" rule
+    # its own docstring and the comment at that call site already state for
+    # effective_gcc_options, which the fold's l3_context_applied reassignment
+    # below would otherwise silently defeat for gcc_option_tokens too, since
+    # that reassignment folds the derived flags in before this variable is
+    # read again. Captured here, before any L3 reassignment.
+    _user_gcc_option_tokens = gcc_option_tokens
     _l2_pending_cleanups: list[Callable[[], None]] = []
     try:
         (
@@ -1809,12 +1818,16 @@ def perform_elf_dump(
             # review #498). We deliberately do NOT feed ``effective_gcc_options``,
             # which also carries the *first* resolved header's auto-derived build
             # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
-            # active for every scanned header.
+            # active for every scanned header. The P0.3 L3->L2 fold's own derived
+            # flags are excluded for the identical reason: ``_user_gcc_option_tokens``
+            # is captured before the fold's ``l3_context_applied`` reassignment, so a
+            # per-header-matched compile unit's own ``-D``/``-U`` never leaks into this
+            # snapshot-wide harvest either (Codex review).
             _attach_build_context(
                 snap,
                 effective_compile_db,
                 resolved_headers,
-                _user_define_flags(gcc_option_tokens, user_gcc_options),
+                _user_define_flags(_user_gcc_option_tokens, user_gcc_options),
                 source_filter=compile_db_filter,
             )
 

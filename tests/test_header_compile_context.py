@@ -1372,6 +1372,12 @@ def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
     assert derive_l2_compile_context([header], pack_dir, None) == (None, [])
 
 
+# seed_includes_and_fold_compile_context's own direct branch coverage lives
+# in tests/test_non_elf_dump_l2_seed.py (room there; this file is near the
+# 2000-line hard cap) -- see its "seed_includes_and_fold_compile_context
+# branch coverage" section.
+
+
 # ---------------------------------------------------------------------------
 # 3. service_input_resolution wiring
 # ---------------------------------------------------------------------------

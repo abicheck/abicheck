@@ -215,11 +215,18 @@ def _build_new_snapshot(
     symbols_only: bool = False,
     debug_presence_only: bool = False,
     include_dependencies: bool = False,
-) -> tuple[Any, list[Path]]:
+) -> tuple[Any, list[Path], CompileContext | None]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
-    Returns ``(snapshot, effective_includes)`` — the effective includes carry any
-    build-derived L2 seed so a ``--baseline`` compare can reuse the same context.
+    Returns ``(snapshot, effective_includes, effective_compile_context)`` — the
+    effective includes carry any build-derived L2 seed, and the effective
+    compile context carries the P0.3 L3->L2 fold's own merged result (when
+    applied), so a ``--baseline`` compare can reuse the same extraction
+    recipe for the native old library, not just the candidate's own header
+    parse (Codex review: without this, the candidate folded real L3 context
+    while the baseline side parsed with the caller's original,
+    un-folded context, silently reintroducing the very
+    ``NOT_COMPARABLE``/false-ABI-difference risk this fold exists to close).
 
     The resolved ``changed_paths`` (from ``--changed-path``/``--since``) are
     threaded into the inline source replay so a ``source-changed`` collection
@@ -386,8 +393,9 @@ def _build_new_snapshot(
     # Return the *effective* includes (the seed above may have added build-derived
     # dirs) so a --baseline compare header-parses the old native library with the
     # same include context — else the baseline side fails on dependency headers the
-    # candidate resolved via the seed (Codex review).
-    return snap, includes
+    # candidate resolved via the seed (Codex review). Also return the effective
+    # (possibly L3-folded) compile_context itself, for the identical reason.
+    return snap, includes, compile_context
 
 
 def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
@@ -1047,7 +1055,7 @@ def run_scan_core(
     # completion (or hanging) regardless of --budget.
     try:
         with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
-            new_snap, eff_includes = _build_new_snapshot(
+            new_snap, eff_includes, eff_compile_context = _build_new_snapshot(
                 binary,
                 list(headers),
                 list(includes),
@@ -1169,7 +1177,12 @@ def run_scan_core(
                     list(eff_includes),
                     list(public_headers),
                     list(public_header_dirs),
-                    compile_context=compile_context,
+                    # The *effective* compile_context (the P0.3 L3->L2 fold's own
+                    # merged result, when applied) -- not the caller's original,
+                    # possibly-unfolded one, or the baseline native parse would
+                    # resolve under a different recipe than the candidate just did
+                    # (Codex review).
+                    compile_context=eff_compile_context,
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,

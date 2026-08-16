@@ -915,6 +915,55 @@ def test_budget_checked_during_baseline_compare_not_only_at_end(
     assert elapsed < 2.0
 
 
+def test_baseline_compare_receives_l3_folded_compile_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap
+):
+    """Codex review, PR #782: `_build_new_snapshot`'s P0.3 L3->L2 fold only
+    updated its own *local* `compile_context` -- `run_scan_core` still held
+    the caller's original, un-folded one and forwarded THAT to
+    `_run_baseline_compare`, so the candidate could fold real L3 build
+    context (`-std=`/`-D`/target/sysroot) while the native `--against`
+    baseline's own header parse never received it, silently recreating the
+    NOT_COMPARABLE/false-ABI-difference risk this whole fold exists to
+    close. `run_scan_core` must forward the *effective* (possibly-folded)
+    compile_context `_build_new_snapshot` returns, not its own original."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        # Mirrors the real function's 3-tuple return -- the third element is
+        # the effective (fold-applied) compile_context.
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is sentinel_folded_ctx
+
+
 def test_against_not_comparable_exits_6(
     monkeypatch, runner, new_snap_compatible, baseline_snap
 ):

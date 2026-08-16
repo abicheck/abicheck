@@ -1047,12 +1047,43 @@ Once a root command genuinely clears the bar above, pick the right home:
   resolution + merge) from that single `BuildEvidence`, so only one inferred
   query — if any — ever runs per call. All three call sites now call this
   one combined function instead of the two separate ones; `seed_l2_includes`
-  and `fold_l3_compile_context` themselves are unchanged and still used
-  independently elsewhere (each is well-defined on its own — the bug was
-  specifically two independent *collections* of the same evidence in one
-  logical operation, not either function individually). Verified against
-  the same real `compile_commands.json` fixtures the fourth finding's own
-  regression tests use, now exercised through the combined entry point.
+  itself is unchanged and still used independently elsewhere (well-defined
+  on its own — the bug was specifically two independent *collections* of
+  the same evidence in one logical operation, not either function
+  individually). Verified against the same real `compile_commands.json`
+  fixtures the fourth finding's own regression tests use, now exercised
+  through the combined entry point. `fold_l3_compile_context` itself —
+  the standalone wrapper this combined function was built to replace — is
+  **not** still used independently: once all three call sites moved to
+  the combined function, nothing called it anymore, so it was removed
+  entirely as dead code rather than left orphaned alongside its
+  replacement (found while writing this entry's own closure notes; no
+  call site or test referenced it directly by the time this was checked).
+
+  **A seventh finding, from writing direct unit tests for the combined
+  function itself (not through any of the three call sites), on the
+  combined function's own body — a real regression relative to both
+  siblings it was assembled from.** `derive_l2_include_dirs`'s and
+  `derive_l2_compile_context`'s own identical comments both state "pack
+  resolution stays inside this protected section... a corrupt/unreadable
+  pack must degrade best-effort, not raise" — but
+  `seed_includes_and_fold_compile_context`'s own `_resolve_l2_seed_pack_args`
+  call was placed *before* the `try:` block, not inside it, so a corrupt
+  pack (a `manifest.json` present but unparseable, `is_pack_dir`'s own
+  documented "still a pack" case) raised a bare `JSONDecodeError` straight
+  out of the function instead of degrading to the pre-existing "nothing to
+  apply" no-op every other caller relies on. Caught immediately by writing
+  `test_seed_and_fold_corrupt_pack_degrades_to_empty` (mirroring the two
+  siblings' own `test_derive_l2_*_corrupt_*_pack_degrades_to_empty`
+  tests) — it failed with the raw `JSONDecodeError` before the fix, not
+  the intended empty-degrade result. Fixed by moving the
+  `_resolve_l2_seed_pack_args` call inside the `try:`, matching both
+  siblings exactly. The four new direct tests (no-inputs no-op, no-match
+  returns none, ambiguous raises and drains pending cleanups, corrupt pack
+  degrades) live in `tests/test_non_elf_dump_l2_seed.py` (not the more
+  natural `test_header_compile_context.py`, which is near its own
+  1500-line soft/2000-line hard cap) as a
+  "seed_includes_and_fold_compile_context branch coverage" section.
 
   **A sixth finding, on `_split_include_tokens` itself, documented as a
   residual gap rather than fixed here (Codex review).** The split
@@ -1068,6 +1099,48 @@ Once a root command genuinely clears the bar above, pick the right home:
   output shape, not a follow-up to the explicit-vs-derived ordering fix
   (the fourth finding above) this function exists for. See the function's
   own docstring for the same note.
+
+  **An eighth and ninth finding, both from a fresh Codex review round on the
+  P1/P2-labeled commit that added the combined function above, both real
+  and both fixed.** (8, P1) `scan_engine._build_new_snapshot`'s own L3->L2
+  fold only updated its *local* `compile_context` variable — `run_scan_core`
+  still held the caller's original, un-folded `compile_context` and
+  forwarded *that* to `_run_baseline_compare`, so a `scan --against` a
+  native library could fold real L3 context into the *candidate*'s header
+  parse while the *baseline*'s own native-library header parse never
+  received it — silently recreating the exact `NOT_COMPARABLE`/false-ABI-
+  difference risk this whole P0.3 fold exists to close, just moved from the
+  dump-vs-scan pairing to the candidate-vs-baseline pairing within one
+  `scan --against` invocation. Fixed by widening `_build_new_snapshot`'s
+  return from `(snapshot, effective_includes)` to `(snapshot,
+  effective_includes, effective_compile_context)` — mirroring the existing
+  `effective_includes` precedent for exactly the same reason — and having
+  `run_scan_core` forward that third value to `_run_baseline_compare`
+  instead of its own original. Regression test:
+  `tests/test_cli_scan.py::test_baseline_compare_receives_l3_folded_compile_context`
+  (mocks both `_build_new_snapshot` and `_run_baseline_compare` at the
+  `cli_scan.py`/`scan_engine.py` module boundary, confirmed to fail against
+  the pre-fix code with the un-folded context forwarded instead of the
+  sentinel folded one). (9, P2) `perform_elf_dump`'s ADR-039 build-context
+  collector (`_attach_build_context`/`_user_define_flags`) has its own
+  long-standing, explicit rule — stated in both functions' docstrings —
+  that the auto-derived, per-header-matched build context must never be
+  unioned snapshot-wide, since doing so would mark one TU's `-D` active for
+  every scanned header. The L3->L2 fold's `l3_context_applied`
+  reassignment folds that same derived context into the *identically-named*
+  `gcc_option_tokens` local variable used for the primary header parse,
+  which silently defeated that rule once `_user_define_flags` was called
+  with the (by-then-merged) `gcc_option_tokens` rather than the caller's
+  original tokens. Fixed by capturing `_user_gcc_option_tokens =
+  gcc_option_tokens` before the fold's reassignment and passing that
+  captured value to `_user_define_flags` instead. Regression test:
+  `tests/test_non_elf_dump_l2_seed.py::
+  test_perform_elf_dump_keeps_l3_derived_flags_out_of_build_context_collector`
+  (confirmed to fail against the pre-fix code, asserting the L3-derived
+  `-DL3ONLY=1` reaches `_attach_build_context`'s `extra_flags` when it must
+  not). `handle_non_elf_dump` (PE/Mach-O) was checked and does not call
+  `_attach_build_context` at all — the ADR-039 collector is ELF-only — so
+  finding 9 has no PE/Mach-O counterpart.
 
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
