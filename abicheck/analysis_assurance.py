@@ -976,6 +976,26 @@ def _export_accounting(
     also subtracting ``internal``, so the three categories are now a true
     partition of ``total`` (``source_linked + internal + unaccounted ==
     total``), not just two of the three kept mutually exclusive.
+
+    Finding (Codex review, PR #788): the fix above assumed every
+    ``SourceAbiSurface`` reaching this rollup was already produced by the
+    fixed ``link_source_abi``/``relink_surface_exports`` (which now folds a
+    classified symbol into ``all_matched``, so it can no longer appear in
+    ``symbols_without_decl`` too). A *persisted* surface produced by a
+    pre-fix build -- the ordinary "compare an existing baseline JSON against
+    a fresh candidate" workflow -- round-trips through
+    ``SourceAbiSurface.from_dict()`` with that stale overlap still intact:
+    the same symbol sits in both ``symbols_without_decl`` and
+    ``non_public_symbol_to_reason``. Counting ``len(...)`` of each
+    independently double-subtracts that symbol (once as ``unaccounted``,
+    once as ``internal``), so ``source_linked`` under-reports (or clamps to
+    0) and ``unaccounted`` stays nonzero even though the symbol IS
+    genuinely classified -- ``--require-complete-analysis`` still fails on
+    this upgrade path. Fixed by deduplicating per side: a symbol already
+    classified into ``non_public_symbol_to_reason`` no longer counts toward
+    ``unaccounted`` here regardless of whether the surface that produced it
+    already excluded it from ``symbols_without_decl`` -- this rollup is now
+    correct for both a freshly-linked surface and a legacy persisted one.
     """
     total: int | None = None
     unaccounted: int | None = None
@@ -985,8 +1005,15 @@ def _export_accounting(
         if sa is None:
             continue
         side_total = len(sa.roots.get("exported_symbols", []))
-        side_unaccounted = len(sa.unmatched.get("symbols_without_decl", []))
-        side_internal = len(sa.mappings.get("non_public_symbol_to_reason", {}))
+        non_public_keys = set(sa.mappings.get("non_public_symbol_to_reason", {}))
+        # Subtract any overlap rather than trusting symbols_without_decl to
+        # already be disjoint from non_public_symbol_to_reason -- true for a
+        # freshly-linked surface, not guaranteed for one persisted before
+        # this fix (see the Codex-review docstring paragraph above).
+        side_unaccounted = len(
+            set(sa.unmatched.get("symbols_without_decl", [])) - non_public_keys
+        )
+        side_internal = len(non_public_keys)
         total = (total or 0) + side_total
         unaccounted = (unaccounted or 0) + side_unaccounted
         internal = (internal or 0) + side_internal

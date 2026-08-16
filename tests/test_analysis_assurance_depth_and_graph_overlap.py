@@ -510,3 +510,65 @@ class TestExportAccountingDoesNotDoubleCount:
         # alone silently double-counted internal exports as ALSO
         # source_linked once unaccounted correctly excluded them).
         assert aa.export_accounting.source_linked == 0
+
+
+class TestExportAccountingDedupsLegacyPersistedOverlap:
+    """Codex review, PR #788, round 2: the rollup fix above assumed every
+    ``SourceAbiSurface`` it sees was produced by the FIXED
+    ``link_source_abi``/``relink_surface_exports`` (which no longer leaves a
+    classified symbol in ``symbols_without_decl`` too). A surface persisted
+    by a pre-fix build still carries that stale overlap after round-tripping
+    through ``SourceAbiSurface.from_dict()`` -- the ordinary "compare an
+    existing baseline JSON against a fresh candidate" upgrade workflow -- so
+    counting ``len(symbols_without_decl)`` and ``len(non_public_symbol_to_
+    reason)`` independently double-subtracted the same symbol from ``total``.
+    """
+
+    def test_legacy_overlapping_surface_is_deduplicated_at_rollup(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        # Hand-built to reproduce the pre-fix persisted shape directly --
+        # "_Z6privXv" sits in BOTH symbols_without_decl AND
+        # non_public_symbol_to_reason, exactly what SourceAbiSurface.
+        # from_dict() would still carry for a snapshot written before the
+        # link_source_abi double-count fix.
+        surface = SourceAbiSurface(
+            coverage={"compile_units_selected": 1, "compile_units_parsed": 1},
+            roots={
+                "exported_symbols": ["_Z5pub_av", "_Z6privXv"],
+                "public_header_declarations": [],
+                "forced_public": [],
+            },
+            unmatched={
+                "symbols_without_decl": ["_Z6privXv"],
+                "decls_without_symbol": [],
+            },
+            mappings={
+                "source_decl_to_binary_symbol": {},
+                "source_type_to_debug_type": {},
+                "public_header_to_target": {},
+                "synthesized_symbol_to_owner": {},
+                "template_instantiation_symbol_to_decl": {},
+                "allocator_interposer_symbol_to_owner": {},
+                "non_public_symbol_to_reason": {"_Z6privXv": "internal"},
+            },
+        )
+        for snap in (old, new):
+            snap.build_source = BuildSourcePack(
+                root=tmp_path / "legacy-overlapping-pack", source_abi=surface,
+            )
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        # 2 exports/side x 2 sides == 4 total; "_Z6privXv" is genuinely
+        # classified internal on each side and must count ONLY as internal,
+        # not also as unaccounted -- the legacy overlap must not survive
+        # the rollup.
+        assert aa.export_accounting.total == 4
+        assert aa.export_accounting.internal == 2
+        assert aa.export_accounting.unaccounted == 0
+        assert aa.export_accounting.source_linked == 2

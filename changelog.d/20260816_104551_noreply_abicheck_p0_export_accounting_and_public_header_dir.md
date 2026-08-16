@@ -27,7 +27,17 @@
   arithmetically consistent, but wrong (a `dependency:stdlib` export is
   definitionally not linked to *this* library's own source). Fixed by also
   subtracting `internal`, so `source_linked + internal + unaccounted ==
-  total` is now a true three-way partition.
+  total` is now a true three-way partition. Second follow-up (Codex
+  review): that partition still assumed every `SourceAbiSurface` reaching
+  the rollup was already produced by the fixed linker — a *persisted*
+  baseline JSON from before this fix round-trips through
+  `SourceAbiSurface.from_dict()` with the stale overlap still intact, so
+  counting `unaccounted`/`internal` independently double-subtracted the
+  same symbol on the normal "compare an existing baseline against a fresh
+  candidate" upgrade path. Fixed by deduplicating per side in the rollup
+  itself (a symbol already classified into `non_public_symbol_to_reason`
+  no longer counts toward `unaccounted`), so it's now correct for both a
+  freshly-linked surface and a legacy persisted one.
 
 - **Action `public-header-dir` input produced genuinely different header
   extraction (and therefore `include_sequence`) between `dump` and `scan`
