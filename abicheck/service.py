@@ -45,7 +45,7 @@ from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
-    cache_relevant_operand_dirs,
+    cache_relevant_operand_paths,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
@@ -1051,7 +1051,7 @@ def _attach_header_graph(
             # primary snapshot re-parsed correctly (Codex review).
             deferred_dirs = tuple(
                 deferred_token_dirs(deferred)
-            ) + cache_relevant_operand_dirs(cc.gcc_option_tokens)
+            ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -1327,7 +1327,7 @@ def _dump_elf(
         # staleness for the same header (Codex review).
         deferred_dirs = tuple(
             deferred_token_dirs(deferred)
-        ) + cache_relevant_operand_dirs(cc.gcc_option_tokens)
+        ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
 
     compiler = "cc" if lang == "c" else "c++"
     try:

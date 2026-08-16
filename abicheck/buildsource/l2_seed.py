@@ -591,7 +591,7 @@ def _split_include_tokens(
 def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
     """Every directory in *tokens* an AST cache key must cover for staleness.
 
-    Thin alias for :func:`~abicheck.header_utils.cache_relevant_operand_dirs`
+    Thin alias for :func:`~abicheck.header_utils.cache_relevant_operand_paths`
     -- the extraction moved to ``header_utils`` (a leaf module ``service.py``
     already imports from too) once ``service._attach_header_graph``'s own
     independent second header parse needed the identical extraction for its
@@ -601,9 +601,9 @@ def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
     PR D). Kept here under its original private name so this module's own
     callers/tests don't need updating.
     """
-    from ..header_utils import cache_relevant_operand_dirs
+    from ..header_utils import cache_relevant_operand_paths
 
-    return cache_relevant_operand_dirs(tokens)
+    return cache_relevant_operand_paths(tokens)
 
 
 def seed_includes_and_fold_compile_context(

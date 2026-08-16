@@ -44,6 +44,7 @@ entry point every ``dump``/``scan``/``compare`` resolver actually calls
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -363,25 +364,107 @@ class TestForcedIncludeCacheKey:
     hashing never covered it — editing the one macro-controlling input the
     parse depends on most would reuse a stale AST."""
 
-    def test_union_covers_both_include_search_and_forced_include_dirs(self) -> None:
+    def test_union_covers_both_include_search_and_forced_include_paths(self) -> None:
         from abicheck.header_utils import (
-            cache_relevant_operand_dirs,
+            cache_relevant_operand_paths,
             include_operand_dirs,
         )
 
         toks = ("-I", "/proj/include", "-include", "/proj/gen/config.h")
         assert include_operand_dirs(toks) == (Path("/proj/include"),)
-        assert set(cache_relevant_operand_dirs(toks)) == {
+        assert set(cache_relevant_operand_paths(toks)) == {
             Path("/proj/include"),
+            # The forced header itself, *and* its directory: the file because
+            # the cache key's directory walk is suffix-filtered and would miss
+            # it outright for a non-header suffix; the directory so a
+            # neighbouring header it pulls in relatively is covered too, since
+            # that directory need not be on the include search path.
+            Path("/proj/gen/config.h"),
             Path("/proj/gen"),
         }
 
-    def test_bare_forced_operand_contributes_no_directory(self) -> None:
-        from abicheck.header_utils import forced_include_operand_dirs
+    def test_bare_forced_operand_contributes_only_the_file(self) -> None:
+        from abicheck.header_utils import forced_include_operand_paths
 
-        # Its resolution depends on the include search, whose dirs
-        # include_operand_dirs already covers.
-        assert forced_include_operand_dirs(("-include", "config.h")) == ()
+        # No directory part to add: its resolution depends on the include
+        # search, whose dirs include_operand_dirs already covers.
+        assert forced_include_operand_paths(("-include", "config.h")) == (
+            Path("config.h"),
+        )
+
+    def test_non_header_suffixed_forced_file_is_itself_hashed(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: the cache key's directory walk is suffix-filtered.
+
+        `-imacros settings.def` (and an extensionless `-include generated/config`)
+        carry suffixes `CACHE_HEADER_SUFFIXES` does not list, so hashing only the
+        parent directory left an edit to the one macro-controlling input the
+        parse depends on most invisible to the key.
+        """
+        from abicheck.dumper_ast_config import _cache_key
+        from abicheck.header_utils import cache_relevant_operand_paths
+
+        macros = tmp_path / "settings.def"
+        macros.write_text("#define WIDTH 32\n", encoding="utf-8")
+        header = tmp_path / "widget.h"
+        header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        hash_paths = list(cache_relevant_operand_paths(("-imacros", str(macros))))
+        assert macros in hash_paths
+
+        def key() -> str:
+            return _cache_key([header], [], "c++", extra_hash_dirs=tuple(hash_paths))
+
+        before = key()
+        # A real edit to the forced file, with its mtime advanced the way a
+        # rewrite does.
+        macros.write_text("#define WIDTH 64\n", encoding="utf-8")
+        os.utime(macros, (0, 0))
+        assert key() != before
+
+    def test_pe_macho_parse_derives_the_same_hash_paths_from_its_own_tokens(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review: PE/Mach-O must not disagree with ELF about staleness.
+
+        `dump_native_binary`/`service.run_dump` exposes no `extra_hash_dirs`
+        hook, so the caller's own derived-dirs return is discarded on that
+        path. It does not need one: the merged L3 context arrives here as
+        `compile=`, so the parse derives the identical set from the very
+        tokens those dirs came from — the same fold `service._dump_elf` and
+        `service._attach_header_graph` already apply.
+        """
+        from abicheck import service_header_scoped
+        from abicheck.service_scan import CompileContext
+
+        gen = tmp_path / "gen"
+        gen.mkdir()
+        forced = gen / "config.h"
+        forced.write_text("#define BUILD_ONLY 1\n", encoding="utf-8")
+        header = tmp_path / "widget.h"
+        header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+
+        seen: dict[str, Any] = {}
+
+        def fake_dump_pe(*args: Any, **kwargs: Any) -> Any:
+            seen["extra_hash_dirs"] = kwargs.get("extra_hash_dirs")
+            raise RuntimeError("stop after the cache-key inputs are known")
+
+        monkeypatch.setattr("abicheck.dumper._dump_pe", fake_dump_pe, raising=False)
+        service_header_scoped._try_header_scoped_dump(
+            "pe",
+            tmp_path / "lib.dll",
+            [header],
+            [],
+            "1.0",
+            "c++",
+            compile=CompileContext(
+                gcc_option_tokens=("-I", str(gen), "-include", str(forced))
+            ),
+        )
+        hashed = set(seen["extra_hash_dirs"])
+        assert forced in hashed  # the forced file itself
+        assert gen in hashed  # and the include-search dir
 
     def test_derived_forced_include_dir_reaches_the_callers_hash_dirs(
         self, tmp_path: Path

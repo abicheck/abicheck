@@ -637,19 +637,35 @@ def forced_include_operands(
     return out
 
 
-def forced_include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
-    """The *containing directory* of every forced pre-include in *tokens*.
+def forced_include_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """Every forced pre-include in *tokens*, as the file **and** its directory.
 
     Sibling of :func:`include_operand_dirs`, for the same AST-cache-key
     channel and the same reason — a forced-include header
     (``-include config.h``) reaches the parse only as an opaque
     ``gcc_option_tokens`` string, so editing that header would otherwise reuse
     a stale cached AST even though it is exactly the macro-controlling input
-    the parse depends on most. The cache key's channel takes *directories*
-    (``extra_hash_dirs``, mtime-walked via :func:`iter_cache_header_files`),
-    so the operand's parent is what is returned; a bare operand with no
-    directory part contributes nothing, since its resolution depends on the
-    include search and the searched dirs are already covered by
+    the parse depends on most.
+
+    **The file itself, not only its parent directory (Codex review, PR D).**
+    An earlier revision returned the parent alone, on the assumption that the
+    cache key's directory walk would then cover it. It does not in general:
+    that walk (:func:`iter_cache_header_files`, via
+    ``dumper_ast_config._cache_key``) is suffix-filtered by
+    :data:`CACHE_HEADER_SUFFIXES` — correct for "catch transitive includes
+    under a search root", wrong for a file named explicitly because it is
+    *itself* part of the parse. A forced include routinely carries a suffix
+    that list does not name (``-imacros settings.def``) or none at all
+    (``-include generated/config``), so hashing only the parent left an edit
+    to it invisible while the unchanged option token kept the key identical.
+    ``_cache_key`` hashes a non-directory entry's own mtime directly, the same
+    way it already hashes ``headers``.
+
+    The parent is still returned alongside it, so a *neighbouring* header the
+    forced one pulls in relatively is covered too — that directory need not be
+    on the include search path, so nothing else would cover it. A bare operand
+    with no directory part contributes only the file, since its resolution
+    depends on the include search and those dirs are already covered by
     :func:`include_operand_dirs`.
 
     Recognition is :func:`forced_include_operands` above, run over both
@@ -658,31 +674,40 @@ def forced_include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
     to the compiler.
     """
     toks = list(tokens)
-    dirs: list[Path] = []
+    paths: list[Path] = []
     for _option, operand in {
         *forced_include_operands(toks, msvc=False),
         *forced_include_operands(toks, msvc=True),
     }:
-        parent = Path(operand).parent
+        operand_path = Path(operand)
+        paths.append(operand_path)
+        parent = operand_path.parent
         if str(parent) not in (".", ""):
-            dirs.append(parent)
-    return tuple(sorted(set(dirs), key=str))
+            paths.append(parent)
+    return tuple(sorted(set(paths), key=str))
 
 
-def cache_relevant_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
-    """Every directory in *tokens* whose contents an AST cache key must cover.
+def cache_relevant_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """Every path in *tokens* an AST cache key must cover for staleness.
 
     The union of :func:`include_operand_dirs` (include-*search* dirs) and
-    :func:`forced_include_operand_dirs` (the dirs holding forced pre-included
-    headers). One function so the three header-parse cache keys that consume
-    it — the primary ``service._dump_elf`` parse, ``service.
-    _attach_header_graph``'s independent second parse, and the L2 seed's own
-    ``derived_include_dirs`` return — cannot disagree about what staleness
-    means for the same ``gcc_option_tokens``; two of those three have already
+    :func:`forced_include_operand_paths` (each forced pre-included header and
+    its directory). One function so the four header-parse cache keys that
+    consume it — the primary ``service._dump_elf`` parse, ``service.
+    _attach_header_graph``'s independent second parse, the PE/Mach-O
+    ``service_header_scoped._try_header_scoped_dump`` parse, and the L2 seed's
+    own ``derived_include_dirs`` return — cannot disagree about what staleness
+    means for the same ``gcc_option_tokens``; three of those four have already
     each needed their own individual fix for exactly that divergence
-    (``AGENTS.md``'s tenth and seventeenth L3->L2-fold findings).
+    (``AGENTS.md``'s tenth and seventeenth L3->L2-fold findings, plus PR D's
+    own PE/Mach-O round).
+
+    Mixed files and directories: the consuming ``extra_hash_dirs`` channel
+    accepts both (see ``dumper_ast_config._cache_key``), since a forced
+    pre-include is a file whose content is part of the parse rather than a
+    directory to search.
     """
-    return include_operand_dirs(tokens) + forced_include_operand_dirs(tokens)
+    return include_operand_dirs(tokens) + forced_include_operand_paths(tokens)
 
 
 def iter_cache_header_files(directory: Path) -> list[Path]:

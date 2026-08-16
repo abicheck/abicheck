@@ -31,10 +31,14 @@
 - **A forced pre-include is now hashed into the header-AST cache key.**
   Editing the forced header — the one macro-controlling input a parse depends
   on most — previously reused a stale cached AST, because it reached the
-  parse only as an opaque compiler-option string. All three header-parse
-  cache keys (the primary dump parse, the header-graph second pass, and the
-  L2 seed's own derived directories) now share one definition of which
-  directories affect staleness.
+  parse only as an opaque compiler-option string. The file itself is hashed,
+  not just its directory, so a forced include whose suffix is not a
+  recognised header suffix (`-imacros settings.def`, or an extensionless
+  `-include generated/config`) is covered too — the directory walk is
+  deliberately suffix-filtered and would skip those. All four header-parse
+  cache keys — the primary dump parse, the header-graph second pass, the
+  PE/Mach-O header-scoped parse, and the L2 seed's own derived paths — now
+  share one definition of what affects staleness.
 - **The L2 include-directory seed is restricted to the compile units that
   actually compile the headers being parsed.** When no explicit `-I` is
   given, abicheck seeds include directories from the build's compile

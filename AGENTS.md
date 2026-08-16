@@ -1471,7 +1471,34 @@ Once a root command genuinely clears the bar above, pick the right home:
   `service._attach_header_graph`, the L2 seed's own `derived_include_dirs`
   return) — covers the forced header's directory, closing for this input
   the same staleness class the tenth and seventeenth findings above each
-  had to close individually. **Residual, deliberately unclosed:** because a
+  had to close individually. **Two follow-on findings from the Codex review
+  of this same change, both real and both fixed.** (1) The cache-key channel
+  takes directories and walks them with `iter_cache_header_files`, which is
+  suffix-filtered by `CACHE_HEADER_SUFFIXES` — correct for "catch transitive
+  includes under a search root", wrong for a file named explicitly because it
+  is *itself* part of the parse. A forced include routinely carries a suffix
+  that list does not name (`-imacros settings.def`) or none at all
+  (`-include generated/config`), so hashing only its parent left an edit to it
+  invisible while the unchanged option token kept the key identical. Fixed by
+  having `dumper_ast_config._cache_key` hash a non-directory entry's own mtime
+  directly (a strict widening — such an entry previously contributed only its
+  path string) and having `forced_include_operand_paths` return the file
+  alongside its parent; `cache_relevant_operand_dirs` was renamed
+  `cache_relevant_operand_paths` to stay honest about carrying both.
+  (2) The PE/Mach-O path never received the widened set at all:
+  `cli_dump_helpers.handle_non_elf_dump` binds the derived-dirs return as
+  `_l3_include_dirs` and discards it, since `dump_native_binary`/
+  `service.run_dump` exposes no `extra_hash_dirs` hook. Rather than thread one
+  through `run_dump`/`resolve_input` — the change this same entry's earlier
+  text assumed was required, carried by every caller of those — the fix is
+  local: `service_header_scoped._try_header_scoped_dump` folds
+  `cache_relevant_operand_paths(cc.gcc_option_tokens)` into its own
+  `deferred_dirs`, deriving the identical set from the very tokens those dirs
+  came from, since `handle_non_elf_dump` already passes the merged L3 context
+  as `compile=`. That is the same "close it where the tokens land, rather than
+  threading a new channel" move the tenth and seventeenth findings made, now
+  applied to the fourth and last header-parse cache key.
+  **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one
   build's forced-include header for another does not raise
