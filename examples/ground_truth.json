@@ -2983,6 +2983,9 @@
     "calling_convention_changed"
    ],
    "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang",
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "known_gap_toolchains": [
     "gcc"
    ],

@@ -37,14 +37,13 @@ GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 _COMPATIBLE_EXPECTED = {"COMPATIBLE", "NO_CHANGE", "COMPATIBLE_WITH_RISK"}
 
 # A reduced-evidence BREAKING -> clean result is only an expected downgrade
-# when the comparison receipt says the analysis was incomplete. Do not accept
-# ``not_requested``: it says this axis did not run, so it cannot substantiate
-# the claim that this particular clean verdict lost evidence.
-_EXPLICITLY_INCOMPLETE_ASSURANCE_STATUSES = {
-    "partial",
-    "failed",
-    "not_comparable",
-}
+# when the receipt identifies the *specific* lost capability.  In particular,
+# an overall partial result cannot waive an L0 export/SONAME finding: those
+# checks do not depend on DWARF.  ``failed`` and ``not_comparable`` are failed
+# validation, not evidence-loss downgrades.
+_DWARF_DEPENDENT_MIN_EVIDENCE = "L1"
+_L0_KIND_PREFIXES = ("symbol_", "soname_")
+_L0_KIND_NAMES = {"func_removed", "func_removed_elf_only"}
 
 
 def _load(path: Path) -> dict:
@@ -99,6 +98,57 @@ def _gap_applies(
     return True
 
 
+def _is_l0_finding(entry: dict[str, Any]) -> bool:
+    """Whether the canonical break includes direct binary-table evidence."""
+    kinds = entry.get("expected_kinds") or ()
+    return any(
+        kind in _L0_KIND_NAMES or kind.startswith(_L0_KIND_PREFIXES)
+        for kind in kinds
+        if isinstance(kind, str)
+    )
+
+
+def _dwarf_evidence_loss_allows_downgrade(
+    entry: dict[str, Any], assurance: object
+) -> bool:
+    """Allow only the documented DWARF-asymmetry downgrade shape.
+
+    The catalog's ``min_evidence`` says which capability establishes the
+    canonical finding; the receipt says which capability this run actually
+    lost.  Both are required.  This deliberately excludes L0 kinds even when
+    they co-occur with a higher-level detector in a case.
+    """
+    if not isinstance(assurance, dict):
+        return False
+    if assurance.get("status") != "partial":
+        return False
+    if assurance.get("dwarf_context_status") != "asymmetric":
+        return False
+    if entry.get("min_evidence") != _DWARF_DEPENDENT_MIN_EVIDENCE:
+        return False
+    return not _is_l0_finding(entry)
+
+
+def _known_gap_covers_row(
+    entry: dict[str, Any], *, got: str, status: object,
+    case: str, platform: str, variant: str, data: dict[str, Any],
+) -> bool:
+    """Whether a reviewed, exact known-gap observation covers this row.
+
+    A prose-only ``known_gap`` is documentation, not a blanket waiver for a
+    full CLI verdict.  The artifact must be an XFAIL and the catalog must pin
+    the exact observed wrong verdict.
+    """
+    observed = entry.get("known_gap_observed")
+    return bool(
+        status == "XFAIL"
+        and isinstance(observed, list)
+        and got in observed
+        and entry.get("known_gap")
+        and _gap_applies(entry, case, platform, variant, data)
+    )
+
+
 def _classify_results(
     rows: list[dict[str, Any]], gt: dict[str, Any], label: str, data: dict[str, Any]
 ) -> tuple[list[str], list[str], list[str]]:
@@ -135,12 +185,21 @@ def _classify_results(
         # carries one of the two still resolves correctly, only falling back
         # to the CLI label when a row has neither (Codex review).
         variant = r.get("mode") or r.get("variant") or label
-        known_gap_applies = entry.get("known_gap") and _gap_applies(
-            entry, case, platform, variant, data
+        known_gap_applies = _known_gap_covers_row(
+            entry, got=got, status=status, case=case, platform=platform,
+            variant=variant, data=data,
+        )
+        assurance = r.get("analysis_assurance")
+        assurance_status = (
+            assurance.get("status") if isinstance(assurance, dict) else None
         )
         if known_gap_applies and (
             (expected in _COMPATIBLE_EXPECTED and got == "BREAKING")
-            or (expected == "BREAKING" and got in _COMPATIBLE_EXPECTED)
+            or (
+                expected == "BREAKING"
+                and got in _COMPATIBLE_EXPECTED
+                and assurance_status not in {"failed", "not_comparable"}
+            )
         ):
             downgrades.append(
                 f"{case}: {expected}→{got} (known_gap, not evidence loss in {label} mode)"
@@ -149,20 +208,22 @@ def _classify_results(
         if expected in _COMPATIBLE_EXPECTED and got == "BREAKING":
             false_positives.append(f"{case}: expected {expected} got {got}")
         elif expected == "BREAKING" and got in _COMPATIBLE_EXPECTED:
-            assurance = r.get("analysis_assurance")
-            assurance_status = (
-                assurance.get("status") if isinstance(assurance, dict) else None
+            dwarf_context_status = (
+                assurance.get("dwarf_context_status")
+                if isinstance(assurance, dict)
+                else None
             )
-            if assurance_status in _EXPLICITLY_INCOMPLETE_ASSURANCE_STATUSES:
+            if _dwarf_evidence_loss_allows_downgrade(entry, assurance):
                 downgrades.append(
-                    f"{case}: {expected}→{got} (evidence lost in {label} mode; "
-                    f"analysis_assurance={assurance_status})"
+                    f"{case}: {expected}→{got} (DWARF evidence lost in {label} "
+                    f"mode; analysis_assurance={assurance_status})"
                 )
             else:
                 errors.append(
-                    f"{case}: {expected}→{got} without explicitly incomplete "
-                    "analysis_assurance "
-                    f"(status={assurance_status!r})"
+                    f"{case}: {expected}→{got} without a DWARF-dependent partial "
+                    "analysis_assurance receipt "
+                    f"(status={assurance_status!r}, "
+                    f"dwarf_context_status={dwarf_context_status!r})"
                 )
     return false_positives, downgrades, errors
 
