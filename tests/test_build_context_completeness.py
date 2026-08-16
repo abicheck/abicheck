@@ -280,6 +280,37 @@ class TestForcedIncludesReachTheDerivedContext:
             "config.h",
         ]
 
+    @pytest.mark.parametrize("driver", ["dpcpp-cl", "clang-cl-20", "clang-cl-20.1.exe"])
+    def test_cl_mode_driver_spelled_with_gnu_dash_c_still_renders_fi(
+        self, tmp_path: Path, driver: str
+    ) -> None:
+        """Codex review: the dialect vocabulary had drifted between the layers.
+
+        `adapters.base._is_msvc_command` listed only `cl`/`clang-cl` while the
+        L4 replay path also knew `dpcpp-cl` and version-suffixed drivers. A
+        CL-mode command spelled with GNU `-c` rather than `/c` therefore read
+        as GNU dialect here — silently dropping its `/FI` from the derived L2
+        context while L4 replayed it correctly. Both now share one vocabulary.
+        """
+        header = tmp_path / "widget.h"
+        header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        ev = BuildEvidence(
+            compile_units=[
+                _cu(
+                    source=str(src),
+                    directory=str(tmp_path),
+                    argv=[driver, "-c", str(src), "/FIconfig.h"],
+                )
+            ]
+        )
+
+        assert _tokens(resolve_header_compile_context(ev, [header]))[-2:] == [
+            "-include",
+            "config.h",
+        ]
+
     def test_include_pch_is_not_rendered(self, tmp_path: Path) -> None:
         # A .pch is locked to the exact compiler build that produced it, and
         # L2 parses with castxml's bundled clang or the host clang -- replaying
@@ -421,6 +452,24 @@ class TestForcedIncludeCacheKey:
         macros.write_text("#define WIDTH 64\n", encoding="utf-8")
         os.utime(macros, (0, 0))
         assert key() != before
+
+    def test_an_unresolvable_forced_include_degrades_instead_of_raising(
+        self, tmp_path: Path
+    ) -> None:
+        # Not hypothetical: `_forced_include_flags` deliberately leaves an
+        # operand relative when it does not resolve against the compile unit's
+        # own directory (the include search is expected to find it), so the
+        # cache key routinely sees a path that does not exist from here. It
+        # must contribute its path string and move on, not raise.
+        from abicheck.dumper_ast_config import _cache_key
+
+        header = tmp_path / "widget.h"
+        header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        missing = tmp_path / "nope" / "generated_config.h"
+
+        assert _cache_key(
+            [header], [], "c++", extra_hash_dirs=(missing,)
+        ) != _cache_key([header], [], "c++", extra_hash_dirs=())
 
     def test_pe_macho_parse_derives_the_same_hash_paths_from_its_own_tokens(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -18,6 +18,14 @@
   includes from raw argv, and the two paths now share one recognizer rather
   than the L2 fix routing through `CompileUnit.abi_relevant_flags`, which
   would have made replay emit every forced include twice.
+- **A CL-mode compile command spelled with GNU `-c` is now recognised as
+  MSVC dialect on the build-evidence side.** `dpcpp-cl` (Intel's oneAPI
+  CL-compatible driver) and version-suffixed drivers such as `clang-cl-20`
+  were known to the L4 source-replay path but not to the build-evidence
+  adapter, so unless the command used `/c` they read as GNU dialect there —
+  dropping a `/FI` forced include from the derived header-parse context, and
+  mis-detecting `/Tp`/`/Tc` source and forced-language markers. Both layers
+  now share one driver vocabulary.
 - **A forced pre-include is now part of the compile-context ambiguity check.**
   Two translation units that reference the same public header but force in
   *different* macro-controlling headers previously collapsed into one

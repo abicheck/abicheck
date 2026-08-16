@@ -33,7 +33,11 @@ import os
 import re
 from collections.abc import Sequence
 
-from ...header_utils import match_gnu_forced_include, match_msvc_forced_include
+from ...header_utils import (
+    is_msvc_driver_stem,
+    match_gnu_forced_include,
+    match_msvc_forced_include,
+)
 from ..build_evidence import CompileUnit
 
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
@@ -251,10 +255,12 @@ def is_msvc_mode(cc_bin: str) -> bool:
     back to the same check with a trailing version suffix stripped, so a
     packaged ``clang-cl-20``/``clang-cl-20.exe`` is still recognized.
     """
-    stem = basename(cc_bin).lower()
-    if stem in MSVC_BINARIES:
-        return True
-    return _VERSION_SUFFIX_RE.sub("", stem.removesuffix(".exe")) in _MSVC_STEMS
+    # The name test itself is header_utils.is_msvc_driver_stem -- the one
+    # vocabulary buildsource.adapters.base._is_msvc_command now shares, after
+    # the two drifted apart (Codex review, PR D). Behaviour here is unchanged:
+    # that function is this test, relocated. Only the basename derivation
+    # stays local, since the adapter's is backslash-aware and this one is not.
+    return is_msvc_driver_stem(basename(cc_bin).lower())
 
 
 def _carry_abi_relevant_flags(

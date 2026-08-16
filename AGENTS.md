@@ -1498,6 +1498,20 @@ Once a root command genuinely clears the bar above, pick the right home:
   as `compile=`. That is the same "close it where the tokens land, rather than
   threading a new channel" move the tenth and seventeenth findings made, now
   applied to the fourth and last header-parse cache key.
+  (3) A third round found the *dialect* vocabulary had drifted between the two
+  layers this work now shares a recognizer across:
+  `adapters.base._is_msvc_command` listed only `cl`/`clang-cl` while
+  `_argv.is_msvc_mode` (L4) also knew `dpcpp-cl` and version-suffixed drivers
+  (`clang-cl-20`). A CL-mode command spelled with GNU `-c` rather than `/c`
+  therefore read as GNU dialect on the build-evidence side, silently dropping
+  its `/FI` from the derived L2 context while L4 replayed it correctly. Fixed
+  at the cause rather than at the new call site: `header_utils.
+  is_msvc_driver_stem` is now the one vocabulary both use, so the fix also
+  reaches `_is_msvc_command`'s pre-existing consumers (source detection,
+  forced-language detection, structured-field masking). Only the *name* test
+  is shared — each caller keeps its own basename derivation, since the
+  adapter's is backslash-aware and `_argv`'s is not, and changing L4's would
+  have been a behavior change outside this PR's scope.
   **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one

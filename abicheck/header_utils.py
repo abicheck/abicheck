@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pure path and compiler-include-flag helpers for header (``-H``) inputs.
+"""Pure path and compiler-flag helpers for header (``-H``) inputs.
 
 A leaf module (stdlib-only) so both the service layer (``service._dump_elf``)
 and the ``dump`` CLI helper (``cli_dump_helpers.perform_elf_dump``) can share the
@@ -21,8 +21,9 @@ include-root derivation without an import cycle (``cli`` → ``cli_dump_helpers`
 ``service`` → … → ``cli``).
 
 Being that leaf is also why this module, rather than ``buildsource``, owns the
-compiler include-flag vocabulary the whole codebase reads
-(:data:`_INCLUDE_FLAG_PREFIXES` and the forced-include recognizer below): every
+compiler-dialect and include-flag vocabulary the whole codebase reads
+(:func:`is_msvc_driver_stem`, :data:`_INCLUDE_FLAG_PREFIXES`, and the
+forced-include recognizer below): every
 consumer — the L2 header parse (``buildsource.header_compile_context``), the L4
 replay command builder (``buildsource.source_extractors._argv``), the L2 seed
 and the AST cache keys — already sits above it, so one shared implementation
@@ -33,6 +34,7 @@ import from here would invert that.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -519,6 +521,51 @@ def include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
             dirs.append(Path(t[len(matched_prefix) :]))
         i += 1
     return tuple(dirs)
+
+
+#: Compiler basenames that mean a command line is in MSVC/clang-cl (``/opt``)
+#: mode. ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI CL-compatible driver —
+#: the same convention as ``clang-cl``, just Intel-branded.
+MSVC_DRIVER_BINARIES: frozenset[str] = frozenset(
+    {"cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "dpcpp-cl.exe"}
+)
+#: The same names with any ``.exe`` suffix stripped, for matching after a
+#: version suffix has also been removed.
+_MSVC_DRIVER_STEMS: frozenset[str] = frozenset(
+    name.removesuffix(".exe") for name in MSVC_DRIVER_BINARIES
+)
+#: Matches a trailing numeric version suffix LLVM/Debian packaging commonly
+#: appends to an unversioned driver name (``clang-cl-20``, ``clang-20.1``).
+#: Without stripping it, a real CL-mode driver is missed just because it
+#: carries its LLVM major-version suffix.
+_DRIVER_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
+
+
+def is_msvc_driver_stem(stem: str) -> bool:
+    """True when *stem* — an already-lowercased driver **basename** — is CL-mode.
+
+    The single vocabulary behind both dialect decisions this codebase makes,
+    which had drifted apart: ``source_extractors._argv.is_msvc_mode`` (the L4
+    replay path) recognized ``dpcpp-cl`` and version-suffixed drivers, while
+    ``buildsource.adapters.base._is_msvc_command`` (which decides the dialect
+    for source detection, forced-language detection, structured-field masking
+    and — since PR D — the L2 forced-include render) listed only ``cl`` and
+    unversioned ``clang-cl``. A ``dpcpp-cl``/``clang-cl-20`` command spelled
+    with GNU ``-c`` rather than ``/c`` therefore read as GNU dialect on the
+    build-evidence side, silently dropping its ``/FI`` forced include from the
+    derived L2 context while L4 replayed it correctly (Codex review).
+
+    Takes the basename rather than computing one, because the two callers
+    disagree — deliberately — about how to derive it: the adapter is
+    backslash-aware (a Windows driver path recorded in a compile database read
+    on POSIX), ``_argv`` uses ``os.path.basename``. Sharing only the name test
+    fixes the vocabulary drift without changing either caller's path handling.
+    """
+    if stem in MSVC_DRIVER_BINARIES:
+        return True
+    return _DRIVER_VERSION_SUFFIX_RE.sub("", stem.removesuffix(".exe")) in (
+        _MSVC_DRIVER_STEMS
+    )
 
 
 #: GNU/clang forced-include options in their **separate**-operand spelling

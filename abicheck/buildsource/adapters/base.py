@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 from typing import Protocol, runtime_checkable
 
+from ...header_utils import is_msvc_driver_stem
 from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 
 # Source-file extension → normalized language token.
@@ -371,7 +372,6 @@ def source_from_argv(argv: list[str]) -> str:
 
 #: Driver basenames that mark a command as MSVC-dialect (``/`` introduces an
 #: option, not a path). ``clang-cl`` mimics ``cl`` exactly.
-_MSVC_DRIVERS: frozenset[str] = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
 
 _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
     "/fi",
@@ -391,9 +391,15 @@ def _is_msvc_command(argv: list[str]) -> bool:
     """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
 
     Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
-    ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
-    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's
-    explicit ``--driver-mode=cl`` spelling.
+    CL-mode driver basename anywhere in the leading tokens (the driver may be
+    a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's explicit
+    ``--driver-mode=cl`` spelling.
+
+    Driver-name recognition is ``header_utils.is_msvc_driver_stem`` — the one
+    vocabulary the L4 replay path uses too, so ``dpcpp-cl`` and a
+    version-suffixed ``clang-cl-20`` are recognized here as well. They were
+    not, and a such a command spelled with GNU ``-c`` rather than ``/c`` then
+    read as GNU dialect on this side while L4 replayed it as CL (Codex review).
     """
     if "/c" in argv:
         return True
@@ -413,7 +419,7 @@ def _is_msvc_command(argv: list[str]) -> bool:
         if arg.lower() == "--driver-mode=cl":
             return True
         base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if base in _MSVC_DRIVERS:
+        if is_msvc_driver_stem(base):
             return True
         i += 1
     return False
