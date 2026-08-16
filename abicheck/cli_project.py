@@ -464,6 +464,29 @@ def _parse_build_output_specs(
         "targets: are declared yet)."
     ),
 )
+@click.option(
+    "--gate-missing-required",
+    type=click.Choice(["fail", "warn"]),
+    default=None,
+    help=(
+        "Stamp run-plan.json's own gate.missing_required, which "
+        "`abicheck aggregate --run-plan run-plan.json` projects into its "
+        "manifest's gate block (CLI cleanup phase two, PR 2 -- the "
+        "run-plan-sourced equivalent of --manifest's own gate.missing_"
+        "required key). Omitted by default, meaning aggregate's hard-coded "
+        "'fail' default applies."
+    ),
+)
+@click.option(
+    "--gate-unexpected-target",
+    type=click.Choice(["include", "warn", "fail", "ignore"]),
+    default=None,
+    help=(
+        "Stamp run-plan.json's own gate.unexpected_target, projected the "
+        "same way as --gate-missing-required above. Omitted by default, "
+        "meaning aggregate's hard-coded 'include' default applies."
+    ),
+)
 @output_options(
     ["json", "text"],
     default="json",
@@ -477,6 +500,8 @@ def project_plan_cmd(
     head_sha: str,
     toolchain_bindings: Path | None,
     allow_empty: bool,
+    gate_missing_required: str | None,
+    gate_unexpected_target: str | None,
     fmt: str,
     output: Path | None,
     verbose: bool,
@@ -558,6 +583,8 @@ def project_plan_cmd(
         project=project,
         head_sha=head_sha,
         resolved_bindings=resolved_bindings,
+        gate_missing_required=gate_missing_required,
+        gate_unexpected_target=gate_unexpected_target,
     )
 
     if bindings_file_for_identity is not None:

@@ -561,7 +561,7 @@
       "roots": [
         ".agents/skills/native-release-compatibility"
       ],
-      "tree": "sha256:1bdd18ba804833c40ca26d1a9e5c6ecad9eea8497fa1b6d4559f59dccc6951ac"
+      "tree": "sha256:ebaf028c69626dd45c73681f619eb84622c6d5ddaabeeda2f00417ae0c222fc0"
     }
   }
 }

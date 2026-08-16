@@ -180,11 +180,44 @@ addressed via `binary_pattern`/`consumer_binary_pattern`/
 a live filesystem (this generator performs no file I/O beyond reading its
 own inputs).
 
+## Top-level `gate` block and the `schema` discriminator
+
+`project plan --gate-missing-required fail|warn` and
+`--gate-unexpected-target include|warn|fail|ignore` (CLI cleanup phase two,
+PR 2) stamp an optional top-level `gate` block onto the generated
+`run-plan.json` — the same policy shape a hand-authored `--manifest` carries
+in its own `gate` block (see
+[Aggregate Reports](../use/aggregate-reports.md)):
+
+```json
+{"gate": {"missing_required": "fail", "unexpected_target": "include"}}
+```
+
+Only present when at least one of the two flags was given; a plan generated
+without them omits `gate` entirely, and `aggregate --run-plan` then applies
+the hard-coded default policy, same as before this option existed.
+
+**A plan carrying `gate` is always stamped `"schema": "abicheck.run-plan/v1"`
+is wrong — it is stamped `"schema": "abicheck.run-plan/v2"` instead.** This
+is deliberate, not incidental: an old, pre-gate reader's `RunPlan.from_dict()`
+would otherwise silently ignore the unknown `gate` key and apply its own
+hard-coded default policy — exactly the version-skew inversion
+`aggregate_manifest_version`'s `2.0` bump (see
+[Aggregate Reports](../use/aggregate-reports.md)) exists to prevent, just one
+layer up, in the *persisted* `run-plan.json` artifact rather than only in the
+manifest `aggregate --run-plan` projects from it in memory. A plan with no
+`gate` keeps the unchanged `v1` schema string — the bump is additive-only,
+scoped to this one capability. A `gate` block paired with a declared `v1`
+schema, a missing `schema` field, or an unrecognized/malformed `schema`
+string is rejected as malformed input, not silently honored.
+
 ## CLI
 
 ```bash
 abicheck project plan [CONFIG] [--build-output PROFILE=DIR ...] \
     [--project OWNER/REPO] [--head-sha SHA] [--allow-empty] \
+    [--gate-missing-required fail|warn] \
+    [--gate-unexpected-target include|warn|fail|ignore] \
     [--format json|text] [-o OUTPUT]
 ```
 

@@ -72,12 +72,24 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
     "release-cut": {
         "depth": "source",
         "fmt": "markdown",
-        "recommend": True,
+        # No "recommend": True key any more (CLI cleanup phase two, PR 1) --
+        # markdown output always includes the release recommendation now,
+        # so this profile no longer needs to ask for it.
     },
     # Quick look: symbols-only, one-line summary — the "just tell me" flow.
+    # "fmt": "oneline" (not "stat": True -- CLI cleanup phase two, PR 1: the
+    # boolean --stat flag is gone) is service_render.ONELINE_FORMAT, an
+    # internal-only value never offered on the public --format Choice list,
+    # so it is reachable only through this profile injecting it. An explicit
+    # --format on the command line still wins over the profile (the usual
+    # "explicit flag > profile" precedence, apply_compare_profile), so
+    # `--profile quick --format json` now genuinely returns full JSON rather
+    # than the old --stat boolean's json-shaped summary -- a deliberate
+    # behaviour refinement, not an oversight: the profile's one-line default
+    # only applies when the user didn't ask for a specific format.
     "quick": {
         "depth": "binary",
-        "stat": True,
+        "fmt": "oneline",
     },
 }
 

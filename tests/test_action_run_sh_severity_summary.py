@@ -392,6 +392,31 @@ class TestReportPathAnchoring:
         assert result.returncode == 0, result.stderr
         return result.stdout
 
+    @staticmethod
+    def _bash_pwd(cwd: Path) -> str:
+        """The real ``$PWD`` bash itself reports for *cwd* -- not
+        ``str(cwd)`` (Codex review, fresh evidence: on a Windows Git-Bash
+        runner, ``$PWD`` inside bash is always the MSYS POSIX form
+        (``/c/Users/...``), never the native backslash form Python's
+        ``pathlib.Path`` prints there. Comparing the real anchoring
+        output -- itself built from bash's own ``$PWD`` -- against
+        ``f"{tmp_path}/..."`` therefore compared two different path
+        *representations* of the same directory, not two different
+        directories; every "genuinely relative" case failed on Windows
+        for exactly this reason, regardless of whether the anchoring
+        logic itself was correct. Querying bash's own ``$PWD`` here keeps
+        the expected value in the same representation the real script
+        output is always in, on every platform (a no-op on POSIX hosts,
+        where both forms already coincide)."""
+        result = subprocess.run(
+            [_bash_executable(), "-c", "printf '%s' \"$PWD\""],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
     def test_posix_absolute_path_is_unchanged(self, tmp_path: Path) -> None:
         assert self._anchor("/abs/report.json", tmp_path) == "/abs/report.json"
 
@@ -434,7 +459,10 @@ class TestReportPathAnchoring:
         )
 
     def test_genuinely_relative_path_is_anchored_to_pwd(self, tmp_path: Path) -> None:
-        assert self._anchor("report.json", tmp_path) == f"{tmp_path}/report.json"
+        assert (
+            self._anchor("report.json", tmp_path)
+            == f"{self._bash_pwd(tmp_path)}/report.json"
+        )
 
     def test_windows_only_forms_still_anchored_on_a_non_windows_host(
         self, tmp_path: Path
@@ -445,11 +473,12 @@ class TestReportPathAnchoring:
         single character then a literal `:`) must still be anchored to
         `$PWD` on a non-Windows host, not misrecognized as already
         qualified just because it happens to match that shape."""
+        pwd = self._bash_pwd(tmp_path)
         assert (
             self._anchor("a:baseline.json", tmp_path, windows=False)
-            == f"{tmp_path}/a:baseline.json"
+            == f"{pwd}/a:baseline.json"
         )
         assert (
             self._anchor("\\report.json", tmp_path, windows=False)
-            == f"{tmp_path}/\\report.json"
+            == f"{pwd}/\\report.json"
         )

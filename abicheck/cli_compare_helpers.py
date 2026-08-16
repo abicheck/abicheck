@@ -108,6 +108,7 @@ from .cli_secondary_output import reject_incoherent_secondary_output
 from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .service_render import ONELINE_FORMAT
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
@@ -916,8 +917,8 @@ def _resolve_evaluation_config(
 def _render_compare_report(
     result: Any, old: Any, new: Any, *,
     fmt: str, follow_deps: bool, show_only: str | None, report_mode: str,
-    show_impact: bool, stat: bool, severity_config: Any,
-    recommend: bool, demangle: bool, contract_evaluation: bool,
+    show_impact: bool, severity_config: Any,
+    demangle: bool, contract_evaluation: bool,
     old_build_info: Path | None, new_build_info: Path | None,
     old_sources: Path | None, new_sources: Path | None,
     require_complete_analysis: bool = False,
@@ -927,14 +928,17 @@ def _render_compare_report(
     The primary (``--format``) and secondary (``--write``) renders
     run the identical four-step pipeline and differ only in their arguments, so
     they share this one function rather than keeping two copies that can drift.
+
+    No ``stat``/``recommend`` parameters (CLI cleanup phase two, PR 1): see
+    ``_render_output``/``service_render.render_output`` for where the
+    one-line format and the unconditional recommendation now live.
     """
     text = _render_output(
         fmt, result, old, new,
         follow_deps=follow_deps,
         show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact, stat=stat,
+        show_impact=show_impact,
         severity_config=severity_config,
-        show_recommendation=recommend,
         demangle=demangle,
         contract_evaluation=contract_evaluation,
         require_complete_analysis=require_complete_analysis,
@@ -1100,7 +1104,7 @@ def _report_compare_result(
     used_by_old_input: Path, used_by_new_input: Path,
     suppression: Any, audit_suppressions: bool,
     fmt: str, output: Path | None, show_only: str | None, report_mode: str,
-    show_impact: bool, stat: bool, recommend: bool,
+    show_impact: bool,
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
     secondary_fmt: str | None, secondary_output: Path | None,
     old_build_info: Path | None, new_build_info: Path | None,
@@ -1218,7 +1222,6 @@ def _report_compare_result(
             result,
             base_exit=scoped_exit_code,
             fmt=fmt,
-            stat=stat,
             secondary_fmt=secondary_fmt,
         )
         scoped_exit_code = fold_coverage_exit(scoped_exit_code, result)
@@ -1261,8 +1264,8 @@ def _report_compare_result(
         _render_compare_report(
             result, old, new, fmt=fmt,
             follow_deps=follow_deps, show_only=show_only, report_mode=report_mode,
-            show_impact=show_impact, stat=stat, severity_config=report_severity,
-            recommend=recommend, demangle=demangle,
+            show_impact=show_impact, severity_config=report_severity,
+            demangle=demangle,
             contract_evaluation=contract_evaluation,
             old_build_info=old_build_info, new_build_info=new_build_info,
             old_sources=old_sources, new_sources=new_sources,
@@ -1271,8 +1274,8 @@ def _report_compare_result(
     )
 
     if secondary_fmt is not None:
-        # Always the full, unfiltered report — ignores --show-only/--stat
-        # (which describe the *primary* format's display) and forces
+        # Always the full, unfiltered report — ignores --show-only
+        # (which describes the *primary* format's display) and forces
         # report_mode="full" (not the primary's --report-mode leaf) so a
         # --secondary-* consumer (e.g. a CI action rendering a PR-comment
         # JSON from a markdown-format primary run) sees the complete change
@@ -1288,9 +1291,8 @@ def _report_compare_result(
             _render_compare_report(
                 result, old, new, fmt=secondary_fmt,
                 follow_deps=follow_deps, show_only=None, report_mode="full",
-                show_impact=show_impact, stat=False,
+                show_impact=show_impact,
                 severity_config=report_severity,
-                recommend=recommend,
                 demangle=_resolve_demangle(secondary_fmt, demangle_explicit),
                 contract_evaluation=contract_evaluation,
                 old_build_info=old_build_info, new_build_info=new_build_info,
@@ -1310,9 +1312,9 @@ def _report_compare_result(
         # the terminal exit, not a second fold.
         sys.exit(scoped_exit_code)
 
-    _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
+    _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt)
     _exit_with_severity_or_verdict(
-        result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat, secondary_fmt,
+        result, sev_config, resolved_cfg.exit_code_scheme, fmt, secondary_fmt,
         require_complete_analysis=require_complete_analysis,
     )
 
@@ -1351,11 +1353,10 @@ def run_compare(
     exit_code_scheme: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     include_dependencies: bool,
-    show_only: str | None, stat: bool,
+    show_only: str | None,
     scope_public_headers: bool, show_filtered: bool,
     post_manifest_path: Path | None,
     report_mode: str,
-    recommend: bool,
     debug_format_opt: str | None,
     debug_format: str | None,
     annotate: bool,
@@ -1489,28 +1490,41 @@ def run_compare(
     # failure --use-cases is rejected for set inputs to avoid: an apparently
     # successful report with the requested data silently missing. Two ways to
     # land there -- sarif/junit/html render from `result` but never read
-    # `DiffResult.use_case_impact`, and --stat promises one shape and one only
-    # ("With --format json, emits only the summary object") that the block
-    # would break for every CI consumer parsing it.
+    # `DiffResult.use_case_impact`, and the internal one-line format (reached
+    # only via the built-in `quick` --profile) promises one shape and one
+    # only that the block would break for every CI consumer parsing it.
     #
     # Asked across *every* rendered output rather than the primary alone: the
     # secondary --write render reuses this same attributed result at
-    # report_mode="full" and stat=False, so `--format html --write json=PATH`
-    # does deliver the attribution and rejecting it was arbitrary -- the
+    # report_mode="full", so `--format html --write json=PATH` does deliver
+    # the attribution and rejecting it was arbitrary (Codex review); the
     # primary-only message below had in fact been proposing that exact
-    # arrangement as the fix (Codex review). One output carrying the block is
-    # enough; only when none does is the manifest genuinely resolved for
-    # nothing.
+    # arrangement as the fix. One output carrying the block is enough; only
+    # when none does is the manifest genuinely resolved for nothing.
     if use_cases_manifest is not None and not (
-        format_carries_use_case_impact(fmt, stat=stat)
+        format_carries_use_case_impact(fmt)
         or format_carries_use_case_impact(secondary_fmt)
     ):
-        if stat and secondary_fmt is None:
+        if fmt == ONELINE_FORMAT:
+            # `fmt` here is the internal-only "oneline" value (reachable only
+            # via --profile quick's injected default) -- never a spelling
+            # the user typed as --format, so the generic `rendered = f"
+            # --format {fmt}"` branch below would name a flag value that
+            # doesn't exist on the command line. Name --profile quick
+            # instead, and still mention the secondary format when one is
+            # ALSO ledgerless (--profile quick --write sarif=...), rather
+            # than silently dropping that half of the picture (Codex
+            # review, fresh evidence).
+            also = (
+                f" The --write {secondary_fmt}=... output does not carry it "
+                "either." if secondary_fmt else ""
+            )
             detail = (
-                "--stat emits only the summary object (and one line of text), "
-                "which the attribution block would not fit. Drop --stat to get "
-                "the use-case section, add --write json=PATH to carry it "
-                "alongside the summary, or drop --use-cases."
+                "--profile quick emits only a one-line summary, which the "
+                "attribution block would not fit. Use a different profile "
+                "or --format to get the use-case section, add --write "
+                "json=PATH to carry it alongside the summary, or drop "
+                "--use-cases." + also
             )
         else:
             rendered = f"--format {fmt}" + (
@@ -1551,8 +1565,9 @@ def run_compare(
     #
     # After the flag-combination rejections above, for the reason the
     # --dump-manifest parse below states for itself: when --use-cases was
-    # never going to work here at all, "not supported with --stat" is the
-    # useful message, not "your manifest is malformed".
+    # never going to work here at all, "not supported here" (the one-line
+    # --profile quick case) is the useful message, not "your manifest is
+    # malformed".
     #
     # The *other* --use-cases exit a dry run still cannot predict is "neither
     # side carries a source graph", and deliberately so: that is a property
@@ -1919,7 +1934,7 @@ def run_compare(
         suppression=suppression,
         audit_suppressions=audit_suppressions,
         fmt=fmt, output=output, show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact, stat=stat, recommend=recommend,
+        show_impact=show_impact,
         demangle=demangle, demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
         secondary_fmt=secondary_fmt, secondary_output=secondary_output,

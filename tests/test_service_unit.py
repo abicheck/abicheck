@@ -3181,14 +3181,115 @@ class TestRenderOutput:
         with pytest.raises(ValidationError, match="Unsupported output format"):
             render_output("xml", diff_result, snap)
 
-    def test_stat_json(self, diff_result, snap):
-        out = render_output("json", diff_result, snap, stat=True)
-        d = json.loads(out)
-        assert isinstance(d, dict)
+    def test_oneline_format(self, diff_result, snap):
+        # CLI cleanup phase two, PR 1: --stat's boolean parameter is gone --
+        # the one-line summary is now its own fmt value
+        # (service_render.ONELINE_FORMAT), reached only via the built-in
+        # `quick` --profile at the CLI layer, but directly callable here as
+        # a plain fmt string like any other format.
+        from abicheck.service_render import ONELINE_FORMAT
 
-    def test_stat_text(self, diff_result, snap):
-        out = render_output("markdown", diff_result, snap, stat=True)
+        out = render_output(ONELINE_FORMAT, diff_result, snap)
         assert isinstance(out, str)
+        assert "\n" not in out.strip()
+
+    def test_stat_kwarg_is_a_compatibility_shim_for_oneline(self, diff_result, snap):
+        """CodeRabbit review: `render_output` is exported via
+        `abicheck.service.__all__` (Tier-2 typed API), so an existing
+        caller spelling the pre-PR-1 `render_output(..., stat=True)` must
+        not get a bare `TypeError` -- only the CLI's own `--stat` flag was
+        announced as removed, not this function's signature. For a
+        non-``json`` *fmt*, `stat=True` is equivalent to
+        `fmt=ONELINE_FORMAT` (the human one-line renderer)."""
+        from abicheck.service_render import ONELINE_FORMAT
+
+        assert render_output(
+            "markdown", diff_result, snap, stat=True
+        ) == render_output(ONELINE_FORMAT, diff_result, snap)
+
+    def test_stat_kwarg_with_json_fmt_preserves_the_old_stat_json_shape(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: an earlier revision of this shim
+        collapsed `render_output("json", ..., stat=True)` onto the human
+        one-line renderer too, silently breaking a Tier-2 caller that fed
+        the pre-PR-1 `--stat --format json` shape to `json.loads()`. The
+        JSON case must keep returning `to_stat_json`'s summary-only JSON
+        object (no `changes` array), not human text."""
+        from abicheck.reporter import to_stat_json
+
+        out = render_output("json", diff_result, snap, stat=True)
+        assert json.loads(out) == json.loads(to_stat_json(diff_result))
+        d = json.loads(out)
+        assert "changes" not in d
+        assert d["verdict"] == diff_result.verdict.value
+
+    def test_stat_kwarg_with_junit_fmt_is_never_short_circuited(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: the pre-PR-1 `--stat` boolean's own
+        guard was `if stat and fmt != "junit": ...` -- JUnit was *never*
+        replaced by the one-line summary, since an XML consumer needs the
+        real `<testsuite>` document regardless of `--stat`. A revision of
+        this shim that routed every non-JSON `fmt` (JUnit included) to the
+        human one-line renderer silently broke that XML consumer."""
+        assert render_output(
+            "junit", diff_result, snap, stat=True
+        ) == render_output("junit", diff_result, snap, stat=False)
+
+    def test_show_recommendation_false_still_suppresses_the_section(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: `show_recommendation` is a real,
+        effective toggle, not an inert compatibility shim -- an earlier
+        revision hard-coded `True` into the `to_markdown` call regardless
+        of what the caller passed, silently reintroducing the
+        recommendation section for a direct Tier-2 caller that explicitly
+        asked it be suppressed (only the CLI's own `--recommend` flag was
+        announced removed, not this keyword's effect)."""
+        with_rec = render_output(
+            "markdown", diff_result, snap, show_recommendation=True
+        )
+        without_rec = render_output(
+            "markdown", diff_result, snap, show_recommendation=False
+        )
+        assert with_rec != without_rec
+
+    def test_show_recommendation_default_matches_pre_removal_api(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence, second round: the default must stay
+        `False` -- the exact pre-removal Tier-2 Python API default -- not
+        `True`. An earlier revision changed the default to match the CLI's
+        own unconditional-inclusion behaviour, which silently changed what
+        an existing direct caller gets when it omits this keyword entirely
+        (a public-API default change this PR's docs never announced). The
+        CLI achieves its own unconditional inclusion by having its wrapper
+        (`cli._render_output`) pass `show_recommendation=True` explicitly,
+        not by changing this function's default -- see
+        `test_cli_recommendation_is_unconditional_despite_the_false_default`
+        below for that half of the contract."""
+        assert render_output(
+            "markdown", diff_result, snap
+        ) == render_output("markdown", diff_result, snap, show_recommendation=False)
+
+    def test_cli_recommendation_is_unconditional_despite_the_false_default(
+        self, diff_result, snap
+    ):
+        """The CLI's own `cli._render_output` wrapper explicitly passes
+        `show_recommendation=True` to `render_output` (it never relies on
+        the library default), so its own markdown output stays
+        unconditional even though `render_output`'s own default flipped
+        back to `False` in this round's fix."""
+        from abicheck.cli import _render_output
+
+        cli_markdown = _render_output("markdown", diff_result, snap)
+        default_markdown = render_output("markdown", diff_result, snap)
+        explicit_true_markdown = render_output(
+            "markdown", diff_result, snap, show_recommendation=True
+        )
+        assert cli_markdown == explicit_true_markdown
+        assert cli_markdown != default_markdown
 
     def test_stat_json_forwards_require_complete_analysis(self, diff_result, snap):
         """Codex/CodeRabbit review: `render_output`'s own `stat`

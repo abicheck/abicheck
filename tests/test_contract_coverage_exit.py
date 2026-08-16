@@ -265,21 +265,30 @@ class TestTheGatingConditionIsVisible:
         assert report["contract_coverage_exit_contribution"] == 1
         assert report["contract_coverage_failures"]
 
-    def test_stat_json_is_ledgerless_so_it_still_explains(self, tmp_path: Path) -> None:
-        """`--stat` renders `to_stat_json`, a summary that omits both ledger
-        keys -- so a stat run is ledgerless whatever `--format` says, and
-        suppressing on the format name alone left it exiting 1 with no
-        explanation anywhere (Codex review)."""
+    def test_quick_profile_is_ledgerless_so_it_still_explains(
+        self, tmp_path: Path
+    ) -> None:
+        """The internal one-line format (``--profile quick``) is a summary
+        that omits both ledger keys -- so a one-line run is ledgerless
+        whatever else its output looks like, and suppressing on the format
+        name alone left it exiting 1 with no explanation anywhere (Codex
+        review, originally about ``--stat``; CLI cleanup phase two, PR 1
+        moved the one-line output behind ``--profile quick`` instead of a
+        boolean flag, but the ledgerless-summary property is unchanged)."""
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--stat",
-            "--format",
-            "json",
+            "--profile",
+            "quick",
             "--contract",
             "exports",
         )
         assert result.exit_code == 1, result.output
+        # Confirms this really went through the one-line renderer (not, say,
+        # a format that happens to also lack the ledger) -- the coverage
+        # notice is appended after it, so the output leads with the
+        # one-liner's own verdict label (CodeRabbit review).
+        assert result.output.startswith("NO_CHANGE:"), result.output
         assert "Contract coverage incomplete" in result.output
 
     def test_it_does_not_claim_a_floor_it_did_not_apply(self) -> None:

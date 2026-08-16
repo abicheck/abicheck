@@ -126,7 +126,7 @@ def test_option_row_shows_a_real_false_default_not_a_blank():
     gen = _load_gen()
 
     class _FakeParam:
-        opts = ("--recommend",)
+        opts = ("--show-impact",)
         secondary_opts = ()
         default = False
         required = False
@@ -134,7 +134,7 @@ def test_option_row_shows_a_real_false_default_not_a_blank():
         type = None
 
     row = gen._option_row(_FakeParam())
-    assert "| `--recommend` | no | `False` | Show impact analysis. |" == row
+    assert "| `--show-impact` | no | `False` | Show impact analysis. |" == row
 
 
 def test_option_row_hides_click_internal_unset_sentinel():
