@@ -757,6 +757,58 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
+class TestCompareRejectsRequireCompleteAnalysisForDirectoryOrPackage:
+    """Mirrors run.sh's P0.4 release-operand guard (Codex review): the CLI's
+    per-library release fan-out has no single ``analysis_assurance`` result
+    to gate on and rejects ``--require-complete-analysis`` outright, so a
+    directory/package compare with the flag set must fail here too, before
+    dependency install -- not only later in run.sh."""
+
+    def test_directory_old_library_with_the_flag_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
+            }
+        )
+        assert result.returncode == 1
+        assert "does not support require-complete-analysis" in result.stdout
+
+    def test_single_pair_compare_with_the_flag_passes(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_directory_compare_with_the_flag_unset_passes(
+        self, tmp_path: Path
+    ) -> None:
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
 class TestUnsetFormatUsesEachModesOwnDefault:
     """Regression (Codex review, PR #594): action.yml's `format` input must
     NOT declare a static top-level default. GitHub Actions applies a

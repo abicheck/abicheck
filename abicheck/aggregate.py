@@ -100,7 +100,17 @@ from .change_registry_types import Verdict
 #: ``--contract`` for that target, never changes ``scope`` or
 #: any existing key, and a ``1.3``-shaped consumer that ignores unknown
 #: keys keeps reading a ``1.4`` document correctly.
-AGGREGATE_SCHEMA_VERSION = "1.4"
+#:
+#: ``1.5`` adds an ``analysis_assurance_exit`` field on every target entry
+#: (P0.4's orthogonal analysis-assurance axis, the exact sibling of
+#: ``1.3``'s ``contract_coverage_exit`` -- Codex review: without it, a
+#: target whose severity gate read 0 but whose analysis-assurance axis
+#: independently floored the *real* exit to 1 fed the aggregate a green
+#: result for that target). Additive in shape, but not inert the same way
+#: ``1.3`` was not: the contribution folds into ``gate.exit_code``, so a
+#: matrix whose targets exited 1 for incomplete analysis assurance no
+#: longer aggregates to 0.
+AGGREGATE_SCHEMA_VERSION = "1.5"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -487,6 +497,11 @@ class TargetReport:
     #: ``contract.unresolved=warn`` acceptance from a silent or malformed
     #: one, so prose about the run cannot claim a policy it never set.
     contract_coverage_declared: bool = False
+    #: P0.4's orthogonal analysis-assurance contribution (``0``/``1``), the
+    #: exact sibling of :attr:`contract_coverage_exit` above for the other
+    #: orthogonal exit-floor axis. Declared last for the same
+    #: positional-construction-safety reason as that field.
+    analysis_assurance_exit: int = 0
 
     @property
     def analyzed(self) -> bool:
@@ -523,6 +538,7 @@ class TargetReport:
             ),
             "gate": self.gate.to_dict() if self.gate is not None else None,
             "contract_coverage_exit": self.contract_coverage_exit,
+            "analysis_assurance_exit": self.analysis_assurance_exit,
         }
         if self.unexpected:
             d["unexpected"] = True
@@ -614,6 +630,10 @@ class ProfileMatrixEntry:
     #: Declared last, with a default, so adding it cannot break a positional
     #: construction of this public dataclass (CodeRabbit review).
     contract_incomplete_profiles: tuple[str, ...] = ()
+    #: Sibling of ``contract_incomplete_profiles`` for P0.4's own
+    #: analysis-assurance axis; same predicate, same positional-safety
+    #: reason for being declared last.
+    analysis_incomplete_profiles: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -623,6 +643,7 @@ class ProfileMatrixEntry:
             "incomplete_profiles": list(self.incomplete_profiles),
             "unanalyzed_profiles": list(self.unanalyzed_profiles),
             "contract_incomplete_profiles": list(self.contract_incomplete_profiles),
+            "analysis_incomplete_profiles": list(self.analysis_incomplete_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 
@@ -773,18 +794,39 @@ class AggregateResult:
             )
         )
 
+    @property
+    def analysis_assurance_exit(self) -> int:
+        """P0.4's analysis-assurance contribution -- sibling of
+        :attr:`contract_coverage_exit`. Without this a target whose
+        ``--require-complete-analysis`` gate raised its own exit to ``1``
+        fed this aggregate a green ``0`` (Codex review)."""
+        gated = list(self.analyzed) + list(self._gated_unexpected)
+        return max((t.analysis_assurance_exit for t in gated), default=0)
+
+    @property
+    def analysis_assurance_targets(self) -> tuple[str, ...]:
+        """Targets short of analysis assurance -- the *why* behind
+        :attr:`analysis_assurance_exit`."""
+        gated = list(self.analyzed) + list(self._gated_unexpected)
+        return tuple(
+            sorted(t.target_id for t in gated if t.analysis_assurance_exit > 0)
+        )
+
     def exit_code(self) -> int:
         """The single CI gate exit code.
 
         The max of every gated target's own ``severity.exit_code`` (so a
         target's policy-blocked addition contributes ``1``, an API break ``2``,
         an ABI break ``4`` — never recomputed from the verdict), a coverage
-        contribution of ``1`` when a required target is missing, and ADR-049's
+        contribution of ``1`` when a required target is missing, ADR-049's
         orthogonal contract-coverage contribution of ``1`` when any target's
         selected contract domain was short of evidence
-        (:attr:`contract_coverage_exit`). All three fold with ``max``, so the
-        two ``1``-valued axes can raise a clean ``0`` and neither can lower a
-        real break's ``2``/``4``. ``64`` / malformed-input errors are raised as
+        (:attr:`contract_coverage_exit`), and P0.4's orthogonal
+        analysis-assurance contribution of ``1`` when any target's evidence
+        was incomplete under ``--require-complete-analysis``
+        (:attr:`analysis_assurance_exit`). All fold with ``max``, so every
+        ``1``-valued axis can raise a clean ``0`` and none can lower a real
+        break's ``2``/``4``. ``64`` / malformed-input errors are raised as
         :class:`AggregateError`, never returned here.
         """
         gated = list(self.analyzed) + list(self._gated_unexpected)
@@ -792,6 +834,7 @@ class AggregateResult:
         if self.coverage_blocking:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
         code = max(code, self.contract_coverage_exit)
+        code = max(code, self.analysis_assurance_exit)
         # ``fail`` fails the gate on *any* unexpected report — including one that
         # is unreadable/verdictless (so has no gate to contribute above) — since
         # the policy is "no target outside the expected set is tolerated".
@@ -855,6 +898,7 @@ class AggregateResult:
             incomplete = []
             unanalyzed = []
             contract_incomplete = []
+            analysis_incomplete = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
@@ -869,6 +913,11 @@ class AggregateResult:
                     for r in reports
                 ):
                     contract_incomplete.append(pid)
+                # Sibling check for P0.4's own orthogonal axis (Codex
+                # review): a COMPATIBLE profile short on analysis-assurance
+                # evidence still needs profile-level attribution here.
+                if any(r.analysis_assurance_exit > 0 for r in reports):
+                    analysis_incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
                     for r in reports
@@ -893,6 +942,7 @@ class AggregateResult:
                     incomplete_profiles=tuple(incomplete),
                     unanalyzed_profiles=tuple(unanalyzed),
                     contract_incomplete_profiles=tuple(contract_incomplete),
+                    analysis_incomplete_profiles=tuple(analysis_incomplete),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -991,6 +1041,7 @@ class AggregateResult:
         lines.append("  " + self._render_compatibility_line())
 
         lines.extend(self._render_contract_coverage_lines())
+        lines.extend(self._render_analysis_assurance_lines())
         lines.extend(self._render_profile_matrix_lines())
         lines.extend(render_finding_matrix_lines(self.finding_matrix))
 
@@ -1041,6 +1092,27 @@ class AggregateResult:
             out.append(
                 f"  contributes {self.contract_coverage_exit} to the exit code "
                 "(ADR-049 contract-coverage axis)"
+            )
+
+        return out
+
+    def _render_analysis_assurance_lines(self) -> list[str]:
+        """P0.4's analysis-assurance block, the exact sibling of
+        :meth:`_render_contract_coverage_lines` for the other orthogonal
+        exit-floor axis. Simpler than that one: there is no
+        ``contract.unresolved=warn``-shaped "accepted, listed but not
+        gated" state for this axis -- a target's contribution is a plain
+        satisfied/not floor, so only the incomplete-target list and the
+        contribution itself are worth stating."""
+        out: list[str] = []
+        incomplete = self.analysis_assurance_targets
+        if incomplete:
+            out.append("")
+            out.append("Analysis assurance:")
+            out.append(f"  incomplete on {', '.join(incomplete)}")
+            out.append(
+                f"  contributes {self.analysis_assurance_exit} to the exit code "
+                "(P0.4 analysis-assurance axis)"
             )
 
         return out
@@ -1111,6 +1183,14 @@ class AggregateResult:
             line += (
                 f" [contract evidence incomplete on "
                 f"{', '.join(entry.contract_incomplete_profiles)}]"
+            )
+        if entry.analysis_incomplete_profiles:
+            # The exact sibling suffix, for the exact sibling reason (Codex
+            # review): a profile that raised the exit to 1 purely on the
+            # analysis-assurance axis must not read as flatly clean either.
+            line += (
+                f" [analysis assurance incomplete on "
+                f"{', '.join(entry.analysis_incomplete_profiles)}]"
             )
         return line
 
@@ -1233,6 +1313,15 @@ class AggregateResult:
                 "exit_contribution": self.contract_coverage_exit,
                 "incomplete_targets": list(self.contract_coverage_targets),
             },
+            # P0.4's own orthogonal axis, the exact sibling of
+            # "contract_coverage" above for the same reason: a different
+            # question ("was this target's own evidence complete under
+            # --require-complete-analysis?"), also contributing 1, so a
+            # consumer must be able to tell which axis raised the exit.
+            "analysis_assurance": {
+                "exit_contribution": self.analysis_assurance_exit,
+                "incomplete_targets": list(self.analysis_assurance_targets),
+            },
             "targets": [t.to_dict() for t in self.targets],
             "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
             "profile_matrix": [e.to_dict() for e in self.profile_matrix],
@@ -1291,6 +1380,12 @@ class _LoadedReport:
     #: the comparison did or did not find. Otherwise the report's own
     #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
     findings: ReportFindings | None = None
+    #: P0.4's orthogonal analysis-assurance contribution, read off the
+    #: report's own ``analysis_assurance_exit_contribution``. The exact
+    #: sibling of :attr:`contract_coverage_exit` above, for the same reason:
+    #: a run without ``--require-complete-analysis`` never floors its exit
+    #: on this axis, so ``0`` is the honest default rather than a fallback.
+    analysis_assurance_exit: int = 0
 
 
 def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
@@ -1370,6 +1465,21 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     """
     for block in contract_coverage_blocks(data):
         raw = block.get("contract_coverage_exit_contribution")
+        if _is_valid_contribution(raw):
+            return raw
+    return 0
+
+
+def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
+    """The report's own P0.4 analysis-assurance contribution (``0``/``1``).
+
+    Sibling of :func:`_contract_coverage_exit`: read, not recomputed, since
+    ``GateInfo.from_scan_report`` reads only the nested compatibility gate,
+    never this orthogonal axis (Codex review). Fails open like its sibling,
+    reusing :func:`contract_coverage_blocks`' document-shape traversal.
+    """
+    for block in contract_coverage_blocks(data):
+        raw = block.get("analysis_assurance_exit_contribution")
         if _is_valid_contribution(raw):
             return raw
     return 0
@@ -1573,6 +1683,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=_contract_coverage_declared(data),
+            analysis_assurance_exit=_analysis_assurance_exit(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: `_format_release_json` emits `bundle_findings`/
             # `matrix_findings` from whatever did complete, regardless of the
@@ -1619,6 +1730,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 path=path,
                 contract_coverage_exit=_contract_coverage_exit(data),
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
+                analysis_assurance_exit=_analysis_assurance_exit(data),
             )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
@@ -1664,6 +1776,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         contract_coverage_exit=_contract_coverage_exit(data),
         contract_coverage_incomplete=_contract_coverage_incomplete(data),
         contract_coverage_declared=_contract_coverage_declared(data),
+        analysis_assurance_exit=_analysis_assurance_exit(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
@@ -1821,6 +1934,7 @@ def aggregate(
             contract_coverage_exit=report.contract_coverage_exit,
             contract_coverage_incomplete=report.contract_coverage_incomplete,
             contract_coverage_declared=report.contract_coverage_declared,
+            analysis_assurance_exit=report.analysis_assurance_exit,
             findings=report.findings,
         )
 

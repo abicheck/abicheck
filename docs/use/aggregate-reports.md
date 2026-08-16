@@ -49,10 +49,13 @@ required platform was never analyzed. `aggregate`'s one invariant is the
 fix: **an expected target with no report is unavailable (unknown), never
 folded into the result as compatible.**
 
-## The four orthogonal axes
+## The five orthogonal axes
 
-Every aggregate run answers four independent questions, and the exit code is
-the worst contribution across all four (`max`, never additive):
+Every aggregate run answers five independent questions. `compatibility` is
+reporting-only — the worst ABI verdict, shown for context, never itself an
+input to the exit code. The exit code is the worst contribution across the
+other four (`gate`/`coverage`/`contract_coverage`/`analysis_assurance`,
+`max`, never additive):
 
 ```mermaid
 flowchart TD
@@ -60,10 +63,12 @@ flowchart TD
     R --> B["gate<br/>(each report's own severity/scan<br/>gate, combined — never recomputed)"]
     R --> C["coverage<br/>(did every REQUIRED target<br/>report at all?)"]
     R --> D["contract_coverage<br/>(for a target that DID report,<br/>was its own contract evidence complete?)"]
+    R --> F["analysis_assurance<br/>(for a target that DID report,<br/>was its own evidence complete<br/>under --require-complete-analysis?)"]
     A -.->|context only| E["exit code = max(...)"]
     B --> E
     C --> E
     D --> E
+    F --> E
 ```
 
 - **compatibility** — the worst ABI verdict over the *analyzed* targets.
@@ -90,6 +95,16 @@ flowchart TD
   still incomplete (a contract-coverage gap) — both can independently
   produce exit `1`, for unrelated reasons, and the JSON output records which
   targets caused which.
+- **analysis_assurance** (P0.4, aggregate schema 1.5) — for a target that
+  *did* report, was its own evidence complete under
+  `--require-complete-analysis`? Read back from that report's own
+  `analysis_assurance_exit_contribution` and folded with `max`, exactly the
+  way `compare`/`scan --against` fold theirs. The exact sibling of
+  `contract_coverage` above, for a different question: a required target
+  can report successfully with a closed `--contract` domain while its own
+  broader evidence (depth, TU/export accounting, header-context drift, ...)
+  was still incomplete — both axes can independently produce exit `1`, and
+  the JSON output records which targets caused which.
 
 An illustrative report (`aggregate_schema_version` is omitted here since
 `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is its fact owner, not this
@@ -116,6 +131,10 @@ example — every real report carries the field):
     "exit_contribution": 0,
     "incomplete_targets": []
   },
+  "analysis_assurance": {
+    "exit_contribution": 0,
+    "incomplete_targets": []
+  },
   "targets": [
     {
       "target_id": "linux-x86_64",
@@ -123,7 +142,8 @@ example — every real report carries the field):
       "state": "analyzed",
       "compatibility_verdict": "BREAKING",
       "gate": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"], "from_report": true},
-      "contract_coverage_exit": 0
+      "contract_coverage_exit": 0,
+      "analysis_assurance_exit": 0
     },
     {
       "target_id": "macos-arm64",
@@ -131,7 +151,8 @@ example — every real report carries the field):
       "state": "analyzed",
       "compatibility_verdict": "COMPATIBLE",
       "gate": {"exit_code": 0, "blocking": false, "blocking_categories": [], "from_report": true},
-      "contract_coverage_exit": 0
+      "contract_coverage_exit": 0,
+      "analysis_assurance_exit": 0
     },
     {
       "target_id": "windows-x86_64",
@@ -140,6 +161,7 @@ example — every real report carries the field):
       "compatibility_verdict": null,
       "gate": null,
       "contract_coverage_exit": 0,
+      "analysis_assurance_exit": 0,
       "reason": "no report was produced for this expected target"
     }
   ],
@@ -149,7 +171,10 @@ example — every real report carries the field):
 
 `contract_coverage` is present in every `--format json` output, with
 `exit_contribution: 0` and an empty `incomplete_targets` list when no
-target's report used `--contract` — it is never omitted.
+target's report used `--contract` — it is never omitted. `analysis_assurance`
+is the exact sibling, present the same way, with `exit_contribution: 0` and
+an empty `incomplete_targets` list when no target's report used
+`--require-complete-analysis`.
 
 ## Declaring the expected-target set
 
@@ -165,9 +190,10 @@ cannot tell a missing required target from an intentionally absent one):
 - `--discovered-only` — aggregate whatever reports are present with **no
   required-target coverage gate** (a missing target is simply not counted,
   never a coverage failure). This disables only the `coverage` axis — the
-  `contract_coverage` axis is unaffected: a report that *is* present with
-  an incomplete contract-evidence domain still floors the exit at `1`, the
-  same as in the declared-target-set modes.
+  `contract_coverage`/`analysis_assurance` axes are unaffected: a report
+  that *is* present with an incomplete contract-evidence or
+  analysis-assurance domain still floors the exit at `1`, the same as in
+  the declared-target-set modes.
 
 `--on-missing-required warn` downgrades a coverage gap to advisory.
 `--on-unexpected-target` (`include`/`warn`/`fail`/`ignore`, default

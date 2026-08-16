@@ -24,6 +24,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.buildsource.scan_levels import (
+    USER_DEPTHS,
     EvidenceDepth,
     ScanMode,
     SourceMethod,
@@ -32,6 +33,7 @@ from abicheck.buildsource.scan_levels import (
     method_to_collect_mode,
     method_to_depth,
     mode_preset,
+    public_depth_value,
     resolve_level,
     resolve_source_method,
 )
@@ -171,3 +173,33 @@ def test_lexical_methods_collect_no_inline_pack():
 def test_semantic_methods_select_replay_scopes():
     assert method_to_collect_mode(SourceMethod.S5) == "source-changed"
     assert method_to_collect_mode(SourceMethod.S6) == "graph-full"
+
+
+class TestPublicDepthValue:
+    """``public_depth_value()`` (Codex review, PR #780): the internal-only
+    FULL/GRAPH rungs must normalize onto the public four-rung assurance
+    ladder before being stamped onto ``DiffResult.requested_depth`` --
+    otherwise ``analysis_assurance.py``'s ``_DEPTH_RANK.get(value, 0)`` reads
+    an unrecognized ``"full"``/``"graph"`` as rank 0 (the shallowest rung),
+    and a run pinned to one of them could read ``depth_satisfied=True``/
+    ``status="complete"`` without the ladder ever actually evaluating the
+    request."""
+
+    def test_full_normalizes_to_source(self):
+        assert public_depth_value(EvidenceDepth.FULL) == "source"
+
+    def test_graph_normalizes_to_source(self):
+        assert public_depth_value(EvidenceDepth.GRAPH) == "source"
+
+    @pytest.mark.parametrize("depth", USER_DEPTHS)
+    def test_every_public_rung_passes_through_unchanged(self, depth):
+        assert public_depth_value(depth) == depth.value
+
+    def test_result_is_always_a_real_public_rung(self):
+        # The property the fix actually needs to hold, over every possible
+        # input: whatever comes in, what comes out is always something
+        # `analysis_assurance._DEPTH_RANK` (and EVIDENCE_DEPTH_VALUES) can
+        # actually rank -- never one of the internal-only spellings.
+        public_values = {d.value for d in USER_DEPTHS}
+        for depth in EvidenceDepth:
+            assert public_depth_value(depth) in public_values

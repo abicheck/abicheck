@@ -159,6 +159,7 @@ def to_stat_json(
     indent: int = 2,
     *,
     severity_config: SeverityConfig | None = None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """JSON output for --stat mode: summary only, no changes array.
 
@@ -206,10 +207,18 @@ def to_stat_json(
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
-    from .analysis_assurance import analysis_assurance_report_dict
+    from .analysis_assurance import (
+        analysis_assurance_exit_contribution,
+        analysis_assurance_report_dict,
+    )
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
+        # Same persistence `add_contract_context` does for the full JSON
+        # path, which `--stat` bypasses entirely (Codex review).
+        d["analysis_assurance_exit_contribution"] = analysis_assurance_exit_contribution(
+            result, require_complete=require_complete_analysis
+        )
     # Deliberately NOT `add_use_case_impact` here, unlike the full JSON path
     # (`reporter_contract_blocks`): this function's contract is the summary
     # object alone, and a per-finding attribution block is the opposite of a
@@ -319,6 +328,7 @@ def _to_json_leaf(
     show_only: str | None = None,
     *,
     severity_config: SeverityConfig | None = None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Leaf-change mode JSON output.
 
@@ -536,7 +546,9 @@ def _to_json_leaf(
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result, _displayed_with_scoped_only(result, changes, show_only))
+    _add_contract_context(
+        d, result, _displayed_with_scoped_only(result, changes, show_only),
+        require_complete_analysis=require_complete_analysis)
     # Codex review: full/root-cause mode call this; leaf mode never did,
     # silently dropping policy_overrides/policy_reclassify here.
     _add_policy_overrides(d, result)
@@ -626,6 +638,7 @@ def _to_json_root_cause(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
 
@@ -734,7 +747,9 @@ def _to_json_root_cause(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result, _displayed_with_scoped_only(result, changes, show_only))
+    _add_contract_context(
+        d, result, _displayed_with_scoped_only(result, changes, show_only),
+        require_complete_analysis=require_complete_analysis)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1114,24 +1129,26 @@ def to_json(
     show_impact: bool = False,
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
+    require_complete_analysis: bool = False,
 ) -> str:
     if stat:
-        return to_stat_json(result, indent=indent, severity_config=severity_config)
+        return to_stat_json(
+            result, indent=indent, severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
+        )
 
     if report_mode == "leaf":
         return _to_json_leaf(
-            result,
-            indent=indent,
-            show_only=show_only,
+            result, indent=indent, show_only=show_only,
             severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
         )
 
     if report_mode == "root-cause":
         return _to_json_root_cause(
-            result,
-            indent=indent,
-            show_only=show_only,
+            result, indent=indent, show_only=show_only,
             severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
         )
 
     changes = list(result.changes)
@@ -1178,7 +1195,9 @@ def to_json(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
-    _add_contract_context(d, result, _displayed_with_scoped_only(result, changes, show_only))
+    _add_contract_context(
+        d, result, _displayed_with_scoped_only(result, changes, show_only),
+        require_complete_analysis=require_complete_analysis)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)

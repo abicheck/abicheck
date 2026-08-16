@@ -489,7 +489,18 @@ from typing import Any
 #:       ``--show-only`` the block is projected onto the displayed findings,
 #:       so it never names a change the report itself omits. Additive
 #:       optional top-level key.
-REPORT_SCHEMA_VERSION = "2.39"
+#: 2.40 -- new top-level ``analysis_assurance_exit_contribution`` (``0``/``1``),
+#:       the exact sibling of the pre-existing ``contract_coverage_exit_
+#:       contribution`` for P0.4's own orthogonal analysis-assurance axis.
+#:       Persisted alongside ``analysis_assurance`` (present whenever a real
+#:       ``AnalysisAssurance`` is attached to the result -- in practice every
+#:       real ``compare()`` call) rather than unconditionally: read directly
+#:       by ``aggregate.py``'s ``_analysis_assurance_exit`` the same way the
+#:       coverage sibling already is, since without it a report whose
+#:       severity/compatibility gate read a clean 0 while this axis
+#:       independently floored the *real* exit to 1 fed ``abicheck aggregate``
+#:       a green result for it (Codex review). Additive key.
+REPORT_SCHEMA_VERSION = "2.40"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -725,7 +736,35 @@ REPORT_SCHEMA_VERSION = "2.39"
 #:        2.36's identical addition to ``compare``'s ``changes[]`` -- the two
 #:        bump together since ``finding_id``/``canonical_finding_id`` are
 #:        joinable across both report shapes by design). Additive key.
-SCAN_SCHEMA_VERSION = "1.15"
+#: 1.16 -- P0.4: the ``diff`` block gains ``analysis_assurance`` (the same
+#:        shape ``compare``'s own top-level ``analysis_assurance`` key
+#:        already carries, via the identical ``analysis_assurance_report_
+#:        dict`` narrowing helper), always present on a real ``--against``
+#:        comparison regardless of whether ``--require-complete-analysis``
+#:        was passed (Codex review: a consumer dispatching on
+#:        ``scan_schema_version`` had no way to detect this additive
+#:        contract change). Reports how complete/trustworthy the run's own
+#:        evidence was -- depth, TU/export accounting, fact-set
+#:        comparability, header-context drift, source-graph completeness --
+#:        independently of the compatibility verdict; the flag only
+#:        controls whether an incomplete status additionally floors the
+#:        exit code. Additive key, absent only for the ``NOT_COMPARABLE``/
+#:        audit-only ``diff`` shapes that never reach a real comparison.
+#: 1.17 -- P0.4: the ``diff`` block gains ``analysis_assurance_exit_
+#:        contribution`` (``0``/``1``), the exact sibling of the pre-existing
+#:        ``contract_coverage_exit_contribution`` for the analysis-assurance
+#:        axis -- read directly rather than recomputed by
+#:        ``aggregate.GateInfo.from_scan_report``/``_analysis_assurance_exit``,
+#:        since the aggregate holds none of the evidence needed to answer it
+#:        again (Codex review: without this field, a target whose severity
+#:        gate read ``0`` but whose analysis-assurance axis independently
+#:        floored the real exit to ``1`` fed the aggregate a green result for
+#:        that target). Always present on a real ``--against`` comparison,
+#:        regardless of whether ``--require-complete-analysis`` was passed
+#:        (``0`` either way when the flag wasn't given or the status was
+#:        already ``complete``). Additive key, absent only for the same
+#:        NOT_COMPARABLE/audit-only shapes ``analysis_assurance`` itself is.
+SCAN_SCHEMA_VERSION = "1.17"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

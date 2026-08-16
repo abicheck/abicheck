@@ -648,7 +648,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.39",
+  "report_schema_version": "2.40",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -790,10 +790,10 @@ jsonschema.validate(report, load_compare_report_schema())
 `abicheck aggregate --format json` is a **separate document**, not a
 `compare`/`scan` report — it's versioned by its own
 `aggregate_schema_version` and describes a fan-in over already-produced
-reports rather than one comparison. Its four independent axes
-(`compatibility`/`coverage`/`gate`/`contract_coverage`) and the
-`profile_matrix`/`finding_matrix` reconciliation blocks are documented,
-with a fully annotated example, in [Aggregate
+reports rather than one comparison. Its five independent axes
+(`compatibility`/`coverage`/`gate`/`contract_coverage`/`analysis_assurance`)
+and the `profile_matrix`/`finding_matrix` reconciliation blocks are
+documented, with a fully annotated example, in [Aggregate
 Reports](aggregate-reports.md) rather than repeated here.
 
 ---
