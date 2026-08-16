@@ -156,3 +156,16 @@
   whenever the old side's resolved headers are the same as the
   candidate's, and only the plain, unfolded context is used when they
   genuinely diverge (a real `old=` override).
+
+- **Documented (not fixed, Codex review): `ABI_RELEVANT_FLAG_PREFIXES`
+  omits GNU/clang `-include`/`-imacros` and MSVC `/FI`/`/FU` (forced
+  pre-include), so a matched compile unit's own forced-include header
+  never reaches the P0.3 L3->L2 fold's derived compile context.**
+  Confirmed genuinely pre-existing (present at this PR's own base
+  commit, unrelated to the L3->L2 fold work this PR adds) and shared by
+  `compare`'s own already-existing implicit-dump fold, not something
+  newly introduced. Not fixed here: unlike every other entry in that
+  list, these flags carry a required value that must travel with them, so
+  a correct fix needs a new spaced-value-flag extraction branch, not a
+  bare addition to the prefix list — left as a known gap (see
+  `ABI_RELEVANT_FLAG_PREFIXES`'s own docstring and `AGENTS.md`).

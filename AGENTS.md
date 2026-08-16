@@ -1282,6 +1282,46 @@ Once a root command genuinely clears the bar above, pick the right home:
   which forwarded `None` rather than the folded sentinel for a bare
   shared `-H` with no `old=` at all).
 
+  **A fourteenth finding, from a further Codex review round (P1), on
+  `ABI_RELEVANT_FLAG_PREFIXES` itself — real, pre-existing (confirmed
+  present at this PR's own base commit, before any of its changes), and
+  documented as a known gap rather than fixed here.** GNU/clang
+  `-include`/`-imacros` and MSVC `/FI`/`/FU` (forced pre-include) are
+  absent from this list, so `extract_abi_relevant_flags()` never captures
+  them into `CompileUnit.abi_relevant_flags` — `buildsource.adapters.
+  base.SOURCE_OPERAND_FLAGS` already recognizes these as value-taking, but
+  for an unrelated purpose (not mistaking the operand for the TU source
+  file), and that recognition never feeds this list. A matched compile
+  unit's own forced-include header is therefore silently absent from
+  `header_compile_context`'s derived L2 `CompileContext`, so the P0.3
+  fold (reached from `dump`/`scan`/`compare`'s implicit-dump path alike,
+  not just the three call sites this PR added) can report a real match
+  and stamp `parsed_with_build_context` while still parsing without a
+  macro-controlling forced-include header the real build always applies.
+  Confirmed genuinely pre-existing, not introduced by this PR:
+  `ABI_RELEVANT_FLAG_PREFIXES` and its consumers (`extract_
+  abi_relevant_flags`, `header_compile_context.py`) already existed at
+  commit `674a506` (this PR's own base, before any of its changes) with
+  the identical omission — this PR only added two more call sites
+  (`dump` ELF/PE-Mach-O, `scan`) to the same, already-existing
+  `resolve_header_compile_context` machinery `compare`'s implicit-dump
+  path already used. Not fixed here because a correct fix is a genuine,
+  non-trivial extraction-logic change: unlike every other entry in
+  `ABI_RELEVANT_FLAG_PREFIXES` (a bare prefix match that appends the
+  single matched token), `-include`/`-imacros`/`/FI` always carry a
+  required following value that must travel with the flag — appending
+  just the bare prefix (the pattern this whole list otherwise uses)
+  would silently drop the header filename that is the entire point. A
+  correct fix needs a new spaced-value-flag branch in
+  `extract_abi_relevant_flags` (mirroring, but distinct from, its
+  existing `-D`/`/D` split-form handling), verified end-to-end through
+  `header_compile_context._context_flags()`'s reconstruction and the
+  real header-parse invocation's own handling of `-include`/`/FI` —
+  a cross-cutting change to a shared, well-tested primitive several
+  other pre-existing paths already depend on, not a scoped fix reactive
+  to one review comment on this PR. Documented in `ABI_RELEVANT_FLAG_
+  PREFIXES`'s own docstring alongside this entry.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
