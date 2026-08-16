@@ -1312,37 +1312,74 @@ class TestRunPlanGenerateCli:
             "libfoo@linux#release@headers"
         ]
 
-    def test_gate_flags_stamp_the_generated_plan(self, tmp_path: Path) -> None:
-        """CLI cleanup phase two, PR 2: --gate-missing-required/
-        --gate-unexpected-target reach the generated run-plan.json's own
-        `gate` block through the real CLI."""
-        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+    def test_aggregate_gate_config_stamps_the_generated_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """CLI cleanup phase two, PR 2 follow-up: CONFIG's `aggregate: gate:`
+        block reaches the generated run-plan.json's own `gate` block through
+        the real CLI -- the durable-config replacement for the removed
+        --gate-missing-required/--gate-unexpected-target flags."""
+        raw = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw["aggregate"] = {
+            "gate": {"missing_required": "warn", "unexpected_target": "fail"}
+        }
+        config = _write_config(tmp_path, raw)
         build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
         result = CliRunner().invoke(
             main,
             [
-                "project", "plan", str(config),
-                "--build-output", f"linux={build_dir}",
-                "--gate-missing-required", "warn",
-                "--gate-unexpected-target", "fail",
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"linux={build_dir}",
             ],
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
         assert data["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
 
-    def test_no_gate_flags_omits_gate_key(self, tmp_path: Path) -> None:
+    def test_no_aggregate_gate_config_omits_gate_key(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
         result = CliRunner().invoke(
             main,
             [
-                "project", "plan", str(config),
-                "--build-output", f"linux={build_dir}",
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"linux={build_dir}",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "gate" not in json.loads(result.stdout)
+
+    def test_gate_flags_removed_no_cli_alias(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, PR 2 follow-up: --gate-missing-required/
+        --gate-unexpected-target were removed from `project plan` with no
+        deprecation alias -- the policy is durable project config now (see
+        the two tests above), not a per-invocation flag."""
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        for flag, value in (
+            ("--gate-missing-required", "warn"),
+            ("--gate-unexpected-target", "fail"),
+        ):
+            result = CliRunner().invoke(
+                main,
+                [
+                    "project",
+                    "plan",
+                    str(config),
+                    "--build-output",
+                    f"linux={build_dir}",
+                    flag,
+                    value,
+                ],
+            )
+            assert result.exit_code == 64, result.output
+            assert "No such option" in result.output
 
     def test_generate_exits_one_on_unresolved_explicit_profile(
         self, tmp_path: Path

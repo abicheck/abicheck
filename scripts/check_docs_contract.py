@@ -1458,6 +1458,23 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "project plan --gate-missing-required/--gate-unexpected-target (CLI"
+        " cleanup phase two, PR 2 follow-up): the policy moved to"
+        " .abicheck.yml's aggregate: gate: block, durable project config"
+        " project plan sources instead of a per-invocation flag",
+        ("--gate-missing-required", "--gate-unexpected-target"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # Explicit migration notes naming the retired flags and
+                # their aggregate: gate: replacement in the same breath,
+                # same reasoning as the --stat/--recommend entry above.
+                "reference/project-targets-schema.md",
+                "reference/run-plan-schema.md",
+            }
+        ),
+    ),
 )
 
 

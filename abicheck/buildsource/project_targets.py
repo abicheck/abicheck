@@ -1098,18 +1098,103 @@ class BaselineChannelSpec:
 
 
 @dataclass
-class ProjectTargetsConfig:
-    """Parsed ``targets:``/``bundles:``/``profiles:``/``baseline:`` block.
+class AggregateGateSpec:
+    """``aggregate: gate:`` (CLI cleanup phase two, PR 2 follow-up).
 
-    All four sub-blocks are optional; an absent block yields an empty dict,
-    matching the ``buildsource``-wide convention that a project not yet
-    using G30's CI-integration primitives sees no behavior change at all.
+    The durable, project-owned home for the policy ``abicheck project plan``
+    stamps onto the ``gate`` block of every ``run-plan.json`` it generates
+    (:attr:`RunPlan.gate_missing_required`/
+    :attr:`~.run_plan.RunPlan.gate_unexpected_target`) -- the same fields a
+    hand-authored ``aggregate --manifest``'s own ``gate`` block carries, so
+    the two entry points can never diverge in what they express. Before this,
+    the only way to set this policy was ``project plan``'s own
+    ``--gate-missing-required``/``--gate-unexpected-target`` flags, re-typed
+    on every invocation; this block replaces both (removed, no CLI alias --
+    same "no deprecation window" stance as the rest of this cleanup).
+
+    Both fields are optional and independently settable, mirroring
+    ``RunPlan``'s own "unset means no policy stated here" contract: an absent
+    field is projected as absent from the generated ``run-plan.json``'s
+    ``gate`` block too, so ``aggregate``'s own hard-coded defaults
+    (``missing_required: fail``, ``unexpected_target: include``) apply
+    exactly as they do with no ``aggregate:`` block at all.
+    """
+
+    missing_required: str | None = None
+    unexpected_target: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.missing_required is not None:
+            d["missing_required"] = self.missing_required
+        if self.unexpected_target is not None:
+            d["unexpected_target"] = self.unexpected_target
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AggregateGateSpec:
+        """Validated against the same ``OnMissingRequired``/
+        ``OnUnexpectedTarget`` enum vocabulary ``aggregate --manifest``'s own
+        ``gate`` block is validated against (``ExpectedTargets.
+        from_manifest_data``), so a bad value here is caught at ``project
+        plan`` time rather than surfacing later at ``aggregate`` time from a
+        run-plan.json this config produced. Imported lazily (function-local),
+        the same way :mod:`abicheck.buildsource.run_plan` keeps its own
+        ``..aggregate_manifest`` reference lazy, so this leaf validation
+        module carries no module-level dependency on it.
+        """
+        from ..aggregate_manifest import OnMissingRequired, OnUnexpectedTarget
+
+        where = "aggregate.gate"
+        if not isinstance(d, dict):
+            raise ValueError(
+                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
+            )
+        unknown = _unknown_keys(d, {"missing_required", "unexpected_target"})
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+        missing_required = d.get("missing_required")
+        if missing_required is not None:
+            if not isinstance(missing_required, str) or missing_required not in {
+                v.value for v in OnMissingRequired
+            }:
+                raise ValueError(
+                    f"{where}.missing_required must be one of "
+                    f"{[v.value for v in OnMissingRequired]}, got {missing_required!r}"
+                )
+        unexpected_target = d.get("unexpected_target")
+        if unexpected_target is not None:
+            if not isinstance(unexpected_target, str) or unexpected_target not in {
+                v.value for v in OnUnexpectedTarget
+            }:
+                raise ValueError(
+                    f"{where}.unexpected_target must be one of "
+                    f"{[v.value for v in OnUnexpectedTarget]}, got {unexpected_target!r}"
+                )
+        return cls(
+            missing_required=missing_required, unexpected_target=unexpected_target
+        )
+
+    def is_empty(self) -> bool:
+        return self.missing_required is None and self.unexpected_target is None
+
+
+@dataclass
+class ProjectTargetsConfig:
+    """Parsed ``targets:``/``bundles:``/``profiles:``/``baseline:``/
+    ``aggregate:`` block.
+
+    All five sub-blocks are optional; an absent block yields an empty dict
+    (or ``None`` for :attr:`aggregate_gate`), matching the
+    ``buildsource``-wide convention that a project not yet using G30's
+    CI-integration primitives sees no behavior change at all.
     """
 
     targets: dict[str, TargetSpec] = field(default_factory=dict)
     bundles: dict[str, BundleSpec] = field(default_factory=dict)
     profiles: dict[str, ProfileSpec] = field(default_factory=dict)
     baseline_channels: dict[str, BaselineChannelSpec] = field(default_factory=dict)
+    aggregate_gate: AggregateGateSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -1123,11 +1208,13 @@ class ProjectTargetsConfig:
             out["baseline"] = {
                 "channels": {k: v.to_dict() for k, v in self.baseline_channels.items()}
             }
+        if self.aggregate_gate is not None and not self.aggregate_gate.is_empty():
+            out["aggregate"] = {"gate": self.aggregate_gate.to_dict()}
         return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProjectTargetsConfig:
-        """Parse the four top-level blocks out of a raw ``.abicheck.yml`` mapping.
+        """Parse the five top-level blocks out of a raw ``.abicheck.yml`` mapping.
 
         Structural/type errors raise ``ValueError`` immediately (ADR-043
         strict-config convention — the same treatment ``BuildConfig`` gives
@@ -1150,7 +1237,7 @@ class ProjectTargetsConfig:
 
         Every key in *data* is checked against the *full* ``.abicheck.yml``
         top-level key set (:data:`~.inline.KNOWN_TOP_LEVEL_KEYS`), not just
-        this module's own four owned keys — a misspelled block (e.g.
+        this module's own five owned keys — a misspelled block (e.g.
         ``tagrets:``) would otherwise be silently ignored as an unrecognized,
         unrelated key rather than caught as the typo it is (review finding).
         Keys this module doesn't itself parse (``build``, ``severity``, ...)
@@ -1170,6 +1257,13 @@ class ProjectTargetsConfig:
         channels_raw = _require_mapping(
             baseline_raw.get("channels"), "baseline.channels"
         )
+        aggregate_raw = _require_mapping(data.get("aggregate"), "aggregate")
+        unknown_aggregate = sorted(set(aggregate_raw) - {"gate"})
+        if unknown_aggregate:
+            raise ValueError(f"aggregate: unknown key(s) {unknown_aggregate}")
+        aggregate_gate: AggregateGateSpec | None = None
+        if "gate" in aggregate_raw:
+            aggregate_gate = AggregateGateSpec.from_dict(aggregate_raw["gate"])
 
         targets = {
             name: TargetSpec.from_dict(name, t) for name, t in targets_raw.items()
@@ -1189,6 +1283,7 @@ class ProjectTargetsConfig:
             bundles=bundles,
             profiles=profiles,
             baseline_channels=baseline_channels,
+            aggregate_gate=aggregate_gate,
         )
 
 

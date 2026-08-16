@@ -464,29 +464,6 @@ def _parse_build_output_specs(
         "targets: are declared yet)."
     ),
 )
-@click.option(
-    "--gate-missing-required",
-    type=click.Choice(["fail", "warn"]),
-    default=None,
-    help=(
-        "Stamp run-plan.json's own gate.missing_required, which "
-        "`abicheck aggregate --run-plan run-plan.json` projects into its "
-        "manifest's gate block (CLI cleanup phase two, PR 2 -- the "
-        "run-plan-sourced equivalent of --manifest's own gate.missing_"
-        "required key). Omitted by default, meaning aggregate's hard-coded "
-        "'fail' default applies."
-    ),
-)
-@click.option(
-    "--gate-unexpected-target",
-    type=click.Choice(["include", "warn", "fail", "ignore"]),
-    default=None,
-    help=(
-        "Stamp run-plan.json's own gate.unexpected_target, projected the "
-        "same way as --gate-missing-required above. Omitted by default, "
-        "meaning aggregate's hard-coded 'include' default applies."
-    ),
-)
 @output_options(
     ["json", "text"],
     default="json",
@@ -500,13 +477,24 @@ def project_plan_cmd(
     head_sha: str,
     toolchain_bindings: Path | None,
     allow_empty: bool,
-    gate_missing_required: str | None,
-    gate_unexpected_target: str | None,
     fmt: str,
     output: Path | None,
     verbose: bool,
 ) -> None:
     """Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
+
+    CONFIG's optional ``aggregate: gate:`` block (CLI cleanup phase two, PR 2
+    follow-up) is stamped onto the generated ``run-plan.json``'s own ``gate``
+    block, exactly as a hand-authored ``aggregate --manifest``'s own ``gate``
+    block would be -- so ``abicheck aggregate --run-plan run-plan.json``
+    applies the same policy either way. This replaces the former
+    ``--gate-missing-required``/``--gate-unexpected-target`` flags (removed,
+    no CLI alias): the policy is durable project configuration, not
+    something to re-type on every invocation. Omitting ``aggregate:`` (or
+    either of its ``gate:`` sub-keys) leaves the field unset on the plan, and
+    ``aggregate``'s own hard-coded defaults (``missing_required: fail``,
+    ``unexpected_target: include``) apply, unchanged from before this block
+    existed.
 
     CONFIG defaults to ``.abicheck.yml``. For every ``checks[]`` entry (per
     target or per bundle), resolves which ``(target, profile)`` cells
@@ -583,8 +571,12 @@ def project_plan_cmd(
         project=project,
         head_sha=head_sha,
         resolved_bindings=resolved_bindings,
-        gate_missing_required=gate_missing_required,
-        gate_unexpected_target=gate_unexpected_target,
+        gate_missing_required=(
+            parsed.aggregate_gate.missing_required if parsed.aggregate_gate else None
+        ),
+        gate_unexpected_target=(
+            parsed.aggregate_gate.unexpected_target if parsed.aggregate_gate else None
+        ),
     )
 
     if bindings_file_for_identity is not None:

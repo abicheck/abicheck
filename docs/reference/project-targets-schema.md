@@ -1,6 +1,7 @@
 # `.abicheck.yml` Project Targets Reference
 
-`.abicheck.yml`'s `targets:`/`bundles:`/`profiles:`/`baseline:` block is the
+`.abicheck.yml`'s `targets:`/`bundles:`/`profiles:`/`baseline:`/`aggregate:`
+block is the
 portable, project-owned surface that declares a project's CI-integration
 topology: which libraries/consumers/plugin-contracts exist, how they group
 into release bundles, which build profiles are ABI contracts, which baseline
@@ -370,6 +371,34 @@ Currently one recognized sub-key, `channels:` — a mapping of channel id →
 An external object store (a fourth backend ADR-047 §10 lists) is out of
 scope for P0/P1 and not a valid `source` value here.
 
+## `aggregate:`
+
+The durable, project-owned home for `abicheck aggregate`'s
+missing-required/unexpected-target gate policy (CLI cleanup phase two, PR 2
+follow-up), stated once instead of re-typed on every `project plan`
+invocation. `abicheck project plan` stamps this block's values onto the
+generated `run-plan.json`'s own top-level `gate` block (see the
+[run-plan schema](run-plan-schema.md#top-level-gate-block-and-the-schema-discriminator))
+— the same `gate` shape a hand-authored `aggregate --manifest` carries
+directly (see [Aggregate Reports](../use/aggregate-reports.md)).
+
+One recognized sub-key, `gate:`, with two independently optional fields:
+
+```yaml
+aggregate:
+  gate:
+    missing_required: fail       # fail | warn (default: fail)
+    unexpected_target: include   # include | warn | fail | ignore (default: include)
+```
+
+Omitting `aggregate:` entirely, or either `gate:` sub-key, leaves that field
+unset on the generated plan — `aggregate`'s own hard-coded defaults apply,
+unchanged from before this block existed. There is no per-invocation CLI
+override: `project plan`'s former `--gate-missing-required`/
+`--gate-unexpected-target` flags were removed (no CLI alias, same "no
+deprecation window" stance as the rest of this cleanup) — set the policy
+here instead.
+
 ## Validation
 
 `abicheck project validate [CONFIG]` (`CONFIG` defaults to
@@ -404,7 +433,7 @@ scope for P0/P1 and not a valid `source` value here.
 
 Structural/type errors in the YAML itself (an unknown key at any level —
 including a misspelled top-level block like `tagrets:`, checked against the
-*full* `.abicheck.yml` key set, not just this block's four keys — or a
+*full* `.abicheck.yml` key set, not just this block's five keys — or a
 value of the wrong type, e.g. `contract: "yes"` instead of a boolean) fail
 immediately, as a usage error, matching `.abicheck.yml`'s existing
 strict-parsing convention (ADR-043) — the validation report above only
@@ -427,4 +456,5 @@ $ abicheck project validate .abicheck.yml --format json
 
 Exit codes: `0` valid (warnings may still be present), `1` one or more
 validation errors, `64` usage error (`CONFIG` is not readable YAML, or its
-`targets:`/`bundles:`/`profiles:`/`baseline:` block fails strict parsing).
+`targets:`/`bundles:`/`profiles:`/`baseline:`/`aggregate:` block fails
+strict parsing).

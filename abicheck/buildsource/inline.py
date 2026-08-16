@@ -271,9 +271,10 @@ class BuildConfig:
     #: newer schema read by an older abicheck) **warns**, never errors, so a
     #: project can adopt a future key without breaking older installs. Keys parsed
     #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
-    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline`` →
-    #: ``project_targets.py``, ADR-047 §3/G30 P1.5) are listed so they don't trip
-    #: the warning.
+    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline``/
+    #: ``aggregate`` → ``project_targets.py``, ADR-047 §3/G30 P1.5; CLI cleanup
+    #: phase two, PR 2 follow-up for ``aggregate``) are listed so they don't
+    #: trip the warning.
     _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "build",
@@ -292,6 +293,7 @@ class BuildConfig:
             "bundles",
             "profiles",
             "baseline",
+            "aggregate",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {

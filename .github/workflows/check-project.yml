@@ -126,14 +126,13 @@ on:
         description: 'Python version for setup-python, every job.'
         type: string
         default: '3.13'
-      on-missing-required:
-        description: "Folded into the manifest's `gate.missing_required` before `abicheck aggregate` runs (CLI cleanup phase two, PR 2 replaced the CLI flag with a manifest-carried policy): 'fail' (default) or 'warn'."
-        type: string
-        default: 'fail'
-      on-unexpected-target:
-        description: "Folded into the manifest's `gate.unexpected_target` before `abicheck aggregate` runs: 'include' (default), 'warn', 'fail', or 'ignore'."
-        type: string
-        default: 'include'
+      # `abicheck aggregate`'s missing-required/unexpected-target gate policy
+      # (CLI cleanup phase two, PR 2's original manifest-carried policy, and
+      # its PR 2 follow-up) is no longer a workflow input here: `project
+      # plan`'s own --gate-missing-required/--gate-unexpected-target flags
+      # were removed (no CLI alias), so the only way to set it is CONFIG's
+      # own `aggregate: gate:` block, read directly by the "Generate
+      # run-plan.json" step below. Set it there instead of here.
 
       # ── Shared analysis options, forwarded to every check-target cell ────
       # (a per-cell override of any of these is out of scope for this first
@@ -370,14 +369,9 @@ jobs:
           PROJECT: ${{ inputs.project != '' && inputs.project || github.repository }}
           HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           TOOLCHAIN_BINDINGS_PATH: ${{ inputs.toolchain-bindings-path }}
-          ON_MISSING_REQUIRED: ${{ inputs.on-missing-required }}
-          ON_UNEXPECTED_TARGET: ${{ inputs.on-unexpected-target }}
         run: |
           set -euo pipefail
-          args=(
-            --gate-missing-required "$ON_MISSING_REQUIRED"
-            --gate-unexpected-target "$ON_UNEXPECTED_TARGET"
-          )
+          args=()
           if [[ -n "$TOOLCHAIN_BINDINGS_PATH" ]]; then
             args+=(--toolchain-bindings "$TOOLCHAIN_BINDINGS_PATH")
           fi
@@ -402,13 +396,17 @@ jobs:
           # error message than a bare CLI exit), so --allow-empty defers to
           # that guard instead of stopping mid-script with a less helpful one.
           #
-          # --gate-missing-required/--gate-unexpected-target (CLI cleanup
-          # phase two, PR 2) stamp run-plan.json's own gate policy, which
-          # `to_aggregate_manifest()` projects into the aggregate manifest's
-          # `gate` block -- the equivalent of the removed `aggregate
-          # --on-missing-required`/`--on-unexpected-target` CLI flags, now
-          # riding inside the plan artifact instead of a second pair of CLI
-          # arguments at the aggregate step (see "Run aggregate" below).
+          # run-plan.json's own gate policy (stamped from CONFIG's optional
+          # `aggregate: gate:` block, CLI cleanup phase two, PR 2 follow-up)
+          # is what `to_aggregate_manifest()` projects into the aggregate
+          # manifest's `gate` block -- the equivalent of the removed
+          # `aggregate --on-missing-required`/`--on-unexpected-target` CLI
+          # flags, now riding inside the plan artifact instead of a second
+          # pair of CLI arguments at the aggregate step (see "Run aggregate"
+          # below). There is no per-workflow-call override any more (the
+          # underlying `project plan --gate-missing-required`/
+          # `--gate-unexpected-target` flags were removed too, no CLI
+          # alias) -- set the policy in CONFIG directly.
           abicheck project plan "$CONFIG_PATH" \
             --project "$PROJECT" --head-sha "$HEAD_SHA" \
             --allow-empty "${args[@]}" -o run-plan.json
@@ -1136,10 +1134,10 @@ jobs:
         run: |
           # --run-plan projects run-plan.json to the expected-target set
           # internally (ADR-054) -- no separate `run-plan to-aggregate-
-          # manifest` step needed. The gate policy (this workflow's own
-          # `on-missing-required`/`on-unexpected-target` inputs) now rides
-          # inside run-plan.json itself (CLI cleanup phase two, PR 2 -- see
-          # the "Generate run-plan.json" step above), not as CLI flags here.
+          # manifest` step needed. The gate policy (CONFIG's own
+          # `aggregate: gate:` block) rides inside run-plan.json itself
+          # (CLI cleanup phase two, PR 2 -- see the "Generate run-plan.json"
+          # step above), not as CLI flags here.
           set +e
           abicheck aggregate reports --run-plan run-plan.json \
             --format json -o aggregate-result.json
