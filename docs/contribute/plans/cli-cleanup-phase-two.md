@@ -647,6 +647,26 @@ assurance:
   required_status: complete
 ```
 
+**The unset/disabled case must be pinned explicitly, not left implicit
+(Codex review).** `AssuranceStatus` (`analysis_assurance.py`) is already a
+five-value *observed*-status enum — `complete`, `partial`, `failed`,
+`not_comparable`, `not_requested` — and `not_requested` there names something
+`analysis_assurance.status` genuinely comes back as. `assurance.required_status`
+is a different axis: a configured *threshold*, not an observation, so it must
+not reuse `not_requested` (or any other observed-status spelling) to mean "no
+gate configured" — that would make one string do double duty as both a real
+status value and an off switch, and risks gating every default invocation the
+moment the field is merely present with an unexpected value. The field is
+**optional and absent by default**: unset (`null`/key omitted) means exactly
+what today's ungated behavior means — `analysis_assurance_exit_contribution`
+returns `0` regardless of the observed status, matching
+`--require-complete-analysis` never having been passed. Only an explicit
+`required_status: complete` (today's one real tier; a future looser or
+stricter tier is a new value here, not a new key) activates the gate. Pin
+this — the optional field, its `null` default, and its serialization — in the
+config schema and in tests before PR B ships it, not as an implementation
+detail discovered while wiring the resolver.
+
 `--require-complete-analysis` stays as the CLI spelling (the advanced one-run
 override), but resolves into `assurance.required_status: complete`, not into a
 parallel `gate.require_complete_analysis` field — the boolean is a resolver
@@ -671,10 +691,13 @@ target report that legitimately exited `1` could aggregate green (its
 contribution silently overridden by a looser aggregate-time policy), or a
 report that explicitly accepted partial assurance could be newly failed
 downstream by a stricter one. If a future need for `aggregate` to *verify*
-consistent assurance policy across targets emerges, that is a configuration-
-digest check against `effective_policy` (PR 2's field), not a second
-resolution — never a value the aggregate derives from its own gate policy and
-substitutes for what each report already recorded.
+consistent assurance policy across targets emerges, that is a check against
+PR B's per-report effective-configuration digest — not PR 2's
+`effective_policy` (that field is `aggregate`'s own `missing_required`/
+`unexpected_target` target-expectation policy, per
+`aggregate_report.schema.json`, and carries no assurance information to
+compare) — and never a value the aggregate derives from its own gate policy
+and substitutes for what each report already recorded.
 
 **Do not add a further standalone boolean for any new assurance dimension**
 on the comparison-producing side — extend the `assurance.required_status`
