@@ -1325,6 +1325,10 @@
         "dwarf_context_status": {
           "type": "string"
         },
+        "debug_evidence": {
+          "type": "object",
+          "description": "Per-side debug evidence receipt. basic and advanced distinguish presence-only probes, parsed facts, unavailable/failed parsing, and BTF/CTF's unsupported advanced DWARF capability."
+        },
         "l3_context_status": {
           "type": "string"
         },

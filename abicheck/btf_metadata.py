@@ -152,6 +152,8 @@ class BtfMetadata:
             structs=dict(self.structs),
             enums=dict(self.enums),
             has_dwarf=self.has_btf,
+            evidence_source="btf",
+            evidence_state="parsed" if self.has_btf else "not_available",
         )
 
 

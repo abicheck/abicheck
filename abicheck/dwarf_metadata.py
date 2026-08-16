@@ -128,6 +128,12 @@ class DwarfMetadata:
     # under -mlong-double-64/-mabi=ibmlongdouble (G23 D2, same-mangling case).
     base_types: dict[str, int] = field(default_factory=dict)
     has_dwarf: bool = False   # False = binary had no DWARF info
+    # Provenance for assurance receipts.  ``has_dwarf`` alone deliberately
+    # cannot say whether this is a full type parse or binary-depth's cheap
+    # section-presence probe, nor whether BTF/CTF was adapted into this
+    # DWARF-shaped compatibility model.
+    evidence_source: str = "dwarf"  # dwarf | btf | ctf
+    evidence_state: str = "not_available"  # parsed | presence_only | failed | not_available
 
     # TypeMetadataSource protocol methods
     @property

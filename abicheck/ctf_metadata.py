@@ -157,6 +157,8 @@ class CtfMetadata:
             structs=dict(self.structs),
             enums=dict(self.enums),
             has_dwarf=self.has_ctf,
+            evidence_source="ctf",
+            evidence_state="parsed" if self.has_ctf else "not_available",
         )
 
 

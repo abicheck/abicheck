@@ -145,6 +145,10 @@ class ToolchainInfo:
 class AdvancedDwarfMetadata:
     """Sprint 4 metadata extracted from a single .so."""
     has_dwarf: bool = False
+    # See DwarfMetadata.evidence_state.  BTF/CTF explicitly use
+    # ``not_supported``: their basic layouts must never be represented as
+    # DWARF calling-convention/value-ABI evidence.
+    evidence_state: str = "not_available"  # parsed | presence_only | failed | not_supported | not_available
     # Normalized target architecture (_normalize_arch): "x86_64", "aarch64",
     # "i386", … Empty string when unknown (e.g. arch-less mock snapshots).
     # Gates the SysV-AMD64-specific aggregate-return-convention classification.

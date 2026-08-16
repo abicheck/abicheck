@@ -661,6 +661,8 @@ def _dwarf_from_dict(d: dict[str, Any]) -> Any:
         enums=enums,
         base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
+        evidence_source=d.get("evidence_source", "dwarf"),
+        evidence_state=d.get("evidence_state", "parsed" if d.get("has_dwarf", False) else "not_available"),
     )
 
 
@@ -677,6 +679,7 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
+        evidence_state=d.get("evidence_state", "parsed" if d.get("has_dwarf", False) else "not_available"),
         target_arch=d.get("target_arch", ""),
         toolchain=toolchain,
         calling_conventions=d.get("calling_conventions", {}),

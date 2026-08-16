@@ -146,7 +146,7 @@ __all__ = [
 #: ``buildsource.model.BUILD_SOURCE_PACK_VERSION`` versions independently of
 #: the ABI-snapshot schema: this is a self-contained sub-object a consumer
 #: can version-check without caring about the report's own MAJOR.MINOR.
-ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.0"
+ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.1"
 
 #: The required top-level status vocabulary.
 AssuranceStatus = Literal[
@@ -317,6 +317,35 @@ class ExportAccounting:
         }
 
 
+def _debug_evidence_receipt(snap: AbiSnapshot) -> dict[str, str]:
+    """Return one side's debug capability receipt without re-probing it.
+
+    Basic BTF/CTF metadata is intentionally adapted into ``DwarfMetadata``
+    for layout comparison.  It has no DWARF advanced channel, though, so it
+    must be reported as ``not_supported`` rather than silently looking like
+    calling-convention/value-ABI evidence.
+    """
+    basic = getattr(snap, "dwarf", None)
+    advanced = getattr(snap, "dwarf_advanced", None)
+    source = getattr(basic, "evidence_source", "dwarf") if basic else "dwarf"
+    basic_state = (
+        getattr(basic, "evidence_state", None)
+        or ("parsed" if basic is not None and basic.has_dwarf else "not_available")
+    )
+    if source in ("btf", "ctf"):
+        advanced_state = "not_supported"
+    else:
+        advanced_state = (
+            getattr(advanced, "evidence_state", None)
+            or ("parsed" if advanced is not None and advanced.has_dwarf else "not_available")
+        )
+    return {
+        "source": source,
+        "basic": basic_state,
+        "advanced": advanced_state,
+    }
+
+
 @dataclass
 class AnalysisAssurance:
     """The ``analysis_assurance`` block: how complete was the evidence.
@@ -360,6 +389,10 @@ class AnalysisAssurance:
     #: missing side was never even attempted), or ``"not_evaluated"``
     #: (neither side has DWARF -- nothing to be asymmetric about).
     dwarf_context_status: str = "not_evaluated"
+    #: Per-side receipt of the three distinct debug states: a cheap
+    #: presence-only probe, parsed basic layouts, and parsed DWARF-advanced
+    #: calling-convention/value-ABI facts.  BTF/CTF expose basic facts only.
+    debug_evidence: dict[str, dict[str, str]] = field(default_factory=dict)
     #: ``"clean"`` (both sides carry an L3 ``BuildEvidence`` payload),
     #: ``"asymmetric"`` (only one side does -- the other's build-only
     #: changes were never checked at all;
@@ -408,6 +441,7 @@ class AnalysisAssurance:
             "l0_context_status": self.l0_context_status,
             "header_context_status": self.header_context_status,
             "dwarf_context_status": self.dwarf_context_status,
+            "debug_evidence": self.debug_evidence,
             "l3_context_status": self.l3_context_status,
             "fact_set_comparability": self.fact_set_comparability,
             "graph_completeness": self.graph_completeness,
@@ -1346,6 +1380,34 @@ def compute_analysis_assurance(
     # -- DWARF-context status --------------------------------------------------
     dwarf_context_status, dw_notes = _dwarf_context_status(old, new)
     notes.extend(dw_notes)
+    debug_evidence = {
+        "old": _debug_evidence_receipt(old),
+        "new": _debug_evidence_receipt(new),
+    }
+    advanced_unavailable = any(
+        receipt["basic"] == "parsed" and receipt["advanced"] != "parsed"
+        for receipt in debug_evidence.values()
+    )
+    debug_parse_incomplete = any(
+        receipt["basic"] in ("presence_only", "failed")
+        or receipt["advanced"] in ("presence_only", "failed")
+        for receipt in debug_evidence.values()
+    )
+    if advanced_unavailable:
+        affected = ", ".join(
+            side
+            for side, receipt in debug_evidence.items()
+            if receipt["basic"] == "parsed" and receipt["advanced"] != "parsed"
+        )
+        notes.append(
+            "parsed basic debug evidence lacks parsed DWARF-advanced "
+            f"calling-convention/value-ABI capability on: {affected}"
+        )
+    if debug_parse_incomplete:
+        notes.append(
+            "debug evidence was only presence-probed or failed to parse; "
+            "layout and calling-convention/value-ABI facts were not fully evaluated"
+        )
     # Symmetric absence is still incomplete for a binary comparison. ELF and
     # header evidence cannot establish layout, value-ABI, or calling-convention
     # compatibility when neither artifact has usable DWARF. Keep this orthogonal
@@ -1433,6 +1495,8 @@ def compute_analysis_assurance(
         l0_context_status == "asymmetric"
         or header_context_status in ("drift_detected", "asymmetric")
         or dwarf_context_status == "asymmetric"
+        or advanced_unavailable
+        or debug_parse_incomplete
         or dwarf_evidence_missing
         or l3_context_status == "asymmetric"
         or graph_completeness in ("degraded", "narrowed", "unknown")
@@ -1462,6 +1526,7 @@ def compute_analysis_assurance(
         l0_context_status=l0_context_status,
         header_context_status=header_context_status,
         dwarf_context_status=dwarf_context_status,
+        debug_evidence=debug_evidence,
         l3_context_status=l3_context_status,
         fact_set_comparability=fact_set_comparability,
         graph_completeness=graph_completeness,

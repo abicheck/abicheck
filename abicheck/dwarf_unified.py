@@ -165,8 +165,8 @@ def parse_dwarf_from_session(
     the whole binary's DIE tree still resident from this one. Output is
     unaffected either way -- see ``free_cu_die_cache``'s docstring.
     """
-    meta = DwarfMetadata(has_dwarf=True)
-    adv = AdvancedDwarfMetadata(has_dwarf=True)
+    meta = DwarfMetadata(has_dwarf=True, evidence_state="parsed")
+    adv = AdvancedDwarfMetadata(has_dwarf=True, evidence_state="parsed")
     adv.target_arch = session.arch
     low_memory = dwarf_low_memory_mode(session.dwarf)
 
@@ -226,7 +226,10 @@ def parse_dwarf(
         # degrades to symbol-only) rather than leaking the handle / aborting.
         log.warning("parse_dwarf: failed to parse CUs in %s: %s", so_path, exc)
         session.close()
-        return DwarfMetadata(), AdvancedDwarfMetadata()
+        return (
+            DwarfMetadata(evidence_state="failed"),
+            AdvancedDwarfMetadata(evidence_state="failed"),
+        )
 
     if _session_out is not None:
         _session_out.append(session)

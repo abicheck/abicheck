@@ -37,7 +37,11 @@ def cheap_dwarf_presence_metadata(so_path: Path) -> tuple[DwarfMetadata, Advance
             has_dwarf = has_real_dwarf_info(ELFFile(f))
     except Exception:  # noqa: BLE001 - debug presence is advisory here
         has_dwarf = False
-    return DwarfMetadata(has_dwarf=has_dwarf), AdvancedDwarfMetadata(has_dwarf=has_dwarf)
+    state = "presence_only" if has_dwarf else "not_available"
+    return (
+        DwarfMetadata(has_dwarf=has_dwarf, evidence_state=state),
+        AdvancedDwarfMetadata(has_dwarf=has_dwarf, evidence_state=state),
+    )
 
 
 def cheap_debug_presence_metadata(
@@ -49,29 +53,35 @@ def cheap_debug_presence_metadata(
     if debug_format == "dwarf":
         return cheap_dwarf_presence_metadata(so_path)
     if debug_format == "btf":
-        return _section_presence_metadata(_has_btf(so_path))
+        return _section_presence_metadata(_has_btf(so_path), "btf")
     if debug_format == "ctf":
-        return _section_presence_metadata(_has_ctf(so_path))
+        return _section_presence_metadata(_has_ctf(so_path), "ctf")
     if debug_format is not None:
         raise ValueError(
             f"Invalid debug_format {debug_format!r}; expected 'dwarf', 'btf', or 'ctf'."
         )
 
     if _is_kernel_binary(so_path) and _has_btf(so_path):
-        return _section_presence_metadata(True)
+        return _section_presence_metadata(True, "btf")
 
     dwarf_meta, dwarf_adv = cheap_dwarf_presence_metadata(so_path)
     if dwarf_meta.has_dwarf:
         return dwarf_meta, dwarf_adv
     if _has_btf(so_path):
-        return _section_presence_metadata(True)
+        return _section_presence_metadata(True, "btf")
     if _has_ctf(so_path):
-        return _section_presence_metadata(True)
+        return _section_presence_metadata(True, "ctf")
     return dwarf_meta, dwarf_adv
 
 
-def _section_presence_metadata(present: bool) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
-    return DwarfMetadata(has_dwarf=present), AdvancedDwarfMetadata(has_dwarf=present)
+def _section_presence_metadata(
+    present: bool, source: str = "dwarf"
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+    state = "presence_only" if present else "not_available"
+    return (
+        DwarfMetadata(has_dwarf=present, evidence_source=source, evidence_state=state),
+        AdvancedDwarfMetadata(has_dwarf=present, evidence_state=state),
+    )
 
 
 def _has_btf(so_path: Path) -> bool:
