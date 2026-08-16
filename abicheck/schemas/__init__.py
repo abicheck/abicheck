@@ -513,12 +513,19 @@ from typing import Any
 #:       ``contract_coverage_exit_contribution``/
 #:       ``analysis_assurance_exit_contribution`` independently and risk
 #:       disagreeing with the number that actually gated the run.
-#:       Unconditional -- every comparison has a compatibility
-#:       contribution, so there is always a decision to report, unlike
-#:       ``contract_context`` which stays opt-in. Deliberately does not
-#:       yet cover ``not_comparable``/scan-budget/release-removed-library
-#:       exits, which are raised through different code paths today; see
-#:       ``exit_decision.py``'s own module docstring. Additive key.
+#:       Emitted by every native ``compare``/``scan --against`` JSON
+#:       report -- every comparison has a compatibility contribution, so
+#:       there is always a decision to report, unlike ``contract_context``
+#:       which stays opt-in -- but is schema-optional, not required: an
+#:       ``include_exit_decision=False`` caller (``compat check``'s own
+#:       ABICC 0/1/2 exit scheme differs from native ``compare``'s, so its
+#:       report omits this block rather than emit a ``code`` that would
+#:       disagree with the real process exit for the same run -- Codex
+#:       review) still validates against schema 2.41 with the key absent.
+#:       Deliberately does not yet cover ``not_comparable``/scan-budget/
+#:       release-removed-library exits, which are raised through
+#:       different code paths today; see ``exit_decision.py``'s own module
+#:       docstring. Additive key.
 REPORT_SCHEMA_VERSION = "2.41"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

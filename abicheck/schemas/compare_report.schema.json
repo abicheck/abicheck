@@ -44,8 +44,7 @@
           "evidence_tier",
           "evidence_tiers",
           "analysis_assurance",
-          "analysis_assurance_exit_contribution",
-          "exit"
+          "analysis_assurance_exit_contribution"
         ]
       }
     },

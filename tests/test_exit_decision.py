@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.checker import compare
@@ -36,7 +37,17 @@ from abicheck.cli import main
 from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.reporter import to_json
+from abicheck.schemas import load_compare_report_schema
 from abicheck.serialization import snapshot_to_json
+
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover - exercised only when jsonschema absent
+    jsonschema = None
+
+_requires_jsonschema = pytest.mark.skipif(
+    jsonschema is None, reason="jsonschema not installed"
+)
 
 
 class TestResolveExitDecision:
@@ -367,3 +378,20 @@ class TestIncludeExitDecisionFlag:
                 to_json(result, report_mode=mode, include_exit_decision=False)
             )
             assert "exit" not in report, mode
+
+    @_requires_jsonschema
+    def test_include_exit_decision_false_still_validates_against_schema(
+        self,
+    ) -> None:
+        """``exit`` is schema-optional (not in ``required``) specifically so
+        this -- what ``compat check``'s JSON output actually produces -- still
+        validates against the same ``report_schema_version`` it stamps
+        (Codex review: an earlier revision required ``exit`` unconditionally,
+        so a ``compat`` report claiming schema 2.41 while omitting the block
+        failed to validate against its own advertised schema).
+        """
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        report = json.loads(to_json(result, include_exit_decision=False))
+        assert "exit" not in report
+        jsonschema.validate(report, load_compare_report_schema())
