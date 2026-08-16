@@ -440,10 +440,12 @@ does not undertake, and would leave two sources for the same verdict/finding
 set free to drift. What actually generalizes across all three operand shapes
 is the *concept* of three fields — `exit`, `contract_coverage_exit_
 contribution`, `analysis_assurance_exit_contribution` — not yet a uniform
-*location* for them today. `compare` (PR G1, landed) puts all three at the
-report's top level. **`scan --against` does not (fresh evidence, Codex
-review):** `ScanOutcome.to_dict()` (`scan_engine.py`) nests its whole
-`diff_summary` under a `"diff"` key, and `_baseline_summary()`
+*location* for them today. `compare` puts all three at the report's top
+level, **implemented in a separate, not-yet-merged PR (#789) — "PR G1" here
+names the plan slice, not a landed state of this codebase; treat it as still
+in flight until that PR merges to `main`.** **`scan --against` does not
+(fresh evidence, Codex review):** `ScanOutcome.to_dict()` (`scan_engine.py`)
+nests its whole `diff_summary` under a `"diff"` key, and `_baseline_summary()`
 (`cli_scan_baseline.py`) writes `analysis_assurance_exit_contribution` and
 the contract-coverage block *into that nested summary*, not the outer
 `ScanOutcome` dict — so today they live at `report["diff"].
@@ -873,10 +875,11 @@ reviewed ordering rather than inside PR 4.
 
 **(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
 this is no longer two axes but a set of them, and a flat `max()` is not the
-whole rule: a non-comparable pair must dominate every other axis; scan budget
-overflow (`5`) is scan-only; usage error (`64`) is not a result at all and
-never appears in a report; and exit `1` has several distinct causes that a
-bare number cannot tell apart. Encode it once:
+whole rule: scan budget overflow (`5`) is scan-only, and so is a pinned depth
+whose evidence can't be collected (`_EvidenceContractError`, exit `1`); usage
+error (`64`) is not a result at all and never appears in a report; and exit
+`1` has several distinct causes that a bare number cannot tell apart. Encode
+it once:
 
 ```python
 @dataclass(frozen=True)
@@ -891,17 +894,48 @@ class ExitDecision:
 ```
 
 with an explicit precedence resolver, pinned by the ADR and by tests rather
-than distributed across CLI callbacks — **precedence order, not a renumbering**:
+than distributed across CLI callbacks — **precedence order, not a renumbering,
+and derived from what the current code actually does, not from what "should"
+dominate (two rows below were wrong in an earlier draft for exactly that
+reason — Codex review, fresh evidence against `scan_engine.py`)**:
 
 ```text
-usage/config error          (outside the report entirely — 64 everywhere)
-not comparable               (dominates every result axis below)
-budget exceeded              (scan only)
-removed required library  ─┐ mode-dependent (see below) — NOT a fixed rank
-ABI / API / policy gate    ─┘
-coverage & assurance floors (max-folded, never lowering the above)
+usage/config error            (outside the report entirely — 64 everywhere)
+scan evidence-contract error  (scan only, exit 1 — see below)
+scan budget exceeded          (scan only, exit 5 — see below; dominates
+                                not-comparable when both would apply)
+not comparable                (dominates the gate/coverage/assurance axes
+                                below, but not budget — see below)
+removed required library    ─┐ mode-dependent (see below) — NOT a fixed rank
+ABI / API / policy gate      ─┘
+coverage & assurance floors   (max-folded, never lowering the above)
 clean
 ```
+
+**Scan evidence-contract error and the budget-vs-comparability ordering, both
+found by review, fresh evidence against `scan_engine.py`:**
+
+- `run_scan_core` raises `_EvidenceContractError` during evidence collection
+  — before a candidate/baseline comparison is even attempted — whenever a
+  pinned (non-`auto`) `--depth`/`--source-method` has no source evidence to
+  satisfy it (ADR-037 D5). `cli_scan.py` maps it to a `click.ClickException`
+  (exit `1`); `service_scan.py` maps it to `ScanResult(verdict=
+  "EVIDENCE_CONTRACT_ERROR", exit_code=1)`. Distinct from usage error `64`
+  (a bad flag combination) and from the gate's own `1` (a severity-scheme
+  error-level finding) — it's "the evidence contract this run pinned itself
+  to could not be met," always scan-only, and an earlier draft of this table
+  omitted it entirely.
+- An earlier draft also had not-comparable dominating budget overflow — the
+  real code does the opposite. `run_scan_core`'s baseline-compare block can
+  set `exit_code = 6` (`NOT_COMPARABLE`) on a `ProfileMismatchError`/
+  `ScopeMismatchError`, but `_check_scan_budget(budget, budget_s, elapsed)`
+  still runs unconditionally afterward and, if the elapsed time is over
+  budget, *raises* `_BudgetOverflow` regardless of what was already decided
+  — discarding the not-comparable result before `ScanOutcome` is even
+  constructed, so the caller maps the exception to exit `5`. So today, when
+  both conditions hold in the same run, budget wins. `ExitDecision`'s
+  resolver must reproduce that order, not the "more fundamental axis should
+  dominate" ordering that reads more natural on paper.
 
 **Removed-required-library's rank is not fixed, and an earlier draft of this
 table got that wrong** (Codex review): today's contract
