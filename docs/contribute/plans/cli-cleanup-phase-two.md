@@ -438,16 +438,31 @@ scan's or release's own, differently-shaped report structures.** Introducing
 those spellings for real would be a major-version schema migration this PR
 does not undertake, and would leave two sources for the same verdict/finding
 set free to drift. What actually generalizes across all three operand shapes
-today, without inventing a new envelope, is only the three fields PR G1/#780
-already ship at the top level of whichever shape a given command emits:
-`exit`, `contract_coverage_exit_contribution`,
-`analysis_assurance_exit_contribution`. The Action's renderer keeps reading
-each operand's own existing `verdict`/`changes` (single-library),
-per-library summaries (release), or scan's own result shape through the
-adapter it already has for that shape — PR E's job is only to route the gate
-*explanation* through the shared `exit` block instead of re-deriving it from
-stderr, not to unify how verdicts/findings are structured. A single-library
-compare report, unmodified by this section, already reads:
+is the *concept* of three fields — `exit`, `contract_coverage_exit_
+contribution`, `analysis_assurance_exit_contribution` — not yet a uniform
+*location* for them today. `compare` (PR G1, landed) puts all three at the
+report's top level. **`scan --against` does not (fresh evidence, Codex
+review):** `ScanOutcome.to_dict()` (`scan_engine.py`) nests its whole
+`diff_summary` under a `"diff"` key, and `_baseline_summary()`
+(`cli_scan_baseline.py`) writes `analysis_assurance_exit_contribution` and
+the contract-coverage block *into that nested summary*, not the outer
+`ScanOutcome` dict — so today they live at `report["diff"].
+analysis_assurance_exit_contribution`, not `report.
+analysis_assurance_exit_contribution`. G1 never touched
+`cli_scan_baseline.py` at all, so `exit` does not exist for `scan --against`
+yet, in either location. PR E's job is therefore two things, not one: land
+`exit` for `scan --against` (mirroring G1's `compare` wiring, called from
+`_baseline_summary`/`_run_baseline_compare` the way `add_contract_context`
+is called from `compare`'s own JSON path), and decide — as part of that
+wiring, not as a drive-by rename — whether `scan`'s existing nested
+placement moves to the top level to match `compare`, or `compare`'s renderer
+adapter learns to read scan's nested location instead. Whichever is chosen,
+the Action's renderer keeps reading each operand's own existing
+`verdict`/`changes` (single-library), per-library summaries (release), or
+scan's own result shape through the adapter it already has for that shape —
+this section is only about where the *gate-explanation* fields live, not
+about unifying verdict/finding structures. A single-library compare report,
+unmodified by this section, already reads:
 
 ```json
 {
@@ -462,10 +477,10 @@ compare report, unmodified by this section, already reads:
 With that in place the Action does not parse stderr, does not re-run any
 comparison, does not guess why the exit was `1`, renders annotations from the
 persisted findings and the Job Summary from the same object, and behaves
-identically for a single pair and a release fan-out — reading `exit` the same
-way regardless of which command's report it is, while still reading
-`verdict`/`changes` (or that operand's own equivalent) unchanged. The `exit`
-block is the
+identically for a single pair and a release fan-out — once PR E lands
+`exit` for `scan --against` at whichever location this section's `scan`
+resolution above settles on, while still reading `verdict`/`changes` (or
+that operand's own equivalent) unchanged. The `exit` block is the
 same object PR 4/G formalizes as `ExitDecision`. Build it once and consume it
 once — which is why PR G is split, and the split is load-bearing for this
 section rather than cosmetic: **G1** builds the decision object and emits its
