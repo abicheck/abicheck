@@ -369,50 +369,39 @@ class TestPySafeDirFailsClosedWhenMktempFails:
     (``exit 1``) instead.
     """
 
-    def test_mktemp_failure_exits_nonzero_with_a_clear_error(
-        self, tmp_path: Path
-    ) -> None:
-        # Forces a REAL `mktemp -d` failure via `$TMPDIR` pointing at a
-        # plain file (mktemp then fails with "Not a directory") rather than
-        # shadowing `mktemp` itself with a fake PATH-prioritized shim --
-        # two earlier revisions of this test tried exactly that (first with
-        # `os.chmod`, then with bash's own `chmod +x` plus a relative PATH
-        # entry, mirroring the fix that worked for `TestPyBinResolvedAs
-        # Absolute` one class up) and BOTH still failed identically on
-        # windows-latest CI: a bareword `mktemp -d` invocation kept
-        # resolving the real system `mktemp` regardless, even though the
-        # identical PATH-priority mechanism was independently confirmed
-        # working for `command -v python3` elsewhere in this same file --
-        # the exact reason for the difference could not be root-caused
-        # remotely. Driving a genuine failure in the real `mktemp` binary
-        # sidesteps the whole PATH-shadowing question entirely, and is
-        # arguably a more faithful test of this fail-closed behavior than
-        # a fake shim would have been anyway.
+    def test_mktemp_failure_exits_nonzero_with_a_clear_error(self) -> None:
+        # Shadows `mktemp` with a bash FUNCTION defined inline in the script
+        # itself, rather than a fake file on PATH or an environment
+        # variable read by the real binary -- three earlier revisions of
+        # this test each tried one of those and each failed on a different
+        # platform for a different, never-fully-explained reason: a
+        # PATH-prioritized fake shim (marked executable first via
+        # `os.chmod`, then via bash's own `chmod +x` plus a relative PATH
+        # entry) was never picked up by a bareword `mktemp -d` invocation
+        # on windows-latest CI, even though the identical PATH-priority
+        # mechanism was independently confirmed working for `command -v
+        # python3` elsewhere in this file; a `$TMPDIR` override (first
+        # relative, then absolute) pointed at a plain file was silently
+        # ignored by macOS's `mktemp`, which resolves its own temp
+        # directory via `confstr(_CS_DARWIN_USER_TEMP_DIR)` rather than
+        # reading the `TMPDIR` environment variable the way GNU coreutils
+        # and MSYS's own mktemp both do.
         #
-        # `$TMPDIR` is set to an ABSOLUTE path here, not a relative one --
-        # a further revision found the relative form silently ignored by
-        # macOS's BSD `mktemp` (unlike GNU coreutils' on Linux and MSYS on
-        # Windows, both independently verified to honor it): the real
-        # system TMPDIR was used instead and the directory was created
-        # successfully, so this test failed on macOS the same way the two
-        # PATH-shadowing attempts failed on Windows -- a real mktemp
-        # failure, but only reliably reproducible across all three
-        # platforms via an absolute value. Unlike PATH-search entries
-        # (which cross the POSIX/native path-representation boundary this
-        # module's other tests work around), `$TMPDIR` is read directly by
-        # `mktemp` itself as a plain file-path argument, so a native
-        # absolute path string is the form every platform's `mktemp`
-        # already handles correctly (the same reasoning `_mark_executable`
-        # relies on for `chmod`'s own path argument). Verified locally
-        # (GNU coreutils) that `mktemp -d` genuinely fails (exit 1, "Not a
-        # directory") when `$TMPDIR` names an existing plain file, for
-        # both an absolute and a relative `$TMPDIR` value -- only the
-        # relative form is platform-fragile.
-        blocker = tmp_path / "not_a_directory"
-        blocker.write_text("")
-        script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
-        env = {**os.environ, "TMPDIR": str(blocker)}
-        result = _run_bash_script(script, env=env, timeout=30)
+        # A bash function sidesteps both failure classes at once: function
+        # lookup always takes precedence over a PATH-searched external
+        # command for an unqualified name (`mktemp -d`, exactly the form
+        # `_py_safe_dir_source()`'s own `$(...)` command substitution
+        # uses) in every bash build, on every platform, with no
+        # cross-process filesystem staging, PATH-string translation, or
+        # environment-variable-reading behavior involved at all -- it's
+        # resolved entirely within the one running bash process. Verified
+        # locally that this reliably shadows a bareword `mktemp -d` call.
+        script = (
+            "mktemp() { return 1; }\n"
+            + _py_safe_dir_source()
+            + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
+        )
+        result = _run_bash_script(script, timeout=30)
         assert result.returncode == 1
         assert "UNREACHABLE" not in result.stdout
         assert "::error::" in result.stdout
