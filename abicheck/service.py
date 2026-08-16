@@ -46,6 +46,7 @@ from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
     deferred_token_dirs,
+    include_operand_dirs,
     resolve_inferred_header_roots,
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
@@ -1039,8 +1040,18 @@ def _attach_header_graph(
             # never inspects option-token content, only extra_includes/
             # extra_hash_dirs, so without this a header changed under an
             # inferred root would reuse a stale cached AST (Codex review;
-            # mirrors _dump_elf's own deferred_dirs handling).
-            deferred_dirs = tuple(deferred_token_dirs(deferred))
+            # mirrors _dump_elf's own deferred_dirs handling). Also fold in
+            # any include-search directory riding in `cc.gcc_option_tokens`
+            # itself (an explicit --gcc-options/--compiler-option -I, or —
+            # since the P0.3 L3->L2 fold — a compile-DB-derived one), for
+            # the identical reason: this second, independent header parse
+            # has its own cache key, so a directory the primary snapshot
+            # pass already hashes must be hashed here too, or an edit under
+            # it would silently reuse a stale cached graph even though the
+            # primary snapshot re-parsed correctly (Codex review).
+            deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
+                cc.gcc_option_tokens
+            )
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -1310,7 +1321,13 @@ def _dump_elf(
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
         # Deferred roots ride in gcc_option_tokens (-isystem), not extra_includes,
         # so hash their contents into the AST cache key explicitly (Codex review).
-        deferred_dirs = tuple(deferred_token_dirs(deferred))
+        # Also fold in any include-search dir in cc.gcc_option_tokens itself, so
+        # this PRIMARY parse's cache key stays aligned with _attach_header_graph's
+        # own identical fold above -- else the two passes could disagree on
+        # staleness for the same header (Codex review).
+        deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
+            cc.gcc_option_tokens
+        )
 
     compiler = "cc" if lang == "c" else "c++"
     try:

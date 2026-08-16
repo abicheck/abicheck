@@ -24,27 +24,37 @@ still-held lock until the 600s timeout (Codex review)."""
 from __future__ import annotations
 
 from abicheck.cli_scan import _build_new_snapshot
+from abicheck.compile_context import CompileContext
+
+#: Keyword names shared verbatim between seed_includes_and_fold_compile_context's
+#: own signature and CompileContext's fields -- one place to update if either
+#: gains a field, instead of three hand-copied constructors (CodeRabbit review).
+_CC_FIELDS = (
+    "gcc_path", "gcc_prefix", "gcc_options", "gcc_option_tokens",
+    "sysroot", "nostdinc", "frontend", "frontend_context",
+)
+
+
+def _explicit_ctx_from_kwargs(kwargs: dict) -> CompileContext:
+    return CompileContext(**{k: kwargs[k] for k in _CC_FIELDS})
 
 
 def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
     events: list[str] = []
     seed_kwargs: dict = {}
 
-    def fake_seed(**kwargs):
+    def fake_seed_and_fold(**kwargs):
         seed_kwargs.update(kwargs)
         events.append("seed")
-        # Faithful to the real seed_l2_includes: an inferred-CMake seed produces a
-        # flock-release cleanup that, given a defer_cleanup list, is pushed there
-        # (and returned as [] pending) — otherwise returned pending for the caller
-        # to drain locally. So with the *bug* (outer list passed) the cleanup lands
-        # on the outer list and never runs before embed; with the fix (None) it
-        # comes back pending and the finally drains it first.
-        cleanup = lambda: events.append("cleanup")  # noqa: E731
-        defer = kwargs["defer_cleanup"]
-        if defer is not None:
-            defer.append(cleanup)
-            return list(kwargs["includes"]), []
-        return list(kwargs["includes"]), [cleanup]
+        # Faithful to the real seed_includes_and_fold_compile_context: an
+        # inferred-CMake seed produces a flock-release cleanup, appended to
+        # the caller-owned pending_cleanups list -- which _build_new_snapshot
+        # must keep LOCAL (its own fresh list, never the outer scan
+        # defer_cleanup) and drain in its finally, before embed_build_source
+        # below replays its own inferred query on the same lock.
+        kwargs["pending_cleanups"].append(lambda: events.append("cleanup"))
+        explicit_ctx = _explicit_ctx_from_kwargs(kwargs)
+        return list(kwargs["includes"]), False, explicit_ctx, ()
 
     def fake_resolve(*args, **kwargs):
         events.append("resolve")
@@ -53,12 +63,16 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
     def fake_embed(*args, **kwargs):
         events.append("embed")
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
     monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
 
     sources = tmp_path / "src"
     sources.mkdir()
+    outer_cleanups: list = []
     _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[tmp_path / "h.h"],
@@ -67,12 +81,15 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
         collect_mode="build",  # non-"off" → embed_build_source runs
         lang="c++",
         allow_build_query=False,
-        defer_cleanup=[],  # the outer scan list — the seed must NOT use it
+        defer_cleanup=outer_cleanups,  # the outer scan list — the seed must NOT use it
     )
 
-    # The seed was told to keep its cleanups local (not on the outer list), so the
-    # flock releases in the finally before embed's own inferred query.
-    assert seed_kwargs.get("defer_cleanup") is None
+    # The seed+fold's pending cleanups were a genuinely different list object
+    # from the outer scan list (Codex review: `is not None` alone also
+    # passes for the outer list itself, since defer_cleanup=[] is never None
+    # either — this must catch a regression that reuses it).
+    assert seed_kwargs["pending_cleanups"] is not outer_cleanups
+    assert outer_cleanups == []
     # Ordering invariant: seed → resolve → cleanup (flock release) → embed.
     assert events == ["seed", "resolve", "cleanup", "embed"]
     assert events.index("cleanup") < events.index("embed")
@@ -90,10 +107,6 @@ def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_pat
         resolve_kwargs.update(kwargs)
         return object()
 
-    monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_l2_includes",
-        lambda **kwargs: (list(kwargs["includes"]), []),
-    )
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
 
     _build_new_snapshot(
@@ -110,6 +123,116 @@ def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_pat
     assert resolve_kwargs["include_dependencies"] is False
 
 
+def test_scan_candidate_folds_l3_compile_context_into_header_parse(
+    monkeypatch, tmp_path
+):
+    """P0.3 L3->L2 fold (AGENTS.md's former "The native ELF `abicheck dump`
+    path never applies L3 build context..." known gap -- scan's own
+    candidate resolution shared the identical gap, closed here alongside
+    dump/PE-Mach-O): `_build_new_snapshot` calls `service.resolve_input`
+    directly, not `resolve_side_snapshot`, so a real compile database's
+    `-std=`/`-D` flags never reached the candidate's own header-AST parse.
+    Without this a scan candidate and a dump-produced baseline of the same
+    project resolved under genuinely different extraction recipes and were
+    rejected as NOT_COMPARABLE for reasons neither command's own
+    diagnostics named."""
+    import json
+
+    from abicheck.model import AbiSnapshot
+
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20", "-DFOO=1"],
+        }]),
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    def fake_resolve(*args, **kwargs):
+        captured["compile"] = kwargs["compile"]
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+    )
+
+    snap, _eff_includes, _eff_ctx = _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[hdr],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="source-target",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+
+    tokens = captured["compile"].gcc_option_tokens
+    assert "-std=c++20" in tokens
+    assert "-DFOO=1" in tokens
+    assert snap.parsed_with_build_context is True
+
+
+def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
+    monkeypatch, tmp_path
+):
+    """Codex review, PR #782: `lang="c"` is never scan's own Click default
+    (only "c++" is), so it is always a genuine explicit request -- the fold
+    must treat it as such (lang_explicit=True) rather than the hard-coded
+    False the first revision of this fix used, or a matched C++ compile
+    unit's own -std=c++20 would reach a parse `scan --lang c` is explicitly
+    forcing into C mode, which a real compiler rejects outright."""
+    import json
+
+    from abicheck.model import AbiSnapshot
+
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20"],
+        }]),
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    def fake_resolve(*args, **kwargs):
+        captured["compile"] = kwargs["compile"]
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+    )
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[hdr],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="source-target",
+        lang="c",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+
+    tokens = captured["compile"].gcc_option_tokens
+    assert not any(t.startswith("-std=") for t in tokens)
+
+
 def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     # _build_new_snapshot returns the *effective* (seeded) includes so a --baseline
     # compare can header-parse the old native library with the same build-derived
@@ -117,16 +240,20 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     seeded = tmp_path / "buildinc"
     seeded.mkdir()
 
-    def fake_seed(**kwargs):
-        return [seeded], []  # seed adds a build-derived dir, no cleanup
+    def fake_seed_and_fold(**kwargs):
+        # seed adds a build-derived dir, no cleanup
+        return [seeded], False, _explicit_ctx_from_kwargs(kwargs), ()
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: object())
     monkeypatch.setattr(
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
 
-    snap, eff_includes = _build_new_snapshot(
+    snap, eff_includes, _eff_ctx = _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[tmp_path / "h.h"],
         includes=[],
@@ -144,15 +271,20 @@ def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_pat
     # parse still can't wedge a later inferred query.
     events: list[str] = []
 
-    def fake_seed(**kwargs):
-        return list(kwargs["includes"]), [lambda: events.append("cleanup")]
+    def fake_seed_and_fold(**kwargs):
+        kwargs["pending_cleanups"].append(lambda: events.append("cleanup"))
+        explicit_ctx = _explicit_ctx_from_kwargs(kwargs)
+        return list(kwargs["includes"]), False, explicit_ctx, ()
 
     def fake_resolve(*args, **kwargs):
         from abicheck.errors import AbicheckError
 
         raise AbicheckError("boom")
 
-    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
 
     import click

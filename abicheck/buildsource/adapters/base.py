@@ -45,6 +45,28 @@ _LANG_BY_EXT: dict[str, str] = {
 #: ``ABI_RELEVANT_BUILD_FLAG_CHANGED`` (unless the flag is a runtime-mode or
 #: toolchain flag with a dedicated finding). Per ADR-028 D3 these are risk/
 #: source-level signals — the artifact diff proves any concrete break.
+#:
+#: Known gap (Codex review, AGENTS.md's L3->L2 fold entry, not fixed here):
+#: does not include GNU/clang ``-include``/``-imacros`` or MSVC ``/FI``/``/FU``
+#: (forced pre-include) -- SOURCE_OPERAND_FLAGS below already recognizes these
+#: as value-taking for a *different* purpose (not mistaking the operand for
+#: the TU source file), but that recognition never feeds this list, so a
+#: matched compile unit's own forced-include header is silently absent from
+#: ``CompileUnit.abi_relevant_flags`` and therefore from
+#: ``header_compile_context``'s derived L2 ``CompileContext`` -- the P0.3
+#: L3->L2 fold (``buildsource.l2_seed.resolve_header_compile_context``,
+#: reached from ``dump``/``scan``/``compare``'s implicit-dump path alike)
+#: can report a real match (``matched_unit_count > 0``, ``parsed_with_
+#: build_context`` stamped) while still parsing without a macro-controlling
+#: forced-include header the real build always applies. Unlike this
+#: tuple's other prefix-only entries, ``-include``/``-imacros``/``/FI``
+#: always carry a required following value that must travel with them, so
+#: adding the bare prefix alone (the pattern every other entry here uses)
+#: would append only the flag, silently dropping the header filename that
+#: is the entire point -- a correct fix needs a new spaced-value-flag
+#: branch in :func:`extract_abi_relevant_flags` (mirroring, but distinct
+#: from, its existing ``-D``/``/D`` split-form handling), not a bare
+#: addition to this tuple.
 ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-std=", "/std:", "-stdlib=",
     "--target=", "-target", "-mabi=", "/arch:", "-m32", "-m64",

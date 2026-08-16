@@ -915,6 +915,222 @@ def test_budget_checked_during_baseline_compare_not_only_at_end(
     assert elapsed < 2.0
 
 
+def test_baseline_compare_receives_l3_folded_compile_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap
+):
+    """Codex review, PR #782: `_build_new_snapshot`'s P0.3 L3->L2 fold only
+    updated its own *local* `compile_context` -- `run_scan_core` still held
+    the caller's original, un-folded one and forwarded THAT to
+    `_run_baseline_compare`, so the candidate could fold real L3 build
+    context (`-std=`/`-D`/target/sysroot) while the native `--against`
+    baseline's own header parse never received it, silently recreating the
+    NOT_COMPARABLE/false-ABI-difference risk this whole fold exists to
+    close. `run_scan_core` must forward the *effective* (possibly-folded)
+    compile_context `_build_new_snapshot` returns, not its own original."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        # Mirrors the real function's 3-tuple return -- the third element is
+        # the effective (fold-applied) compile_context.
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is sentinel_folded_ctx
+
+
+def test_baseline_compare_with_side_aware_headers_keeps_unfolded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782: the P0.3 fold above is derived by matching the
+    CANDIDATE's own headers against the NEW build's compile units, so its
+    -D/-U/-std/include flags describe the new side specifically. A
+    side-aware `-H old=PATH` baseline is parsed through its own, different
+    old headers -- forwarding the new side's folded context there risks a
+    bad parse or a false ABI diff, not a more accurate one, since there is
+    no old-side build evidence to derive a matching fold from. When
+    baseline_headers is given, run_scan_core must fall back to the caller's
+    plain, un-folded compile_context for the baseline parse, not the
+    candidate's folded one."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    old_hdr = tmp_path / "old.h"
+    old_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            f"old={old_hdr}",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is not sentinel_folded_ctx
+
+
+def test_baseline_compare_with_shared_bare_header_still_gets_folded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782 (fresh evidence): the previous fix's own
+    `not baseline_headers` guard was too broad in the other direction --
+    cli_scan.py's `baseline_header = header_both + header_old` means a
+    bare, *shared* `-H api.h` (no `old=` scoping at all, the ordinary,
+    most common case) already makes `baseline_headers` truthy and
+    identical in content to `headers`, so gating on mere truthiness
+    silently reintroduced the whole PR's own NOT_COMPARABLE/false-ABI-diff
+    bug for the common case. When the resolved old-side headers are
+    identical to the candidate's (no real `old=` override), the fold must
+    still reach the baseline parse."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    shared_hdr = tmp_path / "api.h"
+    shared_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            str(shared_hdr),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is sentinel_folded_ctx
+
+
+def test_baseline_compare_with_side_aware_includes_keeps_unfolded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782 (fresh evidence): the previous fix only compared
+    resolved *header* lists, but `cli_scan.py` builds `baseline_include`
+    independently of `baseline_header` -- a shared, bare `-H api.h` combined
+    with side-specific `-I old=.../-I new=...` shares one header list across
+    both sides while still routing each through a genuinely different
+    include tree. Forwarding the new side's folded -D/-std/sysroot/include
+    context there would parse the old binary under the new build's
+    configuration, so the fold must also require the old side's resolved
+    include scope to match the candidate's own effective includes."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        # eff_includes intentionally differs from the old-side -I below, so
+        # the candidate's and baseline's resolved include scopes diverge
+        # even though both sides share the same -H.
+        return (
+            AbiSnapshot(library="l", version="2.0"),
+            [tmp_path / "new_inc"],
+            sentinel_folded_ctx,
+        )
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    shared_hdr = tmp_path / "api.h"
+    shared_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            str(shared_hdr),
+            "-I",
+            f"old={tmp_path / 'old_inc'}",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is not sentinel_folded_ctx
+
+
 def test_against_not_comparable_exits_6(
     monkeypatch, runner, new_snap_compatible, baseline_snap
 ):

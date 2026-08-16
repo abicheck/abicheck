@@ -1372,13 +1372,19 @@ def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
     assert derive_l2_compile_context([header], pack_dir, None) == (None, [])
 
 
+# seed_includes_and_fold_compile_context's own direct branch coverage lives
+# in tests/test_non_elf_dump_l2_seed.py (room there; this file is near the
+# 2000-line hard cap) -- see its "seed_includes_and_fold_compile_context
+# branch coverage" section.
+
+
 # ---------------------------------------------------------------------------
 # 3. service_input_resolution wiring
 # ---------------------------------------------------------------------------
 
 
 def test_merge_l3_compile_context_derived_leads_explicit_wins() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("-DFOO=1", "-fPIC"))
     explicit = CompileContext(gcc_option_tokens=("-DFOO=2",), sysroot=Path("/x"))
@@ -1401,7 +1407,7 @@ def test_merge_l3_compile_context_explicit_gcc_options_string_folded_after_deriv
 ):
     """Finding 2: the free-form ``gcc_options`` string channel, not just
     ``sysroot``, must also land after every derived token."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("-DFOO=1",))
     explicit = CompileContext(gcc_options="-DFOO=2 -DBAR=3")
@@ -1418,8 +1424,8 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
     context carrying a derived AND an explicit, conflicting sysroot, and
     assert the *last* --sysroot= token (the one that wins under real
     compiler last-flag-wins semantics) is the explicit one."""
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
     from abicheck.dumper_ast_config import _build_castxml_command
-    from abicheck.service_input_resolution import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("--sysroot=/derived",))
     explicit = CompileContext(sysroot=Path("/explicit"))
@@ -1441,15 +1447,66 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
     assert sysroot_tokens[-1] == "--sysroot=/explicit"  # last-flag-wins: explicit
 
 
+def test_merge_l3_compile_context_explicit_include_search_wins_first_match() -> None:
+    """Codex review, PR #782: unlike a macro/std/sysroot switch (last-flag-
+    wins), an include search path is first-match-wins -- so an explicit
+    -I/-isystem must search *before* a derived one, the opposite order from
+    every other token this function merges."""
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+
+    derived = CompileContext(
+        gcc_option_tokens=("-DFOO=1", "-I", "/build/inc", "-isystem", "/build/sys")
+    )
+    explicit = CompileContext(gcc_option_tokens=("-I", "/user/inc"))
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    assert merged.gcc_option_tokens == (
+        "-DFOO=1",  # a non-include derived token: unaffected, still leads
+        "-I",
+        "/user/inc",  # explicit's own -I: now searches before derived's
+        "-I",
+        "/build/inc",
+        "-isystem",
+        "/build/sys",
+    )
+
+
+def test_merge_l3_compile_context_attached_include_form_stays_paired() -> None:
+    """The attached spelling (-Idir, no space) is self-contained -- must not
+    consume a following, unrelated token as if it were a spaced operand."""
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+
+    derived = CompileContext(gcc_option_tokens=("-I/build/inc", "-DFOO=1"))
+    explicit = CompileContext()
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    # -DFOO=1 is not an include token and must not be swept into the
+    # include group merely for following an attached -I entry.
+    assert merged.gcc_option_tokens == ("-DFOO=1", "-I/build/inc")
+
+
+def test_include_operand_dirs_extracts_spaced_and_attached_forms() -> None:
+    """Codex review, PR #782: the AST cache key's extra_hash_dirs channel
+    needs real directory Paths, not token strings, to stat -- covers both
+    the spaced (-I dir) and attached (-Idir) spellings, and a non-include
+    token contributes nothing."""
+    from abicheck.buildsource.l2_seed import _include_operand_dirs
+
+    dirs = _include_operand_dirs(
+        ("-DFOO=1", "-I", "/build/inc", "-isystem/build/sys", "-fPIC")
+    )
+    assert dirs == (Path("/build/inc"), Path("/build/sys"))
+
+
 def test_merge_l3_compile_context_none_derived_is_noop() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     explicit = CompileContext(gcc_options="-DX=1")
     assert _merge_l3_compile_context(explicit, None) is explicit
 
 
 def test_merge_l3_compile_context_none_explicit_uses_derived() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("-std=c++20",))
     assert _merge_l3_compile_context(None, derived) is derived

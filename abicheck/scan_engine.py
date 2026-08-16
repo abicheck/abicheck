@@ -215,11 +215,18 @@ def _build_new_snapshot(
     symbols_only: bool = False,
     debug_presence_only: bool = False,
     include_dependencies: bool = False,
-) -> tuple[Any, list[Path]]:
+) -> tuple[Any, list[Path], CompileContext | None]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
-    Returns ``(snapshot, effective_includes)`` — the effective includes carry any
-    build-derived L2 seed so a ``--baseline`` compare can reuse the same context.
+    Returns ``(snapshot, effective_includes, effective_compile_context)`` — the
+    effective includes carry any build-derived L2 seed, and the effective
+    compile context carries the P0.3 L3->L2 fold's own merged result (when
+    applied), so a ``--baseline`` compare can reuse the same extraction
+    recipe for the native old library, not just the candidate's own header
+    parse (Codex review: without this, the candidate folded real L3 context
+    while the baseline side parsed with the caller's original,
+    un-folded context, silently reintroducing the very
+    ``NOT_COMPARABLE``/false-ABI-difference risk this fold exists to close).
 
     The resolved ``changed_paths`` (from ``--changed-path``/``--since``) are
     threaded into the inline source replay so a ``source-changed`` collection
@@ -232,46 +239,83 @@ def _build_new_snapshot(
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
     """
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
     from .errors import AbicheckError
     from .service import resolve_input
 
-    # L2 include fallback: when headers are given but the user passed no explicit
-    # -I, seed the build's include dirs so the aggregate public-header parse can
-    # resolve dependency headers (e.g. pvxs headers include EPICS Base's
-    # <epicsTime.h>). Shared with the dump path via seed_l2_includes.
+    # L2 include fallback + P0.3 L3->L2 fold, combined into one L3 collection
+    # (Codex review, PR #782 -- see seed_includes_and_fold_compile_context's own
+    # docstring for why the two were merged: two independent
+    # collect_inline_pack() calls each capable of triggering the zero-config
+    # inferred build-system query would contend on the same exclusive
+    # flock, one waiting up to the 600s timeout on the other's still-held
+    # lock). This also closes scan's own candidate-resolution side of the
+    # AGENTS.md "The native ELF `abicheck dump` path never applies L3 build
+    # context..." known gap: this function calls service.resolve_input
+    # directly, not resolve_side_snapshot, so compare's/dump's own fold never
+    # ran here either -- folding the real L3 CompileUnit-derived context into
+    # the already-resolved compile_context so a scan candidate and a
+    # dump-produced baseline of the same project agree on
+    # language_standard/include_sequence instead of NOT_COMPARABLE for
+    # reasons neither diagnostics named.
     #
-    # Keep the seed's temp-build-dir cleanups LOCAL (defer_cleanup=None), not on the
-    # outer scan list: the seed may run the inferred-CMake query, whose build dir is
-    # held under an exclusive flock until its cleanup runs. embed_build_source()
-    # below runs its *own* inferred query in the same function, so if we deferred the
-    # release to the outer drain (which happens after embed) that second query would
-    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s) before
-    # falling back to a fresh dir. The finally below drains _l2_local_cleanups right
-    # after resolve_input() has consumed the seeded dirs, releasing the lock before
-    # L3/L4 collection replays the query (Codex review).
-    includes, _l2_local_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        # -I dirs the user gave through --compiler-option (carried on the
-        # CompileContext) are explicit too — pass them so the seed stays a no-op
-        # and the user's include search precedence is preserved (Codex review).
-        gcc_options=compile_context.gcc_options if compile_context else None,
-        gcc_option_tokens=(
-            compile_context.gcc_option_tokens if compile_context else ()
-        ),
-        # L2-only pins (--depth headers → collect_mode "off") requested no build/
-        # source evidence, so the include-dir seed must not run a build system just
-        # to hint headers. Passive DB discovery still applies; only the zero-config
-        # inferred cmake/make/bazel query is gated (Codex review).
-        allow_inferred_build_query=collect_mode != "off",
-    )
-
+    # Keep the seed's temp-build-dir cleanups LOCAL (pending_cleanups=
+    # _l2_local_cleanups), not on the outer scan list: the seed may run the
+    # inferred-CMake query, whose build dir is held under an exclusive flock
+    # until its cleanup runs. embed_build_source() below runs its *own*
+    # inferred query in the same function, so if we deferred the release to
+    # the outer drain (which happens after embed) that second query would
+    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s)
+    # before falling back to a fresh dir. The finally below drains
+    # _l2_local_cleanups right after resolve_input() has consumed the seeded
+    # dirs, releasing the lock before L3/L4 collection replays the query
+    # (Codex review).
+    _l2_local_cleanups: list[Callable[[], None]] = []
     try:
+        (
+            includes,
+            l3_context_applied,
+            compile_context,
+            _l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
+            headers=headers,
+            includes=includes,
+            sources=sources,
+            build_info=build_info,
+            build_config=build_config,
+            build_query=None,
+            build_compile_db=None,
+            collect_mode=collect_mode,
+            gcc_path=compile_context.gcc_path if compile_context else None,
+            gcc_prefix=compile_context.gcc_prefix if compile_context else None,
+            gcc_options=compile_context.gcc_options if compile_context else None,
+            gcc_option_tokens=(
+                compile_context.gcc_option_tokens if compile_context else ()
+            ),
+            sysroot=compile_context.sysroot if compile_context else None,
+            nostdinc=compile_context.nostdinc if compile_context else False,
+            frontend=compile_context.frontend if compile_context else "auto",
+            frontend_context=(
+                compile_context.frontend_context if compile_context else "host"
+            ),
+            lang=lang,
+            # `lang` defaults to "c++" (scan's own Click default), so it
+            # can't distinguish a genuinely explicit request from the
+            # default the way DumpRequest.lang_explicit does -- but "c" is
+            # never a default, only ever a real request (mirrors perform_elf_
+            # dump's identical `lang_explicit or lang == "c"` squash-guard
+            # rule). Without this, an explicit `scan --lang c` against a
+            # matched C++ compile unit's own `-std=c++20` would let the
+            # derived standard reach a parse scan is explicitly forcing into
+            # C mode, which a real compiler rejects outright (Codex review).
+            lang_explicit=lang.lower() == "c",
+            pending_cleanups=_l2_local_cleanups,
+        )
+        # _l3_include_dirs: not yet threaded into an extra_hash_dirs hook
+        # here -- resolve_input has no such public parameter, unlike
+        # perform_elf_dump's own direct dump() call (see that fix's own
+        # comment for why this is a narrower, pre-existing, not-yet-closed
+        # residual gap rather than something new to this path).
         snap = resolve_input(
             binary,
             headers,
@@ -306,6 +350,11 @@ def _build_new_snapshot(
             from .buildsource.inline import _run_cleanups
 
             _run_cleanups(_l2_local_cleanups)
+    # P0.3: mirrors resolve_side_snapshot's identical stamp -- gated on
+    # snap.from_headers so a snapshot that never actually parsed the headers
+    # doesn't claim their parse used real build context.
+    if l3_context_applied and snap.from_headers:
+        snap.parsed_with_build_context = True
     # Collect evidence when there is something to collect from — a source tree OR
     # an out-of-tree build-info input — at a non-"off" level.
     if (sources is not None or build_info is not None) and collect_mode != "off":
@@ -344,8 +393,9 @@ def _build_new_snapshot(
     # Return the *effective* includes (the seed above may have added build-derived
     # dirs) so a --baseline compare header-parses the old native library with the
     # same include context — else the baseline side fails on dependency headers the
-    # candidate resolved via the seed (Codex review).
-    return snap, includes
+    # candidate resolved via the seed (Codex review). Also return the effective
+    # (possibly L3-folded) compile_context itself, for the identical reason.
+    return snap, includes, compile_context
 
 
 def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
@@ -1005,7 +1055,7 @@ def run_scan_core(
     # completion (or hanging) regardless of --budget.
     try:
         with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
-            new_snap, eff_includes = _build_new_snapshot(
+            new_snap, eff_includes, eff_compile_context = _build_new_snapshot(
                 binary,
                 list(headers),
                 list(includes),
@@ -1127,7 +1177,53 @@ def run_scan_core(
                     list(eff_includes),
                     list(public_headers),
                     list(public_header_dirs),
-                    compile_context=compile_context,
+                    # The *effective* compile_context (the P0.3 L3->L2 fold's
+                    # own merged result, when applied) -- but ONLY when the
+                    # baseline actually reuses the candidate's own headers.
+                    # `baseline_headers` alone is the wrong signal here (Codex
+                    # review, fresh evidence): cli_scan.py's own
+                    # `baseline_header = header_both + header_old` means a
+                    # bare, *shared* `-H api.h` (no `old=` scoping at all --
+                    # the ordinary, most common case) already makes
+                    # `baseline_headers` truthy and identical in content to
+                    # `headers`, so gating on mere truthiness wrongly treated
+                    # every scan with any headers at all as "old-side-scoped"
+                    # and silently reintroduced this whole fix's own
+                    # NOT_COMPARABLE/false-ABI-diff bug for the common case.
+                    # The real signal is whether the resolved old-side header
+                    # set genuinely *differs* from the candidate's (a real
+                    # `-H old=PATH` override) -- only then does the fold's
+                    # new-side-specific -D/-U/-std/include flags risk not
+                    # fitting the old side's own, different headers, whose
+                    # macros/standard/generated-header paths may genuinely
+                    # differ; there is no old-side build evidence to derive a
+                    # matching fold for that case, so the caller's plain,
+                    # unfolded compile_context is the correct fallback there.
+                    #
+                    # Header equality alone is not sufficient (Codex review,
+                    # fresh evidence): `-H api.h -I old=old-build -I
+                    # new=new-build` shares one header list across both sides
+                    # while still routing each side through a genuinely
+                    # different include tree via `baseline_includes` --
+                    # `cli_scan.py` builds that list independently of
+                    # `baseline_headers`. Forwarding the new side's folded
+                    # `-D`/`-std`/sysroot/include flags there would parse the
+                    # old binary under the new build's configuration, so the
+                    # fold is only reused when the old side's *resolved
+                    # include scope* also matches the candidate's own (no
+                    # side-specific include override at all).
+                    compile_context=(
+                        eff_compile_context
+                        if (
+                            not baseline_headers
+                            or list(baseline_headers) == list(headers)
+                        )
+                        and (
+                            not baseline_includes
+                            or list(baseline_includes) == list(eff_includes)
+                        )
+                        else compile_context
+                    ),
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
