@@ -1083,10 +1083,10 @@ class TestOnlyAppliedFieldsAreAccepted:
         (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
         # Syntactically valid YAML, semantically invalid as a policy (an
         # unknown ChangeKind slug) -- PolicyFile.load raises PolicyError (a
-        # ValueError subclass), which is now caught here. A syntax error
-        # (yaml.YAMLError, not a ValueError) is a separate, pre-existing gap
-        # this test deliberately does not exercise -- it reproduces
-        # identically with or without --pack, so it is not part of this slice.
+        # ValueError subclass), which is now caught here. A genuine YAML
+        # *syntax* error (yaml.YAMLError, not a ValueError) is a distinct
+        # failure mode, covered separately below by
+        # `test_yaml_syntax_error_is_a_clean_usage_error_on_release`.
         broken_policy_file = tmp_path / "broken-policy.yml"
         broken_policy_file.write_text(
             "base_policy: strict_abi\noverrides:\n  not_a_real_kind: ignore\n",
@@ -1111,6 +1111,63 @@ class TestOnlyAppliedFieldsAreAccepted:
             "must be a clean click.UsageError exit, not an uncaught exception"
         )
         assert "not_a_real_kind" in result.output
+
+    def test_yaml_syntax_error_is_a_clean_usage_error_on_release(
+        self, tmp_path: Path, ignore_removals: Path
+    ) -> None:
+        """Codex review, P2 follow-up on the finding above: a genuinely
+        malformed YAML *document* (unbalanced flow-mapping brackets, not a
+        semantically-invalid-but-well-formed one) raises PyYAML's own
+        `yaml.YAMLError` from `resolve_release_pack_application`'s second,
+        provenance-only `--policy` reload -- not a `ValueError`, so the
+        earlier fix's `except (..., ValueError, OSError, ImportError)` still
+        let this specific shape through as a raw traceback. Fixed by adding
+        `yaml.YAMLError` to both `resolve_release_pack_application_from_ctx`'s
+        except clause and its own earlier best-effort `PolicyFile.load`
+        pre-read, which would otherwise raise the identical uncaught error
+        one step earlier, before ever reaching the later, wider guard."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        # Genuinely malformed YAML -- an unclosed flow mapping -- so
+        # `yaml.safe_load` itself raises `yaml.YAMLError` (a `ParserError`),
+        # never reaching `PolicyFile.load`'s own semantic validation.
+        syntax_error_file = tmp_path / "syntax-error-policy.yml"
+        syntax_error_file.write_text(
+            "base_policy: strict_abi\noverrides: {not_closed\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--policy",
+                str(syntax_error_file),
+                "--pack",
+                str(ignore_removals),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            "must be a clean click.UsageError exit, not an uncaught exception"
+        )
 
 
 class TestNoPackChangesNothing:

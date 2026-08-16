@@ -533,6 +533,7 @@ def resolve_release_pack_application_from_ctx(
     if not pack_paths:
         return None
     import click
+    import yaml
 
     from .compatibility_evaluation_resolver import (
         FieldResolutionError,
@@ -550,7 +551,7 @@ def resolve_release_pack_application_from_ctx(
     if policy_file_path is not None:
         try:
             loaded_policy_file = PolicyFile.load(policy_file_path)
-        except (ValueError, OSError, ImportError):
+        except (ValueError, OSError, ImportError, yaml.YAMLError):
             loaded_policy_file = None
     typed = {
         name
@@ -592,16 +593,23 @@ def resolve_release_pack_application_from_ctx(
         # via `compatibility_evaluation_frontend`), independently of the
         # already-guarded pre-read a few lines up -- a genuinely malformed
         # policy document (an unknown ChangeKind slug, a non-mapping
-        # `overrides:`, an unreadable file) raises `PolicyError`/`OSError`/
-        # `ImportError` there, uncaught, unlike the single-pair path (whose
-        # own `_load_suppression_and_policy` call already converts the
-        # identical failure to a clean error *before* ever reaching this
-        # resolver, so it never hits this second load at all). Caught here
-        # instead of left to propagate as a raw traceback (Codex review,
-        # found while adding direct test coverage for this function).
+        # `overrides:`, an unreadable file, or a plain YAML syntax error)
+        # raises `PolicyError`/`OSError`/`ImportError`/`yaml.YAMLError` there,
+        # uncaught, unlike the single-pair path (whose own
+        # `_load_suppression_and_policy` call already converts the identical
+        # failure to a clean error *before* ever reaching this resolver, so
+        # it never hits this second load at all). Caught here instead of left
+        # to propagate as a raw traceback (Codex review, found while adding
+        # direct test coverage for this function; `yaml.YAMLError` added in a
+        # second round once real syntax-error input was tried, not just a
+        # semantically-invalid-but-well-formed document). `yaml` is safe to
+        # import unconditionally here: if PyYAML itself were missing,
+        # `PolicyFile.load`'s own `ImportError` would already have fired at
+        # the guarded pre-read above, before this call ever runs.
         ValueError,
         OSError,
         ImportError,
+        yaml.YAMLError,
     ) as exc:
         raise click.UsageError(str(exc)) from exc
 
