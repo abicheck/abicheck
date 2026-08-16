@@ -91,8 +91,13 @@ SHA), which is precisely what item 4 exists to make detectable.
 informational classification, not the set of workflow names visible in a run
 (Codex review caught an earlier draft that didn't).** `Examples Validation`
 and `agentready.yml` are both explicitly `No (informational)` there, and
-`test-action.yml` is conditional — it runs only when `action/**`/`action.yml`
-changes, path-filtered like several other workflows in that same table. A
+`test-action.yml` is conditional — it runs only when its own trigger's full
+path set changes (`action.yml`, `action/**`, `actions/check-target/**`,
+`actions/resolve-baseline/**`, `abicheck/**`, `pyproject.toml`, `pixi.lock`,
+its own workflow file, `check-single.yml`, `tests/fixtures/action/**` — the
+complete list in `.github/workflows/test-action.yml`'s own `on:` block, not
+the abbreviated "when the CLI surface changes" gloss `.github/AGENTS.md`'s
+table uses), path-filtered like several other workflows in that same table. A
 required check that a path-filtered workflow never starts is not "green by
 default" on an unrelated PR — GitHub blocks merge on a required check that
 never reports at all, the same as on a failing one, so requiring any of these
@@ -103,10 +108,13 @@ catching a different mistake in a hand-copied snapshot, hand-copying a
 fourth one is the wrong fix.** Round 1 conflated "sounds conditional" with
 "is trigger-filtered" (put `CLI Interface Check` in the wrong bucket, missed
 `Changelog Fragment Check`/`Bug-fix test contract` entirely). Round 2 found
-the fixed list still missed `docs-pr.yml` — required whenever
-`docs/**`/`abicheck/schemas/**`/`examples/**`/`mkdocs.yml` changes per
-`.github/AGENTS.md`, *and* genuinely trigger-path-filtered on those same
-paths, the identical shape as `test-action.yml`. Round 3 found the fallback
+the fixed list still missed `docs-pr.yml` — required per `.github/AGENTS.md`
+whenever `docs/**`/`mkdocs.yml` changes (that table's own gloss; the
+workflow's actual `on:` block is wider still: `abicheck/schemas/**`,
+`examples/**`, `scripts/gen_examples_docs.py`, `scripts/publish_schemas.py`,
+and its own plus `pages.yml`'s workflow files), *and* genuinely
+trigger-path-filtered on that same set, the identical shape as
+`test-action.yml`. Round 3 found the fallback
 plan itself wrong: **no native GitHub mechanism — not classic branch
 protection, not a Ruleset's required-status-checks rule — conditions
 "required" on which files a given PR touched.** A Ruleset can require a
