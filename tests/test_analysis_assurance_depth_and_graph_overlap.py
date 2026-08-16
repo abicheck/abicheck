@@ -457,3 +457,51 @@ class TestGraphCompletenessPartialFamilyOverlap:
         status, notes = _graph_completeness(old_pack, new_pack)
         assert status == "unknown"
         assert any("confirmed on only one side" in n for n in notes), notes
+
+
+class TestExportAccountingDoesNotDoubleCount:
+    """lab/Codex review, fresh evidence: an export classified into
+    ``non_public_symbol_to_reason`` (dependency/internal/own -- ACCOUNTED
+    for, per ``_classify_non_public_exports``'s own docstring) must not
+    ALSO count toward ``export_accounting.unaccounted``.
+    ``source_link.link_source_abi`` previously left a classified symbol in
+    ``symbols_without_decl`` too, so a comparison where every export on both
+    sides was fully classified as non-public still reported
+    ``unaccounted == total`` instead of ``0``, keeping
+    ``--require-complete-analysis`` stuck at ``status="partial"`` for no real
+    gap (reported against a real Bazel lab project: 6 exports/side, all
+    non-public, ``internal=6, unaccounted=6`` for a 12-export total).
+    """
+
+    def test_end_to_end_via_real_link_source_abi(self) -> None:
+        """Exercises the real ``link_source_abi`` entry point end to end on
+        both sides -- not a hand-built ``SourceAbiSurface`` with
+        already-disjoint fields, which can't reproduce this bug."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiTu
+        from abicheck.buildsource.source_link import link_source_abi
+
+        # Every one of these is classified by _classify_non_public_exports
+        # with no library/source-namespace context needed (dependency:stdlib,
+        # dependency:tbb, internal_or_private_export) -- so symbols_without_
+        # decl comes back genuinely empty once the fix is in place.
+        exports = [
+            "_ZNSt6vectorIiSaIiEEC1Ev",
+            "_ZN3tbb6detail2r13fooEv",
+            "_private_c",
+        ]
+        old, new = _header_pair()
+        for snap in (old, new):
+            surface = link_source_abi([SourceAbiTu()], exported_symbols=exports)
+            assert surface.unmatched["symbols_without_decl"] == []
+            snap.build_source = BuildSourcePack(
+                root=Path("/tmp/nonexistent-pack-no-double-count"),
+                source_abi=surface,
+            )
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.export_accounting.total == len(exports) * 2
+        assert aa.export_accounting.internal == len(exports) * 2
+        assert aa.export_accounting.unaccounted == 0
+        assert aa.export_accounting.source_linked == len(exports) * 2

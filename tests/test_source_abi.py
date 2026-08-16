@@ -1455,10 +1455,17 @@ def test_non_public_export_accounting_keeps_reasons_separate_from_decl_matches()
         exported_symbols=exports,
         library="libfoo",
     )
-    assert surface.unmatched["symbols_without_decl"] == sorted(exports)
+    # Every export here was classified into non_public_symbol_to_reason below
+    # -- a classified export is ACCOUNTED for (dependency/internal/own, not a
+    # genuinely unclassified gap), so it must not also land in
+    # symbols_without_decl. Fixed after a double-counting bug (lab/Codex
+    # review): non_public wasn't folded into all_matched, so every classified
+    # symbol here still counted as "unmatched" too, inflating
+    # ExportAccounting's unaccounted total past the real export count.
+    assert surface.unmatched["symbols_without_decl"] == []
     assert surface.coverage["matched_symbols"] == 0
     assert surface.coverage["non_public_symbols_classified"] == len(exports)
-    assert surface.coverage["unmatched_symbols"] == len(exports)
+    assert surface.coverage["unmatched_symbols"] == 0
     assert surface.mappings["non_public_symbol_to_reason"] == {
         "_ZNSt6vectorIiSaIiEEC1Ev": "dependency:stdlib",
         "_ZN3tbb6detail2r13fooEv": "dependency:tbb",
