@@ -375,9 +375,16 @@ work, not part of this slice; see the "Status: implemented" note above).
                         "source": "run-plan"}}
   ```
 
-Because this is a schema change: bump the manifest schema version, update the
-packaged and documented schema copies, keep reading the older version, and add
-JSON Schema validation for the new `gate` block.
+Because this is a schema change: bump the manifest schema version and keep
+reading the older version. Implemented: validation is Python-level
+(`aggregate_manifest.py`'s own parser rejects a malformed/version-mismatched
+`gate` block with a clear `AggregateError`), not a separate published JSON
+Schema file — the manifest's `{targets, gate}` input shape is small and has
+no external-tooling consumers analogous to the aggregate *report*'s
+(`aggregate_report.schema.json`, which is packaged/published and does gain a
+`gate`-adjacent `effective_policy` entry). A machine-readable manifest input
+schema remains future work if an external producer needs one, not part of
+this slice.
 
 **Tests:** manifest-supplied policy; run-plan-supplied policy; default policy;
 missing required target; unexpected analyzed report; unreadable unexpected
