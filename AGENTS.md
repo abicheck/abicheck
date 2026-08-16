@@ -1571,9 +1571,21 @@ Once a root command genuinely clears the bar above, pick the right home:
   these already carry L3-derived content, so an inferred `-H` root whose
   directory the L3 evidence already covers is **skipped entirely**
   (`inferred` ends up empty, the function returns `([], [])` for that
-  root) rather than reclassified into a different bucket; dump's pre-fold
-  call has a much smaller `skip` set (no L3 content yet), so the same root
-  is far more likely to survive as a plain `-I` extra-include instead.
+  root); dump's pre-fold call has a much smaller `skip` set (no L3 content
+  yet), so the same root is far more likely to survive as a plain `-I`
+  extra-include instead. This omission is real only for the two branches of
+  `skip` that do **not** independently reach `extra_includes`: a
+  `_build_context_include_dirs(ctx)` match (a dir implied only by
+  `gcc_options`/`gcc_option_tokens`, never itself added to `includes`), and
+  the sibling deferred-token branch below. It is *not* an omission when
+  `skip` matches purely because the root is already literally present in
+  `user_includes` — `_dump_elf`'s own `eff_includes = list(includes)`
+  starts from that same list before `resolve_inferred_header_roots` ever
+  runs and is only ever added to, never filtered, so that root's slot
+  survives via the pre-existing `includes` entry regardless of whether the
+  inferred-root call re-adds it (Codex review: an earlier draft of this
+  entry collapsed all three skip/defer shapes into one "no slot" outcome,
+  which is only true for two of them).
   (b) Separately, `perform_elf_dump` computes `inc_extra` from this
   *pre-fold* call and only later builds `extra_includes=eff_includes +
   inc_extra` for the actual `dump(...)` call, where `eff_includes` is the
