@@ -272,6 +272,45 @@ def _build_new_snapshot(
     )
 
     try:
+        # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path
+        # never applies L3 build context..." known gap -- scan's own
+        # candidate resolution shared the identical gap: this function calls
+        # service.resolve_input directly, not resolve_side_snapshot, so
+        # compare's/dump's own fold never ran here either). Folds the real L3
+        # CompileUnit-derived context into the already-resolved
+        # compile_context, mirroring perform_elf_dump's identical fold -- so
+        # a scan candidate and a dump-produced baseline of the same project
+        # agree on language_standard/include_sequence instead of
+        # NOT_COMPARABLE for reasons neither diagnostics named. Inside this
+        # try block so a genuine HeaderCompileContextAmbiguousError surfaces
+        # as the same clean click.ClickException resolve_input's own errors
+        # do below.
+        from .buildsource.l2_seed import fold_l3_compile_context
+
+        l3_context_applied, compile_context = fold_l3_compile_context(
+            headers=headers,
+            build_info=build_info,
+            sources=sources,
+            build_config=build_config,
+            build_query=None,
+            build_compile_db=None,
+            collect_mode=collect_mode,
+            gcc_path=compile_context.gcc_path if compile_context else None,
+            gcc_prefix=compile_context.gcc_prefix if compile_context else None,
+            gcc_options=compile_context.gcc_options if compile_context else None,
+            gcc_option_tokens=(
+                compile_context.gcc_option_tokens if compile_context else ()
+            ),
+            sysroot=compile_context.sysroot if compile_context else None,
+            nostdinc=compile_context.nostdinc if compile_context else False,
+            frontend=compile_context.frontend if compile_context else "auto",
+            frontend_context=(
+                compile_context.frontend_context if compile_context else "host"
+            ),
+            lang=lang,
+            lang_explicit=False,
+            pending_cleanups=_l2_local_cleanups,
+        )
         snap = resolve_input(
             binary,
             headers,
@@ -306,6 +345,11 @@ def _build_new_snapshot(
             from .buildsource.inline import _run_cleanups
 
             _run_cleanups(_l2_local_cleanups)
+    # P0.3: mirrors resolve_side_snapshot's identical stamp -- gated on
+    # snap.from_headers so a snapshot that never actually parsed the headers
+    # doesn't claim their parse used real build context.
+    if l3_context_applied and snap.from_headers:
+        snap.parsed_with_build_context = True
     # Collect evidence when there is something to collect from — a source tree OR
     # an out-of-tree build-info input — at a non-"off" level.
     if (sources is not None or build_info is not None) and collect_mode != "off":

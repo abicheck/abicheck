@@ -455,6 +455,19 @@ def _merge_l3_compile_context(
     "What NOT to do" -- prefer a leaf module both sides can depend on over
     extending ``IMPORT_CYCLE_ALLOWLIST``). ``service_input_resolution``'s
     own ``_seeded_compile_context`` now imports it from here instead.
+
+    "Derived leads, explicit wins" is *not* the right rule for an include
+    search path (Codex review): unlike a macro/std/sysroot switch, which a
+    real compiler resolves last-flag-wins, ``-I``/``-isystem`` entries are
+    first-match-wins, so putting a derived ``CompileUnit.include_paths``/
+    ``system_include_paths`` entry (:func:`header_compile_context.
+    _context_flags` renders both) ahead of an explicit one silently prefers
+    the build's own header over a caller's explicit override for a
+    colliding basename. :func:`_split_include_tokens` carves derived's own
+    include-search entries out of the leading (last-flag-wins) group and
+    appends them *after* explicit instead, so explicit's own ``-I``/
+    ``-isystem`` (wherever it came from) always searches first, while every
+    other derived token keeps its original leading, overridable position.
     """
     if derived is None:
         return explicit
@@ -473,16 +486,50 @@ def _merge_l3_compile_context(
             # verbatim as one token so it is at least still present, rather
             # than silently dropped.
             explicit_tail.append(explicit.gcc_options)
+    derived_rest, derived_includes = _split_include_tokens(derived.gcc_option_tokens)
     return dataclasses.replace(
         explicit,
         sysroot=None,
         gcc_options=None,
         gcc_option_tokens=(
-            *derived.gcc_option_tokens,
+            *derived_rest,
             *explicit_tail,
             *explicit.gcc_option_tokens,
+            *derived_includes,
         ),
     )
+
+
+def _split_include_tokens(
+    tokens: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split *tokens* into ``(non_include, include)``, preserving order.
+
+    An include-search flag given as a separate operand (``-I dir`` /
+    ``/imsvc dir`` — the token equals the *bare* prefix exactly) consumes the
+    next token as its directory operand, so both travel together into
+    *include*; an attached form (``-Idir``) is self-contained. Mirrors
+    ``header_utils._flag_tokens``'s identical spaced-vs-attached distinction.
+    """
+    from ..header_utils import _INCLUDE_FLAG_PREFIXES
+
+    non_include: list[str] = []
+    include: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        t = tokens[i]
+        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
+            include.append(t)
+            include.append(tokens[i + 1])
+            i += 2
+        elif any(t.startswith(p) for p in _INCLUDE_FLAG_PREFIXES):
+            include.append(t)
+            i += 1
+        else:
+            non_include.append(t)
+            i += 1
+    return tuple(non_include), tuple(include)
 
 
 def fold_l3_compile_context(

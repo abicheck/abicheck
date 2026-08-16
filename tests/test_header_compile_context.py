@@ -1441,6 +1441,44 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
     assert sysroot_tokens[-1] == "--sysroot=/explicit"  # last-flag-wins: explicit
 
 
+def test_merge_l3_compile_context_explicit_include_search_wins_first_match() -> None:
+    """Codex review, PR #782: unlike a macro/std/sysroot switch (last-flag-
+    wins), an include search path is first-match-wins -- so an explicit
+    -I/-isystem must search *before* a derived one, the opposite order from
+    every other token this function merges."""
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+
+    derived = CompileContext(
+        gcc_option_tokens=("-DFOO=1", "-I", "/build/inc", "-isystem", "/build/sys")
+    )
+    explicit = CompileContext(gcc_option_tokens=("-I", "/user/inc"))
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    assert merged.gcc_option_tokens == (
+        "-DFOO=1",  # a non-include derived token: unaffected, still leads
+        "-I",
+        "/user/inc",  # explicit's own -I: now searches before derived's
+        "-I",
+        "/build/inc",
+        "-isystem",
+        "/build/sys",
+    )
+
+
+def test_merge_l3_compile_context_attached_include_form_stays_paired() -> None:
+    """The attached spelling (-Idir, no space) is self-contained -- must not
+    consume a following, unrelated token as if it were a spaced operand."""
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+
+    derived = CompileContext(gcc_option_tokens=("-I/build/inc", "-DFOO=1"))
+    explicit = CompileContext()
+    merged = _merge_l3_compile_context(explicit, derived)
+    assert merged is not None
+    # -DFOO=1 is not an include token and must not be swept into the
+    # include group merely for following an attached -I entry.
+    assert merged.gcc_option_tokens == ("-DFOO=1", "-I/build/inc")
+
+
 def test_merge_l3_compile_context_none_derived_is_noop() -> None:
     from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 

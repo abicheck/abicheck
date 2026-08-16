@@ -924,33 +924,74 @@ Once a root command genuinely clears the bar above, pick the right home:
   `CompileUnit`-derived context (`-std=`, ABI-relevant `-D`/`-U`, target,
   sysroot) into the *same* explicit context CLI flags/`.abicheck.yml`
   already built, exactly mirroring what `_seeded_compile_context` already
-  does for `compare`'s implicit-dump and `scan` paths via
-  `resolve_side_snapshot` — so all three commands now fold under one
-  shared primitive, even though `dump`'s own CLI pipeline still doesn't
-  route through `run_dump_request`. `perform_elf_dump`'s two independent
-  second-pass clang re-parses (the header-graph attach and the
-  clang-layout-tool attach) also now receive this same fully-merged
-  context via `effective_compile_context = l3_effective_ctx`, closing a
-  narrower, previously-undocumented sibling gap where those passes' own
-  `gcc_options`-string-only re-derivation never looked at
-  `gcc_option_tokens`/`sysroot`/`nostdinc`/deferred include roots at all —
-  so a real disagreement on any of those between the primary parse and the
-  second passes could previously have gone unnoticed even without any L3
-  evidence in play. `AbiSnapshot.parsed_with_build_context` is now stamped
-  from either this fold or the older `-p`/`--compile-db` mechanism
-  (OR'd, matching `resolve_side_snapshot`'s own rule), on both the ELF and
-  PE/Mach-O paths. Verified end-to-end against a real `compile_commands.json`
-  fixture through the actual `perform_elf_dump`/`handle_non_elf_dump`
-  entry points (not a hand-built `CompileContext`) — see
-  `tests/test_cli_dump_helpers_coverage.py::
-  test_perform_elf_dump_folds_l3_compile_context_into_header_parse` and
+  does for `compare`'s implicit-dump path via `resolve_side_snapshot` — so
+  `dump` and `compare` now fold under one shared primitive, even though
+  `dump`'s own CLI pipeline still doesn't route through `run_dump_request`.
+  `perform_elf_dump`'s two independent second-pass clang re-parses (the
+  header-graph attach and the clang-layout-tool attach) also now receive
+  this same fully-merged context via `effective_compile_context =
+  l3_effective_ctx`, closing a narrower, previously-undocumented sibling
+  gap where those passes' own `gcc_options`-string-only re-derivation never
+  looked at `gcc_option_tokens`/`sysroot`/`nostdinc`/deferred include roots
+  at all — so a real disagreement on any of those between the primary
+  parse and the second passes could previously have gone unnoticed even
+  without any L3 evidence in play. `AbiSnapshot.parsed_with_build_context`
+  is now stamped from either this fold or the older `-p`/`--compile-db`
+  mechanism (OR'd, matching `resolve_side_snapshot`'s own rule), on both
+  the ELF and PE/Mach-O paths.
+
+  **A third, independent instance of the same gap, found only by testing
+  the actual end-to-end repro rather than trusting this entry's original
+  framing: `scan`'s own candidate resolution never applied the fold
+  either.** This entry's first draft claimed `_seeded_compile_context`
+  "already does" this for `scan` — false. `scan_engine._build_new_snapshot`
+  calls `service.resolve_input` directly, not `resolve_side_snapshot`, so
+  `compare`'s/`dump`'s fold never ran on `scan`'s candidate side. A
+  same-project `scan --against` a freshly-fixed `dump` baseline still
+  returned `NOT_COMPARABLE` on `language_standard` even after the two
+  `dump`-path fixes above — confirmed by actually running the repro end to
+  end (a real `g++`-compiled library + `compile_commands.json`), not by
+  re-reading the code. Fixed the identical way: `_build_new_snapshot` now
+  calls `fold_l3_compile_context` immediately before `resolve_input`, and
+  stamps `parsed_with_build_context` the same way. The same real repro now
+  produces `NO_CHANGE` end to end (`dump` baseline → `scan --against`),
+  which is the actual acceptance criterion this whole entry exists for.
+
+  **A fourth finding, from a Codex review of this same change, on the
+  *shared* `_merge_l3_compile_context` primitive itself — pre-existing in
+  the `compare`/`scan`-implicit-dump fold this PR reused, not introduced by
+  it, but real and now fixed alongside it.** "Derived leads, explicit
+  wins" (last-flag-wins) is the right rule for a macro/std/sysroot switch,
+  but `header_compile_context._context_flags` also renders a matched
+  `CompileUnit`'s own `include_paths`/`system_include_paths` as `-I`/
+  `-isystem` tokens, and an include search path is *first*-match-wins —
+  so putting a derived `-I` ahead of an explicit one (the pre-existing
+  order) silently let the build's own header win over a caller's explicit
+  override for a colliding basename. Fixed with a new
+  `_split_include_tokens()` helper that carves derived's own include-search
+  entries (`-I`/`-isystem`/`-iquote`/`-idirafter`/MSVC `/I`/`/imsvc`/
+  `/external:I`, spaced-pair-aware) out of the leading last-flag-wins group
+  and appends them *after* explicit instead — every other derived token
+  keeps its original leading, overridable position.
+
+  Verified end-to-end against a real `compile_commands.json` fixture
+  through the actual `perform_elf_dump`/`handle_non_elf_dump`/
+  `_build_new_snapshot` entry points (not a hand-built `CompileContext`) —
+  see `tests/test_cli_dump_helpers_coverage.py::
+  test_perform_elf_dump_folds_l3_compile_context_into_header_parse`,
   `tests/test_non_elf_dump_l2_seed.py::
-  test_non_elf_dump_folds_l3_compile_context_into_header_parse` — confirming
-  the derived `-std=`/`-D` flags reach the primary header-AST parse and
-  `parsed_with_build_context` is stamped. Full test suite (28k+ tests)
-  green; no import-cycle or file-size regression (`cli_dump_helpers.py`
-  stayed under its 2000-line hard cap by moving the shared fold logic into
-  `l2_seed.py` rather than duplicating it inline for both call sites).
+  test_non_elf_dump_folds_l3_compile_context_into_header_parse`,
+  `tests/test_scan_l2_cleanup_ordering.py::
+  test_scan_candidate_folds_l3_compile_context_into_header_parse`, and
+  `tests/test_header_compile_context.py`'s
+  `test_merge_l3_compile_context_explicit_include_search_wins_first_match`/
+  `test_merge_l3_compile_context_attached_include_form_stays_paired` —
+  confirming the derived `-std=`/`-D` flags reach the primary header-AST
+  parse, `parsed_with_build_context` is stamped, and an explicit `-I`
+  outranks a derived one. Full test suite (28k+ tests) green; no
+  import-cycle or file-size regression (`cli_dump_helpers.py` stayed under
+  its 2000-line hard cap by moving the shared fold logic into `l2_seed.py`
+  rather than duplicating it inline for both call sites).
 
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s

@@ -110,6 +110,68 @@ def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_pat
     assert resolve_kwargs["include_dependencies"] is False
 
 
+def test_scan_candidate_folds_l3_compile_context_into_header_parse(
+    monkeypatch, tmp_path
+):
+    """P0.3 L3->L2 fold (AGENTS.md's former "The native ELF `abicheck dump`
+    path never applies L3 build context..." known gap -- scan's own
+    candidate resolution shared the identical gap, closed here alongside
+    dump/PE-Mach-O): `_build_new_snapshot` calls `service.resolve_input`
+    directly, not `resolve_side_snapshot`, so a real compile database's
+    `-std=`/`-D` flags never reached the candidate's own header-AST parse.
+    Without this a scan candidate and a dump-produced baseline of the same
+    project resolved under genuinely different extraction recipes and were
+    rejected as NOT_COMPARABLE for reasons neither command's own
+    diagnostics named."""
+    import json
+
+    from abicheck.model import AbiSnapshot
+
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20", "-DFOO=1"],
+        }]),
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    def fake_resolve(*args, **kwargs):
+        captured["compile"] = kwargs["compile"]
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **kwargs: (list(kwargs["includes"]), []),
+    )
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+    )
+
+    snap, _eff_includes = _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[hdr],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="source-target",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+
+    tokens = captured["compile"].gcc_option_tokens
+    assert "-std=c++20" in tokens
+    assert "-DFOO=1" in tokens
+    assert snap.parsed_with_build_context is True
+
+
 def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     # _build_new_snapshot returns the *effective* (seeded) includes so a --baseline
     # compare can header-parse the old native library with the same build-derived
