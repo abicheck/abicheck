@@ -1177,12 +1177,26 @@ def run_scan_core(
                     list(eff_includes),
                     list(public_headers),
                     list(public_header_dirs),
-                    # The *effective* compile_context (the P0.3 L3->L2 fold's own
-                    # merged result, when applied) -- not the caller's original,
-                    # possibly-unfolded one, or the baseline native parse would
-                    # resolve under a different recipe than the candidate just did
-                    # (Codex review).
-                    compile_context=eff_compile_context,
+                    # The *effective* compile_context (the P0.3 L3->L2 fold's
+                    # own merged result, when applied) -- but ONLY when the
+                    # baseline reuses the candidate's own headers
+                    # (baseline_headers not given): the fold was derived by
+                    # matching the CANDIDATE's headers against the NEW build's
+                    # compile units, so its -D/-U/-std/include flags describe
+                    # the new side specifically. A side-aware `-H old=PATH`
+                    # baseline is parsed through its own, different old
+                    # headers, whose macros/standard/generated-header paths
+                    # may genuinely differ -- applying the new side's derived
+                    # flags there risks a bad parse or a false ABI diff, not a
+                    # more-accurate one (Codex review; no old-side build
+                    # evidence exists to derive a matching fold for, so the
+                    # caller's plain, unfolded compile_context is the correct
+                    # fallback here, not a second, unfounded fold attempt).
+                    compile_context=(
+                        eff_compile_context
+                        if not baseline_headers
+                        else compile_context
+                    ),
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,

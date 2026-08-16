@@ -128,3 +128,18 @@
   to that set — a cross-cutting change to a well-tested module's return
   shape and two independent call sites, left as a known gap (see
   `_existing_include_dirs`'s own docstring and `AGENTS.md`).
+
+- **A `scan --against` regression risk on the side-aware `-H old=PATH`
+  baseline path, in the fix that made `run_scan_core` forward the
+  candidate's folded compile context to the baseline parse (Codex
+  review).** That earlier fix forwarded the fold unconditionally, but the
+  fold describes the *new* side's build specifically (its `-D`/`-U`/
+  `-std`/include flags come from matching the candidate's own headers
+  against the new build) — a side-aware `-H old=PATH` baseline is parsed
+  through its own, different old headers, where the new side's derived
+  flags can produce a bad parse or a false ABI diff instead of a more
+  accurate one. Fixed by forwarding the folded context only when the
+  baseline reuses the candidate's own headers (`baseline_headers` not
+  given); a side-aware baseline now gets the caller's plain, unfolded
+  context instead, since no old-side build evidence exists to derive a
+  matching fold for.

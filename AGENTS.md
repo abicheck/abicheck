@@ -1233,6 +1233,32 @@ Once a root command genuinely clears the bar above, pick the right home:
   scoped fix reactive to one review comment on one PR. Documented in
   `_existing_include_dirs`'s own docstring alongside this entry.
 
+  **A twelfth finding, from a further Codex review round (P1), on
+  `run_scan_core`'s own forwarding of the folded context to the baseline
+  parse — real and fixed.** The eighth finding above fixed `run_scan_core`
+  forwarding its *original* `compile_context` to `_run_baseline_compare`
+  unconditionally; that fix itself was too broad in the other direction.
+  The fold is derived by matching the *candidate*'s own headers against
+  the *new* build's compile units, so its `-D`/`-U`/`-std`/include flags
+  describe the new side specifically — but `_run_baseline_compare`'s own
+  `_resolve_baseline_header_scope` parses a side-aware `-H old=PATH`
+  baseline through its own, different old headers, whose macros/standard/
+  generated-header paths may genuinely differ from the new build's.
+  Forwarding the new side's folded context there unconditionally risked a
+  bad parse or a false ABI diff on exactly the old-side-headers path the
+  eighth finding's own fix never distinguished from the common case (no
+  `baseline_headers`, baseline reuses the candidate's headers). No
+  old-side build evidence exists to derive a matching fold for that case
+  (there is no `--build-info-old`/`--sources-old` flag), so the correct
+  fallback is the caller's plain, unfolded `compile_context` — not a
+  second, unfounded fold attempt. Fixed by conditioning the forwarded
+  value on whether `baseline_headers` was given:
+  `eff_compile_context if not baseline_headers else compile_context`.
+  Regression test:
+  `tests/test_cli_scan.py::test_baseline_compare_with_side_aware_headers_keeps_unfolded_context`
+  (confirmed to fail against the pre-fix code — the folded sentinel
+  reached `_run_baseline_compare` even with `-H old=...` given).
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
