@@ -666,10 +666,13 @@ class TestReleaseFanOutContractParity:
             "package compare, same as on a single pair"
         )
 
-    def test_pack_still_rejected_on_directory_inputs(self, tmp_path):
-        # --pack is deliberately NOT part of this parity slice: applying a
-        # pack's policy/contract/gate overrides per library still needs its
-        # own resolve-once-apply-per-pair design.
+    def test_gate_pack_still_rejected_on_directory_inputs(self, tmp_path):
+        # CLI cleanup phase two, "PR B" slice 1: --pack now applies a
+        # `policy.overrides`/`surface.internal_namespaces` contribution to
+        # the release fan-out uniformly (see test_pack_application.py's
+        # TestOnlyAppliedFieldsAreAccepted). A `kind: gate` pack is the one
+        # still rejected -- the release fan-out has no resolved gate-options
+        # wiring to apply gate.exit_code_scheme/gate.severity.* to yet.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -681,7 +684,8 @@ class TestReleaseFanOutContractParity:
         pack_dir.mkdir()
         pack_path = pack_dir / "pack.yml"
         pack_path.write_text(
-            "kind: contract\nversion: 1\nassignments:\n  contract.mode: public\n",
+            "id: gate_scheme\nkind: gate\nversion: 1\n"
+            "assignments:\n  gate.exit_code_scheme: severity\n",
             encoding="utf-8",
         )
 
@@ -690,8 +694,35 @@ class TestReleaseFanOutContractParity:
             ["compare", str(old_dir), str(new_dir), "--pack", str(pack_path)],
         )
         assert result.exit_code == 64, result.output
-        assert "not supported for directory/package" in result.output
-        assert "--pack" in result.output
+        assert "kind: gate" in result.output
+
+    def test_pack_field_this_kind_may_not_assign_still_rejected(self, tmp_path):
+        # A `kind: contract` pack assigning `contract.mode` (deliberately not
+        # a routable field for any pack kind -- ADR-049 D8 keeps contract/
+        # policy/gate distinct) fails the same way it always has: resolving
+        # the pack for the release fan-out does not loosen field routing.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        pack_path = pack_dir / "pack.yml"
+        pack_path.write_text(
+            "id: bad_route\nkind: contract\nversion: 1\n"
+            "assignments:\n  contract.mode: public\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--pack", str(pack_path)],
+        )
+        assert result.exit_code == 64, result.output
+        assert "may not assign" in result.output
 
 
 class TestUsedByScopingStampsExplicitEvidence:

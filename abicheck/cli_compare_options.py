@@ -86,7 +86,6 @@ def _reject_set_input_flags(
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
     audit_suppressions: bool = False,
-    pack_paths: tuple[Path, ...] = (),
     include_labels: dict[Path, str] | None = None,
     require_complete_analysis: bool = False,
 ) -> None:
@@ -94,6 +93,9 @@ def _reject_set_input_flags(
 
     The per-library fan-out has no public CLI support for these, so reject them
     loudly rather than silently ignore them (ADR-037 D12).
+
+    ``--pack`` is not one of these -- its own, separate resolution (CLI
+    cleanup phase two, "PR B" slice 1) decides what to accept or reject.
     """
     if exit_code_scheme is not None:
         raise click.UsageError(
@@ -157,24 +159,22 @@ def _reject_set_input_flags(
     # (compare_release_cmd), the exact same Tier-2 chokepoint a single-pair
     # `compare` uses -- so a library compared through the fan-out gets the
     # identical contract decision it would from comparing it individually.
-    # --pack stays rejected below: applying a pack's policy/contract/gate
-    # overrides per library still needs its own resolve-once-apply-per-pair
-    # design (ADR-049 D8 pack-vs-pack conflict detection resolves against a
-    # single library pair today), which this change does not attempt.
+    # --pack is the same story since CLI cleanup phase two "PR B" slice 1:
+    # its own resolution (resolve_release_pack_application, called by the
+    # caller right after this function) applies a pack's policy/contract-
+    # surface contributions to every library uniformly, through
+    # CompareRequest.pack_policy_overrides/pack_internal_namespaces -- the
+    # same Tier-2 chokepoint (service_compare_pipeline.classify_compare_pair)
+    # a single-pair `compare` folds its own packs through. Only a `kind:
+    # gate` pack (gate.exit_code_scheme/gate.severity.*) is still rejected,
+    # by that resolution itself, since the release fan-out has no resolved
+    # gate-options wiring to apply one to yet.
     if audit_suppressions:
         raise click.UsageError(
             "--audit-suppressions is not supported for directory/package "
             "(release) comparisons yet: the per-library fan-out has no "
             "single suppression-audit result to attach. Compare the "
             "specific library individually to use it."
-        )
-    if pack_paths:
-        raise click.UsageError(
-            "--pack is not supported for directory/package (release) "
-            "comparisons yet: the fan-out dispatches before the effective "
-            "configuration is resolved, so a pack would be accepted and then "
-            "score nothing. Compare the specific library individually to "
-            "use it."
         )
     if include_labels:
         raise click.UsageError(

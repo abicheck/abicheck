@@ -398,6 +398,157 @@ def resolve_and_apply(
     )
 
 
+def resolve_release_pack_application(
+    params: Mapping[str, Any],
+    *,
+    contract_evaluation: bool = False,
+    **kwargs: Any,
+) -> Any:
+    """Resolve ``--pack`` contributions for the directory/package release fan-out.
+
+    Returns a :class:`~abicheck.pack_application.PackApplication` (``None``
+    when no ``--pack`` was given), whose ``policy_overrides``/
+    ``internal_namespaces`` the caller threads into every library's own
+    ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces`` --
+    :func:`~abicheck.service_compare_pipeline.classify_compare_pair` folds
+    them against each library's freshly-loaded ``PolicyFile``.
+
+    Distinct from :func:`resolve_and_apply`, which also merges the packs into
+    *one* ``PolicyFile`` object and *one* ``ResolvedCompareConfig``. That fits
+    a single-pair ``compare``'s single ambient policy file, but the release
+    fan-out reloads its own ``PolicyFile`` fresh per library (``policy_file_
+    path`` is a filesystem path, not an object shared across the run) -- so
+    this returns the pack's *contribution* for the caller to fold in later,
+    once per library, rather than one merged object upfront.
+
+    Rejects a ``kind: gate`` pack outright (``gate_supported=False``, mirroring
+    ``cli_scan.py``'s identical stance): a gate pack's ``gate.exit_code_scheme``/
+    ``gate.severity.*`` need their own resolved gate-options wiring the release
+    fan-out does not have yet (CLI cleanup phase two, "PR B").
+
+    Raises what the canonical resolver and the pack loader raise (a D7
+    same-tier conflict, a D8 pack conflict, an inapplicable or gate-only
+    pack); mapping those onto exit 64 is the caller's job.
+    """
+    pack_paths = tuple(params.get("pack_paths") or ())
+    if not pack_paths:
+        return None
+    config = resolve_cli_config(params, **kwargs)
+    from .pack_application import check_resolved_config_applies_packs, pack_application
+
+    check_resolved_config_applies_packs(
+        config,
+        gate_supported=False,
+        gate_reason=(
+            "the directory/package (release) fan-out does not yet fold a "
+            "gate pack's gate.* assignments the way `compare --pack` does "
+            "for a single-pair comparison; pass --severity-preset/.abicheck.yml "
+            "severity settings directly instead, or compare the specific "
+            "library individually with --pack"
+        ),
+        contract_evaluation=contract_evaluation,
+    )
+    return pack_application(config, policy_file=kwargs.get("policy_file"))
+
+
+def resolve_release_pack_application_from_ctx(
+    ctx: Any,
+    *,
+    contract_mode: str | None,
+    scope_public_headers: bool,
+    policy: str,
+    policy_file_path: Path | None,
+    suppress: Path | None,
+    require_justification: bool,
+    exit_code_scheme: str | None,
+    severity_preset: str | None,
+    pack_paths: tuple[Path, ...],
+    contract_evaluation: bool,
+    project_cfg: Any,
+    project_path: Path | None,
+    project_sha256: str | None,
+    policy_option: str | None,
+    policy_path: Path | None,
+    policy_sha256: str | None,
+    run_profile: Mapping[str, Any] | None = None,
+) -> Any:
+    """``resolve_release_pack_application``, but reading "was this typed?"
+    (and a best-effort ``--policy-file`` pre-read) off the real Click
+    *ctx* itself, the way ``_resolve_evaluation_config`` does for the
+    single-pair path -- split out so the caller (``cli_compare_helpers.
+    run_compare``, already at the AI-readiness file-size cap) stays a single
+    call rather than this whole resolution inlined at the call site.
+
+    *run_profile* is ``ctx.meta.get(cli_options.RUN_PROFILE_META_KEY)`` --
+    read by the caller, not here: importing ``cli_options`` from this module
+    would close a real cycle back to this file (``cli_options ->
+    service_scan -> scan_engine -> cli_scan_baseline ->
+    cli_compare_helpers -> cli_compare_receipt``), the exact ``import-cycle-
+    growth`` regression this module's own "leaf" design avoids elsewhere.
+
+    ``None`` when *pack_paths* is empty -- no Click/file access at all in
+    that case, matching ``resolve_release_pack_application``'s own contract.
+    Raises ``click.UsageError`` directly (mapping a D7 same-tier conflict, a
+    D8 pack conflict, or an inapplicable/gate-only pack) rather than the raw
+    resolver exceptions, so the caller does not need its own except clause.
+    """
+    if not pack_paths:
+        return None
+    import click
+
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
+    )
+    from .errors import PackManifestError
+    from .policy_file import PolicyFile
+
+    # A best-effort read purely to answer "does the real --policy-file
+    # already state this ChangeKind override" (D8 precedence, mirroring
+    # `_shadowed_inert_fields`'s identical reasoning): a broken file is not
+    # reported here -- the real per-library load a moment later (inside
+    # `compare_release_cmd`) reports it with its own framing.
+    loaded_policy_file = None
+    if policy_file_path is not None:
+        try:
+            loaded_policy_file = PolicyFile.load(policy_file_path)
+        except (ValueError, OSError, ImportError):
+            loaded_policy_file = None
+    typed = {
+        name
+        for name in typed_parameter_names()
+        if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+    }
+    try:
+        return resolve_release_pack_application(
+            {
+                "contract_mode": contract_mode,
+                "scope_public_headers": scope_public_headers,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "exit_code_scheme": exit_code_scheme,
+                "severity_preset": severity_preset,
+                "pack_paths": pack_paths,
+            },
+            contract_evaluation=contract_evaluation,
+            typed=typed,
+            project_cfg=project_cfg,
+            project_path=project_path,
+            policy_file=loaded_policy_file,
+            suppress_path=suppress,
+            run_profile=run_profile,
+            policy_option=policy_option,
+            policy_path=policy_path,
+            policy_sha256=policy_sha256,
+            project_sha256=project_sha256,
+            symbols_list=None,
+        )
+    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+
 def record_resolved_config(
     result: Any,
     resolved_cfg: Any,

@@ -1776,138 +1776,27 @@ def compare_snapshots(
     )
 
 
-def run_compare_request(request: CompareRequest) -> CompareResult:
-    """Compare two ABI inputs described by a :class:`CompareRequest`.
-
-    The single classification chokepoint (ADR-037 D1/D2): every front-end
-    builds a ``CompareRequest`` and calls this, so defaults cannot diverge
-    between invocation paths. The keyword-argument :func:`run_compare` is a
-    thin shim that builds the request and delegates here.
-
-    Exactly the composition of the two phases in
-    :mod:`abicheck.service_compare_pipeline` —
-    :func:`~abicheck.service_compare_pipeline.resolve_compare_request` then
-    :func:`~abicheck.service_compare_pipeline.classify_compare_pair`. A front
-    end that must configure the run between them (the native ``compare`` CLI's
-    ADR-049 ``resolve_and_apply``, whose ``--pack`` can move the policy file
-    and severity levels the classification is scored under) calls the two
-    phases directly rather than keeping a second resolution implementation.
-
-    Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
-    bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
-    gain a field without breaking positional callers, which a tuple cannot.
-    ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
-    wants it back in one line.
-
-    Raises:
-        ValidationError: If the request fails :meth:`CompareRequest.validate`.
-        SnapshotError: If either input cannot be loaded.
-    """
-    return classify_compare_pair(request, resolve_compare_request(request))
-
-
-def run_compare(
-    old_input: Path,
-    new_input: Path,
-    old_headers: list[Path] | None = None,
-    new_headers: list[Path] | None = None,
-    old_includes: list[Path] | None = None,
-    new_includes: list[Path] | None = None,
-    old_version: str = "",
-    new_version: str = "",
-    lang: str = "c++",
-    frontend: str = "auto",
-    suppress: Path | None = None,
-    policy: str = "strict_abi",
-    policy_file_path: Path | None = None,
-    old_pdb_path: Path | None = None,
-    new_pdb_path: Path | None = None,
-    old_debug_roots: list[Path] | None = None,
-    new_debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
-    scope_to_public_surface: bool = True,
-    force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = False,
-    public_surface_allowlist: set[str] | None = None,
-    debuginfod_url: str | None = None,
-    diagnostic_comparison: bool = False,
-    contract_evaluation: bool = False,
-    include_dependencies: bool = True,
-    contract_mode: str | None = None,
-) -> CompareResult:
-    """Compare two ABI inputs and return the classified diff result.
-
-    Keyword-argument shim over :func:`run_compare_request`: it assembles a
-    :class:`CompareRequest` from loose arguments and delegates, so existing
-    callers keep working while the typed request is the real chokepoint
-    (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
-    Trailing keyword-only params (``debuginfod_url`` onward) are appended
-    after every pre-existing one, never alongside a thematically-closer
-    neighbor, so a positional caller keeps binding each argument to the same
-    parameter it always did (Codex review, PR #551). ``include_dependencies``
-    applies to *both* sides — build a ``CompareRequest`` for a per-side override.
-    Returns:
-        A :class:`~abicheck.api_types.CompareResult`. This returned the bare
-        ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
-        shape back for a caller that unpacks positionally.
-    Raises:
-        SnapshotError: If either input cannot be loaded.
-        ValidationError: If inputs have unrecognised formats.
-    """
-    request = CompareRequest(
-        old=InputSpec(
-            path=old_input,
-            headers=tuple(old_headers or ()),
-            includes=tuple(old_includes or ()),
-            version=old_version,
-            pdb=old_pdb_path,
-            debug_roots=tuple(old_debug_roots or ()),
-            include_dependencies=include_dependencies,
-        ),
-        new=InputSpec(
-            path=new_input,
-            headers=tuple(new_headers or ()),
-            includes=tuple(new_includes or ()),
-            version=new_version,
-            pdb=new_pdb_path,
-            debug_roots=tuple(new_debug_roots or ()),
-            include_dependencies=include_dependencies,
-        ),
-        lang=lang,
-        frontend=frontend,
-        policy=policy,
-        policy_file_path=policy_file_path,
-        suppress=suppress,
-        scope_public=scope_to_public_surface,
-        force_public_symbols=(
-            frozenset(force_public_symbols) if force_public_symbols else None
-        ),
-        public_surface_allowlist=(
-            frozenset(public_surface_allowlist)
-            if public_surface_allowlist is not None
-            else None
-        ),
-        pattern_verdicts=pattern_verdicts,
-        enable_debuginfod=enable_debuginfod,
-        debuginfod_url=debuginfod_url,
-        diagnostic_comparison=diagnostic_comparison,
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
-    )
-    return run_compare_request(request)
+# run_compare_request/run_compare moved to service_compare_pipeline.py (CLI
+# cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
+# cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
+# -- re-exported below, same pattern as resolve_compare_request/
+# classify_compare_pair already use.
 
 
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
 # the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can
 # run its Click-dependent ADR-049 ``resolve_and_apply`` step between them and
 # still share this resolution instead of keeping a second copy. Re-exported here
-# so ``from abicheck.service import resolve_compare_request`` works and
-# ``run_compare_request`` above resolves both names at call time. ──────────────
+# so ``from abicheck.service import resolve_compare_request`` works.
+# ``run_compare_request``/``run_compare`` (their composition and its
+# keyword-argument shim) live there too now, for the same file-size reason. ──
 from .service_compare_pipeline import (  # noqa: E402,F401
     ResolvedComparePair,
     classify_compare_pair,
     resolve_compare_request,
     resolve_sides_sequentially,
+    run_compare,
+    run_compare_request,
 )
 
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the

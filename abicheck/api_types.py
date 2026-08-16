@@ -62,6 +62,8 @@ from typing import TYPE_CHECKING, Any
 from .errors import ValidationError
 
 if TYPE_CHECKING:
+    from .change_registry_types import Verdict
+    from .checker_policy import ChangeKind
     from .checker_types import DiffResult
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
@@ -499,6 +501,50 @@ class CompareRequest:
     # identical PR #582 lesson AGENTS.md's `Change`-dataclass entry already
     # documents for exactly this mistake).
     lang_explicit: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B slice 1: a caller that has already resolved
+    # a ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
+    # contributions (ADR-049 D8's ``pack_application.PackApplication``) can
+    # hand them over here instead of dropping to Tier-1 directly. Before this
+    # field existed, ``policy_file_path`` was the *only* channel this typed
+    # request had for policy configuration, and it names a file on disk —
+    # there was no way to say "apply these already-resolved overrides on top
+    # of it" without either writing a synthetic policy file to disk or
+    # calling ``checker.compare``/``compare_snapshots`` directly, which the
+    # ``cli-contract`` AI-readiness gate forbids for any ``cli*.py`` module.
+    # That gap is exactly why the directory/package release fan-out rejected
+    # ``--pack`` outright (see ``cli_compare_options._reject_set_input_flags``)
+    # while the single-pair ``compare`` CLI could already apply one: the
+    # single-pair path never went through this typed request for that step,
+    # calling ``compare_snapshots`` directly with an already pack-folded
+    # ``PolicyFile`` object. Folded into the loaded ``PolicyFile`` by
+    # ``service_compare_pipeline.classify_compare_pair`` via
+    # ``pack_application.policy_file_with_packs`` — the exact same function
+    # the single-pair CLI path already uses — so every caller that reaches
+    # ``classify_compare_pair`` (which is every ``CompareRequest`` consumer,
+    # ``run_compare_request``'s own two phases included) applies a pack's
+    # policy/contract-surface contributions identically, rather than each
+    # front end re-deriving its own application. ``None``/empty is a no-op:
+    # every pre-existing caller that never sets this field is unaffected.
+    # Deliberately narrower than the full ``PackApplication`` (no
+    # ``exit_code_scheme``/``severity_levels``): those gate-shaped fields
+    # need their own resolved gate-options wiring the release fan-out does
+    # not have yet — see the plan's "PR B" section.
+    # A tuple of pairs, not a `dict` -- the same reason `include_labels`
+    # above is a tuple of pairs rather than a `dict`: this dataclass is
+    # frozen and Python derives `__hash__` from its fields, which a `dict`
+    # field would silently break the moment one was actually populated
+    # (verified: `CompareRequest(...)` hashes fine with every pre-existing
+    # field, and stops the moment this one carries a real `dict`).
+    pack_policy_overrides: tuple[tuple[ChangeKind, Verdict], ...] | None = field(
+        default=None, kw_only=True
+    )
+    #: ``surface.internal_namespaces`` when a pack supplied it — see
+    #: ``pack_policy_overrides`` above for why this field exists and how it
+    #: is applied. ``None`` means "no pack stated this"; distinct from an
+    #: empty tuple, which is a pack's explicit "this project has none".
+    pack_internal_namespaces: tuple[str, ...] | None = field(
+        default=None, kw_only=True
+    )
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).

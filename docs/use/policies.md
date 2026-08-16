@@ -330,13 +330,16 @@ when a domain is selected to measure coverage of — so assigning it without
 that flag is a usage error rather than a silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
-a `kind: gate` pack is **compare-only**, because a `scan`'s exit code follows
-its compatibility verdict directly and so has no gate to move; `scan --pack`
-requires `--against`, since a pack's only application there is the baseline
-comparison; and `--pack` is rejected on a directory/package (release)
-`compare`, whose per-library fan-out dispatches before the effective
-configuration is resolved. Each of those is a usage error rather than a
-silently ignored flag.
+a `kind: gate` pack is rejected on `scan` (`scan --against` honours
+`--severity-preset`/`--exit-code-scheme` given directly, but does not yet
+fold a gate pack's `gate.*` assignments) and on a directory/package (release)
+`compare` (the per-library fan-out has no resolved gate-options wiring for it
+yet); `scan --pack` also requires `--against`, since a pack's only
+application there is the baseline comparison. A `kind: policy`/`kind:
+contract` pack's `policy.overrides`/`surface.internal_namespaces`, by
+contrast, apply uniformly to every library on a directory/package `compare`
+too. Each rejection above is a usage error rather than a silently ignored
+flag.
 
 For the full field vocabulary, the precedence rules, and what a resolution
 receipt records, see

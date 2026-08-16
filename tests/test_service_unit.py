@@ -3077,12 +3077,15 @@ class TestContractEvaluationThreading:
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        # contract_mode (ADR-049 Phase 6's --contract) was appended after
-        # include_dependencies in turn, following the same rule.
-        assert params[-1] == "contract_mode"
-        assert params[-2] == "include_dependencies"
-        assert params[-3] == "contract_evaluation"
-        assert params[-4] == "diagnostic_comparison"
+        # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
+        # two, "PR B" slice 1) were appended after contract_mode in turn,
+        # following the same rule.
+        assert params[-1] == "pack_internal_namespaces"
+        assert params[-2] == "pack_policy_overrides"
+        assert params[-3] == "contract_mode"
+        assert params[-4] == "include_dependencies"
+        assert params[-5] == "contract_evaluation"
+        assert params[-6] == "diagnostic_comparison"
 
 
 class TestParallelOldNewExtraction:

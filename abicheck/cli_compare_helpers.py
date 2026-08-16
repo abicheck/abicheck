@@ -117,12 +117,6 @@ if TYPE_CHECKING:
     from .policy_file import PolicyFile
 
 
-
-
-
-
-
-
 def _resolve_compare_config(
     *,
     config: Path | None,
@@ -177,12 +171,6 @@ def _resolve_compare_config(
         cli_debuginfod_url=debuginfod_url,
     )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
-
-
-
-
-
-
 
 
 def _resolve_compare_collect_mode(
@@ -312,8 +300,6 @@ def _needs_inline_embed(
     )
 
 
-
-
 def _resolve_post_manifest_allowlist(
     post_manifest_path: Path | None,
     old: AbiSnapshot,
@@ -354,10 +340,6 @@ def _classify_and_reject_operands(
     if old_kind == "app" or new_kind == "app":
         _reject_application_operand(old_input, new_input, old_kind, new_kind)
     return old_kind, new_kind
-
-
-
-
 
 
 def _render_compare_dry_run(
@@ -545,7 +527,6 @@ def _reject_incoherent_compare_flags(
         secondary_fmt=secondary_fmt,
         secondary_output=secondary_output,
     )
-
 
 
 def _preflight_manifests_and_audit(
@@ -1056,7 +1037,7 @@ def _reject_flags_unsupported_for_set_inputs(
     env_matrix_path: Path | None, secondary_fmt: str | None,
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
-    pack_paths: tuple[Path, ...], include_labels: dict[Path, str] | None,
+    include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
 ) -> None:
@@ -1068,20 +1049,16 @@ def _reject_flags_unsupported_for_set_inputs(
     of the ``--dry-run`` emit (not just before the real dispatch) so a dry
     run can't report "ok" for a flag combination the real run would then
     reject (Codex review).
+
+    ``--pack`` is not rejected here (CLI cleanup phase two, "PR B" slice 1):
+    the caller resolves it separately right after this call.
     """
-    # The per-library fan-out (`compare-release` backend) consumes the
-    # resolved scheme from config but has no public CLI support for these
-    # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
-    # Validated ahead of the --dry-run emit below (not just before the real
-    # dispatch) so a dry run can't report "ok" for a flag combination the
-    # real run would then reject (Codex review).
     _reject_set_input_flags(
         exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
         audit_suppressions=audit_suppressions,
-        pack_paths=pack_paths,
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
     )
@@ -1546,6 +1523,10 @@ def run_compare(
             )
         raise click.UsageError(f"--use-cases is not supported here: {detail}")
 
+    # CLI cleanup phase two, PR B slice 1: None for a single-pair compare or a
+    # release/directory one with no --pack; resolved just below (ahead of the
+    # --dry-run emit) otherwise, so a dry run and the real run agree.
+    release_pack_application = None
     if {old_kind, new_kind} & {"directory", "package"}:
         _reject_flags_unsupported_for_set_inputs(
             ctx, project_cfg,
@@ -1555,11 +1536,26 @@ def run_compare(
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
-            pack_paths=pack_paths,
             include_labels=include_labels,
             require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
         )
+        if pack_paths:
+            from .cli_compare_receipt import resolve_release_pack_application_from_ctx
+            from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
+
+            release_pack_application = resolve_release_pack_application_from_ctx(
+                ctx,
+                contract_mode=contract_mode, scope_public_headers=scope_public_headers,
+                policy=policy, policy_file_path=policy_file_path, suppress=suppress,
+                require_justification=require_justification,
+                exit_code_scheme=exit_code_scheme, severity_preset=severity_preset,
+                pack_paths=pack_paths, contract_evaluation=contract_evaluation,
+                project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
+                policy_option=policy_selected_by, policy_path=policy_selected_path,
+                policy_sha256=policy_selected_sha,
+                run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
+            )
 
     # Parsed here, in the preflight, not only at the post-comparison
     # attribution call: --dry-run returns before that call, so a malformed
@@ -1662,6 +1658,7 @@ def run_compare(
             verbose=verbose,
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
+            pack_application=release_pack_application,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

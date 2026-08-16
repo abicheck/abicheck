@@ -32,6 +32,18 @@ changes what a CI job's exit code means.
 > exit decision — have to converge first, or deleting the flags merely freezes
 > today's divergence between parallel paths into the removed-flag baseline. The
 > per-PR sections below carry the prerequisites each one gained.
+>
+> **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
+> + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
+> — out of the reviewed "Ordering" sequence below, which lists it after PR B/C/D,
+> but that is harmless: G1 is purely additive (no CLI change, no flag removed),
+> so it has no prerequisite on the others. PR B ("effective configuration
+> parity") gained its first slice: `--pack`'s `policy.overrides`/`surface.
+> internal_namespaces` contributions now apply uniformly to `compare`, `scan
+> --against`, *and* the directory/package release fan-out (previously the
+> release fan-out rejected `--pack` outright). See PR B's own section below for
+> what this slice closed and what is still open (`gate.*` pack fields on
+> release/scan, and the effective-config digest in every report).
 
 ## Problem
 
@@ -441,10 +453,8 @@ set free to drift. What actually generalizes across all three operand shapes
 is the *concept* of three fields — `exit`, `contract_coverage_exit_
 contribution`, `analysis_assurance_exit_contribution` — not yet a uniform
 *location* for them today. `compare` puts all three at the report's top
-level, **implemented in a separate, not-yet-merged PR (#789) — "PR G1" here
-names the plan slice, not a landed state of this codebase; treat it as still
-in flight until that PR merges to `main`.** **`scan --against` does not
-(fresh evidence, Codex review):** `ScanOutcome.to_dict()` (`scan_engine.py`)
+level, **implemented and merged as #789 (`e43abfd`) — "PR G1" is done.**
+**`scan --against` does not (fresh evidence, Codex review):** `ScanOutcome.to_dict()` (`scan_engine.py`)
 nests its whole `diff_summary` under a `"diff"` key, and `_baseline_summary()`
 (`cli_scan_baseline.py`) writes `analysis_assurance_exit_contribution` and
 the contract-coverage block *into that nested summary*, not the outer
@@ -870,7 +880,42 @@ no answerable question about how a legacy pack migrates: the answer would be
 immutable effective configuration (one `CompatibilityEvaluationConfig`, one
 `GateOptions`), the same object used by `compare`, the release fan-out, `scan`
 and the Action, with the same effective-config digest recorded in every
-report. This is also PR 1b/E's prerequisite, which is why it sits early in the
+report.
+
+> **Slice 1 landed (2026-08-16):** the directory/package release fan-out no
+> longer rejects `--pack` outright. `CompareRequest` gained `pack_policy_
+> overrides`/`pack_internal_namespaces` (additive, `None` by default — see the
+> field's own docstring in `api_types.py`), folded into the loaded `PolicyFile`
+> at the one Tier-2 chokepoint every `CompareRequest` consumer already passes
+> through (`service_compare_pipeline.classify_compare_pair`, via `pack_
+> application.policy_file_with_packs` — the exact function the single-pair CLI
+> path already used). `cli_compare_helpers.run_compare` resolves the release
+> operand's `--pack` once (`cli_compare_receipt.resolve_release_pack_
+> application`/`_from_ctx`), before dispatch, and forwards the resulting
+> `PackApplication` through `compare_release_cmd` → `_compare_release_
+> libraries`/`_collect_release_extras`/`_collect_matrix_result` → `_run_
+> compare_pair` → `service.run_compare` (now `service_compare_pipeline.
+> run_compare`, moved there in the same change to stay under the AI-readiness
+> file-size cap) uniformly, so every library in the release — and its
+> build-configuration-matrix findings — sees the identical pack-resolved
+> policy. **What is still open, deliberately not attempted in this slice:** a
+> `kind: gate` pack (`gate.exit_code_scheme`/`gate.severity.*`) is still
+> rejected for the release fan-out (`gate_supported=False`, mirroring `cli_
+> scan.py`'s existing stance) — release's severity/exit-code-scheme resolution
+> (`_resolve_release_severity_config`, raw CLI-or-config strings re-derived at
+> several call sites) has no `GateOptions`-shaped object to fold a pack's
+> `gate.*` fields into yet, and forcing one through the existing raw-string
+> shape risked exactly the "changed behavior nobody reviewed" this cleanup
+> exists to avoid. `scan`'s own `gate.*` rejection is unchanged. Neither the
+> "one effective configuration shared by the Action" half nor the
+> "effective-config digest recorded in every report" half of PR B's stated
+> goal is attempted in this slice — both remain open, and both need the
+> `GateOptions` unification above as a prerequisite, same as the gate-pack gap.
+> Tests: `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
+> (`test_policy_pack_is_applied_to_a_release_comparison`, `test_gate_pack_is_
+> still_rejected_on_a_release_comparison`).
+
+This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.
 
 **(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780

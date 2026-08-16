@@ -921,22 +921,62 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert result.exit_code == 0, result.output
 
-    def test_pack_is_rejected_on_a_release_comparison(
+    def test_policy_pack_is_applied_to_a_release_comparison(
         self, tmp_path: Path, ignore_removals: Path
     ) -> None:
-        """The directory/package fan-out dispatches before the effective
-        configuration is resolved, so a pack there would be accepted and score
-        nothing -- the same reason `--contract` is rejected."""
+        """CLI cleanup phase two, "PR B" slice 1: a `kind: policy` pack now
+        configures the directory/package fan-out instead of being rejected
+        outright -- the first-assertion rule this whole module states in its
+        own docstring: an exit code that differs with and without the pack,
+        not just "the flag was accepted"."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        without_pack = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+        assert without_pack.exit_code == 4, without_pack.output
+        with_pack = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--pack", str(ignore_removals)],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+
+    def test_gate_pack_is_still_rejected_on_a_release_comparison(
+        self, tmp_path: Path
+    ) -> None:
+        """The release fan-out has no resolved gate-options wiring yet
+        (unlike `policy.overrides`/`surface.internal_namespaces`, which now
+        apply): a `kind: gate` pack must still fail loudly rather than be
+        silently accepted and score nothing."""
+        gate = _pack(
+            tmp_path,
+            "scheme.yml",
+            "id: scheme\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.exit_code_scheme: severity\n",
+        )
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         result = CliRunner().invoke(
-            main,
-            ["compare", str(old_dir), str(new_dir), "--pack", str(ignore_removals)],
+            main, ["compare", str(old_dir), str(new_dir), "--pack", str(gate)]
         )
         assert result.exit_code == 64, result.output
-        assert "--pack" in result.output
+        assert "kind: gate" in result.output
 
 
 class TestNoPackChangesNothing:
