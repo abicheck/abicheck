@@ -69,10 +69,13 @@ phase-two plan's own PR 0B section for that history):
    job's `test-action summary` check for `test-action.yml`, since that
    workflow fans out to 17+ independent jobs with no single existing
    pass/fail check to point at) for the same head SHA and mirrors its
-   conclusion. **Require `docs-pr-required`/`test-action-required` in the
-   Ruleset, never `build-docs`/`test-action summary` directly** — the whole
-   point is that the wrapper is unconditionally present while the wrapped
-   check may not be.
+   conclusion. **Require the gate jobs' own emitted check names in the
+   Ruleset — `docs-pr (required)`/`test-action (required)` (each job's own
+   `name:` override, not its job id `docs-pr-required`/`test-action-required`;
+   GitHub Rulesets match a required status check by its reported check-run
+   name, not by workflow job id) — never `build-docs`/`test-action summary`
+   directly.** The whole point is that the wrapper is unconditionally present
+   while the wrapped check may not be.
 4. Anything the table marks **not required** stays out of the required set
    entirely — this rule does not change that classification.
 
@@ -84,7 +87,10 @@ not every matrix leg, see "one stable aggregate check" below),
 `packaging (ubuntu-latest)`, `packaging (windows-latest)`,
 `changelog-fragment`, `cli-interface-diff`, `test-contract`,
 `Dependency Review`, `Security Scan`, `CodeQL Analysis (python)`,
-`docs-pr-required`, `test-action-required`.
+`docs-pr (required)`, `test-action (required)` (the `name:` values of
+`ci.yml`'s `docs-pr-required`/`test-action-required` jobs — see the note in
+rule step 3 above on why the check name, not the job id, is what a Ruleset
+actually requires).
 
 **This document states the rule and the resulting list; it does not itself
 turn the list into an enforced Ruleset.** That configuration step is a
@@ -109,13 +115,19 @@ every push to `main` and looks up the PR GitHub associates with that commit
 already-recorded *tested head SHA* — not the new merge commit, which most of
 the required workflows above never re-run against (`pull_request`-only
 triggers) and which wouldn't prove anything about what was reviewed even if
-they did — against the unconditional half of the required-check list above
-(the two neutral-aggregate checks are deliberately excluded; see the
-workflow's own header comment for why). It cannot block an already-completed
-merge; it fails loudly on `main`'s own Actions tab instead, which is what
-makes a merge that slipped through a misconfigured or momentarily-disabled
-Ruleset *detectable* rather than invisible — the exact gap that let the
-#782 merge SHA go out with no full `ci.yml` sweep having run against it.
+they did — against the required-check list above, including the two
+neutral-aggregate gate checks themselves (`docs-pr (required)`/
+`test-action (required)`, which are unconditioned and so exist on every PR
+head SHA); only the *path-filtered* checks those gates wrap (`build-docs`,
+`test-action summary`) are deliberately excluded from this second pass, since
+whether those exist at all depends on the same path filter the gate job
+already re-evaluated as a required check on the PR itself — see the
+workflow's own header comment for the full reasoning. It cannot block an
+already-completed merge; it fails loudly on `main`'s own Actions tab instead,
+which is what makes a merge that slipped through a misconfigured or
+momentarily-disabled Ruleset *detectable* rather than invisible — the exact
+gap that let the PR #782 merge SHA go out with no full `ci.yml` sweep having
+run against it.
 
 ## Local equivalence (CLAUDE.md "M0-3")
 

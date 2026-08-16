@@ -562,6 +562,7 @@ jobs:
     permissions:
       contents: read
       checks: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Detect whether docs-pr.yml's own paths changed
@@ -580,7 +581,7 @@ jobs:
               - '.github/workflows/docs-pr.yml'
       - name: Wait for docs-pr.yml's build-docs check and mirror its outcome
         if: steps.filter.outputs.docs == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
         with:
           script: |
             const sha = context.payload.pull_request.head.sha;
@@ -593,11 +594,13 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: sha,
+                check_name: checkName,
+                per_page: 100,
               });
               const run = data.check_runs.find(r => r.name === checkName);
               if (run && run.status === 'completed') {
                 core.info(`${checkName} completed with conclusion: ${run.conclusion}`);
-                if (!['success', 'neutral', 'skipped'].includes(run.conclusion)) {
+                if (!['success', 'neutral'].includes(run.conclusion)) {
                   core.setFailed(`${checkName} did not succeed (conclusion: ${run.conclusion})`);
                 }
                 return;
@@ -620,6 +623,7 @@ jobs:
     permissions:
       contents: read
       checks: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Detect whether test-action.yml's own paths changed
@@ -640,7 +644,7 @@ jobs:
               - 'tests/fixtures/action/**'
       - name: Wait for test-action.yml's summary check and mirror its outcome
         if: steps.filter.outputs.action == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
         with:
           script: |
             const sha = context.payload.pull_request.head.sha;
@@ -653,11 +657,13 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: sha,
+                check_name: checkName,
+                per_page: 100,
               });
               const run = data.check_runs.find(r => r.name === checkName);
               if (run && run.status === 'completed') {
                 core.info(`${checkName} completed with conclusion: ${run.conclusion}`);
-                if (!['success', 'neutral', 'skipped'].includes(run.conclusion)) {
+                if (!['success', 'neutral'].includes(run.conclusion)) {
                   core.setFailed(`${checkName} did not succeed (conclusion: ${run.conclusion})`);
                 }
                 return;

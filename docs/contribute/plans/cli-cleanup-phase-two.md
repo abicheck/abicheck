@@ -104,9 +104,10 @@ SHA), which is precisely what item 4 exists to make detectable.
 > states the classification rule (superseding the hand-copied-list attempts
 > below, kept here as the historical record of why a rule beat a list) and
 > the concrete required-check name list it produces; `ci.yml` gained the two
-> neutral-aggregate gate jobs (`docs-pr-required`/`test-action-required`)
-> `test-action.yml`'s own `test-action-summary` aggregate they wrap, all
-> structurally guarded by `tests/test_required_checks_governance.py`. Item
+> neutral-aggregate gate jobs (`docs-pr-required`/`test-action-required`),
+> and `test-action.yml` gained the `test-action-summary` aggregate they
+> wrap, all structurally guarded by
+> `tests/test_required_checks_governance.py`. Item
 > 4's `verify-merge-checks.yml` (push-to-`main` exact-merge-SHA
 > verification) is implemented and tested the same way. **What remains is
 > exactly one manual action**: an account with repository-admin access must

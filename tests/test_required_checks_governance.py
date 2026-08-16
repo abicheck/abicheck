@@ -97,6 +97,59 @@ class TestNeutralAggregateGateJobsExist:
         # Confirm the job itself exists (sanity: parametrize didn't typo).
         assert job_id in _jobs(ci)
 
+    @pytest.mark.parametrize(
+        ("job_id", "expected_check_name"),
+        [
+            ("docs-pr-required", "docs-pr (required)"),
+            ("test-action-required", "test-action (required)"),
+        ],
+    )
+    def test_gate_job_check_name_is_documented_as_required(
+        self, job_id: str, expected_check_name: str
+    ) -> None:
+        """GitHub Rulesets match a required status check by its emitted
+        check-run *name*, not by the workflow job id -- `.github/AGENTS.md`'s
+        required-check list must name what the job actually reports
+        (`name:`), not the job id, or an admin applying that list configures
+        a context that never reports and strands every PR."""
+        job = _jobs(_load_workflow("ci.yml"))[job_id]
+        assert job.get("name") == expected_check_name
+        agents_md = (ROOT / ".github" / "AGENTS.md").read_text(encoding="utf-8")
+        assert f"`{expected_check_name}`" in agents_md
+
+
+class TestGateJobPollingLogic:
+    """Guards on the two gate jobs' own `actions/github-script` polling step
+    -- a `skipped` conclusion must not be silently accepted as a pass (the
+    path filter is what handles "the target workflow never ran"; a check run
+    that exists and reports `skipped` is a different, real signal), and the
+    step should be SHA-pinned like its neighbors rather than a floating tag."""
+
+    @pytest.mark.parametrize("job_id", ["docs-pr-required", "test-action-required"])
+    def test_does_not_accept_a_skipped_conclusion_as_success(self, job_id: str) -> None:
+        ci = _load_workflow("ci.yml")
+        job = _jobs(ci)[job_id]
+        script_step = next(
+            s
+            for s in job["steps"]
+            if s.get("uses", "").startswith("actions/github-script@")
+        )
+        script = script_step["with"]["script"]
+        assert "'success', 'neutral'" in script
+        assert "'skipped'" not in script
+
+    @pytest.mark.parametrize("workflow_name", ["ci.yml", "verify-merge-checks.yml"])
+    def test_github_script_is_pinned_by_sha(self, workflow_name: str) -> None:
+        wf = _load_workflow(workflow_name)
+        for job in _jobs(wf).values():
+            for step in job.get("steps", []):
+                uses = step.get("uses", "")
+                if uses.startswith("actions/github-script@"):
+                    ref = uses.split("@", 1)[1]
+                    assert len(ref) == 40, (
+                        f"{workflow_name}: {uses!r} is not SHA-pinned"
+                    )
+
 
 class TestPathFilterStaysInSyncWithTargetWorkflow:
     """The gate jobs' own `dorny/paths-filter` filter lists are hand-copied
@@ -122,16 +175,18 @@ class TestPathFilterStaysInSyncWithTargetWorkflow:
     def test_docs_pr_required_matches_docs_pr_yml(self) -> None:
         ci = _load_workflow("ci.yml")
         docs_pr = _load_workflow("docs-pr.yml")
-        assert self._gate_job_filter_paths(ci, "docs-pr-required") == _paths_filter(
-            docs_pr
-        )
+        target = _paths_filter(docs_pr)
+        assert target, "docs-pr.yml no longer has an `on: pull_request: paths:` filter"
+        assert self._gate_job_filter_paths(ci, "docs-pr-required") == target
 
     def test_test_action_required_matches_test_action_yml(self) -> None:
         ci = _load_workflow("ci.yml")
         test_action = _load_workflow("test-action.yml")
-        assert self._gate_job_filter_paths(ci, "test-action-required") == _paths_filter(
-            test_action
+        target = _paths_filter(test_action)
+        assert target, (
+            "test-action.yml no longer has an `on: pull_request: paths:` filter"
         )
+        assert self._gate_job_filter_paths(ci, "test-action-required") == target
 
 
 class TestTestActionSummaryCoversEveryJob:
@@ -155,6 +210,21 @@ class TestTestActionSummaryCoversEveryJob:
         test_action = _load_workflow("test-action.yml")
         summary = _jobs(test_action)["test-action-summary"]
         assert summary.get("if") == "always()"
+
+    def test_fails_on_a_skipped_dependency_too(self) -> None:
+        """`if: always()` (above) makes a skipped dependency visible to this
+        job's `needs.*.result`, but visibility alone doesn't fail the run --
+        the shell check must also treat 'skipped' as unsuccessful, or a
+        partially-skipped fan-out reports green through the required gate
+        `test-action-required` (`ci.yml`) polls."""
+        test_action = _load_workflow("test-action.yml")
+        summary = _jobs(test_action)["test-action-summary"]
+        run_step = next(
+            s
+            for s in summary["steps"]
+            if s.get("name") == "Fail if any test-action.yml job did not succeed"
+        )
+        assert "contains(needs.*.result, 'skipped')" in run_step["run"]
 
 
 class TestVerifyMergeChecksWorkflow:
@@ -184,6 +254,11 @@ class TestVerifyMergeChecksWorkflow:
             "Dependency Review",
             "Security Scan",
             "CodeQL Analysis (python)",
+            # The two neutral-aggregate gate jobs' own emitted check names
+            # (not their job ids) -- both are unconditioned like every other
+            # ci.yml job, so they exist on every PR head SHA and belong here.
+            "docs-pr (required)",
+            "test-action (required)",
         ):
             assert name in raw, f"{name!r} missing from verify-merge-checks.yml"
 
@@ -197,3 +272,21 @@ class TestVerifyMergeChecksWorkflow:
         raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
         assert "'build-docs'" not in raw
         assert "'test-action summary'" not in raw
+
+    def test_check_run_listing_is_paginated(self) -> None:
+        """A hand-added `per_page: 100` ceiling silently drops any check run
+        past the 100th once the repo's check-run count grows past it -- use
+        `github.paginate` instead so there's no ceiling to outgrow."""
+        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
+        assert "github.paginate(github.rest.checks.listForRef" in raw
+
+    def test_target_pr_selection_is_restricted_to_merged_prs_targeting_main(
+        self,
+    ) -> None:
+        """`listPullRequestsAssociatedWithCommit` can return an unrelated
+        open PR that happens to contain the same commit -- selection must be
+        restricted to merged PRs based against `main` before falling back to
+        anything, or an unrelated PR's head SHA could be verified instead."""
+        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
+        assert "pr.merged_at" in raw
+        assert "pr.base.ref === 'main'" in raw

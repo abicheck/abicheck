@@ -39,22 +39,27 @@ jobs:
       pull-requests: read
     steps:
       - name: Verify the merged PR's tested head SHA passed every required check
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
         with:
           script: |
             // Kept in sync by hand with .github/AGENTS.md's "Required vs.
             // informational workflows" table and the neutral-aggregate gate
-            // jobs in ci.yml (`docs-pr-required`/`test-action-required`) --
+            // jobs in ci.yml (job ids `docs-pr-required`/`test-action-
+            // required`, whose emitted check-run names are `docs-pr
+            // (required)`/`test-action (required)` via their own `name:`
+            // override -- what a Ruleset actually matches against is the
+            // emitted name, not the job id, so this list uses the names) --
             // this is the set of checks that exist unconditionally on every
-            // PR head SHA regardless of which paths it touched. The two
-            // path-filtered aggregate checks (`build-docs`, `test-action
-            // summary`) are deliberately NOT verified here: whether they
-            // exist at all depends on the same path filter their own
-            // neutral-aggregate gate job already re-evaluates, and
-            // duplicating that logic here would only risk the two drifting
-            // apart -- the gate job is already what makes their absence-when-
-            // inapplicable safe, and it already ran as a *required* check on
-            // the PR itself.
+            // PR head SHA regardless of which paths it touched. Both gate
+            // jobs themselves are unconditioned (only their *internal* wait
+            // step is path-gated), so they belong in this list; the two
+            // path-filtered aggregate checks they wrap (`build-docs`,
+            // `test-action summary`) are deliberately NOT verified here:
+            // whether those exist at all depends on the same path filter
+            // their own gate job already re-evaluates, and duplicating that
+            // logic here would only risk the two drifting apart -- the gate
+            // job already ran as a *required*, unconditional check on the PR
+            // itself and is what this list actually verifies.
             const REQUIRED_CHECKS = [
               'ai-readiness',
               'FAIR metadata and packaging',
@@ -68,6 +73,8 @@ jobs:
               'Dependency Review',
               'Security Scan',
               'CodeQL Analysis (python)',
+              'docs-pr (required)',
+              'test-action (required)',
             ];
 
             const sha = context.sha;
@@ -87,19 +94,25 @@ jobs:
             }
 
             // A commit can legitimately be associated with more than one PR
-            // (e.g. a stacked branch merged separately); prefer the one whose
-            // merge_commit_sha is exactly this push, falling back to the
-            // first association for a fast-forward/rebase merge where
-            // merge_commit_sha may not equal the pushed SHA.
-            const target = prs.find(pr => pr.merge_commit_sha === sha) || prs[0];
+            // (e.g. a stacked branch merged separately, or an unrelated open
+            // PR that happens to contain this same commit) -- restrict to
+            // merged PRs that actually targeted `main` before picking one,
+            // so an unrelated candidate can never be selected. Prefer the
+            // one whose merge_commit_sha is exactly this push, falling back
+            // to the first eligible candidate for a fast-forward/rebase
+            // merge where merge_commit_sha may not equal the pushed SHA.
+            const candidates = prs.filter(
+              pr => pr.merged_at && pr.base && pr.base.ref === 'main'
+            );
+            const target =
+              candidates.find(pr => pr.merge_commit_sha === sha) ||
+              candidates[0] ||
+              prs[0];
             const headSha = target.head.sha;
 
             core.info(`Merge commit ${sha} <- PR #${target.number}, tested head ${headSha}`);
 
-            // Not paginated: today's full required-check set plus every
-            // matrix leg is well under the 100-per-page ceiling (~78
-            // check runs observed). Revisit if that changes.
-            const { data: checkRunsResp } = await github.rest.checks.listForRef({
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: headSha,
@@ -107,10 +120,15 @@ jobs:
             });
 
             const byName = new Map();
-            for (const run of checkRunsResp.check_runs) {
+            for (const run of checkRuns) {
               // A check can be re-run; keep only the most recently started.
+              // `Date.parse` of a missing/malformed `started_at` is `NaN`,
+              // and every comparison with `NaN` is false -- fall back to 0
+              // so a queued run with no `started_at` yet still loses to any
+              // real timestamp instead of winning by default.
+              const startedAt = r => (r.started_at ? Date.parse(r.started_at) : 0);
               const existing = byName.get(run.name);
-              if (!existing || new Date(run.started_at) > new Date(existing.started_at)) {
+              if (!existing || startedAt(run) >= startedAt(existing)) {
                 byName.set(run.name, run);
               }
             }
