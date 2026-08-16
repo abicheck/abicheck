@@ -635,6 +635,70 @@ def test_perform_elf_dump_folds_l3_compile_context_into_header_parse(
     assert written.parsed_with_build_context is True
 
 
+def test_perform_elf_dump_hashes_derived_include_dirs_into_ast_cache_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review, PR #782: a derived -I/-isystem dir reaches the header
+    parse only as an opaque gcc_option_tokens string, which extra_includes'
+    own directory-mtime hashing never inspects -- without folding it into
+    extra_hash_dirs too, editing a header under that dir would reuse a
+    stale cached AST."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    build_inc = tmp_path / "buildinc"
+    build_inc.mkdir()
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "arguments": [
+                "c++", "-c", str(src), "-o", "out.o", "-I", str(build_inc),
+            ],
+        }]),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _dump_stub(**kw):  # noqa: ANN003
+        captured["extra_hash_dirs"] = kw["extra_hash_dirs"]
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _dump_stub)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", lambda snap, *_a, **_k: snap)
+    # seed_l2_includes' own compile-DB fallback would independently discover
+    # the identical build_inc dir and add it to extra_includes (which is
+    # already hashed) -- disabled here so the only source of build_inc in
+    # this test is the new L3 fold + extra_hash_dirs threading being tested.
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **kwargs: (list(kwargs["includes"]), []),
+    )
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None, None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None, False,  # sysroot, nostdinc
+        False, None,  # dwarf_only, effective_debug_format
+        (), (),  # public_headers, public_header_dirs
+        None,  # effective_compile_db
+        False, (), "",  # follow_deps, search_paths, ld_library_path
+        None, None, False,  # git_tag, build_id, no_git
+        None, None,
+        tmp_path,  # build_info=None, sources=tmp_path
+        None, False,
+        "source-target",  # build_config, allow_build_query, collect_mode
+        _expand, _populate, _stamp, _write,
+    )
+
+    assert build_inc in captured["extra_hash_dirs"]
+
+
 def test_perform_elf_dump_scopes_primary_dump_for_ast_memo_reuse(
     tmp_path: Path, monkeypatch
 ) -> None:

@@ -287,7 +287,7 @@ def _build_new_snapshot(
         # do below.
         from .buildsource.l2_seed import fold_l3_compile_context
 
-        l3_context_applied, compile_context = fold_l3_compile_context(
+        l3_context_applied, compile_context, _l3_include_dirs = fold_l3_compile_context(
             headers=headers,
             build_info=build_info,
             sources=sources,
@@ -308,9 +308,23 @@ def _build_new_snapshot(
                 compile_context.frontend_context if compile_context else "host"
             ),
             lang=lang,
-            lang_explicit=False,
+            # `lang` defaults to "c++" (scan's own Click default), so it
+            # can't distinguish a genuinely explicit request from the
+            # default the way DumpRequest.lang_explicit does -- but "c" is
+            # never a default, only ever a real request (mirrors perform_elf_
+            # dump's identical `lang_explicit or lang == "c"` squash-guard
+            # rule). Without this, an explicit `scan --lang c` against a
+            # matched C++ compile unit's own `-std=c++20` would let the
+            # derived standard reach a parse scan is explicitly forcing into
+            # C mode, which a real compiler rejects outright (Codex review).
+            lang_explicit=lang.lower() == "c",
             pending_cleanups=_l2_local_cleanups,
         )
+        # _l3_include_dirs: not yet threaded into an extra_hash_dirs hook
+        # here -- resolve_input has no such public parameter, unlike
+        # perform_elf_dump's own direct dump() call (see that fix's own
+        # comment for why this is a narrower, pre-existing, not-yet-closed
+        # residual gap rather than something new to this path).
         snap = resolve_input(
             binary,
             headers,

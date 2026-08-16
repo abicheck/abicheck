@@ -1294,7 +1294,7 @@ def handle_non_elf_dump(
         # clean click.ClickException the header-parse failure below does.
         from .buildsource.l2_seed import fold_l3_compile_context
 
-        l3_context_applied, l3_effective_ctx = fold_l3_compile_context(
+        l3_context_applied, l3_effective_ctx, _l3_include_dirs = fold_l3_compile_context(
             headers=headers,
             build_info=build_info,
             sources=sources,
@@ -1314,6 +1314,11 @@ def handle_non_elf_dump(
             lang_explicit=lang_explicit,
             pending_cleanups=_l2_pending_cleanups,
         )
+        # _l3_include_dirs unused here: dump_native_binary/service.run_dump
+        # has no public extra_hash_dirs hook (unlike perform_elf_dump's own
+        # dump() call below) -- a pre-existing, broader service.py cache-key
+        # gap this PR doesn't scope to fix (Codex review; AGENTS.md "Known
+        # gaps").
         snap = dump_native_binary(
             so_path,
             binary_fmt,
@@ -1691,7 +1696,7 @@ def perform_elf_dump(
         # below does, rather than an unhandled traceback.
         from .buildsource.l2_seed import fold_l3_compile_context
 
-        l3_context_applied, l3_effective_ctx = fold_l3_compile_context(
+        l3_context_applied, l3_effective_ctx, l3_include_dirs = fold_l3_compile_context(
             headers=resolved_headers,
             build_info=build_info,
             sources=sources,
@@ -1723,6 +1728,12 @@ def perform_elf_dump(
             sysroot = l3_effective_ctx.sysroot
             nostdinc = l3_effective_ctx.nostdinc
             deferred = []
+            # A derived -I/-isystem dir reaches the header parse only as an
+            # opaque gcc_option_tokens string, which extra_includes' own
+            # directory-mtime hashing never inspects -- fold it into
+            # deferred_dirs (extra_hash_dirs below) too, or an edit under
+            # this dir would reuse a stale cached AST (Codex review).
+            deferred_dirs = deferred_dirs + l3_include_dirs
 
         # Scoped so a clang primary parse is handed off in-process to the
         # `_attach_header_graph` pass below (G31 Phase C) -- this ELF `dump`

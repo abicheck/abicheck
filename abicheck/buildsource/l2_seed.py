@@ -532,6 +532,34 @@ def _split_include_tokens(
     return tuple(non_include), tuple(include)
 
 
+def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
+    """The directory operand of every include-search token in *tokens*.
+
+    Mirrors :func:`_split_include_tokens`'s spaced-vs-attached pairing, but
+    returns the resolved directory :class:`Path` objects rather than the raw
+    token pair -- the AST cache key's ``extra_hash_dirs`` channel (Codex
+    review) needs real paths to stat, not token strings.
+    """
+    from ..header_utils import _INCLUDE_FLAG_PREFIXES
+
+    dirs: list[Path] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        t = tokens[i]
+        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
+            dirs.append(Path(tokens[i + 1]))
+            i += 2
+            continue
+        matched_prefix = next(
+            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p) and t != p), None
+        )
+        if matched_prefix is not None:
+            dirs.append(Path(t[len(matched_prefix) :]))
+        i += 1
+    return tuple(dirs)
+
+
 def fold_l3_compile_context(
     *,
     headers: list[Path] | tuple[Path, ...],
@@ -552,7 +580,7 @@ def fold_l3_compile_context(
     lang: str,
     lang_explicit: bool,
     pending_cleanups: list[Callable[[], None]],
-) -> tuple[bool, CompileContext]:
+) -> tuple[bool, CompileContext, tuple[Path, ...]]:
     """P0.3 L3->L2 fold for a raw-parameter caller (shared by the ELF and
     PE/Mach-O ``dump`` CLI paths, AGENTS.md's former "the native ELF
     `abicheck dump` path never applies L3 build context to its own L2
@@ -573,13 +601,20 @@ def fold_l3_compile_context(
     correctly (per ADR-050 D2) refuses the comparison as ``NOT_COMPARABLE``
     for reasons neither command's own diagnostics name.
 
-    Returns ``(applied, effective_context)``: ``applied`` is ``True`` only
-    when a real L3 context was found and folded in (the caller's signal for
-    stamping ``AbiSnapshot.parsed_with_build_context``); ``effective_context``
-    is always real -- the explicit one unchanged when nothing was found, or
-    the merged result otherwise. Any temp-build-dir cleanups an inferred
-    build query created are appended to *pending_cleanups* in place (the
-    caller's own list, drained only after the L2 parse has consumed them).
+    Returns ``(applied, effective_context, derived_include_dirs)``: ``applied``
+    is ``True`` only when a real L3 context was found and folded in (the
+    caller's signal for stamping ``AbiSnapshot.parsed_with_build_context``);
+    ``effective_context`` is always real -- the explicit one unchanged when
+    nothing was found, or the merged result otherwise. ``derived_include_dirs``
+    is every directory a derived ``-I``/``-isystem``/etc. token names (empty
+    when nothing was found) -- since these dirs reach the header parse only
+    as opaque ``gcc_option_tokens`` strings, not as ``extra_includes``, the
+    AST cache key's own directory-mtime hashing never covered them without
+    the caller separately threading them into ``extra_hash_dirs`` (Codex
+    review): editing a header under a derived include dir would otherwise
+    reuse a stale cached AST. Any temp-build-dir cleanups an inferred build
+    query created are appended to *pending_cleanups* in place (the caller's
+    own list, drained only after the L2 parse has consumed them).
 
     May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
     when the matched compile units genuinely disagree on an unpinned
@@ -612,10 +647,10 @@ def fold_l3_compile_context(
     if cleanups:
         pending_cleanups.extend(cleanups)
     if derived is None:
-        return False, explicit_ctx
+        return False, explicit_ctx, ()
     merged = _merge_l3_compile_context(explicit_ctx, derived)
     assert merged is not None  # both args non-None -> _merge_l3_compile_context always merges
-    return True, merged
+    return True, merged, _include_operand_dirs(derived.gcc_option_tokens)
 
 
 def seed_l2_includes(

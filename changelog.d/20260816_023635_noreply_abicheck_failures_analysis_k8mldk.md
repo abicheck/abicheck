@@ -51,3 +51,17 @@
   `_split_include_tokens()` helper that carves derived's own include-search
   entries out of the leading last-flag-wins group and appends them after
   explicit instead, so an explicit include path always searches first.
+
+- **Two more Codex-review findings on the same fold, both fixed alongside
+  it.** A derived `-I`/`-isystem` directory reaches the header parse only
+  as an opaque `gcc_option_tokens` string, which the AST cache key's own
+  directory-mtime hashing (`extra_includes`/`extra_hash_dirs`) never
+  inspected — so editing a header under a derived include dir could reuse
+  a stale cached AST on the ELF `dump` path. `fold_l3_compile_context()`
+  now also returns the derived include directories, threaded into
+  `perform_elf_dump`'s existing `extra_hash_dirs`. Separately, `scan`'s own
+  fold call hard-coded `lang_explicit=False`, so an explicit `scan --lang
+  c` against a matched C++ compile unit's own `-std=c++20` could let that
+  derived standard reach a parse being forced into C mode; `lang == "c"`
+  (never `scan`'s own default) is now treated as explicit, mirroring
+  `perform_elf_dump`'s identical squash-guard rule.

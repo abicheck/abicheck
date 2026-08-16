@@ -1479,6 +1479,19 @@ def test_merge_l3_compile_context_attached_include_form_stays_paired() -> None:
     assert merged.gcc_option_tokens == ("-DFOO=1", "-I/build/inc")
 
 
+def test_include_operand_dirs_extracts_spaced_and_attached_forms() -> None:
+    """Codex review, PR #782: the AST cache key's extra_hash_dirs channel
+    needs real directory Paths, not token strings, to stat -- covers both
+    the spaced (-I dir) and attached (-Idir) spellings, and a non-include
+    token contributes nothing."""
+    from abicheck.buildsource.l2_seed import _include_operand_dirs
+
+    dirs = _include_operand_dirs(
+        ("-DFOO=1", "-I", "/build/inc", "-isystem/build/sys", "-fPIC")
+    )
+    assert dirs == (Path("/build/inc"), Path("/build/sys"))
+
+
 def test_merge_l3_compile_context_none_derived_is_noop() -> None:
     from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 

@@ -172,6 +172,62 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
     assert snap.parsed_with_build_context is True
 
 
+def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
+    monkeypatch, tmp_path
+):
+    """Codex review, PR #782: `lang="c"` is never scan's own Click default
+    (only "c++" is), so it is always a genuine explicit request -- the fold
+    must treat it as such (lang_explicit=True) rather than the hard-coded
+    False the first revision of this fix used, or a matched C++ compile
+    unit's own -std=c++20 would reach a parse `scan --lang c` is explicitly
+    forcing into C mode, which a real compiler rejects outright."""
+    import json
+
+    from abicheck.model import AbiSnapshot
+
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tmp_path),
+            "file": str(src),
+            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20"],
+        }]),
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    def fake_resolve(*args, **kwargs):
+        captured["compile"] = kwargs["compile"]
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **kwargs: (list(kwargs["includes"]), []),
+    )
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+    )
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[hdr],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="source-target",
+        lang="c",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+
+    tokens = captured["compile"].gcc_option_tokens
+    assert not any(t.startswith("-std=") for t in tokens)
+
+
 def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     # _build_new_snapshot returns the *effective* (seeded) includes so a --baseline
     # compare can header-parse the old native library with the same build-derived

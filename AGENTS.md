@@ -993,6 +993,32 @@ Once a root command genuinely clears the bar above, pick the right home:
   its 2000-line hard cap by moving the shared fold logic into `l2_seed.py`
   rather than duplicating it inline for both call sites).
 
+  **Two more findings on the same change, both fixed, one left as a
+  narrower residual gap.** (1) A derived `-I`/`-isystem` reaches the header
+  parse only as an opaque `gcc_option_tokens` string, which the AST cache
+  key's own directory-mtime hashing (`extra_includes`/`extra_hash_dirs`,
+  `dumper_ast_config.py`) never inspected — editing a header under a
+  derived include dir could reuse a stale cached AST. `fold_l3_compile_
+  context()` now also returns the derived include directories
+  (`_include_operand_dirs()`), threaded into `perform_elf_dump`'s existing
+  `extra_hash_dirs`. **Not closed for `handle_non_elf_dump` (PE/Mach-O) or
+  `scan_engine._build_new_snapshot`**: neither `dump_native_binary`→
+  `service.run_dump` nor `service.resolve_input` exposes a public
+  `extra_hash_dirs` hook the way `perform_elf_dump`'s own direct `dump()`
+  call does — and `service.py`'s own internal cache-key computation for
+  those paths already has the identical, broader, pre-existing gap for
+  *any* `CompileContext.gcc_option_tokens` include entry (not just an
+  L3-derived one), so a scoped fix here would still leave the general case
+  open. Threading a real `extra_hash_dirs` channel through `resolve_input`'s
+  public signature is a genuine, separate change affecting every caller of
+  that function, not a follow-up to this one. (2) `scan`'s own fold call
+  hard-coded `lang_explicit=False`; since `scan --lang c` is never the
+  Click default (only `"c++"` is), it is always a genuine explicit
+  request, and the hard-coded `False` let a matched C++ compile unit's own
+  `-std=c++20` reach a parse `scan --lang c` was explicitly forcing into C
+  mode. Fixed by treating `lang == "c"` as explicit, mirroring `perform_
+  elf_dump`'s identical squash-guard rule elsewhere in this same area.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
