@@ -77,6 +77,7 @@ class ExitReason(str, Enum):
     """
 
     COMPATIBILITY_GATE = "compatibility_gate"
+    SCOPED_GATE = "scoped_gate"
     CONTRACT_COVERAGE = "contract_coverage"
     ANALYSIS_ASSURANCE = "analysis_assurance"
     CLEAN = "clean"
@@ -172,10 +173,47 @@ def resolve_compare_exit_decision(
     one canonical resolution, so a caller building the report's ``exit``
     block and a caller computing the real process exit code cannot read
     two different numbers for the same comparison.
+
+    **`--used-by`/`--required-symbol(s)` scoped gating overrides the
+    compatibility axis entirely (Codex review, fresh evidence).**
+    `cli_compare_helpers._apply_scoped_gating` floors the *full-library*
+    verdict/severity gate this function would otherwise compute to the
+    scoped application/plugin-host contract's own result, already folded
+    with the coverage/assurance floors, and persists it onto
+    `result.scoped_exit_code` before any report renders -- `cli.py` itself
+    exits on that value directly (`sys.exit(scoped_exit_code)`), never
+    reaching `_exit_with_severity_or_verdict`/this function's own
+    compatibility-axis computation. An earlier revision of this function
+    ignored that and derived `compatibility_contribution` from
+    `result.verdict`/severity regardless -- reporting the full-library
+    gate's code (which is informational-only under scoping) while the real
+    process exited on the scoped one, so a report consumer trusting this
+    field would disagree with the CLI. When `scoped_exit_code` is set, it
+    *is* the decision: reported directly (already-folded, so not re-folded
+    through `resolve_exit_decision`) under its own `SCOPED_GATE` reason,
+    never recomputed from the unscoped verdict.
     """
     from .analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
+
+    coverage_contribution = coverage_exit_floor(result)
+    assurance_contribution = analysis_assurance_exit_contribution(
+        result, require_complete=require_complete_analysis
+    )
+
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
+    if scoped_exit_code is not None:
+        reasons: tuple[ExitReason, ...] = (
+            (ExitReason.SCOPED_GATE,) if scoped_exit_code else (ExitReason.CLEAN,)
+        )
+        return ExitDecision(
+            code=scoped_exit_code,
+            reasons=reasons,
+            compatibility_contribution=scoped_exit_code,
+            contract_coverage_contribution=coverage_contribution,
+            analysis_assurance_contribution=assurance_contribution,
+        )
 
     if scheme == "severity":
         assert sev_config is not None
@@ -190,8 +228,6 @@ def resolve_compare_exit_decision(
         compatibility_contribution = legacy_exit_code(result.verdict)
     return resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
-        contract_coverage_contribution=coverage_exit_floor(result),
-        analysis_assurance_contribution=analysis_assurance_exit_contribution(
-            result, require_complete=require_complete_analysis
-        ),
+        contract_coverage_contribution=coverage_contribution,
+        analysis_assurance_contribution=assurance_contribution,
     )

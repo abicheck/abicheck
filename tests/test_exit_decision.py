@@ -231,3 +231,58 @@ class TestCompareExitDecisionIntegration:
             report["exit"]["analysis_assurance_contribution"]
             == report["analysis_assurance_exit_contribution"]
         )
+
+    def test_scoped_gate_reports_the_scoped_exit_not_the_full_library_gate(
+        self, tmp_path: Path,
+    ) -> None:
+        """Codex review: a `--required-symbol` compare's real process exit is
+        the *scoped* gate (`result.scoped_exit_code`), floored/persisted by
+        `cli_compare_helpers._apply_scoped_gating` before any report renders
+        -- not the full-library verdict/severity gate this module would
+        otherwise compute from `result.verdict`. Scoping the requirement to
+        the surviving symbol alone must report a clean scoped exit even
+        though the full library is BREAKING (a real removed symbol outside
+        the required set), and the persisted ``exit`` block must agree with
+        the real process exit code, not the informational full-library one.
+        """
+        old_p, new_p = _write(tmp_path, *_breaking_pair())
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--required-symbol", "_Z5pub_av",  # pub_a survives; pub_b was removed
+                "--format", "json",
+            ],
+        )
+        assert res.exit_code == 0, res.output
+        report = json.loads(res.stdout[res.stdout.index("{") :])
+        # full_verdict is the informational, unscoped full-library gate;
+        # verdict itself is already the scoped one under --required-symbol.
+        assert report["full_verdict"] == "BREAKING"
+        assert report["exit"]["code"] == 0
+        assert report["exit"]["reasons"] == ["clean"]
+        assert report["exit"]["compatibility_contribution"] == 0
+        assert report["exit"]["code"] == res.exit_code
+
+    def test_scoped_gate_failure_names_the_scoped_reason(
+        self, tmp_path: Path,
+    ) -> None:
+        """The inverse: requiring the *removed* symbol must fail the scoped
+        gate, and the ``exit`` block must name ``scoped_gate`` -- not
+        ``compatibility_gate`` -- since the full-library verdict alone never
+        determined this exit.
+        """
+        old_p, new_p = _write(tmp_path, *_breaking_pair())
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--required-symbol", "_Z5pub_bv",  # pub_b was removed
+                "--format", "json",
+            ],
+        )
+        assert res.exit_code != 0, res.output
+        report = json.loads(res.stdout[res.stdout.index("{") :])
+        assert report["exit"]["code"] == res.exit_code
+        assert report["exit"]["reasons"] == ["scoped_gate"]
+        assert report["exit"]["compatibility_contribution"] == res.exit_code

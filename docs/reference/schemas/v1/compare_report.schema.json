@@ -1141,17 +1141,18 @@
             "type": "string",
             "enum": [
               "compatibility_gate",
+              "scoped_gate",
               "contract_coverage",
               "analysis_assurance",
               "clean"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution)."
         },
         "compatibility_contribution": {
           "type": "integer",
           "minimum": 0,
-          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict)."
+          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict) -- UNLESS --used-by/--required-symbol(s) scoping is in effect, in which case this is the already-folded scoped application/plugin-host contract's own exit code (cli_compare_helpers._apply_scoped_gating's result.scoped_exit_code), not the informational full-library gate; reasons carries scoped_gate rather than compatibility_gate in that case."
         },
         "contract_coverage_contribution": {
           "type": "integer",
