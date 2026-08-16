@@ -215,6 +215,7 @@ def _build_new_snapshot(
     symbols_only: bool = False,
     debug_presence_only: bool = False,
     include_dependencies: bool = False,
+    build_targets: tuple[str, ...] = (),
 ) -> tuple[Any, list[Path], CompileContext | None]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -238,6 +239,11 @@ def _build_new_snapshot(
     threaded through so a pinned s5/s6 scan can collect L3/L4 even when the build
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
+
+    ``build_targets`` (P0.2, lab report follow-up): forwarded to
+    ``embed_build_source`` unchanged, scoping L3 collection to the given
+    root target(s) the same way `dump --build-target` already does — see
+    ``run_scan_core``'s own docstring for the full rationale.
     """
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
     from .errors import AbicheckError
@@ -368,6 +374,7 @@ def _build_new_snapshot(
             build_config=build_config,
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
+            build_targets=build_targets,
             # L4 source-ABI replay must invoke the same compiler the scan's own
             # L2 header AST was pointed at (--compiler/--compiler-prefix), not the
             # embed_build_source default of a bare "clang" — mirrors
@@ -940,6 +947,7 @@ def run_scan_core(
     sibling_exported_symbols: frozenset[str] | None = None,
     max_findings: int | None = None,
     require_complete_analysis: bool = False,
+    build_targets: tuple[str, ...] = (),
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -971,6 +979,17 @@ def run_scan_core(
     Orthogonal to the budget/evidence-contract/NOT_COMPARABLE exit codes
     this function already special-cases (5/1/6) — those are returned before
     ever reaching the baseline comparison.
+
+    ``build_targets`` (P0.2, lab report follow-up): the CLI equivalent of
+    `dump`'s own ``--build-target`` (``BuildEvidence.target_scope``), scoping
+    L3 evidence collection to the given root target(s) and their transitive
+    deps instead of a workspace-wide query. `dump`'s own ``embed_build_source``
+    call already threaded this through (see ``cli_buildsource.py``); `scan`'s
+    identical call below did not, so a `scan --against` a `dump`-produced
+    baseline of the same scoped root target(s) previously always ran
+    unscoped, capturing unrelated fixture/test targets alongside the real
+    library and diverging from the baseline's own scoped evidence. Empty by
+    default (the pre-existing, unscoped behavior).
     """
     stage_timings: dict[str, float] = {}
 
@@ -1073,6 +1092,7 @@ def run_scan_core(
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
                 debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
                 include_dependencies=_scan_candidate_include_dependencies(baseline),
+                build_targets=build_targets,
             )
     except deadline.DeadlineExceeded as exc:
         elapsed = time.monotonic() - start

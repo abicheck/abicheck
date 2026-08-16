@@ -246,6 +246,7 @@ class ScanRequest:
     build_config: Path | None = None
     allow_build_query: bool = False
     risk_rules_path: Path | None = None
+    build_targets: tuple[str, ...] = ()  # P0.2: equivalent of `dump --build-target`
     # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
     # ADR-056: real changed-path provenance (e.g. "--since origin/main" or
@@ -1326,6 +1327,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             resolved_config=_scan_request_config(req),
             abi3_floor=req.abi3_floor,
             max_findings=req.max_findings,
+            build_targets=req.build_targets,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
@@ -1573,12 +1575,9 @@ def _run_scan_one_member(
       alone produces the correct shrinking remaining budget across members.
       Passing an already-reduced ``budget_s`` here instead would
       double-subtract elapsed time.
-    - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/
-      `build_config`/`allow_build_query`/`risk_rules_path`, which `run_scan`
-      itself still ignores (unchanged behavior) but which the single-binary
-      CLI path (`cli_scan.py`) already passes directly to `run_scan_core` —
-      an `--artifact-set` scan must not silently drop them relative to an
-      equivalent single-binary `scan` invocation with the same flags.
+    - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/`build_config`/
+      `allow_build_query`/`risk_rules_path`/`build_targets` -- an
+      `--artifact-set` scan must not silently drop what single-binary `scan` honors.
     - Accepts ``sibling_exported_symbols`` (G35): a sibling's export also
       satisfies this member's own `public_not_exported` check.
     """
@@ -1677,6 +1676,7 @@ def _run_scan_one_member(
             defer_cleanup=build_dir_cleanups,
             abi3_floor=req.abi3_floor,
             sibling_exported_symbols=sibling_exported_symbols,
+            build_targets=req.build_targets,
         )
     except _BudgetOverflow:
         return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)

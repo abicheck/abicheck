@@ -121,6 +121,20 @@ inputs:
       `include_sequence` for no real recipe difference (lab report). compare
       has no equivalent flag.
     required: false
+  build-target:
+    description: >
+      Explicit build-system root target(s) to scope L3 evidence collection
+      to, instead of a workspace-wide query (P0.2; Bazel only so far, e.g.
+      `//:math`). Space-separated, repeatable — each root's transitive
+      dependency closure is unioned. Forwarded identically to both dump and
+      scan mode (`--build-target`, same flag and semantics on both); CLI
+      equivalent of `.abicheck.yml`'s `build.targets`, overrides it when
+      both are given. Without this, a multi-package workspace with
+      fixture/test targets alongside the real library is collected in
+      full, which can pollute L3 evidence with unrelated compile units and
+      diverge a `scan --against` a target-scoped `dump` baseline's own
+      evidence (lab report). compare has no equivalent flag.
+    required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
   include:
@@ -816,6 +830,7 @@ runs:
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         # validate-inputs.sh's own compile-context guard (ast-frontend/
         # gcc-*/sysroot/nostdinc for a directory/package compare operand)
         # and its new require-complete-analysis release-operand guard both
@@ -962,6 +977,7 @@ runs:
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_NEW_INCLUDE: ${{ inputs.new-include }}

@@ -956,6 +956,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
@@ -1404,6 +1405,11 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # --build-target (P0.2, lab report follow-up): scan now supports the same
+  # root-target scoping dump does (scan_engine.run_scan_core), so forward it
+  # identically -- an unscoped scan of a multi-package workspace previously
+  # diverged from a --build-target-scoped dump baseline's own L3 evidence.
+  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   # Omitting --against is already a one-build audit-only run; the preferred
   # way to force one for a single step is to simply not set against/
   # abi-baseline there. The deprecated `audit: true` back-compat alias

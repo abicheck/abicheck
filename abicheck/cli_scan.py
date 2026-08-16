@@ -801,6 +801,7 @@ def _run_artifact_set(
     sources: Path | None,
     build_info: Path | None,
     build_config: Path | None,
+    build_targets: tuple[str, ...],
     depth: str | None,
     since: str | None,
     changed_paths_opt: tuple[str, ...],
@@ -913,6 +914,7 @@ def _run_artifact_set(
         risk_rules_path=risk_rules_path,
         bundle_system_providers=bsp,
         changed_src=changed_src,
+        build_targets=build_targets,
     )
     try:
         # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
@@ -1173,6 +1175,22 @@ def _discover_scan_project_config(
     "omitted.",
 )
 @click.option(
+    "--build-target",
+    "build_targets",
+    multiple=True,
+    metavar="TARGET",
+    help="Explicit build-system root target(s) to scope L3 evidence "
+    "collection to, instead of a workspace-wide query (P0.2; Bazel "
+    "only so far, e.g. '//:math'). Repeatable -- each root's transitive "
+    "dependency closure is unioned. Same flag and semantics as "
+    "`dump --build-target`; CLI equivalent of `.abicheck.yml` "
+    "build.targets, overrides it when both are given. Without this, a "
+    "multi-package workspace with fixture/test targets alongside the "
+    "real library is collected in full, which can pollute L3 evidence "
+    "(and diverge from a `dump --build-target`-scoped baseline) with "
+    "unrelated compile units.",
+)
+@click.option(
     "--against",
     "against",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -1366,6 +1384,7 @@ def scan_cmd(
     sources: Path | None,
     build_info: Path | None,
     build_config: Path | None,
+    build_targets: tuple[str, ...],
     against: Path | None,
     depth: str | None,
     since: str | None,
@@ -1486,6 +1505,7 @@ def scan_cmd(
             sources=sources,
             build_info=build_info,
             build_config=build_config,
+            build_targets=build_targets,
             depth=depth,
             since=since,
             changed_paths_opt=changed_paths_opt,
@@ -1896,6 +1916,7 @@ def scan_cmd(
             abi3_floor=abi3_floor,
             max_findings=max_findings,
             require_complete_analysis=require_complete_analysis,
+            build_targets=build_targets,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
