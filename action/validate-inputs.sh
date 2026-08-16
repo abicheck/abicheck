@@ -335,6 +335,15 @@ if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" && "$MODE" != "scan" ]]; the
   _warn "public-header-dir is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
 fi
 
+# build-target: dump and scan modes only, same restriction and reasoning as
+# public-header-dir directly above (the CLI's own --build-target flag exists
+# on those two subcommands only; compare has no equivalent). run.sh's
+# compare/deps-tree/deps-compare branches never forward it (Codex review).
+_BUILD_TARGET="${INPUT_BUILD_TARGET:-}"
+if [[ -n "$_BUILD_TARGET" && "$MODE" != "dump" && "$MODE" != "scan" ]]; then
+  _warn "build-target is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
+fi
+
 # new-library-set: scan mode only (ADR-056). The scan-mode arm above already
 # fails outright on an invalid combination (new-library also set, or
 # against/abi-baseline also set) -- this only covers the inert case (set on

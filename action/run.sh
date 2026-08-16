@@ -956,6 +956,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
@@ -1344,6 +1345,51 @@ elif [[ "$MODE" == "scan" ]]; then
   # --public-header-dir is not side-aware on the CLI (unlike -H/-I above),
   # so it's forwarded once regardless of which branch above ran.
   add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  # ALSO forwarded as a bare -H root (lab report, fresh evidence): unlike
+  # `dump` mode above, which has no separate flag at all and folds
+  # public-header-dir into -H itself (dump derives provenance AND extraction
+  # scope from -H's own directory semantics -- see the comment there), scan's
+  # --public-header-dir is scope-only and does NOT add to the header
+  # extraction candidates the way dump's -H <dir> does (see the CLI option's
+  # own --help text: "A directory passed via -H also counts" -- extraction
+  # only ever comes from -H). With only --public-header-dir set (the common
+  # Action shape: one explicit new-header plus a public-header-dir covering
+  # the whole public tree), scan's own header extraction stayed narrowed to
+  # just the explicit header while a fresh `dump` of the identical inputs
+  # extracted the WHOLE public-header-dir tree (dump's own -H forwarding
+  # above) -- two genuinely different header candidate sets/include_sequence
+  # for the "same" logical Action inputs, so scan --against a fresh dump
+  # baseline of the same project spuriously read NOT_COMPARABLE
+  # (profile_fingerprint mismatch on include_sequence) with no real recipe
+  # difference. scan's own -H <dir> expansion (service_scan.
+  # expand_header_inputs) recursively extracts every header under a
+  # directory identically to dump's (header_utils.iter_directory_headers),
+  # so forwarding the same value as -H here closes the gap with no CLI
+  # change needed -- scan's own docs already note a directory via -H
+  # subsumes --public-header-dir's scope-establishing role, so the two
+  # forwards are redundant for scope (harmless) and now agree on extraction
+  # too. Bare (unsided) ONLY when there is no old side to contaminate --
+  # new-library-set audits (no old side at all, ADR-056) and a plain
+  # audit-only scalar scan (no --against resolved) both describe a single
+  # library's public surface, matching --header's own bare/unsided
+  # forwarding just above for those same shapes.
+  #
+  # For a scalar scan with a resolved baseline, forward it sided as
+  # `-H new=...` instead (lab report, fresh evidence, Codex review):
+  # _resolve_baseline_header_scope() treats a bare -H root as describing
+  # BOTH sides, so with old-header also supplied (or even without it) the
+  # candidate's public-header-dir tree was parsed into the OLD/baseline
+  # side's header set too -- the baseline binary got scanned through the
+  # *candidate's* headers, which can hide a removed declaration (still
+  # present in the candidate's tree) or fabricate a spurious difference
+  # (a candidate-only header reachable from the baseline side). Mirrors the
+  # exact condition the real `--against` forward below uses, so the two
+  # stay in lockstep.
+  if [[ -z "$SCAN_ARTIFACT_SET" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
+    add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  else
+    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  fi
 
   # Cross-compiler flags -- documented root-Action inputs. Forwarded once,
   # below, grouped with --ast-frontend (matching compare mode's own single
@@ -1377,6 +1423,11 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # --build-target (P0.2, lab report follow-up): scan now supports the same
+  # root-target scoping dump does (scan_engine.run_scan_core), so forward it
+  # identically -- an unscoped scan of a multi-package workspace previously
+  # diverged from a --build-target-scoped dump baseline's own L3 evidence.
+  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   # Omitting --against is already a one-build audit-only run; the preferred
   # way to force one for a single step is to simply not set against/
   # abi-baseline there. The deprecated `audit: true` back-compat alias

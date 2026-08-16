@@ -92,6 +92,7 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_SNAPSHOT_COMPRESSION",
     "INPUT_BUILD_INFO",
     "INPUT_COMPILE_DB",
+    "INPUT_BUILD_TARGET",
 )
 
 
@@ -1036,6 +1037,19 @@ class TestModeScopedInputWarnings:
         result = _run_validate(
             {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIR": "include/"}
         )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    @pytest.mark.parametrize("mode", ["compare", "deps-tree", "deps-compare"])
+    def test_build_target_warns_outside_dump_and_scan(self, mode: str) -> None:
+        result = _run_validate({"INPUT_MODE": mode, "INPUT_BUILD_TARGET": "//:math"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "build-target" in result.stdout
+
+    @pytest.mark.parametrize("mode", ["dump", "scan"])
+    def test_build_target_silent_on_dump_and_scan(self, mode: str) -> None:
+        result = _run_validate({"INPUT_MODE": mode, "INPUT_BUILD_TARGET": "//:math"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 

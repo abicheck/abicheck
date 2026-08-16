@@ -110,11 +110,34 @@ inputs:
       Directory whose headers are treated as public for provenance
       classification (repeatable, space-separated) — establishes the
       public/internal boundary so leakage/RTTI/exported-vs-public
-      cross-checks run instead of skipping. scan mode forwards it as
-      `--public-header-dir`; dump mode forwards it as one more `-H/--header`
-      root, which is where `dump` reads declaration provenance from (a
-      directory entry tags everything under it public). compare has no
-      equivalent flag.
+      cross-checks run instead of skipping. dump mode forwards it as one
+      more `-H/--header` root, which is where `dump` reads declaration
+      provenance from AND extracts headers from (a directory entry tags
+      everything under it public and expands to every header inside). scan
+      mode forwards it both as `--public-header-dir` (scope only) and as an
+      `-H` root, so its own header extraction expands the same directory
+      `dump` does — keeping a `scan --against` a fresh `dump` baseline of
+      the same inputs comparable instead of drifting apart on
+      `include_sequence` for no real recipe difference (lab report). The
+      `-H` root is candidate-sided (`new=...`) for a scalar scan with a
+      resolved baseline — so it never leaks into the baseline/old side's
+      own header parse even when `old-header` is also given — and bare
+      (both-sided) for an audit-only or `--artifact-set` scan, which has no
+      old side to protect. compare has no equivalent flag.
+    required: false
+  build-target:
+    description: >
+      Explicit build-system root target(s) to scope L3 evidence collection
+      to, instead of a workspace-wide query (P0.2; Bazel only so far, e.g.
+      `//:math`). Space-separated, repeatable — each root's transitive
+      dependency closure is unioned. Forwarded identically to both dump and
+      scan mode (`--build-target`, same flag and semantics on both); CLI
+      equivalent of `.abicheck.yml`'s `build.targets`, overrides it when
+      both are given. Without this, a multi-package workspace with
+      fixture/test targets alongside the real library is collected in
+      full, which can pollute L3 evidence with unrelated compile units and
+      diverge a `scan --against` a target-scoped `dump` baseline's own
+      evidence (lab report). compare has no equivalent flag.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
@@ -811,6 +834,7 @@ runs:
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         # validate-inputs.sh's own compile-context guard (ast-frontend/
         # gcc-*/sysroot/nostdinc for a directory/package compare operand)
         # and its new require-complete-analysis release-operand guard both
@@ -957,6 +981,7 @@ runs:
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_NEW_INCLUDE: ${{ inputs.new-include }}

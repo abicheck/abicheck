@@ -242,6 +242,7 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `bundle_system_providers` | `tuple[str, ...]` | `()` |
 | `changed_src` | `str` | `'run_scan_set'` |
 | `max_findings` | `int \| None` | `None` |
+| `build_targets` | `tuple[str, ...]` | `()` |
 
 ## `ScanResult`
 

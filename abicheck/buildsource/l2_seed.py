@@ -55,6 +55,7 @@ def _l2_seed_config(
     sources: Path | None,
     build_query: str | None,
     build_compile_db: str | None,
+    build_targets: tuple[str, ...] = (),
 ) -> BuildConfig | None:
     """The effective ``BuildConfig`` for L2 seeding, or ``None`` to degrade.
 
@@ -65,6 +66,14 @@ def _l2_seed_config(
     but never run), then folds the CLI build-DB overrides in exactly as embed
     does, so L2 seeding resolves the *same* DB L3 will.
 
+    ``build_targets`` (P0.2, Codex review): folded in the same way, so an
+    explicit ``--build-target`` scopes the L2 include/compile-context seed's
+    own ``collect_inline_pack`` call identically to ``embed_build_source``'s
+    L3/L4/L5 collection -- without this, a multi-target Bazel workspace could
+    seed L2 from an unrelated target's include dirs/dialect flags even though
+    the caller explicitly scoped L3 evidence to one root, producing a snapshot
+    parsed under the wrong compile context despite target-scoped L3 evidence.
+
     A malformed/invalid config surfaces loudly elsewhere (``embed_build_source``,
     the compile-context resolver); this is a best-effort include-dir hint, so it
     degrades to "no seeded dirs" rather than raising through.
@@ -74,7 +83,7 @@ def _l2_seed_config(
         cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
     except ValueError:
         return None
-    if build_query is None and build_compile_db is None:
+    if build_query is None and build_compile_db is None and not build_targets:
         return cfg
     return dataclasses.replace(
         cfg,
@@ -82,6 +91,7 @@ def _l2_seed_config(
         compile_db=(
             build_compile_db if build_compile_db is not None else cfg.compile_db
         ),
+        targets=list(build_targets) if build_targets else cfg.targets,
     )
 
 
@@ -143,12 +153,15 @@ def _resolve_l2_seed_pack_args(
     build_info: Path | None,
     build_query: str | None,
     build_compile_db: str | None,
+    build_targets: tuple[str, ...] = (),
 ) -> _L2SeedPackArgs | None:
     """Resolve *build_config*/*sources*/*build_info* into ``collect_inline_pack``
     call arguments, or ``None`` when there is no config to seed from (the
     caller's existing "nothing to apply" degrade).
     """
-    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
+    cfg = _l2_seed_config(
+        build_config, sources, build_query, build_compile_db, build_targets
+    )
     if cfg is None:
         return None
     base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(build_info, sources)
@@ -239,6 +252,7 @@ def derive_l2_include_dirs(
     *,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     allow_inferred_build_query: bool = True,
 ) -> tuple[list[str], list[Callable[[], None]]]:
     """Best-effort ``-I``/``-isystem`` dirs from the build's compile DB, + cleanups.
@@ -274,7 +288,8 @@ def derive_l2_include_dirs(
         # (Codex review — this call used to live inside this try before the
         # shared-helper extraction, and moved ahead of it by mistake).
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db
+            build_config, sources, build_info, build_query, build_compile_db,
+            build_targets,
         )
         if args is None:
             return [], []
@@ -320,6 +335,7 @@ def derive_l2_compile_context(
     *,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     allow_inferred_build_query: bool = True,
     explicit: CompileContext | None = None,
     lang: str | None = None,
@@ -390,7 +406,8 @@ def derive_l2_compile_context(
         # corrupt/unreadable pack must degrade best-effort, not raise
         # (Codex review).
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db
+            build_config, sources, build_info, build_query, build_compile_db,
+            build_targets,
         )
         if args is None:
             return None, []
@@ -582,6 +599,7 @@ def seed_includes_and_fold_compile_context(
     build_config: Path | None,
     build_query: str | None,
     build_compile_db: str | None,
+    build_targets: tuple[str, ...] = (),
     collect_mode: str,
     gcc_path: str | None,
     gcc_prefix: str | None,
@@ -683,7 +701,8 @@ def seed_includes_and_fold_compile_context(
         # raise (Codex review) -- an earlier revision of this function had it
         # outside the try, which reintroduced exactly that regression.
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db
+            build_config, sources, build_info, build_query, build_compile_db,
+            build_targets,
         )
         if args is None:
             return incs, False, explicit_ctx, ()
@@ -758,6 +777,7 @@ def seed_l2_includes(
     defer_cleanup: list[Callable[[], None]] | None,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     gcc_options: str | None = None,
     gcc_option_tokens: Sequence[str] = (),
     allow_inferred_build_query: bool = True,
@@ -811,6 +831,7 @@ def seed_l2_includes(
         build_config,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        build_targets=build_targets,
         allow_inferred_build_query=allow_inferred_build_query,
     )
     if not derived:

@@ -399,6 +399,10 @@ class TestComputeAnalysisAssurance:
                     "forced_public": [],
                 },
                 unmatched={
+                    # "_Z5pub_av" is classified (internal, below) so it no
+                    # longer belongs here too -- the old fixture named an
+                    # unrelated "_Z6privXv" not even in exported_symbols,
+                    # a shape link_source_abi can't actually produce.
                     "symbols_without_decl": ["_Z5pub_bv"],
                     "decls_without_symbol": [],
                 },
@@ -409,7 +413,7 @@ class TestComputeAnalysisAssurance:
                     "synthesized_symbol_to_owner": {},
                     "template_instantiation_symbol_to_decl": {},
                     "allocator_interposer_symbol_to_owner": {},
-                    "non_public_symbol_to_reason": {"_Z6privXv": "internal"},
+                    "non_public_symbol_to_reason": {"_Z5pub_av": "internal"},
                 },
             ),
         )
@@ -421,8 +425,10 @@ class TestComputeAnalysisAssurance:
         assert aa.translation_units.failed == 1
         assert aa.export_accounting.total == 2
         assert aa.export_accounting.unaccounted == 1
-        assert aa.export_accounting.source_linked == 1
         assert aa.export_accounting.internal == 1
+        # Both exports accounted for (one internal, one unaccounted), so
+        # nothing is left as genuinely source-linked (Codex review, #788).
+        assert aa.export_accounting.source_linked == 0
         # A failed TU is exactly the kind of shortfall that keeps this run
         # from reading as unconditionally "complete".
         assert aa.status == "partial"

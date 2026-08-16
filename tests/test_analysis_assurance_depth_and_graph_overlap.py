@@ -457,3 +457,118 @@ class TestGraphCompletenessPartialFamilyOverlap:
         status, notes = _graph_completeness(old_pack, new_pack)
         assert status == "unknown"
         assert any("confirmed on only one side" in n for n in notes), notes
+
+
+class TestExportAccountingDoesNotDoubleCount:
+    """lab/Codex review, fresh evidence: an export classified into
+    ``non_public_symbol_to_reason`` (dependency/internal/own -- ACCOUNTED
+    for, per ``_classify_non_public_exports``'s own docstring) must not
+    ALSO count toward ``export_accounting.unaccounted``.
+    ``source_link.link_source_abi`` previously left a classified symbol in
+    ``symbols_without_decl`` too, so a comparison where every export on both
+    sides was fully classified as non-public still reported
+    ``unaccounted == total`` instead of ``0``, keeping
+    ``--require-complete-analysis`` stuck at ``status="partial"`` for no real
+    gap (reported against a real Bazel lab project: 6 exports/side, all
+    non-public, ``internal=6, unaccounted=6`` for a 12-export total).
+    """
+
+    def test_end_to_end_via_real_link_source_abi(self, tmp_path: Path) -> None:
+        """Exercises the real ``link_source_abi`` entry point end to end on
+        both sides -- not a hand-built ``SourceAbiSurface`` with
+        already-disjoint fields, which can't reproduce this bug."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiTu
+        from abicheck.buildsource.source_link import link_source_abi
+
+        # Every one of these is classified by _classify_non_public_exports
+        # with no library/source-namespace context needed (dependency:stdlib,
+        # dependency:tbb, internal_or_private_export) -- so symbols_without_
+        # decl comes back genuinely empty once the fix is in place.
+        exports = [
+            "_ZNSt6vectorIiSaIiEEC1Ev",
+            "_ZN3tbb6detail2r13fooEv",
+            "_private_c",
+        ]
+        old, new = _header_pair()
+        for snap in (old, new):
+            surface = link_source_abi([SourceAbiTu()], exported_symbols=exports)
+            assert surface.unmatched["symbols_without_decl"] == []
+            snap.build_source = BuildSourcePack(
+                root=tmp_path / "nonexistent-pack-no-double-count",
+                source_abi=surface,
+            )
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.export_accounting.total == len(exports) * 2
+        assert aa.export_accounting.internal == len(exports) * 2
+        assert aa.export_accounting.unaccounted == 0
+        # Every export here is classified non-public -- none is genuinely
+        # linked to a public source declaration, so source_linked must be 0,
+        # not the total (Codex review: source_linked = total - unaccounted
+        # alone silently double-counted internal exports as ALSO
+        # source_linked once unaccounted correctly excluded them).
+        assert aa.export_accounting.source_linked == 0
+
+
+class TestExportAccountingDedupsLegacyPersistedOverlap:
+    """Codex review, PR #788, round 2: the rollup fix above assumed every
+    ``SourceAbiSurface`` it sees was produced by the FIXED
+    ``link_source_abi``/``relink_surface_exports`` (which no longer leaves a
+    classified symbol in ``symbols_without_decl`` too). A surface persisted
+    by a pre-fix build still carries that stale overlap after round-tripping
+    through ``SourceAbiSurface.from_dict()`` -- the ordinary "compare an
+    existing baseline JSON against a fresh candidate" upgrade workflow -- so
+    counting ``len(symbols_without_decl)`` and ``len(non_public_symbol_to_
+    reason)`` independently double-subtracted the same symbol from ``total``.
+    """
+
+    def test_legacy_overlapping_surface_is_deduplicated_at_rollup(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        old, new = _header_pair()
+        # Hand-built to reproduce the pre-fix persisted shape directly --
+        # "_Z6privXv" sits in BOTH symbols_without_decl AND
+        # non_public_symbol_to_reason, exactly what SourceAbiSurface.
+        # from_dict() would still carry for a snapshot written before the
+        # link_source_abi double-count fix.
+        surface = SourceAbiSurface(
+            coverage={"compile_units_selected": 1, "compile_units_parsed": 1},
+            roots={
+                "exported_symbols": ["_Z5pub_av", "_Z6privXv"],
+                "public_header_declarations": [],
+                "forced_public": [],
+            },
+            unmatched={
+                "symbols_without_decl": ["_Z6privXv"],
+                "decls_without_symbol": [],
+            },
+            mappings={
+                "source_decl_to_binary_symbol": {},
+                "source_type_to_debug_type": {},
+                "public_header_to_target": {},
+                "synthesized_symbol_to_owner": {},
+                "template_instantiation_symbol_to_decl": {},
+                "allocator_interposer_symbol_to_owner": {},
+                "non_public_symbol_to_reason": {"_Z6privXv": "internal"},
+            },
+        )
+        for snap in (old, new):
+            snap.build_source = BuildSourcePack(
+                root=tmp_path / "legacy-overlapping-pack", source_abi=surface,
+            )
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        # 2 exports/side x 2 sides == 4 total; "_Z6privXv" is genuinely
+        # classified internal on each side and must count ONLY as internal,
+        # not also as unaccounted -- the legacy overlap must not survive
+        # the rollup.
+        assert aa.export_accounting.total == 4
+        assert aa.export_accounting.internal == 2
+        assert aa.export_accounting.unaccounted == 0
+        assert aa.export_accounting.source_linked == 2

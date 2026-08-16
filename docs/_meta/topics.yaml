@@ -504,3 +504,33 @@ topics:
     allowed_summaries:
       - learn/abi-series/04-cpp-abi.md
       - learn/abi-series/05-linker-elf.md
+
+  # P0.2: explicit build-system root-target scoping (Bazel only so far) --
+  # dump/scan/the typed API/the Action all declaring which specific
+  # target(s) are the library under test instead of a workspace-wide query.
+  # learn/build-source-data.md's own "Scoping a Bazel query to specific root
+  # targets" section is the narrative home; registered per docs/AGENTS.md's
+  # "every new public-facing... Action input" rule (Codex review, PR #788).
+  build-target-scoping:
+    canonical_page: learn/build-source-data.md
+    fact_sources:
+      - abicheck/buildsource/l2_seed.py
+      - abicheck/buildsource/adapters/bazel.py
+      - abicheck/buildsource/build_evidence.py
+      - abicheck/cli_scan.py
+      - abicheck/cli_dump_helpers.py
+      - abicheck/scan_engine.py
+      - abicheck/service_scan.py
+      - action.yml
+      - action/run.sh
+      - action/validate-inputs.sh
+    # --build-target is primarily a CLI concept (cli-reference.md), extended
+    # identically to the typed API and the Action -- both already-registered
+    # generated references (cli-surface/python-api/github-actions-surface
+    # each own one), reused here the same way reference/exit-codes.md is
+    # already shared by two other topics above (no reference_page uniqueness
+    # constraint; Codex review, fresh evidence after the first fix).
+    reference_page: reference/cli-reference.md
+    task_pages:
+      - reference/python-api-reference.md
+      - reference/github-action-inputs.md
