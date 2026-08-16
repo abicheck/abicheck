@@ -391,6 +391,35 @@ class TestCompareReleaseErrorPaths:
         # incoming COMPATIBLE verdict to API_BREAK.
         assert verdict == "COMPATIBLE"
 
+    def test_collect_matrix_result_applies_pack_policy(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, PR B slice 1: a release-wide --pack's
+        policy.overrides applies to matrix findings too, not only to each
+        library's own per-pair comparison -- `_collect_matrix_result` folds
+        it via `pack_application.policy_file_with_packs` directly, since it
+        builds its own local `PolicyFile` rather than routing through
+        `service.run_compare`."""
+        from abicheck import cli_compare_release
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.pack_application import PackApplication
+
+        pack_app = PackApplication(
+            policy_overrides={ChangeKind.CXX_STANDARD_FLOOR_RAISED: Verdict.COMPATIBLE},
+        )
+        fake = [self._matrix_change()]
+        old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
+        with patch(
+            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+        ):
+            _, verdict = cli_compare_release._collect_matrix_result(
+                old_m, new_m, "strict_abi", "COMPATIBLE",
+                pack_application=pack_app,
+            )
+        # The pack's override downgrades the finding, so it must NOT escalate
+        # the incoming COMPATIBLE verdict to API_BREAK -- same outcome as the
+        # equivalent --policy-file override test above, via a pack instead.
+        assert verdict == "COMPATIBLE"
+
     def test_collect_matrix_result_respects_suppression(self, tmp_path: Path) -> None:
         """A --suppress rule applies to matrix findings, matching the compare
         path (which routes extra_changes through checker.compare). (Codex P2)"""
