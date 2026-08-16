@@ -387,14 +387,32 @@ class TestPySafeDirFailsClosedWhenMktempFails:
         # remotely. Driving a genuine failure in the real `mktemp` binary
         # sidesteps the whole PATH-shadowing question entirely, and is
         # arguably a more faithful test of this fail-closed behavior than
-        # a fake shim would have been anyway. Verified locally that GNU
-        # coreutils' `mktemp -d` genuinely fails (exit 1, "Not a
-        # directory") when `$TMPDIR` names an existing plain file, both
-        # with an absolute and a relative `$TMPDIR` value.
-        (tmp_path / "not_a_directory").write_text("")
+        # a fake shim would have been anyway.
+        #
+        # `$TMPDIR` is set to an ABSOLUTE path here, not a relative one --
+        # a further revision found the relative form silently ignored by
+        # macOS's BSD `mktemp` (unlike GNU coreutils' on Linux and MSYS on
+        # Windows, both independently verified to honor it): the real
+        # system TMPDIR was used instead and the directory was created
+        # successfully, so this test failed on macOS the same way the two
+        # PATH-shadowing attempts failed on Windows -- a real mktemp
+        # failure, but only reliably reproducible across all three
+        # platforms via an absolute value. Unlike PATH-search entries
+        # (which cross the POSIX/native path-representation boundary this
+        # module's other tests work around), `$TMPDIR` is read directly by
+        # `mktemp` itself as a plain file-path argument, so a native
+        # absolute path string is the form every platform's `mktemp`
+        # already handles correctly (the same reasoning `_mark_executable`
+        # relies on for `chmod`'s own path argument). Verified locally
+        # (GNU coreutils) that `mktemp -d` genuinely fails (exit 1, "Not a
+        # directory") when `$TMPDIR` names an existing plain file, for
+        # both an absolute and a relative `$TMPDIR` value -- only the
+        # relative form is platform-fragile.
+        blocker = tmp_path / "not_a_directory"
+        blocker.write_text("")
         script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
-        env = {**os.environ, "TMPDIR": "not_a_directory"}
-        result = _run_bash_script(script, cwd=tmp_path, env=env, timeout=30)
+        env = {**os.environ, "TMPDIR": str(blocker)}
+        result = _run_bash_script(script, env=env, timeout=30)
         assert result.returncode == 1
         assert "UNREACHABLE" not in result.stdout
         assert "::error::" in result.stdout
