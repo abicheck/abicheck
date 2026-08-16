@@ -1321,7 +1321,13 @@ def _dump_elf(
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
         # Deferred roots ride in gcc_option_tokens (-isystem), not extra_includes,
         # so hash their contents into the AST cache key explicitly (Codex review).
-        deferred_dirs = tuple(deferred_token_dirs(deferred))
+        # Also fold in any include-search dir in cc.gcc_option_tokens itself, so
+        # this PRIMARY parse's cache key stays aligned with _attach_header_graph's
+        # own identical fold above -- else the two passes could disagree on
+        # staleness for the same header (Codex review).
+        deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
+            cc.gcc_option_tokens
+        )
 
     compiler = "cc" if lang == "c" else "c++"
     try:

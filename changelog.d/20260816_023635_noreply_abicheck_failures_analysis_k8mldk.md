@@ -198,3 +198,18 @@
   cache-hashing/ordering logic silently disagree with each other — left as
   a known gap (see `_INCLUDE_FLAG_PREFIXES`'s own docstring and
   `AGENTS.md`).
+
+- **A stale-AST-cache-key gap in `service._dump_elf`'s own PRIMARY header
+  parse (Codex review), the counterpart to the `_attach_header_graph` cache
+  fix above.** `_dump_elf`'s own `deferred_dirs` computation hashed only
+  `resolve_inferred_header_roots`'s deferred roots, never any include-search
+  directory riding in the compile context's own `gcc_option_tokens` (an
+  explicit `-I`, or — since the L3 fold — a compile-DB-derived one) —
+  exactly the gap the `_attach_header_graph` fix above closed, but left open
+  on the *primary* parse whose cache key that fix was supposed to stay
+  aligned with. Editing a header under such a directory could let the
+  primary parse reuse a stale cached AST while `_attach_header_graph`'s own
+  independent second parse correctly reparsed, producing a snapshot whose
+  declarations and embedded graph describe different source states. Fixed
+  by folding `include_operand_dirs(cc.gcc_option_tokens)` into `_dump_elf`'s
+  `deferred_dirs` too, mirroring `_attach_header_graph`'s identical fold.

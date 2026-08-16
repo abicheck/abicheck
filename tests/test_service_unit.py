@@ -1044,6 +1044,33 @@ class TestDumpElf:
         passed = mock.call_args.kwargs["extra_includes"]
         assert root in passed  # the include root was auto-added (plain -I)
 
+    def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path):
+        """Codex review, PR #782: this primary ELF dump pass's own
+        deferred_dirs (extra_hash_dirs) computation only covered
+        resolve_inferred_header_roots's own deferred roots -- never any
+        include-search directory riding in compile.gcc_option_tokens itself
+        (an explicit --gcc-options/--compiler-option -I, or -- since the
+        P0.3 L3->L2 fold -- a compile-DB-derived one). service._attach_
+        header_graph's own independent second parse already hashes this
+        identical set into its own cache key, so leaving it out of THIS
+        primary parse's cache key let the two passes disagree on staleness
+        -- reusing a stale cached AST here while the header-graph pass
+        correctly reparsed."""
+        from abicheck.service import _dump_elf
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        build_inc = tmp_path / "buildinc"
+        build_inc.mkdir()
+        snap = AbiSnapshot(library="t", version="1.0")
+        cc = CompileContext(gcc_option_tokens=("-I", str(build_inc)))
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [header], [], "1.0", "c++", compile=cc)
+        assert build_inc in mock.call_args.kwargs["extra_hash_dirs"]
+
     def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
         # Codex: when the caller's CompileContext supplies includes via -isystem,
         # the inferred -H root must defer — emitted as its own -isystem token

@@ -1393,6 +1393,27 @@ Once a root command genuinely clears the bar above, pick the right home:
   comment on this PR. Documented in `_INCLUDE_FLAG_PREFIXES`'s own
   docstring alongside this entry.
 
+  **A seventeenth finding, from a further Codex review round (P1), on the
+  counterpart cache key the tenth finding's `_attach_header_graph` fix was
+  supposed to stay aligned with — real, and fixed.** `service._dump_elf`'s
+  own `deferred_dirs` computation (its PRIMARY header parse's cache key,
+  not the header-graph attach) hashed only `resolve_inferred_header_roots`'s
+  deferred roots, never any include-search directory riding in the compile
+  context's own `gcc_option_tokens` — exactly the gap the tenth finding
+  closed on `_attach_header_graph`'s side, left open on the primary parse
+  whose cache key that fix was meant to match. Editing a header under such
+  a directory could let the primary parse reuse a stale cached AST while
+  `_attach_header_graph`'s own independent second parse correctly
+  reparsed, producing a snapshot whose declarations and embedded graph
+  describe different source states — the exact divergence the tenth
+  finding's fix was supposed to prevent, just from the other side. Fixed
+  by folding `include_operand_dirs(cc.gcc_option_tokens)` into `_dump_elf`'s
+  `deferred_dirs` too, the identical fold `_attach_header_graph` already
+  applies. Regression test:
+  `tests/test_service_unit.py::TestDumpElf::test_gcc_option_tokens_include_dir_is_hashed`
+  (confirmed to fail against the pre-fix code, which never hashed the
+  directory into `extra_hash_dirs`).
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
