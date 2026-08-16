@@ -246,7 +246,6 @@ class ScanRequest:
     build_config: Path | None = None
     allow_build_query: bool = False
     risk_rules_path: Path | None = None
-    build_targets: tuple[str, ...] = ()  # P0.2: equivalent of `dump --build-target`
     # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
     # ADR-056: real changed-path provenance (e.g. "--since origin/main" or
@@ -257,6 +256,9 @@ class ScanRequest:
     changed_src: str = "run_scan_set"
     # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
     max_findings: int | None = None
+    # P0.2 equivalent of `dump --build-target`; kw_only + appended last (checker_types.py's
+    # public-dataclass convention) so a positional insert can't rebind a later field (Codex review).
+    build_targets: tuple[str, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1573,11 +1575,9 @@ def _run_scan_one_member(
       member — `run_scan_core`'s own ``_remaining_budget_s(start, budget_s)``
       already computes ``budget_s - (now - start)`` internally, so this
       alone produces the correct shrinking remaining budget across members.
-      Passing an already-reduced ``budget_s`` here instead would
-      double-subtract elapsed time.
-    - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/`build_config`/
-      `allow_build_query`/`risk_rules_path`/`build_targets` -- an
-      `--artifact-set` scan must not silently drop what single-binary `scan` honors.
+      Passing an already-reduced ``budget_s`` here instead would double-subtract elapsed time.
+    - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/`build_config`/`allow_build_query`/
+      `risk_rules_path`/`build_targets` -- must not silently drop what single-binary `scan` honors.
     - Accepts ``sibling_exported_symbols`` (G35): a sibling's export also
       satisfies this member's own `public_not_exported` check.
     """

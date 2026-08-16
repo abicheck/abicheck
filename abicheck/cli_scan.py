@@ -449,6 +449,7 @@ def render_scan_dry_run(
     lang: str,
     header_backend: str,
     fmt: str,
+    build_targets: tuple[str, ...] = (),
     scheme_label: str = "legacy (0/2/4)",
     sev_config: Any = None,
 ) -> Any:
@@ -490,6 +491,7 @@ def render_scan_dry_run(
         "Build/source inputs",
         f"--sources: {sources}" if sources else None,
         f"--build-info: {effective_build_info}" if effective_build_info else None,
+        f"--build-target: {', '.join(build_targets)}" if build_targets else None,
     )
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
     result.add(
@@ -518,6 +520,7 @@ def render_scan_dry_run(
             seeded=seeded,
             budget=Budget(total_timeout=budget_s),
             lang=lang,
+            build_targets=build_targets,
         )
         estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
         total = sum(e.est_seconds for e in estimates)
@@ -528,6 +531,17 @@ def render_scan_dry_run(
                 for e in estimates
             ),
             f"projected total: {total:.2f}s",
+            # Codex review: estimate_scan's TU count is a workspace-wide probe
+            # (compile-DB/source-tree file count) -- it does not scope to
+            # build_targets the way the real scan's Bazel collection would, so
+            # a --build-target run's actual TU count is typically LOWER than
+            # this preview states. Flagged rather than silently misleading.
+            "note: --build-target given -- the TU counts above are an "
+            "UNSCOPED workspace-wide estimate; the real run's Bazel "
+            "collection will scope to the requested root target(s) and "
+            "typically touch fewer TUs than shown"
+            if build_targets
+            else None,
         )
     except Exception as exc:  # pragma: no cover - best-effort probe
         result.warn(f"could not project per-layer cost: {exc}")
@@ -1831,6 +1845,7 @@ def scan_cmd(
                 lang=lang,
                 header_backend=header_backend,
                 fmt=fmt,
+                build_targets=build_targets,
                 scheme_label=scheme_label,
                 sev_config=sev_config_for_preview,
             )

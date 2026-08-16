@@ -237,3 +237,86 @@ def test_scan_request_build_targets_reaches_embed_build_source_via_run_scan_set(
 def test_scan_request_default_build_targets_is_empty_tuple():
     """Additive default -- an existing ScanRequest() caller is unaffected."""
     assert ScanRequest().build_targets == ()
+
+
+def test_scan_request_build_targets_is_keyword_only():
+    """Codex review: ScanRequest is public API -- an ordinary positional
+    insertion would silently rebind bundle_system_providers/changed_src/
+    max_findings for any existing positional caller. build_targets must be
+    unreachable positionally."""
+    import dataclasses
+
+    from abicheck.service_scan import ScanRequest as _SR
+
+    f = next(
+        fld for fld in dataclasses.fields(_SR) if fld.name == "build_targets"
+    )
+    assert f.kw_only is True
+
+
+# ── `scan --dry-run` preview (Codex review) ────────────────────────────────
+
+
+def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
+    tmp_path: Path,
+) -> None:
+    """Codex review: a --build-target dry-run silently omitted the requested
+    root(s) from the preview, and the TU-count estimate looked scoped when
+    it's actually a workspace-wide probe. Fixed by stating the requested
+    target(s) and flagging the estimate as unscoped."""
+    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from abicheck.cli_scan import render_scan_dry_run
+
+    result = render_scan_dry_run(
+        artifact=tmp_path / "lib.so",
+        against=None,
+        headers=[],
+        includes=[],
+        sources=tmp_path,
+        effective_build_info=None,
+        changed=[],
+        changed_src="none",
+        seeded=False,
+        depth=None,
+        eff_depth_enum=EvidenceDepth.BINARY,
+        resolved=SourceMethod.S0,
+        collect_mode="off",
+        budget_s=None,
+        lang="c++",
+        header_backend="auto",
+        fmt="text",
+        build_targets=("//:math",),
+    )
+    build_lines = " ".join(result.sections.get("Build/source inputs", []))
+    assert "--build-target: //:math" in build_lines
+    scope_lines = " ".join(result.sections.get("Resolved depth and source scope", []))
+    assert "UNSCOPED" in scope_lines
+
+
+def test_dry_run_preview_omits_build_target_note_when_unset(tmp_path: Path) -> None:
+    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from abicheck.cli_scan import render_scan_dry_run
+
+    result = render_scan_dry_run(
+        artifact=tmp_path / "lib.so",
+        against=None,
+        headers=[],
+        includes=[],
+        sources=tmp_path,
+        effective_build_info=None,
+        changed=[],
+        changed_src="none",
+        seeded=False,
+        depth=None,
+        eff_depth_enum=EvidenceDepth.BINARY,
+        resolved=SourceMethod.S0,
+        collect_mode="off",
+        budget_s=None,
+        lang="c++",
+        header_backend="auto",
+        fmt="text",
+    )
+    build_lines = " ".join(result.sections.get("Build/source inputs", []))
+    assert "--build-target" not in build_lines
+    scope_lines = " ".join(result.sections.get("Resolved depth and source scope", []))
+    assert "UNSCOPED" not in scope_lines
