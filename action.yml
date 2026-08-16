@@ -110,11 +110,16 @@ inputs:
       Directory whose headers are treated as public for provenance
       classification (repeatable, space-separated) — establishes the
       public/internal boundary so leakage/RTTI/exported-vs-public
-      cross-checks run instead of skipping. scan mode forwards it as
-      `--public-header-dir`; dump mode forwards it as one more `-H/--header`
-      root, which is where `dump` reads declaration provenance from (a
-      directory entry tags everything under it public). compare has no
-      equivalent flag.
+      cross-checks run instead of skipping. dump mode forwards it as one
+      more `-H/--header` root, which is where `dump` reads declaration
+      provenance from AND extracts headers from (a directory entry tags
+      everything under it public and expands to every header inside). scan
+      mode forwards it both as `--public-header-dir` (scope only) and as a
+      bare `-H` root, so its own header extraction expands the same
+      directory `dump` does — keeping a `scan --against` a fresh `dump`
+      baseline of the same inputs comparable instead of drifting apart on
+      `include_sequence` for no real recipe difference (lab report). compare
+      has no equivalent flag.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
