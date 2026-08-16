@@ -59,7 +59,7 @@ simplification).
 | `compare --stat`, `compare --recommend` | Remove | `--format review` replaces `--stat`; recommendation becomes an unconditional renderer output |
 | `scan --artifact-set` | **Keep** | Refine the value syntax only (repeatable option / manifest); do not overload positional `DIRECTORY` |
 | `--annotate`, `--annotate-additions` | Remove from CLI (PR 1b, not PR 1) | Options on `compare` alone, shared by both operand shapes (no CLI-level split is possible) — blocked on a release-report persistence prerequisite; see PR 1b |
-| `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to explicitly-trusted `.abicheck.yml`, with a real trust + dry-run contract |
+| `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to `.abicheck.yml`; only `build.query` (an executable command) needs the explicit-`--config` trust gate — `build.compile_db` is a data path and carries the ordinary dry-run contract only |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
 
 Everything above is a **breaking** change to the native CLI. Consistent with
@@ -708,12 +708,10 @@ reviewed ordering rather than inside PR 4.
 
 **(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
 this is no longer two axes but a set of them, and a flat `max()` is not the
-whole rule: a non-comparable pair must dominate every other axis; a removed
-required library (`8`) has its own release policy and is already checked ahead
-of the coverage-only fallback; scan budget overflow (`5`) is scan-only; usage
-error (`64`) is not a result at all and never appears in a report; and exit `1`
-has several distinct causes that a bare number cannot tell apart. Encode it
-once:
+whole rule: a non-comparable pair must dominate every other axis; scan budget
+overflow (`5`) is scan-only; usage error (`64`) is not a result at all and
+never appears in a report; and exit `1` has several distinct causes that a
+bare number cannot tell apart. Encode it once:
 
 ```python
 @dataclass(frozen=True)
@@ -732,13 +730,31 @@ than distributed across CLI callbacks — **precedence order, not a renumbering*
 
 ```text
 usage/config error          (outside the report entirely — 64 everywhere)
-not comparable              (dominates every result axis below)
-removed required library    (release policy)
-budget exceeded             (scan only)
-ABI / API / policy gate
+not comparable               (dominates every result axis below)
+budget exceeded              (scan only)
+removed required library  ─┐ mode-dependent (see below) — NOT a fixed rank
+ABI / API / policy gate    ─┘
 coverage & assurance floors (max-folded, never lowering the above)
 clean
 ```
+
+**Removed-required-library's rank is not fixed, and an earlier draft of this
+table got that wrong** (Codex review): today's contract
+(`docs/reference/exit-codes.md`'s release table,
+`tests/test_compare_release.py::test_removed_and_breaking_exits_4_not_8`) is
+mode-dependent, not a constant precedence slot —
+
+- **legacy scheme** (no severity map in effect): an ABI/API break or an
+  operational `ERROR` wins; removed-library is checked only when neither
+  applies.
+- **severity-aware scheme** (a severity map is in effect): removed-library
+  takes precedence over the aggregated `0/1/2/4`.
+
+`ExitDecision`'s resolver must reproduce this switch, not collapse it into one
+row — the existing legacy-mode test (`4`, not `8`, for a release with both a
+breaking pair and a removed library) is exactly the behavior PR G is
+forbidden from changing, since it is a consolidation of the *algorithm
+selector*, not a migration of release exit semantics.
 
 **`ExitDecision` unifies the precedence, not the numbers, and this is a hard
 constraint on PR G, not a detail** (Codex review of this plan caught an earlier
@@ -899,9 +915,11 @@ PR E  Action machine-report           = PR 1b — uncapped persisted release
                                        findings, no comparison re-run, no
                                        stderr inference; reads G1's block
       └─ then DELETE --annotate, --annotate-additions
-PR F  trusted build config            = PR 3C — build.query / build.compile_db
-                                       only from an explicit --config, trust
-                                       receipt in --dry-run, fail closed
+PR F  trusted build config            = PR 3C — build.query executes only
+                                       from an explicit --config (a data
+                                       path like build.compile_db carries no
+                                       such restriction), trust receipt in
+                                       --dry-run, fail closed
       └─ then DELETE dump --build-query, dump --build-compile-db
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        schema / report / Action parity
