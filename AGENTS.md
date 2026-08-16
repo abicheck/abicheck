@@ -1205,6 +1205,34 @@ Once a root command genuinely clears the bar above, pick the right home:
   `_CC_FIELDS`/`_explicit_ctx_from_kwargs()` helper, mirroring the
   identical pattern `test_cli_dump_helpers_coverage.py` already used.
 
+  **An eleventh finding, from a further Codex review round (P1), on
+  `_existing_include_dirs`'s own selection scope — real, but a
+  pre-existing, cross-cutting design shared with `compare`'s implicit-dump
+  path, documented as a known gap rather than fixed here.** When no
+  explicit `-I` is given, `_existing_include_dirs` gathers directories
+  from *every* `CompileUnit` in the build evidence, not only the unit(s)
+  `resolve_header_compile_context` actually matched to the headers being
+  parsed. Those directories reach the AST command as `extra_includes`,
+  emitted ahead of the matched context's own include tokens — so in a
+  multi-TU build, an unrelated TU's own colliding generated header (e.g.
+  a stray `config.h`) can shadow the header the matched TU would have
+  resolved, while the snapshot may still get stamped
+  `parsed_with_build_context=True` from the (separate) successful fold,
+  reading as more authoritative than the seed actually was. Confirmed
+  **not** new to this PR: `service_input_resolution._seeded_includes`/
+  `_seeded_compile_context` — the pre-existing pair `resolve_side_snapshot`
+  already uses for `compare`'s implicit-dump operand, and the reference
+  implementation this PR's own fold was modeled after — combines the
+  identical broad-seed-plus-matched-fold shape already, unchanged by this
+  PR. A correct fix needs `HeaderCompileContextResolution` to expose which
+  `CompileUnit`s actually matched (today it exposes only a
+  `matched_unit_count`), then both `_existing_include_dirs`'s caller here
+  *and* `_seeded_includes` in `service_input_resolution.py` to restrict
+  the seed to that set — a genuine, cross-cutting widening of a
+  well-tested module's return shape and two independent call sites, not a
+  scoped fix reactive to one review comment on one PR. Documented in
+  `_existing_include_dirs`'s own docstring alongside this entry.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C

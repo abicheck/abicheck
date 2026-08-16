@@ -113,3 +113,18 @@
   snapshot pass re-parsed correctly. Fixed by extracting the include-dir
   extraction logic into a new shared `header_utils.include_operand_dirs()`
   and folding it into this pass's own cache key too.
+
+- **Documented (not fixed, Codex review): the L2 include-dir seed scans
+  every compile unit in the build evidence, not only the one(s) actually
+  matched to the headers being parsed, so an unrelated TU's own colliding
+  header directory could in principle shadow the matched TU's header in a
+  multi-TU build.** Confirmed pre-existing and not introduced by this
+  PR's fold — `compare`'s implicit-dump path already combines the
+  identical broad-seed-plus-matched-fold shape via
+  `service_input_resolution._seeded_includes`/`_seeded_compile_context`,
+  unchanged here. A correct fix needs `resolve_header_compile_context`'s
+  result to expose which compile units actually matched (today only a
+  count), then both this module's seed and `_seeded_includes` to restrict
+  to that set — a cross-cutting change to a well-tested module's return
+  shape and two independent call sites, left as a known gap (see
+  `_existing_include_dirs`'s own docstring and `AGENTS.md`).

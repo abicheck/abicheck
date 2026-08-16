@@ -204,6 +204,20 @@ def _existing_include_dirs(units: Iterable[Any]) -> list[str]:
     on the same host as the build, so ``~`` is expanded back before the
     existence check — otherwise every home-rooted include dir (the common CI
     case this fallback targets) would be silently dropped.
+
+    Known gap (Codex review, not fixed here): deliberately scans *every*
+    compile unit, not only the one(s) ``resolve_header_compile_context``
+    matches to the headers actually being parsed -- ``HeaderCompileContext
+    Resolution`` exposes only a ``matched_unit_count``, not which units
+    matched, so there is no narrower set to restrict to without widening
+    that return shape. In a multi-TU build an unrelated TU's own generated
+    header directory (e.g. a colliding ``config.h``) can therefore ride
+    along in this seed and shadow the matched TU's own header for a caller
+    that also stamps ``parsed_with_build_context`` from the (separate)
+    successful fold — same pre-existing shape as ``service_input_
+    resolution._seeded_includes``/``_seeded_compile_context``, which
+    `compare`'s implicit-dump path already combines identically. See
+    AGENTS.md's "Known gaps" entry for the same note.
     """
     seen: set[str] = set()
     out: list[str] = []
