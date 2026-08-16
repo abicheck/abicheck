@@ -431,24 +431,41 @@ So the prerequisite below is not just "uncap the findings": the persisted
 report must be the single source for *both* the annotations and the gate
 explanation, for both operand shapes.
 
-The shape the Action should be able to read, uniformly, for a single-library
-compare, a release/package compare, and `scan --against`:
+**Not a proposed common envelope — (Codex review) `compatibility.verdict`/
+`findings` below were an illustrative shorthand, and neither exists in
+`compare_report.schema.json` (which is top-level `verdict`/`changes`) nor in
+scan's or release's own, differently-shaped report structures.** Introducing
+those spellings for real would be a major-version schema migration this PR
+does not undertake, and would leave two sources for the same verdict/finding
+set free to drift. What actually generalizes across all three operand shapes
+today, without inventing a new envelope, is only the three fields PR G1/#780
+already ship at the top level of whichever shape a given command emits:
+`exit`, `contract_coverage_exit_contribution`,
+`analysis_assurance_exit_contribution`. The Action's renderer keeps reading
+each operand's own existing `verdict`/`changes` (single-library),
+per-library summaries (release), or scan's own result shape through the
+adapter it already has for that shape — PR E's job is only to route the gate
+*explanation* through the shared `exit` block instead of re-deriving it from
+stderr, not to unify how verdicts/findings are structured. A single-library
+compare report, unmodified by this section, already reads:
 
 ```json
 {
-  "compatibility": {"verdict": "COMPATIBLE"},
-  "gate": {"exit_code": 0, "blocking": false},
+  "verdict": "COMPATIBLE",
   "contract_coverage_exit_contribution": 0,
   "analysis_assurance_exit_contribution": 1,
   "exit": {"code": 1, "reasons": ["analysis_assurance"]},
-  "findings": []
+  "changes": []
 }
 ```
 
 With that in place the Action does not parse stderr, does not re-run any
 comparison, does not guess why the exit was `1`, renders annotations from the
 persisted findings and the Job Summary from the same object, and behaves
-identically for a single pair and a release fan-out. The `exit` block is the
+identically for a single pair and a release fan-out — reading `exit` the same
+way regardless of which command's report it is, while still reading
+`verdict`/`changes` (or that operand's own equivalent) unchanged. The `exit`
+block is the
 same object PR 4/G formalizes as `ExitDecision`. Build it once and consume it
 once — which is why PR G is split, and the split is load-bearing for this
 section rather than cosmetic: **G1** builds the decision object and emits its
