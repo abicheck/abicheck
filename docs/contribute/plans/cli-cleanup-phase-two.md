@@ -185,9 +185,13 @@ standing red lane, not #770's regression.
 3. Reconcile branch protection with reality. The repository reports
    `protected: true` with `required_status_checks.enforcement_level: off` and
    empty `contexts`/`checks`; unless an equivalent GitHub Ruleset supplies them,
-   a red CI does not block merge. Add required checks (branch protection or
-   Ruleset) covering the Linux/macOS/Windows unit lanes, `lint-and-types`, and
-   `ai-readiness`.
+   a red CI does not block merge. Add required checks per the classification
+   rule stated below (Codex review caught an earlier draft of this item
+   restating a second, stale required-check list — `.github/AGENTS.md`'s
+   `ci.yml` row names only the canonical Linux/3.13 `unit-tests` lane,
+   `ai-readiness`, `fair-metadata`, `lint-and-types`, and `packaging` as the
+   core required jobs; macOS and Windows are separate matrix legs the table
+   does not require, and this item must not diverge from that classification).
 4. Add exact-merge-SHA verification on `push: main`, so a merge that did not
    run the checks it claimed is detectable after the fact.
 
@@ -597,16 +601,28 @@ print a context the real run does not use, the L3→L2 fold could diverge again,
 and every future context field would need hand-threading through three
 pipelines a fourth time.
 
-- **PR 3A — typed `dump` convergence (the review's PR C).** One canonical path:
+- **PR 3A — typed `dump` *and `scan`* convergence (the review's PR C) — both
+  remaining resolvers, not just one.** An earlier draft of this section scoped
+  3A to `dump_cmd`/`perform_elf_dump` alone, which would still leave
+  `scan_engine._build_new_snapshot` as a second, independent interpreter of
+  the same `.abicheck.yml` build input once 3C removes the CLI flags — the
+  identical structural divergence this whole section exists to close, just
+  moved from a `dump`-vs-`compare` mismatch to a `dump`-vs-`scan` one
+  (Codex review). Both must converge in this slice: one canonical path,
   `Click parsing → DumpRequest → ResolvedDumpRequest → dry-run or execution →
-  DumpResult`, with `dump_cmd`/`perform_elf_dump` routing through
-  `service_dump_pipeline.run_dump_request` the way `compare`'s implicit-dump
-  operand already does. `DumpResult` states the snapshot, requested vs.
-  effective depth, the resolved compile context, the build-query decision, the
-  source scope, the dependency scope, diagnostics, and the storage result — and
-  `--dry-run` renders *that object*, so the printed plan and the executed run
-  cannot disagree. The root `AGENTS.md` "Known gaps" entry on
-  `service_dump_pipeline.py` is the same migration seen from the code side.
+  DumpResult`, with `dump_cmd`/`perform_elf_dump` **and**
+  `scan_engine._build_new_snapshot` both routing through
+  `service_dump_pipeline.run_dump_request` (or the per-input primitives it
+  shares with `resolve_side_snapshot` — see `service_input_resolution.py`),
+  the way `compare`'s implicit-dump operand already does. `DumpResult` states
+  the snapshot, requested vs. effective depth, the resolved compile context,
+  the build-query decision, the source scope, the dependency scope,
+  diagnostics, and the storage result — and `--dry-run` renders *that
+  object*, so the printed plan and the executed run cannot disagree. The root
+  `AGENTS.md` "Known gaps" entry on `service_dump_pipeline.py` is the same
+  migration seen from the code side; that entry does not yet mention the scan
+  side explicitly, so this plan is the tracking place for that half until it
+  does.
 - **PR 3B — build-context completeness (the review's PR D).** Two #782
   follow-ups that change the *parsed public surface*, not just performance, so
   they belong before the model is called finished: (1) compile-unit matching —
@@ -618,7 +634,11 @@ pipelines a fourth time.
   even though the run reports a match and stamps `parsed_with_build_context`.
   Both are already recorded as known gaps in the root `AGENTS.md`.
 - **PR 3C — the removal itself** (everything the rest of this section
-  describes), landing only after 3A and 3B.
+  describes), landing only after **all three** resolvers converge — 3A (both
+  `dump` and `scan`) and 3B. 3C must not land on 3A-covers-`dump`-only; a
+  `.abicheck.yml` build input used for a `dump` baseline and a
+  `scan --against` candidate needs one interpreter, not two, before the flags
+  that configure it are removed.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
@@ -1013,10 +1033,12 @@ PR B  effective configuration parity — packs resolved once into one
                                        GateOptions, shared by compare /
                                        release / scan / Action, digest in
                                        every report
-PR C  typed dump convergence          = PR 3A — DumpRequest →
+PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        ResolvedDumpRequest → DumpResult, one
-                                       resolver for CLI/Python/Action, JSON
-                                       dry-run rendered from that object
+                                       resolver for dump CLI/Python/Action
+                                       *and* scan_engine's candidate
+                                       resolution, JSON dry-run rendered
+                                       from that object
 PR D  build-context completeness      = PR 3B — matched compile-unit
                                        selection, forced includes, provenance
                                        tests
