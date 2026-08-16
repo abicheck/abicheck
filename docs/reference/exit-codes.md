@@ -130,6 +130,45 @@ contract-coverage axis: an assurance-gated exit `1` (via the dedicated
 `ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
 unconditional (no `fail-on-*` input disables it).
 
+## The `exit` report field (CLI cleanup phase two, PR G1)
+
+Every real-verdict `compare --format json` report (`full`/`leaf`/`root-cause`
+modes) carries a top-level `exit` object (report schema 2.41) stating the
+already-resolved decision behind the three axes above as one explainable
+value, rather than requiring a reader to separately combine
+`severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
+`analysis_assurance_exit_contribution` themselves:
+
+```json
+"exit": {
+  "code": 1,
+  "reasons": ["analysis_assurance"],
+  "compatibility_contribution": 0,
+  "contract_coverage_contribution": 0,
+  "analysis_assurance_contribution": 1
+}
+```
+
+`code` is exactly `max()` over the three contributions — the identical
+number the real process exits with for a single-pair comparison.
+`reasons` names every axis whose own contribution equals `code` (a lower,
+non-winning contribution is excluded, since it did not determine the
+result); `["clean"]` when `code` is `0`.
+
+Under `--used-by`/`--required-symbol(s)` scoping, `compatibility_contribution`
+and `reasons` describe the **scoped** application/plugin-host gate (the one
+the process actually exits on — see the section below), not the
+informational full-library verdict/severity gate `full_verdict`/
+`full_severity` still report; `reasons` carries `scoped_gate` rather than
+`compatibility_gate` in that case.
+
+This field is additive and does not itself change any exit code — it is a
+persisted view of a resolution every axis above already performs. It does
+not yet cover `not_comparable`, `scan --against`'s own budget-overflow
+floor, or a release's removed-required-library policy, each raised through
+a different code path today; see `abicheck/exit_decision.py`'s own module
+docstring for that scope boundary.
+
 ## Commands removed in the ADR-043 CLI reset
 
 `appcompat` and `plugin-check` are gone as standalone commands; their scoping

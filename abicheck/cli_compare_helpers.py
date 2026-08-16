@@ -1218,6 +1218,13 @@ def _report_compare_result(
             fold_analysis_assurance_exit,
         )
 
+        # `exit_decision.resolve_compare_exit_decision`'s own reasons need
+        # the *pre-fold* scoped contribution, not the already-folded value
+        # `result.scoped_exit_code` ends up holding below -- otherwise a
+        # scoped gate floored by (say) `--require-complete-analysis` alone
+        # reports `reasons: ["scoped_gate"]` even though the scoped gate
+        # itself never contributed to that number (Codex review).
+        result.scoped_compatibility_contribution = scoped_exit_code  # type: ignore[attr-defined]
         announce_coverage_floor(
             result,
             base_exit=scoped_exit_code,

@@ -328,7 +328,7 @@ def _to_json_leaf(
     show_only: str | None = None,
     *,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False,
+    require_complete_analysis: bool = False, include_exit_decision: bool = True,
 ) -> str:
     """Leaf-change mode JSON output.
 
@@ -548,7 +548,8 @@ def _to_json_leaf(
     _add_reconciled(d, result)
     _add_contract_context(
         d, result, _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis)
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config, include_exit_decision=include_exit_decision)
     # Codex review: full/root-cause mode call this; leaf mode never did,
     # silently dropping policy_overrides/policy_reclassify here.
     _add_policy_overrides(d, result)
@@ -638,7 +639,7 @@ def _to_json_root_cause(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False,
+    require_complete_analysis: bool = False, include_exit_decision: bool = True,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
 
@@ -749,7 +750,8 @@ def _to_json_root_cause(
     _add_reconciled(d, result)
     _add_contract_context(
         d, result, _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis)
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config, include_exit_decision=include_exit_decision)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1130,6 +1132,7 @@ def to_json(
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
+    include_exit_decision: bool = True,  # exit block (2.41); see exit_decision.py
 ) -> str:
     if stat:
         return to_stat_json(
@@ -1142,14 +1145,14 @@ def to_json(
             result, indent=indent, show_only=show_only,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-        )
+            include_exit_decision=include_exit_decision)
 
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result, indent=indent, show_only=show_only,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-        )
+            include_exit_decision=include_exit_decision)
 
     changes = list(result.changes)
     if show_only:
@@ -1197,7 +1200,8 @@ def to_json(
     _add_reconciled(d, result)
     _add_contract_context(
         d, result, _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis)
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config, include_exit_decision=include_exit_decision)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
