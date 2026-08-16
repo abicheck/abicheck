@@ -1496,6 +1496,146 @@ Once a root command genuinely clears the bar above, pick the right home:
   assertion catching `deferred` leaking into the fold's own explicit
   tokens and via the final ordering check).
 
+  **A nineteenth finding, from real Bazel/castxml CI evidence (not a
+  hand-built fixture) on `napetrov/abicheck-bazel-lab`'s diagnostic PR #14,
+  after repinning it to `abicheck/abicheck@84cf3d4` (PR #788) — a narrower
+  residual of this same topic survives the eighth/`_build_new_snapshot`
+  fold fix above, investigated but not fixed.** The lab's
+  `validate-two-fresh-mains.yml` workflow builds BASE and HEAD with real
+  Bazel, captures target-scoped cquery/aquery evidence for both, `dump`s
+  each fresh (`fresh-base.abi.json`/`fresh-head.abi.json`, same code,
+  identical `--sources`/`--build-info`), then separately `scan`s HEAD
+  `--against` the fresh BASE dump. `compare fresh-base fresh-head` (pure
+  `dump` vs `dump`) reads `COMPATIBLE`/`NO_CHANGE` with a complete
+  `analysis_assurance` — confirming `language_standard` parity holds, i.e.
+  the eighth-finding fix above genuinely works. But `scan HEAD --against
+  fresh-base.abi.json` (the same HEAD code, same `-H`/`--sources`/
+  `--build-info` inputs, `dump`'s baseline) still reads `NOT_COMPARABLE`:
+  `diff.reason` names exactly one differing field, `include_sequence` (not
+  `language_standard`, which no longer reproduces) — a narrower,
+  previously-undetected sibling of the field this whole topic exists to
+  close, confirmed via the run's own uploaded `two-fresh-mains-validation`
+  artifact (run
+  https://github.com/napetrov/abicheck-bazel-lab/actions/runs/31950549361,
+  job 95173233150, commit `a7f5a7f`).
+
+  **A disconfirmed hypothesis, corrected by Codex review — recorded so a
+  future pass doesn't re-propose it.** This entry's first draft claimed the
+  cause was `scan_engine._build_new_snapshot` passing a raw, unexpanded
+  `headers` list (still containing the directory entry) into
+  `seed_includes_and_fold_compile_context`/`service.resolve_input`, while
+  `perform_elf_dump` pre-expands via `expand_header_inputs()` first. False,
+  verified by reading both paths fully rather than trusting the first,
+  partial read: (1) `header_compile_context.resolve_header_compile_context`
+  — reached from *inside* `seed_includes_and_fold_compile_context`'s own
+  compile-context fold, not just its truthiness-only `seed_l2_includes`
+  half this entry's first draft checked — calls its own
+  `_expand_header_directories()` on the raw `headers` list, whose docstring
+  states it deliberately reuses `header_utils.iter_directory_headers` (the
+  same walk `expand_header_inputs` itself delegates to, same suffix/pruned-
+  segment filters) specifically so the expanded set matches what L2 actually
+  parses. (2) `service.resolve_input`'s own ELF dispatch, `_dump_elf`, calls
+  `expand_header_inputs(headers)` internally (`service.py:1281`) before
+  ever reaching `dumper.dump()` — the identical function `perform_elf_dump`
+  calls explicitly upfront, just one call-stack frame deeper. Both `scan`'s
+  and `dump`'s header lists therefore converge on the identical expanded,
+  deduped, deterministically-ordered file set before any header-AST parse
+  runs; a raw-vs-expanded asymmetry cannot be the cause of the `include_
+  sequence` mismatch.
+
+  **Two further Codex review rounds, each finding the previous round's
+  proposed single "the mechanism is X" narrative was itself incomplete —
+  pattern worth naming before the specifics: this area (`perform_elf_dump`
+  vs. `scan_engine._build_new_snapshot`'s relative ordering of the L3→L2
+  fold and `header_utils.resolve_inferred_header_roots`) has enough real
+  asymmetry that every single-paragraph explanation attempted so far turned
+  out to be a true but partial slice of it, not the whole story — so this
+  entry stops trying to assert one and instead lists the verified-by-
+  reading candidate mechanisms found, unranked, without claiming which one
+  (if any single one) explains the specific `include_sequence` mismatch in
+  the CI evidence above.** `perform_elf_dump` calls
+  `resolve_inferred_header_roots(headers, includes, gcc_options=
+  effective_gcc_options, gcc_option_tokens=tuple(gcc_option_tokens))` using
+  its own *pre-fold* local variables, before its later
+  `seed_includes_and_fold_compile_context` call folds real L3 evidence into
+  them; `scan_engine._build_new_snapshot` folds *first*, then passes the
+  already-folded `compile_context` into `resolve_input(..., compile=
+  compile_context)`, whose ELF dispatch `_dump_elf` makes its own internal
+  `resolve_inferred_header_roots(...)` call reading that already-folded
+  context. Two concrete, verified effects of this ordering difference, not
+  one:
+  (a) `resolve_inferred_header_roots`'s own `skip` set is built from
+  `user_includes` (the caller's `includes` parameter) *and*
+  `_build_context_include_dirs(ctx)` (dirs implied by the passed-in
+  `gcc_options`/`gcc_option_tokens`) — for scan's post-fold call, both of
+  these already carry L3-derived content, so an inferred `-H` root whose
+  directory the L3 evidence already covers is **skipped entirely**
+  (`inferred` ends up empty, the function returns `([], [])` for that
+  root); dump's pre-fold call has a much smaller `skip` set (no L3 content
+  yet), so the same root is far more likely to survive as a plain `-I`
+  extra-include instead. This omission is real only for the two branches of
+  `skip` that do **not** independently reach `extra_includes`: a
+  `_build_context_include_dirs(ctx)` match (a dir implied only by
+  `gcc_options`/`gcc_option_tokens`, never itself added to `includes`), and
+  the sibling deferred-token branch below. It is *not* an omission when
+  `skip` matches purely because the root is already literally present in
+  `user_includes` — `_dump_elf`'s own `eff_includes = list(includes)`
+  starts from that same list before `resolve_inferred_header_roots` ever
+  runs and is only ever added to, never filtered, so that root's slot
+  survives via the pre-existing `includes` entry regardless of whether the
+  inferred-root call re-adds it (Codex review: an earlier draft of this
+  entry collapsed all three skip/defer shapes into one "no slot" outcome,
+  which is only true for two of them).
+  (b) Separately, `perform_elf_dump` computes `inc_extra` from this
+  *pre-fold* call and only later builds `extra_includes=eff_includes +
+  inc_extra` for the actual `dump(...)` call, where `eff_includes` is the
+  (by then real) L2-seeded include list — if `inc_extra`'s root and
+  `eff_includes` overlap (plausible, since both can independently resolve
+  to the same L3-derived directory), the *same* directory can appear twice
+  in dump's own `extra_includes`, which is what `comparability_fields.
+  _include_slot_tokens` actually tokenizes into `include_sequence` — one
+  token per `declared_includes` slot, and `dumper_contract.
+  _attach_extraction_contract` builds `declared_includes` **exclusively**
+  from `extra_includes` (`IncludeDir(path=p, ...) for p in extra_includes`,
+  absent a `dump_manifest`); `gcc_option_tokens` (where a *deferred* root
+  rides, as `-isystem`/etc.) never contributes a slot at all (Codex review
+  — corrected from this entry's own prior, wrong claim that both jointly
+  derive slots). This sharpens rather than weakens candidates (a)/(b)
+  below: a root that lands in `extra_includes` always produces a slot: once
+  for dump's `inc_extra`, and *again* if `eff_includes` also independently
+  picked up the same directory (candidate (b), a real duplicate slot); a
+  root that `resolve_inferred_header_roots` either skips outright or
+  reclassifies to a deferred `gcc_option_tokens` flag produces **no** slot
+  at all either way, since neither reaches `extra_includes` (candidate (a),
+  collapsing what looked like two distinct scan-side outcomes — "skipped"
+  vs. "deferred" — into the same net effect on `include_sequence`). scan's
+  candidate side has no equivalent double-add, since its single fold call
+  already produced the final `includes`/`compile_context` `resolve_input`
+  uses directly. Either effect alone — a missing slot on scan's side, or a
+  duplicated slot on dump's — changes the resulting slot *count*, which is
+  sufficient to make `include_sequence` differ regardless of which specific
+  slot moved. **Not fixed here, and deliberately not narrowed to one of (a)/
+  (b) without more evidence**: neither this pass nor either Codex round
+  inspected the actual differing `include_sequence` token values from the
+  CI artifact (only `diff.reason`'s field name was read, not its content),
+  so which effect (or another one still unfound) actually fired in this
+  specific repro is genuinely unknown; a real fix needs that inspection (or
+  a live `bazel`/`castxml` repro, absent from this pass's environment)
+  before it can even be scoped, let alone attempted — this file's own
+  "known gaps over risky reactive patches" convention applies doubly here,
+  given how many single-paragraph "found it" claims this same footnote has
+  already had to walk back. Consequence for
+  `napetrov/abicheck-bazel-lab`: PR #14's `fresh-to-fresh` job (its real
+  workflow-job name) genuinely fails overall — its own
+  `compare fresh-base fresh-head` step passes, but its separate
+  `scan HEAD --against fresh-base.abi.json` step is the one that returns
+  `NOT_COMPARABLE` and fails the job — so it should be treated as still red
+  on this one residual field, and the lab's own checked-in
+  `abi/math.abicheck.json` should **not** be regenerated
+  against the new core pin yet — doing so now would just encode a baseline
+  that a fresh `scan --against` still can't cleanly compare to, the same
+  problem this diagnostic exists to catch, not fix.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
