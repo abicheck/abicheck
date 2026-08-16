@@ -38,6 +38,7 @@ from .checker import DiffResult
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
+    from .pack_application import PackApplication
     from .package import PackageExtractor
     from .severity import SeverityConfig
 
@@ -280,7 +281,8 @@ def _extract_if_package(
 
 
 def _debian_symbols_warning(
-    old_symbols_file: Path | None, new_symbols_file: Path | None,
+    old_symbols_file: Path | None,
+    new_symbols_file: Path | None,
 ) -> str | None:
     """Compare two .deb packages' dpkg-gensymbols(1) contracts, if both sides
     have one (CLI-audit P2: "Debian .symbols not integrated" -- extraction
@@ -358,6 +360,90 @@ def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
     elif temp_dir_paths:
         kept_paths = ", ".join(temp_dir_paths)
         click.echo(f"Extracted files kept in: {kept_paths}", err=True)
+
+
+def apply_release_gate_pack(
+    pack_application: PackApplication | None,
+    *,
+    release_exit_code_scheme: str | None,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+    """Fold a selected ``kind: gate`` pack's contribution into the release
+    fan-out's own raw exit-code-scheme/severity inputs (CLI cleanup phase
+    two, "PR B" slice 2).
+
+    Returns ``(release_exit_code_scheme, severity_preset,
+    severity_abi_breaking, severity_potential_breaking,
+    severity_quality_issues, severity_addition)`` -- the exact six values
+    the caller already threads through every downstream severity/exit-code
+    resolution (``_resolve_release_severity_config``,
+    ``_compute_release_severity_exit_code``,
+    ``_fold_release_global_severity``, and the per-library JSON write), so
+    calling this **once**, before any of those, is what makes every one of
+    them agree with the pack -- mirroring how ``compare_release_cmd``
+    already reassigns ``release_exit_code_scheme``/``severity_preset``
+    once, early, for the ``.abicheck.yml``-only ``exit_code_scheme:
+    severity`` case just above this function's own call site.
+
+    The release fan-out has no ``ResolvedCompareConfig``-shaped object of
+    its own to fold onto the way :func:`~abicheck.pack_application.
+    apply_to_compare_config` does for a single-pair ``compare`` -- its
+    severity/exit-code-scheme resolution is a set of raw CLI-or-config
+    strings, re-derived at several call sites. So this mirrors that
+    function's *logic* against the release fan-out's raw-string shape
+    instead: a pack-supplied ``gate.severity.<category>`` overrides the
+    matching raw string (only ever reached when nothing more explicit --
+    ``--severity-<category>``/``.abicheck.yml`` -- already stated it,
+    since :func:`~abicheck.pack_application.pack_application` already
+    excludes a field an explicit source shadowed), and a pack-supplied
+    ``gate.exit_code_scheme`` overrides *that* raw string the same way --
+    with the identical "resolver's own already-decided ``auto`` answer,
+    not a re-derivation" fallback when only a severity level moved and no
+    scheme was directly assigned (see ``apply_to_compare_config``'s own
+    docstring for why re-deriving one here would be wrong: a severity
+    level *is* severity being configured, and the resolver's own
+    ``resolved_exit_code_scheme`` already reflects that while still
+    letting an explicit ``--exit-code-scheme``/``.abicheck.yml`` value
+    outrank it).
+
+    A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
+    contributed neither field -- every pre-existing invocation reaches the
+    six inputs completely unchanged.
+    """
+    if pack_application is None:
+        return (
+            release_exit_code_scheme,
+            severity_preset,
+            severity_abi_breaking,
+            severity_potential_breaking,
+            severity_quality_issues,
+            severity_addition,
+        )
+    levels = pack_application.severity_levels
+    if levels:
+        severity_abi_breaking = levels.get("abi_breaking", severity_abi_breaking)
+        severity_potential_breaking = levels.get(
+            "potential_breaking", severity_potential_breaking
+        )
+        severity_quality_issues = levels.get("quality_issues", severity_quality_issues)
+        severity_addition = levels.get("addition", severity_addition)
+    scheme = pack_application.exit_code_scheme
+    if scheme is None and levels:
+        scheme = pack_application.resolved_exit_code_scheme
+    if scheme is not None:
+        release_exit_code_scheme = scheme
+    return (
+        release_exit_code_scheme,
+        severity_preset,
+        severity_abi_breaking,
+        severity_potential_breaking,
+        severity_quality_issues,
+        severity_addition,
+    )
 
 
 def _resolve_release_severity_config(
@@ -594,7 +680,10 @@ def _format_release_summary(
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
         return _format_release_junit(
-            diff_pairs, matrix_result, library_results, severity_config=severity_config,
+            diff_pairs,
+            matrix_result,
+            library_results,
+            severity_config=severity_config,
         )
     if fmt == "json":
         return _format_release_json(
@@ -886,7 +975,9 @@ def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[
     if bundle_result is None or not bundle_result.bundle_findings:
         return []
     return [
-        "", "## 🔗 Bundle (Cross-Library) Findings", "",
+        "",
+        "## 🔗 Bundle (Cross-Library) Findings",
+        "",
         *render_bundle_findings_markdown(bundle_result.bundle_findings),
     ]
 

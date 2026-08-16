@@ -339,9 +339,7 @@ class TestEndToEndJsonReport:
         # `--severity-<category>` flags were removed), so the tier that can
         # state one is the project config.
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            "severity:\n  abi_breaking: warning\n", encoding="utf-8"
-        )
+        cfg.write_text("severity:\n  abi_breaking: warning\n", encoding="utf-8")
         scored = CliRunner().invoke(
             main,
             [
@@ -666,13 +664,18 @@ class TestReleaseFanOutContractParity:
             "package compare, same as on a single pair"
         )
 
-    def test_gate_pack_still_rejected_on_directory_inputs(self, tmp_path):
-        # CLI cleanup phase two, "PR B" slice 1: --pack now applies a
-        # `policy.overrides`/`surface.internal_namespaces` contribution to
-        # the release fan-out uniformly (see test_pack_application.py's
-        # TestOnlyAppliedFieldsAreAccepted). A `kind: gate` pack is the one
-        # still rejected -- the release fan-out has no resolved gate-options
-        # wiring to apply gate.exit_code_scheme/gate.severity.* to yet.
+    def test_gate_pack_applied_on_directory_inputs(self, tmp_path):
+        # CLI cleanup phase two, "PR B": --pack now applies both a
+        # `policy.overrides`/`surface.internal_namespaces` contribution
+        # (slice 1) and a `kind: gate` pack's `gate.exit_code_scheme`/
+        # `gate.severity.*` contribution (slice 2) to the release fan-out
+        # uniformly -- see test_pack_application.py's
+        # TestOnlyAppliedFieldsAreAccepted for the exit-code-differs
+        # assertions this test doesn't repeat. A bare `gate.exit_code_
+        # scheme: severity` (no severity level) still resolves and applies
+        # cleanly here -- it's just not on its own enough to move this
+        # particular pair's exit code, since abi_breaking defaults to
+        # `error` under both the legacy and severity schemes.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -691,10 +694,20 @@ class TestReleaseFanOutContractParity:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--pack", str(pack_path)],
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--pack",
+                str(pack_path),
+                "--format",
+                "json",
+            ],
         )
-        assert result.exit_code == 64, result.output
-        assert "kind: gate" in result.output
+        assert result.exit_code == 4, result.output
+        assert (
+            json.loads(result.output)["severity"]["config"]["abi_breaking"] == "error"
+        )
 
     def test_pack_field_this_kind_may_not_assign_still_rejected(self, tmp_path):
         # A `kind: contract` pack assigning `contract.mode` (deliberately not

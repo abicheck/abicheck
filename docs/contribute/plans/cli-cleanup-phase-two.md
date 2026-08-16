@@ -926,6 +926,56 @@ report.
 > (`test_policy_pack_is_applied_to_a_release_comparison`,
 > `test_gate_pack_is_still_rejected_on_a_release_comparison`,
 > `test_contract_unresolved_pack_still_rejected_on_a_release_comparison`).
+>
+> **Slice 2 landed (2026-08-16):** the directory/package release fan-out no
+> longer rejects a `kind: gate` pack either. Rather than building the full
+> `GateOptions` object this section's own goal names — a shared, unified
+> configuration object for `compare`/release/`scan`/the Action, still not
+> attempted — the fix is the same additive discipline slice 1 used for
+> `policy.overrides`/`surface.internal_namespaces`, applied to the release
+> fan-out's own raw exit-code-scheme/severity strings instead of a resolved
+> object: `cli_compare_receipt.resolve_release_pack_application` now calls
+> `pack_application.check_resolved_config_applies_packs` with
+> `gate_supported` at its default (`True`) instead of forcing it `False`, so
+> the already-resolved `PackApplication`'s `exit_code_scheme`/
+> `severity_levels` fields (`pack_application.pack_application()` always
+> populates them, gate-supported or not — nothing new needed there) reach
+> the release fan-out instead of being rejected before they're read. A new
+> `cli_compare_release_helpers.apply_release_gate_pack()` mirrors
+> `pack_application.apply_to_compare_config`'s logic — a pack-supplied
+> severity level overrides the matching raw `--severity-<category>`-shaped
+> string (only ever reached when nothing more explicit already stated it,
+> since `pack_application()` itself already excludes a field an explicit
+> source shadowed), and a pack-supplied `gate.exit_code_scheme` overrides
+> the raw scheme string the same way, falling back to the resolver's own
+> already-decided `resolved_exit_code_scheme` when only a severity level
+> moved and no scheme was directly assigned (the identical "a severity
+> level *is* severity being configured" rule `apply_to_compare_config`'s
+> own docstring states, and the identical "read the resolved value, never
+> re-derive one" rule that avoids silently overriding an explicit
+> `--exit-code-scheme legacy`). `cli_compare_release.compare_release_cmd`
+> calls this fold exactly once, early — the same point it already
+> reassigns `severity_preset`/`release_exit_code_scheme` for the
+> `.abicheck.yml`-only `exit_code_scheme: severity` case — so every
+> downstream consumer of those six raw strings (`_resolve_release_severity_
+> config`, the per-library JSON write inside `_compare_release_libraries`,
+> `_compute_release_severity_exit_code`, `_fold_release_global_severity`)
+> agrees with the pack, the same "one fold point, not several independently
+> re-deriving ones" discipline slice 1 established. **What is still open,
+> deliberately not attempted in this slice** (unchanged from slice 1's own
+> list, restated here since the gate-pack gap it named is now closed): the
+> full `GateOptions` object shared by `compare`/release/`scan`/the Action;
+> the effective-config digest recorded in every report; and `scan
+> --against`'s own `kind: gate` rejection (`cli_scan.py`, unaffected by
+> this slice — a scan's exit code follows its verdict directly and still
+> has no gate of its own to fold a pack into). All three still need the
+> `GateOptions` unification as a prerequisite. Tests:
+> `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
+> (`test_gate_pack_is_applied_to_a_release_comparison`, replacing the
+> now-stale rejection test of the same name minus "is_applied", and
+> `test_gate_pack_severity_moves_a_release_onto_the_severity_scheme`);
+> `scan`'s own `test_a_gate_pack_is_rejected_by_scan_which_has_no_gate` is
+> unchanged and still passes, confirming this slice left `scan` alone.
 
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.

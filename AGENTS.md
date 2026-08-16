@@ -288,7 +288,16 @@ Core pipeline (in order of data flow):
      empty — each is a pack recorded as active configuration that changes
      nothing, which is the single failure all of these guard. `compare`
      takes all three kinds; `scan --against` takes policy/contract and
-     rejects a gate pack, having no gate of its own. Two review findings
+     rejects a gate pack, having no gate of its own. The directory/package
+     release fan-out (`cli_compare_release.py`) takes all three kinds too,
+     since CLI cleanup phase two's "PR B" slice 2 — it has no `GateOptions`-
+     shaped object of its own, so a `kind: gate` pack's `gate.exit_code_
+     scheme`/`gate.severity.*` are folded into the fan-out's own raw
+     severity/exit-code-scheme strings by `cli_compare_release_helpers.
+     apply_release_gate_pack`, called once before every downstream consumer
+     of those strings reads them (see that plan section for what's still
+     open — the full `GateOptions` unification and the effective-config
+     digest). Two review findings
      worth not rediscovering: the gate application must *read* the resolved
      `gate.exit_code_scheme` rather than re-derive one (re-deriving let a
      severity-only gate pack override an explicit `--exit-code-scheme

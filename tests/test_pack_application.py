@@ -955,28 +955,126 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert with_pack.exit_code == 0, with_pack.output
 
-    def test_gate_pack_is_still_rejected_on_a_release_comparison(
-        self, tmp_path: Path
-    ) -> None:
-        """The release fan-out has no resolved gate-options wiring yet
-        (unlike `policy.overrides`/`surface.internal_namespaces`, which now
-        apply): a `kind: gate` pack must still fail loudly rather than be
-        silently accepted and score nothing."""
-        gate = _pack(
-            tmp_path,
-            "scheme.yml",
-            "id: scheme\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.exit_code_scheme: severity\n",
-        )
+    def test_gate_pack_is_applied_to_a_release_comparison(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, "PR B" slice 2: a `kind: gate` pack now
+        configures the directory/package fan-out instead of being rejected
+        outright -- the same first-assertion rule
+        `test_policy_pack_is_applied_to_a_release_comparison` states for the
+        policy half: an exit code that differs with and without the pack.
+
+        Exercises both fields a gate pack can assign at once
+        (`gate.exit_code_scheme` *and* `gate.severity.<category>`), on a
+        release whose only change is a compatible addition -- normally exit
+        0 regardless of scheme, since neither the legacy verdict mapping nor
+        the severity default (`addition: info`) makes an addition-only
+        release non-zero. The pack moves it to exit 1 by forcing both the
+        scheme and the addition category to error.
+        """
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
-        result = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--pack", str(gate)]
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
         )
-        assert result.exit_code == 64, result.output
-        assert "kind: gate" in result.output
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        gate = _pack(
+            tmp_path,
+            "strict-additions.yml",
+            "id: strict_additions\nversion: 1\nkind: gate\n"
+            "assignments:\n"
+            "  gate.exit_code_scheme: severity\n"
+            "  gate.severity.addition: error\n",
+        )
+        without_pack = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+        )
+        assert without_pack.exit_code == 0, without_pack.output
+        with_pack = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--pack",
+                str(gate),
+            ],
+        )
+        assert with_pack.exit_code == 1, with_pack.output
+        summary = json.loads(with_pack.output)
+        assert summary["severity"]["config"]["addition"] == "error"
+        assert summary["severity"]["exit_code"] == 1
+
+    def test_gate_pack_severity_moves_a_release_onto_the_severity_scheme(
+        self, tmp_path: Path
+    ) -> None:
+        """The release-side mirror of
+        `test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme`
+        (the single-pair version, above): a bare `gate.severity.<category>`
+        assignment -- no explicit `gate.exit_code_scheme` -- still moves the
+        release onto the severity scheme, via
+        `cli_compare_release_helpers.apply_release_gate_pack`'s fallback to
+        the canonical resolver's own already-decided `resolved_exit_code_
+        scheme`, exactly as `pack_application.apply_to_compare_config` does
+        for a single-pair `compare`."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        gate = _pack(
+            tmp_path,
+            "lenient-abi.yml",
+            "id: lenient_abi\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        without_pack = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+        assert without_pack.exit_code == 4, without_pack.output
+
+        with_pack = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--pack",
+                str(gate),
+            ],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+        # The finding is still reported -- only the gate moved (same
+        # assertion the single-pair sibling test makes).
+        summary = json.loads(with_pack.output)
+        assert summary["libraries"][0]["verdict"] == "BREAKING"
 
     @pytest.mark.parametrize("with_contract", [True, False])
     def test_contract_unresolved_pack_still_rejected_on_a_release_comparison(

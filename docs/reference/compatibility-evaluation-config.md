@@ -220,7 +220,7 @@ assignments:
 |---|---|---|
 | `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` and `contract.unresolved` |
 | `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
-| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare` only) |
+| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package; not `scan`) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
 judges against stays the user's own per-run choice — ADR-049 D3 forbids a
@@ -255,13 +255,15 @@ compatibility verdict directly and so has no gate to move.
 A further restriction, for the same "configure or reject" reason: `--pack`
 needs `--against` on `scan` (a pack's only application there is the baseline
 comparison's policy). On a directory/package (release) `compare`, a `kind:
-policy`/`kind: contract` pack's `policy.overrides`/`surface.
-internal_namespaces` now apply to every library uniformly; a `kind: gate`
-pack is still rejected there, since the release fan-out has no resolved
-gate-options wiring for `gate.exit_code_scheme`/`gate.severity.<category>`
-yet (CLI cleanup phase two, "PR B") — and so is `contract.unresolved`, with
-or without `--contract`: its consumer needs a per-comparison contract
-context the release fan-out never builds per library.
+policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
+internal_namespaces`/`gate.exit_code_scheme`/`gate.severity.<category>` all
+apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1
+and 2) — the gate half is folded into the release's own raw severity/
+exit-code-scheme inputs rather than a resolved `GateOptions` object, which
+doesn't exist for the release fan-out yet. `contract.unresolved` is still
+rejected there, with or without `--contract`: its consumer needs a
+per-comparison contract context the release fan-out never builds per
+library.
 
 ## The resolution receipt
 
