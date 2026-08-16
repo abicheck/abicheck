@@ -1517,32 +1517,52 @@ Once a root command genuinely clears the bar above, pick the right home:
   close, confirmed via the run's own uploaded `two-fresh-mains-validation`
   artifact (run
   https://github.com/napetrov/abicheck-bazel-lab/actions/runs/31950549361,
-  job 95173233150, commit `a7f5a7f`). The most concrete, verified-by-
-  reading (not yet verified against a live repro — no `bazel`/`castxml` in
-  this pass's environment) structural asymmetry: `scan_engine.
-  _build_new_snapshot` passes its raw, **unexpanded** `headers` list
-  (`-H new=math.h -H new=include` — the directory entry still present as a
-  single item) into both `seed_includes_and_fold_compile_context` and
-  `service.resolve_input`, while `cli_dump_helpers.perform_elf_dump` first
-  calls `expand_header_inputs()` — which recursively expands a directory
-  via `header_utils.iter_directory_headers` into individual files, in a
-  deterministic order, with order-preserving dedup — and passes that
-  already-**expanded** `resolved_headers` list to the identical two calls
-  instead. `seed_includes_and_fold_compile_context`'s own use of `headers`
-  is confirmed harmless (`seed_l2_includes` only ever tests it for
-  truthiness, never iterates it), so the divergence — if this asymmetry is
-  indeed the cause, which is not yet confirmed — would have to originate
-  deeper, in whatever directory-expansion `service.resolve_input`/
-  `dumper.dump()`'s own ELF path performs internally on an unexpanded
-  directory entry, which may not traverse/order/dedup identically to
-  `expand_header_inputs`'s explicit, upfront pass. **Not fixed here**: the
-  hypothesis above is code-reading-only, this pass's environment has no
-  `bazel`/`castxml` to build a live repro and verify it, and even if
-  confirmed, the fix (either making `scan_engine._build_new_snapshot` call
-  `expand_header_inputs()` upfront the way `perform_elf_dump` already does,
-  or tracing the deeper internal expansion path to bring it in line) needs
-  the same real-repro verification discipline every other finding in this
-  topic already required, not a guess shipped without it. Consequence for
+  job 95173233150, commit `a7f5a7f`).
+
+  **A disconfirmed hypothesis, corrected by Codex review — recorded so a
+  future pass doesn't re-propose it.** This entry's first draft claimed the
+  cause was `scan_engine._build_new_snapshot` passing a raw, unexpanded
+  `headers` list (still containing the directory entry) into
+  `seed_includes_and_fold_compile_context`/`service.resolve_input`, while
+  `perform_elf_dump` pre-expands via `expand_header_inputs()` first. False,
+  verified by reading both paths fully rather than trusting the first,
+  partial read: (1) `header_compile_context.resolve_header_compile_context`
+  — reached from *inside* `seed_includes_and_fold_compile_context`'s own
+  compile-context fold, not just its truthiness-only `seed_l2_includes`
+  half this entry's first draft checked — calls its own
+  `_expand_header_directories()` on the raw `headers` list, whose docstring
+  states it deliberately reuses `header_utils.iter_directory_headers` (the
+  same walk `expand_header_inputs` itself delegates to, same suffix/pruned-
+  segment filters) specifically so the expanded set matches what L2 actually
+  parses. (2) `service.resolve_input`'s own ELF dispatch, `_dump_elf`, calls
+  `expand_header_inputs(headers)` internally (`service.py:1281`) before
+  ever reaching `dumper.dump()` — the identical function `perform_elf_dump`
+  calls explicitly upfront, just one call-stack frame deeper. Both `scan`'s
+  and `dump`'s header lists therefore converge on the identical expanded,
+  deduped, deterministically-ordered file set before any header-AST parse
+  runs; a raw-vs-expanded asymmetry cannot be the cause of the `include_
+  sequence` mismatch. **The real cause remains unidentified.** Two
+  unverified candidates worth checking first in a follow-up pass (neither
+  confirmed, both requiring the same live-repro discipline before trusting
+  either): `perform_elf_dump`'s and `scan_engine._build_new_snapshot`'s
+  calls to `seed_includes_and_fold_compile_context` seed `gcc_path`/
+  `gcc_prefix`/`gcc_options`/`gcc_option_tokens`/`sysroot`/`nostdinc`/
+  `frontend`/`frontend_context` from genuinely different starting points —
+  `dump`'s call reads its own already-resolved local variables (`gcc_path`,
+  `header_backend`, ...), while `scan`'s call reads them off a
+  `compile_context` object (`compile_context.gcc_path if compile_context
+  else None`, `compile_context.frontend if compile_context else "auto"`,
+  ...) that may not be populated identically for every field even when the
+  same CLI flags were given on both commands; and `build_query`/
+  `build_compile_db` are hard-coded `None` on `scan`'s call but forwarded
+  from the caller on `dump`'s, though neither is set by this specific
+  lab repro's own Action inputs, making it an unlikely match for *this*
+  reproduction specifically. **Not fixed here**: no confirmed hypothesis
+  exists yet to fix, this pass's environment has no `bazel`/`castxml` to
+  build and verify one, and per this file's own "known gaps over risky
+  reactive patches" convention, the next candidate needs the same
+  live-repro verification every other finding in this topic already
+  required before being trusted, let alone fixed. Consequence for
   `napetrov/abicheck-bazel-lab`: PR #14's `fresh-to-fresh` control job
   should be treated as still red on this one residual field, and the lab's
   own checked-in `abi/math.abicheck.json` should **not** be regenerated
