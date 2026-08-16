@@ -173,6 +173,23 @@ def test_parse_functions_recovers_ms_abi_from_qual_type_when_attr_node_is_omitte
     assert fn.contract_attributes == ["ms_abi"]
 
 
+def test_parse_functions_ignores_non_string_qual_type_for_abi_fallback() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": None},
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
 def test_parse_functions_method_const_and_access() -> None:
     root = _tu(
         {

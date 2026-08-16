@@ -145,6 +145,38 @@ class TestMergeSnapshotsBasics:
 
         assert merged.functions[0].contract_attributes == ["ms_abi", "sysv_abi"]
 
+    def test_clang_non_cc_attributes_do_not_change_castxml_contract(self):
+        castxml_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["nonnull(1)"],
+        )
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["nonnull(1)"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["nonnull(1)"]
+
+    def test_clang_matching_cc_does_not_replace_existing_contract(self):
+        castxml_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi"],
+        )
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["ms_abi"]
+
     def test_clang_only_function_is_appended(self):
         clang_only = Function(name="bar", mangled="_Z3barv", return_type="void")
         castxml = _snap(ast_producer="castxml")
