@@ -291,6 +291,7 @@ def _build_new_snapshot(
             build_config=build_config,
             build_query=None,
             build_compile_db=None,
+            build_targets=build_targets,
             collect_mode=collect_mode,
             gcc_path=compile_context.gcc_path if compile_context else None,
             gcc_prefix=compile_context.gcc_prefix if compile_context else None,

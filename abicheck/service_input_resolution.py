@@ -137,6 +137,7 @@ def _seeded_includes(
         build_info=side.build_info,
         build_config=None,
         defer_cleanup=None,
+        build_targets=side.build_targets,
         gcc_options=ctx.gcc_options if ctx is not None else None,
         gcc_option_tokens=ctx.gcc_option_tokens if ctx is not None else (),
         allow_inferred_build_query=False,
@@ -193,6 +194,7 @@ def _seeded_compile_context(
         build_info=side.build_info,
         sources=side.sources,
         build_config=None,
+        build_targets=side.build_targets,
         allow_inferred_build_query=False,
         # Finding 3: fold the caller's own already-explicit context into
         # ambiguity resolution so a field it already pins (e.g. an explicit
