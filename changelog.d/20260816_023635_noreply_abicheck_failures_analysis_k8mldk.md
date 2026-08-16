@@ -182,3 +182,19 @@
   diff on the old binary. Fixed by also requiring the old side's resolved
   include scope to match the candidate's own effective includes before
   reusing the fold.
+
+- **Documented (not fixed, CodeRabbit review): `header_utils.
+  _INCLUDE_FLAG_PREFIXES` matching is case-sensitive, so clang-cl's
+  documented case-insensitive `/IMsvc`/`/EXTERNAL:I` spellings aren't
+  recognized as include-search flags.** Confirmed pre-existing for four of
+  its six consumers (present at this PR's own base commit, before any of
+  its changes); only this PR's own new `include_operand_dirs` (AST
+  cache-key hashing) and `_split_include_tokens` (explicit-vs-derived
+  include ordering) inherit the gap for the first time. Not fixed here: a
+  correct fix needs case-insensitive matching applied consistently across
+  all six consumers plus a new longest-prefix-first tie-break (`/imsvc`
+  case-insensitively also matches the shorter `/I`) — fixing only this
+  PR's two new consumers would make the seed-suppression logic and the
+  cache-hashing/ordering logic silently disagree with each other — left as
+  a known gap (see `_INCLUDE_FLAG_PREFIXES`'s own docstring and
+  `AGENTS.md`).

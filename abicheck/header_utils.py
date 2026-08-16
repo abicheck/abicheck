@@ -62,6 +62,42 @@ CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 #: ``/I`` options) is not mistaken for "no build context" (Codex review).
 #: Distinct, case-sensitive prefixes (``-I`` ≠ ``-isystem``/``-iquote``);
 #: ``startswith`` covers both spaced (``-I dir``) and attached (``-Idir``) forms.
+#:
+#: Known gap (CodeRabbit review, PR #782): every match against this tuple
+#: (here and in every consumer below -- :func:`_has_include_build_context`,
+#: :func:`_build_context_include_dirs`, :func:`_flag_tokens`,
+#: :func:`_msvc_deferred_flag`, :func:`include_operand_dirs`, and
+#: ``buildsource.l2_seed._split_include_tokens``) is exactly case-sensitive.
+#: That is correct for the GNU/clang spellings (a real compiler only ever
+#: accepts the documented lowercase ``-I``/``-isystem``/…), but wrong for the
+#: two clang-cl-only entries: unlike native ``cl.exe`` (case-sensitive, and
+#: does not recognise ``/imsvc`` at all -- that spelling is clang-cl's own),
+#: clang-cl's own driver option parsing is documented case-insensitive, so
+#: ``/IMsvc``/``/EXTERNAL:I`` are legal, real spellings this tuple's exact-case
+#: ``startswith`` silently fails to recognise as include-search flags at all.
+#: Concretely: a real clang-cl build record using ``/IMsvc`` would have that
+#: directory (a) not suppress the L2 include-dir seed
+#: (:func:`_has_include_build_context`), (b) not be resolved by
+#: :func:`_build_context_include_dirs`'s existing-dir dedup, and (c) --
+#: this PR's own new consumers -- not be hashed into the AST cache key's
+#: ``extra_hash_dirs`` (:func:`include_operand_dirs`) and not be carved out
+#: of the leading last-flag-wins token group by ``_split_include_tokens``,
+#: so an explicit ``/IMsvc`` override could still lose to a derived ``-I``
+#: for a colliding header. Not fixed here: a correct fix needs case-
+#: insensitive matching applied *consistently* to every consumer above --
+#: several of which (all but :func:`include_operand_dirs`) predate this PR
+#: entirely (present at commit ``dc09aec``, this PR's own base) -- plus a
+#: longest-prefix-first tie-break, since case-folding introduces a genuine
+#: new ambiguity a case-sensitive scan never had: ``/imsvc`` case-
+#: insensitively also matches the shorter ``/I`` prefix, and picking the
+#: wrong one changes which include bucket the directory is treated as
+#: (see :func:`_msvc_deferred_flag`'s own bucket-priority docstring). Fixing
+#: only the two consumers this PR added (:func:`include_operand_dirs` /
+#: ``_split_include_tokens``) while leaving the pre-existing consumers
+#: case-sensitive would be strictly worse than today's uniform gap -- it
+#: would make the seed-suppression and cache-hashing/ordering logic
+#: silently *disagree* about whether a given ``/IMsvc`` token is an
+#: include-search flag at all. Left as a known gap (see ``AGENTS.md``).
 _INCLUDE_FLAG_PREFIXES = (
     "-I",
     "-isystem",

@@ -1349,6 +1349,50 @@ Once a root command genuinely clears the bar above, pick the right home:
   which forwarded the folded sentinel even though the old side's
   resolved include scope diverged from the candidate's).
 
+  **A sixteenth finding, from a CodeRabbit review round (Major), on
+  `header_utils._INCLUDE_FLAG_PREFIXES`'s own matching itself — real,
+  and confirmed pre-existing for most of its consumers (present at this
+  PR's own base commit `dc09aec`, before any of its changes), documented
+  as a known gap rather than fixed here.** Every match against this
+  tuple — in `_has_include_build_context`, `_build_context_include_dirs`,
+  `_flag_tokens`, `_msvc_deferred_flag`, `include_operand_dirs`, and
+  `buildsource.l2_seed._split_include_tokens` alike — is exactly
+  case-sensitive `str.startswith`. That is correct for the GNU/clang
+  spellings (a real compiler only ever accepts the documented lowercase
+  forms), but wrong for the two clang-cl-only entries: verified against
+  real documentation for both drivers — native `cl.exe`'s own options are
+  case-sensitive (and it doesn't recognize `/imsvc` at all, a clang-cl-only
+  spelling), while clang-cl's own option parsing is documented
+  case-insensitive, so `/IMsvc`/`/EXTERNAL:I` are legal, real spellings
+  this tuple's exact-case matching silently fails to recognize as
+  include-search flags at all. Concretely: a real clang-cl build record
+  using `/IMsvc` would have that directory not suppress the L2 include-dir
+  seed, not resolve through the existing-dir dedup, and — this PR's own
+  two new consumers specifically — not be hashed into the AST cache key's
+  `extra_hash_dirs` (`include_operand_dirs`) and not be carved out of the
+  leading last-flag-wins token group by `_split_include_tokens`, so an
+  explicit `/IMsvc` override could still lose to a derived `-I` for a
+  colliding header. Confirmed pre-existing for `_has_include_build_context`/
+  `_build_context_include_dirs`/`_flag_tokens`/`_msvc_deferred_flag` — all
+  four already existed at commit `dc09aec` (this PR's own base) with the
+  identical case-sensitive matching; only `include_operand_dirs` (moved
+  from `l2_seed._include_operand_dirs`) is new to this PR. Not fixed here:
+  a correct fix needs case-insensitive matching applied *consistently* to
+  every one of those six consumers, not just the two this PR added — fixing
+  only the new ones while leaving the pre-existing four case-sensitive
+  would be strictly worse than today's uniform gap, making the
+  seed-suppression logic and the cache-hashing/ordering logic silently
+  *disagree* about whether a given `/IMsvc` token is an include-search
+  flag at all. It also needs a genuine new tie-break case-folding
+  introduces that a case-sensitive scan never had: `/imsvc` case-
+  insensitively also matches the shorter `/I` prefix, and picking the
+  wrong one changes which include bucket the directory is treated as (see
+  `_msvc_deferred_flag`'s own bucket-priority docstring) — a real, if
+  narrow, cross-cutting change to a shared, well-tested primitive several
+  pre-existing callers depend on, not a scoped fix reactive to one review
+  comment on this PR. Documented in `_INCLUDE_FLAG_PREFIXES`'s own
+  docstring alongside this entry.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
