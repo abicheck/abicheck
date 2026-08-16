@@ -98,49 +98,51 @@ default" on an unrelated PR — GitHub blocks merge on a required check that
 never reports at all, the same as on a failing one, so requiring any of these
 three as written would strand every PR that doesn't touch their paths. Cover:
 
-**The distinction that actually matters is trigger-level path filtering, not
-a workflow's *name* sounding conditional (a second Codex review round caught
-an earlier draft of this list conflating the two).** Checked directly against
-each workflow's own `on: pull_request:` block: `changelog-check.yml`,
-`bugfix-test-contract.yml`, and `cli-interface-check.yml` all carry **no**
-`paths:` filter — they run on every PR and decide applicability *inside* the
-job (a `skip-changelog`/`skip-test-contract` label, or the diffed-CLI-surface
-check's own no-op-when-unchanged logic), so a check run always exists to be
-required. `test-action.yml` alone among this group genuinely is
-trigger-level path-filtered (`paths: [action.yml, action/**, ...]`) — it is
-the one entry that needs the conditional/neutral-aggregate treatment below.
+**This section states a rule, not a list — after three review rounds each
+catching a different mistake in a hand-copied snapshot, hand-copying a
+fourth one is the wrong fix.** Round 1 conflated "sounds conditional" with
+"is trigger-filtered" (put `CLI Interface Check` in the wrong bucket, missed
+`Changelog Fragment Check`/`Bug-fix test contract` entirely). Round 2 found
+the fixed list still missed `docs-pr.yml` — required whenever
+`docs/**`/`abicheck/schemas/**`/`examples/**`/`mkdocs.yml` changes per
+`.github/AGENTS.md`, *and* genuinely trigger-path-filtered on those same
+paths, the identical shape as `test-action.yml`. Round 3 found the fallback
+plan itself wrong: **no native GitHub mechanism — not classic branch
+protection, not a Ruleset's required-status-checks rule — conditions
+"required" on which files a given PR touched.** A Ruleset can require a
+check unconditionally for matching refs; it cannot express "required only
+when `action/**` changed." So there is no first-class way to make a
+trigger-path-filtered workflow's own check required without also stranding
+every PR that doesn't touch its paths — the neutral-aggregate wrapper below
+is not a fallback for when the ideal mechanism is unavailable, it is the
+*only* correct approach for this class of workflow.
 
-- **always-required** (workflow always runs and reports, applicability
-  decided internally — safe to require unconditionally): `CI` (or its
-  constituent jobs), `Security & Quality` (`security.yml`),
-  `dependency-review.yml`, `Changelog Fragment Check`
-  (`changelog-check.yml`), `Bug-fix test contract` (`bugfix-test-contract.yml`),
-  `CLI Interface Check` (`cli-interface-check.yml`), and the docs/schema
-  checks that run unconditionally.
-- **conditionally-required, only for a genuinely trigger-path-filtered
-  workflow**, and only if the branch protection / Ruleset mechanism used
-  actually supports a path-scoped required check (GitHub Rulesets do;
-  classic branch protection's required-status-checks list does not
-  distinguish "didn't run" from "should have run and didn't"): `Test GitHub
-  Action` when `action/**`/`action.yml` changed.
-- **not required**: `Examples Validation`, `AgentReady` — both stay
-  informational, matching `.github/AGENTS.md`; PR 0B does not change that
-  classification, only enforces the subset the table already calls required.
+**The rule PR 0B's implementer applies, once, against `.github/AGENTS.md`'s
+table at implementation time (not against a hand-copied snapshot here,
+which is what has now drifted wrong three times in a row):**
 
-**Don't hand-copy this list again without re-checking each workflow's own
-`on:` block** — this is exactly the second time a plausible-sounding
-classification here turned out wrong on inspection. If PR 0B's implementer
-finds this list has drifted from `.github/AGENTS.md`'s table by then, treat
-that table (and each workflow file's own trigger) as authoritative and fix
-this list to match, not the other way around.
+1. For every workflow that table marks required (unconditionally or "when
+   X changes"), read its own `on: pull_request:` block.
+2. **No `paths:` filter** (the workflow always runs; a `skip-*` label or
+   internal diff check decides applicability) → require its check directly.
+   Example: `changelog-check.yml` has no `paths:` filter — required
+   directly, its own `skip-changelog` label is the escape hatch, not a
+   missing check run.
+3. **Has a `paths:` filter** (the workflow may not run at all on an
+   unrelated PR) → never require its check directly. Add — or extend — one
+   always-triggered neutral-aggregate job that itself reads the same path
+   set that workflow's own condition uses, reports success when the paths
+   don't apply and otherwise mirrors that workflow's real outcome, and
+   require *that* aggregate job instead. Example: both `test-action.yml`
+   and `docs-pr.yml` are in this bucket.
+4. Anything the table marks **not required** (`Examples Validation`,
+   `AgentReady`, `docs-review-triggers.yml`, ...) stays out of the required
+   set entirely; PR 0B does not change that classification.
 
-If the chosen mechanism cannot express "required only when triggered,"
-the safer fallback is an always-running **neutral aggregate status** (a thin
-job that reports success on every PR regardless of whether the conditional
-workflows ran) rather than requiring the conditional workflows' own checks
-directly — the "one stable aggregate check per workflow" rule below still
-holds *within* the always-required set, but must not be used to paper over a
-genuinely conditional workflow.
+This rule is self-checking in a way a copied list is not: step 1 always
+starts from the table's current contents, and steps 2/3 are a mechanical
+read of each workflow's own trigger, not a memory of what a prior draft of
+this document said.
 
 Prefer **one stable aggregate required check per always-required workflow**
 (or a Ruleset-compatible job) over requiring every matrix leg individually —
