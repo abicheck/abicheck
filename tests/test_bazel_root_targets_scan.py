@@ -320,3 +320,72 @@ def test_dry_run_preview_omits_build_target_note_when_unset(tmp_path: Path) -> N
     assert "--build-target" not in build_lines
     scope_lines = " ".join(result.sections.get("Resolved depth and source scope", []))
     assert "UNSCOPED" not in scope_lines
+
+
+# ── Typed API: estimate_scan()'s TU-count rows flag UNSCOPED (Codex review) ──
+#
+# Fresh evidence beyond the CLI dry-run preview above: a Python caller can
+# construct ScanRequest(build_targets=...) directly and call estimate_scan()
+# (or read ScanResult.estimate off a real run_scan()) without ever going
+# through cli_scan.py's own dry-run renderer -- which previously was the
+# *only* place this workspace-wide-vs-scoped caveat was surfaced. Verifies
+# the caveat now lives in the CostEstimate rows themselves, so every API
+# caller sees it, not only the CLI's rendered text.
+
+
+def _compile_db_request(tmp_path: Path, *, build_targets: tuple[str, ...] = ()):
+    import json
+
+    from abicheck.service_scan import ScanRequest
+
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"file": "a.cpp", "command": "c++ a.cpp", "directory": "."}]
+        ),
+        encoding="utf-8",
+    )
+    snap = tmp_path / "new.abi.json"
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import snapshot_to_json
+
+    snap.write_text(snapshot_to_json(AbiSnapshot(library="libfoo.so", version="1.0")), encoding="utf-8")
+    return ScanRequest(
+        binaries=[snap],
+        compile_db=cdb,
+        mode="baseline",
+        build_targets=build_targets,
+    )
+
+
+def test_estimate_scan_flags_unscoped_l3_row_when_build_targets_set(
+    tmp_path: Path,
+) -> None:
+    from abicheck.service_scan import estimate_scan
+
+    req = _compile_db_request(tmp_path, build_targets=("//:math",))
+    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    assert "UNSCOPED" in l3.note
+
+
+def test_estimate_scan_l3_row_unflagged_when_build_targets_unset(
+    tmp_path: Path,
+) -> None:
+    from abicheck.service_scan import estimate_scan
+
+    req = _compile_db_request(tmp_path)
+    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    assert "UNSCOPED" not in l3.note
+
+
+def test_estimate_scan_flags_unscoped_l4_l5_rows_too(tmp_path: Path) -> None:
+    # L4/L5 TU counts derive from the same unscoped total_tus the L3 row's own
+    # note flags -- each carries its own short back-reference (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    req = _compile_db_request(tmp_path, build_targets=("//:math",))
+    estimates = estimate_scan(req)
+    l4 = next(e for e in estimates if e.layer == "L4_source_abi")
+    l5_rows = [e for e in estimates if e.layer == "L5_source_graph"]
+    assert "UNSCOPED" in l4.note
+    assert l5_rows and all("UNSCOPED" in e.note for e in l5_rows)

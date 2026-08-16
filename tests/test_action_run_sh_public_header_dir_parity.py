@@ -124,10 +124,19 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         # --public-header-dir (scope) is still forwarded, unchanged.
         i = cmd.index("--public-header-dir")
         assert cmd[i + 1] == "include"
-        # It must ALSO ride along as a bare -H root, so scan's own header
+        # It must ALSO ride along as an -H root, so scan's own header
         # extraction expands the whole directory the same way dump's does.
-        h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
-        assert any(cmd[j + 1] == "include" for j in h_indices), cmd
+        # SIDED (`new=include`), not bare, for a scalar scan with a resolved
+        # baseline (Codex review, later follow-up, fresh evidence): a bare
+        # -H root is side-both (ADR-040 L1), so it also fed the candidate's
+        # public-header-dir tree into the baseline/old side's own header
+        # parse -- see test_action_run_sh_public_header_dir_scan_scope.py
+        # for the dedicated regression coverage of that fix. Bare stays
+        # correct for audit-only/--artifact-set scans (no old side to
+        # contaminate), see the sibling test below.
+        h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
+        assert "new=include" in h_pairs, cmd
+        assert "include" not in h_pairs
 
     def test_public_header_dir_absent_forwards_neither(self) -> None:
         cmd = _run_cmd(

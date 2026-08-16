@@ -1368,10 +1368,28 @@ elif [[ "$MODE" == "scan" ]]; then
   # change needed -- scan's own docs already note a directory via -H
   # subsumes --public-header-dir's scope-establishing role, so the two
   # forwards are redundant for scope (harmless) and now agree on extraction
-  # too. Bare (unsided): the whole public surface presumably describes both
-  # the old and new sides of the same library, matching --header's own
-  # bare/unsided forwarding just above.
-  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  # too. Bare (unsided) ONLY when there is no old side to contaminate --
+  # new-library-set audits (no old side at all, ADR-056) and a plain
+  # audit-only scalar scan (no --against resolved) both describe a single
+  # library's public surface, matching --header's own bare/unsided
+  # forwarding just above for those same shapes.
+  #
+  # For a scalar scan with a resolved baseline, forward it sided as
+  # `-H new=...` instead (lab report, fresh evidence, Codex review):
+  # _resolve_baseline_header_scope() treats a bare -H root as describing
+  # BOTH sides, so with old-header also supplied (or even without it) the
+  # candidate's public-header-dir tree was parsed into the OLD/baseline
+  # side's header set too -- the baseline binary got scanned through the
+  # *candidate's* headers, which can hide a removed declaration (still
+  # present in the candidate's tree) or fabricate a spurious difference
+  # (a candidate-only header reachable from the baseline side). Mirrors the
+  # exact condition the real `--against` forward below uses, so the two
+  # stay in lockstep.
+  if [[ -z "$SCAN_ARTIFACT_SET" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
+    add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  else
+    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  fi
 
   # Cross-compiler flags -- documented root-Action inputs. Forwarded once,
   # below, grouped with --ast-frontend (matching compare mode's own single

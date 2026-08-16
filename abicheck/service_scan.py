@@ -226,20 +226,16 @@ class ScanRequest:
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
     collapse_versioned_symbols: bool = False
-    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side
-    # among the fields the two commands must agree on -- which a
-    # `scan --against` result could not carry at all while only `compare`
-    # could ask for the shadow evaluator. Same advisory contract as
-    # `compare`: stamping a decision never changes verdict or exit code.
+    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side among the fields the two commands must
+    # agree on -- which a `scan --against` result could not carry at all while only `compare` could ask for the
+    # shadow evaluator. Same advisory contract as `compare`: stamping a decision never changes verdict or exit code.
     contract_evaluation: bool = False
     contract_mode: str | None = None
-    # ADR-056: options the single-binary CLI path (cli_scan.py) already
-    # forwards straight to run_scan_core, bypassing ScanRequest entirely.
-    # Both run_scan and run_scan_set (--artifact-set) honor these when set
-    # directly on a ScanRequest (P2 regression, Codex review: run_scan used
-    # to silently ignore them, so a direct Python API caller passing
-    # abi3_floor/enabled_checks/severities/build_config/allow_build_query/
-    # risk_rules_path got a differently-gated result than requested).
+    # ADR-056: options the single-binary CLI path (cli_scan.py) already forwards straight to run_scan_core,
+    # bypassing ScanRequest entirely. Both run_scan and run_scan_set (--artifact-set) honor these when set directly
+    # on a ScanRequest (P2 regression, Codex review: run_scan used to silently ignore them, so a direct Python API
+    # caller passing abi3_floor/enabled_checks/severities/ build_config/allow_build_query/risk_rules_path got a
+    # differently-gated result than requested).
     abi3_floor: tuple[int, int] | None = None
     enabled_checks: frozenset[str] | None = None  # None = ALL_CHECKS default
     severities: dict[str, str] = field(default_factory=dict)
@@ -248,16 +244,16 @@ class ScanRequest:
     risk_rules_path: Path | None = None
     # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
-    # ADR-056: real changed-path provenance (e.g. "--since origin/main" or
-    # "--changed-path"), as computed by cli_scan._resolve_changed_seed.
-    # run_scan_set forwards this into each member's report instead of a
-    # hardcoded placeholder; unused by run_scan (which threads its own
-    # changed_src through _run_scan_one_member's caller directly).
+    # ADR-056: real changed-path provenance (e.g. "--since origin/main" or "--changed-path"), as computed by
+    # cli_scan._resolve_changed_seed. run_scan_set forwards this into each member's report instead of a hardcoded
+    # placeholder; unused by run_scan (which threads its own changed_src through _run_scan_one_member's caller
+    # directly).
     changed_src: str = "run_scan_set"
     # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
     max_findings: int | None = None
-    # P0.2 equivalent of `dump --build-target`; kw_only + appended last (checker_types.py's
-    # public-dataclass convention) so a positional insert can't rebind a later field (Codex review).
+    # P0.2 equivalent of `dump --build-target`; kw_only + appended last
+    # (checker_types.py's public-dataclass convention) so a positional insert
+    # can't rebind a later field (Codex review).
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
 
 
@@ -412,11 +408,10 @@ def _count_compile_db_tus(compile_db: Path) -> int:
         return 0
     if not isinstance(raw, list):
         return 0
-    # Deduplicate on the *resolved* path (file joined with its entry directory):
-    # a compile DB commonly stores relative `file` names under different
-    # `directory` entries, so two distinct TUs (/proj/a/main.cpp, /proj/b/main.cpp)
-    # both read as a bare `main.cpp` and would collapse to one — undercounting the
-    # TUs the real scan (which normalizes via load_compile_db) replays (Codex).
+    # Deduplicate on the *resolved* path (file joined with its entry directory): a compile DB commonly stores
+    # relative `file` names under different `directory` entries, so two distinct TUs (/proj/a/main.cpp,
+    # /proj/b/main.cpp) both read as a bare `main.cpp` and would collapse to one — undercounting the TUs the real
+    # scan (which normalizes via load_compile_db) replays (Codex).
     import os.path as _osp
 
     files: set[str] = set()
@@ -576,22 +571,19 @@ def _resolve_estimate_level(
     mode = ScanMode(req.mode)
     seeded = req.seeded or bool(req.changed_paths)
     if resolved_level is not None:
-        # The caller (the CLI scan path) already resolved the concrete (method,
-        # depth) level — including the auto/risk choice. Honor it verbatim so the
-        # estimate matches the real scan: re-resolving from req.source_method/depth
-        # here would re-apply the source-method > depth precedence and collapse a
-        # mode preset that pins a *deeper* depth than its method implies
-        # (``pr-deep`` = (s5, graph) → graph-full), under-pricing it (Codex review).
+        # The caller (the CLI scan path) already resolved the concrete (method, depth) level — including the auto/risk
+        # choice. Honor it verbatim so the estimate matches the real scan: re-resolving from req.source_method/depth
+        # here would re-apply the source-method > depth precedence and collapse a mode preset that pins a *deeper* depth
+        # than its method implies (``pr-deep`` = (s5, graph) → graph-full), under-pricing it (Codex review).
         resolved, eff_depth = resolved_level
     else:
         sm = SourceMethod(req.source_method) if req.source_method else None
         dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
         auto_method = None
-        # AUTO resolves from the risk score whenever a real diff seed was produced —
-        # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
-        # mirroring what the real scan does. Treating a seeded empty diff as unseeded
-        # would fall back to the mode preset and over-estimate a no-op PR (Codex
-        # review). A non-empty changed set is itself proof of a seed.
+        # AUTO resolves from the risk score whenever a real diff seed was produced — including a *seeded but empty* diff
+        # (a no-op PR), which scores 0 → s0/off, mirroring what the real scan does. Treating a seeded empty diff as
+        # unseeded would fall back to the mode preset and over-estimate a no-op PR (Codex review). A non-empty changed
+        # set is itself proof of a seed.
         if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
             auto_method = score_changed_paths(
                 list(req.changed_paths), RiskRules.default()
@@ -610,14 +602,27 @@ def _resolve_estimate_level(
     return resolved, eff_depth, collect_mode
 
 
+# Codex review, fresh evidence: TU counts here are workspace-wide (a
+# pre-captured Bazel aquery/cquery jsonproto is never filtered by `targets`
+# -- adapters/bazel.py's BazelAdapter only scopes a *live* query, see its
+# own `collect()`), so a `--build-target` run's real TU count is typically
+# lower. Previously only cli_scan.py's dry-run bullet flagged this; baked
+# into each row's own `note` here so a Python-API caller reading
+# `ScanResult.estimate`/`estimate_scan()` directly sees it too.
+_UNSCOPED_TU_NOTE_SUFFIX = (
+    " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
+    "the real run's Bazel collection scopes to the requested root target(s) "
+    "and typically touches fewer TUs]"
+)
+
+
 def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     """Project-wide TU count and its provenance note for the estimate."""
-    # Count TUs from the *same* effective build-info the real scan uses
-    # (`req.compile_db or req.build_info`) so an explicit --compile-db wins over a
-    # Bazel --build-info here too — else the estimate could price a different action
-    # graph than the scan executes (Codex review). A pack dir supplies its own L3
-    # compile units; a Bazel aquery/cquery jsonproto is routed through the Bazel
-    # adapter; a raw compile DB / source tree is counted otherwise.
+    # Count TUs from the *same* effective build-info the real scan uses (`req.compile_db or req.build_info`) so an
+    # explicit --compile-db wins over a Bazel --build-info here too — else the estimate could price a different
+    # action graph than the scan executes (Codex review). A pack dir supplies its own L3 compile units; a Bazel
+    # aquery/cquery jsonproto is routed through the Bazel adapter; a raw compile DB / source tree is counted
+    # otherwise.
     eff_build_info = req.compile_db or req.build_info
     bazel_tus = (
         _count_bazel_build_info_tus(eff_build_info)
@@ -627,29 +632,30 @@ def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     pack_tus = _count_pack_tus(eff_build_info) if eff_build_info is not None else None
     compile_db = _discover_compile_db(req.sources, eff_build_info)
     if bazel_tus is not None:
-        return bazel_tus, "Bazel aquery/cquery (build_evidence)"
-    if pack_tus is not None:
-        return pack_tus, "build-source pack (build_evidence)"
-    if compile_db is not None:
-        return _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
-    if req.sources is not None:
-        return _count_source_tus(req.sources), "counted source files (no compile DB)"
-    return 0, "no source tree / compile DB"
+        total, note = bazel_tus, "Bazel aquery/cquery (build_evidence)"
+    elif pack_tus is not None:
+        total, note = pack_tus, "build-source pack (build_evidence)"
+    elif compile_db is not None:
+        total, note = _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
+    elif req.sources is not None:
+        total, note = _count_source_tus(req.sources), "counted source files (no compile DB)"
+    else:
+        total, note = 0, "no source tree / compile DB"
+    if req.build_targets:
+        note += _UNSCOPED_TU_NOTE_SUFFIX
+    return total, note
 
 
 def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) -> int:
     """TUs the L4 replay (and its clang call-graph pass) would touch."""
-    # The L4 replay scope: a changed-only collection touches at most the changed
-    # *source* TUs (POI-focused, D7); a full/target scope touches every TU. The
-    # budget's max_tus is a documented cap (never shrinks scope silently — it
-    # FAILS — but the estimate honestly reflects the cap as the upper bound).
-    #
-    # A changed *header* fans out: without an include graph (the common
-    # compile-DB-only path) ``source_replay.select_compile_units(scope='changed')``
-    # fails open to **all** TUs so header ABI changes are never silently missed,
-    # so the estimate must charge ``total_tus`` for a header change rather than
-    # the single header path — else it understates L4 cost and a user picks too
-    # small a budget (Codex review). An empty/seedless diff is likewise broad.
+    # The L4 replay scope: a changed-only collection touches at most the changed *source* TUs (POI-focused, D7); a
+    # full/target scope touches every TU. The budget's max_tus is a documented cap (never shrinks scope silently —
+    # it FAILS — but the estimate honestly reflects the cap as the upper bound). A changed *header* fans out:
+    # without an include graph (the common compile-DB-only path)
+    # ``source_replay.select_compile_units(scope='changed')`` fails open to **all** TUs so header ABI changes are
+    # never silently missed, so the estimate must charge ``total_tus`` for a header change rather than the single
+    # header path — else it understates L4 cost and a user picks too small a budget (Codex review). An
+    # empty/seedless diff is likewise broad.
     changed = [p for p in req.changed_paths if p]
     source_changed = [p for p in changed if _is_source_tu_path(p)]
     header_changed = any(_is_header_path(p) for p in changed)
@@ -715,13 +721,17 @@ def _source_layer_estimates(
     total_tus: int,
     tu_note: str,
     replay_tus: int,
+    build_targets: tuple[str, ...] = (),
 ) -> list[CostEstimate]:
     """The collect-mode-dependent L3/L4/L5 rows (source-evidence layers)."""
-    # "source-target" (ADR-043 D2/D3) is the unseeded sibling of "source-changed"
-    # — same L3/L4/L5 layers, just a broader (target-scoped, not changed-only)
-    # replay; it must price identically to source-changed everywhere below, else
-    # an unseeded explicit-source scan/estimate silently reports zero source
-    # layers (the same zero-TU defect the collect-mode fix addresses).
+    # "source-target" (ADR-043 D2/D3) is the unseeded sibling of "source-changed" — same L3/L4/L5 layers, just a
+    # broader (target-scoped, not changed-only) replay; it must price identically to source-changed everywhere
+    # below, else an unseeded explicit-source scan/estimate silently reports zero source layers (the same zero-TU
+    # defect the collect-mode fix addresses).
+    #
+    # L4/L5 inherit the same unscoped total_tus the L3 row's tu_note already
+    # flags -- a short back-reference, not the full sentence again (Codex review).
+    unscoped_ref = " [UNSCOPED, see L3_build note]" if build_targets else ""
     estimates: list[CostEstimate] = []
     if collect_mode in (
         "build",
@@ -748,7 +758,7 @@ def _source_layer_estimates(
                 replay_tus,
                 _COST_PER_TU_REPLAY * replay_tus,
                 0.0,
-                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s))",
+                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s)){unscoped_ref}",
             )
         )
     # L5 structural fold runs for every graph-building mode (cheap).
@@ -760,7 +770,7 @@ def _source_layer_estimates(
                 total_tus,
                 _COST_PER_TU_GRAPH * total_tus,
                 0.0,
-                "source graph fold/edges",
+                f"source graph fold/edges{unscoped_ref}",
             )
         )
     # When both L4 and L5 are collected the inline path also runs a Clang
@@ -775,7 +785,7 @@ def _source_layer_estimates(
                 replay_tus,
                 _COST_PER_TU_REPLAY * replay_tus,
                 0.0,
-                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s))",
+                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s)){unscoped_ref}",
             )
         )
     return estimates
@@ -800,7 +810,9 @@ def estimate_scan(
     replay_tus = _estimate_replay_tus(req, collect_mode, total_tus)
     estimates = _intrinsic_layer_estimates(req, eff_depth)
     estimates.extend(
-        _source_layer_estimates(resolved, collect_mode, total_tus, tu_note, replay_tus)
+        _source_layer_estimates(
+            resolved, collect_mode, total_tus, tu_note, replay_tus, req.build_targets
+        )
     )
     return estimates
 
@@ -857,13 +869,11 @@ class ScanArtifactResult:
 # scan-specific failure verdicts (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`)
 # a ScanResult can carry. See _aggregate_scan_set_verdict's docstring.
 _SCAN_SET_COMPAT_ORDER: dict[str, int] = {
-    # NO_CHANGE ranks strictly below COMPATIBLE (not tied at 0): the bundle
-    # audit's own verdict is always appended to `candidates` below and often
-    # reads NO_CHANGE when it simply found nothing to flag -- with a tied
-    # rank, the >= tie-break (last-candidate-wins) let that placeholder
-    # silently override a real, positive COMPATIBLE result from every
-    # member scan (Codex review). A genuine "I actually compared this and
-    # it's fine" always outranks "there was nothing to compare here."
+    # NO_CHANGE ranks strictly below COMPATIBLE (not tied at 0): the bundle audit's own verdict is always appended
+    # to `candidates` below and often reads NO_CHANGE when it simply found nothing to flag -- with a tied rank, the
+    # >= tie-break (last-candidate-wins) let that placeholder silently override a real, positive COMPATIBLE result
+    # from every member scan (Codex review). A genuine "I actually compared this and it's fine" always outranks
+    # "there was nothing to compare here."
     "NO_CHANGE": -1,
     "COMPATIBLE": 0,
     "COMPATIBLE_WITH_RISK": 1,
@@ -944,12 +954,10 @@ class ScanSetResult:
             "verdict": self.verdict,
             "exit_code": self.exit_code,
             "per_artifact": [a.to_dict() for a in self.per_artifact],
-            # Full finding records (kind/symbol/consumer/provider/description),
-            # not just a count -- mirrors cli_compare_release_helpers.py's
-            # summary["bundle_findings"] JSON shape for the two-sided release
-            # path, so a machine consumer of either can identify and act on
-            # the condition that produced bundle_verdict, not just its count
-            # (Codex review).
+            # Full finding records (kind/symbol/consumer/provider/description), not just a count -- mirrors
+            # cli_compare_release_helpers.py's summary["bundle_findings"] JSON shape for the two-sided release path, so a
+            # machine consumer of either can identify and act on the condition that produced bundle_verdict, not just its
+            # count (Codex review).
             "bundle_findings": [
                 {
                     "kind": f.kind.value,
@@ -1137,11 +1145,9 @@ def _scan_request_config(req: ScanRequest) -> Any:
     try:
         return resolve_scan_config(
             {
-                # Dropped when a `policy_file` overrode it, exactly as the
-                # comparison itself treats it -- otherwise an accepted
-                # request (unknown name, valid file) died in its own receipt
-                # before the comparison ran (Codex review, the same defect
-                # already fixed on the MCP path; the helper is shared now).
+                # Dropped when a `policy_file` overrode it, exactly as the comparison itself treats it -- otherwise an accepted
+                # request (unknown name, valid file) died in its own receipt before the comparison ran (Codex review, the same
+                # defect already fixed on the MCP path; the helper is shared now).
                 "policy": stated_policy_base(req.policy, req.policy_file),
                 "policy_file_path": None,
                 "suppress": None,
@@ -1206,13 +1212,11 @@ def run_scan(req: ScanRequest) -> ScanResult:
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
     else:
-        # ADR-049 Phase 6's own rule, applied where the CLI applies it: up
-        # front, not after the scan. `compare_snapshots` already rejects the
-        # combination at the Tier-2 boundary (`service._validate_contract_mode`,
-        # which this reuses rather than restating), so it was never silently
-        # accepted -- but reaching that check means a full scan runs first and
-        # then fails, where `scan_cmd` rejects the same request before any work
-        # (CodeRabbit review).
+        # ADR-049 Phase 6's own rule, applied where the CLI applies it: up front, not after the scan.
+        # `compare_snapshots` already rejects the combination at the Tier-2 boundary (`service._validate_contract_mode`,
+        # which this reuses rather than restating), so it was never silently accepted -- but reaching that check means a
+        # full scan runs first and then fails, where `scan_cmd` rejects the same request before any work (CodeRabbit
+        # review).
         from .service import _validate_contract_mode
 
         _validate_contract_mode(req.contract_mode, req.contract_evaluation)
@@ -1229,23 +1233,19 @@ def run_scan(req: ScanRequest) -> ScanResult:
     risk = score_changed_paths(changed, risk_rules)
 
     scan_mode = ScanMode(req.mode)
-    # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic
-    # API too: an explicit depth *always* pins (even with source_method=auto, which
-    # only picks the method), or a non-auto source_method does. So run_scan_core
-    # fails loud if it can't collect the evidence — same as the CLI. AUTO / preset-
-    # only requests stay best-effort (CodeRabbit review).
+    # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic API too: an explicit depth
+    # *always* pins (even with source_method=auto, which only picks the method), or a non-auto source_method does.
+    # So run_scan_core fails loud if it can't collect the evidence — same as the CLI. AUTO / preset- only requests
+    # stay best-effort (CodeRabbit review).
     pinned_explicit = (dp is not None) or (
         sm is not None and sm is not SourceMethod.AUTO
     )
     sm_pin = sm is not None and sm is not SourceMethod.AUTO
-    # Mirrors cli_scan._scan_explicit_flags'/_run_scan_one_member's
-    # level_explicit: consent to auto-running a trusted --config's
-    # build.query (a non-auto source_method, or an explicit depth with no
-    # source_method pinned). Without this the singular Python API path
-    # left level_explicit at run_scan_core's False default, so an explicit
-    # build_config + depth="build"/"source" could return
-    # EVIDENCE_CONTRACT_ERROR instead of auto-running the query the CLI
-    # and run_scan_set both already consent to (Codex review).
+    # Mirrors cli_scan._scan_explicit_flags'/_run_scan_one_member's level_explicit: consent to auto-running a
+    # trusted --config's build.query (a non-auto source_method, or an explicit depth with no source_method pinned).
+    # Without this the singular Python API path left level_explicit at run_scan_core's False default, so an explicit
+    # build_config + depth="build"/"source" could return EVIDENCE_CONTRACT_ERROR instead of auto-running the query
+    # the CLI and run_scan_set both already consent to (Codex review).
     level_explicit = sm_pin or (sm is None and dp is not None)
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
@@ -1261,12 +1261,10 @@ def run_scan(req: ScanRequest) -> ScanResult:
         eff_depth,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
-    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
-    # provenance) even when the caller passes headers, so the collected evidence
-    # matches the reported depth — parity with the CLI's `scan --depth binary`.
-    # Keyed on the *resolved* effective depth, not the raw depth: --source-method
-    # wins over --depth, so a source-method scan that also passes `depth="binary"`
-    # still needs the header AST (Codex review).
+    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its provenance) even when the caller
+    # passes headers, so the collected evidence matches the reported depth — parity with the CLI's `scan --depth
+    # binary`. Keyed on the *resolved* effective depth, not the raw depth: --source-method wins over --depth, so a
+    # source-method scan that also passes `depth="binary"` still needs the header AST (Codex review).
     eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
     prov_headers, prov_dirs = _public_provenance_set(
         eff_headers, list(req.public_header_dirs)
@@ -1378,20 +1376,15 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
 
     from . import deadline
 
-    # _kill_process_tree's _descendant_pgids() walk is a point-in-time
-    # snapshot taken before proc.terminate() fires; a clang/castxml child
-    # this worker spawns via deadline.run_bounded() in the gap between that
-    # snapshot and the terminate() call is invisible to it. Without this,
-    # proc.terminate() (default SIGTERM disposition, since this is a fresh
-    # `spawn`-context process with no inherited handler) would kill the
-    # worker immediately, leaving that just-spawned detached process group
-    # permanently orphaned — the worker's own _active_pgroups registry never
-    # gets a handler chance to sweep it. install_sigterm_cleanup() gives this
-    # worker the same in-process cleanup handler the plain CLI path and the
-    # L4 ProcessPoolExecutor workers already install, so its own SIGTERM
-    # handler kills every group *it* has registered before the process
-    # actually exits — independent of what the outer descendant-pgid
-    # snapshot did or didn't see (Codex review, PR #591, round 9).
+    # _kill_process_tree's _descendant_pgids() walk is a point-in-time snapshot taken before proc.terminate() fires;
+    # a clang/castxml child this worker spawns via deadline.run_bounded() in the gap between that snapshot and the
+    # terminate() call is invisible to it. Without this, proc.terminate() (default SIGTERM disposition, since this
+    # is a fresh `spawn`-context process with no inherited handler) would kill the worker immediately, leaving that
+    # just-spawned detached process group permanently orphaned — the worker's own _active_pgroups registry never
+    # gets a handler chance to sweep it. install_sigterm_cleanup() gives this worker the same in-process cleanup
+    # handler the plain CLI path and the L4 ProcessPoolExecutor workers already install, so its own SIGTERM handler
+    # kills every group *it* has registered before the process actually exits — independent of what the outer
+    # descendant-pgid snapshot did or didn't see (Codex review, PR #591, round 9).
     deadline.install_sigterm_cleanup()
     try:
         os.setsid()  # new process group; killpg(parent) reaches clang subprocs
@@ -1486,18 +1479,14 @@ def _kill_process_tree(proc: Any) -> None:
     except (ProcessLookupError, PermissionError, AttributeError, OSError):
         pass
     pgids |= _descendant_pgids(proc.pid)
-    # Only kill *proc*'s own group when it actually detached into its own (``os.
-    # setsid`` ran). If it timed out before that, its pgid still equals the
-    # parent's group — killpg would then terminate the MCP server itself, so
-    # that group is excluded and only its (already-detached) descendants, if
-    # any, are targeted (Codex review).
+    # Only kill *proc*'s own group when it actually detached into its own (``os. setsid`` ran). If it timed out
+    # before that, its pgid still equals the parent's group — killpg would then terminate the MCP server itself, so
+    # that group is excluded and only its (already-detached) descendants, if any, are targeted (Codex review).
     pgids.discard(own_pgid)
-    # Unconditional: proc itself never detached (own_pgid was excluded above
-    # precisely because it's still in the parent's group), so it is never
-    # reached by the killpg sweep below over *descendant* groups. Skipping
-    # this when pgids is non-empty left the direct worker process running
-    # forever whenever it had spawned a detached clang/castxml child but had
-    # not itself detached (CodeRabbit review, PR #591).
+    # Unconditional: proc itself never detached (own_pgid was excluded above precisely because it's still in the
+    # parent's group), so it is never reached by the killpg sweep below over *descendant* groups. Skipping this when
+    # pgids is non-empty left the direct worker process running forever whenever it had spawned a detached
+    # clang/castxml child but had not itself detached (CodeRabbit review, PR #591).
     try:
         proc.terminate()
     except (OSError, AttributeError):
@@ -1615,11 +1604,10 @@ def _run_scan_one_member(
     scan_mode = ScanMode(req.mode)
     sm_pin = sm is not None and sm is not SourceMethod.AUTO
     pinned_explicit = (dp is not None) or sm_pin
-    # Mirrors cli_scan._scan_explicit_flags' level_explicit: consent to
-    # auto-running build.query (a non-auto source_method, or an explicit
-    # depth with no source_method pinned) -- without this, a trusted
-    # --config's build.query never auto-runs for a member even when the
-    # caller explicitly requested a deep depth (Codex review).
+    # Mirrors cli_scan._scan_explicit_flags' level_explicit: consent to auto-running build.query (a non-auto
+    # source_method, or an explicit depth with no source_method pinned) -- without this, a trusted --config's
+    # build.query never auto-runs for a member even when the caller explicitly requested a deep depth (Codex
+    # review).
     level_explicit = sm_pin or (sm is None and dp is not None)
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
@@ -1723,22 +1711,17 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         discover_artifact_set,
     )
 
-    # run_scan_set is audit-only by definition (ADR-056 D2) -- normalize
-    # mode here rather than trust every caller to set it. Without this, the
-    # documented minimal form ``run_scan_set(ScanRequest(binaries=[...]))``
-    # left req.mode at ScanRequest's own default ("pr"), so each member's
-    # report claimed mode: "pr" despite this entry point never accepting a
-    # baseline (Codex review).
+    # run_scan_set is audit-only by definition (ADR-056 D2) -- normalize mode here rather than trust every caller to
+    # set it. Without this, the documented minimal form ``run_scan_set(ScanRequest(binaries=[...]))`` left req.mode
+    # at ScanRequest's own default ("pr"), so each member's report claimed mode: "pr" despite this entry point never
+    # accepting a baseline (Codex review).
     req = replace(req, mode="audit")
 
-    # Canonicalize/deduplicate before the cardinality check: two literal
-    # duplicates or symlink aliases of one DSO must not silently pass as a
-    # valid 2-member set (discover_artifact_set below dedupes via
-    # Path.resolve() too, which would otherwise report a "complete" audit
-    # of what's really a single library) (Codex review). Path.resolve()
-    # only follows symlinks, not hard links -- key on filesystem identity
-    # (st_dev, st_ino) when available so two hard-linked aliases of one
-    # DSO are also caught, not just symlink aliases (Codex review, same
+    # Canonicalize/deduplicate before the cardinality check: two literal duplicates or symlink aliases of one DSO
+    # must not silently pass as a valid 2-member set (discover_artifact_set below dedupes via Path.resolve() too,
+    # which would otherwise report a "complete" audit of what's really a single library) (Codex review).
+    # Path.resolve() only follows symlinks, not hard links -- key on filesystem identity (st_dev, st_ino) when
+    # available so two hard-linked aliases of one DSO are also caught, not just symlink aliases (Codex review, same
     # gap fixed in bundle.discover_artifact_set's own dedup).
     seen_resolved: set[Path | tuple[int, int]] = set()
     binaries: list[Path] = []
@@ -1764,47 +1747,35 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         )
     if req.baseline is not None:
         raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
-    # P2 regression (Codex review): run_scan_set is a public, re-exported
-    # service entry point (ADR-056) that a direct Python API caller can
-    # reach without going through cli_scan._run_artifact_set's own
-    # click-level "these flags only mean anything with --against" guard --
-    # req.mode is already forced to "audit" above, so this always applies
-    # here (unlike run_scan, where it's conditional on baseline/mode).
+    # P2 regression (Codex review): run_scan_set is a public, re-exported service entry point (ADR-056) that a
+    # direct Python API caller can reach without going through cli_scan._run_artifact_set's own click-level "these
+    # flags only mean anything with --against" guard -- req.mode is already forced to "audit" above, so this always
+    # applies here (unlike run_scan, where it's conditional on baseline/mode).
     _reject_comparison_only_fields(req)
 
-    # Start the shared budget clock *before* set discovery/validation, not
-    # after (Codex review): discover_artifact_set() stats every candidate
-    # path and parses each one's ELF program/dynamic table to classify it,
-    # which is real, potentially non-trivial work on a large set -- if the
-    # clock only started once that finished, a slow discovery phase would
-    # be invisible to `--budget` entirely, so even `--budget 0s` could spend
-    # substantial time discovering before ever reporting overflow.
+    # Start the shared budget clock *before* set discovery/validation, not after (Codex review):
+    # discover_artifact_set() stats every candidate path and parses each one's ELF program/dynamic table to classify
+    # it, real work on a large set -- if the clock only started once that finished, a slow discovery phase would be
+    # invisible to `--budget` entirely, so even `--budget 0s` could spend substantial time discovering before ever
+    # reporting overflow.
     start = _time.monotonic()
     budget_s = req.budget.total_timeout
 
-    # Validate/canonicalize the whole set *before* scanning any member
-    # (Codex review): run_scan_set is a public, re-exported service entry
-    # point (ADR-056) -- a direct Python API caller can reach it without
-    # ever going through cli_scan._run_artifact_set's own
-    # discover_artifact_set prevalidation, so an unsupported member or a
-    # canonical-identity collision here is not necessarily anomalous the
-    # way it would be for a CLI-originated request. Discovering first
-    # avoids two real problems with discovering after the per-member
-    # loop: (1) needlessly running potentially expensive member scans
-    # (compiler/build queries) for a request that was never valid to
-    # begin with, and (2) a member scan exhausting the budget and
-    # returning BUDGET_OVERFLOW *before* discovery ever runs, which would
-    # report budget exhaustion instead of the real, underlying
-    # ArtifactSetError.
+    # Validate/canonicalize the whole set *before* scanning any member (Codex review): run_scan_set is a public, re-
+    # exported service entry point (ADR-056) -- a direct Python API caller can reach it without ever going through
+    # cli_scan._run_artifact_set's own discover_artifact_set prevalidation, so an unsupported member or a canonical-
+    # identity collision here is not necessarily anomalous the way it would be for a CLI-originated request.
+    # Discovering first avoids two real problems with discovering after the per-member loop: (1) needlessly running
+    # potentially expensive member scans (compiler/build queries) for a request that was never valid to begin with,
+    # and (2) a member scan exhausting the budget and returning BUDGET_OVERFLOW *before* discovery ever runs, which
+    # would report budget exhaustion instead of the real, underlying ArtifactSetError.
     libraries = discover_artifact_set(list(binaries), explicit=True)
 
-    # P2 regression (Codex review): validate cross-member DT_SONAME
-    # uniqueness before scanning any member, not only inside audit_bundle()
-    # after every member has already been individually scanned -- an
-    # earlier member scan exhausting --budget would otherwise mask this
-    # genuine usage error as an ordinary BUDGET_OVERFLOW, and every
-    # member's own (potentially expensive) scan would already have run for
-    # a request that was always going to be rejected.
+    # P2 regression (Codex review): validate cross-member DT_SONAME uniqueness before scanning any member, not only
+    # inside audit_bundle() after every member has already been individually scanned -- an earlier member scan
+    # exhausting --budget would otherwise mask this genuine usage error as an ordinary BUDGET_OVERFLOW, and every
+    # member's own (potentially expensive) scan would already have run for a request that was always going to be
+    # rejected.
     remaining_for_soname_check = (
         None if budget_s is None else budget_s - (_time.monotonic() - start)
     )
@@ -1856,30 +1827,21 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         )
 
     try:
-        # P2 regression (Codex review): the post-audit elapsed-time check
-        # below only detects an overflow *after* audit_bundle() already ran
-        # to completion -- it doesn't bound the call itself, so a
-        # pathologically large or malformed ELF set could still burn far
-        # more wall-clock than --budget allows before that check is ever
-        # reached. build_bundle_snapshot()'s per-library parsing loop now
-        # calls deadline.check() between members (the same cooperative,
-        # per-unit-of-work checkpoint pattern scan_engine already uses for
-        # per-header/per-TU work), so running audit_bundle() under this
-        # scope lets a real overflow raise mid-parse instead of only being
-        # caught afterward.
+        # P2 regression (Codex review): the post-audit elapsed-time check below only detects an overflow *after*
+        # audit_bundle() already ran to completion -- it doesn't bound the call itself, so a pathologically large or
+        # malformed ELF set could still burn far more wall-clock than --budget allows before that check is ever reached.
+        # build_bundle_snapshot()'s per-library parsing loop now calls deadline.check() between members (the same
+        # cooperative, per-unit-of-work checkpoint pattern scan_engine already uses for per-header/per-TU work), so
+        # running audit_bundle() under this scope lets a real overflow raise mid-parse instead of only being caught
+        # afterward.
         #
-        # audit_bundle()'s ambiguous duplicate-SONAME rejection
-        # (ArtifactSetError) is only detectable *here*, after actually
-        # parsing every member's ELF metadata -- propagates the same way
-        # discover_artifact_set()'s own ArtifactSetError does above (P2,
-        # Codex review x2): degrading either to bundle_incomplete=True let
-        # a genuinely invalid artifact set exit 0 with the cross-library
-        # audit silently skipped, misreading as full success for a direct
-        # Python API caller that never went through
-        # cli_scan._run_artifact_set's own prevalidation. The CLI's own
-        # try/except around run_scan_set() converts this into a
-        # click.UsageError (exit 64, "bad flags/inputs" per AGENTS.md's
-        # exit code table).
+        # audit_bundle()'s ambiguous duplicate-SONAME rejection (ArtifactSetError) is only detectable *here*, after
+        # actually parsing every member's ELF metadata -- propagates the same way discover_artifact_set()'s own
+        # ArtifactSetError does above (P2, Codex review x2): degrading either to bundle_incomplete=True let a genuinely
+        # invalid artifact set exit 0 with the cross-library audit silently skipped, misreading as full success for a
+        # direct Python API caller that never went through cli_scan._run_artifact_set's own prevalidation. The CLI's own
+        # try/except around run_scan_set() converts this into a click.UsageError (exit 64, "bad flags/inputs" per
+        # AGENTS.md's exit code table).
         with _deadline.deadline_scope(remaining):
             audit = audit_bundle(
                 libraries, bundle_system_providers=req.bundle_system_providers
@@ -1888,40 +1850,31 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
         )
-    # The deadline_scope above only bounds the checkpoints
-    # build_bundle_snapshot() itself calls deadline.check() between (i.e.
-    # per library, not mid-parse of one) -- re-check elapsed time after the
-    # whole call so a real overflow within a single library's parse (or in
-    # _compute_resolution_graph/_detect_unresolved_intra_dependency, which
-    # have no checkpoints of their own) is still reported as
-    # BUDGET_OVERFLOW (the failure-guard contract) rather than a normal
-    # verdict that quietly ran over time (Codex review).
+    # The deadline_scope above only bounds the checkpoints build_bundle_snapshot() itself calls deadline.check()
+    # between (i.e. per library, not mid-parse of one) -- re-check elapsed time after the whole call so a real
+    # overflow within a single library's parse (or in _compute_resolution_graph/
+    # _detect_unresolved_intra_dependency, which have no checkpoints of their own) is still reported as
+    # BUDGET_OVERFLOW (the failure-guard contract) rather than a normal verdict that quietly ran over time (Codex
+    # review).
     if budget_s is not None and (_time.monotonic() - start) > budget_s:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
         )
-    # discover_artifact_set already validated every member looks like ELF,
-    # but build_bundle_snapshot() can still silently drop one whose actual
-    # parse failed or came back empty (bundle.py's own per-member try/except
-    # + empty-metadata skip). A reduced resolution graph missing a real
-    # provider can then invent an unresolved-import finding for a symbol
-    # that dropped member would have supplied -- mark the audit incomplete
-    # (no findings published) rather than risk a false positive (Codex
-    # review), the same degrade-not-raise contract the discovery-failure
-    # path above already uses.
+    # discover_artifact_set already validated every member looks like ELF, but build_bundle_snapshot() can still
+    # silently drop one whose actual parse failed or came back empty (bundle.py's own per-member try/except + empty-
+    # metadata skip). A reduced resolution graph missing a real provider can then invent an unresolved-import
+    # finding for a symbol that dropped member would have supplied -- mark the audit incomplete (no findings
+    # published) rather than risk a false positive (Codex review), the same degrade-not-raise contract the
+    # discovery-failure path above already uses.
     if set(audit.snapshot.libraries) != set(libraries):
         verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
-        # P2 regression (Codex review): bundle_incomplete previously left the
-        # exit code purely a function of the per-member verdicts -- the
-        # cross-library audit itself never ran, but a set where every member
-        # scanned clean (COMPATIBLE/NO_CHANGE/COMPATIBLE_WITH_RISK) still
-        # exited 0, so a CI gate that only checks the exit code silently
-        # accepted a skipped audit as a full pass. Floor the exit code at 1
-        # (mirroring the per-member EVIDENCE_CONTRACT_ERROR contract in
-        # ``_aggregate_scan_set_verdict`` above) and surface a dedicated
-        # BUNDLE_INCOMPLETE verdict when no worse, already-dominant member
-        # problem (API_BREAK/BREAKING/EVIDENCE_CONTRACT_ERROR/BUDGET_OVERFLOW)
-        # is already being reported.
+        # P2 regression (Codex review): bundle_incomplete previously left the exit code purely a function of the per-
+        # member verdicts -- the cross-library audit itself never ran, but a set where every member scanned clean
+        # (COMPATIBLE/NO_CHANGE/COMPATIBLE_WITH_RISK) still exited 0, so a CI gate that only checks the exit code
+        # silently accepted a skipped audit as a full pass. Floor the exit code at 1 (mirroring the per-member
+        # EVIDENCE_CONTRACT_ERROR contract in ``_aggregate_scan_set_verdict`` above) and surface a dedicated
+        # BUNDLE_INCOMPLETE verdict when no worse, already-dominant member problem
+        # (API_BREAK/BREAKING/EVIDENCE_CONTRACT_ERROR/BUDGET_OVERFLOW) is already being reported.
         exit_code = max(exit_code, 1)
         if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
             verdict = "BUNDLE_INCOMPLETE"
