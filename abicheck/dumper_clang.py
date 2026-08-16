@@ -593,13 +593,24 @@ def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
                 token = f"{token}({','.join(arg_tokens)})"
             tokens.add(token)
 
-    # Current Clang JSON preserves these two ABI attributes only in qualType.
-    # This narrow fallback complements attribute-node parsing above.
-    qual_type = node.get("type", {}).get("qualType", "")
-    if isinstance(qual_type, str):
-        for spelling in ("ms_abi", "sysv_abi"):
-            if re.search(rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qual_type):
-                tokens.add(spelling)
+    # Current Clang JSON sometimes preserves these two ABI attributes only in
+    # the function type.  Inspect only its *outer* trailing qualifiers: a
+    # whole-qualType search would incorrectly assign a callback parameter's
+    # (or a nested function return type's) convention to this declaration.
+    # A typedef can hide the effective function type in qualType, while clang
+    # provides its expanded spelling in desugaredQualType.
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict):
+        effective_type = type_obj.get("desugaredQualType")
+        if not isinstance(effective_type, str) or not effective_type:
+            effective_type = type_obj.get("qualType")
+        if isinstance(effective_type, str):
+            qualifiers = _function_qualifiers(effective_type)
+            for spelling in ("ms_abi", "sysv_abi"):
+                if re.search(
+                    rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qualifiers
+                ):
+                    tokens.add(spelling)
     return sorted(tokens)
 
 

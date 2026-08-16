@@ -156,7 +156,7 @@ def test_parse_functions_preserves_x86_64_abi_attributes(
     assert fn.contract_attributes == [expected]
 
 
-def test_parse_functions_recovers_ms_abi_from_qual_type_when_attr_node_is_omitted() -> None:
+def test_parse_functions_recovers_outer_ms_abi_from_qual_type_when_attr_node_is_omitted() -> None:
     root = _tu(
         {
             "kind": "FunctionDecl",
@@ -171,6 +171,81 @@ def test_parse_functions_recovers_ms_abi_from_qual_type_when_attr_node_is_omitte
     (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
 
     assert fn.contract_attributes == ["ms_abi"]
+
+
+def test_parse_functions_does_not_claim_nested_callback_abi_attribute() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {
+                "qualType": "void (void (*)(int) __attribute__((ms_abi)))"
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_does_not_claim_nested_return_function_abi_attribute() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "factory",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "factory",
+            "type": {
+                "qualType": "void (__attribute__((sysv_abi)) *())()"
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_uses_desugared_outer_type_for_typedef_abi_attribute() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {
+                "qualType": "ApiFn",
+                "desugaredQualType": "void (int) __attribute__((sysv_abi))",
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == ["sysv_abi"]
+
+
+def test_parse_functions_does_not_normalize_unknown_platform_cc_spelling() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((cdecl))"},
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
 
 
 def test_parse_functions_ignores_non_string_qual_type_for_abi_fallback() -> None:
