@@ -402,7 +402,7 @@ jobs:
       # only release evidence that detects the C++ floor/concept/uninstantiated
       # template regressions in cases 98/105/122, so do not mask a non-zero
       # validator exit behind the reduced-evidence reported-only policy.
-      - name: Run artifact-mode validation (reported-only + FP guard)
+      - name: Run artifact-mode validation (build-source release proof + reported-only FP guard)
         if: always()
         run: |
           if [ "${{ matrix.mode }}" = "build-source" ]; then
@@ -411,6 +411,8 @@ jobs:
               > results/validate_examples-build-source.json
             cp results/validate_examples-build-source.json results/validate_examples.json
             ABICHECK_STRICT_KINDS=1 python tests/check_validate_results.py
+            python scripts/check_build_source_release_proof.py \
+              results/validate_examples-build-source.json
           else
             set +e
             PYTHONPATH=. python tests/validate_examples.py --artifact-variant ${{ matrix.mode }} --json \
