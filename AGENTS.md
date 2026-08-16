@@ -1581,13 +1581,25 @@ Once a root command genuinely clears the bar above, pick the right home:
   `eff_includes` overlap (plausible, since both can independently resolve
   to the same L3-derived directory), the *same* directory can appear twice
   in dump's own `extra_includes`, which is what `comparability_fields.
-  _include_slot_tokens` actually tokenizes into `include_sequence` (one
-  token per `declared_includes` slot — itself derived from
-  `extra_includes`/`gcc_option_tokens` together, not straightforwardly one
-  or the other alone, per `_include_slot_tokens`'s own signature). scan's
+  _include_slot_tokens` actually tokenizes into `include_sequence` — one
+  token per `declared_includes` slot, and `dumper_contract.
+  _attach_extraction_contract` builds `declared_includes` **exclusively**
+  from `extra_includes` (`IncludeDir(path=p, ...) for p in extra_includes`,
+  absent a `dump_manifest`); `gcc_option_tokens` (where a *deferred* root
+  rides, as `-isystem`/etc.) never contributes a slot at all (Codex review
+  — corrected from this entry's own prior, wrong claim that both jointly
+  derive slots). This sharpens rather than weakens candidates (a)/(b)
+  below: a root that lands in `extra_includes` always produces a slot: once
+  for dump's `inc_extra`, and *again* if `eff_includes` also independently
+  picked up the same directory (candidate (b), a real duplicate slot); a
+  root that `resolve_inferred_header_roots` either skips outright or
+  reclassifies to a deferred `gcc_option_tokens` flag produces **no** slot
+  at all either way, since neither reaches `extra_includes` (candidate (a),
+  collapsing what looked like two distinct scan-side outcomes — "skipped"
+  vs. "deferred" — into the same net effect on `include_sequence`). scan's
   candidate side has no equivalent double-add, since its single fold call
   already produced the final `includes`/`compile_context` `resolve_input`
-  uses directly. Either effect alone — an omitted slot on scan's side, or a
+  uses directly. Either effect alone — a missing slot on scan's side, or a
   duplicated slot on dump's — changes the resulting slot *count*, which is
   sufficient to make `include_sequence` differ regardless of which specific
   slot moved. **Not fixed here, and deliberately not narrowed to one of (a)/
