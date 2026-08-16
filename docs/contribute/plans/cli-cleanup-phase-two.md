@@ -386,8 +386,15 @@ With that in place the Action does not parse stderr, does not re-run any
 comparison, does not guess why the exit was `1`, renders annotations from the
 persisted findings and the Job Summary from the same object, and behaves
 identically for a single pair and a release fan-out. The `exit` block is the
-same object PR 4/G formalizes as `ExitDecision` — build it once, in PR G, and
-have PR E consume it rather than inventing a second, Action-shaped spelling.
+same object PR 4/G formalizes as `ExitDecision`. Build it once and consume it
+once — which is why PR G is split, and the split is load-bearing for this
+section rather than cosmetic: **G1** builds the decision object and emits its
+report block (no CLI behaviour change, no flag removed) and lands *before* PR
+E; **G2** makes today's `auto` the only gate algorithm and deletes
+`--exit-code-scheme`. Without that split PR E would have to either depend on
+unlanded work or invent the second, Action-shaped spelling this section
+prohibits. If G1 slips, PR E ships its annotations half and leaves the
+gate-explanation half — not a private `exit` block of its own.
 
 **Tests.** A saved report fixture (both a single-library and a release-style
 report) must produce, through the Action's renderer, byte-identical
@@ -701,11 +708,12 @@ reviewed ordering rather than inside PR 4.
 
 **(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
 this is no longer two axes but a set of them, and a flat `max()` is not the
-whole rule: `NOT_COMPARABLE` (`16`) must dominate; a removed required library
-(`8`) has its own release policy and is already checked ahead of the
-coverage-only fallback; scan budget overflow (`5`) is scan-only; usage error
-(`64`) is not a result at all and never appears in a report; and exit `1` has
-several distinct causes that a bare number cannot tell apart. Encode it once:
+whole rule: a non-comparable pair must dominate every other axis; a removed
+required library (`8`) has its own release policy and is already checked ahead
+of the coverage-only fallback; scan budget overflow (`5`) is scan-only; usage
+error (`64`) is not a result at all and never appears in a report; and exit `1`
+has several distinct causes that a bare number cannot tell apart. Encode it
+once:
 
 ```python
 @dataclass(frozen=True)
@@ -720,22 +728,37 @@ class ExitDecision:
 ```
 
 with an explicit precedence resolver, pinned by the ADR and by tests rather
-than distributed across CLI callbacks:
+than distributed across CLI callbacks — **precedence order, not a renumbering**:
 
 ```text
-usage/config error        → 64, outside the report
-not comparable            → 16
-removed required library  →  8  (release policy)
-budget exceeded           →  5  (scan)
-ABI / API / policy gate   →  4 / 2 / 1
-coverage & assurance floors → 1  (max-folded, never lowering the above)
-clean                     →  0
+usage/config error          (outside the report entirely — 64 everywhere)
+not comparable              (dominates every result axis below)
+removed required library    (release policy)
+budget exceeded             (scan only)
+ABI / API / policy gate
+coverage & assurance floors (max-folded, never lowering the above)
+clean
 ```
 
-`reasons` is what makes a shared `1` explainable, and it is the same block PR
-1b/E has the Action read instead of inferring from stderr. `docs/reference/
-exit-codes.md` becomes a rendering of this resolver, not a parallel hand-kept
-table.
+**`ExitDecision` unifies the precedence, not the numbers, and this is a hard
+constraint on PR G, not a detail** (Codex review of this plan caught an earlier
+draft that wrote a single global number per row). Every command keeps its own
+exit-code scheme, and `docs/reference/exit-codes.md` already says so
+explicitly: a non-comparable pair is `16` for native `compare`, **`6`** for
+`scan --against`, and `9` for `compat check`. A resolver that emitted one
+number for that row would silently renumber `scan`, breaking every script and
+Action consumer that recognises `6` — while PR G is framed as removing the
+*algorithm selector*, not as a command-numbering migration. So the resolver
+answers "which reason wins", and each command's own code table maps the winning
+reason to its own number; renumbering, if ever wanted, is a separate, explicitly
+designed and documented breaking change with its own migration note.
+
+`reasons` is what makes a shared `1` explainable, and it is the same block PR E
+has the Action read instead of inferring from stderr — see the split of PR G
+into **G1** (the decision object and its report block, no CLI change, landing
+*before* PR E) and **G2** (one gate algorithm, `--exit-code-scheme` deleted) in
+"Ordering". `docs/reference/exit-codes.md` becomes a rendering of this resolver
+plus each command's own mapping, not a parallel hand-kept table.
 
 **Atomic change set:** remove the flag from `compare` and `scan`; migrate the
 Action side — there is **no** `exit-code-scheme` input in `action.yml` to
@@ -868,17 +891,20 @@ PR C  typed dump convergence          = PR 3A — DumpRequest →
 PR D  build-context completeness      = PR 3B — matched compile-unit
                                        selection, forced includes, provenance
                                        tests
+PR G1 canonical exit decision, part 1 — ExitDecision + reasons + the report
+                                       block, precedence pinned by ADR and
+                                       tests; NO CLI change, no flag removed.
+                                       Lands before PR E, which consumes it
 PR E  Action machine-report           = PR 1b — uncapped persisted release
                                        findings, no comparison re-run, no
-                                       stderr inference
+                                       stderr inference; reads G1's block
       └─ then DELETE --annotate, --annotate-additions
 PR F  trusted build config            = PR 3C — build.query / build.compile_db
                                        only from an explicit --config, trust
                                        receipt in --dry-run, fail closed
       └─ then DELETE dump --build-query, dump --build-compile-db
-PR G  canonical exit decision         = PR 4 — ExitDecision + reasons + one
-                                       automatic gate algorithm, schema /
-                                       report / Action parity
+PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
+                                       schema / report / Action parity
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
                                        duplicated symbols, cost and dry-run;
