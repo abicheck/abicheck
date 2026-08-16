@@ -1017,6 +1017,59 @@ def test_baseline_compare_with_side_aware_headers_keeps_unfolded_context(
     assert captured["compile_context"] is not sentinel_folded_ctx
 
 
+def test_baseline_compare_with_shared_bare_header_still_gets_folded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782 (fresh evidence): the previous fix's own
+    `not baseline_headers` guard was too broad in the other direction --
+    cli_scan.py's `baseline_header = header_both + header_old` means a
+    bare, *shared* `-H api.h` (no `old=` scoping at all, the ordinary,
+    most common case) already makes `baseline_headers` truthy and
+    identical in content to `headers`, so gating on mere truthiness
+    silently reintroduced the whole PR's own NOT_COMPARABLE/false-ABI-diff
+    bug for the common case. When the resolved old-side headers are
+    identical to the candidate's (no real `old=` override), the fold must
+    still reach the baseline parse."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    shared_hdr = tmp_path / "api.h"
+    shared_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            str(shared_hdr),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is sentinel_folded_ctx
+
+
 def test_against_not_comparable_exits_6(
     monkeypatch, runner, new_snap_compatible, baseline_snap
 ):

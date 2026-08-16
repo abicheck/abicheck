@@ -143,3 +143,16 @@
   given); a side-aware baseline now gets the caller's plain, unfolded
   context instead, since no old-side build evidence exists to derive a
   matching fold for.
+
+- **A regression in the fix directly above, caught by a further Codex
+  review round before merge.** `not baseline_headers` was the wrong
+  signal — a bare, shared `-H api.h` with no `old=` scoping at all (the
+  ordinary, most common `scan --against` usage) already makes
+  `baseline_headers` truthy and identical in content to the candidate's
+  own `headers`, so the previous fix's guard treated every scan with any
+  headers as "old-side-scoped" and silently reintroduced the same
+  `NOT_COMPARABLE`/false-ABI-diff bug for the common case. Fixed by
+  checking content equality instead of mere truthiness: the fold is used
+  whenever the old side's resolved headers are the same as the
+  candidate's, and only the plain, unfolded context is used when they
+  genuinely diverge (a real `old=` override).

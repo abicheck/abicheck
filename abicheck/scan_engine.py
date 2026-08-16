@@ -1179,22 +1179,30 @@ def run_scan_core(
                     list(public_header_dirs),
                     # The *effective* compile_context (the P0.3 L3->L2 fold's
                     # own merged result, when applied) -- but ONLY when the
-                    # baseline reuses the candidate's own headers
-                    # (baseline_headers not given): the fold was derived by
-                    # matching the CANDIDATE's headers against the NEW build's
-                    # compile units, so its -D/-U/-std/include flags describe
-                    # the new side specifically. A side-aware `-H old=PATH`
-                    # baseline is parsed through its own, different old
-                    # headers, whose macros/standard/generated-header paths
-                    # may genuinely differ -- applying the new side's derived
-                    # flags there risks a bad parse or a false ABI diff, not a
-                    # more-accurate one (Codex review; no old-side build
-                    # evidence exists to derive a matching fold for, so the
-                    # caller's plain, unfolded compile_context is the correct
-                    # fallback here, not a second, unfounded fold attempt).
+                    # baseline actually reuses the candidate's own headers.
+                    # `baseline_headers` alone is the wrong signal here (Codex
+                    # review, fresh evidence): cli_scan.py's own
+                    # `baseline_header = header_both + header_old` means a
+                    # bare, *shared* `-H api.h` (no `old=` scoping at all --
+                    # the ordinary, most common case) already makes
+                    # `baseline_headers` truthy and identical in content to
+                    # `headers`, so gating on mere truthiness wrongly treated
+                    # every scan with any headers at all as "old-side-scoped"
+                    # and silently reintroduced this whole fix's own
+                    # NOT_COMPARABLE/false-ABI-diff bug for the common case.
+                    # The real signal is whether the resolved old-side header
+                    # set genuinely *differs* from the candidate's (a real
+                    # `-H old=PATH` override) -- only then does the fold's
+                    # new-side-specific -D/-U/-std/include flags risk not
+                    # fitting the old side's own, different headers, whose
+                    # macros/standard/generated-header paths may genuinely
+                    # differ; there is no old-side build evidence to derive a
+                    # matching fold for that case, so the caller's plain,
+                    # unfolded compile_context is the correct fallback there.
                     compile_context=(
                         eff_compile_context
                         if not baseline_headers
+                        or list(baseline_headers) == list(headers)
                         else compile_context
                     ),
                     baseline_headers=baseline_headers,

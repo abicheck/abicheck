@@ -1259,6 +1259,29 @@ Once a root command genuinely clears the bar above, pick the right home:
   (confirmed to fail against the pre-fix code — the folded sentinel
   reached `_run_baseline_compare` even with `-H old=...` given).
 
+  **A thirteenth finding, from a further Codex review round (P1), on the
+  twelfth finding's own fix — a real regression in the fix itself, caught
+  before merge.** `not baseline_headers` was the wrong signal: `cli_scan.py`
+  builds `baseline_header = header_both + header_old`, so a bare, *shared*
+  `-H api.h` (no `old=` scoping at all — the ordinary, most common
+  `scan --against` usage) already makes `baseline_headers` truthy and
+  identical in *content* to `headers`, since both draw from the same
+  `header_both` list. The twelfth finding's own fix therefore treated
+  every `scan --against` invocation with any headers at all as
+  "old-side-scoped" and fell back to the unfolded `compile_context` —
+  silently reintroducing this whole PR's own `NOT_COMPARABLE`/false-ABI-
+  diff bug for the common case, one commit after fixing the narrower
+  `-H old=PATH` case. Fixed by checking content equality instead of mere
+  truthiness: `not baseline_headers or list(baseline_headers) ==
+  list(headers)` — the fold is used whenever the old side's resolved
+  headers are the same as the candidate's (shared, or genuinely absent),
+  and only the caller's plain, unfolded context is used when they
+  actually diverge (a real `old=` override). Regression test:
+  `tests/test_cli_scan.py::test_baseline_compare_with_shared_bare_header_still_gets_folded_context`
+  (confirmed to fail against the pre-fix — twelfth-finding-only — code,
+  which forwarded `None` rather than the folded sentinel for a bare
+  shared `-H` with no `old=` at all).
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
