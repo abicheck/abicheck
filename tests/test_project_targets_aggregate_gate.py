@@ -69,6 +69,17 @@ def test_aggregate_gate_partial_block_round_trips() -> None:
     assert config.to_dict()["aggregate"] == {"gate": {"missing_required": "warn"}}
 
 
+def test_aggregate_gate_partial_block_unexpected_target_only_round_trips() -> None:
+    """The other half of the partial-block case above: `missing_required`
+    unset, only `unexpected_target` set -- `AggregateGateSpec.to_dict()`'s
+    two `is not None` checks are independent, so a test covering only one
+    ordering leaves the other branch unexercised."""
+    raw = {"aggregate": {"gate": {"unexpected_target": "fail"}}}
+    config = ProjectTargetsConfig.from_dict(raw)
+    assert config.aggregate_gate == AggregateGateSpec(unexpected_target="fail")
+    assert config.to_dict()["aggregate"] == {"gate": {"unexpected_target": "fail"}}
+
+
 def test_no_aggregate_block_leaves_aggregate_gate_none() -> None:
     config = ProjectTargetsConfig.from_dict({})
     assert config.aggregate_gate is None
