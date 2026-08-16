@@ -181,6 +181,26 @@ def _run_bash_script(
         os.unlink(script_path)
 
 
+def _mark_executable(path: Path) -> None:
+    """Mark ``path`` executable via bash's own ``chmod +x``, not Python's
+    native ``os.chmod(0o755)``.
+
+    On a Windows Git-Bash host, Python's native ``os.chmod`` does not
+    reliably set the executable bit Git-Bash's own PATH search (``command
+    -v``, and an implicit lookup of an unqualified command name) checks
+    before considering a candidate file runnable -- so a fake shim written
+    and chmod'd from Python could be silently invisible to that search,
+    letting the real system binary run instead of the fake one a test
+    installs to stand in for it (Codex review, fresh evidence)."""
+    result = subprocess.run(
+        [_bash_executable(), "-c", 'chmod +x "$1"', "_", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def _run_import_via_real_mechanism(
     cwd: Path, extra_env: dict[str, str] | None = None, *, use_the_fix: bool = True
 ) -> subprocess.CompletedProcess[str]:
@@ -356,7 +376,14 @@ class TestPySafeDirFailsClosedWhenMktempFails:
         fake_bin.mkdir()
         fake_mktemp = fake_bin / "mktemp"
         fake_mktemp.write_text("#!/bin/bash\nexit 1\n")
-        fake_mktemp.chmod(0o755)
+        # Marked executable via bash's own `chmod +x`, not Python's
+        # `os.chmod(0o755)` -- on a Windows Git-Bash host, Python's native
+        # `os.chmod` does not reliably set the executable bit Git-Bash's
+        # own PATH search (`command -v` and this shim's implicit lookup of
+        # `mktemp`) checks, so the fake shim would be silently invisible to
+        # PATH resolution and the real system `mktemp` would run instead
+        # (Codex review, fresh evidence).
+        _mark_executable(fake_mktemp)
 
         script = _py_safe_dir_source() + 'echo "UNREACHABLE: $_PY_SAFE_DIR"\n'
         env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
@@ -410,11 +437,20 @@ class TestPyBinHasAbicheckFallback:
             '#!/bin/bash\nexec "$(command -v python3.11 || command -v python3)" '
             '-S -c \'raise SystemExit("no abicheck here")\' "$@"\n'
         )
-        fake_python3.chmod(0o755)
+        _mark_executable(fake_python3)
+        # `_py_bin_has_abicheck_source()`'s check runs as
+        # `(cd "$_PY_SAFE_DIR" && ...)` -- the real script always has
+        # `$_PY_SAFE_DIR` already set by this point (its own creation is
+        # immediately above this check, per run.sh's comment). Reproducing
+        # that here too, rather than leaving `$_PY_SAFE_DIR` unset (`cd ""`
+        # is a harmless no-op on some bash builds but not a guaranteed one
+        # across platforms -- Codex review, fresh evidence), so this test
+        # exercises the same control flow the real invocation does.
         script = (
             '_PY_BIN="'
             + str(fake_python3)
             + '"\n'
+            + _py_safe_dir_source()
             + self._py_bin_has_abicheck_source()
             + 'echo "HAS_ABICHECK=$_PY_BIN_HAS_ABICHECK"\n'
         )
@@ -427,15 +463,29 @@ class TestPyBinHasAbicheckFallback:
     def test_real_interpreter_has_abicheck(self) -> None:
         """Proves the test above isn't vacuously passing -- the identical
         check, run against the real, ambient python3 (which does have
-        abicheck importable in this test environment), resolves true."""
+        abicheck importable in this test environment), resolves true.
+
+        Sets up ``$_PY_SAFE_DIR`` via the real mechanism first (see the
+        comment on the sibling test above) -- omitting it left the check's
+        ``cd "$_PY_SAFE_DIR"`` running against an *unset* variable, which
+        is a harmless no-op on some bash builds but not guaranteed to be on
+        every platform; if ``cd`` there fails, the whole
+        ``(cd ... && ... -c "import abicheck")`` subshell fails closed
+        regardless of whether the resolved interpreter can actually import
+        abicheck, which is indistinguishable from this check's own
+        genuine "cannot import abicheck" case from the test's own
+        assertions alone (Codex review, fresh evidence)."""
         script = (
             '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + _py_safe_dir_source()
             + self._py_bin_has_abicheck_source()
             + 'echo "HAS_ABICHECK=$_PY_BIN_HAS_ABICHECK"\n'
         )
         result = _run_bash_script(script, timeout=30)
         assert result.returncode == 0, result.stderr
-        assert "HAS_ABICHECK=true" in result.stdout
+        assert "HAS_ABICHECK=true" in result.stdout, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
 
 
 class TestPySafeDirCleanedUpOnEarlyExit:
@@ -451,13 +501,32 @@ class TestPySafeDirCleanedUpOnEarlyExit:
     already covers ``$_PY_SAFE_DIR`` too.
     """
 
+    @staticmethod
+    def _bash_dir_exists(created_dir: str) -> bool:
+        """Check existence via bash's own ``[ -d ... ]`` rather than
+        Python's ``pathlib.Path`` -- ``created_dir`` is whatever bash's
+        ``mktemp -d`` printed, which on a Windows Git-Bash host is always
+        the MSYS POSIX form (``/c/Users/...``). Python's native
+        ``WindowsPath`` cannot parse that form -- it reads it as
+        drive-relative to the *current* drive, silently checking a
+        different, usually nonexistent, location. That makes a "does not
+        exist" assertion pass vacuously either way, so only bash itself can
+        answer this (Codex review, fresh evidence)."""
+        result = subprocess.run(
+            [_bash_executable(), "-c", 'test -d "$1"', "_", created_dir],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+
     def test_directory_is_removed_on_an_early_exit(self, tmp_path: Path) -> None:
         script = _py_safe_dir_source() + 'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'
         result = _run_bash_script(script, timeout=30)
         assert result.returncode == 0, result.stderr
         line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DIR="))
         created_dir = line[len("DIR=") :]
-        assert not Path(created_dir).exists()
+        assert not self._bash_dir_exists(created_dir)
 
     def test_without_the_early_trap_the_directory_actually_leaks(
         self, tmp_path: Path
@@ -474,9 +543,12 @@ class TestPySafeDirCleanedUpOnEarlyExit:
         line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DIR="))
         created_dir = line[len("DIR=") :]
         try:
-            assert Path(created_dir).exists()
+            assert self._bash_dir_exists(created_dir)
         finally:
-            subprocess.run(["rm", "-rf", created_dir], timeout=10)
+            subprocess.run(
+                [_bash_executable(), "-c", 'rm -rf "$1"', "_", created_dir],
+                timeout=10,
+            )
 
 
 class TestPyBinResolvedAsAbsolute:
@@ -495,18 +567,36 @@ class TestPyBinResolvedAsAbsolute:
         tools.mkdir()
         fake_python3 = tools / "python3"
         fake_python3.write_text('#!/bin/bash\necho "ARGS: $@"\n')
-        fake_python3.chmod(0o755)
+        _mark_executable(fake_python3)
 
-        script = _py_bin_resolution_source() + 'echo "PY_BIN=$_PY_BIN"\n'
+        # `$_PY_BIN` is anchored via bash's own `$PWD` (always the MSYS
+        # POSIX form on a Windows Git-Bash host -- e.g. `/c/Users/...` --
+        # never the native backslash form Python's `pathlib.Path` would
+        # print there), so both "is it absolute" and "does it name the same
+        # file as `tools/python3`" are answered inside the same bash
+        # process instead of crossing into Python's own path
+        # interpretation, which cannot parse an MSYS path on a native
+        # Windows interpreter (Codex review, fresh evidence).
+        script = (
+            _py_bin_resolution_source()
+            + 'echo "PY_BIN=$_PY_BIN"\n'
+            + 'if _is_path_already_qualified "$_PY_BIN"; then\n'
+            + '  echo "QUALIFIED=true"\n'
+            + "else\n"
+            + '  echo "QUALIFIED=false"\n'
+            + "fi\n"
+            + 'if [ "$_PY_BIN" -ef "tools/python3" ]; then\n'
+            + '  echo "SAME_FILE=true"\n'
+            + "else\n"
+            + '  echo "SAME_FILE=false"\n'
+            + "fi\n"
+        )
         env = {**os.environ, "PATH": f"tools{os.pathsep}{os.environ.get('PATH', '')}"}
         result = _run_bash_script(script, env=env, cwd=tmp_path, timeout=30)
         assert result.returncode == 0, result.stderr
-        line = next(
-            ln for ln in result.stdout.splitlines() if ln.startswith("PY_BIN=")
-        )
-        py_bin = line[len("PY_BIN=") :]
-        assert Path(py_bin).is_absolute()
-        assert Path(py_bin) == fake_python3
+        assert "PY_BIN=" in result.stdout
+        assert "QUALIFIED=true" in result.stdout
+        assert "SAME_FILE=true" in result.stdout
 
     def test_without_the_fix_relative_path_actually_reproduces(
         self, tmp_path: Path
@@ -519,7 +609,7 @@ class TestPyBinResolvedAsAbsolute:
         tools.mkdir()
         fake_python3 = tools / "python3"
         fake_python3.write_text('#!/bin/bash\necho "ARGS: $@"\n')
-        fake_python3.chmod(0o755)
+        _mark_executable(fake_python3)
 
         script = (
             '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
