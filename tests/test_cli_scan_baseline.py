@@ -311,6 +311,8 @@ class TestBaselineSummaryKeysArePinned:
             "policy_overrides",
             "policy_reclassify",
             "policy_file",
+            "analysis_assurance",
+            "analysis_assurance_exit_contribution",
         }
     )
 
@@ -348,6 +350,7 @@ class TestBaselineSummaryKeysArePinned:
         ]
         from pathlib import Path
 
+        from abicheck.analysis_assurance import AnalysisAssurance
         from abicheck.checker_policy import Verdict
         from abicheck.policy_file import PolicyFile
         from abicheck.reclassify import ReclassifyRule
@@ -380,6 +383,12 @@ class TestBaselineSummaryKeysArePinned:
             suppressed_changes=suppressed,
             policy="strict_abi",
             policy_file=policy_file,
+            # P0.4: `analysis_assurance_report_dict` (`analysis_assurance.py`)
+            # only emits the key for a real `AnalysisAssurance` instance
+            # (`isinstance` check) -- a plain `SimpleNamespace`/dict fixture
+            # would silently leave this branch unexercised the same way an
+            # absent attribute does (Codex review).
+            analysis_assurance=AnalysisAssurance(status="partial"),
         )
 
     def test_every_emitted_key_is_pinned(self) -> None:

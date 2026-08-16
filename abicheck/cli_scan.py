@@ -754,6 +754,13 @@ _COMPARISON_ONLY_FLAGS = {
     # `_baseline_summary` builds -- without a baseline there is no such
     # summary to cap.
     "max_findings": "--max-findings",
+    # P0.4: the exit-code floor `--require-complete-analysis` imposes is
+    # folded alongside `--against`'s own verdict/coverage exit code
+    # (`_run_baseline_compare`) -- without a baseline there is no such
+    # exit code to floor. `analysis_assurance` is still always computed and
+    # available in --format json for an audit-only scan; only the flag that
+    # makes it *gate* requires a comparison.
+    "require_complete_analysis": "--require-complete-analysis",
 }
 
 
@@ -1221,6 +1228,18 @@ def _discover_scan_project_config(
     "still report a kind -> count breakdown of what was cut.",
 )
 @click.option(
+    "--require-complete-analysis", "require_complete_analysis",
+    is_flag=True, default=False,
+    help="With --against: fail the build when analysis_assurance.status is "
+    "not 'complete', independent of the compatibility verdict. Contributes "
+    "exit 1, folded with max the same way the --contract coverage axis is "
+    "(ADR-049 Phase 7): it raises a clean 0 to 1 and never lowers a 2/4/5/6. "
+    "Mirrors `compare --require-complete-analysis` (P0.4). Without the "
+    "flag, analysis_assurance is still always computed and reported in "
+    "--format json, it just never affects the exit code. See "
+    "docs/reference/exit-codes.md.",
+)
+@click.option(
     "--abi3",
     "abi3",
     default=None,
@@ -1353,6 +1372,7 @@ def scan_cmd(
     changed_paths_opt: tuple[str, ...],
     budget: str | None,
     max_findings: int | None,
+    require_complete_analysis: bool,
     abi3: str | None,
     dry_run: bool,
     crosschecks: tuple[str, ...],
@@ -1875,6 +1895,7 @@ def scan_cmd(
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,
             max_findings=max_findings,
+            require_complete_analysis=require_complete_analysis,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)

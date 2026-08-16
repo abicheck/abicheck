@@ -335,6 +335,16 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
             node.get("contract_coverage_exit_contribution")
         ):
             node["contract_coverage_exit_contribution"] = 0
+        # P0.4's orthogonal analysis-assurance contribution is the exact
+        # sibling of the contract-coverage one just above -- a second,
+        # independent way this report can raise an exit code, so "advisory
+        # means this check gates nothing" has to hold on this axis too, not
+        # just the coverage one. Same block, same validity check (both are
+        # plain 0/1 floors), same fail-open reasoning.
+        if _is_valid_coverage_contribution(
+            node.get("analysis_assurance_exit_contribution")
+        ):
+            node["analysis_assurance_exit_contribution"] = 0
 
 
 def _zero_nested_severity_gates(report: dict[str, Any]) -> None:

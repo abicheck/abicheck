@@ -921,6 +921,7 @@ def _render_compare_report(
     demangle: bool, contract_evaluation: bool,
     old_build_info: Path | None, new_build_info: Path | None,
     old_sources: Path | None, new_sources: Path | None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render one compare report and fold every post-render section into it.
 
@@ -940,6 +941,7 @@ def _render_compare_report(
         severity_config=severity_config,
         demangle=demangle,
         contract_evaluation=contract_evaluation,
+        require_complete_analysis=require_complete_analysis,
     )
     text = _fold_scoped_compat_into_text(
         text, fmt, result,
@@ -1267,6 +1269,7 @@ def _report_compare_result(
             contract_evaluation=contract_evaluation,
             old_build_info=old_build_info, new_build_info=new_build_info,
             old_sources=old_sources, new_sources=new_sources,
+            require_complete_analysis=require_complete_analysis,
         ),
     )
 
@@ -1294,6 +1297,7 @@ def _report_compare_result(
                 contract_evaluation=contract_evaluation,
                 old_build_info=old_build_info, new_build_info=new_build_info,
                 old_sources=old_sources, new_sources=new_sources,
+                require_complete_analysis=require_complete_analysis,
             ),
         )
 

@@ -871,6 +871,7 @@ def _render_output(
     severity_config: SeverityConfig | None = None,
     demangle: bool = False,
     contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -893,6 +894,7 @@ def _render_output(
         demangle=demangle,
         contract_evaluation=contract_evaluation,
         show_recommendation=True,
+        require_complete_analysis=require_complete_analysis,
     )
 
 

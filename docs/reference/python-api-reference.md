@@ -386,6 +386,7 @@ Render comparison result in the requested output format.
 | `contract_evaluation` | `bool` | `False` |
 | `stat` | `bool` | `False` |
 | `show_recommendation` | `bool` | `False` |
+| `require_complete_analysis` | `bool` | `False` |
 
 **Returns:** `str`
 

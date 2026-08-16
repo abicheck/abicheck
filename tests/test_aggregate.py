@@ -955,6 +955,7 @@ class TestProfileMatrix:
                 "incomplete_profiles": [],
                 "unanalyzed_profiles": [],
                 "contract_incomplete_profiles": [],
+                "analysis_incomplete_profiles": [],
                 "verdict_by_profile": {
                     "linux-clang20": "COMPATIBLE",
                     "linux-gcc14": "BREAKING",
