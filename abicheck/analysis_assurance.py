@@ -1346,6 +1346,21 @@ def compute_analysis_assurance(
     # -- DWARF-context status --------------------------------------------------
     dwarf_context_status, dw_notes = _dwarf_context_status(old, new)
     notes.extend(dw_notes)
+    # Symmetric absence is still incomplete for a binary comparison. ELF and
+    # header evidence cannot establish layout, value-ABI, or calling-convention
+    # compatibility when neither artifact has usable DWARF. Keep this orthogonal
+    # to the compatibility verdict: callers that need a gate opt into
+    # --require-complete-analysis.
+    dwarf_evidence_missing = (
+        l0_context_status == "clean" and dwarf_context_status == "not_evaluated"
+    )
+    if dwarf_evidence_missing:
+        notes.append(
+            "binary artifacts were compared without DWARF layout/value-ABI "
+            "evidence; layout and calling-convention detector families were "
+            "not fully evaluable, so a clean verdict covers only available "
+            "ELF/header evidence"
+        )
 
     # -- L3 build-evidence context status ---------------------------------------
     l3_context_status, l3_notes = _l3_context_status(old_pack, new_pack)
@@ -1418,6 +1433,7 @@ def compute_analysis_assurance(
         l0_context_status == "asymmetric"
         or header_context_status in ("drift_detected", "asymmetric")
         or dwarf_context_status == "asymmetric"
+        or dwarf_evidence_missing
         or l3_context_status == "asymmetric"
         or graph_completeness in ("degraded", "narrowed", "unknown")
         or (tu_accounting.failed or 0) > 0
