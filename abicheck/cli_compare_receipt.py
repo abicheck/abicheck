@@ -421,10 +421,22 @@ def resolve_release_pack_application(
     this returns the pack's *contribution* for the caller to fold in later,
     once per library, rather than one merged object upfront.
 
-    Rejects a ``kind: gate`` pack outright (``gate_supported=False``, mirroring
-    ``cli_scan.py``'s identical stance): a gate pack's ``gate.exit_code_scheme``/
-    ``gate.severity.*`` need their own resolved gate-options wiring the release
-    fan-out does not have yet (CLI cleanup phase two, "PR B").
+    **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
+    The release fan-out still has no ``GateOptions``-shaped object of its
+    own -- ``compare-release``'s severity/exit-code-scheme resolution
+    (``_resolve_release_severity_config`` and friends, in
+    ``cli_compare_release_helpers.py``) is a set of raw CLI-or-config
+    strings, re-derived at several call sites, not one resolved object the
+    way ``ResolvedCompareConfig`` is for a single-pair ``compare``. So the
+    returned ``PackApplication``'s ``exit_code_scheme``/``severity_levels``
+    (already populated by :func:`~abicheck.pack_application.pack_application`
+    regardless of ``gate_supported``) are folded into those raw strings by
+    ``cli_compare_release_helpers.apply_release_gate_pack`` -- the same
+    "smallest additive fold point" discipline slice 1 used for
+    ``policy.overrides``/``surface.internal_namespaces``, not the full
+    ``GateOptions`` unification PR B's own plan section still lists as open.
+    ``scan --against`` is unaffected: it still rejects a ``kind: gate`` pack
+    (``cli_scan.py``, unchanged by this slice).
 
     Also rejects ``contract.unresolved`` unconditionally -- not merely when
     ``contract_evaluation`` is false, the way :func:`~abicheck.
@@ -460,14 +472,12 @@ def resolve_release_pack_application(
 
     check_resolved_config_applies_packs(
         config,
-        gate_supported=False,
-        gate_reason=(
-            "the directory/package (release) fan-out does not yet fold a "
-            "gate pack's gate.* assignments the way `compare --pack` does "
-            "for a single-pair comparison; pass --severity-preset/.abicheck.yml "
-            "severity settings directly instead, or compare the specific "
-            "library individually with --pack"
-        ),
+        # `gate_supported` defaults to True: since CLI cleanup phase two "PR
+        # B" slice 2, the release fan-out folds a `kind: gate` pack's
+        # `exit_code_scheme`/`severity.*` into its own raw severity/exit-
+        # code-scheme inputs (`cli_compare_release_helpers.
+        # apply_release_gate_pack`) the same way `compare --pack` folds them
+        # into `ResolvedCompareConfig` -- see this function's own docstring.
         # `contract_evaluation=True` here is deliberate, not a copy-paste of
         # the release-wide value: it only widens what the *shared* resolver
         # accepts (so `--contract` genuinely unlocks `contract.unresolved`

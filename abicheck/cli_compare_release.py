@@ -67,6 +67,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_headers,
     _resolve_release_severity_config,
     _run_bundle_analysis,
+    apply_release_gate_pack,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -350,7 +351,11 @@ def _compare_one_library(
         # abicheck bug), so it gets its own "not_comparable" verdict string
         # instead of falling into the same "ERROR"/exit-4 bucket a genuine
         # crash uses — see _RELEASE_VERDICT_ORDER's dedicated rank for it.
-        kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+        kind = (
+            "profile_mismatch"
+            if isinstance(exc, ProfileMismatchError)
+            else "scope_mismatch"
+        )
         if output_dir:
             from .schemas import REPORT_SCHEMA_VERSION
 
@@ -1091,7 +1096,10 @@ def _release_gating_buckets(
             policy_file=diff.policy_file,
         )
         categorized = categorize_changes(
-            diff.changes, policy=diff.policy, kind_sets=kind_sets, policy_file=diff.policy_file,
+            diff.changes,
+            policy=diff.policy,
+            kind_sets=kind_sets,
+            policy_file=diff.policy_file,
         )
         cat_changes_by_name = {
             "abi_breaking": categorized.abi_breaking,
@@ -1500,7 +1508,11 @@ def compare_release_cmd(
     with dedup_validate_overrides_warnings():
         # Validate suppression file early (before per-library loop)
         _validate_suppression_early(
-            suppress, policy, policy_file_path, strict_suppressions, require_justification
+            suppress,
+            policy,
+            policy_file_path,
+            strict_suppressions,
+            require_justification,
         )
 
         try:
@@ -1544,6 +1556,34 @@ def compare_release_cmd(
 
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
+
+            # CLI cleanup phase two, "PR B" slice 2: fold a selected `kind:
+            # gate` pack's gate.exit_code_scheme/gate.severity.<category>
+            # into these same raw inputs, once, before every downstream
+            # consumer below (this function's own severity_config, the
+            # per-library JSON write inside _compare_release_libraries,
+            # _compute_release_severity_exit_code,
+            # _fold_release_global_severity) reads them — mirroring the
+            # `.abicheck.yml`-only `severity_preset = "default"` reassignment
+            # a few lines below, which the same downstream consumers already
+            # rely on seeing applied exactly once. A no-op without --pack or
+            # without a selected gate pack.
+            (
+                release_exit_code_scheme,
+                severity_preset,
+                severity_abi_breaking,
+                severity_potential_breaking,
+                severity_quality_issues,
+                severity_addition,
+            ) = apply_release_gate_pack(
+                pack_application,
+                release_exit_code_scheme=release_exit_code_scheme,
+                severity_preset=severity_preset,
+                severity_abi_breaking=severity_abi_breaking,
+                severity_potential_breaking=severity_potential_breaking,
+                severity_quality_issues=severity_quality_issues,
+                severity_addition=severity_addition,
+            )
 
             # Resolved before the compare pass (its inputs are plain CLI values, no
             # dependency on compare results) so --annotate's GitHub annotations —
@@ -1631,7 +1671,9 @@ def compare_release_cmd(
                     for entry in library_results
                     if isinstance(entry, dict)
                     and isinstance(
-                        contribution := entry.get("contract_coverage_exit_contribution", 0),
+                        contribution := entry.get(
+                            "contract_coverage_exit_contribution", 0
+                        ),
                         int,
                     )
                 ),
