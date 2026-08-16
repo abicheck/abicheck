@@ -31,9 +31,11 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from abicheck.checker import compare
 from abicheck.cli import main
 from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
 
 
@@ -286,3 +288,82 @@ class TestCompareExitDecisionIntegration:
         assert report["exit"]["code"] == res.exit_code
         assert report["exit"]["reasons"] == ["scoped_gate"]
         assert report["exit"]["compatibility_contribution"] == res.exit_code
+
+    def test_scoped_clean_gate_does_not_mask_the_real_assurance_reason(
+        self, tmp_path: Path,
+    ) -> None:
+        """Codex review: an earlier revision of the scoped fix read the
+        already-*folded* ``result.scoped_exit_code`` as the compatibility
+        contribution, so a clean scoped gate (0) floored to 1 purely by
+        ``--require-complete-analysis`` still reported ``reasons:
+        ["scoped_gate"]`` and ``compatibility_contribution: 1`` -- as if the
+        scoped gate itself had determined the exit, when it contributed
+        nothing. The *pre-fold* scoped contribution must be what's compared
+        against the other axes, so a clean scoped gate correctly stays out
+        of ``reasons`` when assurance alone is what floored the exit.
+        """
+        common = {"library": "libfoo.so.1", "elf_only_mode": True}
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old_p, new_p = _write(
+            tmp_path,
+            AbiSnapshot(version="1.0", functions=fns, **common),
+            AbiSnapshot(version="2.0", functions=fns, **common),
+        )
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--required-symbol", "_Z5pub_av",  # survives -- clean scoped gate
+                "--format", "json",
+                "--require-complete-analysis",  # elf-only pair: incomplete
+            ],
+        )
+        assert res.exit_code == 1, res.output
+        report = json.loads(res.stdout[res.stdout.index("{") :])
+        assert report["exit"]["code"] == 1
+        assert report["exit"]["code"] == res.exit_code
+        assert report["exit"]["reasons"] == ["analysis_assurance"]
+        assert report["exit"]["compatibility_contribution"] == 0
+        assert report["exit"]["analysis_assurance_contribution"] == 1
+
+
+class TestIncludeExitDecisionFlag:
+    """Codex review: ``compat/cli.py``'s own ``-report-format json`` reuses
+    this exact ``reporter.to_json`` function, but ``compat check``'s real
+    process exit follows a different, ABICC-style 0/1/2 scheme
+    (``_classify_compat_error_exit_code``) than the native
+    ``legacy_exit_code``/``compute_exit_code`` the ``exit`` block computes --
+    emitting it unconditionally would report a code that disagrees with the
+    actual ``compat check`` exit for the same run. ``include_exit_decision``
+    is the flag that keeps them apart; ``compat/cli.py``'s own call site
+    passes ``False``, and these tests pin `to_json` itself -- the real
+    function both callers share -- rather than only the CLI wrapper.
+    """
+
+    def test_default_includes_the_exit_block(self) -> None:
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        report = json.loads(to_json(result))
+        assert "exit" in report
+        assert report["exit"]["code"] == 4
+
+    def test_include_exit_decision_false_omits_it(self) -> None:
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        report = json.loads(to_json(result, include_exit_decision=False))
+        assert "exit" not in report
+        # Every other field this function always writes stays present --
+        # this flag turns off exactly one block, nothing else.
+        assert report["verdict"] == "BREAKING"
+        assert "changes" in report
+
+    def test_include_exit_decision_false_also_applies_to_leaf_and_root_cause(
+        self,
+    ) -> None:
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        for mode in ("leaf", "root-cause"):
+            report = json.loads(
+                to_json(result, report_mode=mode, include_exit_decision=False)
+            )
+            assert "exit" not in report, mode

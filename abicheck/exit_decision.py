@@ -118,24 +118,33 @@ def resolve_exit_decision(
     compatibility_contribution: int,
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
+    compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the three already-computed axis contributions into one decision.
 
     *compatibility_contribution* is the caller's own pre-computed
     compatibility-gate exit code -- either `severity.legacy_exit_code`
     (verdict-based, no severity config in effect) or
-    `severity.compute_exit_code` (a severity map is in effect). This
-    function does not choose between the two; that selection is exactly
-    what PR 4/G2 still has to consolidate into one automatic algorithm.
+    `severity.compute_exit_code` (a severity map is in effect), or (Codex
+    review) the *pre-fold* `--used-by`/`--required-symbol(s)` scoped gate
+    contribution -- never an already-folded value, or a tie with coverage/
+    assurance would be silently hidden behind whichever reason this slot is
+    labelled. This function does not choose between the unscoped
+    algorithms; that selection is exactly what PR 4/G2 still has to
+    consolidate into one automatic algorithm.
     *contract_coverage_contribution*/*analysis_assurance_contribution*
     default to ``0`` (their "never asked the question" value, matching
     `contract_coverage_exit.coverage_exit_floor`/`analysis_assurance.
     analysis_assurance_exit_contribution`'s own fail-open defaults) so a
     caller with neither `--contract` nor `--require-complete-analysis` in
-    effect can omit both.
+    effect can omit both. *compatibility_reason* names which
+    :class:`ExitReason` this slot represents -- `COMPATIBILITY_GATE` by
+    default, or `SCOPED_GATE` when the caller's compatibility contribution
+    is the scoped application/plugin-host gate rather than the full-library
+    one; every other axis's reason is unaffected either way.
     """
     contributions = {
-        ExitReason.COMPATIBILITY_GATE: compatibility_contribution,
+        compatibility_reason: compatibility_contribution,
         ExitReason.CONTRACT_COVERAGE: contract_coverage_contribution,
         ExitReason.ANALYSIS_ASSURANCE: analysis_assurance_contribution,
     }
@@ -178,20 +187,25 @@ def resolve_compare_exit_decision(
     compatibility axis entirely (Codex review, fresh evidence).**
     `cli_compare_helpers._apply_scoped_gating` floors the *full-library*
     verdict/severity gate this function would otherwise compute to the
-    scoped application/plugin-host contract's own result, already folded
-    with the coverage/assurance floors, and persists it onto
-    `result.scoped_exit_code` before any report renders -- `cli.py` itself
-    exits on that value directly (`sys.exit(scoped_exit_code)`), never
-    reaching `_exit_with_severity_or_verdict`/this function's own
-    compatibility-axis computation. An earlier revision of this function
-    ignored that and derived `compatibility_contribution` from
-    `result.verdict`/severity regardless -- reporting the full-library
-    gate's code (which is informational-only under scoping) while the real
-    process exited on the scoped one, so a report consumer trusting this
-    field would disagree with the CLI. When `scoped_exit_code` is set, it
-    *is* the decision: reported directly (already-folded, so not re-folded
-    through `resolve_exit_decision`) under its own `SCOPED_GATE` reason,
-    never recomputed from the unscoped verdict.
+    scoped application/plugin-host contract's own result -- `cli.py` itself
+    exits on the (separately, already-folded) `result.scoped_exit_code`
+    directly (`sys.exit(scoped_exit_code)`), never reaching
+    `_exit_with_severity_or_verdict`/this function's own compatibility-axis
+    computation. An earlier revision of this function ignored that and
+    derived `compatibility_contribution` from `result.verdict`/severity
+    regardless -- reporting the full-library gate's code (informational-only
+    under scoping) while the real process exited on the scoped one.
+
+    **A later revision fixed that but introduced a second bug (Codex
+    review): it read the already-folded `result.scoped_exit_code` as the
+    compatibility contribution, so a tie with coverage/assurance was hidden
+    behind a `SCOPED_GATE` reason that may not have contributed at all.**
+    `result.scoped_compatibility_contribution` (`cli_compare_helpers`,
+    persisted immediately before that fold runs) is the *pre-fold* scoped
+    value -- passed through the same `resolve_exit_decision` every other
+    caller uses, with `compatibility_reason=SCOPED_GATE`, so a genuine tie
+    between the scoped gate and coverage/assurance is named correctly
+    instead of always attributed to scoping.
     """
     from .analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
@@ -204,15 +218,14 @@ def resolve_compare_exit_decision(
 
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     if scoped_exit_code is not None:
-        reasons: tuple[ExitReason, ...] = (
-            (ExitReason.SCOPED_GATE,) if scoped_exit_code else (ExitReason.CLEAN,)
+        scoped_compatibility_contribution = getattr(
+            result, "scoped_compatibility_contribution", scoped_exit_code,
         )
-        return ExitDecision(
-            code=scoped_exit_code,
-            reasons=reasons,
-            compatibility_contribution=scoped_exit_code,
+        return resolve_exit_decision(
+            compatibility_contribution=scoped_compatibility_contribution,
             contract_coverage_contribution=coverage_contribution,
             analysis_assurance_contribution=assurance_contribution,
+            compatibility_reason=ExitReason.SCOPED_GATE,
         )
 
     if scheme == "severity":
