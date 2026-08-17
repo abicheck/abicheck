@@ -1071,21 +1071,27 @@ class TestCompareDispatch:
         assert code != 0
         assert "--exit-code-scheme is not supported" in (out + err)
 
-    def test_write_rejected_on_set_inputs(self, tmp_path: Path) -> None:
-        # --write reuses the single comparison's DiffResult, which
-        # doesn't exist as a single object across the release fan-out.
+    def test_write_now_supported_on_set_inputs(self, tmp_path: Path) -> None:
+        # CLI cleanup phase two, PR E: --write now renders its secondary
+        # format from the same already-computed per-library results the
+        # release fan-out's primary format uses -- no second per-library
+        # DiffResult needed. See test_compare_release.py's
+        # TestReleaseWriteSecondaryOutput for the fuller positive coverage
+        # (including the no-rerun assertion).
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
+        write_path = tmp_path / "sec.json"
         code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--write", f"json={tmp_path / 'sec.json'}",
+            "--write", f"json={write_path}",
         )
-        assert code != 0
-        assert "--write is not supported" in (out + err)
+        assert code == 0
+        assert write_path.is_file()
+        assert "--write is not supported" not in (out + err)
 
     def test_config_legacy_exit_scheme_applies_to_set_inputs(self, tmp_path: Path) -> None:
         # A project config may demote ABI-breaking findings to warnings for

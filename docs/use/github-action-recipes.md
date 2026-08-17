@@ -425,7 +425,7 @@ binding information alongside the regular ABI diff:
 
 ## Inline PR annotations
 
-Add `--annotate` to get ABI breaking changes as inline comments on the PR diff.
+Set `annotate: true` to get ABI breaking changes as inline comments on the PR diff.
 See [GitHub PR Annotations](annotations.md) for full details.
 
 ```yaml
@@ -434,7 +434,7 @@ See [GitHub PR Annotations](annotations.md) for full details.
           old-library: baseline.json
           new-library: build/libfoo.so
           new-header: include/foo.h
-          extra-args: --annotate
+          annotate: true
 ```
 
 ## Sticky PR comment

@@ -937,61 +937,8 @@ def _warn_all_suppressed(result: DiffResult) -> None:
         )
 
 
-def _maybe_emit_annotations(
-    result: DiffResult,
-    *,
-    annotate: bool,
-    annotate_additions: bool,
-    write_step_summary: bool = True,
-    severity_config: SeverityConfig | None = None,
-) -> None:
-    """Emit GitHub annotations to stderr if --annotate is set and running in CI."""
-    if not annotate:
-        return
-
-    from .annotations import (
-        collect_annotations,
-        emit_github_step_summary,
-        format_annotations,
-        is_github_actions,
-    )
-
-    if not is_github_actions():
-        return
-
-    annotations = collect_annotations(
-        result, annotate_additions=annotate_additions, severity_config=severity_config,
-    )
-    text = format_annotations(annotations)
-    if text:
-        click.echo(text, err=True)
-
-    if write_step_summary:
-        emit_github_step_summary(result, severity_config=severity_config)
 
 
-def _write_release_step_summary(text: str, fmt: str) -> None:
-    """Write a single step summary for compare-release when running in CI."""
-    import os as _os
-
-    summary_path = _os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
-        return
-
-    from .annotations import is_github_actions
-
-    if not is_github_actions():
-        return
-
-    # For markdown output, write the summary directly.
-    # For JSON, wrap it in a code block.
-    if fmt == "json":
-        content = f"```json\n{text}\n```\n"
-    else:
-        content = text + "\n"
-
-    with open(summary_path, "a", encoding="utf-8") as f:
-        f.write(content)
 
 
 def _write_or_echo(output: Path | None, text: str) -> None:
@@ -1130,11 +1077,10 @@ def _finalize_compare_result(
     result: DiffResult, old_input: Path, new_input: Path,
     *,
     show_redundant: bool, show_filtered: bool,
-    annotate: bool, annotate_additions: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression/annotation output."""
+    """Attach metadata and emit redundancy/filter/suppression output."""
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
 
@@ -1158,10 +1104,19 @@ def _finalize_compare_result(
         )
 
     _warn_all_suppressed(result)
-    _maybe_emit_annotations(
-        result, annotate=annotate, annotate_additions=annotate_additions,
-        severity_config=severity_config,
-    )
+    # CLI cleanup phase two, PR E removed --annotate/--annotate-additions,
+    # the flag that used to gate a $GITHUB_STEP_SUMMARY write here as a side
+    # effect. Making that write unconditional-in-CI instead (an earlier
+    # revision of this comment) was itself a real regression (Codex review,
+    # fresh evidence): when this command runs through the composite Action,
+    # the subprocess inherits GITHUB_ACTIONS=true/GITHUB_STEP_SUMMARY from
+    # the Action's own job, so an unconditional write here double-writes
+    # against action/run.sh's own, richer, INPUT_ADD_JOB_SUMMARY-gated job
+    # summary (or writes one even when a caller explicitly set
+    # add-job-summary: false). The CLI no longer writes a step summary on
+    # its own at all -- annotations_step_summary.emit_github_step_summary
+    # stays available as a public primitive for a caller invoking the CLI
+    # directly outside the composite Action to call itself.
 
 
 # ── ADR-037 D7: input-type dispatch for `compare` ────────────────────────────
@@ -1240,6 +1195,27 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
             "non-package) comparison. Choose one of: "
             f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
             f"a time (a single old/new .so pair) to use --format {fmt}."
+        )
+    # CLI cleanup phase two, PR E: --write now works for a release operand
+    # (compare_release_cmd's own secondary_output_options only declares
+    # json/markdown/junit, matching _RELEASE_FORMATS) -- but `compare`'s own
+    # --write accepts sarif/html/review too, parsed by its own Click
+    # callback *before* this dispatch ever runs, so an incompatible
+    # secondary format must be rejected here explicitly. Without this,
+    # compare_release_cmd's own callback is reached directly (not through
+    # Click's arg parsing, so its own decorator-level validation never
+    # runs) and _format_release_summary's fallback branch would silently
+    # render markdown to the requested sarif/html/review path instead of
+    # erroring.
+    secondary_fmt = kwargs.get("secondary_fmt")
+    if secondary_fmt is not None and secondary_fmt not in _RELEASE_FORMATS:
+        raise click.UsageError(
+            f"--write {secondary_fmt}=... is not available when comparing "
+            "directories or packages: sarif/html/review require a "
+            "single-pair (non-directory, non-package) comparison. Choose "
+            f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
+            "library at a time (a single old/new .so pair) to use --write "
+            f"{secondary_fmt}=..."
         )
     from .cli_compare_release import compare_release_cmd
 
@@ -1539,8 +1515,8 @@ def _embed_inline_source_side(
                 "--format markdown for a human alongside --write json=abi.json "
                 "for tooling). FORMAT is one of {formats}; PATH must differ from "
                 "--output/-o. Always renders the full, unfiltered report "
-                "(ignores --show-only). Not supported for "
-                "directory/package (release) comparisons.",
+                "(ignores --show-only). For a directory/package (release) "
+                "comparison, only json/markdown/junit are available.",
 )
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review output (default "
@@ -1624,13 +1600,6 @@ def _embed_inline_source_side(
                    "--format sarif keeps its normal one-result-per-finding "
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
-@click.option("--annotate", is_flag=True, default=False,
-              help="Emit GitHub Actions workflow command annotations to stderr. "
-                   "Annotations appear as inline comments on PR diffs. "
-                   "Only effective when GITHUB_ACTIONS=true.")
-@click.option("--annotate-additions", is_flag=True, default=False,
-              help="Include additions/compatible changes as ::notice annotations "
-                   "(requires --annotate).")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.

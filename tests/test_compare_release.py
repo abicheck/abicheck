@@ -464,9 +464,12 @@ class TestDirVsDir:
         its `augment_usage_errors` wrapper so the formatted CLI error got a
         "Usage: ..." header; `_dispatch_release_compare` now does that
         backfill by hand -- this proves a validation error raised inside the
-        release engine (`--annotate-additions` without `--annotate`) still
-        exits 64 with the same "Usage:" header through a directory compare,
-        not just a degraded one-line "Error: ..." message."""
+        release engine (`reject_incoherent_secondary_output`'s "two reports
+        aimed at the same file" check -- CLI cleanup phase two, PR E's
+        earlier `--annotate-additions` trigger for this same test was
+        removed along with the flag itself) still exits 64 with the same
+        "Usage:" header through a directory compare, not just a degraded
+        one-line "Error: ..." message."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -474,15 +477,17 @@ class TestDirVsDir:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
+        same_path = tmp_path / "out.json"
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
-            "--annotate-additions",
+            "-o", str(same_path),
+            "--write", f"json={same_path}",
         )
         assert code == 64
         assert "Usage:" in out
-        assert "--annotate-additions requires --annotate" in out
+        assert "--write's PATH must differ from --output/-o" in out
 
     def test_json_output_multi(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

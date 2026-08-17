@@ -37,6 +37,7 @@ from abicheck.cli_compare_release import (
     _compare_one_library,
     _finalize_release_output,
     _format_release_json,
+    _strip_diff_results_and_adjust_verdict,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -154,6 +155,90 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
     assert entry["contract_coverage_failure_count"] == 0
 
 
+def test_compare_one_library_stashes_old_snapshot_only_when_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: `_old_snapshot` (added for a secondary
+    JUnit render to read straight off the primary pass, see
+    `_compare_one_library`'s own docstring) must not be stashed on every
+    release entry unconditionally -- an `AbiSnapshot` can be large, and
+    every entry in `library_results` is held until the whole release
+    finishes, so an unconditional stash would grow peak memory by every
+    library's old snapshot even for the common markdown/JSON-only case
+    that never reads it. Gated on `collect_diff_results`, the same flag
+    that already gates whether `_compare_release_libraries` reads it back.
+    """
+    from abicheck.api_types import CompareResult
+    from abicheck.checker import DiffResult, Verdict
+
+    old_path = tmp_path / "libfoo.so.1"
+    new_path = tmp_path / "libfoo.so.2"
+    old_snap = _snap("1.0")
+    new_snap = _snap("1.0")
+
+    def _fake_run_compare_pair(*_args: object, **_kwargs: object) -> CompareResult:
+        result = DiffResult(
+            old_version="1.0", new_version="1.0", library="libfoo.so",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
+
+    monkeypatch.setattr(
+        "abicheck.cli_compare_release._run_compare_pair", _fake_run_compare_pair
+    )
+    common = (
+        {"libfoo.so": old_path}, {"libfoo.so": new_path}, None, None,
+        lambda _old, _dbg: None, [], [], [], [], "1.0", "1.0", "c",
+        None, "strict_abi", None, None,
+    )
+    default_entry = _compare_one_library("libfoo.so", *common)
+    assert "_old_snapshot" not in default_entry
+
+    junit_entry = _compare_one_library(
+        "libfoo.so", *common, collect_diff_results=True,
+    )
+    assert junit_entry["_old_snapshot"] is old_snap
+
+
+def test_strip_diff_results_builds_annotations_only_when_requested() -> None:
+    """Codex review, fresh evidence: the uncapped `annotations` array (only
+    a JSON render -- primary `--format json` or a secondary `--write
+    json=...` -- ever reads it) must not be built for every library
+    unconditionally, the same class of gap the sibling `_old_snapshot`
+    fix above closed for JUnit specifically -- every entry in
+    `library_results` is held until the whole release finishes.
+    """
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+    def _entry() -> dict[str, object]:
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        return {"library": "libfoo.so", "verdict": "BREAKING", "_diff_result": result}
+
+    markdown_entries = [_entry()]
+    _strip_diff_results_and_adjust_verdict(
+        markdown_entries,
+        [],
+        "BREAKING",
+        needs_annotations=False,
+    )
+    assert "annotations" not in markdown_entries[0]
+
+    json_entries = [_entry()]
+    _strip_diff_results_and_adjust_verdict(
+        json_entries,
+        [],
+        "BREAKING",
+        needs_annotations=True,
+    )
+    assert json_entries[0]["annotations"]
+
+
 def test_release_json_contract_coverage_failure_count_independent_of_warn() -> None:
     # CLI-audit P2 follow-up (Codex review): `contract.unresolved=warn`
     # zeroes the exit-code contribution while the failure count stays real
@@ -227,7 +312,6 @@ def test_release_stderr_announces_contract_coverage_for_non_json_format(capsys) 
             None,
             None,
             False,
-            False,
             contract_coverage_exit_contribution=1,
             contract_coverage_failure_count=1,
         )
@@ -269,7 +353,6 @@ def test_release_stderr_announces_warn_accepted_gap_as_advisory(capsys) -> None:
         None,
         None,
         False,
-        False,
         contract_coverage_exit_contribution=0,
         contract_coverage_failure_count=1,
     )
@@ -305,7 +388,6 @@ def test_release_stderr_no_notice_when_no_library_carries_per_library_key(
             None,
             None,
             None,
-            False,
             False,
             contract_coverage_exit_contribution=1,
             contract_coverage_failure_count=1,
@@ -343,7 +425,6 @@ def test_release_stderr_omits_contract_coverage_notice_for_json_format(capsys) -
             None,
             None,
             False,
-            False,
             contract_coverage_exit_contribution=1,
         )
     err = capsys.readouterr().err
@@ -377,7 +458,6 @@ def test_release_stderr_silent_when_contract_coverage_contribution_zero(capsys) 
         None,
         None,
         None,
-        False,
         False,
         contract_coverage_exit_contribution=0,
     )

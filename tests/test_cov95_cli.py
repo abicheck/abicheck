@@ -41,7 +41,6 @@ from abicheck.cli import (
     _expand_header_inputs,
     _load_probe_matrix_changes,
     _load_suppression_and_policy,
-    _maybe_emit_annotations,
     _merge_gcc_options,
     _resolve_linker_script,
     _resolve_per_side_options,
@@ -652,25 +651,6 @@ class TestExitSchemeHelpers:
         assert _exit_with_severity_or_verdict(result, None, "legacy") is None
 
 
-# ── _maybe_emit_annotations (cli.py:1329-1340) ────────────────────────────────
-
-
-class TestMaybeEmitAnnotations:
-    def test_not_annotate_noop(self) -> None:
-        result = DiffResult(old_version="1", new_version="2", library="x")
-        # Returns early at the `if not annotate` guard (no return value).
-        assert (
-            _maybe_emit_annotations(result, annotate=False, annotate_additions=False)
-            is None
-        )
-
-    def test_annotate_outside_ci_noop(self, monkeypatch, capsys) -> None:
-        # Force is_github_actions() False so the body short-circuits.
-        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-        result = DiffResult(old_version="1", new_version="2", library="x")
-        _maybe_emit_annotations(result, annotate=True, annotate_additions=False)
-        assert capsys.readouterr().err == ""
-
 
 # ── compare command CliRunner error/branch paths ──────────────────────────────
 
@@ -681,7 +661,13 @@ class TestCompareCommand:
         assert result.exit_code == 0
         assert "Compare two ABI surfaces" in result.output
 
-    def test_annotate_additions_requires_annotate(self, tmp_path: Path) -> None:
+    def test_annotate_flags_were_removed(self, tmp_path: Path) -> None:
+        # CLI cleanup phase two, PR E: --annotate/--annotate-additions no
+        # longer exist on `compare` at all -- the composite Action renders
+        # annotations itself from the persisted `annotations` report field
+        # (its own `annotate`/`annotate-additions` inputs), so both flags
+        # exit 64 with Click's own "No such option" rather than any
+        # abicheck-specific usage error.
         old_f = _write_snap(tmp_path / "old.json", _snap())
         new_f = _write_snap(tmp_path / "new.json", _snap())
         result = _invoke(
@@ -690,8 +676,8 @@ class TestCompareCommand:
             str(new_f),
             "--annotate-additions",
         )
-        assert result.exit_code != 0
-        assert "--annotate-additions requires --annotate" in result.output
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_compatible_snapshots(self, tmp_path: Path) -> None:
         snap = _snap()
@@ -1107,7 +1093,9 @@ class TestCompareReleaseCommand:
         result = _invoke("compare", "--help")
         assert result.exit_code == 0
 
-    def test_annotate_additions_requires_annotate(self, tmp_path: Path) -> None:
+    def test_annotate_flags_were_removed(self, tmp_path: Path) -> None:
+        # CLI cleanup phase two, PR E: see the single-pair sibling test's
+        # own comment for why this is now a plain Click usage error.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -1120,8 +1108,8 @@ class TestCompareReleaseCommand:
             str(new_dir),
             "--annotate-additions",
         )
-        assert result.exit_code != 0
-        assert "--annotate-additions requires --annotate" in result.output
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_markdown_output(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
@@ -2610,45 +2598,11 @@ class TestUsedByScopingWithSnapshotInputs:
         assert "requires OLD/NEW to be real library binaries" in (result.output or "")
 
 
-# ── cli.py: _write_release_step_summary (1351-1372) ───────────────────────────
-
-
-class TestWriteReleaseStepSummary:
-    def test_no_summary_path_noop(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-        # No GITHUB_STEP_SUMMARY → returns early without writing.
-        assert _write_release_step_summary("text", "markdown") is None
-
-    def test_not_github_actions_noop(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        summary = tmp_path / "summary.md"
-        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-        _write_release_step_summary("text", "markdown")
-        assert not summary.exists()
-
-    def test_markdown_written_in_ci(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        summary = tmp_path / "summary.md"
-        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        monkeypatch.setenv("GITHUB_ACTIONS", "true")
-        _write_release_step_summary("hello world", "markdown")
-        assert "hello world" in summary.read_text()
-
-    def test_json_wrapped_in_code_block(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        summary = tmp_path / "summary.md"
-        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        monkeypatch.setenv("GITHUB_ACTIONS", "true")
-        _write_release_step_summary('{"a": 1}', "json")
-        text = summary.read_text()
-        assert "```json" in text
-        assert '{"a": 1}' in text
+# _write_release_step_summary was removed (CLI cleanup phase two, PR E,
+# review follow-up): making the CLI's own step-summary write unconditional
+# in CI double-wrote against the composite Action's own job summary. The
+# CLI no longer writes one on its own at all -- see cli.py's
+# _finalize_compare_result comment.
 
 
 # ── cli.py: _log_one_side_debug / _log_debug_resolution (1435-1465) ───────────
@@ -3008,7 +2962,7 @@ class TestLinkerScriptKeywordSkip:
         assert resolved is None
 
 
-# ── cli.py: _resolve_debug_artifact / _maybe_emit_annotations in CI ───────────
+# ── cli.py: _resolve_debug_artifact ────────────────────────────────────────
 
 
 class TestResolveDebugArtifact:
@@ -3031,35 +2985,6 @@ class TestResolveDebugArtifact:
             None,
         )
         assert out is sentinel
-
-
-class TestMaybeEmitAnnotationsInCI:
-    def test_emits_when_in_github_actions(self, monkeypatch, capsys) -> None:
-        import abicheck.cli as cli_mod
-
-        monkeypatch.setattr("abicheck.annotations.is_github_actions", lambda: True)
-        monkeypatch.setattr(
-            "abicheck.annotations.collect_annotations",
-            lambda result, annotate_additions=False, severity_config=None: ["a1"],
-        )
-        monkeypatch.setattr(
-            "abicheck.annotations.format_annotations",
-            lambda anns: "::warning::break",
-        )
-        emitted = {}
-        monkeypatch.setattr(
-            "abicheck.annotations.emit_github_step_summary",
-            lambda result, severity_config=None: emitted.setdefault("summary", True),
-        )
-        result = DiffResult(old_version="1", new_version="2", library="x")
-        cli_mod._maybe_emit_annotations(
-            result,
-            annotate=True,
-            annotate_additions=False,
-        )
-        err = capsys.readouterr().err
-        assert "::warning::break" in err
-        assert emitted.get("summary") is True
 
 
 # ── cli.py: _log_debug_resolution drives both sides when requested ────────────

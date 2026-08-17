@@ -322,6 +322,24 @@ topics:
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
 
+  # GitHub Actions workflow-command annotations (stderr rendering) and,
+  # since report schema 2.43, the same classification persisted as a
+  # `compare --format json` report field (CLI cleanup phase two, PR E) --
+  # distinct from `github-actions-surface` (the Action's own inputs/wiring)
+  # and `output-formats` (the report envelope in general).
+  pr-annotations:
+    canonical_page: use/annotations.md
+    fact_sources:
+      - abicheck/annotations.py
+      - abicheck/annotations_step_summary.py
+      - abicheck/reporter_contract_blocks.py
+      - abicheck/cli_compare_release.py
+      - abicheck/schemas/compare_report.schema.json
+      - action/run.sh
+      - action.yml
+    allowed_summaries:
+      - use/github-action-recipes.md
+
   output-formats:
     canonical_page: use/output-formats.md
     fact_sources:

@@ -81,6 +81,26 @@ class ExitReason(str, Enum):
     CONTRACT_COVERAGE = "contract_coverage"
     ANALYSIS_ASSURANCE = "analysis_assurance"
     CLEAN = "clean"
+    #: `scan --against` only. A maintainer-promoted `--crosscheck KEY=error`
+    #: finding (`scan_engine._crosscheck_severity_exit`) raised the exit code
+    #: past what the three compatibility/coverage/assurance axes would have
+    #: produced on their own. :func:`resolve_exit_decision` *does* model
+    #: this as a real fourth contribution
+    #: (`ExitDecision.crosscheck_promotion_contribution`) when a caller
+    #: passes one in -- `resolve_compare_exit_decision` (native `compare`)
+    #: never does, since crosscheck promotion has no meaning outside
+    #: `scan --against`, so it is always `0`/absent there. The scan-only
+    #: half that stays true is *when* the contribution is known:
+    #: `scan_engine._promote_published_gate` re-resolves the whole decision
+    #: through `resolve_exit_decision` (with the crosscheck contribution
+    #: filled in) only *after* the fact, once a promotion actually fires --
+    #: mirroring how that same function already patches the persisted
+    #: `severity` block for the identical reason -- a published `exit`
+    #: block that still named `compatibility_gate` for a code the
+    #: crosscheck promotion actually produced would be exactly the kind of
+    #: "explains nothing about why the exit is N" trap this enum exists to
+    #: avoid.
+    PROMOTED_CROSSCHECK = "promoted_crosscheck"
 
 
 @dataclass(frozen=True)
@@ -88,12 +108,16 @@ class ExitDecision:
     """One comparison's fully explainable exit code.
 
     ``code`` is exactly ``max(compatibility_contribution,
-    contract_coverage_contribution, analysis_assurance_contribution)`` --
-    the identical value today's ad hoc fold chain in
-    ``cli._exit_with_severity_or_verdict`` already produces, computed once
-    here instead of via three separately-called functions. ``reasons``
-    names every axis tied for that maximum; see :class:`ExitReason` for why
-    a lower, non-winning contribution is excluded.
+    contract_coverage_contribution, analysis_assurance_contribution,
+    crosscheck_promotion_contribution)`` -- the first three are the identical
+    value today's ad hoc fold chain in ``cli._exit_with_severity_or_verdict``
+    already produces, computed once here instead of via three separately-
+    called functions; the fourth exists only for `scan --against`'s own
+    maintainer-promoted `--crosscheck KEY=error` finding and is always `0`
+    for a native `compare` report (see :class:`ExitReason.PROMOTED_
+    CROSSCHECK`). ``reasons`` names every axis tied for that maximum; see
+    :class:`ExitReason` for why a lower, non-winning contribution is
+    excluded.
     """
 
     code: int
@@ -101,6 +125,21 @@ class ExitDecision:
     compatibility_contribution: int
     contract_coverage_contribution: int
     analysis_assurance_contribution: int
+    #: `scan --against` only -- what a maintainer-promoted `--crosscheck
+    #: KEY=error` finding contributes (`0` for every other caller, and for
+    #: a scan run where no promotion fired). A *fourth* axis, not a
+    #: bolt-on mutation of `code`/`reasons` after the fact (Codex review,
+    #: fresh evidence): `scan_engine._promote_published_gate` used to patch
+    #: only those two fields, leaving the three contributions above
+    #: summing to less than the new `code` -- silently breaking this
+    #: class's own documented invariant that `code == max(the
+    #: contributions)`, and also never adding `PROMOTED_CROSSCHECK` to
+    #: `reasons` on an exact tie (a hand-rolled strict `>` check, unlike
+    #: this function's own tie-inclusive fold). Modeling it as a real
+    #: contribution lets `_promote_published_gate` reconstruct the whole
+    #: decision through :func:`resolve_exit_decision` instead of hand-
+    #: patching two of its five fields.
+    crosscheck_promotion_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block."""
@@ -110,6 +149,7 @@ class ExitDecision:
             "compatibility_contribution": self.compatibility_contribution,
             "contract_coverage_contribution": self.contract_coverage_contribution,
             "analysis_assurance_contribution": self.analysis_assurance_contribution,
+            "crosscheck_promotion_contribution": self.crosscheck_promotion_contribution,
         }
 
 
@@ -118,9 +158,10 @@ def resolve_exit_decision(
     compatibility_contribution: int,
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
+    crosscheck_promotion_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
-    """Fold the three already-computed axis contributions into one decision.
+    """Fold the axis contributions below into one explainable decision.
 
     *compatibility_contribution* is the caller's own pre-computed
     compatibility-gate exit code -- either `severity.legacy_exit_code`
@@ -142,11 +183,18 @@ def resolve_exit_decision(
     default, or `SCOPED_GATE` when the caller's compatibility contribution
     is the scoped application/plugin-host gate rather than the full-library
     one; every other axis's reason is unaffected either way.
+    *crosscheck_promotion_contribution* defaults to ``0`` (every caller but
+    `scan_engine._promote_published_gate`, which is the only place a
+    maintainer-promoted `--crosscheck KEY=error` finding's own exit
+    contribution is known) -- see :class:`ExitDecision`'s own field
+    docstring for why this has to be a real axis rather than a post-hoc
+    patch to `code`/`reasons`.
     """
     contributions = {
         compatibility_reason: compatibility_contribution,
         ExitReason.CONTRACT_COVERAGE: contract_coverage_contribution,
         ExitReason.ANALYSIS_ASSURANCE: analysis_assurance_contribution,
+        ExitReason.PROMOTED_CROSSCHECK: crosscheck_promotion_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -163,6 +211,7 @@ def resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=contract_coverage_contribution,
         analysis_assurance_contribution=analysis_assurance_contribution,
+        crosscheck_promotion_contribution=crosscheck_promotion_contribution,
     )
 
 
@@ -176,20 +225,32 @@ def resolve_compare_exit_decision(
     """:func:`resolve_exit_decision`, deriving every contribution from
     *result* the same way `cli._exit_with_severity_or_verdict` does today.
 
-    The single call site a native `compare` invocation needs: it reproduces
+    The call site a native `compare` invocation needs: it reproduces
     that function's exact fold order (compatibility → coverage floor →
     assurance floor, each `max`-based) as one canonical resolution, so a
     caller building the report's ``exit`` block and a caller computing the
     real process exit code cannot read two different numbers for the same
     comparison.
 
-    **`scan --against` does not call this function yet (Codex review, fresh
-    evidence).** `scan_engine.py`/`cli_scan_baseline.py` compute their own
-    exit code and report contributions independently -- their comments
-    describe themselves as *mirroring* `compare`'s pattern, but neither
-    calls `resolve_compare_exit_decision` or emits a top-level ``exit``
-    object. Wiring `scan --against` through this resolver is scoped to a
-    later PR, not this one.
+    **`scan --against` also calls this function (CLI cleanup phase two, PR
+    E), from `cli_scan_baseline._run_baseline_compare`, which nests the
+    result at ``diff.exit`` rather than the report's top level -- matching
+    where its own constituent `analysis_assurance_exit_contribution`/
+    `contract_coverage_exit_contribution` fields already live, not
+    `ScanOutcome`'s own top-level ``verdict``/``exit_code``.** That
+    top-level pair folds strictly more than this function ever will for a
+    scan: budget overflow, `NOT_COMPARABLE`, and a maintainer-promoted
+    `--crosscheck KEY=error` finding (`scan_engine._crosscheck_severity_
+    exit`) are scan-only axes raised through their own code paths, not
+    modeled by this resolver (see this module's own docstring for why).
+    `scan_engine._promote_published_gate` keeps the persisted ``diff.exit``
+    block honest for the one of those three that can happen *after* this
+    function already ran -- crosscheck promotion -- by raising its ``code``
+    and re-stamping ``reasons`` to ``PROMOTED_CROSSCHECK``, the same way it
+    already patches the persisted ``severity`` block. Budget overflow
+    aborts before a report is built at all; `NOT_COMPARABLE` has no
+    `DiffResult` for this resolver to read from, so no ``exit`` block is
+    emitted for that case either.
 
     **`--used-by`/`--required-symbol(s)` scoped gating overrides the
     compatibility axis entirely (Codex review, fresh evidence).**

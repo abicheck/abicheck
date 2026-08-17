@@ -1426,6 +1426,208 @@ def test_a_promoted_crosscheck_never_lowers_an_already_blocking_gate(
     assert "promoted_crosscheck" not in gate["blocking_categories"], gate
 
 
+def test_json_report_carries_exit_decision_for_clean_baseline(
+    runner, baseline_snap, new_snap_compatible
+):
+    # CLI cleanup phase two, PR E: `diff.exit` mirrors `compare`'s own
+    # top-level `exit` block (PR G1, #789) -- built once by
+    # `exit_decision.resolve_compare_exit_decision` so a reader doesn't
+    # have to re-derive "why is this exit N" from the separately-emitted
+    # `analysis_assurance_exit_contribution`/`contract_coverage_exit_
+    # contribution` fields.
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_compatible), "--against", str(baseline_snap),
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 0
+    assert exit_block["reasons"] == ["clean"]
+    assert exit_block["compatibility_contribution"] == 0
+    assert exit_block["contract_coverage_contribution"] == 0
+    assert exit_block["analysis_assurance_contribution"] == 0
+
+
+def test_json_report_carries_exit_decision_for_breaking_baseline(
+    runner, baseline_snap, new_snap_breaking
+):
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_breaking), "--against", str(baseline_snap), "--format", "json"],
+    )
+    assert res.exit_code == 4, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 4
+    assert exit_block["reasons"] == ["compatibility_gate"]
+    assert exit_block["compatibility_contribution"] == 4
+
+
+def test_exit_decision_matches_severity_gate_exit_code(
+    runner, baseline_snap, new_snap_breaking
+):
+    # The two blocks are derived independently (`_build_severity_json` via
+    # `compute_gate_decision`, `resolve_compare_exit_decision` via
+    # `compute_exit_code` directly) -- they must never read two different
+    # numbers for the same comparison.
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_breaking), "--against", str(baseline_snap),
+            "--exit-code-scheme", "severity", "--format", "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    payload = _payload(res)["diff"]
+    assert payload["exit"]["code"] == payload["severity"]["exit_code"]
+
+
+def test_a_promoted_crosscheck_updates_the_persisted_exit_block(runner, tmp_path):
+    # Sibling of test_published_gate_reflects_a_promoted_crosscheck, for the
+    # new `diff.exit` block: it is built by `_run_baseline_compare` from the
+    # baseline diff alone, before `run_scan_core`'s crosscheck promotion
+    # runs -- so without `_promote_published_gate` also patching this block
+    # (the way it already patches `diff.severity`), a clean baseline would
+    # publish `exit.code: 0` while the process exited 2.
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 2, exit_block
+    assert exit_block["reasons"] == ["promoted_crosscheck"], exit_block
+    # The invariant Codex flagged on an earlier revision: `code` must equal
+    # `max()` over every contribution field, not just the two this function
+    # used to hand-patch.
+    assert exit_block["code"] == max(
+        exit_block["compatibility_contribution"],
+        exit_block["contract_coverage_contribution"],
+        exit_block["analysis_assurance_contribution"],
+        exit_block["crosscheck_promotion_contribution"],
+    ), exit_block
+
+
+def _api_break_with_build_context_mismatch_snap(tmp_path: Path, name: str, constant: str | None) -> Path:
+    # Combines two independent axes in one pair: a real, non-promoted
+    # API_BREAK (constant_removed, legacy exit 2) from the baseline compare
+    # itself, and the same "header_build_context_mismatch" crosscheck
+    # evidence-hygiene finding `_header_context_mismatch_snap` uses
+    # (`--crosscheck header_build_context_mismatch=error` also contributes
+    # exit 2) -- so promoting the crosscheck TIES the baseline's own exit
+    # code instead of exceeding it.
+    from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        parsed_with_build_context=False,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+        constants={"MAX_SIZE": constant} if constant is not None else {},
+    )
+    snap.build_source = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(
+            build_options=[BuildOption(key="glibcxx_use_cxx11_abi", value="1", abi_relevant=True)]
+        ),
+    )
+    return _write_snapshot(tmp_path / name, snap)
+
+
+def test_a_tying_promoted_crosscheck_still_names_itself_in_the_exit_block(
+    runner, tmp_path
+):
+    # Codex review (P2), fresh evidence: `run_scan_core` only called
+    # `_promote_published_gate` from inside `if sev_exit > exit_code:` --
+    # so a crosscheck that only *ties* an already-2 baseline exit (rather
+    # than exceeding it) never reached the refold at all, leaving
+    # `crosscheck_promotion_contribution` at 0 and `promoted_crosscheck`
+    # missing from `reasons` even though the tie is real. `old`'s
+    # constant_removed vs `new`'s baseline shape means the baseline compare
+    # alone already exits 2 (API_BREAK); the shared build-context-mismatch
+    # evidence gap makes `--crosscheck header_build_context_mismatch=error`
+    # contribute exit 2 too -- a genuine tie, not a promotion.
+    old = _api_break_with_build_context_mismatch_snap(tmp_path, "old.abi.json", "100")
+    new = _api_break_with_build_context_mismatch_snap(tmp_path, "new.abi.json", None)
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    assert payload["verdict"] == "API_BREAK"
+    exit_block = payload["diff"]["exit"]
+    assert exit_block["code"] == 2, exit_block
+    assert set(exit_block["reasons"]) == {
+        "compatibility_gate", "promoted_crosscheck",
+    }, exit_block
+    assert exit_block["crosscheck_promotion_contribution"] == 2, exit_block
+
+
+def test_a_tying_promoted_crosscheck_still_names_itself_in_the_severity_gate(
+    runner, tmp_path
+):
+    # Sibling of the previous test for the *other* persisted block --
+    # `diff.severity` -- under the severity exit-code scheme. Codex review,
+    # fresh evidence: the `diff.exit` tie fix above made a tie reach
+    # `_promote_published_gate` at all, but the severity-gate half of that
+    # function still used a strict `>` guard, so the two published gate
+    # explanations disagreed about the same tied crosscheck.
+    old = _api_break_with_build_context_mismatch_snap(tmp_path, "old.abi.json", "100")
+    new = _api_break_with_build_context_mismatch_snap(tmp_path, "new.abi.json", None)
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    gate = payload["diff"]["severity"]
+    assert gate["exit_code"] == 2, gate
+    assert gate["blocking"] is True, gate
+    assert "promoted_crosscheck" in gate["blocking_categories"], gate
+    # And the two blocks must agree, not just each be internally sensible.
+    exit_block = payload["diff"]["exit"]
+    assert exit_block["code"] == gate["exit_code"]
+    assert "promoted_crosscheck" in exit_block["reasons"]
+
+
+def test_a_promoted_crosscheck_never_lowers_an_already_blocking_exit_block(
+    runner, baseline_snap, new_snap_breaking
+):
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_breaking), "--against", str(baseline_snap),
+            "--crosscheck", "exported_not_public=error",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 4, exit_block
+    assert exit_block["reasons"] == ["compatibility_gate"], exit_block
+
+
 def test_severity_demoted_breaking_verdict_survives_crosscheck_promotion(
     runner, tmp_path
 ):

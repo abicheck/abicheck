@@ -130,14 +130,21 @@ contract-coverage axis: an assurance-gated exit `1` (via the dedicated
 `ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
 unconditional (no `fail-on-*` input disables it).
 
-## The `exit` report field (CLI cleanup phase two, PR G1)
+## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
 Every real-verdict `compare --format json` report (`full`/`leaf`/`root-cause`
-modes) carries a top-level `exit` object (report schema 2.41) stating the
-already-resolved decision behind the three axes above as one explainable
+modes) carries a top-level `exit` object (introduced at report schema 2.41;
+schema 2.42 added its `crosscheck_promotion_contribution` field — see
+`abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` docstring for that
+and later additive fields, e.g. `annotations` at 2.43) stating the
+already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
 `severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
-`analysis_assurance_exit_contribution` themselves:
+`analysis_assurance_exit_contribution` themselves. `scan --against
+--format json` carries the identical object too (scan schema 1.18), nested
+at `diff.exit` rather than the report's top level — matching where its own
+constituent contribution fields already live, since `scan` and `compare`
+keep their own report shapes:
 
 ```json
 "exit": {
@@ -145,15 +152,25 @@ value, rather than requiring a reader to separately combine
   "reasons": ["analysis_assurance"],
   "compatibility_contribution": 0,
   "contract_coverage_contribution": 0,
-  "analysis_assurance_contribution": 1
+  "analysis_assurance_contribution": 1,
+  "crosscheck_promotion_contribution": 0
 }
 ```
 
-`code` is exactly `max()` over the three contributions — the identical
-number the real process exits with for a single-pair comparison.
-`reasons` names every axis whose own contribution equals `code` (a lower,
+`code` is exactly `max()` over the four contributions — the identical
+number the real process exits with for a single-pair `compare`. `reasons`
+names every axis whose own contribution equals `code` (a lower,
 non-winning contribution is excluded, since it did not determine the
 result); `["clean"]` when `code` is `0`.
+
+`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a native
+`compare` report — it has no meaning outside `scan --against`'s own
+maintainer-promoted `--crosscheck KEY=error` finding
+(`scan_engine._promote_published_gate`), which reconstructs the whole
+`diff.exit` block through the same resolver whenever the crosscheck
+contributes anything positive, so `reasons` can carry `promoted_crosscheck`
+even when the crosscheck only *ties* — rather than exceeds — the baseline
+comparison's own exit code.
 
 Under `--used-by`/`--required-symbol(s)` scoping, `compatibility_contribution`
 and `reasons` describe the **scoped** application/plugin-host gate (the one

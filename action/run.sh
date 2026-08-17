@@ -227,13 +227,14 @@ add_single_flag() {
 # an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
 # is_package(), including its magic-byte fallback — abicheck/package.py:547-554
 # — since classify_compare_operand() delegates to it regardless of filename;
-# a name-suffix-only check here would still let the Action add
-# --write for such an operand and have the CLI reject it, Codex
+# a name-suffix-only check here would misidentify such an operand, Codex
 # review, PR #557). `compare` fans such an operand out through the release
-# engine internally regardless of the Action's MODE, and the release engine
-# rejects --write — used to skip the --write
-# optimization for compare mode's PR-comment JSON rather than let it
-# hard-fail a directory/package comparison that used to work.
+# engine internally regardless of the Action's MODE. Since CLI cleanup phase
+# two, PR E, the release engine supports --write directly (json/markdown/
+# junit, the same set --format itself accepts there) -- this helper is no
+# longer needed to skip the --write PR-comment JSON injection, but stays in
+# use for the release-only flags below (--jobs, --output-dir, --dso-only,
+# --require-complete-analysis's own rejection, ...).
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -294,6 +295,53 @@ _extra_args_has_write_flag() {
   for _arg in "$@"; do
     case "$_arg" in
       --write | --write=*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+# Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
+# extra-args, printing it (and nothing else) when found. Empty output means
+# "no such flag" -- callers treat that as "cannot tell", same as every other
+# report-discovery helper here.
+#
+# Why this exists (Codex review, PR #798): when the primary FORMAT isn't
+# json and the user's own extra-args already carries `--write`,
+# `_extra_args_has_write_flag` above correctly suppresses the internal
+# `PR_JSON` injection (so the two `--write`s don't collide and Click's
+# last-flag-wins doesn't silently drop the user's own path) -- but that
+# means `_json_report_src` had no JSON source to fall back to at all, so
+# `annotate: true` silently emitted nothing even though the user's own
+# `--write` destination held a perfectly good report the whole time. This
+# recovers that path so `_json_report_src` can read it directly, instead of
+# either rejecting the combination outright or (worse) silently doing
+# nothing.
+#
+# Same word-splitting caveat as `_extra_args_has_write_flag`: an exotically
+# quoted `--write` evades this. `--write` and its value can be one token
+# (`--write=json=PATH`) or two (`--write json=PATH`); both spellings are
+# documented and handled.
+_extra_args_write_json_path() {
+  local _arg _value _prev_was_write=0
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ "$_prev_was_write" == "1" ]]; then
+      _value="$_arg"
+      _prev_was_write=0
+    elif [[ "$_arg" == "--write" ]]; then
+      _prev_was_write=1
+      continue
+    elif [[ "$_arg" == --write=* ]]; then
+      _value="${_arg#--write=}"
+    else
+      continue
+    fi
+    case "$_value" in
+      json=*)
+        printf '%s' "${_value#json=}"
         return 0
         ;;
     esac
@@ -1120,22 +1168,26 @@ elif [[ "$MODE" == "compare" ]]; then
     # the sticky PR comment (--write), instead of re-invoking
     # abicheck a second time just to get JSON. Only needed when the primary
     # format isn't already JSON — a json primary is reused as-is (see
-    # _can_reuse_primary_json below). The per-library release fan-out
-    # (directory/package operands) rejects --write, so it's
-    # skipped there too, falling back to the rerun path in
-    # _maybe_post_pr_comment (Codex review).
+    # _can_reuse_primary_json below).
     #
-    # Also skipped when the user's own `extra-args` already carries
-    # `--write`, the same guard the scan branch below applies (Codex review):
+    # CLI cleanup phase two, PR E: the per-library release fan-out
+    # (directory/package operands) now supports --write directly --
+    # json/markdown/junit only, the same set --format itself accepts there,
+    # which is exactly what this injection ever requests -- so this no
+    # longer needs the _is_release_style_operand carve-out it used to. The
+    # release engine renders the JSON from the same already-computed
+    # per-library results its primary (markdown, by default) render uses,
+    # without re-running any library's comparison, matching how --write
+    # already worked for a single-pair operand.
+    #
+    # Skipped when the user's own `extra-args` already carries `--write`,
+    # the same guard the scan branch below applies (Codex review):
     # extra-args is appended *after* this, and Click honors the last
     # occurrence, so ours would lose and leave $PR_JSON empty -- at which
     # point _maybe_post_pr_comment reruns the whole comparison just to obtain
     # JSON, doubling a potentially expensive analysis to produce a file this
     # very injection existed to avoid rerunning for.
-    if [[ "$FORMAT" != "json" ]] \
-       && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}" \
-       && ! _extra_args_has_write_flag; then
+    if [[ "$FORMAT" != "json" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -1574,6 +1626,58 @@ STDERR_FILE=$(mktemp)
 #: runner accumulates one JSON report per scan run indefinitely.
 trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
+# `_json_report_src`/`_extra_args_write_json_path` below trust `OUTPUT_
+# FILE`/a user-supplied `--write json=PATH` purely on "the file exists and
+# is non-empty" -- both are pure *write* destinations for this invocation
+# (`CMD+=(-o "$OUTPUT_FILE")` above), but if either path already held
+# content BEFORE this invocation (a stale file from a previous step, or
+# one a PR author committed into the checked-out tree -- `INPUT_EXTRA_ARGS`
+# and its own `--write` path are PR-controlled per this file's own threat
+# model) and `abicheck` then fails before overwriting it, every
+# downstream consumer of that file (annotations, coverage/severity/
+# verdict queries, the sticky PR comment) would silently read stale or
+# attacker-controlled content as if it were this run's own report.
+#
+# A first fix here deleted any pre-existing content at both paths before
+# `${CMD[@]}` ran -- reverted (Codex review, fresh evidence): `OUTPUT_
+# FILE`/the `--write` destination are still just `INPUT_*` values, and
+# nothing here can prove they don't happen to collide with a real *input*
+# path (`old-library`/`new-library`/a baseline file/etc, whether by an
+# honest misconfiguration or a crafted `extra-args`) -- unconditionally
+# unlinking a user-controlled path before Click has even validated the
+# invocation risks destroying the very input the comparison needed,
+# unconditionally and irrecoverably, which is strictly worse than the
+# staleness bug it was fixing. Fixed non-destructively instead: record
+# each path's (mtime, size) fingerprint before running, and only trust it
+# afterward if that fingerprint changed (or the path didn't exist before).
+# Python, not `stat -c`/`stat -f` (GNU vs. BSD/macOS spell this
+# differently and this script already leans on `_PY_BIN` for exactly this
+# class of portability need -- see `_report_query`'s own docstring).
+_file_fingerprint() {
+  # Empty output means "does not exist" -- a fingerprint that can never
+  # equal a real file's, so "did not exist before, exists now" always
+  # reads as changed without a separate existence check.
+  [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 0
+  "$_PY_BIN" -c '
+import os, sys
+try:
+    st = os.stat(sys.argv[1])
+except OSError:
+    pass
+else:
+    print(f"{st.st_mtime_ns}:{st.st_size}")
+' "$1" 2>/dev/null
+}
+_output_file_pre_fp=""
+if [[ -n "${OUTPUT_FILE:-}" ]]; then
+  _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
+fi
+_extra_write_json_path="$(_extra_args_write_json_path || true)"
+_extra_write_json_pre_fp=""
+if [[ -n "$_extra_write_json_path" ]]; then
+  _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
+fi
+
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
   "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
@@ -1630,12 +1734,47 @@ _is_cli_error() {
 # substitution. Without that file, every decision below took its "no report"
 # fallback for the one configuration that keeps the report on stdout.
 _json_report_src() {
-  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+  # `OUTPUT_FILE`/the discovered `--write json=PATH` are pure write
+  # destinations that can pre-exist this invocation (see the fingerprint
+  # bookkeeping around the `${CMD[@]}` call above for why) -- trusted only
+  # when non-empty AND its (mtime, size) fingerprint changed since just
+  # before `${CMD[@]}` ran (or it didn't exist then at all, i.e. its pre-
+  # fingerprint was empty). `PR_JSON` (always a fresh mktemp this run) and
+  # `_STDOUT_JSON_FILE` (this run's own captured stdout) need no such
+  # check -- neither can be a pre-existing file.
+  #
+  # `${_output_file_pre_fp+x}`/`${_extra_write_json_pre_fp+x}` (POSIX
+  # parameter-expansion existence tests, not bash-4.2+'s `-v` -- this repo
+  # targets macOS's stock bash 3.2 too) distinguish "the pre-run bookkeeping
+  # ran and found no file there" (set, empty) from "the bookkeeping never
+  # ran at all" -- several existing tests (`test_action_run_sh_severity_
+  # summary.py`, `test_action_run_sh_pr_json.py`, ...) extract `_json_
+  # report_src` and its sibling helpers as an isolated snippet, deliberately
+  # never executing the `${CMD[@]}` invocation section this bookkeeping
+  # lives in -- so in that narrower context the freshness variables are
+  # never assigned at all, not even to "". Enforcing freshness there would
+  # silently reject every report those tests hand it (Codex review, fresh
+  # evidence -- the fingerprint feature caught two of its own consuming
+  # tests as a false positive, not a real staleness case). Degrading to the
+  # pre-fingerprint "exists and non-empty" rule exactly when the bookkeeping
+  # never ran preserves this file's real, in-production freshness guarantee
+  # unchanged, since the real script always assigns both variables (even to
+  # "") before `_json_report_src` can ever be called.
+  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+     && { [[ -z "${_output_file_pre_fp+x}" ]] \
+          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
     echo "${_STDOUT_JSON_FILE}"
+  elif [[ -n "${_extra_write_json_path:-}" && -s "${_extra_write_json_path:-}" ]] \
+       && { [[ -z "${_extra_write_json_pre_fp+x}" ]] \
+            || [[ "$(_file_fingerprint "$_extra_write_json_path")" != "$_extra_write_json_pre_fp" ]]; }; then
+    # A user-supplied `--write json=PATH` in extra-args (see
+    # `_extra_args_write_json_path`'s own docstring for why this is needed
+    # rather than falling through to "no report").
+    echo "$_extra_write_json_path"
   fi
 }
 
@@ -1664,9 +1803,10 @@ _json_report_src() {
 # fallback (which runs long before this function is ever reached) can use
 # the same resolved interpreter too.
 _report_query() {
-  # $1 = report path, $2 = query name. Prints nothing when the report cannot
-  # be read or parsed, which every caller treats as "cannot tell" rather than
-  # as an answer.
+  # $1 = report path, $2 = query name, $3 = optional query-specific argument
+  # (only the "annotations" query reads it, as a "1"/"" additions flag).
+  # Prints nothing when the report cannot be read or parsed, which every
+  # caller treats as "cannot tell" rather than as an answer.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
   # Isolated the same way as every other Python invocation in this file
   # (Codex review, fresh evidence): the sitecustomize.py auto-import vector
@@ -1687,7 +1827,7 @@ _report_query() {
   if ! _is_path_already_qualified "$report_path"; then
     report_path="$PWD/$report_path"
   fi
-  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2" "${3:-}") <<'PYQUERY' 2>/dev/null
 import json
 import sys
 
@@ -1762,9 +1902,134 @@ elif query == "assurance_notes":
 elif query == "assurance_status":
     aa = _either("analysis_assurance", {})
     print(aa.get("status", "") if isinstance(aa, dict) else "")
+elif query == "annotations":
+    # CLI cleanup phase two, PR E: the Action's own renderer -- reads the
+    # persisted `annotations` array (schema 2.43/2.44) instead of relying
+    # on `compare --annotate`'s own stderr rendering, so this works for
+    # BOTH a single-library compare (top-level `annotations`) and a
+    # directory/package release compare (`libraries[].annotations`,
+    # flattened here across every library) uniformly. `scan --against`
+    # carries no `annotations` field as of this schema version, so this
+    # query prints nothing for a scan report -- not an error, just no
+    # entries to emit yet.
+    additions = len(sys.argv) > 3 and sys.argv[3] == "1"
+    entries = report.get("annotations")
+    if not isinstance(entries, list):
+        entries = []
+        libs = report.get("libraries")
+        if isinstance(libs, list):
+            for lib in libs:
+                if isinstance(lib, dict) and isinstance(
+                    lib.get("annotations"), list
+                ):
+                    entries.extend(lib["annotations"])
+    order = {"error": 0, "warning": 1, "notice": 2}
+    kept = []
+    for e in entries:
+        if not isinstance(e, dict) or not e.get("annotation"):
+            continue
+        level = e.get("level")
+        annotation = e["annotation"]
+        # Codex review, fresh evidence: `_json_report_src` can, in a rare
+        # failure-before-write case, resolve to a JSON file this
+        # invocation never produced (a stale --output-file/--write
+        # destination that already existed in the checked-out tree before
+        # abicheck ran, e.g. one a PR author committed). Printing
+        # `annotation` verbatim in that case would echo an arbitrary,
+        # attacker-controlled workflow command -- including one designed
+        # to smuggle a *different* command past this check via an
+        # embedded newline (GitHub parses every stdout line as a
+        # potential command). Never trust the string as-is: it must be a
+        # single line (no embedded \n/\r), and its own `::LEVEL ` prefix
+        # must agree with the entry's separately-typed `level` field --
+        # exactly the shape `annotations._format_annotation()` always
+        # produces. Anything else is dropped rather than printed.
+        if (
+            not isinstance(annotation, str)
+            or not isinstance(level, str)
+            or "\n" in annotation
+            or "\r" in annotation
+            or not annotation.startswith(f"::{level} ")
+            or level not in order
+        ):
+            continue
+        # `always_visible` is schema 2.44+; a report from an older abicheck
+        # (this Action can be pinned to any released version) may carry
+        # `annotations` without it -- degrade to "visible unless it's a
+        # notice", the same rule `--annotate` (no `--annotate-additions`)
+        # already applied before `always_visible` existed.
+        visible = e.get("always_visible", level != "notice")
+        if additions or visible:
+            kept.append(e)
+    kept.sort(key=lambda e: order.get(e.get("level"), 99))
+    # Matches annotations.py's own _MAX_ANNOTATIONS -- GitHub Actions caps
+    # visible annotations per step at roughly the same figure, and sorting
+    # by severity first means a truncated tail is the least important one.
+    for e in kept[:50]:
+        print(e["annotation"])
 else:
     raise SystemExit(2)
 PYQUERY
+}
+
+# CLI cleanup phase two, PR E: the Action's own annotation renderer. Reads
+# the persisted `annotations` array (schema 2.43/2.44) off whichever JSON
+# report this run produced -- the same `_json_report_src` every other
+# post-processing decision in this script already reads -- instead of
+# asking `abicheck` itself to render `::error`/`::warning`/`::notice`
+# workflow commands to its own stderr via `--annotate`. Works uniformly for
+# a single-library `compare` (top-level `annotations`) and a
+# directory/package release `compare` (`libraries[].annotations`), since
+# the `annotations` query above already flattens both shapes -- and for a
+# release operand this also means no second per-library comparison is ever
+# run just to render annotations, the same "no comparison re-run" this
+# whole persisted-report design exists for.
+#
+# Deliberately does not touch `scan --against`: that report carries no
+# `annotations` field as of this schema version (the query prints nothing
+# for it, not an error), so this is a genuine no-op there rather than a
+# scoped-out branch to maintain.
+_emit_annotations() {
+  if [[ "${INPUT_ANNOTATE:-false}" != "true" ]]; then
+    # `annotate-additions: true` alone, with `annotate` left at its
+    # default `false`, used to be a hard CLI usage error
+    # (`--annotate-additions requires --annotate`, removed along with the
+    # flags themselves). An Action input has no equivalent usage-error
+    # mechanism, but silently rendering nothing for this combination is
+    # still a real, surprising behaviour change from that (CodeRabbit
+    # review) -- say so instead.
+    if [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]]; then
+      echo "::notice title=abicheck annotate::annotate-additions is true but annotate is false, so no annotations are rendered. Set annotate: true as well."
+    fi
+    return 0
+  fi
+  local _src _additions
+  _src=$(_json_report_src)
+  if [[ -z "$_src" ]]; then
+    # A user-supplied `--write FORMAT=PATH` in extra-args targeting a
+    # non-json FORMAT (markdown/junit/sarif/html/review) leaves genuinely
+    # no JSON report anywhere: the primary format isn't json either (or
+    # _json_report_src would already have found it), and `--write` only
+    # ever has room for one secondary format -- appending our own
+    # `--write json=...` after the user's own would silently drop theirs
+    # (the exact collision `_extra_args_has_write_flag` exists to prevent),
+    # not add a second report. Unlike the `json=` case
+    # `_extra_args_write_json_path` recovers, there is nothing to discover
+    # here, so say so rather than silently emitting nothing (Codex review,
+    # fresh evidence).
+    if [[ "${FORMAT:-}" != "json" ]] && _extra_args_has_write_flag \
+       && [[ -z "$(_extra_args_write_json_path)" ]]; then
+      echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own --write targets a non-json format -- no JSON report is available to render annotations from. Use format: json, or point --write at json=PATH instead."
+    fi
+    return 0
+  fi
+  _additions="0"
+  [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]] && _additions="1"
+  # Deliberately NOT captured via $(...) -- each printed line is a real
+  # GitHub Actions workflow command and must reach the actual log/stdout,
+  # not be swallowed into a shell variable the way every other
+  # `_report_query` caller above wants it.
+  _report_query "$_src" annotations "$_additions"
 }
 
 # Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
@@ -2850,6 +3115,7 @@ _post_pr_comment() {
     || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
+_emit_annotations
 _maybe_post_pr_comment
 
 # ---------------------------------------------------------------------------

@@ -130,7 +130,47 @@ class TestResolveExitDecision:
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 1,
             "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
         }
+
+    def test_crosscheck_promotion_is_a_real_contribution_not_a_patch(self) -> None:
+        """`scan_engine._promote_published_gate`'s own axis: `code` must
+        equal `max()` over *all four* contributions, `crosscheck_promotion_
+        contribution` included, exactly like the other three (Codex review
+        -- an earlier revision patched `code`/`reasons` directly without
+        this axis, which broke this invariant for a promoted scan).
+        """
+        decision = resolve_exit_decision(
+            compatibility_contribution=0, crosscheck_promotion_contribution=2,
+        )
+        assert decision.code == 2
+        assert decision.reasons == (ExitReason.PROMOTED_CROSSCHECK,)
+        assert decision.code == max(
+            decision.compatibility_contribution,
+            decision.contract_coverage_contribution,
+            decision.analysis_assurance_contribution,
+            decision.crosscheck_promotion_contribution,
+        )
+
+    def test_crosscheck_promotion_ties_are_named_not_dropped(self) -> None:
+        """A promotion that only *ties* the existing code must still be
+        named -- not silently omitted the way a hand-rolled strict `>`
+        check on the caller side would drop it.
+        """
+        decision = resolve_exit_decision(
+            compatibility_contribution=2, crosscheck_promotion_contribution=2,
+        )
+        assert decision.code == 2
+        assert set(decision.reasons) == {
+            ExitReason.COMPATIBILITY_GATE, ExitReason.PROMOTED_CROSSCHECK,
+        }
+
+    def test_crosscheck_promotion_never_lowers_a_real_break(self) -> None:
+        decision = resolve_exit_decision(
+            compatibility_contribution=4, crosscheck_promotion_contribution=2,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
 
     def test_default_contributions_are_zero(self) -> None:
         """A caller with neither `--contract` nor
@@ -206,6 +246,7 @@ class TestCompareExitDecisionIntegration:
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(
@@ -398,3 +439,127 @@ class TestIncludeExitDecisionFlag:
         report = json.loads(to_json(result, include_exit_decision=False))
         assert "exit" not in report
         jsonschema.validate(report, load_compare_report_schema())
+
+
+class TestPromotePublishedGateInvariant:
+    """White-box regression pin for ``scan_engine._promote_published_gate``
+    (CLI cleanup phase two, PR E follow-up, Codex review) -- the function
+    that keeps `scan --against`'s persisted ``diff.exit`` block honest when
+    a maintainer-promoted ``--crosscheck KEY=error`` finding raises the
+    process exit after ``_run_baseline_compare`` already built that block.
+
+    An earlier revision hand-patched only ``code``/``reasons`` in place,
+    which (1) broke :class:`ExitDecision`'s own documented invariant that
+    ``code`` equals the max of its contribution fields, since the three
+    pre-existing contributions were left at their pre-promotion values, and
+    (2) used a strict ``>`` check that silently dropped a promotion which
+    only *tied* the block's existing code. Both are fixed by reconstructing
+    the whole block through :func:`resolve_exit_decision`; these tests fail
+    against that earlier revision, not just against the current one.
+    """
+
+    @staticmethod
+    def _exit_block(
+        *, code: int, reasons: list[str], compat: int,
+        coverage: int = 0, assurance: int = 0, crosscheck: int = 0,
+    ) -> dict[str, object]:
+        return {
+            "code": code,
+            "reasons": reasons,
+            "compatibility_contribution": compat,
+            "contract_coverage_contribution": coverage,
+            "analysis_assurance_contribution": assurance,
+            "crosscheck_promotion_contribution": crosscheck,
+        }
+
+    def test_promotion_preserves_the_max_invariant(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "exit": self._exit_block(code=0, reasons=["clean"], compat=0),
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        exit_block = diff_summary["exit"]
+        assert isinstance(exit_block, dict)
+        assert exit_block["code"] == 2
+        assert exit_block["reasons"] == ["promoted_crosscheck"]
+        assert exit_block["crosscheck_promotion_contribution"] == 2
+        assert exit_block["code"] == max(
+            exit_block["compatibility_contribution"],
+            exit_block["contract_coverage_contribution"],
+            exit_block["analysis_assurance_contribution"],
+            exit_block["crosscheck_promotion_contribution"],
+        )
+
+    def test_promotion_names_a_tie_instead_of_dropping_it(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "exit": self._exit_block(
+                code=2, reasons=["compatibility_gate"], compat=2,
+            ),
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        exit_block = diff_summary["exit"]
+        assert isinstance(exit_block, dict)
+        assert exit_block["code"] == 2
+        assert set(exit_block["reasons"]) == {
+            "compatibility_gate", "promoted_crosscheck",
+        }
+        assert exit_block["crosscheck_promotion_contribution"] == 2
+
+    def test_severity_gate_tie_also_names_the_crosscheck(self) -> None:
+        """Sibling of the previous test for the *other* persisted block --
+        `diff.severity` -- which used a strict `>` guard even after the
+        `diff.exit` tie fix, leaving the two blocks disagreeing about the
+        same tie (Codex review, fresh evidence: the tie only became
+        reachable once the call-site restructuring stopped gating this
+        whole function on `sev_exit > exit_code`).
+        """
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "severity": {
+                "exit_code": 2,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        gate = diff_summary["severity"]
+        assert isinstance(gate, dict)
+        assert gate["exit_code"] == 2
+        assert gate["blocking"] is True
+        assert set(gate["blocking_categories"]) == {
+            "abi_breaking", "promoted_crosscheck",
+        }
+
+    def test_severity_gate_strictly_higher_stays_untouched(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        gate = diff_summary["severity"]
+        assert isinstance(gate, dict)
+        assert gate["exit_code"] == 4
+        assert gate["blocking_categories"] == ["abi_breaking"]
+
+    def test_promotion_never_lowers_a_higher_existing_code(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "exit": self._exit_block(
+                code=4, reasons=["compatibility_gate"], compat=4,
+            ),
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        exit_block = diff_summary["exit"]
+        assert isinstance(exit_block, dict)
+        assert exit_block["code"] == 4
+        assert exit_block["reasons"] == ["compatibility_gate"]

@@ -1475,6 +1475,29 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "compare/compare-release --annotate/--annotate-additions (CLI cleanup"
+        " phase two, PR E: the composite Action now renders annotations"
+        " itself from the persisted `annotations` report field via its own"
+        " `annotate`/`annotate-additions` inputs, so the CLI flags were"
+        " removed entirely)",
+        ("--annotate", "--annotate-additions"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # Migration guidance: names the retired CLI spelling once,
+                # to point a reader at the `annotate`/`annotate-additions`
+                # Action inputs that replaced it.
+                "use/annotations.md",
+                # A point-in-time design review predating the removal: it
+                # names the flags in their own historical-record capacity
+                # (verifying stderr consistency, proposing the
+                # --annotate-additions-could-be-inferred idea), same
+                # reasoning as the --show-impact entry above.
+                "contribute/config-key-review.md",
+            }
+        ),
+    ),
 )
 
 

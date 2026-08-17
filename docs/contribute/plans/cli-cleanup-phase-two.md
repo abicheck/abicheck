@@ -435,6 +435,15 @@ persistence prerequisite completing first:
    workflow/recipe/doc snippet using `extra-args` for this, and state the
    `extra-args` → `annotate` input migration for external callers.
 
+   **Status: all three steps landed.** Step 1's report persistence and
+   step 2's release `--write` support merged first (see the "Landed since
+   the paragraph above was written" note further up this section); step
+   3 — deleting the flags, adding the `action.yml` inputs, implementing
+   `action/run.sh`'s renderer, and updating first-party workflow/recipe/
+   doc snippets — landed in the same PR. `compare --annotate` now exits
+   `64` with `No such option`, matching the sentence a few paragraphs
+   below this one.
+
 **New invariant (post-#780), and it is the reason PR 1b became PR E in the
 reviewed ordering:**
 
@@ -473,27 +482,116 @@ is the *concept* of three fields — `exit`, `contract_coverage_exit_
 contribution`, `analysis_assurance_exit_contribution` — not yet a uniform
 *location* for them today. `compare` puts all three at the report's top
 level, **implemented and merged as #789 (`e43abfd`) — "PR G1" is done.**
-**`scan --against` does not (fresh evidence, Codex review):** `ScanOutcome.to_dict()` (`scan_engine.py`)
-nests its whole `diff_summary` under a `"diff"` key, and `_baseline_summary()`
-(`cli_scan_baseline.py`) writes `analysis_assurance_exit_contribution` and
-the contract-coverage block *into that nested summary*, not the outer
-`ScanOutcome` dict — so today they live at `report["diff"].
-analysis_assurance_exit_contribution`, not `report.
-analysis_assurance_exit_contribution`. G1 never touched
-`cli_scan_baseline.py` at all, so `exit` does not exist for `scan --against`
-yet, in either location. PR E's job is therefore two things, not one: land
-`exit` for `scan --against` (mirroring G1's `compare` wiring, called from
-`_baseline_summary`/`_run_baseline_compare` the way `add_contract_context`
-is called from `compare`'s own JSON path), and decide — as part of that
-wiring, not as a drive-by rename — whether `scan`'s existing nested
-placement moves to the top level to match `compare`, or `compare`'s renderer
-adapter learns to read scan's nested location instead. Whichever is chosen,
-the Action's renderer keeps reading each operand's own existing
-`verdict`/`changes` (single-library), per-library summaries (release), or
-scan's own result shape through the adapter it already has for that shape —
-this section is only about where the *gate-explanation* fields live, not
-about unifying verdict/finding structures. A single-library compare report,
-unmodified by this section, already reads:
+**`scan --against` now does too (first half of PR E, landed).**
+`ScanOutcome.to_dict()` (`scan_engine.py`) nests its whole `diff_summary`
+under a `"diff"` key, and `_baseline_summary()`/`_run_baseline_compare()`
+(`cli_scan_baseline.py`) already wrote `analysis_assurance_exit_contribution`
+and the contract-coverage block *into that nested summary*, not the outer
+`ScanOutcome` dict — so the location question above was answered by
+precedent rather than reopened: `exit` was added at `report["diff"].exit`
+(schema 1.18), matching where its own constituent fields already live,
+**not** moved to the top level to match `compare`'s `report.exit` — the two
+commands keep their own report shapes; only the *concept* is shared, exactly
+as this section's own "not a proposed common envelope" note already argues
+for `verdict`/`findings`. `_run_baseline_compare` calls
+`exit_decision.resolve_compare_exit_decision` directly (the same function
+`add_contract_context` calls for `compare`), so the two commands cannot read
+two different numbers for the same kind of comparison. One scan-only wrinkle
+this block does not, and structurally cannot, resolve on its own: a
+maintainer-promoted `--crosscheck KEY=error` finding (`scan_engine.
+_crosscheck_severity_exit`) can raise the *process* exit code strictly after
+`_run_baseline_compare` already returned its `exit` block — the same
+after-the-fact timing problem `_promote_published_gate` already solved for
+the persisted `severity` block. Fixed the same way: `_promote_published_
+gate` now also raises `diff.exit.code` and re-stamps `diff.exit.reasons` to
+a new `ExitReason.PROMOTED_CROSSCHECK` (a scan-only reason;
+`resolve_compare_exit_decision` itself never emits it) whenever a promotion
+actually fires — never lowering, never firing when the existing code already
+dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by this
+block, matching `exit_decision.py`'s own explicit scope (no `DiffResult`
+exists for `NOT_COMPARABLE`; budget overflow aborts before a report is
+built) — see that module's own docstring for the reasoning.
+
+**The persistence prerequisite's single-library half is now also landed**
+(schema 2.43): every `compare --format json` report carries a top-level
+`annotations` array (`reporter_contract_blocks.add_annotations` /
+`annotations.annotation_report_entries`) — one already-classified,
+already-formatted entry per finding a full annotation pass over the
+comparison found, always the superset (as if `--annotate-additions` had
+also been given) regardless of what this run's own flags were. It reuses
+`annotations.collect_annotations`/`_format_annotation` exactly (no second,
+independently-maintained rendering path), so the persisted array and
+`--annotate`'s stderr output can never disagree. `annotations.py` itself
+had to stop importing `reporter.py` to land this without growing an import
+cycle (`reporter -> reporter_contract_blocks -> annotations -> reporter`,
+since `reporter_contract_blocks.add_annotations` now imports
+`annotations.py`) — `emit_github_step_summary` moved to a new leaf module,
+`annotations_step_summary.py`, since it was the one function in
+`annotations.py` that reached back into `reporter` (for `to_markdown`).
+
+**The persistence prerequisite's release-operand half is now also landed**
+(the capped `findings` list stays, unchanged, as the small human-readable
+summary it always was; this adds alongside it). Every `libraries[]` entry
+in a directory/package `compare --format json` release report now carries
+its own `annotations` array — the identical shape and identical
+`annotation_report_entries` function the single-library slice above uses,
+computed straight from that library's own already-produced `DiffResult`
+(`entry["_diff_result"]`, stashed by the primary per-library pass, after
+SONAME-lockstep-suppression has already run on it) rather than a second,
+independent re-run of that library's comparison.
+`_compare_release_libraries`'s own `--annotate` stderr rendering now reads
+from the same primary-pass results too
+(`_release_annotations_from_primary_pass`), so `_collect_release_extras` is
+called only for JUnit's `collect_diff_results` (which genuinely needs the
+old `AbiSnapshot` alongside the `DiffResult`, something the primary pass
+never stashes) — `--annotate` on a release operand no longer re-runs any
+library's comparison a second time. A Codex review round on the
+single-library slice above also caught a genuine design gap this slice
+closes for both operand shapes at once: `annotation_report_entries`'s
+persisted `"notice"`-level entries conflated two different things — a
+`--contract` finding compatibility policy never evaluated (shown by plain
+`--annotate` alone) and an addition/quality-issue/`info`-severity finding
+(shown only when `--annotate-additions` opts in) — so a renderer that
+dropped every `"notice"` unless `annotate-additions` was on would have
+silently hidden the former. Each entry now also carries `always_visible`
+(schema 2.44): always `true` for `error`/`warning`, and for `notice` only
+`true` for the always-shown contract-audit kind.
+
+**`action/run.sh`'s `--write`-equivalent path is now also landed.** Rather
+than a new bash-side code path, the actual gap was in the CLI itself:
+`compare --write FORMAT=PATH` used to be rejected outright for a
+directory/package operand (`_reject_set_input_flags`'s `secondary_fmt`
+check). `compare_release_cmd` now carries its own
+`secondary_output_options(["json", "markdown", "junit"])` (the same set
+`--format` itself accepts for a release operand) and renders the
+secondary format from the exact same already-computed
+`library_results`/`diff_pairs`/`bundle_result`/`matrix_result` its primary
+format uses — no second per-library comparison pass, mirroring how
+single-pair `compare`'s own `--write` reuses its one `DiffResult`.
+`_dispatch_release_compare` (`cli.py`) now explicitly rejects a
+release-incompatible secondary format (`sarif`/`html`/`review`) with a
+usage error, since `compare`'s own `--write` still accepts all six formats
+at parse time (before dispatch ever reaches the release engine's own,
+narrower `secondary_output_options` declaration) and `_format_release_
+summary`'s fallback branch would otherwise have silently rendered markdown
+into the requested path instead of erroring. `action/run.sh`'s `--write
+json=$PR_JSON` injection for the sticky PR comment no longer skips
+directory/package operands (the `_is_release_style_operand` guard on that
+one injection was removed; the helper itself stays, used by every other
+release-only flag check).
+
+**Landed since the paragraph above was written**: the Action's own
+renderer now reads the persisted `annotations` report field directly
+(`action/run.sh`'s `_emit_annotations`, driven by the new `annotate`/
+`annotate-additions` `action.yml` inputs) instead of inferring anything
+from stderr or re-running a comparison, and works identically for a
+single pair and a release fan-out. The CLI's own `--annotate`/
+`--annotate-additions` flags (and every internal parameter/code path that
+only existed to render them — `_maybe_emit_annotations`,
+`release_annotations_from_primary_pass`, `_collect_release_extras`) have
+since been deleted entirely; `abicheck compare`/`compare-release` no
+longer accept them at all. A single-library compare report, unmodified by
+this section, already reads:
 
 ```json
 {
@@ -501,6 +599,7 @@ unmodified by this section, already reads:
   "contract_coverage_exit_contribution": 0,
   "analysis_assurance_exit_contribution": 1,
   "exit": {"code": 1, "reasons": ["analysis_assurance"]},
+  "annotations": [],
   "changes": []
 }
 ```

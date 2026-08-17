@@ -26,9 +26,11 @@ All five formats support the report filtering options described below.
 The ABICC-compatible XML output (via `abicheck compat check`) includes
 redundancy annotations but does not support `--show-only` filtering.
 
-In addition to report formats, abicheck can emit **GitHub Actions workflow
-command annotations** (`--annotate`) that appear as inline comments on PR
-diffs. See [GitHub PR Annotations](annotations.md) for details.
+In addition to report formats, the composite GitHub Action can emit
+**GitHub Actions workflow command annotations** (`annotate: true`) that
+appear as inline comments on PR diffs, rendered from the persisted
+`annotations` report field. See [GitHub PR Annotations](annotations.md) for
+details.
 
 ## Redundancy filtering
 
@@ -320,9 +322,12 @@ abicheck compare old.json new.json \
   secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
   `--show-only`, which describes only the primary format's display.
-- Not supported for directory/package (release) comparisons — the release
-  fan-out doesn't produce a single `DiffResult` to render twice. Compare the
-  libraries individually to use it.
+- Also works for a directory/package (release) comparison: the per-library
+  fan-out renders its second format from the same already-computed
+  per-library results, without re-running any library's comparison. Only
+  `json`/`markdown`/`junit` are available there (the same set `--format`
+  itself accepts for a release operand) — `sarif`/`html`/`review` still
+  require a single-pair comparison.
 
 The bundled GitHub Action uses this to get JSON for its sticky PR comment
 without re-running the whole comparison a second time.
@@ -660,7 +665,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.41",
+  "report_schema_version": "2.44",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

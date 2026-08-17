@@ -1309,11 +1309,15 @@ class TestTheFailOnClaimTracksTheTier:
 class TestTheReleaseTableVerdictIsRead:
     """A directory/package compare reaches the text fallback with no JSON.
 
-    `--write` is rejected for a release-style operand, so a
-    markdown release compare has no machine-readable report at all — and its
-    renderer writes the verdict as a table row (`| **Verdict** | 💥
-    `BREAKING` |`), with no colon. Matching only the colon form left every
-    release compare unescalated (Codex review).
+    The stub `abicheck` these tests use never honors `--write` (it just
+    echoes a fixed report and exits), simulating the "no machine-readable
+    report was produced" case this fallback exists for — the real CLI's
+    own release-operand `--write` support (CLI cleanup phase two, PR E)
+    doesn't change that this fallback still has to work when JSON genuinely
+    isn't available. A markdown release compare's renderer writes the
+    verdict as a table row (`| **Verdict** | 💥 `BREAKING` |`), with no
+    colon. Matching only the colon form left every release compare
+    unescalated (Codex review).
     """
 
     def _summary(self, tmp_path: Path, verdict_line: str, exit_code: int) -> dict:
@@ -1532,15 +1536,18 @@ class TestCoverageGatedTrustsAReadableZero:
 class TestCoverageGatedFallbackIgnoresAccepted:
     """The genuine no-JSON-at-all stderr fallback must itself distinguish
     the "Accepted by contract.unresolved=warn" wording from a real gate
-    (Codex review, P1, second round) -- exactly the shape a directory/
-    package `compare` takes with a non-JSON format outside a `pull_request`
-    event (this PR's own P1 release fix): `--write` is rejected
-    for a release-style operand, and the Action's PR-comment JSON rerun only
-    fires on `pull_request`/`pull_request_target`, so this fallback is the
-    ONLY signal available at all -- there is no readable-JSON branch to
-    fall back on first. A single-file operand always gets a secondary JSON
-    regardless of format/PR-context (see `PR_JSON` wiring), so this needs a
-    real directory operand to reach the genuine no-JSON path at all.
+    (Codex review, P1, second round). Reached here via the stub `abicheck`
+    these tests use, which never honors `--write` (it just echoes a fixed
+    report and exits) -- since CLI cleanup phase two, PR E, the real CLI's
+    release-operand `--write` support means this path is no longer the
+    *only* way to reach a JSON-less release comparison in production (the
+    real tool now always produces one), but the fallback itself still has
+    to be correct for whenever a real `abicheck` genuinely fails to
+    produce readable JSON (a crash, an old pre-PR-E version, `extra-args`
+    overriding `--write` with something unreadable, ...). A single-file
+    operand always gets a secondary JSON regardless of format/PR-context
+    (see `PR_JSON` wiring), so this needs a real directory operand to
+    reach the genuine no-JSON path at all.
     """
 
     def _release_outputs(
