@@ -486,6 +486,16 @@ STEPS: tuple[Step, ...] = (
         description="Header-graph attach-cost trend measurement (G31 Phase D, report-only)",
     ),
     Step(
+        # The build/source workflow produces the fixed artifact immediately
+        # before invoking this catalog step. Keeping the checker here makes
+        # the local full-profile command and the required CI proof use the
+        # same named verification contract.
+        "build-source-release-proof",
+        _pyscript("scripts/check_build_source_release_proof.py"),
+        frozenset({FULL}),
+        description="Fixed 10-case build/source release-proof artifact gate",
+    ),
+    Step(
         "mutation",
         _pyscript("scripts/check_mutation_score.py"),
         frozenset({FULL}),

@@ -413,8 +413,7 @@ jobs:
               > results/validate_examples-build-source.json
             cp results/validate_examples-build-source.json results/validate_examples.json
             ABICHECK_STRICT_KINDS=1 python tests/check_validate_results.py
-            python scripts/check_build_source_release_proof.py \
-              results/validate_examples-build-source.json
+            python scripts/verify.py --profile full --only build-source-release-proof
           else
             set +e
             PYTHONPATH=. python tests/validate_examples.py --artifact-variant ${{ matrix.mode }} --json \

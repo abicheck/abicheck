@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,3 +56,24 @@ def test_rejects_missing_or_wrong_selected_case_count():
     errors = proof_gate.validate({"selected_cases": 9, "results": []})
 
     assert errors == ["expected selected_cases=10, found 9"]
+
+
+def test_status_sync_recognizes_build_source_proof_row(tmp_path: Path):
+    artifact = tmp_path / "build-source.json"
+    artifact.write_text(json.dumps({"summary": {"PASS": 10}}), encoding="utf-8")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_examples_validation_status_sync.py",
+            "--build-source",
+            str(artifact),
+            "--check",
+        ],
+        cwd=_GATE_PATH.parent.parent,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "validation-status table is in sync" in proc.stdout

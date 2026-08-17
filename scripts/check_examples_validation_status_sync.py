@@ -69,7 +69,7 @@ GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 # Rows whose Scope column (4th cell) is a plain "<N> catalog cases" count that
 # must track the live case count in ground_truth.json — these lanes always
 # run every case (skips/xfails included), unlike the fixed representative
-# subsets ("Build/autodiscovery", "Build/source smoke"). Checked unconditionally
+# subsets ("Build/autodiscovery", "Build/source proof"). Checked unconditionally
 # (no artifact needed): this caught the table claiming "186 catalog cases" in
 # every one of these rows for several releases after the catalog grew to 191,
 # because nothing previously compared the Scope cell to ground_truth.json.
@@ -95,7 +95,7 @@ ROW_STATUS_ORDER = {
     ),
     "Release headers": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
     "Stripped headers": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
-    "Build/source smoke": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
+    "Build/source proof": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
 }
 
 
@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         "Runtime smoke": _row_result("Runtime smoke", runtime),
         "Release headers": _row_result("Release headers", release),
         "Stripped headers": _row_result("Stripped headers", stripped),
-        "Build/source smoke": _row_result("Build/source smoke", build_source),
+        "Build/source proof": _row_result("Build/source proof", build_source),
     }
 
     for label, new_result in row_updates.items():
