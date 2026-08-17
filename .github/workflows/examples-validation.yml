@@ -9,6 +9,7 @@ on:
       - "tests/**"
       - "validation/scripts/**"
       - "scripts/check_examples_validation_status_sync.py"
+      - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
   pull_request:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - "tests/**"
       - "validation/scripts/**"
       - "scripts/check_examples_validation_status_sync.py"
+      - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
   workflow_dispatch:
 
