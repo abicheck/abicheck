@@ -1045,6 +1045,8 @@ def _strip_diff_results_and_adjust_verdict(
     removed_keys: list[str],
     worst_verdict: str,
     severity_config: SeverityConfig | None = None,
+    *,
+    needs_annotations: bool = True,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -1062,6 +1064,18 @@ def _strip_diff_results_and_adjust_verdict(
     Python-only objects. Additionally, if any library was *removed* from the
     release and the verdict has not already been escalated, the verdict is
     bumped to at least ``COMPATIBLE_WITH_RISK``.
+
+    *needs_annotations* gates whether the uncapped ``annotations`` array
+    (unlike ``findings`` above, deliberately unbounded -- see its own
+    comment) is built at all (Codex review, fresh evidence): only a JSON
+    render (primary ``--format json`` or a secondary ``--write
+    json=...``) ever reads it, but every entry in ``library_results`` is
+    held until the whole release finishes, so building it unconditionally
+    grew a large release's peak memory by the combined size of every
+    library's full finding set even for the common markdown/JUnit-only
+    case that never reads it -- the same class of gap the sibling
+    ``_old_snapshot``/``collect_diff_results`` gate already closed for
+    JUnit specifically.
 
     Returns the (possibly updated) *worst_verdict* string.
     """
@@ -1091,11 +1105,12 @@ def _strip_diff_results_and_adjust_verdict(
             # per-library re-run this module used to perform
             # (`_collect_release_extras`, since removed) just to recover the
             # same DiffResult already sitting right here.
-            from .annotations import annotation_report_entries
+            if needs_annotations:
+                from .annotations import annotation_report_entries
 
-            entry["annotations"] = annotation_report_entries(
-                diff, severity_config=severity_config
-            )
+                entry["annotations"] = annotation_report_entries(
+                    diff, severity_config=severity_config
+                )
         entry.pop("_diff_result", None)
         entry.pop("_old_snapshot", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
@@ -1632,7 +1647,11 @@ def compare_release_cmd(
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
             worst_verdict = _strip_diff_results_and_adjust_verdict(
-                library_results, removed_keys, worst_verdict, severity_config
+                library_results,
+                removed_keys,
+                worst_verdict,
+                severity_config,
+                needs_annotations=(fmt == "json" or secondary_fmt == "json"),
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).

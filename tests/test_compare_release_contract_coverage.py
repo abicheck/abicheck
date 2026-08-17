@@ -37,6 +37,7 @@ from abicheck.cli_compare_release import (
     _compare_one_library,
     _finalize_release_output,
     _format_release_json,
+    _strip_diff_results_and_adjust_verdict,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -197,6 +198,45 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         "libfoo.so", *common, collect_diff_results=True,
     )
     assert junit_entry["_old_snapshot"] is old_snap
+
+
+def test_strip_diff_results_builds_annotations_only_when_requested() -> None:
+    """Codex review, fresh evidence: the uncapped `annotations` array (only
+    a JSON render -- primary `--format json` or a secondary `--write
+    json=...` -- ever reads it) must not be built for every library
+    unconditionally, the same class of gap the sibling `_old_snapshot`
+    fix above closed for JUnit specifically -- every entry in
+    `library_results` is held until the whole release finishes.
+    """
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+    def _entry() -> dict[str, object]:
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        return {"library": "libfoo.so", "verdict": "BREAKING", "_diff_result": result}
+
+    markdown_entries = [_entry()]
+    _strip_diff_results_and_adjust_verdict(
+        markdown_entries,
+        [],
+        "BREAKING",
+        needs_annotations=False,
+    )
+    assert "annotations" not in markdown_entries[0]
+
+    json_entries = [_entry()]
+    _strip_diff_results_and_adjust_verdict(
+        json_entries,
+        [],
+        "BREAKING",
+        needs_annotations=True,
+    )
+    assert json_entries[0]["annotations"]
 
 
 def test_release_json_contract_coverage_failure_count_independent_of_warn() -> None:

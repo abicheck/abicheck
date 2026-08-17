@@ -1631,9 +1631,9 @@ trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_B
 # is non-empty" -- both are pure *write* destinations for this invocation
 # (`CMD+=(-o "$OUTPUT_FILE")` above), but if either path already held
 # content BEFORE this invocation (a stale file from a previous step, or
-# one a PR author committed into the checked-out tree -- `INPUT_EXTRA_
-# ARGS` and its own `--write` path are PR-controlled per this file's own
-# threat model) and `abicheck` then fails before overwriting it, every
+# one a PR author committed into the checked-out tree -- `INPUT_EXTRA_ARGS`
+# and its own `--write` path are PR-controlled per this file's own threat
+# model) and `abicheck` then fails before overwriting it, every
 # downstream consumer of that file (annotations, coverage/severity/
 # verdict queries, the sticky PR comment) would silently read stale or
 # attacker-controlled content as if it were this run's own report.
@@ -1742,15 +1742,35 @@ _json_report_src() {
   # fingerprint was empty). `PR_JSON` (always a fresh mktemp this run) and
   # `_STDOUT_JSON_FILE` (this run's own captured stdout) need no such
   # check -- neither can be a pre-existing file.
+  #
+  # `${_output_file_pre_fp+x}`/`${_extra_write_json_pre_fp+x}` (POSIX
+  # parameter-expansion existence tests, not bash-4.2+'s `-v` -- this repo
+  # targets macOS's stock bash 3.2 too) distinguish "the pre-run bookkeeping
+  # ran and found no file there" (set, empty) from "the bookkeeping never
+  # ran at all" -- several existing tests (`test_action_run_sh_severity_
+  # summary.py`, `test_action_run_sh_pr_json.py`, ...) extract `_json_
+  # report_src` and its sibling helpers as an isolated snippet, deliberately
+  # never executing the `${CMD[@]}` invocation section this bookkeeping
+  # lives in -- so in that narrower context the freshness variables are
+  # never assigned at all, not even to "". Enforcing freshness there would
+  # silently reject every report those tests hand it (Codex review, fresh
+  # evidence -- the fingerprint feature caught two of its own consuming
+  # tests as a false positive, not a real staleness case). Degrading to the
+  # pre-fingerprint "exists and non-empty" rule exactly when the bookkeeping
+  # never ran preserves this file's real, in-production freshness guarantee
+  # unchanged, since the real script always assigns both variables (even to
+  # "") before `_json_report_src` can ever be called.
   if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
-     && [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; then
+     && { [[ -z "${_output_file_pre_fp+x}" ]] \
+          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
     echo "${_STDOUT_JSON_FILE}"
-  elif [[ -n "$_extra_write_json_path" && -s "$_extra_write_json_path" ]] \
-       && [[ "$(_file_fingerprint "$_extra_write_json_path")" != "$_extra_write_json_pre_fp" ]]; then
+  elif [[ -n "${_extra_write_json_path:-}" && -s "${_extra_write_json_path:-}" ]] \
+       && { [[ -z "${_extra_write_json_pre_fp+x}" ]] \
+            || [[ "$(_file_fingerprint "$_extra_write_json_path")" != "$_extra_write_json_pre_fp" ]]; }; then
     # A user-supplied `--write json=PATH` in extra-args (see
     # `_extra_args_write_json_path`'s own docstring for why this is needed
     # rather than falling through to "no report").
