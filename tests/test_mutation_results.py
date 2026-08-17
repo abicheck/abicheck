@@ -420,7 +420,9 @@ def test_parser_reads_a_real_mutmut_run_end_to_end(tmp_path: Path) -> None:
         textwrap.dedent(
             """\
             [tool.mutmut]
-            source_paths = ["pkg/alpha.py"]
+            # mutmut 3.x requires a source *directory* here; it copies the
+            # directory into its worktree before running pytest.
+            source_paths = ["pkg"]
             pytest_add_cli_args_test_selection = ["tests/"]
             pytest_add_cli_args = ["-q", "--tb=no"]
             use_git_change_detection = false
