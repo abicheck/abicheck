@@ -87,6 +87,7 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
+| Full example proof matrix | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 197 catalog cases | 197/197 COVERED; 196 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
 | Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 197 catalog cases | gcc: 153 PASS / 5 XFAIL / 39 SKIP; clang: 153 PASS / 6 XFAIL / 38 SKIP | Green default/debug verdict lane |
 | Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 197 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
 | Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 197 catalog cases | 146 PASS / 5 XFAIL / 46 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
@@ -219,9 +220,10 @@ Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
 `case60_base_class_position_changed`, and `case69_trivial_to_nontrivial`.
 
-The release/stripped artifact lanes are reported-only plus false-positive
-guarded, while build-source stays a representative smoke because source replay is
-the expensive extended mode.
+Release and stripped full-catalog lanes remain reported-only plus false-positive
+guarded. The fixed ten-case build/source proof is blocking. A complete
+build/source run over every applicable L3-L5 case remains an extended/manual
+validation path because source replay is expensive.
 
 Recent build/source and ABI-mode examples:
 

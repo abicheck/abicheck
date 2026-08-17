@@ -60,7 +60,6 @@ interpretation rather than a second manual snapshot.
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
 | Catalog metadata | 197 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 38 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
-
 | Build/autodiscovery | catalog integration suite | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
 | Full example proof matrix | catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
 | Default/debug verdicts | catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Single-library debug lane; dedicated non-`.so` cases skip here by design; XFAIL is not green full-matrix scope |
@@ -69,7 +68,6 @@ interpretation rather than a second manual snapshot.
 | Release headers | catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; false-positive guard passed |
 | Stripped headers | catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; known signal-loss rows remain visible there |
 | Build/source proof | fixed 10-case proof set | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Blocking fixed-set proof: every expected result must be present and `PASS` |
-
 | Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below | Competitor `.so` lane only; the 38 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
 | Scan-depth matrix | not independently re-run this pass | `abicheck scan --depth {binary,headers,build,source,full}` | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 
@@ -96,9 +94,10 @@ Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
 `case60_base_class_position_changed`, and `case69_trivial_to_nontrivial`.
 
-The full release/stripped/build-source mode matrix is intentionally not a
-blocking CI gate. It remains a manual extended-scan path because it is much
-heavier than the default/debug full-catalog gate.
+Release and stripped full-catalog lanes remain reported-only. The fixed
+ten-case build/source proof is blocking. A complete build/source run over every
+applicable L3-L5 case remains an extended/manual validation path because it is
+much heavier than the default/debug full-catalog gate.
 
 ---
 
