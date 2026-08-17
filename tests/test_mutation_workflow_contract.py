@@ -91,6 +91,7 @@ def _test_filter() -> list[str]:
 _INFRASTRUCTURE_PATHS = {
     "scripts/mutation_results.py",
     "scripts/check_mutation_score.py",
+    "scripts/mutation_scope.py",
     "tests/test_mutation_results.py",
     ".github/workflows/mutation.yml",
     "pyproject.toml",

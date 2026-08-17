@@ -95,6 +95,7 @@ jobs:
               # all (Codex review).
               - 'scripts/mutation_results.py'
               - 'scripts/check_mutation_score.py'
+              - 'scripts/mutation_scope.py'
               - 'tests/test_mutation_results.py'
               - '.github/workflows/mutation.yml'
               - 'pyproject.toml'
@@ -203,6 +204,17 @@ jobs:
         env:
           ABICHECK_MIN_EXECUTED: '1'
         run: python -m pytest tests/test_mutation_results.py -m slow -q
+
+      - name: Narrow mutation scope to PR-implicated detector modules
+        if: github.event_name == 'pull_request'
+        # `--diff-scoped` can only fail on functions the PR changed.  Mutating
+        # unrelated detector modules first consumed the entire two-hour job
+        # budget in #784 and #797 before their changed modules were measured.
+        # The helper falls back to the full configured scope for an
+        # unclassified test or mutation-infrastructure change.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/mutation_scope.py --base-ref "origin/$BASE_REF"
 
       - name: Run mutation testing (diff-scoped)
         if: github.event_name == 'pull_request'
