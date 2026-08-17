@@ -1626,6 +1626,31 @@ STDERR_FILE=$(mktemp)
 #: runner accumulates one JSON report per scan run indefinitely.
 trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
+# Codex review, fresh evidence: `_json_report_src`/`_extra_args_write_json_
+# path` below trust `OUTPUT_FILE`/a user-supplied `--write json=PATH`
+# purely on "the file exists and is non-empty" -- both are pure *write*
+# destinations for this invocation (`CMD+=(-o "$OUTPUT_FILE")` above,
+# never read as input), but if either path already held content BEFORE
+# this invocation (a stale file from a previous step, or one a PR author
+# committed into the checked-out tree -- `INPUT_EXTRA_ARGS` and its own
+# `--write` path are PR-controlled per this file's own threat model) and
+# `abicheck` then fails before overwriting it, every downstream consumer
+# of that file (annotations, coverage/severity/verdict queries, the sticky
+# PR comment) would silently read stale or attacker-controlled content as
+# if it were this run's own report. Removing any pre-existing content at
+# either path here, before the one place `${CMD[@]}` actually runs, is
+# what makes "the file exists and is non-empty afterward" into a sound
+# proof that abicheck itself wrote it this run -- an mtime/size comparison
+# would still be racy (same-second writes, no guaranteed sub-second
+# resolution across all runner filesystems).
+if [[ -n "${OUTPUT_FILE:-}" ]]; then
+  rm -f "$OUTPUT_FILE"
+fi
+_extra_write_json_pre="$(_extra_args_write_json_path || true)"
+if [[ -n "$_extra_write_json_pre" ]]; then
+  rm -f "$_extra_write_json_pre"
+fi
+
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
   "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
@@ -1910,7 +1935,19 @@ PYQUERY
 # for it, not an error), so this is a genuine no-op there rather than a
 # scoped-out branch to maintain.
 _emit_annotations() {
-  [[ "${INPUT_ANNOTATE:-false}" == "true" ]] || return 0
+  if [[ "${INPUT_ANNOTATE:-false}" != "true" ]]; then
+    # `annotate-additions: true` alone, with `annotate` left at its
+    # default `false`, used to be a hard CLI usage error
+    # (`--annotate-additions requires --annotate`, removed along with the
+    # flags themselves). An Action input has no equivalent usage-error
+    # mechanism, but silently rendering nothing for this combination is
+    # still a real, surprising behaviour change from that (CodeRabbit
+    # review) -- say so instead.
+    if [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]]; then
+      echo "::notice title=abicheck annotate::annotate-additions is true but annotate is false, so no annotations are rendered. Set annotate: true as well."
+    fi
+    return 0
+  fi
   local _src _additions
   _src=$(_json_report_src)
   if [[ -z "$_src" ]]; then

@@ -203,6 +203,7 @@ _CompareReleaseCommonArgs = tuple[
     str | None,
     "SeverityConfig | None",
     "PackApplication | None",
+    bool,
 ]
 
 
@@ -247,6 +248,7 @@ def _compare_one_library(
     contract_mode: str | None = None,
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
+    collect_diff_results: bool = False,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -258,6 +260,17 @@ def _compare_one_library(
     the ``"_diff_result"`` key. Callers that need the full diff (the
     bundle layer, JUnit aggregation) pop it from the entry before
     JSON-serialising — keeps the per-library compare a single-pass.
+
+    *collect_diff_results* additionally stashes the old
+    :class:`AbiSnapshot` under ``"_old_snapshot"`` -- needed only for a
+    JUnit render (``--format junit``/``--write junit=...``), which is the
+    one output shape that needs the pair, not just the diff. Gated behind
+    this flag (Codex review, fresh evidence) rather than stashed
+    unconditionally: an `AbiSnapshot` can be large, and every entry in
+    ``library_results`` is held until the whole release finishes, so an
+    unconditional stash would grow a large release's peak memory by the
+    combined size of every library's old snapshot even for the common
+    markdown/JSON-only case that never reads it.
 
     *severity_config* is forwarded to the per-library ``--output-dir`` JSON
     write below (Codex review, fresh evidence): without it, that write
@@ -312,17 +325,20 @@ def _compare_one_library(
             "compatible_additions": len(result.compatible),
             "quality_issues": n_quality,
             "_diff_result": result,
-            # CodeRabbit review, PR #798: stashed alongside `_diff_result` so
-            # a secondary JUnit render (`--write junit=...`/`--format junit`)
-            # can build its (DiffResult, old_snapshot) pairs straight from
-            # this single primary pass, the same way annotations already do
-            # -- instead of `_collect_release_extras`'s old independent
-            # re-run, whose own failure path silently *dropped* a pair from
-            # the secondary report on a rerun error even though the primary
-            # pass had already succeeded for it (a truncated JUnit report
-            # next to a complete primary one).
-            "_old_snapshot": compare_result.old_snapshot,
         }
+        if collect_diff_results:
+            # CodeRabbit review, PR #798: stashed alongside `_diff_result`
+            # so a secondary JUnit render (`--write junit=...`/`--format
+            # junit`) can build its (DiffResult, old_snapshot) pairs
+            # straight from this single primary pass, the same way
+            # annotations already do -- instead of
+            # `_collect_release_extras`'s old independent re-run, whose own
+            # failure path silently *dropped* a pair from the secondary
+            # report on a rerun error even though the primary pass had
+            # already succeeded for it (a truncated JUnit report next to a
+            # complete primary one). Gated on the flag (Codex review,
+            # fresh evidence) -- see this function's own docstring for why.
+            entry["_old_snapshot"] = compare_result.old_snapshot
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -529,6 +545,7 @@ def _compare_release_libraries(
         contract_mode,
         severity_config,
         pack_application,
+        collect_diff_results,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

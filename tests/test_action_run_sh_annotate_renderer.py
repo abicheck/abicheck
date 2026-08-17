@@ -149,6 +149,29 @@ class TestAnnotateRendererReadsThePersistedReport:
         assert result.returncode == 0, result.stdout + result.stderr
         assert _emitted_lines(result) == []
 
+    def test_annotate_additions_alone_explains_rather_than_silently_no_ops(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review, fresh evidence: `annotate-additions: true`
+        with `annotate` left at its default `false` used to be a hard CLI
+        usage error (`--annotate-additions requires --annotate`, removed
+        along with the flags). An Action input has no equivalent, but
+        silently rendering nothing for this combination is still a
+        surprising behaviour change -- it must say so.
+        """
+        result = _run_compare(
+            tmp_path,
+            {"INPUT_ANNOTATE_ADDITIONS": "true"},
+            stub_report=_REPORT_WITH_ANNOTATIONS,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        # No report annotation lines were rendered -- only the diagnostic.
+        lines = _emitted_lines(result)
+        assert "::error title=ABI Break::function foo removed" not in lines
+        combined = result.stdout + result.stderr
+        assert "::notice title=abicheck annotate::" in combined
+        assert "annotate-additions is true but annotate is false" in combined
+
     def test_release_shape_flattens_across_libraries(self, tmp_path: Path) -> None:
         release_report = {
             "verdict": "BREAKING",

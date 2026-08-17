@@ -154,6 +154,51 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
     assert entry["contract_coverage_failure_count"] == 0
 
 
+def test_compare_one_library_stashes_old_snapshot_only_when_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: `_old_snapshot` (added for a secondary
+    JUnit render to read straight off the primary pass, see
+    `_compare_one_library`'s own docstring) must not be stashed on every
+    release entry unconditionally -- an `AbiSnapshot` can be large, and
+    every entry in `library_results` is held until the whole release
+    finishes, so an unconditional stash would grow peak memory by every
+    library's old snapshot even for the common markdown/JSON-only case
+    that never reads it. Gated on `collect_diff_results`, the same flag
+    that already gates whether `_compare_release_libraries` reads it back.
+    """
+    from abicheck.api_types import CompareResult
+    from abicheck.checker import DiffResult, Verdict
+
+    old_path = tmp_path / "libfoo.so.1"
+    new_path = tmp_path / "libfoo.so.2"
+    old_snap = _snap("1.0")
+    new_snap = _snap("1.0")
+
+    def _fake_run_compare_pair(*_args: object, **_kwargs: object) -> CompareResult:
+        result = DiffResult(
+            old_version="1.0", new_version="1.0", library="libfoo.so",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
+
+    monkeypatch.setattr(
+        "abicheck.cli_compare_release._run_compare_pair", _fake_run_compare_pair
+    )
+    common = (
+        {"libfoo.so": old_path}, {"libfoo.so": new_path}, None, None,
+        lambda _old, _dbg: None, [], [], [], [], "1.0", "1.0", "c",
+        None, "strict_abi", None, None,
+    )
+    default_entry = _compare_one_library("libfoo.so", *common)
+    assert "_old_snapshot" not in default_entry
+
+    junit_entry = _compare_one_library(
+        "libfoo.so", *common, collect_diff_results=True,
+    )
+    assert junit_entry["_old_snapshot"] is old_snap
+
+
 def test_release_json_contract_coverage_failure_count_independent_of_warn() -> None:
     # CLI-audit P2 follow-up (Codex review): `contract.unresolved=warn`
     # zeroes the exit-code contribution while the failure count stays real

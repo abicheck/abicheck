@@ -208,10 +208,16 @@ report = json.load(open("report.json"))
 # The persisted array is intentionally uncapped -- sort by severity and
 # apply the same 50-per-step cap the composite Action itself applies
 # (action/run.sh), or a large report can exceed GitHub Actions own limit
-# on visible annotations per step.
+# on visible annotations per step. `always_visible` is schema 2.44+; a
+# report from schema 2.43 (when `annotations` itself was introduced) has
+# no such key on each entry -- degrade to "visible unless it is a
+# notice", the same fallback action/run.sh itself uses for an older report.
 order = {"error": 0, "warning": 1, "notice": 2}
 visible = sorted(
-    (e for e in report.get("annotations", []) if e["always_visible"]),
+    (
+        e for e in report.get("annotations", [])
+        if e.get("always_visible", e.get("level") != "notice")
+    ),
     key=lambda e: order.get(e["level"], 99),
 )
 for e in visible[:50]:
@@ -315,7 +321,8 @@ present in the binary.
 ### Too many notice annotations
 
 Use `annotate: true` without `annotate-additions: true` (the default). This
-limits annotations to breaking changes and warnings only.
+limits annotations to breaking changes, warnings, and the one unconditional
+"not evaluated" notice (see "How it works" above).
 
 ## Migrating from `extra-args: --annotate`
 
