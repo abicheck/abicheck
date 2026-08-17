@@ -650,11 +650,24 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
     naming ``compatibility_gate``/etc. for a code lower than the one
     actually published -- the exact "explains nothing about why the exit
     is N" trap :class:`~abicheck.exit_decision.ExitReason` exists to avoid.
-    Raising it here reproduces this function's own "raise, never clear, and
-    only past the previous max" discipline, and since a raise only ever
-    happens when *sev_exit* strictly exceeds the block's own prior code, no
-    other axis can be tied for the new maximum -- ``reasons`` becomes
-    exactly ``(PROMOTED_CROSSCHECK,)``, not a guess.
+
+    **Reconstructs the whole block through
+    :func:`~abicheck.exit_decision.resolve_exit_decision` rather than
+    hand-patching ``code``/``reasons`` in place (Codex review, fresh
+    evidence).** An earlier revision only overwrote those two fields,
+    which broke :class:`~abicheck.exit_decision.ExitDecision`'s own
+    documented invariant that ``code`` equals the max of its contribution
+    fields (the three pre-existing ones stayed at their pre-promotion
+    values, now summing to less than the new ``code``) and silently
+    skipped a promotion that only *ties* the block's existing code (a
+    strict ``>`` check, unlike :func:`resolve_exit_decision`'s own
+    tie-inclusive fold). Reading the three existing contributions back off
+    the persisted dict and re-folding them alongside
+    ``crosscheck_promotion_contribution=sev_exit`` reproduces this
+    function's "raise, never clear" discipline for free -- ``max`` cannot
+    lower ``code``, and any prior crosscheck contribution already in the
+    block (in case this function is ever called more than once for the
+    same run) is folded in rather than dropped.
     """
     if not isinstance(diff_summary, dict):
         return
@@ -671,12 +684,26 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
             gate["blocking_categories"] = cats
     exit_block = diff_summary.get("exit")
     if isinstance(exit_block, dict):
-        from .exit_decision import ExitReason
+        compat = exit_block.get("compatibility_contribution")
+        coverage = exit_block.get("contract_coverage_contribution")
+        assurance = exit_block.get("analysis_assurance_contribution")
+        prior_crosscheck = exit_block.get("crosscheck_promotion_contribution")
+        if (
+            isinstance(compat, int)
+            and isinstance(coverage, int)
+            and isinstance(assurance, int)
+        ):
+            from .exit_decision import resolve_exit_decision
 
-        current_code = exit_block.get("code")
-        if isinstance(current_code, int) and sev_exit > current_code:
-            exit_block["code"] = sev_exit
-            exit_block["reasons"] = [ExitReason.PROMOTED_CROSSCHECK.value]
+            crosscheck_contribution = max(
+                sev_exit, prior_crosscheck if isinstance(prior_crosscheck, int) else 0
+            )
+            diff_summary["exit"] = resolve_exit_decision(
+                compatibility_contribution=compat,
+                contract_coverage_contribution=coverage,
+                analysis_assurance_contribution=assurance,
+                crosscheck_promotion_contribution=crosscheck_contribution,
+            ).to_dict()
 
 
 def _audit_exit_code(

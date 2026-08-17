@@ -115,6 +115,21 @@ class ExitDecision:
     compatibility_contribution: int
     contract_coverage_contribution: int
     analysis_assurance_contribution: int
+    #: `scan --against` only -- what a maintainer-promoted `--crosscheck
+    #: KEY=error` finding contributes (`0` for every other caller, and for
+    #: a scan run where no promotion fired). A *fourth* axis, not a
+    #: bolt-on mutation of `code`/`reasons` after the fact (Codex review,
+    #: fresh evidence): `scan_engine._promote_published_gate` used to patch
+    #: only those two fields, leaving the three contributions above
+    #: summing to less than the new `code` -- silently breaking this
+    #: class's own documented invariant that `code == max(the
+    #: contributions)`, and also never adding `PROMOTED_CROSSCHECK` to
+    #: `reasons` on an exact tie (a hand-rolled strict `>` check, unlike
+    #: this function's own tie-inclusive fold). Modeling it as a real
+    #: contribution lets `_promote_published_gate` reconstruct the whole
+    #: decision through :func:`resolve_exit_decision` instead of hand-
+    #: patching two of its five fields.
+    crosscheck_promotion_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block."""
@@ -124,6 +139,7 @@ class ExitDecision:
             "compatibility_contribution": self.compatibility_contribution,
             "contract_coverage_contribution": self.contract_coverage_contribution,
             "analysis_assurance_contribution": self.analysis_assurance_contribution,
+            "crosscheck_promotion_contribution": self.crosscheck_promotion_contribution,
         }
 
 
@@ -132,9 +148,10 @@ def resolve_exit_decision(
     compatibility_contribution: int,
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
+    crosscheck_promotion_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
-    """Fold the three already-computed axis contributions into one decision.
+    """Fold the axis contributions below into one explainable decision.
 
     *compatibility_contribution* is the caller's own pre-computed
     compatibility-gate exit code -- either `severity.legacy_exit_code`
@@ -156,11 +173,18 @@ def resolve_exit_decision(
     default, or `SCOPED_GATE` when the caller's compatibility contribution
     is the scoped application/plugin-host gate rather than the full-library
     one; every other axis's reason is unaffected either way.
+    *crosscheck_promotion_contribution* defaults to ``0`` (every caller but
+    `scan_engine._promote_published_gate`, which is the only place a
+    maintainer-promoted `--crosscheck KEY=error` finding's own exit
+    contribution is known) -- see :class:`ExitDecision`'s own field
+    docstring for why this has to be a real axis rather than a post-hoc
+    patch to `code`/`reasons`.
     """
     contributions = {
         compatibility_reason: compatibility_contribution,
         ExitReason.CONTRACT_COVERAGE: contract_coverage_contribution,
         ExitReason.ANALYSIS_ASSURANCE: analysis_assurance_contribution,
+        ExitReason.PROMOTED_CROSSCHECK: crosscheck_promotion_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -177,6 +201,7 @@ def resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=contract_coverage_contribution,
         analysis_assurance_contribution=analysis_assurance_contribution,
+        crosscheck_promotion_contribution=crosscheck_promotion_contribution,
     )
 
 

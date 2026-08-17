@@ -158,8 +158,23 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
     assert verdict == "NO_CHANGE"
     assert exit_code == 0
     # No findings key at all when there is nothing to report (back-compat with
-    # consumers that only ever read the four counts).
-    assert summary == {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0}
+    # consumers that only ever read the four counts) -- `exit` (CLI cleanup
+    # phase two, PR E) is unconditional, unlike `findings`, since every real
+    # comparison has a compatibility contribution to report.
+    assert summary == {
+        "breaking": 0,
+        "api_break": 0,
+        "risk": 0,
+        "compatible": 0,
+        "exit": {
+            "code": 0,
+            "reasons": ["clean"],
+            "compatibility_contribution": 0,
+            "contract_coverage_contribution": 0,
+            "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
+        },
+    }
     assert "findings" not in summary
 
 

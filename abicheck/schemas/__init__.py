@@ -522,21 +522,26 @@ from typing import Any
 #:       report omits this block rather than emit a ``code`` that would
 #:       disagree with the real process exit for the same run -- Codex
 #:       review) still validates against schema 2.41 with the key absent.
-#:       ``scan --against`` does NOT emit this block yet (Codex review, fresh
-#:       evidence): ``scan_engine.py``/``cli_scan_baseline.py`` never call
-#:       ``resolve_compare_exit_decision`` -- ``ScanOutcome.to_dict()``'s own
-#:       ``exit_code`` and the *nested* ``diff.analysis_assurance_exit_
-#:       contribution``/``diff.contract_coverage_exit_contribution`` fields
-#:       are computed independently and only *mirror* ``compare``'s pattern
-#:       in comments, never actually reuse this resolver. Landing ``exit``
-#:       for ``scan --against`` (and deciding whether its existing nested
-#:       placement moves to match ``compare``'s top-level one) is scoped to
-#:       a later PR (see ``docs/contribute/plans/cli-cleanup-phase-two.md``'s
-#:       PR E section). Deliberately does not yet cover ``not_comparable``/
-#:       scan-budget/release-removed-library exits, which are raised through
-#:       different code paths today; see ``exit_decision.py``'s own module
-#:       docstring. Additive key.
-REPORT_SCHEMA_VERSION = "2.41"
+#:       ``scan --against`` emits the identical block too, since schema 1.18
+#:       (CLI cleanup phase two, PR E) -- nested at ``diff.exit``, not this
+#:       top-level key, matching where its own constituent contribution
+#:       fields already live; see ``SCAN_SCHEMA_VERSION``'s own 1.18 entry.
+#:       Deliberately does not yet cover ``not_comparable``/scan-budget/
+#:       release-removed-library exits, which are raised through different
+#:       code paths today; see ``exit_decision.py``'s own module docstring.
+#:       Additive key.
+#: 2.42 -- the ``exit`` object gains ``crosscheck_promotion_contribution``
+#:       (CLI cleanup phase two, PR E follow-up, Codex review): a fourth
+#:       axis alongside the three schema 2.41 introduced, always ``0`` for
+#:       a native ``compare`` report (this axis has no meaning outside
+#:       ``scan --against``'s own maintainer-promoted ``--crosscheck
+#:       KEY=error`` finding -- see ``SCAN_SCHEMA_VERSION``'s own 1.18
+#:       entry). Added so ``code == max(`` the four contributions ``)``
+#:       stays true for every ``exit`` block this package emits, on both
+#:       commands, rather than holding only for ``compare``'s three-axis
+#:       case. ``reasons`` may now also contain ``"promoted_crosscheck"``.
+#:       Additive key.
+REPORT_SCHEMA_VERSION = "2.42"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -805,21 +810,27 @@ REPORT_SCHEMA_VERSION = "2.41"
 #:        resolve_compare_exit_decision``) ``compare``'s own top-level
 #:        ``exit`` key already carries since report_schema_version 2.41 (PR
 #:        G1, #789) -- ``{code, reasons, compatibility_contribution,
-#:        contract_coverage_contribution, analysis_assurance_contribution}``,
-#:        so a reader doesn't have to re-derive "why is this exit N" from
-#:        the separately-emitted ``severity``/``analysis_assurance_exit_
+#:        contract_coverage_contribution, analysis_assurance_contribution,
+#:        crosscheck_promotion_contribution}`` (the last one added by
+#:        report_schema_version 2.42 -- see that entry), so a reader
+#:        doesn't have to re-derive "why is this exit N" from the
+#:        separately-emitted ``severity``/``analysis_assurance_exit_
 #:        contribution``/``contract_coverage_exit_contribution`` fields.
 #:        Nested under ``diff`` (not ``ScanOutcome``'s own top-level
 #:        ``verdict``/``exit_code``, which additionally folds the scan-only
-#:        budget/``NOT_COMPARABLE``/crosscheck-promotion axes this key does
-#:        not model -- see ``exit_decision.resolve_compare_exit_decision``'s
-#:        own docstring). A maintainer-promoted ``--crosscheck KEY=error``
-#:        finding raises this block's ``code`` after the fact
+#:        budget/``NOT_COMPARABLE`` axes this key does not model -- see
+#:        ``exit_decision.resolve_compare_exit_decision``'s own docstring).
+#:        A maintainer-promoted ``--crosscheck KEY=error`` finding raises
+#:        this block's ``code`` after the fact
 #:        (``scan_engine._promote_published_gate``), the same way it
-#:        already raises the persisted ``severity`` block, and re-stamps
-#:        ``reasons`` to ``["promoted_crosscheck"]`` so the block never
-#:        names an axis that did not actually decide the code. Additive
-#:        key, absent only for the same NOT_COMPARABLE/audit-only shapes
+#:        already raises the persisted ``severity`` block -- by
+#:        reconstructing the whole decision through ``exit_decision.
+#:        resolve_exit_decision`` with ``crosscheck_promotion_contribution``
+#:        set to the promoted finding's own exit contribution, rather than
+#:        hand-patching ``code``/``reasons`` in place (an earlier revision
+#:        did exactly that and broke this class's own ``code == max(the
+#:        contributions)`` invariant -- Codex review). Additive key, absent
+#:        only for the same NOT_COMPARABLE/audit-only shapes
 #:        ``analysis_assurance`` itself is.
 SCAN_SCHEMA_VERSION = "1.18"
 

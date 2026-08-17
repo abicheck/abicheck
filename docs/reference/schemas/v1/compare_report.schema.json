@@ -1120,13 +1120,14 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (crosscheck_promotion_contribution is always 0 for a native compare report — it has no meaning outside scan --against's own maintainer-promoted --crosscheck KEY=error finding). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
       "required": [
         "code",
         "reasons",
         "compatibility_contribution",
         "contract_coverage_contribution",
-        "analysis_assurance_contribution"
+        "analysis_assurance_contribution",
+        "crosscheck_promotion_contribution"
       ],
       "properties": {
         "code": {
@@ -1143,10 +1144,11 @@
               "scoped_gate",
               "contract_coverage",
               "analysis_assurance",
+              "promoted_crosscheck",
               "clean"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution)."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
         },
         "compatibility_contribution": {
           "type": "integer",
@@ -1162,9 +1164,14 @@
           "type": "integer",
           "enum": [0, 1],
           "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when --require-complete-analysis was not given."
+        },
+        "crosscheck_promotion_contribution": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes (scan --against only, via scan_engine._promote_published_gate). Always 0 on a native compare report."
         }
       },
-      "$comment": "exit_decision.resolve_compare_exit_decision is the one function that builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for the real process exit, so the two cannot disagree."
+      "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
     },
     "analysis_assurance": {
       "type": "object",

@@ -130,7 +130,47 @@ class TestResolveExitDecision:
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 1,
             "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
         }
+
+    def test_crosscheck_promotion_is_a_real_contribution_not_a_patch(self) -> None:
+        """`scan_engine._promote_published_gate`'s own axis: `code` must
+        equal `max()` over *all four* contributions, `crosscheck_promotion_
+        contribution` included, exactly like the other three (Codex review
+        -- an earlier revision patched `code`/`reasons` directly without
+        this axis, which broke this invariant for a promoted scan).
+        """
+        decision = resolve_exit_decision(
+            compatibility_contribution=0, crosscheck_promotion_contribution=2,
+        )
+        assert decision.code == 2
+        assert decision.reasons == (ExitReason.PROMOTED_CROSSCHECK,)
+        assert decision.code == max(
+            decision.compatibility_contribution,
+            decision.contract_coverage_contribution,
+            decision.analysis_assurance_contribution,
+            decision.crosscheck_promotion_contribution,
+        )
+
+    def test_crosscheck_promotion_ties_are_named_not_dropped(self) -> None:
+        """A promotion that only *ties* the existing code must still be
+        named -- not silently omitted the way a hand-rolled strict `>`
+        check on the caller side would drop it.
+        """
+        decision = resolve_exit_decision(
+            compatibility_contribution=2, crosscheck_promotion_contribution=2,
+        )
+        assert decision.code == 2
+        assert set(decision.reasons) == {
+            ExitReason.COMPATIBILITY_GATE, ExitReason.PROMOTED_CROSSCHECK,
+        }
+
+    def test_crosscheck_promotion_never_lowers_a_real_break(self) -> None:
+        decision = resolve_exit_decision(
+            compatibility_contribution=4, crosscheck_promotion_contribution=2,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
 
     def test_default_contributions_are_zero(self) -> None:
         """A caller with neither `--contract` nor
@@ -206,6 +246,7 @@ class TestCompareExitDecisionIntegration:
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(
