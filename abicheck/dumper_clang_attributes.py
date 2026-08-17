@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+
 def _function_qualifiers(qualtype: str) -> str:
     """Return qualifiers after the outer function parameter list."""
     bracket = 0
@@ -27,7 +28,15 @@ def _function_qualifiers(qualtype: str) -> str:
                 elif qualtype[j] == ")":
                     depth -= 1
                 j += 1
-            return qualtype[j:]
+            tail = qualtype[j:]
+            # A FunctionDecl returning a pointer to function is rendered by
+            # Clang as e.g. ``void (*(void))(int) __attribute__((ms_abi))``.
+            # The first parenthesized group is that declaration's parameter
+            # list; a following function suffix belongs to its *return type*,
+            # so an attribute after it must not be assigned to the declaration.
+            if tail.lstrip().startswith("("):
+                return ""
+            return tail
     return ""
 
 

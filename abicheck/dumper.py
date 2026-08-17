@@ -638,21 +638,36 @@ def _castxml_fallback_reason(
 def _configured_target_triple(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
 ) -> str | None:
-    """Return the effective explicit clang target, else its probed default.
+    """Ask the configured Clang driver for the target used by this frontend.
 
-    This is deliberately limited to target selection already supplied to the
-    frontend.  It gives declaration parsing enough context to discard an
-    explicit default ``ms_abi``/``sysv_abi`` spelling without guessing from
-    the machine running abicheck.
+    Keep the pass-through flags in the precise order used by the header
+    frontend: the shell-style ``gcc_options`` precede literal repeatable
+    ``gcc_option_tokens``.  Delegating to Clang rather than interpreting
+    ``--target`` ourselves also honors driver configuration files and response
+    files, including their normal last-option-wins behavior.
     """
-    args = [*gcc_option_tokens, *split_gcc_options(gcc_options or "")]
-    target: str | None = None
-    for index, arg in enumerate(args):
-        if arg.startswith("--target="):
-            target = arg.partition("=")[2] or None
-        elif arg in ("--target", "-target") and index + 1 < len(args):
-            target = args[index + 1] or None
-    return target or _tool_identity_metadata(clang_bin).get("target_triple")
+    cmd = [
+        clang_bin,
+        *split_gcc_options(gcc_options or ""),
+        *gcc_option_tokens,
+        "-print-target-triple",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Could not probe effective Clang target: %s", exc)
+        return None
+    if result.returncode:
+        log.warning("Could not probe effective Clang target: %s", result.stderr.strip())
+        return None
+    target = result.stdout.strip()
+    return target or None
 
 
 def _header_ast_parser(

@@ -68,6 +68,7 @@ from pathlib import Path
 from typing import Any
 
 from ._compiler_options import split_gcc_options
+from .dumper_clang_attributes import _clang_contract_attributes
 from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _canonical_expr,
@@ -624,9 +625,6 @@ def _function_qualifiers(qualtype: str) -> str:
                 j += 1
             return qualtype[j:]
     return ""
-
-
-from .dumper_clang_attributes import _clang_contract_attributes
 
 
 class _ClangAstParser:

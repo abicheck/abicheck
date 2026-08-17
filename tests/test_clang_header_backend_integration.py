@@ -38,7 +38,8 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.dumper import dump
+from abicheck.dumper import _clang_header_dump, dump
+from abicheck.dumper_clang import _ClangAstParser
 from abicheck.model import Visibility
 
 # Scoped to **Linux/ELF** — the clang L2 backend's target (P1: clang-only Linux
@@ -92,6 +93,21 @@ void scale(Point* p, double factor) { p->x = int(p->x * factor); }
 int Widget::value() const { return hidden_; }
 }  // namespace lib
 """
+
+
+def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(tmp_path: Path) -> None:
+    """Use Clang's real normalized AST spelling, not a hand-written fixture."""
+    if shutil.which("clang") is None or platform.machine().lower() not in {"x86_64", "amd64"}:
+        pytest.skip("requires an x86-64 clang frontend")
+    header = tmp_path / "api.h"
+    header.write_text(
+        "void (__attribute__((ms_abi)) *factory(void))(int);\n", encoding="utf-8"
+    )
+
+    root, _ = _clang_header_dump([header], [], compiler="clang", lang="C")
+    (factory,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
+
+    assert factory.contract_attributes == []
 
 
 def _have(tool: str) -> bool:

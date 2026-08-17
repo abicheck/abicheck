@@ -23,6 +23,7 @@ the live ``clang -ast-dump=json`` run live in the integration lane
 
 from __future__ import annotations
 
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
+    _configured_target_triple,
     _header_ast_parser,
     _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
@@ -209,6 +211,57 @@ def test_parse_functions_does_not_claim_nested_return_function_abi_attribute() -
     (fn,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
 
     assert fn.contract_attributes == []
+
+
+def test_parse_functions_does_not_claim_real_clang_returned_callback_abi_spelling() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "factory",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "factory",
+            # This is the real Clang JSON AST spelling for:
+            # void (__attribute__((ms_abi)) *factory(void))(int);
+            "type": {
+                "qualType": "void (*(void))(int) __attribute__((ms_abi))"
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_configured_target_triple_uses_frontend_option_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        captured["cmd"] = cmd
+        return type("Result", (), {"returncode": 0, "stdout": "x86_64-pc-linux-gnu\n"})()
+
+    monkeypatch.setattr(dumper.subprocess, "run", _run)
+
+    assert _configured_target_triple(
+        "--target=first -DFROM_OPTIONS", ("--target=last", "@flags.rsp"), "clang"
+    ) == "x86_64-pc-linux-gnu"
+    assert captured["cmd"] == [
+        "clang", "--target=first", "-DFROM_OPTIONS", "--target=last", "@flags.rsp",
+        "-print-target-triple",
+    ]
+
+
+def test_configured_target_triple_honors_clang_response_file(tmp_path: Path) -> None:
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("requires clang")
+    response = tmp_path / "target.rsp"
+    response.write_text("--target=x86_64-pc-windows-msvc\n", encoding="utf-8")
+
+    assert _configured_target_triple(None, (f"@{response}",), clang) == (
+        "x86_64-pc-windows-msvc"
+    )
 
 
 def test_parse_functions_uses_desugared_outer_type_for_typedef_abi_attribute() -> None:
