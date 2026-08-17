@@ -16,7 +16,11 @@
   `-include`, matching how every other derived field is rendered.
   `-include-pch` (locked to the compiler build that produced it) and `/FU`
   (managed C++/CLI `#using`, naming no C/C++ header) are deliberately not
-  forwarded. L4 source-ABI replay is unchanged: it already carried forced
+  forwarded, and a derived forced include the caller already supplies through
+  `--compiler-option`/`--gcc-options` is dropped rather than emitted a second
+  time — an unguarded header included twice fails to compile, and the caller
+  passing it by hand is exactly the one who was working around this gap
+  before. L4 source-ABI replay is unchanged: it already carried forced
   includes from raw argv, and the two paths now share one recognizer rather
   than the L2 fix routing through `CompileUnit.abi_relevant_flags`, which
   would have made replay emit every forced include twice.

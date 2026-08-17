@@ -1550,6 +1550,23 @@ Once a root command genuinely clears the bar above, pick the right home:
   requires, and it interacts with the bucket-ordering gap `_split_include_
   tokens` already documents (the sixth finding above). Recorded in
   `_forced_include_flags`'s own docstring as a residual.
+  (6) A sixth round found the same double-inclusion hazard that rules out
+  routing through `abi_relevant_flags`, reached from the other side:
+  `_merge_l3_compile_context` concatenates derived and explicit tokens
+  without deduplication, so a caller passing `--compiler-option -include
+  config.h` for a build whose compile database records the same forced header
+  got `-include config.h` **twice** — and an unguarded header is then
+  processed twice and fails to compile. Reproduced literally. This one is
+  worse than its arithmetic suggests, and the reason is worth keeping: the
+  caller passing the option by hand is precisely the one who was *working
+  around* the absence of this feature, so the duplicate would have broken
+  exactly the users the change exists to help. Fixed by
+  `explicit_forced_include_keys` (both caller spellings —
+  `gcc_option_tokens` and the free-form `gcc_options` string — each
+  contributing the operand as written and its resolved absolute path) with
+  the *derived* copy dropped on a match, keeping the established "explicit
+  wins" precedence and losing nothing, since both name the same file. A
+  *different* explicit forced header does not suppress the derived one.
   **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one

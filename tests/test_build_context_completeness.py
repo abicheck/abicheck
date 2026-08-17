@@ -370,6 +370,72 @@ class TestForcedIncludesReachTheDerivedContext:
         assert toks.index("-include") > toks.index("-I")
 
 
+class TestExplicitForcedIncludeIsNotDuplicated:
+    """Codex review: `_merge_l3_compile_context` concatenates without dedup.
+
+    A caller passing `--compiler-option -include config.h` for a build whose
+    compile database records the same forced header would get it twice — and
+    a header without include guards is then processed twice and fails to
+    compile. That caller is precisely the one who was *working around* the
+    absence of this feature, so the duplicate would break exactly the users
+    the change is meant to help.
+    """
+
+    def _resolution(self, tmp_path: Path, explicit: Any) -> list[str]:
+        from abicheck.compile_context import CompileContext  # noqa: F401
+
+        header = tmp_path / "widget.h"
+        header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        ev = BuildEvidence(
+            compile_units=[
+                _cu(
+                    source=str(src),
+                    directory=str(tmp_path),
+                    argv=["c++", "-c", str(src), "-include", "config.h"],
+                )
+            ]
+        )
+        result = resolve_header_compile_context(ev, [header], explicit=explicit)
+        return _tokens(result)
+
+    @pytest.mark.parametrize(
+        "explicit_kwargs",
+        [
+            {"gcc_option_tokens": ("-include", "config.h")},
+            {"gcc_options": "-include config.h"},
+        ],
+        ids=["tokens", "options-string"],
+    )
+    def test_derived_copy_is_dropped_when_the_caller_already_supplies_it(
+        self, tmp_path: Path, explicit_kwargs: dict[str, Any]
+    ) -> None:
+        from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+        from abicheck.compile_context import CompileContext
+
+        explicit = CompileContext(**explicit_kwargs)
+        derived = CompileContext(
+            gcc_option_tokens=tuple(self._resolution(tmp_path, explicit))
+        )
+        merged = _merge_l3_compile_context(explicit, derived)
+        assert merged is not None
+        # Exactly once in the command the parse actually runs.
+        assert list(merged.gcc_option_tokens).count("-include") == 1
+
+    def test_a_different_explicit_forced_header_does_not_suppress_the_derived_one(
+        self, tmp_path: Path
+    ) -> None:
+        # Only the *same* file is a duplicate; an unrelated explicit forced
+        # header must not silently drop the build's own.
+        from abicheck.compile_context import CompileContext
+
+        toks = self._resolution(
+            tmp_path, CompileContext(gcc_option_tokens=("-include", "other.h"))
+        )
+        assert toks[-2:] == ["-include", "config.h"]
+
+
 class TestForcedIncludeAmbiguity:
     """A forced include was invisible to the ambiguity signature entirely, so
     two units forcing *different* macro-controlling headers in silently

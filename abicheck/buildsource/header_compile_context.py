@@ -824,7 +824,39 @@ def _forced_include_search_dirs(cu: CompileUnit) -> list[Path]:
     return dirs
 
 
-def _forced_include_flags(cu: CompileUnit) -> list[str]:
+def explicit_forced_include_keys(explicit: CompileContext | None) -> frozenset[str]:
+    """Every forced pre-include the *caller* already supplies, as match keys.
+
+    Both spellings a caller can use reach here: ``gcc_option_tokens`` and the
+    free-form ``gcc_options`` string (split the same way the header command
+    builders split it). Each operand contributes two keys — the operand
+    exactly as written, and its resolved absolute path — so a derived
+    occurrence matches whether the two sides spell it identically or the
+    derived one has been pinned to an absolute path by
+    :func:`_forced_include_flags`'s own search-chain resolution.
+    """
+    if explicit is None:
+        return frozenset()
+    tokens = [
+        *explicit.gcc_option_tokens,
+        *split_gcc_options(explicit.gcc_options or ""),
+    ]
+    keys: set[str] = set()
+    for _option, operand in {
+        *forced_include_operands(tokens, msvc=False),
+        *forced_include_operands(tokens, msvc=True),
+    }:
+        keys.add(operand)
+        try:
+            keys.add(str(Path(operand).expanduser().resolve()))
+        except OSError:  # pragma: no cover - defensive, resolve() is strict=False
+            pass
+    return frozenset(keys)
+
+
+def _forced_include_flags(
+    cu: CompileUnit, *, explicit_forced_includes: frozenset[str] = frozenset()
+) -> list[str]:
     """Render *cu*'s own forced pre-includes as literal clang argv tokens.
 
     A build that forces a macro-controlling header in (``-include config.h``,
@@ -875,6 +907,24 @@ def _forced_include_flags(cu: CompileUnit) -> list[str]:
     relative token is the only honest thing to say about a file this side
     cannot locate.
 
+    *explicit_forced_includes* are the keys of every forced pre-include the
+    caller already supplies (:func:`explicit_forced_include_keys`), and a
+    derived occurrence matching one is **dropped** (Codex review, PR D, fifth
+    round). ``_merge_l3_compile_context`` concatenates derived and explicit
+    tokens without deduplication, so without this a caller passing
+    ``--compiler-option -include config.h`` for a build whose compile database
+    records the same forced header gets ``-include config.h`` **twice** — and
+    a header without include guards is then processed twice and fails to
+    compile. This is the identical double-inclusion hazard that rules out
+    routing forced includes through ``CompileUnit.abi_relevant_flags`` (see
+    ``ABI_RELEVANT_FLAG_PREFIXES``'s comment), reached from the other side.
+    It matters more than the arithmetic suggests: the caller passing the
+    option by hand is precisely the one who was *working around* the absence
+    of this feature, so the duplicate would break exactly the users this
+    change is meant to help. Dropping the derived copy rather than the
+    explicit one keeps the established "explicit wins" precedence, and loses
+    nothing — both name the same file.
+
     **Residual, pre-existing and deliberately not fixed here:**
     ``_context_flags`` still does not render argv-only include-search
     directories at all, so a *transitively* included header that the real
@@ -901,13 +951,26 @@ def _forced_include_flags(cu: CompileUnit) -> list[str]:
                 (d / operand_path for d in search_dirs if (d / operand_path).is_file()),
                 None,
             )
-        flags.extend(
-            [rendered_option, resolved.as_posix() if resolved is not None else operand]
-        )
+        rendered_operand = resolved.as_posix() if resolved is not None else operand
+        if explicit_forced_includes and (
+            operand in explicit_forced_includes
+            or rendered_operand in explicit_forced_includes
+            or (
+                resolved is not None
+                and str(resolved.resolve()) in explicit_forced_includes
+            )
+        ):
+            continue
+        flags.extend([rendered_option, rendered_operand])
     return flags
 
 
-def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> list[str]:
+def _context_flags(
+    cu: CompileUnit,
+    *,
+    forced_language: str | None = None,
+    explicit_forced_includes: frozenset[str] = frozenset(),
+) -> list[str]:
     """Render one ``CompileUnit``'s context as literal castxml/clang argv tokens.
 
     Mirrors ``BuildContext.to_castxml_flags()`` (ADR-020a's ``-p``/
@@ -1010,7 +1073,9 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
     # function just rendered above it. Order within the group is the build's
     # own: forced includes are cumulative, never last-one-wins, so none of
     # the override reasoning that governs the tokens above applies here.
-    flags.extend(_forced_include_flags(cu))
+    flags.extend(
+        _forced_include_flags(cu, explicit_forced_includes=explicit_forced_includes)
+    )
     return flags
 
 
@@ -1163,7 +1228,11 @@ def resolve_header_compile_context(
         )
 
     ((_sig, units),) = by_signature.items()
-    flags = _context_flags(units[0], forced_language=forced_language)
+    flags = _context_flags(
+        units[0],
+        forced_language=forced_language,
+        explicit_forced_includes=explicit_forced_include_keys(explicit),
+    )
     context = CompileContext(gcc_option_tokens=tuple(flags))
     return HeaderCompileContextResolution(context=context, matched_units=tuple(matched))
 
