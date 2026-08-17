@@ -54,7 +54,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
 from .dwarf_advanced import (
@@ -175,16 +174,26 @@ def parse_dwarf_from_session(
     type_cache: dict[tuple[int, int], tuple[str, int]] = {}
 
     for CU in session.dwarf.iter_CUs():
+        meta.cu_total += 1
+        adv.cu_total += 1
         try:
             _meta_process_cu(CU, meta, type_cache)
         except Exception as exc:  # noqa: BLE001
+            meta.cu_failed += 1
             log.warning("parse_dwarf: meta CU skipped in %s: %s", session.path, exc)
         try:
             _adv_process_cu(CU, adv)
-        except (ELFError, OSError, ValueError, KeyError) as exc:
+        except Exception as exc:  # noqa: BLE001 - a corrupt CU must not abort the other CUs
+            adv.cu_failed += 1
             log.warning("parse_dwarf: adv CU skipped in %s: %s", session.path, exc)
         if low_memory:
             free_cu_die_cache(CU)
+
+    for channel in (meta, adv):
+        if channel.cu_failed:
+            channel.evidence_state = (
+                "failed" if channel.cu_failed == channel.cu_total else "partial"
+            )
 
     return meta, adv
 

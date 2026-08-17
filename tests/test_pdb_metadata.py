@@ -21,6 +21,7 @@ data model consistency for the checker layer.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -228,6 +229,8 @@ class TestPdbToDwarfMetadata:
         meta, adv = parse_pdb_debug_info(tmp_path / "nonexistent.pdb")
         assert meta.has_dwarf is False
         assert adv.has_dwarf is False
+        assert meta.evidence_source == "pdb"
+        assert meta.evidence_state == adv.evidence_state == "failed"
 
     def test_invalid_pdb(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "bad.pdb"
@@ -235,6 +238,18 @@ class TestPdbToDwarfMetadata:
         meta, adv = parse_pdb_debug_info(bad_file)
         assert meta.has_dwarf is False
         assert adv.has_dwarf is False
+        assert meta.evidence_source == "pdb"
+        assert meta.evidence_state == adv.evidence_state == "failed"
+
+    def test_one_pdb_extraction_phase_marks_only_its_channel_partial(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
+        with patch("abicheck.pdb_metadata._extract_enums", side_effect=RuntimeError("bad enum")):
+            meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
+
+        assert meta.evidence_source == "pdb"
+        assert meta.evidence_state == "partial"
+        assert adv.evidence_state == "parsed"
 
 
 # ---------------------------------------------------------------------------

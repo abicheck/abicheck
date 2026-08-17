@@ -101,7 +101,12 @@ def parse_pdb_debug_info(
     Returns ``(DwarfMetadata(), AdvancedDwarfMetadata())`` on any error.
     Never raises.
     """
-    empty = DwarfMetadata(), AdvancedDwarfMetadata()
+    # A requested PDB that cannot be consumed is a failed evidence channel,
+    # not indistinguishable from a binary for which no debug format existed.
+    empty = (
+        DwarfMetadata(evidence_source="pdb", evidence_state="failed"),
+        AdvancedDwarfMetadata(evidence_state="failed"),
+    )
 
     try:
         pdb = parse_pdb(pdb_path)
@@ -111,10 +116,13 @@ def parse_pdb_debug_info(
 
     if pdb.types is None:
         log.debug("parse_pdb_debug_info: no TPI stream in %s", pdb_path)
-        return empty
+        return (
+            DwarfMetadata(evidence_source="pdb"),
+            AdvancedDwarfMetadata(),
+        )
 
-    meta = DwarfMetadata(has_dwarf=True)
-    adv = AdvancedDwarfMetadata(has_dwarf=True)
+    meta = DwarfMetadata(has_dwarf=True, evidence_source="pdb", evidence_state="parsed")
+    adv = AdvancedDwarfMetadata(has_dwarf=True, evidence_state="parsed")
 
     # UDT name → defining source file (ADR-024 Phase 1 provenance), parsed from
     # the IPI stream. Empty when the PDB carries no IPI / source-line records.
@@ -123,16 +131,20 @@ def parse_pdb_debug_info(
     try:
         _extract_struct_layouts(pdb.types, meta, adv, src_files)
     except Exception as exc:  # noqa: BLE001
+        meta.evidence_state = "partial"
+        adv.evidence_state = "partial"
         log.warning("parse_pdb_debug_info: struct extraction failed: %s", exc)
 
     try:
         _extract_enums(pdb.types, meta, src_files)
     except Exception as exc:  # noqa: BLE001
+        meta.evidence_state = "partial"
         log.warning("parse_pdb_debug_info: enum extraction failed: %s", exc)
 
     try:
         _extract_toolchain_info(pdb, adv)
     except Exception as exc:  # noqa: BLE001
+        adv.evidence_state = "partial"
         log.warning("parse_pdb_debug_info: toolchain info extraction failed: %s", exc)
 
     return meta, adv

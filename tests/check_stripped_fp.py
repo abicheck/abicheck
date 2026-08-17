@@ -45,6 +45,44 @@ _DWARF_DEPENDENT_MIN_EVIDENCE = "L1"
 _L0_KIND_PREFIXES = ("symbol_", "soname_")
 _L0_KIND_NAMES = {"func_removed", "func_removed_elf_only"}
 
+# The L1 catalog tier is deliberately broader than one detector: basic debug
+# metadata proves record/enum layout, while the advanced channel proves
+# calling-convention/value-ABI/toolchain facts.  A general ``partial`` receipt
+# is not a waiver.  Keep this map explicit and default unknown kinds to no
+# waiver, so a new detector cannot be accidentally waived before declaring its
+# required channel.
+_DEBUG_CHANNEL_BY_KIND = {
+    "calling_convention_changed": "advanced",
+    "frame_register_changed": "advanced",
+    "value_abi_trait_changed": "advanced",
+    "struct_return_convention_changed": "advanced",
+    "struct_packing_changed": "advanced",
+    "toolchain_flag_drift": "advanced",
+    "integer_model_changed": "advanced",
+    "wchar_model_changed": "advanced",
+    "vector_abi_changed": "advanced",
+    "type_size_changed": "basic",
+    "struct_size_changed": "basic",
+    "type_alignment_changed": "basic",
+    "type_field_offset_changed": "basic",
+    "type_field_type_changed": "basic",
+    "type_field_added": "basic",
+    "type_removed": "basic",
+    "type_kind_changed": "basic",
+    "enum_member_added": "basic",
+    "enum_member_removed": "basic",
+    "enum_member_renamed": "basic",
+    "enum_member_value_changed": "basic",
+    "enum_last_member_value_changed": "basic",
+    "enum_underlying_size_changed": "basic",
+    "union_field_added": "basic",
+    "union_field_removed": "basic",
+    "field_bitfield_changed": "basic",
+    "flexible_array_member_changed": "basic",
+    "base_class_offset_changed": "basic",
+    "base_class_position_changed": "basic",
+}
+
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -122,27 +160,31 @@ def _dwarf_evidence_loss_allows_downgrade(
         return False
     if assurance.get("status") != "partial":
         return False
-    dwarf_context_status = assurance.get("dwarf_context_status")
-    if dwarf_context_status == "asymmetric":
-        dwarf_lost = True
-    elif dwarf_context_status == "not_evaluated":
-        # A stripped-vs-stripped comparison has no *asymmetry*, but it has
-        # still lost the L1 capability on both sides.  Do not trust the
-        # aggregate status alone: require each side's serialized capability
-        # receipt to prove basic DWARF was unavailable.
-        debug_evidence = assurance.get("debug_evidence")
-        dwarf_lost = isinstance(debug_evidence, dict) and all(
-            isinstance(debug_evidence.get(side), dict)
-            and debug_evidence[side].get("basic") == "not_available"
-            for side in ("old", "new")
-        )
-    else:
-        dwarf_lost = False
-    if not dwarf_lost:
-        return False
     if entry.get("min_evidence") != _DWARF_DEPENDENT_MIN_EVIDENCE:
         return False
-    return not _is_l0_finding(entry)
+    if _is_l0_finding(entry):
+        return False
+    kinds = entry.get("expected_kinds")
+    if not isinstance(kinds, list) or not kinds:
+        return False
+    channels = {_DEBUG_CHANNEL_BY_KIND.get(kind) for kind in kinds if isinstance(kind, str)}
+    if None in channels or not channels:
+        return False
+
+    # The receipt, not aggregate dwarf_context_status, proves loss for each
+    # individual detector channel.  This rejects both pre-receipt artifacts
+    # and the critical "basic parsed, advanced unavailable" case for layout
+    # findings such as type_size_changed.
+    evidence = assurance.get("debug_evidence")
+    if not isinstance(evidence, dict):
+        return False
+    sides = [evidence.get(side) for side in ("old", "new")]
+    if not all(isinstance(side, dict) for side in sides):
+        return False
+    for channel in channels:
+        if not any(side.get(channel) != "parsed" for side in sides):
+            return False
+    return True
 
 
 def _known_gap_covers_row(

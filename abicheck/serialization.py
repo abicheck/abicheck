@@ -661,8 +661,13 @@ def _dwarf_from_dict(d: dict[str, Any]) -> Any:
         enums=enums,
         base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
-        evidence_source=d.get("evidence_source", "dwarf"),
-        evidence_state=d.get("evidence_state", "parsed" if d.get("has_dwarf", False) else "not_available"),
+        # Pre-provenance snapshots only prove that a DWARF-shaped block was
+        # serialized; they do not prove which producer parsed it or that both
+        # detector channels completed.  Fail closed in assurance receipts.
+        evidence_source=d.get("evidence_source", "unknown"),
+        evidence_state=d.get("evidence_state", "presence_only" if d.get("has_dwarf", False) else "not_available"),
+        cu_total=d.get("cu_total", 0),
+        cu_failed=d.get("cu_failed", 0),
     )
 
 
@@ -679,7 +684,9 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
-        evidence_state=d.get("evidence_state", "parsed" if d.get("has_dwarf", False) else "not_available"),
+        evidence_state=d.get("evidence_state", "presence_only" if d.get("has_dwarf", False) else "not_available"),
+        cu_total=d.get("cu_total", 0),
+        cu_failed=d.get("cu_failed", 0),
         target_arch=d.get("target_arch", ""),
         toolchain=toolchain,
         calling_conventions=d.get("calling_conventions", {}),

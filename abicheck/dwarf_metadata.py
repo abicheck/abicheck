@@ -132,8 +132,12 @@ class DwarfMetadata:
     # cannot say whether this is a full type parse or binary-depth's cheap
     # section-presence probe, nor whether BTF/CTF was adapted into this
     # DWARF-shaped compatibility model.
-    evidence_source: str = "dwarf"  # dwarf | btf | ctf
-    evidence_state: str = "not_available"  # parsed | presence_only | failed | not_available
+    evidence_source: str = "dwarf"  # dwarf | btf | ctf | pdb | unknown
+    evidence_state: str = "not_available"  # parsed | partial | presence_only | failed | not_available
+    # Extraction accounting.  These remain zero for formats/producers which
+    # cannot expose CU-level progress (and for old serialized snapshots).
+    cu_total: int = 0
+    cu_failed: int = 0
 
     # TypeMetadataSource protocol methods
     @property

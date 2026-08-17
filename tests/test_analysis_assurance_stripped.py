@@ -125,3 +125,21 @@ def test_failed_debug_parse_is_preserved_in_receipt() -> None:
     assert aa.debug_evidence["old"]["basic"] == "failed"
     assert aa.debug_evidence["old"]["advanced"] == "failed"
     assert aa.status == "partial"
+
+
+def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
+    raw = json.loads(snapshot_to_json(_debug_snapshot(
+        "1.0", DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)
+    )))
+    del raw["dwarf"]["evidence_source"]
+    del raw["dwarf"]["evidence_state"]
+    del raw["dwarf_advanced"]["evidence_state"]
+    restored = snapshot_from_dict(raw)
+
+    aa = checker.compare(restored, restored, scope_to_public_surface=False).analysis_assurance
+
+    assert isinstance(aa, AnalysisAssurance)
+    assert aa.debug_evidence["old"] == {
+        "source": "unknown", "basic": "presence_only", "advanced": "presence_only"
+    }
+    assert aa.status == "partial"

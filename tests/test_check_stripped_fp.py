@@ -109,7 +109,11 @@ def test_dwarf_dependent_partial_downgrade_is_reported_not_failed() -> None:
     guard = _guard_module()
     row = _row("partial")
     row["analysis_assurance"] = {
-        "status": "partial", "dwarf_context_status": "asymmetric"
+        "status": "partial", "dwarf_context_status": "asymmetric",
+        "debug_evidence": {
+            "old": {"basic": "parsed", "advanced": "parsed"},
+            "new": {"basic": "not_available", "advanced": "not_available"},
+        },
     }
 
     false_positives, downgrades, errors = guard._classify_results(
@@ -126,6 +130,55 @@ def test_dwarf_dependent_partial_downgrade_is_reported_not_failed() -> None:
     )
 
     assert false_positives == []
+    assert len(downgrades) == 1
+    assert errors == []
+
+
+def test_advanced_only_gap_does_not_waive_basic_layout_kind() -> None:
+    """A receipt must name the channel the missing detector actually needs."""
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial", "dwarf_context_status": "asymmetric",
+        "debug_evidence": {
+            "old": {"basic": "parsed", "advanced": "parsed"},
+            "new": {"basic": "parsed", "advanced": "not_available"},
+        },
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {"case_break": {
+            "expected": "BREAKING", "min_evidence": "L1",
+            "expected_kinds": ["type_size_changed"],
+        }},
+        "stripped-headers", {},
+    )
+
+    assert downgrades == []
+    assert len(errors) == 1
+
+
+def test_advanced_only_gap_waives_advanced_detector_kind() -> None:
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial", "dwarf_context_status": "asymmetric",
+        "debug_evidence": {
+            "old": {"basic": "parsed", "advanced": "parsed"},
+            "new": {"basic": "parsed", "advanced": "not_available"},
+        },
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {"case_break": {
+            "expected": "BREAKING", "min_evidence": "L1",
+            "expected_kinds": ["calling_convention_changed"],
+        }},
+        "stripped-headers", {},
+    )
+
     assert len(downgrades) == 1
     assert errors == []
 

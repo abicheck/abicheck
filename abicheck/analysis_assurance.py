@@ -317,7 +317,7 @@ class ExportAccounting:
         }
 
 
-def _debug_evidence_receipt(snap: AbiSnapshot) -> dict[str, str]:
+def _debug_evidence_receipt(snap: AbiSnapshot) -> dict[str, Any]:
     """Return one side's debug capability receipt without re-probing it.
 
     Basic BTF/CTF metadata is intentionally adapted into ``DwarfMetadata``
@@ -339,11 +339,20 @@ def _debug_evidence_receipt(snap: AbiSnapshot) -> dict[str, str]:
             getattr(advanced, "evidence_state", None)
             or ("parsed" if advanced is not None and advanced.has_dwarf else "not_available")
         )
-    return {
+    receipt: dict[str, Any] = {
         "source": source,
         "basic": basic_state,
         "advanced": advanced_state,
     }
+    # CU accounting is available only from the unified DWARF producer.  Do
+    # not manufacture zero counts for old snapshots or PDB/BTF/CTF inputs.
+    for prefix, channel in (("basic", basic), ("advanced", advanced)):
+        total = getattr(channel, "cu_total", 0) if channel is not None else 0
+        failed = getattr(channel, "cu_failed", 0) if channel is not None else 0
+        if total or failed:
+            receipt[f"{prefix}_cu_total"] = total
+            receipt[f"{prefix}_cu_failed"] = failed
+    return receipt
 
 
 @dataclass
@@ -392,7 +401,7 @@ class AnalysisAssurance:
     #: Per-side receipt of the three distinct debug states: a cheap
     #: presence-only probe, parsed basic layouts, and parsed DWARF-advanced
     #: calling-convention/value-ABI facts.  BTF/CTF expose basic facts only.
-    debug_evidence: dict[str, dict[str, str]] = field(default_factory=dict)
+    debug_evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: ``"clean"`` (both sides carry an L3 ``BuildEvidence`` payload),
     #: ``"asymmetric"`` (only one side does -- the other's build-only
     #: changes were never checked at all;
@@ -1389,8 +1398,8 @@ def compute_analysis_assurance(
         for receipt in debug_evidence.values()
     )
     debug_parse_incomplete = any(
-        receipt["basic"] in ("presence_only", "failed")
-        or receipt["advanced"] in ("presence_only", "failed")
+        receipt["basic"] in ("partial", "presence_only", "failed")
+        or receipt["advanced"] in ("partial", "presence_only", "failed")
         for receipt in debug_evidence.values()
     )
     if advanced_unavailable:
