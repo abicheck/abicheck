@@ -619,7 +619,11 @@ jobs:
     name: test-action (required)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The target workflow can be delayed in GitHub's job queue even though
+    # its individual jobs are bounded. Keep this outer wait comfortably
+    # longer than the polling window so a green summary is not rejected
+    # merely because it was scheduled late.
+    timeout-minutes: 60
     permissions:
       contents: read
       checks: read
@@ -649,7 +653,7 @@ jobs:
           script: |
             const sha = context.payload.pull_request.head.sha;
             const checkName = 'test-action summary';
-            const timeoutMs = 35 * 60 * 1000;
+            const timeoutMs = 55 * 60 * 1000;
             const pollMs = 15 * 1000;
             const start = Date.now();
             while (Date.now() - start < timeoutMs) {

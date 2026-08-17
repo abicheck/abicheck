@@ -138,6 +138,22 @@ class TestGateJobPollingLogic:
         assert "'success', 'neutral'" in script
         assert "'skipped'" not in script
 
+    def test_test_action_gate_wait_fits_inside_its_job_budget(self) -> None:
+        """Leave enough room for setup/teardown around the polling window.
+
+        The target workflow may start late because of GitHub queueing; a
+        polling window shorter than its enclosing job budget must therefore
+        have a useful margin rather than timing out at the job boundary.
+        """
+        job = _jobs(_load_workflow("ci.yml"))["test-action-required"]
+        assert job["timeout-minutes"] >= 60
+        script_step = next(
+            s
+            for s in job["steps"]
+            if s.get("uses", "").startswith("actions/github-script@")
+        )
+        assert "const timeoutMs = 55 * 60 * 1000;" in script_step["with"]["script"]
+
     @pytest.mark.parametrize("workflow_name", ["ci.yml", "verify-merge-checks.yml"])
     def test_github_script_is_pinned_by_sha(self, workflow_name: str) -> None:
         wf = _load_workflow(workflow_name)
