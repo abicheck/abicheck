@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-
 _SPEC = importlib.util.spec_from_file_location(
     "mutation_scope", Path(__file__).parent.parent / "scripts" / "mutation_scope.py"
 )
