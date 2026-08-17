@@ -638,27 +638,11 @@ def _castxml_fallback_reason(
 def _configured_target_triple(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
 ) -> str | None:
-    """Ask the configured Clang driver for the target used by this frontend.
-
-    Keep the pass-through flags in the precise order used by the header
-    frontend: the shell-style ``gcc_options`` precede literal repeatable
-    ``gcc_option_tokens``.  Delegating to Clang rather than interpreting
-    ``--target`` ourselves also honors driver configuration files and response
-    files, including their normal last-option-wins behavior.
-    """
-    cmd = [
-        clang_bin,
-        *split_gcc_options(gcc_options or ""),
-        *gcc_option_tokens,
-        "-print-target-triple",
-    ]
+    """Return the target reported by configured Clang and its pass-through flags."""
+    cmd = [clang_bin, *split_gcc_options(gcc_options or ""), *gcc_option_tokens, "-print-target-triple"]
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
+            cmd, capture_output=True, text=True, check=False, timeout=10
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("Could not probe effective Clang target: %s", exc)
