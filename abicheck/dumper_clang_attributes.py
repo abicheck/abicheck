@@ -8,18 +8,30 @@ import re
 from typing import Any
 
 
+def _follows_type_operator(qualtype: str, paren_index: int) -> bool:
+    """Whether a parenthesized group is a ``typeof``-like type operand."""
+    end = paren_index
+    while end > 0 and qualtype[end - 1].isspace():
+        end -= 1
+    start = end
+    while start > 0 and (qualtype[start - 1].isalnum() or qualtype[start - 1] == "_"):
+        start -= 1
+    return qualtype[start:end] in {
+        "decltype", "typeof", "__typeof", "__typeof__", "typeof_unqual",
+    }
+
+
 def _function_qualifiers(qualtype: str) -> str:
     """Return qualifiers after the outer function parameter list."""
     bracket = 0
-    start = -1
-    for idx, ch in enumerate(qualtype):
+    idx = 0
+    while idx < len(qualtype):
+        ch = qualtype[idx]
         if ch in "<[":
             bracket += 1
         elif ch in ">]":
             bracket = max(0, bracket - 1)
-        elif ch == "(" and bracket == 0 and start == -1:
-            start = idx
-            bracket += 1
+        elif ch == "(" and bracket == 0:
             depth = 1
             j = idx + 1
             while j < len(qualtype) and depth:
@@ -28,6 +40,9 @@ def _function_qualifiers(qualtype: str) -> str:
                 elif qualtype[j] == ")":
                     depth -= 1
                 j += 1
+            if _follows_type_operator(qualtype, idx):
+                idx = j
+                continue
             tail = qualtype[j:]
             # A FunctionDecl returning a pointer to function is rendered by
             # Clang as e.g. ``void (*(void))(int) __attribute__((ms_abi))``.
@@ -37,6 +52,7 @@ def _function_qualifiers(qualtype: str) -> str:
             if tail.lstrip().startswith("("):
                 return ""
             return tail
+        idx += 1
     return ""
 
 

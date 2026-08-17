@@ -175,6 +175,25 @@ def test_parse_functions_recovers_outer_ms_abi_from_qual_type_when_attr_node_is_
     assert fn.contract_attributes == ["ms_abi"]
 
 
+def test_parse_functions_skips_typeof_return_type_before_outer_convention() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {
+                "qualType": "typeof (1) () __attribute__((ms_abi))",
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == ["ms_abi"]
+
+
 def test_parse_functions_does_not_claim_nested_callback_abi_attribute() -> None:
     root = _tu(
         {
