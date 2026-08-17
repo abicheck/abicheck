@@ -88,8 +88,10 @@ class TestReleaseAnnotationsPersistence:
     """CLI cleanup phase two, PR E (release-operand half): each library
     entry in a release JSON report carries its own uncapped ``annotations``
     array (mirroring single-library ``compare --format json``'s top-level
-    ``annotations``, schema 2.43), and ``--annotate`` no longer re-runs any
-    library's comparison to collect it.
+    ``annotations``, schema 2.43), always computed regardless of any flag
+    (the CLI's own ``--annotate``/``--annotate-additions`` were later
+    removed entirely) and without re-running any library's comparison to
+    collect it.
     """
 
     def test_annotations_present_on_breaking_library(self, tmp_path: Path) -> None:
@@ -126,15 +128,17 @@ class TestReleaseAnnotationsPersistence:
         [lib] = data["libraries"]
         assert lib["annotations"] == []
 
-    def test_annotate_release_does_not_rerun_comparison(
+    def test_release_annotations_do_not_rerun_comparison(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """``--annotate`` used to trigger `_collect_release_extras`, which
-        re-ran `_run_compare_pair` for every library a second time purely to
-        recover a `DiffResult` for annotations. That `DiffResult` is now read
-        straight off the primary pass's stashed `entry["_diff_result"]`, so
-        `_run_compare_pair` is called exactly once per library regardless of
-        `--annotate`.
+        """Persisted per-library annotations used to require ``--annotate``
+        to trigger `_collect_release_extras`, which re-ran
+        `_run_compare_pair` for every library a second time purely to
+        recover a `DiffResult`. Both the flag and that re-run helper are
+        gone (CLI cleanup phase two, PR E): annotations are read straight
+        off the primary pass's stashed `entry["_diff_result"]`/
+        `entry["_old_snapshot"]`, so `_run_compare_pair` is called exactly
+        once per library, unconditionally.
         """
         import abicheck.cli_compare_release as release_mod
 
@@ -159,47 +163,13 @@ class TestReleaseAnnotationsPersistence:
         )
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--annotate", "--format", "json"],
+            ["compare", str(old_dir), str(new_dir), "--format", "json"],
         )
         assert result.exit_code == 4
         assert len(calls) == 1, f"expected exactly one compare per library, got {calls}"
         data = json.loads(result.stdout)
         [lib] = data["libraries"]
         assert lib["annotations"]
-
-    def test_annotate_release_stderr_matches_persisted_annotations(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The `--annotate` stderr rendering (still live in this slice) and
-        the persisted `annotations` array must describe the same findings --
-        both now come from the identical, single per-library `DiffResult`.
-        """
-        old_dir = tmp_path / "old"
-        old_dir.mkdir()
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-        old_foo, new_foo = _breaking_pair("libfoo.so")
-        _write_snap(old_dir / "libfoo.json", old_foo)
-        _write_snap(new_dir / "libfoo.json", new_foo)
-
-        monkeypatch.setenv("GITHUB_ACTIONS", "true")
-        result = CliRunner().invoke(
-            main,
-            [
-                "compare",
-                str(old_dir),
-                str(new_dir),
-                "--annotate",
-                "--format",
-                "json",
-            ],
-        )
-        assert result.exit_code == 4
-        data = json.loads(result.stdout)
-        [lib] = data["libraries"]
-        for entry in lib["annotations"]:
-            if entry["level"] == "error":
-                assert entry["annotation"] in result.stderr
 
 
 class TestReleaseWriteSecondaryOutput:

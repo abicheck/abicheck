@@ -435,6 +435,15 @@ persistence prerequisite completing first:
    workflow/recipe/doc snippet using `extra-args` for this, and state the
    `extra-args` → `annotate` input migration for external callers.
 
+   **Status: all three steps landed.** Step 1's report persistence and
+   step 2's release `--write` support merged first (see the "Landed since
+   the paragraph above was written" note further up this section); step
+   3 — deleting the flags, adding the `action.yml` inputs, implementing
+   `action/run.sh`'s renderer, and updating first-party workflow/recipe/
+   doc snippets — landed in the same PR. `compare --annotate` now exits
+   `64` with `No such option`, matching the sentence a few paragraphs
+   below this one.
+
 **New invariant (post-#780), and it is the reason PR 1b became PR E in the
 reviewed ordering:**
 
@@ -571,16 +580,18 @@ directory/package operands (the `_is_release_style_operand` guard on that
 one injection was removed; the helper itself stays, used by every other
 release-only flag check).
 
-**What's still open in PR E**: the Action's own renderer (reading
-`exit`/`annotations`/`changes` instead of inferring from stderr or
-re-running a comparison — the persisted report now has somewhere to be
-read from for both operand shapes, but `action/run.sh` doesn't read it yet
-for GitHub annotations specifically, only for the sticky PR comment), and
-— gated on that — deleting `--annotate`/`--annotate-additions`, defining
-`annotate`/`annotate-additions` inputs in `action.yml`, and updating every
-first-party workflow/recipe/doc snippet currently reaching the flags
-through `extra-args`. A single-library compare report, unmodified by this
-section, already reads:
+**Landed since the paragraph above was written**: the Action's own
+renderer now reads the persisted `annotations` report field directly
+(`action/run.sh`'s `_emit_annotations`, driven by the new `annotate`/
+`annotate-additions` `action.yml` inputs) instead of inferring anything
+from stderr or re-running a comparison, and works identically for a
+single pair and a release fan-out. The CLI's own `--annotate`/
+`--annotate-additions` flags (and every internal parameter/code path that
+only existed to render them — `_maybe_emit_annotations`,
+`release_annotations_from_primary_pass`, `_collect_release_extras`) have
+since been deleted entirely; `abicheck compare`/`compare-release` no
+longer accept them at all. A single-library compare report, unmodified by
+this section, already reads:
 
 ```json
 {

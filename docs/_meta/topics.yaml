@@ -335,6 +335,8 @@ topics:
       - abicheck/reporter_contract_blocks.py
       - abicheck/cli_compare_release.py
       - abicheck/schemas/compare_report.schema.json
+      - action/run.sh
+      - action.yml
     allowed_summaries:
       - use/github-action-recipes.md
 

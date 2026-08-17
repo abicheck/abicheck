@@ -227,8 +227,6 @@ def _normalize_compare_options(
     resolved_cfg: ResolvedCompareConfig,
     *,
     depth: str | None,
-    annotate: bool,
-    annotate_additions: bool,
     headers: tuple[Path, ...],
     old_headers_only: tuple[Path, ...],
     new_headers_only: tuple[Path, ...],
@@ -243,9 +241,6 @@ def _normalize_compare_options(
     new_build_info: Path | None = None,
 ) -> _NormalizedCompareOptions:
     """Fold the compare option flags into their resolved, dispatch-ready values."""
-    if annotate_additions and not annotate:
-        raise click.UsageError("--annotate-additions requires --annotate")
-
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
     # same way `dump` does; when omitted, infer it from --sources/--build-info
     # (or config source.method) rather than defaulting to "off" (P1 fix).
@@ -1077,7 +1072,6 @@ def _report_compare_result(
     layer_coverage_rows: Any, evidence_metrics: Any, extra_changes: Any,
     explain_patterns: bool,
     show_redundant: bool, show_filtered: bool,
-    annotate: bool, annotate_additions: bool,
     contract_evaluation: bool,
     policy: str, pf: PolicyFile | None,
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
@@ -1093,7 +1087,7 @@ def _report_compare_result(
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
 ) -> None:
-    """Everything after the comparison: annotate, scope, render, exit.
+    """Everything after the comparison: scope, render, exit.
 
     ``run_compare``'s third phase (resolve -> compare -> report), split out so
     each reads as one job. Terminal: ends in
@@ -1162,7 +1156,6 @@ def _report_compare_result(
     _finalize_compare_result(
         result, old_input, new_input,
         show_redundant=show_redundant, show_filtered=show_filtered,
-        annotate=annotate, annotate_additions=annotate_additions,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,
     )
@@ -1346,8 +1339,6 @@ def run_compare(
     report_mode: str,
     debug_format_opt: str | None,
     debug_format: str | None,
-    annotate: bool,
-    annotate_additions: bool,
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
@@ -1657,7 +1648,6 @@ def run_compare(
             severity_addition=resolved_cfg.merged_severity_addition,
             release_exit_code_scheme=resolved_cfg.exit_code_scheme,
             probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
-            annotate=annotate, annotate_additions=annotate_additions,
             verbose=verbose,
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
@@ -1684,7 +1674,6 @@ def run_compare(
     ) = _normalize_compare_options(
         resolved_cfg,
         depth=depth,
-        annotate=annotate, annotate_additions=annotate_additions,
         headers=headers,
         old_headers_only=old_headers_only, new_headers_only=new_headers_only,
         debug_format_opt=debug_format_opt, debug_format=debug_format,
@@ -1934,7 +1923,6 @@ def run_compare(
         evidence_metrics=evidence_metrics, extra_changes=extra_changes,
         explain_patterns=explain_patterns,
         show_redundant=show_redundant, show_filtered=show_filtered,
-        annotate=annotate, annotate_additions=annotate_additions,
         contract_evaluation=contract_evaluation,
         policy=policy, pf=pf,
         used_by_apps=used_by_apps, required_symbols=required_symbols,

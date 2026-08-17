@@ -302,6 +302,53 @@ _extra_args_has_write_flag() {
   return 1
 }
 
+# Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
+# extra-args, printing it (and nothing else) when found. Empty output means
+# "no such flag" -- callers treat that as "cannot tell", same as every other
+# report-discovery helper here.
+#
+# Why this exists (Codex review, PR #798): when the primary FORMAT isn't
+# json and the user's own extra-args already carries `--write`,
+# `_extra_args_has_write_flag` above correctly suppresses the internal
+# `PR_JSON` injection (so the two `--write`s don't collide and Click's
+# last-flag-wins doesn't silently drop the user's own path) -- but that
+# means `_json_report_src` had no JSON source to fall back to at all, so
+# `annotate: true` silently emitted nothing even though the user's own
+# `--write` destination held a perfectly good report the whole time. This
+# recovers that path so `_json_report_src` can read it directly, instead of
+# either rejecting the combination outright or (worse) silently doing
+# nothing.
+#
+# Same word-splitting caveat as `_extra_args_has_write_flag`: an exotically
+# quoted `--write` evades this. `--write` and its value can be one token
+# (`--write=json=PATH`) or two (`--write json=PATH`); both spellings are
+# documented and handled.
+_extra_args_write_json_path() {
+  local _arg _value _prev_was_write=0
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ "$_prev_was_write" == "1" ]]; then
+      _value="$_arg"
+      _prev_was_write=0
+    elif [[ "$_arg" == "--write" ]]; then
+      _prev_was_write=1
+      continue
+    elif [[ "$_arg" == --write=* ]]; then
+      _value="${_arg#--write=}"
+    else
+      continue
+    fi
+    case "$_value" in
+      json=*)
+        printf '%s' "${_value#json=}"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1635,12 +1682,19 @@ _is_cli_error() {
 # substitution. Without that file, every decision below took its "no report"
 # fallback for the one configuration that keeps the report on stdout.
 _json_report_src() {
+  local _user_write_json
   if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
     echo "${_STDOUT_JSON_FILE}"
+  elif _user_write_json=$(_extra_args_write_json_path) \
+       && [[ -n "$_user_write_json" && -s "$_user_write_json" ]]; then
+    # A user-supplied `--write json=PATH` in extra-args (see
+    # `_extra_args_write_json_path`'s own docstring for why this is needed
+    # rather than falling through to "no report").
+    echo "$_user_write_json"
   fi
 }
 

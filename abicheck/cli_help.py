@@ -88,8 +88,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--demangle",
                 "--report-mode",
                 "--show-only",
-                "--annotate",
-                "--annotate-additions",
                 "--config",
                 "--exit-code-scheme",
                 "--verbose",

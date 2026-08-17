@@ -20,7 +20,7 @@ was detected.
 
 ## Quick start
 
-Add `--annotate` to your existing abicheck step:
+Set `annotate: true` on the composite Action:
 
 ```yaml
 - name: Check ABI compatibility
@@ -29,7 +29,7 @@ Add `--annotate` to your existing abicheck step:
     old-library: abi-baseline.json
     new-library: build/libfoo.so
     new-header: include/foo.h
-    extra-args: --annotate
+    annotate: true
 ```
 
 That's it. On the next PR, any breaking change detected by abicheck will show
@@ -38,47 +38,57 @@ Markdown summary will appear in the **Job Summary** panel.
 
 ## How it works
 
-When both conditions are met:
+The CLI's `compare`/`compare-release` no longer render annotations
+themselves at all — every `compare --format json` report persists a
+top-level `annotations` array (see "Persisted alongside the report" below),
+computed unconditionally regardless of any flag or input. The composite
+Action reads that array straight off the report and prints
+[workflow command annotations][gh-wc] itself
+(`action/run.sh`'s `_emit_annotations`), gated on two Action inputs:
 
-1. The `--annotate` flag is passed, **and**
-2. The environment variable `GITHUB_ACTIONS=true` is set (automatic on all
-   GitHub Actions runners)
+1. `annotate: true` — print the always-visible entries (errors, warnings,
+   and the one unconditional notice: a `--contract` finding compatibility
+   policy never evaluated).
+2. `annotate-additions: true` — also print the opt-in notices (additions,
+   quality issues, other `info`-severity findings). Requires `annotate:
+   true` to have any effect.
 
-abicheck prints [workflow command annotations][gh-wc] to **stderr** so that the
-primary stdout payload (JSON, SARIF, HTML, Markdown) remains a clean,
-machine-parsable stream. GitHub Actions processes workflow commands from both
-stdout and stderr, so annotations work correctly on both channels.
+Annotations print to the Action's own log output (stdout), so GitHub Actions
+processes them from the same step that ran the comparison. This works
+identically for a single-pair `compare` and a directory/package (release)
+`compare` — the Action reads `libraries[].annotations` for the latter and
+flattens across every library.
 
-If `$GITHUB_STEP_SUMMARY` is available (also automatic on GitHub Actions
-runners), abicheck appends a full Markdown ABI report to the
-[Job Summary][gh-summary] panel.
+If `$GITHUB_STEP_SUMMARY` is available (automatic on GitHub Actions
+runners), the composite Action separately appends a Markdown summary to the
+[Job Summary][gh-summary] panel via its own `add-job-summary` input — see
+[GitHub Action Inputs](../reference/github-action-inputs.md). This is
+independent of `annotate`/`annotate-additions`.
 
 [gh-summary]: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary
 
 ### Persisted alongside the report (`--format json`)
 
-Since report schema 2.43, every `compare --format json` report also carries
+Since report schema 2.43, every `compare --format json` report carries
 a top-level `annotations` array — one already-classified,
 already-formatted entry (`{"level": "error"|"warning"|"notice",
 "annotation": "::error file=...,line=...,title=...::message",
 "always_visible": true}`) per finding a full annotation pass over the
-comparison found, regardless of whether `--annotate` was actually given
-this run. It's always the superset (as if `--annotate-additions` had also
-been passed). A directory/package (release) `compare` persists the
+comparison found, always the superset (as if `annotate-additions` had
+also been requested). A directory/package (release) `compare` persists the
 identical shape per library, at `libraries[].annotations`.
 
 A consumer deciding whether to keep a `"notice"`-level entry must gate on
 `always_visible` (schema 2.44), not on `level` alone: one notice kind — a
-`--contract` finding compatibility policy never evaluated — is shown by
-plain `--annotate` with no `--annotate-additions` at all, so it carries
-`always_visible: true`; every other notice (an addition, a quality issue,
-an `info`-severity finding) only exists because this array computes the
-`--annotate-additions` superset, and carries `always_visible: false`.
-`always_visible` is always `true` for `"error"`/`"warning"`. This is what a
-rendering front end other than the CLI's own stderr output (e.g. a future
-revision of the composite GitHub Action) reads instead of re-parsing
-stderr or re-running the comparison — see `docs/reference/exit-codes.md`'s
-sibling `exit` field for the same pattern applied to the gate decision.
+`--contract` finding compatibility policy never evaluated — is shown even
+without `annotate-additions`, so it carries `always_visible: true`; every
+other notice (an addition, a quality issue, an `info`-severity finding)
+only exists because this array always computes the `annotate-additions`
+superset, and carries `always_visible: false`. `always_visible` is always
+`true` for `"error"`/`"warning"`. This is what the composite Action's
+renderer reads instead of parsing stderr or re-running the comparison —
+see [`docs/reference/exit-codes.md`](../reference/exit-codes.md)'s sibling
+`exit` field for the same pattern applied to the gate decision.
 
 ## Severity mapping
 
@@ -87,7 +97,7 @@ sibling `exit` field for the same pattern applied to the gate decision.
 | BREAKING (binary ABI incompatible) | `::error` | `ABI Break: <kind>` | Yes |
 | API_BREAK (source-level break) | `::warning` | `API Break: <kind>` | Yes |
 | COMPATIBLE_WITH_RISK (deployment risk) | `::warning` | `Deployment Risk: <kind>` | Yes |
-| COMPATIBLE (additions, quality issues) | `::notice` | `ABI Addition: <kind>` | Only with `--annotate-additions` |
+| COMPATIBLE (additions, quality issues) | `::notice` | `ABI Addition: <kind>` | Only with `annotate-additions: true` |
 
 ### Example annotation output
 
@@ -98,29 +108,19 @@ sibling `exit` field for the same pattern applied to the gate decision.
 ::notice title=ABI Addition%3A func_added::Function foo::new_thing() was added to the public interface
 ```
 
-## CLI flags
+## Action inputs
 
-Both single-library `compare` and bundle `compare` (directory/package inputs) support these flags:
+### `annotate`
 
-### `--annotate`
+Emit GitHub Actions workflow command annotations for the always-visible
+entries (errors, warnings, and the one unconditional "not evaluated"
+notice). Default `false`.
 
-Emit GitHub Actions workflow command annotations to stderr. Annotations appear
-as inline comments on PR diffs. Only effective when `GITHUB_ACTIONS=true`.
+### `annotate-additions`
 
-When not running inside GitHub Actions, this flag is silently ignored — you can
-leave it in your CI config and run the same command locally without side effects.
-
-### `--annotate-additions`
-
-Include additions and compatible changes as `::notice` annotations. Off by
+Also emit the opt-in notices (additions and compatible changes). Off by
 default because additions are typically informational and can be noisy.
-
-Requires `--annotate`. Passing `--annotate-additions` without `--annotate`
-produces an error:
-
-```
-Error: --annotate-additions requires --annotate
-```
+Has no effect without `annotate: true`.
 
 ## Usage examples
 
@@ -145,7 +145,7 @@ jobs:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
           new-header: include/foo.h
-          extra-args: --annotate
+          annotate: true
 ```
 
 ### Include additions as notices
@@ -157,7 +157,8 @@ jobs:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
           new-header: include/foo.h
-          extra-args: --annotate --annotate-additions
+          annotate: true
+          annotate-additions: true
 ```
 
 ### Annotate a release comparison
@@ -168,7 +169,7 @@ jobs:
         with:
           old-library: libfoo-1.0-1.el9.x86_64.rpm
           new-library: libfoo-1.1-1.el9.x86_64.rpm
-          extra-args: --annotate
+          annotate: true
 ```
 
 ### Combine with SARIF upload
@@ -186,24 +187,28 @@ persistent alerts.
           new-header: include/foo.h
           format: sarif
           upload-sarif: true
-          extra-args: --annotate
+          annotate: true
 ```
 
-### Local CLI usage (no annotations emitted)
+### Reading annotations without the composite Action
 
-When running locally, `--annotate` is a no-op since `GITHUB_ACTIONS` is not
-set:
+If you invoke the `abicheck` CLI directly (not through
+`abicheck/abicheck@...`), render annotations yourself from the persisted
+`annotations` report field — the CLI itself has no `--annotate` flag to
+pass:
 
 ```bash
-# Annotations silently skipped (GITHUB_ACTIONS not set)
 abicheck compare libfoo.so.1 libfoo.so.2 \
   --header old=v1/foo.h --header new=v2/foo.h \
-  --annotate
+  --format json --output report.json
 
-# To test annotation output locally, set the env var:
-GITHUB_ACTIONS=true abicheck compare libfoo.so.1 libfoo.so.2 \
-  --header old=v1/foo.h --header new=v2/foo.h \
-  --annotate
+python3 -c '
+import json, sys
+report = json.load(open("report.json"))
+for e in report.get("annotations", []):
+    if e["always_visible"]:
+        print(e["annotation"])
+'
 ```
 
 ## Behavior details
@@ -224,8 +229,9 @@ than inline on the diff.
 ### Annotation limit
 
 GitHub Actions caps visible annotations at approximately 50 per step.
-abicheck enforces this limit and sorts annotations by severity so the most
-important ones (errors first, then warnings, then notices) are always visible.
+The persisted `annotations` array enforces this limit and sorts entries by
+severity so the most important ones (errors first, then warnings, then
+notices) are always visible.
 
 For a bundle `compare` (directory/package inputs), the 50-annotation budget is
 shared across all libraries in the release. This ensures a single noisy library doesn't consume all
@@ -238,9 +244,10 @@ undocumented message length limits. Long descriptions end with `...`.
 
 ### Job Summary
 
-When `$GITHUB_STEP_SUMMARY` is available, abicheck automatically appends a
-full Markdown ABI report to the Job Summary panel. This provides the complete
-report alongside the inline annotations.
+The composite Action's own `add-job-summary` input (default `true`)
+appends a Markdown ABI report to the Job Summary panel, independent of
+`annotate`/`annotate-additions` — see
+[GitHub Action Inputs](../reference/github-action-inputs.md).
 
 - **single-library `compare`**: writes the per-library Markdown report
 - **bundle `compare`** (directory/package inputs): writes the consolidated release summary (one entry,
@@ -256,21 +263,24 @@ and `\r` using GitHub's `%`-encoding. Message bodies escape `%`, `\n`, and
 
 | Method | Inline on diff | Persistent | Setup |
 |--------|---------------|------------|-------|
-| **`--annotate`** (this feature) | Yes | No (per-run) | Add one flag |
+| **`annotate: true`** (this feature) | Yes | No (per-run) | Add one Action input |
 | **SARIF + Code Scanning** | Yes (Security tab) | Yes (alerts) | `format: sarif` + `upload-sarif: true` + permissions |
-| **Job Summary** | No (separate panel) | No (per-run) | Automatic with `--annotate` |
+| **Job Summary** | No (separate panel) | No (per-run) | Automatic via `add-job-summary` |
 | **Markdown report** (default) | No (log output) | No | Default behavior |
 
-For most teams, `--annotate` provides the best signal-to-noise ratio with zero
-configuration beyond the single flag.
+For most teams, `annotate: true` provides the best signal-to-noise ratio with
+zero configuration beyond the single input.
 
 ## Troubleshooting
 
 ### Annotations not appearing
 
-1. **Is `--annotate` set?** Check `extra-args` in your workflow YAML.
-2. **Running on GitHub Actions?** Annotations require `GITHUB_ACTIONS=true`.
-   Self-hosted runners set this automatically.
+1. **Is `annotate: true` set?** Check the Action's `with:` block in your
+   workflow YAML.
+2. **Running through the composite Action?** A raw `abicheck compare` CLI
+   invocation outside `abicheck/abicheck@...` has no annotation renderer of
+   its own — read the persisted `annotations` report field yourself (see
+   "Reading annotations without the composite Action" above).
 3. **Are there any changes?** No annotations are emitted for `NO_CHANGE` results.
 4. **File path mismatch?** Annotations with `file=` are only shown inline when
    the file path matches a file changed in the PR. Step-level annotations
@@ -287,5 +297,17 @@ present in the binary.
 
 ### Too many notice annotations
 
-Use `--annotate` without `--annotate-additions` (the default). This limits
-annotations to breaking changes and warnings only.
+Use `annotate: true` without `annotate-additions: true` (the default). This
+limits annotations to breaking changes and warnings only.
+
+## Migrating from `extra-args: --annotate`
+
+Older workflows passed `--annotate`/`--annotate-additions` to the CLI via the
+Action's `extra-args` input. Those CLI flags have been removed —
+`abicheck compare --annotate` now exits `64` with `No such option`. Replace:
+
+```diff
+- extra-args: --annotate --annotate-additions
++ annotate: true
++ annotate-additions: true
+```

@@ -937,37 +937,36 @@ def _warn_all_suppressed(result: DiffResult) -> None:
         )
 
 
-def _maybe_emit_annotations(
+def _maybe_write_step_summary(
     result: DiffResult,
     *,
-    annotate: bool,
-    annotate_additions: bool,
-    write_step_summary: bool = True,
     severity_config: SeverityConfig | None = None,
 ) -> None:
-    """Emit GitHub annotations to stderr if --annotate is set and running in CI."""
-    if not annotate:
-        return
+    """Write a $GITHUB_STEP_SUMMARY job summary when running in CI.
 
-    from .annotations import (
-        collect_annotations,
-        format_annotations,
-        is_github_actions,
-    )
+    CLI cleanup phase two, PR E removed the ``--annotate``/
+    ``--annotate-additions`` flags: the GitHub Actions composite Action no
+    longer asks the CLI to render annotations to stderr at all -- it reads
+    the persisted ``annotations`` report field (schema 2.43/2.44, always
+    computed regardless of any flag) and renders them itself
+    (``action/run.sh``'s ``_emit_annotations``, gated by the Action's own
+    ``annotate``/``annotate-additions`` inputs). This step-summary write is
+    a genuinely separate concern from stderr annotations -- it is what a
+    caller invoking ``abicheck compare`` directly inside a raw GitHub
+    Actions step (not through the composite Action, which has its own,
+    independent ``add-job-summary``/``INPUT_ADD_JOB_SUMMARY`` bash-level
+    mechanism -- see ``action/run.sh``) relies on for a rendered Markdown
+    summary. It used to be gated behind ``--annotate`` as a side effect of
+    that flag rather than as its own decision; now that the flag is gone,
+    it runs unconditionally whenever ``is_github_actions()`` is true, which
+    is what it always should have been keyed on.
+    """
+    from .annotations import is_github_actions
     from .annotations_step_summary import emit_github_step_summary
 
     if not is_github_actions():
         return
-
-    annotations = collect_annotations(
-        result, annotate_additions=annotate_additions, severity_config=severity_config,
-    )
-    text = format_annotations(annotations)
-    if text:
-        click.echo(text, err=True)
-
-    if write_step_summary:
-        emit_github_step_summary(result, severity_config=severity_config)
+    emit_github_step_summary(result, severity_config=severity_config)
 
 
 def _write_release_step_summary(text: str, fmt: str) -> None:
@@ -1130,11 +1129,10 @@ def _finalize_compare_result(
     result: DiffResult, old_input: Path, new_input: Path,
     *,
     show_redundant: bool, show_filtered: bool,
-    annotate: bool, annotate_additions: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression/annotation output."""
+    """Attach metadata and emit redundancy/filter/suppression/step-summary output."""
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
 
@@ -1158,10 +1156,7 @@ def _finalize_compare_result(
         )
 
     _warn_all_suppressed(result)
-    _maybe_emit_annotations(
-        result, annotate=annotate, annotate_additions=annotate_additions,
-        severity_config=severity_config,
-    )
+    _maybe_write_step_summary(result, severity_config=severity_config)
 
 
 # ── ADR-037 D7: input-type dispatch for `compare` ────────────────────────────
@@ -1645,13 +1640,6 @@ def _embed_inline_source_side(
                    "--format sarif keeps its normal one-result-per-finding "
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
-@click.option("--annotate", is_flag=True, default=False,
-              help="Emit GitHub Actions workflow command annotations to stderr. "
-                   "Annotations appear as inline comments on PR diffs. "
-                   "Only effective when GITHUB_ACTIONS=true.")
-@click.option("--annotate-additions", is_flag=True, default=False,
-              help="Include additions/compatible changes as ::notice annotations "
-                   "(requires --annotate).")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.

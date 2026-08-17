@@ -68,7 +68,6 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_severity_config,
     _run_bundle_analysis,
     apply_release_gate_pack,
-    release_annotations_from_primary_pass,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -314,6 +313,16 @@ def _compare_one_library(
             "compatible_additions": len(result.compatible),
             "quality_issues": n_quality,
             "_diff_result": result,
+            # CodeRabbit review, PR #798: stashed alongside `_diff_result` so
+            # a secondary JUnit render (`--write junit=...`/`--format junit`)
+            # can build its (DiffResult, old_snapshot) pairs straight from
+            # this single primary pass, the same way annotations already do
+            # -- instead of `_collect_release_extras`'s old independent
+            # re-run, whose own failure path silently *dropped* a pair from
+            # the secondary report on a rerun error even though the primary
+            # pass had already succeeded for it (a truncated JUnit report
+            # next to a complete primary one).
+            "_old_snapshot": compare_result.old_snapshot,
         }
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
@@ -451,23 +460,6 @@ def _suppress_lockstep_soname_findings(
     return suppressed
 
 
-def _drop_lockstep_soname_finding(result: DiffResult) -> None:
-    """Mirror ``_suppress_lockstep_soname_findings``'s per-result filter.
-
-    Called on the independent re-run :func:`_collect_release_extras` performs
-    for JUnit/annotations, only when the caller has already confirmed
-    ``worst_verdict == "BREAKING"`` (the same release-level condition
-    ``_suppress_lockstep_soname_findings`` gates on) — so this stays a no-op
-    unless the primary pass would also have suppressed the finding.
-    """
-    from .checker_policy import ChangeKind
-
-    if any(c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY for c in result.changes):
-        result.changes = [
-            c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
-        ]
-
-
 def _compare_release_libraries(
     matched_keys: list[str],
     old_map: dict[str, Path],
@@ -488,8 +480,6 @@ def _compare_release_libraries(
     output_dir: Path | None,
     collect_diff_results: bool = False,
     *,
-    annotate: bool = False,
-    annotate_additions: bool = False,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
@@ -516,7 +506,6 @@ def _compare_release_libraries(
     library_results: list[dict[str, object]] = []
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
     worst_verdict = "NO_CHANGE"
-    all_annotations: list[tuple[int, str]] = []
 
     common_args = (
         old_map,
@@ -589,64 +578,25 @@ def _compare_release_libraries(
             err=True,
         )
 
-    # collect_diff_results (JUnit) needs the old AbiSnapshot alongside the
-    # DiffResult, which the primary pass above never stashes -- so it still
-    # requires an independent re-run (see _collect_release_extras's own
-    # docstring). annotate no longer does: every library's DiffResult is
-    # already sitting in its own entry["_diff_result"] from the primary
-    # pass above (post-SONAME-lockstep-suppression, since that runs first),
-    # so annotations are collected directly from it instead of re-running
-    # every library's comparison a second time just to recover the same
-    # DiffResult a `--annotate` release run used to need (CLI cleanup phase
-    # two, PR E: "no comparison re-run").
+    # collect_diff_results (JUnit / a secondary `--write junit=...` render)
+    # used to need an independent re-run (`_collect_release_extras`) purely
+    # to recover the old `AbiSnapshot` alongside each `DiffResult` -- the
+    # primary pass above now stashes both directly in each library's own
+    # `entry["_diff_result"]`/`entry["_old_snapshot"]`, so building the
+    # pairs is a plain read, not a second comparison (CodeRabbit review,
+    # PR #798): the old re-run's own failure handling silently *dropped* a
+    # pair from the secondary report on a rerun error even when the
+    # primary pass had already succeeded for it, which this can no longer
+    # do since there is nothing left to fail. Annotations were fixed the
+    # identical way earlier in this same PR (see `annotation_report_
+    # entries`/`reporter_contract_blocks.add_annotations`); the Action
+    # reads them straight off the JSON report.
     if collect_diff_results:
-        extra_pairs, _ = _collect_release_extras(
-            matched_keys,
-            old_map,
-            new_map,
-            old_debug_dir,
-            new_debug_dir,
-            resolve_debug_info,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
-            annotate_additions=annotate_additions,
-            collect_diff_results=collect_diff_results,
-            annotate=False,
-            scope_to_public_surface=scope_to_public_surface,
-            include_dependencies=include_dependencies,
-            severity_config=severity_config,
-            worst_verdict=worst_verdict,
-            contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
-            pack_application=pack_application,
-        )
-        diff_pairs.extend(extra_pairs)
-    if annotate:
-        all_annotations.extend(
-            release_annotations_from_primary_pass(
-                library_results,
-                annotate_additions=annotate_additions,
-                severity_config=severity_config,
-            ),
-        )
-
-    # Emit annotations once: sort globally across all libraries by severity,
-    # then truncate to the cap.  This ensures the most important annotations
-    # (errors) are always visible regardless of which library they came from.
-    if all_annotations:
-        from .annotations import format_annotations
-
-        text = format_annotations(all_annotations)
-        if text:
-            click.echo(text, err=True)
+        for entry in library_results:
+            diff = entry.get("_diff_result")
+            old_snap = entry.get("_old_snapshot")
+            if isinstance(diff, DiffResult) and isinstance(old_snap, AbiSnapshot):
+                diff_pairs.append((diff, old_snap))
 
     return library_results, worst_verdict, diff_pairs
 
@@ -739,99 +689,6 @@ def _compare_release_sequential(
 ) -> list[dict[str, object]]:
     """Run per-library release comparisons sequentially."""
     return [_compare_one_library(key, *common_args) for key in matched_keys]
-
-
-def _collect_release_extras(
-    matched_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_debug_dir: Path | None,
-    new_debug_dir: Path | None,
-    resolve_debug_info: Callable[[Path, Path], Path | None],
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
-    *,
-    annotate_additions: bool,
-    collect_diff_results: bool,
-    annotate: bool,
-    scope_to_public_surface: bool = True,
-    include_dependencies: bool = True,
-    severity_config: SeverityConfig | None = None,
-    worst_verdict: str = "NO_CHANGE",
-    contract_evaluation: bool = False,
-    contract_mode: str | None = None,
-    pack_application: PackApplication | None = None,
-) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
-    """Collect optional re-run artifacts for JUnit and annotations.
-
-    *worst_verdict* mirrors the condition ``_suppress_lockstep_soname_findings``
-    uses on the primary per-library pass. This function re-runs comparison
-    independently (see its docstring), so a coordinated-release SONAME bump
-    that pass judged intentional and dropped must be dropped here too — else
-    JUnit/annotations disagree with the primary report and can surface (or
-    even gate on, under a severity config) a finding the release-level report
-    no longer shows at all.
-    """
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
-    annotations: list[tuple[int, str]] = []
-    for key in matched_keys:
-        old_path = old_map[key]
-        new_path = new_map[key]
-        old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
-        new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
-        try:
-            compare_result = _run_compare_pair(
-                old_path,
-                new_path,
-                old_h,
-                new_h,
-                old_inc,
-                new_inc,
-                old_version,
-                new_version,
-                lang,
-                suppress,
-                policy,
-                policy_file_path,
-                old_pdb_path=old_dbg,
-                new_pdb_path=new_dbg,
-                scope_to_public_surface=scope_to_public_surface,
-                include_dependencies=include_dependencies,
-                contract_evaluation=contract_evaluation,
-                contract_mode=contract_mode,
-                pack_application=pack_application,
-            )
-        except Exception as exc:
-            click.echo(
-                f"Warning: failed to re-run comparison for {old_path.name}: {exc}",
-                err=True,
-            )
-            continue
-        result, old_snap = compare_result.diff, compare_result.old_snapshot
-        if worst_verdict == "BREAKING":
-            _drop_lockstep_soname_finding(result)
-        if collect_diff_results:
-            diff_pairs.append((result, old_snap))
-        if annotate:
-            from .annotations import collect_annotations, is_github_actions
-
-            if is_github_actions():
-                annotations.extend(
-                    collect_annotations(
-                        result,
-                        annotate_additions=annotate_additions,
-                        severity_config=severity_config,
-                    ),
-                )
-    return diff_pairs, annotations
 
 
 def _write_release_summary_file(
@@ -941,7 +798,6 @@ def _finalize_release_output(
     bundle_result: BundleDiffResult | None,
     output: Path | None,
     output_dir: Path | None,
-    annotate: bool,
     fail_on_removed: bool,
     matrix_result: DiffResult | None = None,
     severity_exit_code: int | None = None,
@@ -971,8 +827,13 @@ def _finalize_release_output(
     )
     _write_or_echo(output, text)
 
-    if annotate:
-        _write_release_step_summary(text, fmt)
+    # CLI cleanup phase two, PR E removed --annotate/--annotate-additions:
+    # this used to run only when that flag was set, as an unrelated side
+    # effect of it. _write_release_step_summary already self-guards on
+    # is_github_actions()/$GITHUB_STEP_SUMMARY, so it now runs
+    # unconditionally in CI, matching _maybe_write_step_summary's identical
+    # decoupling on the single-pair compare path (cli.py).
+    _write_release_step_summary(text, fmt)
 
     if output_dir:
         _write_release_summary_file(
@@ -1208,18 +1069,20 @@ def _strip_diff_results_and_adjust_verdict(
             # same shape single-library `compare --format json` persists at
             # its own top-level `annotations` (schema 2.43,
             # `annotations.annotation_report_entries`), reused verbatim so
-            # the two can never disagree. This is what lets a future Action
-            # renderer read a release-style operand's report the same way it
-            # reads a single-library one, instead of needing `--annotate`'s
-            # independent per-library re-run this module used to perform
-            # (`_collect_release_extras`) just to recover the same
-            # DiffResult already sitting right here.
+            # the two can never disagree. This is what lets the Action's own
+            # renderer (`action/run.sh`'s `_emit_annotations`) read a
+            # release-style operand's report the same way it reads a
+            # single-library one, instead of needing an independent
+            # per-library re-run this module used to perform
+            # (`_collect_release_extras`, since removed) just to recover the
+            # same DiffResult already sitting right here.
             from .annotations import annotation_report_entries
 
             entry["annotations"] = annotation_report_entries(
                 diff, severity_config=severity_config
             )
         entry.pop("_diff_result", None)
+        entry.pop("_old_snapshot", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
@@ -1310,20 +1173,6 @@ def _strip_diff_results_and_adjust_verdict(
     is_flag=True,
     default=False,
     help="Keep extracted temporary files for debugging.",
-)
-@click.option(
-    "--annotate",
-    is_flag=True,
-    default=False,
-    help="Emit GitHub Actions workflow command annotations to stdout. "
-    "Only effective when GITHUB_ACTIONS=true.",
-)
-@click.option(
-    "--annotate-additions",
-    is_flag=True,
-    default=False,
-    help="Include additions/compatible changes as ::notice annotations "
-    "(requires --annotate).",
 )
 @verbose_option
 @click.option(
@@ -1422,8 +1271,6 @@ def compare_release_cmd(
     dso_only: bool,
     include_private_dso: bool,
     keep_extracted: bool,
-    annotate: bool,
-    annotate_additions: bool,
     verbose: bool,
     jobs: int,
     manifest_path: Path | None,
@@ -1508,9 +1355,6 @@ def compare_release_cmd(
     )
 
     _setup_verbosity(verbose)
-
-    if annotate_additions and not annotate:
-        raise click.UsageError("--annotate-additions requires --annotate")
 
     # CLI cleanup phase two, PR E: --write's own internal coherence (no
     # secondary aimed at the same file as the primary; this command has no
@@ -1637,12 +1481,13 @@ def compare_release_cmd(
             )
 
             # Resolved before the compare pass (its inputs are plain CLI values, no
-            # dependency on compare results) so --annotate's GitHub annotations —
-            # collected inside _compare_release_libraries, same pass as the
-            # per-library JUnit re-run — reflect the same severity-aware gate as
-            # the exit code below, instead of the legacy kind-set mapping. Returns
-            # None when no severity setting was in effect, or when compare's
-            # resolved config pins the legacy scheme for set inputs.
+            # dependency on compare results) so persisted per-library annotations
+            # (schema 2.43/2.44, computed inside _compare_release_libraries's
+            # primary pass and read by the Action, not the CLI) reflect the same
+            # severity-aware gate as the exit code below, instead of the legacy
+            # kind-set mapping. Returns None when no severity setting was in
+            # effect, or when compare's resolved config pins the legacy scheme
+            # for set inputs.
             severity_config = _resolve_release_severity_config(
                 severity_preset,
                 severity_abi_breaking,
@@ -1671,15 +1516,15 @@ def compare_release_cmd(
             if release_exit_code_scheme == "legacy":
                 severity_config = None
 
-            # JUnit still re-runs pairs in _collect_release_extras because it
-            # needs old AbiSnapshot too. Bundle analysis reuses the
-            # _diff_result stashed in each library entry from the first pass.
+            # JUnit, bundle analysis, and annotations all reuse the
+            # _diff_result (and, for JUnit, _old_snapshot) stashed in each
+            # library entry from this single primary pass -- no independent
+            # re-run.
             #
-            # This fan-out (plus JUnit's re-run inside it) reloads the same
-            # --policy-file once per library; the enclosing
-            # dedup_validate_overrides_warnings() scope above is what keeps a
-            # single risky override from logging its validate_overrides()
-            # warning once per library (Codex review).
+            # This fan-out reloads the same --policy-file once per library;
+            # the enclosing dedup_validate_overrides_warnings() scope above
+            # is what keeps a single risky override from logging its
+            # validate_overrides() warning once per library (Codex review).
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 matched_keys,
                 old_map,
@@ -1699,8 +1544,6 @@ def compare_release_cmd(
                 policy_file_path,
                 output_dir,
                 collect_diff_results=(fmt == "junit" or secondary_fmt == "junit"),
-                annotate=annotate,
-                annotate_additions=annotate_additions,
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,
                 include_dependencies=include_dependencies,
@@ -1852,7 +1695,6 @@ def compare_release_cmd(
                 bundle_result,
                 output,
                 output_dir,
-                annotate,
                 fail_on_removed,
                 matrix_result=matrix_result,
                 severity_exit_code=severity_exit_code,

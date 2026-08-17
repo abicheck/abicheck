@@ -23,7 +23,7 @@ See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-gi
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .checker import (
     Change,
@@ -593,9 +593,29 @@ def is_github_actions() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-#: Moved to :mod:`abicheck.annotations_step_summary` (CLI cleanup phase
-#: two, PR E) -- see that module's own docstring for why: it wrote the only
-#: import from this module back to ``reporter``, which closed an import
-#: cycle once ``reporter_contract_blocks.add_annotations`` started
-#: importing this module's ``annotation_report_entries``. Import it from
-#: there directly; this module intentionally does not re-export it.
+# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# `emit_github_step_summary` historically lived here. It moved to
+# :mod:`abicheck.annotations_step_summary` (CLI cleanup phase two, PR E) --
+# see that module's own docstring for why: it was the only import from this
+# module back to ``reporter``, which would have closed an import cycle once
+# ``reporter_contract_blocks.add_annotations`` started importing this
+# module's ``annotation_report_entries``. A *static*
+# `from .annotations_step_summary import emit_github_step_summary` re-export
+# here would reopen that same cycle, so this module-level `__getattr__`
+# (PEP 562) resolves it lazily via `importlib.import_module` -- a runtime
+# call, not a static import edge (Codex review: preserves the historical
+# `from abicheck.annotations import emit_github_step_summary` path for any
+# existing caller instead of a bare `ImportError`). New code should import
+# from `annotations_step_summary` directly, matching
+# `cli_buildsource.py`'s identical `_GRAPH_REEXPORTS` shim.
+_STEP_SUMMARY_REEXPORTS = frozenset({"emit_github_step_summary"})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _STEP_SUMMARY_REEXPORTS:
+        import importlib
+
+        return getattr(
+            importlib.import_module("abicheck.annotations_step_summary"), name
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

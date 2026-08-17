@@ -194,6 +194,70 @@ class TestAnnotateRendererReadsThePersistedReport:
         assert result.returncode == 0, result.stdout + result.stderr
         assert _emitted_lines(result) == []
 
+    def test_discovers_a_user_supplied_write_json_path(self, tmp_path: Path) -> None:
+        """Codex review, PR #798: when the primary FORMAT isn't json and the
+        caller's own extra-args already carries ``--write json=PATH``, the
+        Action's internal ``--write json=$PR_JSON`` injection is correctly
+        suppressed (``_extra_args_has_write_flag``) -- which used to leave
+        ``_json_report_src``/the annotate renderer with no JSON source at
+        all, so ``annotate: true`` silently emitted nothing even though the
+        user's own ``--write`` destination held a perfectly good report.
+        ``_extra_args_write_json_path`` now recovers that path directly.
+        """
+        old_json = tmp_path / "old.json"
+        new_json = tmp_path / "new.json"
+        old_json.write_text("{}", encoding="utf-8")
+        new_json.write_text("{}", encoding="utf-8")
+        write_path = tmp_path / "mine.json"
+
+        # A real --write-capable stub: unlike _run_compare's fixed stub,
+        # this one actually honors `--write json=PATH` by writing the
+        # payload there too, so the renderer has something real to
+        # discover -- not just a plausible-looking argv.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        stub = fake_bin / "abicheck"
+        payload = json.dumps(_REPORT_WITH_ANNOTATIONS)
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "for arg in \"$@\"; do\n"
+            '  case "$arg" in\n'
+            "    --write) _want_next=1; continue ;;\n"
+            "    json=*) if [[ \"${_want_next:-0}\" == 1 ]]; then\n"
+            f"      cat > \"${{arg#json=}}\" <<'STUBJSON'\n{payload}\nSTUBJSON\n"
+            "    fi ;;\n"
+            "  esac\n"
+            "  _want_next=0\n"
+            "done\n"
+            "echo markdown-primary-output\n"
+            "exit 4\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+        env = {
+            **base_env,
+            "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": str(old_json),
+            "INPUT_NEW_LIBRARY": str(new_json),
+            "INPUT_FORMAT": "markdown",
+            "INPUT_ADD_JOB_SUMMARY": "false",
+            "INPUT_PR_COMMENT": "false",
+            "INPUT_ANNOTATE": "true",
+            "INPUT_EXTRA_ARGS": f"--write json={write_path}",
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
+        }
+        result = subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        )
+        assert write_path.is_file(), result.stdout + result.stderr
+        lines = _emitted_lines(result)
+        assert "::error title=ABI Break::function foo removed" in lines
+
 
 @pytest.mark.skipif(
     not sys.platform.startswith("linux")
