@@ -342,6 +342,9 @@ also_copy = [
     "examples",
     "mkdocs.yml",
     "pixi.lock",
+    # Mutmut starts pytest from `mutants/`.  Copy this too so that its
+    # test-selection arguments (notably `not slow`) remain active there.
+    "pyproject.toml",
     "scripts",
     "skills-src",
     # The three committed publication trees `scripts/gen_agent_skills.py`
