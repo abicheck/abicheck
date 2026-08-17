@@ -465,13 +465,13 @@ class _CastxmlParser:
             max_ = el.get("max", "")
             base = self._type_name(el.get("type", ""), depth + 1)
             return f"{base}[{max_}]" if max_ else f"{base}[]"
-        if tag == "Unimplemented" and el.get("type_class") == "Atomic":
-            # castxml cannot model C11 _Atomic: it emits a bare Unimplemented
-            # node with no `type` reference to the wrapped type at all, so the
-            # inner type name can't be recovered here. Spell it "_Atomic" (not
-            # the literal tag name) so diff_atomic.py's _has_atomic() can still
-            # detect the qualifier being added/removed on this slot.
-            return "_Atomic"
+        if tag == "AtomicType" or (
+            tag == "Unimplemented" and el.get("type_class") == "Atomic"
+        ):
+            # CastXML emits either AtomicType or legacy Unimplemented/Atomic.
+            # Preserve a wrapped type when present; retain a bare fallback.
+            inner_id = el.get("type", "")
+            return f"_Atomic({self._type_name(inner_id, depth + 1)})" if inner_id else "_Atomic"
         return el.get("name", tag)
 
     def _cv_qualifies_pointer_value(self, type_id: str) -> bool:
