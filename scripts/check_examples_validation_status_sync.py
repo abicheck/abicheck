@@ -17,7 +17,8 @@
 """Keep examples/README.md's "Current Validation Status" table honest.
 
 The table's "Result" column is hand-typed prose summarizing the latest
-gcc/clang/runtime/release/stripped/build-source validator runs. Nothing
+gcc/clang/runtime/release/stripped/build-source validator runs and the full
+example proof matrix. Nothing
 previously checked it against a real run, so it silently drifted for several
 releases (the catalog grew from 169 to 181 cases while the table still said
 169; PR #547's own audit found the table still claiming 148 PASS / 1 XFAIL
@@ -32,9 +33,9 @@ the Command/Executed-where columns and the free-form narrative bullets below
 the table stay hand-maintained, because they require judgment (why a
 release-headers case regressed, whether a gap is release-blocking) that a
 script cannot manufacture from a status count alone. The Scope column is the
-one exception: for the four lanes that always run the whole catalog
-(``Default/debug verdicts``, ``Runtime smoke``, ``Release headers``,
-``Stripped headers``), Scope is a plain "<N> catalog cases" count that must
+one exception: for the five lanes that always run the whole catalog
+(``Full example proof matrix``, ``Default/debug verdicts``, ``Runtime smoke``,
+``Release headers``, ``Stripped headers``), Scope is a plain "<N> catalog cases" count that must
 equal ``len(ground_truth.json["verdicts"])`` — checked/fixed unconditionally
 (no artifact needed), since a catalog-size bump (e.g. 186 -> 191) is otherwise
 silent here exactly like a stale Result cell was before this script existed.
@@ -48,6 +49,7 @@ Usage:
         --release results/validate_examples-release-headers.json \\
         --stripped results/validate_examples-stripped-headers.json \\
         --build-source results/validate_examples-build-source.json \\
+        --full-matrix results/full-example-matrix.json \\
         --check
 
 Any artifact flag may be omitted (e.g. for a partial local run); that row is
@@ -74,6 +76,7 @@ GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 # every one of these rows for several releases after the catalog grew to 191,
 # because nothing previously compared the Scope cell to ground_truth.json.
 SCOPE_CATALOG_ROWS = (
+    "Full example proof matrix",
     "Default/debug verdicts",
     "Runtime smoke",
     "Release headers",
@@ -118,6 +121,38 @@ def _row_result(label: str, artifact: dict[str, object] | None) -> str | None:
         raise ValueError(f"{label}: artifact has no 'summary' dict")
     order = ROW_STATUS_ORDER[label]
     return _format_summary(summary, order)
+
+
+def _full_matrix_result(artifact: dict[str, object] | None) -> str | None:
+    """Render the full-matrix Result cell from its collector artifact."""
+    if artifact is None:
+        return None
+    summary = artifact.get("summary")
+    direct_coverage = artifact.get("direct_coverage")
+    total = artifact.get("ground_truth_cases")
+    if not isinstance(summary, dict) or not isinstance(direct_coverage, dict):
+        raise ValueError(
+            "full matrix artifact requires summary and direct_coverage objects"
+        )
+    if not isinstance(total, int):
+        raise ValueError("full matrix artifact requires integer ground_truth_cases")
+    covered = summary.get("COVERED", 0)
+    failed = summary.get("FAILED", 0)
+    unresolved = summary.get("UNRESOLVED", 0)
+    direct = direct_coverage.get("covered")
+    if not all(
+        isinstance(value, int) for value in (covered, failed, unresolved, direct)
+    ):
+        raise ValueError("full matrix artifact has non-integer coverage counts")
+    if direct_coverage.get("total") != total:
+        raise ValueError(
+            "full matrix direct_coverage total disagrees with ground_truth_cases"
+        )
+    if covered + failed + unresolved != total:
+        raise ValueError("full matrix summary counts disagree with ground_truth_cases")
+    if not 0 <= direct <= covered:
+        raise ValueError("full matrix direct coverage must be within covered cases")
+    return f"{covered}/{total} COVERED; {direct} direct; {failed} FAILED / {unresolved} UNRESOLVED"
 
 
 def _replace_result_cell(text: str, label: str, new_result: str) -> str:
@@ -213,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release", type=Path)
     parser.add_argument("--stripped", type=Path)
     parser.add_argument("--build-source", type=Path)
+    parser.add_argument("--full-matrix", type=Path)
     parser.add_argument(
         "--check",
         action="store_true",
@@ -226,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
     release = _load_json(args.release) if args.release else None
     stripped = _load_json(args.stripped) if args.stripped else None
     build_source = _load_json(args.build_source) if args.build_source else None
+    full_matrix = _load_json(args.full_matrix) if args.full_matrix else None
 
     text = README.read_text(encoding="utf-8")
 
@@ -245,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
 
     combined = _combine_gcc_clang(gcc, clang)
     row_updates = {
+        "Full example proof matrix": _full_matrix_result(full_matrix),
         "Default/debug verdicts": _row_result_combined(combined),
         "Runtime smoke": _row_result("Runtime smoke", runtime),
         "Release headers": _row_result("Release headers", release),
