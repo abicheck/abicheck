@@ -365,6 +365,25 @@ def _collect_annotations_detailed(
     non-zero with that finding present in the rendered report's
     ``changes`` but silently absent from both the stderr annotation and
     the persisted ``annotations`` array.
+
+    **Known gap, not closed here** (Codex review follow-up, fresh evidence):
+    ``diff_result.scoped_missing_labels`` — the sibling synthesized-finding
+    list for a label ``--used-by``/``--required-symbol`` required but the
+    new library lacks entirely — is not walked here, so the identical
+    silent-omission failure mode this fix closes for ``scoped_only_changes``
+    still applies to a comparison whose sole gating finding is a missing
+    label. Closing it is not a one-line extension of the fold above: a
+    missing-label entry has no backing ``Change``/``ChangeKind`` at all
+    (``contract_scoped_promotion._missing_contract_findings`` converts it to
+    a ``MissingContractFinding``, a different shape this loop's
+    ``ChangeKind``-based classification — ``_effective_kind_sets``,
+    ``_category_for_change_severity``, ``is_evaluated`` — cannot consume
+    directly), so every consumer that already handles it
+    (``sarif._missing_contract_result``, ``junit_report.py``,
+    ``reporter_markdown.py``) does so through its own separate rendering
+    path rather than folding it into the ordinary finding loop. A correct
+    fix needs an equivalent separate branch here, not a change to the fold
+    above.
     """
     from .severity import effective_verdict_for_change
 
