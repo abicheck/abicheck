@@ -937,60 +937,8 @@ def _warn_all_suppressed(result: DiffResult) -> None:
         )
 
 
-def _maybe_write_step_summary(
-    result: DiffResult,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> None:
-    """Write a $GITHUB_STEP_SUMMARY job summary when running in CI.
-
-    CLI cleanup phase two, PR E removed the ``--annotate``/
-    ``--annotate-additions`` flags: the GitHub Actions composite Action no
-    longer asks the CLI to render annotations to stderr at all -- it reads
-    the persisted ``annotations`` report field (schema 2.43/2.44, always
-    computed regardless of any flag) and renders them itself
-    (``action/run.sh``'s ``_emit_annotations``, gated by the Action's own
-    ``annotate``/``annotate-additions`` inputs). This step-summary write is
-    a genuinely separate concern from stderr annotations -- it is what a
-    caller invoking ``abicheck compare`` directly inside a raw GitHub
-    Actions step (not through the composite Action, which has its own,
-    independent ``add-job-summary``/``INPUT_ADD_JOB_SUMMARY`` bash-level
-    mechanism -- see ``action/run.sh``) relies on for a rendered Markdown
-    summary. It used to be gated behind ``--annotate`` as a side effect of
-    that flag rather than as its own decision; now that the flag is gone,
-    it runs unconditionally whenever ``is_github_actions()`` is true, which
-    is what it always should have been keyed on.
-    """
-    from .annotations import is_github_actions
-    from .annotations_step_summary import emit_github_step_summary
-
-    if not is_github_actions():
-        return
-    emit_github_step_summary(result, severity_config=severity_config)
 
 
-def _write_release_step_summary(text: str, fmt: str) -> None:
-    """Write a single step summary for compare-release when running in CI."""
-    import os as _os
-
-    summary_path = _os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
-        return
-
-    from .annotations import is_github_actions
-
-    if not is_github_actions():
-        return
-
-    # For markdown output, write the summary directly.
-    # For JSON, wrap it in a code block.
-    if fmt == "json":
-        content = f"```json\n{text}\n```\n"
-    else:
-        content = text + "\n"
-
-    with open(summary_path, "a", encoding="utf-8") as f:
-        f.write(content)
 
 
 def _write_or_echo(output: Path | None, text: str) -> None:
@@ -1132,7 +1080,7 @@ def _finalize_compare_result(
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression/step-summary output."""
+    """Attach metadata and emit redundancy/filter/suppression output."""
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
 
@@ -1156,7 +1104,19 @@ def _finalize_compare_result(
         )
 
     _warn_all_suppressed(result)
-    _maybe_write_step_summary(result, severity_config=severity_config)
+    # CLI cleanup phase two, PR E removed --annotate/--annotate-additions,
+    # the flag that used to gate a $GITHUB_STEP_SUMMARY write here as a side
+    # effect. Making that write unconditional-in-CI instead (an earlier
+    # revision of this comment) was itself a real regression (Codex review,
+    # fresh evidence): when this command runs through the composite Action,
+    # the subprocess inherits GITHUB_ACTIONS=true/GITHUB_STEP_SUMMARY from
+    # the Action's own job, so an unconditional write here double-writes
+    # against action/run.sh's own, richer, INPUT_ADD_JOB_SUMMARY-gated job
+    # summary (or writes one even when a caller explicitly set
+    # add-job-summary: false). The CLI no longer writes a step summary on
+    # its own at all -- annotations_step_summary.emit_github_step_summary
+    # stays available as a public primitive for a caller invoking the CLI
+    # directly outside the composite Action to call itself.
 
 
 # ── ADR-037 D7: input-type dispatch for `compare` ────────────────────────────

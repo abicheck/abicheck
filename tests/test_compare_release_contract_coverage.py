@@ -227,7 +227,6 @@ def test_release_stderr_announces_contract_coverage_for_non_json_format(capsys) 
             None,
             None,
             False,
-            False,
             contract_coverage_exit_contribution=1,
             contract_coverage_failure_count=1,
         )
@@ -269,7 +268,6 @@ def test_release_stderr_announces_warn_accepted_gap_as_advisory(capsys) -> None:
         None,
         None,
         False,
-        False,
         contract_coverage_exit_contribution=0,
         contract_coverage_failure_count=1,
     )
@@ -305,7 +303,6 @@ def test_release_stderr_no_notice_when_no_library_carries_per_library_key(
             None,
             None,
             None,
-            False,
             False,
             contract_coverage_exit_contribution=1,
             contract_coverage_failure_count=1,
@@ -343,7 +340,6 @@ def test_release_stderr_omits_contract_coverage_notice_for_json_format(capsys) -
             None,
             None,
             False,
-            False,
             contract_coverage_exit_contribution=1,
         )
     err = capsys.readouterr().err
@@ -377,7 +373,6 @@ def test_release_stderr_silent_when_contract_coverage_contribution_zero(capsys) 
         None,
         None,
         None,
-        False,
         False,
         contract_coverage_exit_contribution=0,
     )

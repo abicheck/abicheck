@@ -194,6 +194,36 @@ class TestAnnotateRendererReadsThePersistedReport:
         assert result.returncode == 0, result.stdout + result.stderr
         assert _emitted_lines(result) == []
 
+    def test_non_json_write_target_emits_a_diagnostic_not_silence(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #798: when the primary FORMAT isn't json AND the
+        caller's own extra-args ``--write`` targets a non-json format
+        (markdown/junit/sarif/html/review), there is genuinely no JSON
+        report anywhere for this run -- unlike the ``json=`` case, nothing
+        can be discovered. This must say so explicitly rather than
+        silently emitting nothing.
+        """
+        result = _run_compare(
+            tmp_path,
+            {
+                "INPUT_FORMAT": "markdown",
+                "INPUT_ANNOTATE": "true",
+                "INPUT_EXTRA_ARGS": f"--write markdown={tmp_path / 'out.md'}",
+            },
+            stub_report=_REPORT_WITH_ANNOTATIONS,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        # The diagnostic itself is a real ::notice workflow command (so it
+        # shows up in the Actions log), but none of the *report's own*
+        # annotation entries were ever discovered/rendered.
+        assert "::error title=ABI Break::function foo removed" not in _emitted_lines(
+            result
+        )
+        combined = result.stdout + result.stderr
+        assert "::notice title=abicheck annotate::" in combined
+        assert "no JSON report is available" in combined
+
     def test_discovers_a_user_supplied_write_json_path(self, tmp_path: Path) -> None:
         """Codex review, PR #798: when the primary FORMAT isn't json and the
         caller's own extra-args already carries ``--write json=PATH``, the

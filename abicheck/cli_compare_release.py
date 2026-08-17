@@ -41,7 +41,6 @@ from .cli import (
     _safe_write_output,
     _setup_verbosity,
     _write_or_echo,
-    _write_release_step_summary,
 )
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
@@ -827,13 +826,12 @@ def _finalize_release_output(
     )
     _write_or_echo(output, text)
 
-    # CLI cleanup phase two, PR E removed --annotate/--annotate-additions:
-    # this used to run only when that flag was set, as an unrelated side
-    # effect of it. _write_release_step_summary already self-guards on
-    # is_github_actions()/$GITHUB_STEP_SUMMARY, so it now runs
-    # unconditionally in CI, matching _maybe_write_step_summary's identical
-    # decoupling on the single-pair compare path (cli.py).
-    _write_release_step_summary(text, fmt)
+    # CLI cleanup phase two, PR E removed --annotate/--annotate-additions,
+    # the flag that used to gate a $GITHUB_STEP_SUMMARY write here. This no
+    # longer writes one at all -- see cli.py's _finalize_compare_result's
+    # own, longer comment for why "unconditional in CI" (an earlier
+    # revision of this comment) was itself a real regression through the
+    # composite Action, which already writes its own job summary.
 
     if output_dir:
         _write_release_summary_file(

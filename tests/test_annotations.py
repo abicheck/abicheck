@@ -689,6 +689,49 @@ class TestAnnotationReportEntries:
         # through the same _collect_annotations_detailed.
         assert collect_annotations(result)
 
+    def test_missing_contract_label_is_included_and_blocking_by_default(self):
+        """`--used-by`/`--required-symbol` scoping synthesizes
+        `scoped_missing_labels` for a label the new library lacks
+        *entirely* -- no backing `Change` at all, so it needs its own
+        classification branch (Codex review, fresh evidence). Under the
+        legacy scheme (no severity_config) it's always a hard block, so it
+        must be `error`, always_visible, regardless of annotate_additions.
+        """
+        result = _result(Verdict.BREAKING, [])
+        result.gate_scope = "used_by"  # type: ignore[attr-defined]
+        result.scoped_missing_labels = ("libfoo.so@GLIBC_2.30",)  # type: ignore[attr-defined]
+        entries = annotation_report_entries(result)
+        assert entries
+        [entry] = entries
+        assert entry["level"] == "error"
+        assert entry["always_visible"] is True
+        assert "libfoo.so@GLIBC_2.30" in entry["annotation"]
+        # collect_annotations (the stderr path) must agree.
+        [line] = collect_annotations(result)
+        assert line[1] == entry["annotation"]
+
+    def test_missing_contract_label_is_not_blocking_under_a_lenient_severity_config(
+        self,
+    ):
+        """Mirrors sarif._missing_contract_result's identical severity
+        decision: a severity scheme that doesn't error on abi_breaking must
+        not paint this red -- it becomes an opt-in notice instead, gated on
+        annotate_additions like any other non-blocking finding."""
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        cfg = SeverityConfig(
+            abi_breaking=SeverityLevel.WARNING,
+            potential_breaking=SeverityLevel.WARNING,
+            quality_issues=SeverityLevel.INFO,
+            addition=SeverityLevel.INFO,
+        )
+        result = _result(Verdict.BREAKING, [])
+        result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+        result.scoped_missing_labels = ("some_entrypoint",)  # type: ignore[attr-defined]
+        [entry] = annotation_report_entries(result, severity_config=cfg)
+        assert entry["level"] == "notice"
+        assert entry["always_visible"] is False
+
 
 # ---------------------------------------------------------------------------
 # severity_config-aware annotation levels

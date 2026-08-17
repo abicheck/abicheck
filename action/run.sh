@@ -1888,7 +1888,24 @@ _emit_annotations() {
   [[ "${INPUT_ANNOTATE:-false}" == "true" ]] || return 0
   local _src _additions
   _src=$(_json_report_src)
-  [[ -n "$_src" ]] || return 0
+  if [[ -z "$_src" ]]; then
+    # A user-supplied `--write FORMAT=PATH` in extra-args targeting a
+    # non-json FORMAT (markdown/junit/sarif/html/review) leaves genuinely
+    # no JSON report anywhere: the primary format isn't json either (or
+    # _json_report_src would already have found it), and `--write` only
+    # ever has room for one secondary format -- appending our own
+    # `--write json=...` after the user's own would silently drop theirs
+    # (the exact collision `_extra_args_has_write_flag` exists to prevent),
+    # not add a second report. Unlike the `json=` case
+    # `_extra_args_write_json_path` recovers, there is nothing to discover
+    # here, so say so rather than silently emitting nothing (Codex review,
+    # fresh evidence).
+    if [[ "${FORMAT:-}" != "json" ]] && _extra_args_has_write_flag \
+       && [[ -z "$(_extra_args_write_json_path)" ]]; then
+      echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own --write targets a non-json format -- no JSON report is available to render annotations from. Use format: json, or point --write at json=PATH instead."
+    fi
+    return 0
+  fi
   _additions="0"
   [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]] && _additions="1"
   # Deliberately NOT captured via $(...) -- each printed line is a real

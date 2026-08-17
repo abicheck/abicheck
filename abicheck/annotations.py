@@ -36,6 +36,7 @@ from .checker_policy import (
 from .contract_gating import is_evaluated
 
 if TYPE_CHECKING:
+    from .finding_identity import MissingContractFinding
     from .severity import IssueCategory, KindSets, SeverityConfig
 
 # GitHub caps visible annotations at ~50 per step.
@@ -307,11 +308,16 @@ def _title_for_change(
 
 def _format_annotation(
     level: str,
-    change: Change,
+    change: Change | MissingContractFinding,
     title: str,
     message: str,
 ) -> str:
-    """Format a single GitHub workflow command annotation line."""
+    """Format a single GitHub workflow command annotation line.
+
+    Accepts a ``MissingContractFinding`` too (a missing ``--used-by``/
+    ``--required-symbol`` label has no backing ``Change``) -- only
+    ``source_location`` is read, which both share.
+    """
     file, line = _parse_source_location(change.source_location)
 
     props: list[str] = []
@@ -366,24 +372,22 @@ def _collect_annotations_detailed(
     ``changes`` but silently absent from both the stderr annotation and
     the persisted ``annotations`` array.
 
-    **Known gap, not closed here** (Codex review follow-up, fresh evidence):
     ``diff_result.scoped_missing_labels`` — the sibling synthesized-finding
     list for a label ``--used-by``/``--required-symbol`` required but the
-    new library lacks entirely — is not walked here, so the identical
-    silent-omission failure mode this fix closes for ``scoped_only_changes``
-    still applies to a comparison whose sole gating finding is a missing
-    label. Closing it is not a one-line extension of the fold above: a
-    missing-label entry has no backing ``Change``/``ChangeKind`` at all
-    (``contract_scoped_promotion._missing_contract_findings`` converts it to
-    a ``MissingContractFinding``, a different shape this loop's
+    new library lacks entirely — is folded in too (Codex review follow-up,
+    fresh evidence), through a separate branch after the main loop rather
+    than as an extension of the fold above: a missing-label entry has no
+    backing ``Change``/``ChangeKind`` at all
+    (``finding_identity.missing_contract_finding`` converts it to a
+    ``MissingContractFinding``, a different shape this loop's
     ``ChangeKind``-based classification — ``_effective_kind_sets``,
     ``_category_for_change_severity``, ``is_evaluated`` — cannot consume
-    directly), so every consumer that already handles it
+    directly), so it is classified the same way every other consumer of
+    ``scoped_missing_labels`` already does
     (``sarif._missing_contract_result``, ``junit_report.py``,
-    ``reporter_markdown.py``) does so through its own separate rendering
-    path rather than folding it into the ordinary finding loop. A correct
-    fix needs an equivalent separate branch here, not a change to the fold
-    above.
+    ``reporter_markdown.py``): unconditionally a hard block under the
+    legacy scheme, or gated on ``severity.missing_contract_exit_code``
+    under a severity scheme.
     """
     from .severity import effective_verdict_for_change
 
@@ -448,6 +452,43 @@ def _collect_annotations_detailed(
         # visible not-evaluated branch above) is that annotate_additions
         # opted it in.
         annotations.append((sort_key, line, level != "notice"))
+
+    # A missing --used-by/--required-symbol contract member (a label the new
+    # library lacks *entirely* -- not a Change, since there is nothing to
+    # diff against) has no backing ChangeKind at all, so it cannot go
+    # through the ordinary per-change loop above -- it needs the same
+    # dedicated branch every other consumer of `scoped_missing_labels`
+    # already has (`sarif._missing_contract_result`, `junit_report.py`,
+    # `reporter_markdown.py`). Without this, a comparison whose *sole*
+    # gating finding is a missing label could exit non-zero with nothing in
+    # either the stderr annotation stream or the persisted `annotations`
+    # array to explain why (Codex review, fresh evidence -- this closes the
+    # sibling gap the `scoped_only_changes` fold above already closed for a
+    # *present* scope-synthesized finding).
+    gate_scope = getattr(diff_result, "gate_scope", None)
+    if gate_scope is not None:
+        from .finding_identity import missing_contract_finding, missing_contract_kind
+        from .severity import missing_contract_exit_code
+
+        # Mirrors sarif._missing_contract_result's own severity decision
+        # exactly: under the legacy scheme (no severity_config) a missing
+        # contract member is unconditionally a hard block; under a severity
+        # scheme it blocks only when that scheme's abi_breaking category is
+        # configured to error, so a --severity-preset that demotes
+        # abi_breaking must not paint this red regardless (Codex review).
+        blocks = (
+            severity_config is None
+            or missing_contract_exit_code(severity_config) != 0
+        )
+        kind = missing_contract_kind(gate_scope)
+        for label in getattr(diff_result, "scoped_missing_labels", ()) or ():
+            level = "error" if blocks else ("notice" if annotate_additions else None)
+            if level is None:
+                continue
+            finding = missing_contract_finding(kind, label)
+            title = f"ABI Break: {kind}" if blocks else f"ABI Notice: {kind}"
+            line = _format_annotation(level, finding, title, finding.description)
+            annotations.append((_SEVERITY_ORDER.get(level, 99), line, blocks))
 
     return annotations
 

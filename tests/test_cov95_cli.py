@@ -41,7 +41,6 @@ from abicheck.cli import (
     _expand_header_inputs,
     _load_probe_matrix_changes,
     _load_suppression_and_policy,
-    _maybe_write_step_summary,
     _merge_gcc_options,
     _resolve_linker_script,
     _resolve_per_side_options,
@@ -651,17 +650,6 @@ class TestExitSchemeHelpers:
         # Compatible verdict returns normally (no SystemExit).
         assert _exit_with_severity_or_verdict(result, None, "legacy") is None
 
-
-# ── _maybe_write_step_summary ──────────────────────────────────────────────
-
-
-class TestMaybeWriteStepSummary:
-    def test_outside_ci_noop(self, monkeypatch, capsys) -> None:
-        # Force is_github_actions() False so the body short-circuits.
-        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-        result = DiffResult(old_version="1", new_version="2", library="x")
-        assert _maybe_write_step_summary(result) is None
-        assert capsys.readouterr().err == ""
 
 
 # ── compare command CliRunner error/branch paths ──────────────────────────────
@@ -2610,45 +2598,11 @@ class TestUsedByScopingWithSnapshotInputs:
         assert "requires OLD/NEW to be real library binaries" in (result.output or "")
 
 
-# ── cli.py: _write_release_step_summary (1351-1372) ───────────────────────────
-
-
-class TestWriteReleaseStepSummary:
-    def test_no_summary_path_noop(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-        # No GITHUB_STEP_SUMMARY → returns early without writing.
-        assert _write_release_step_summary("text", "markdown") is None
-
-    def test_not_github_actions_noop(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        summary = tmp_path / "summary.md"
-        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-        _write_release_step_summary("text", "markdown")
-        assert not summary.exists()
-
-    def test_markdown_written_in_ci(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        summary = tmp_path / "summary.md"
-        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        monkeypatch.setenv("GITHUB_ACTIONS", "true")
-        _write_release_step_summary("hello world", "markdown")
-        assert "hello world" in summary.read_text()
-
-    def test_json_wrapped_in_code_block(self, monkeypatch, tmp_path) -> None:
-        from abicheck.cli import _write_release_step_summary
-
-        summary = tmp_path / "summary.md"
-        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        monkeypatch.setenv("GITHUB_ACTIONS", "true")
-        _write_release_step_summary('{"a": 1}', "json")
-        text = summary.read_text()
-        assert "```json" in text
-        assert '{"a": 1}' in text
+# _write_release_step_summary was removed (CLI cleanup phase two, PR E,
+# review follow-up): making the CLI's own step-summary write unconditional
+# in CI double-wrote against the composite Action's own job summary. The
+# CLI no longer writes one on its own at all -- see cli.py's
+# _finalize_compare_result comment.
 
 
 # ── cli.py: _log_one_side_debug / _log_debug_resolution (1435-1465) ───────────
@@ -3008,7 +2962,7 @@ class TestLinkerScriptKeywordSkip:
         assert resolved is None
 
 
-# ── cli.py: _resolve_debug_artifact / _maybe_write_step_summary in CI ─────────
+# ── cli.py: _resolve_debug_artifact ────────────────────────────────────────
 
 
 class TestResolveDebugArtifact:
@@ -3031,23 +2985,6 @@ class TestResolveDebugArtifact:
             None,
         )
         assert out is sentinel
-
-
-class TestMaybeWriteStepSummaryInCI:
-    def test_writes_when_in_github_actions(self, monkeypatch) -> None:
-        import abicheck.cli as cli_mod
-
-        monkeypatch.setattr("abicheck.annotations.is_github_actions", lambda: True)
-        emitted = {}
-        monkeypatch.setattr(
-            "abicheck.annotations_step_summary.emit_github_step_summary",
-            lambda result, severity_config=None: emitted.setdefault("summary", True),
-        )
-        result = DiffResult(old_version="1", new_version="2", library="x")
-        # CLI cleanup phase two, PR E: --annotate/--annotate-additions were
-        # removed, so this now runs unconditionally in CI -- no flag to pass.
-        cli_mod._maybe_write_step_summary(result)
-        assert emitted.get("summary") is True
 
 
 # ── cli.py: _log_debug_resolution drives both sides when requested ────────────
