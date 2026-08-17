@@ -51,6 +51,12 @@ _SEVERITY_ORDER = {
     "notice": 2,
 }
 
+#: The inverse of :data:`_SEVERITY_ORDER` -- recovers the level string from
+#: the sort key :func:`collect_annotations` already computes, so
+#: :func:`annotation_report_entries` doesn't need a second classification
+#: pass just to re-derive what level a tuple's ``line`` was rendered at.
+_LEVEL_BY_SORT_KEY = {v: k for k, v in _SEVERITY_ORDER.items()}
+
 
 def _escape_annotation_value(value: str) -> str:
     """Escape special characters for GitHub workflow command values.
@@ -402,6 +408,48 @@ def collect_annotations(
     return annotations
 
 
+def annotation_report_entries(
+    diff_result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> list[dict[str, str]]:
+    """Structured, persistable annotation entries for a JSON report.
+
+    CLI cleanup phase two, PR E (persistence prerequisite): the plan's own
+    "New invariant" is that a rendering front end (the composite Action)
+    must never infer a finding's annotation from stderr or a re-run
+    comparison -- it has to read a persisted, already-classified answer the
+    way it already does for ``exit``/``analysis_assurance``. This is that
+    answer for annotations specifically.
+
+    Unlike :func:`collect_annotations` (the stderr-rendering path, gated by
+    a caller-supplied ``annotate``/``annotate_additions`` at call time),
+    this always computes the *superset* -- ``annotate_additions=True`` --
+    reusing the exact same classification and formatting (escaping,
+    truncation, title selection) `collect_annotations`/`_format_annotation`
+    already implement and are already tested, rather than a second,
+    independently-maintained rendering path. A consumer decides at *read*
+    time whether to include a ``"notice"``-level entry (the
+    ``annotate-additions`` question), the same way it already decides
+    whether to render at all (the ``annotate`` question) -- this function
+    answers a different, prior question: what a full annotation pass over
+    this comparison found, not what any one caller asked to see.
+
+    Each entry is ``{"level": "error"|"warning"|"notice", "annotation": ...}``
+    -- ``annotation`` is the exact, already-escaped/truncated GitHub
+    workflow-command line :func:`_format_annotation` produces, so a
+    renderer can echo it verbatim rather than reassembling
+    ``file``/``line``/``title``/``message`` itself.
+    """
+    annotations = collect_annotations(
+        diff_result, annotate_additions=True, severity_config=severity_config,
+    )
+    return [
+        {"level": _LEVEL_BY_SORT_KEY.get(sort_key, "notice"), "annotation": line}
+        for sort_key, line in sorted(annotations, key=lambda item: item[0])
+    ]
+
+
 def format_annotations(
     annotations: list[tuple[int, str]],
     *,
@@ -454,29 +502,9 @@ def is_github_actions() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-def emit_github_step_summary(
-    diff_result: DiffResult,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> str | None:
-    """Write a Markdown job summary to $GITHUB_STEP_SUMMARY if available.
-
-    *severity_config*, when given, is forwarded to :func:`abicheck.reporter.to_markdown`
-    so the step summary carries the same "Severity Configuration" section the
-    inline annotations are already gated on — without it, `severity.addition: error` (for example) could fail the annotations/exit code while the step
-    summary still rendered the legacy compatible report with no severity gate
-    section, contradicting the actual gate on the same PR.
-
-    Returns the summary path if written, None otherwise.
-    """
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
-        return None
-
-    from .reporter import to_markdown
-
-    md = to_markdown(diff_result, severity_config=severity_config)
-    with open(summary_path, "a", encoding="utf-8") as f:
-        f.write(md)
-        f.write("\n")
-    return summary_path
+#: Moved to :mod:`abicheck.annotations_step_summary` (CLI cleanup phase
+#: two, PR E) -- see that module's own docstring for why: it wrote the only
+#: import from this module back to ``reporter``, which closed an import
+#: cycle once ``reporter_contract_blocks.add_annotations`` started
+#: importing this module's ``annotation_report_entries``. Import it from
+#: there directly; this module intentionally does not re-export it.

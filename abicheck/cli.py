@@ -951,10 +951,10 @@ def _maybe_emit_annotations(
 
     from .annotations import (
         collect_annotations,
-        emit_github_step_summary,
         format_annotations,
         is_github_actions,
     )
+    from .annotations_step_summary import emit_github_step_summary
 
     if not is_github_actions():
         return

@@ -44,6 +44,21 @@ runners), abicheck appends a full Markdown ABI report to the
 
 [gh-summary]: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary
 
+### Persisted alongside the report (`--format json`)
+
+Since report schema 2.43, every `compare --format json` report also carries
+a top-level `annotations` array — one already-classified,
+already-formatted entry (`{"level": "error"|"warning"|"notice",
+"annotation": "::error file=...,line=...,title=...::message"}`) per finding
+a full annotation pass over the comparison found, regardless of whether
+`--annotate` was actually given this run. It's always the superset (as if
+`--annotate-additions` had also been passed); a consumer decides for itself
+whether to keep the `"notice"`-level entries. This is what a rendering
+front end other than the CLI's own stderr output (e.g. a future revision of
+the composite GitHub Action) reads instead of re-parsing stderr or
+re-running the comparison — see `docs/reference/exit-codes.md`'s sibling
+`exit` field for the same pattern applied to the gate decision.
+
 ## Severity mapping
 
 | Change category | Annotation level | Annotation title prefix | Enabled by default |

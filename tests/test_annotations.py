@@ -11,12 +11,13 @@ from abicheck.annotations import (
     _escape_annotation_value,
     _parse_source_location,
     _title_for_change,
+    annotation_report_entries,
     collect_annotations,
     emit_github_annotations,
-    emit_github_step_summary,
     format_annotations,
     is_github_actions,
 )
+from abicheck.annotations_step_summary import emit_github_step_summary
 from abicheck.checker import Change, DiffResult, Verdict
 from abicheck.checker_policy import ChangeKind
 
@@ -586,6 +587,57 @@ class TestCollectAndFormatAnnotations:
         # All 20 errors survive; 30 of 40 warnings fit.
         assert len(error_lines) == 20
         assert len(warning_lines) == 30
+
+
+# ---------------------------------------------------------------------------
+# annotation_report_entries — the JSON-persistence path (CLI cleanup phase
+# two, PR E's persistence prerequisite; report_schema_version 2.43)
+# ---------------------------------------------------------------------------
+
+class TestAnnotationReportEntries:
+    def test_error_entry_shape(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, [c])
+        entries = annotation_report_entries(result)
+        assert entries == [
+            {"level": "error", "annotation": collect_annotations(result)[0][1]}
+        ]
+
+    def test_matches_collect_annotations_when_additions_requested(self):
+        """The persisted array is always the superset -- the identical set
+        `collect_annotations(..., annotate_additions=True)` would render --
+        regardless of whether this test's own call requests it.
+        """
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.COMPATIBLE, [c])
+        entries = annotation_report_entries(result)
+        expected = sorted(
+            collect_annotations(result, annotate_additions=True),
+            key=lambda item: item[0],
+        )
+        assert [e["annotation"] for e in entries] == [line for _, line in expected]
+
+    def test_notice_level_present_even_without_annotate_additions_arg(self):
+        """A consumer reading the persisted array decides at *read* time
+        whether to keep `"notice"` entries -- this function itself never
+        drops them, unlike the stderr-rendering path's own opt-in flag.
+        """
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.COMPATIBLE, [c])
+        entries = annotation_report_entries(result)
+        assert entries
+        assert entries[0]["level"] == "notice"
+
+    def test_clean_comparison_is_an_empty_list(self):
+        result = _result(Verdict.NO_CHANGE, [])
+        assert annotation_report_entries(result) == []
+
+    def test_sorted_by_severity(self):
+        error = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.BREAKING, [addition, error])
+        entries = annotation_report_entries(result)
+        assert [e["level"] for e in entries] == ["error", "notice"]
 
 
 # ---------------------------------------------------------------------------

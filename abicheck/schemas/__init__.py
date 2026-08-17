@@ -541,7 +541,25 @@ from typing import Any
 #:       commands, rather than holding only for ``compare``'s three-axis
 #:       case. ``reasons`` may now also contain ``"promoted_crosscheck"``.
 #:       Additive key.
-REPORT_SCHEMA_VERSION = "2.42"
+#: 2.43 -- new top-level ``annotations`` array (CLI cleanup phase two, PR
+#:       E's persistence prerequisite -- ``reporter_contract_blocks.
+#:       add_annotations``/``annotations.annotation_report_entries``): one
+#:       ``{"level": "error"|"warning"|"notice", "annotation": <the exact
+#:       GitHub workflow-command line ``compare --annotate`` would emit>}``
+#:       entry per finding a full annotation pass over this comparison
+#:       found -- always the *superset* (as if ``--annotate-additions`` had
+#:       also been given), regardless of whether this run itself was given
+#:       ``--annotate``. Exists so a rendering front end (the composite
+#:       Action) can read an already-classified, already-formatted answer
+#:       instead of inferring one from stderr or re-running the comparison
+#:       -- the plan's own "New invariant" for this PR, already true for
+#:       ``exit``/``analysis_assurance`` and now true for annotations too.
+#:       A consumer filters out ``"notice"``-level entries itself when its
+#:       own ``annotate-additions`` input is off, rather than this package
+#:       persisting two differently-scoped arrays for one comparison.
+#:       Unconditionally present (mirroring ``exit``'s own presence rule),
+#:       including as ``[]`` on a clean comparison. Additive key.
+REPORT_SCHEMA_VERSION = "2.43"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

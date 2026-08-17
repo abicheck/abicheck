@@ -3048,7 +3048,7 @@ class TestMaybeEmitAnnotationsInCI:
         )
         emitted = {}
         monkeypatch.setattr(
-            "abicheck.annotations.emit_github_step_summary",
+            "abicheck.annotations_step_summary.emit_github_step_summary",
             lambda result, severity_config=None: emitted.setdefault("summary", True),
         )
         result = DiffResult(old_version="1", new_version="2", library="x")

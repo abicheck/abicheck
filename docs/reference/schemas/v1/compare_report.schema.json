@@ -44,7 +44,8 @@
           "evidence_tier",
           "evidence_tiers",
           "analysis_assurance",
-          "analysis_assurance_exit_contribution"
+          "analysis_assurance_exit_contribution",
+          "annotations"
         ]
       }
     },
@@ -1117,6 +1118,33 @@
       ],
       "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under --require-complete-analysis \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when the flag was given and analysis_assurance.status is not \"complete\", 0 otherwise (including when the flag was never given). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
       "$comment": "aggregate.py's _analysis_assurance_exit reads this field directly rather than recomputing it."
+    },
+    "annotations": {
+      "type": "array",
+      "description": "CLI cleanup phase two, PR E (schema 2.43): reporter_contract_blocks.add_annotations / annotations.annotation_report_entries. One entry per finding a full annotation pass over this comparison found -- always the superset (as if --annotate-additions had also been given), regardless of whether this run itself was given --annotate. Exists so a rendering front end (the composite Action) reads an already-classified, already-formatted answer instead of inferring one from stderr or re-running the comparison. Unconditionally present, including as [] on a clean comparison.",
+      "items": {
+        "type": "object",
+        "required": [
+          "level",
+          "annotation"
+        ],
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "notice"
+            ],
+            "description": "GitHub workflow-command level this finding was classified at. A consumer whose own annotate-additions input is off filters out \"notice\" entries itself."
+          },
+          "annotation": {
+            "type": "string",
+            "description": "The exact, already-escaped/truncated GitHub workflow-command line (::error/::warning/::notice file=...,line=...,title=...::message) -- echo verbatim rather than reassembling it."
+          }
+        }
+      },
+      "$comment": "annotations.annotation_report_entries is the one function that builds this array; cli._maybe_emit_annotations's stderr rendering (collect_annotations/format_annotations) shares the identical classification and formatting, so the two cannot disagree."
     },
     "exit": {
       "type": "object",

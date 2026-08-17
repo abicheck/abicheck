@@ -501,11 +501,37 @@ actually fires — never lowering, never firing when the existing code already
 dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by this
 block, matching `exit_decision.py`'s own explicit scope (no `DiffResult`
 exists for `NOT_COMPARABLE`; budget overflow aborts before a report is
-built) — see that module's own docstring for the reasoning. What's still
-open in PR E: the Action's own renderer (reading `exit`/`changes`/findings
-instead of inferring from stderr or re-running a comparison), and — gated on
-the persistence prerequisite described below — deleting `--annotate`/
-`--annotate-additions`. A single-library compare report, unmodified by this
+built) — see that module's own docstring for the reasoning.
+
+**The persistence prerequisite's single-library half is now also landed**
+(schema 2.43): every `compare --format json` report carries a top-level
+`annotations` array (`reporter_contract_blocks.add_annotations` /
+`annotations.annotation_report_entries`) — one already-classified,
+already-formatted entry per finding a full annotation pass over the
+comparison found, always the superset (as if `--annotate-additions` had
+also been given) regardless of what this run's own flags were. It reuses
+`annotations.collect_annotations`/`_format_annotation` exactly (no second,
+independently-maintained rendering path), so the persisted array and
+`--annotate`'s stderr output can never disagree. `annotations.py` itself
+had to stop importing `reporter.py` to land this without growing an import
+cycle (`reporter -> reporter_contract_blocks -> annotations -> reporter`,
+since `reporter_contract_blocks.add_annotations` now imports
+`annotations.py`) — `emit_github_step_summary` moved to a new leaf module,
+`annotations_step_summary.py`, since it was the one function in
+`annotations.py` that reached back into `reporter` (for `to_markdown`).
+
+**What's still open in PR E**, unchanged from before this slice: the
+release-operand half of the persistence prerequisite (a real, uncapped
+per-finding release report so `_collect_release_extras`'s independent
+re-run of every library's comparison is no longer needed, per this
+section's "Second wrong idea" analysis below), `action/run.sh` gaining a
+`--write`-equivalent path for a release operand, the Action's own renderer
+(reading `exit`/`annotations`/`changes` instead of inferring from stderr or
+re-running a comparison), and — gated on both halves of the persistence
+prerequisite — deleting `--annotate`/`--annotate-additions`, defining
+`annotate`/`annotate-additions` inputs in `action.yml`, and updating every
+first-party workflow/recipe/doc snippet currently reaching the flags
+through `extra-args`. A single-library compare report, unmodified by this
 section, already reads:
 
 ```json
@@ -514,6 +540,7 @@ section, already reads:
   "contract_coverage_exit_contribution": 0,
   "analysis_assurance_exit_contribution": 1,
   "exit": {"code": 1, "reasons": ["analysis_assurance"]},
+  "annotations": [],
   "changes": []
 }
 ```
