@@ -133,9 +133,10 @@ unconditional (no `fail-on-*` input disables it).
 ## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
 Every real-verdict `compare --format json` report (`full`/`leaf`/`root-cause`
-modes) carries a top-level `exit` object (introduced at report schema 2.42;
-see `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` docstring for
-later additive fields, e.g. `annotations` at 2.43) stating the
+modes) carries a top-level `exit` object (introduced at report schema 2.41;
+schema 2.42 added its `crosscheck_promotion_contribution` field — see
+`abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` docstring for that
+and later additive fields, e.g. `annotations` at 2.43) stating the
 already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
 `severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and

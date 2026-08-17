@@ -1669,9 +1669,10 @@ _json_report_src() {
 # fallback (which runs long before this function is ever reached) can use
 # the same resolved interpreter too.
 _report_query() {
-  # $1 = report path, $2 = query name. Prints nothing when the report cannot
-  # be read or parsed, which every caller treats as "cannot tell" rather than
-  # as an answer.
+  # $1 = report path, $2 = query name, $3 = optional query-specific argument
+  # (only the "annotations" query reads it, as a "1"/"" additions flag).
+  # Prints nothing when the report cannot be read or parsed, which every
+  # caller treats as "cannot tell" rather than as an answer.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
   # Isolated the same way as every other Python invocation in this file
   # (Codex review, fresh evidence): the sitecustomize.py auto-import vector
@@ -1692,7 +1693,7 @@ _report_query() {
   if ! _is_path_already_qualified "$report_path"; then
     report_path="$PWD/$report_path"
   fi
-  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2") <<'PYQUERY' 2>/dev/null
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2" "${3:-}") <<'PYQUERY' 2>/dev/null
 import json
 import sys
 
@@ -1767,9 +1768,80 @@ elif query == "assurance_notes":
 elif query == "assurance_status":
     aa = _either("analysis_assurance", {})
     print(aa.get("status", "") if isinstance(aa, dict) else "")
+elif query == "annotations":
+    # CLI cleanup phase two, PR E: the Action's own renderer -- reads the
+    # persisted `annotations` array (schema 2.43/2.44) instead of relying
+    # on `compare --annotate`'s own stderr rendering, so this works for
+    # BOTH a single-library compare (top-level `annotations`) and a
+    # directory/package release compare (`libraries[].annotations`,
+    # flattened here across every library) uniformly. `scan --against`
+    # carries no `annotations` field as of this schema version, so this
+    # query prints nothing for a scan report -- not an error, just no
+    # entries to emit yet.
+    additions = len(sys.argv) > 3 and sys.argv[3] == "1"
+    entries = report.get("annotations")
+    if not isinstance(entries, list):
+        entries = []
+        libs = report.get("libraries")
+        if isinstance(libs, list):
+            for lib in libs:
+                if isinstance(lib, dict) and isinstance(
+                    lib.get("annotations"), list
+                ):
+                    entries.extend(lib["annotations"])
+    order = {"error": 0, "warning": 1, "notice": 2}
+    kept = []
+    for e in entries:
+        if not isinstance(e, dict) or not e.get("annotation"):
+            continue
+        # `always_visible` is schema 2.44+; a report from an older abicheck
+        # (this Action can be pinned to any released version) may carry
+        # `annotations` without it -- degrade to "visible unless it's a
+        # notice", the same rule `--annotate` (no `--annotate-additions`)
+        # already applied before `always_visible` existed.
+        visible = e.get("always_visible", e.get("level") != "notice")
+        if additions or visible:
+            kept.append(e)
+    kept.sort(key=lambda e: order.get(e.get("level"), 99))
+    # Matches annotations.py's own _MAX_ANNOTATIONS -- GitHub Actions caps
+    # visible annotations per step at roughly the same figure, and sorting
+    # by severity first means a truncated tail is the least important one.
+    for e in kept[:50]:
+        print(e["annotation"])
 else:
     raise SystemExit(2)
 PYQUERY
+}
+
+# CLI cleanup phase two, PR E: the Action's own annotation renderer. Reads
+# the persisted `annotations` array (schema 2.43/2.44) off whichever JSON
+# report this run produced -- the same `_json_report_src` every other
+# post-processing decision in this script already reads -- instead of
+# asking `abicheck` itself to render `::error`/`::warning`/`::notice`
+# workflow commands to its own stderr via `--annotate`. Works uniformly for
+# a single-library `compare` (top-level `annotations`) and a
+# directory/package release `compare` (`libraries[].annotations`), since
+# the `annotations` query above already flattens both shapes -- and for a
+# release operand this also means no second per-library comparison is ever
+# run just to render annotations, the same "no comparison re-run" this
+# whole persisted-report design exists for.
+#
+# Deliberately does not touch `scan --against`: that report carries no
+# `annotations` field as of this schema version (the query prints nothing
+# for it, not an error), so this is a genuine no-op there rather than a
+# scoped-out branch to maintain.
+_emit_annotations() {
+  [[ "${INPUT_ANNOTATE:-false}" == "true" ]] || return 0
+  local _src _additions
+  _src=$(_json_report_src)
+  [[ -n "$_src" ]] || return 0
+  _additions="0"
+  [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]] && _additions="1"
+  # Deliberately NOT captured via $(...) -- each printed line is a real
+  # GitHub Actions workflow command and must reach the actual log/stdout,
+  # not be swallowed into a shell variable the way every other
+  # `_report_query` caller above wants it.
+  _report_query "$_src" annotations "$_additions"
 }
 
 # Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
@@ -2855,6 +2927,7 @@ _post_pr_comment() {
     || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
+_emit_annotations
 _maybe_post_pr_comment
 
 # ---------------------------------------------------------------------------

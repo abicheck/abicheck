@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -174,8 +175,11 @@ class TestCompareInjectsWriteForReleaseStyleOperandToo:
 
 
 @pytest.mark.skipif(
-    _REAL_ABICHECK is None or not RUN_SH.is_file(),
-    reason="real abicheck binary or action/run.sh not found",
+    not sys.platform.startswith("linux")
+    or _REAL_ABICHECK is None
+    or not RUN_SH.is_file(),
+    reason="Linux-only (matches test_action_baseline.py's own real-abicheck "
+    "end-to-end precedent) with a real abicheck binary and action/run.sh",
 )
 class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
     """The genuinely end-to-end proof this contract needs (not a stub that

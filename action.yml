@@ -659,6 +659,30 @@ inputs:
       (CPU count). Default: 0.
     required: false
     default: '0'
+  annotate:
+    description: >
+      Emit GitHub Actions workflow command annotations (inline PR-diff
+      comments) for ABI/API findings, in compare mode (single-pair and
+      directory/package release operands alike). Rendered by this Action
+      itself from the run's own persisted JSON report (schema 2.43+), not
+      by passing --annotate to the abicheck CLI -- no second comparison is
+      ever run to collect them, for either operand shape. Has no effect on
+      scan mode as of this Action version. A dedicated input rather than
+      routing through extra-args, for the same reason
+      require-complete-analysis is: this Action's own detection of whether
+      annotations were requested is never ambiguous with some other
+      extra-args value.
+    required: false
+    default: 'false'
+  annotate-additions:
+    description: >
+      Include additions and other compatible-but-notable changes as
+      ::notice annotations. Off by default (only errors/warnings, plus the
+      one notice kind that is always shown regardless of this input -- a
+      --contract finding compatibility policy did not evaluate). Has no
+      effect unless annotate is also true.
+    required: false
+    default: 'false'
   extra-args:
     description: 'Additional CLI arguments passed directly to the abicheck command.'
     required: false
@@ -1014,6 +1038,8 @@ runs:
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
         INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
+        INPUT_ANNOTATE: ${{ inputs.annotate }}
+        INPUT_ANNOTATE_ADDITIONS: ${{ inputs.annotate-additions }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
