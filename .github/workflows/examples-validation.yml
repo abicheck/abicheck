@@ -553,6 +553,7 @@ jobs:
             --release downloaded/examples-validation-artifact-modes-release-headers/validate_examples-release-headers.json \
             --stripped downloaded/examples-validation-artifact-modes-stripped-headers/validate_examples-stripped-headers.json \
             --build-source downloaded/examples-validation-artifact-modes-build-source/validate_examples-build-source.json \
+            --full-matrix results/full-example-matrix.json \
             --check
 
       - name: Job summary
