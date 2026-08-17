@@ -789,11 +789,23 @@ def _forced_include_search_dirs(cu: CompileUnit) -> list[Path]:
     absolute, always-resolvable path instead of a bare operand the rendered
     command could not find.
 
-    Deterministic: structured entries keep their recorded order, argv-derived
-    dirs within a bucket are sorted (``_build_context_include_dirs`` returns a
-    set), so the same compile unit always yields the same chain.
+    Order within a bucket is the command line's own, not sorted (Codex review,
+    PR D, sixth round). A compiler takes the *first* match in a bucket, so
+    ``-iquote z -iquote a -include config.h`` resolves ``z/config.h``; sorting
+    would pin the derived parse to ``a/config.h`` — deterministic, and a
+    different file with potentially different macros.
+    :func:`~abicheck.header_utils.build_context_include_dirs_ordered` exists
+    for exactly this, and is deterministic by preserving argv order rather
+    than by discarding it.
+
+    **Residual:** within one bucket, structured entries are emitted before
+    argv-derived ones rather than interleaved by their true argv positions —
+    the structured fields record no position. This can only matter for a
+    command mixing spellings in the same bucket (a GNU ``-I``, captured
+    structurally, alongside an MSVC ``/I``, which is not), which no single
+    real driver accepts.
     """
-    from ..header_utils import _build_context_include_dirs
+    from ..header_utils import build_context_include_dirs_ordered
 
     argv = list(cu.argv)
     structured: dict[str, list[str]] = {
@@ -812,13 +824,11 @@ def _forced_include_search_dirs(cu: CompileUnit) -> list[Path]:
         if argv:
             dirs.extend(
                 Path(d)
-                for d in sorted(
-                    _build_context_include_dirs(
-                        argv,
-                        base_dir=cu.directory or None,
-                        expand_user=True,
-                        prefixes=bucket,
-                    )
+                for d in build_context_include_dirs_ordered(
+                    argv,
+                    base_dir=cu.directory or None,
+                    expand_user=True,
+                    prefixes=bucket,
                 )
             )
     return dirs

@@ -1567,6 +1567,24 @@ Once a root command genuinely clears the bar above, pick the right home:
   the *derived* copy dropped on a match, keeping the established "explicit
   wins" precedence and losing nothing, since both name the same file. A
   *different* explicit forced header does not suppress the derived one.
+  (7) A seventh round found the search chain (5) added resolved through the
+  *wrong order within a bucket*: it sorted the argv-derived dirs, because
+  `_build_context_include_dirs` returns a set and determinism was the stated
+  goal. But a compiler takes the **first** match in a bucket in argv order, so
+  `-iquote z -iquote a -include config.h` resolves `z/config.h` while the
+  sorted chain pinned `a/config.h` — a different file, potentially different
+  macros, i.e. deterministic and wrong. The lesson is the trade that was made
+  without noticing it was a trade: determinism was available *by preserving
+  argv order*, so sorting bought nothing and cost correctness. Fixed by
+  factoring `header_utils.build_context_include_dirs_ordered` out as the real
+  implementation (argv order, first-occurrence-wins dedup) with the
+  set-returning `_build_context_include_dirs` now a thin collapse of it — every
+  pre-existing caller only asks "is this directory covered", so none change.
+  One residual, recorded at the call site: within a bucket, structured entries
+  are emitted before argv-derived ones rather than interleaved by true argv
+  position, which the structured fields do not record. It can only matter for a
+  command mixing spellings in one bucket (a structurally-captured GNU `-I`
+  alongside an MSVC `/I`), which no single real driver accepts.
   **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one

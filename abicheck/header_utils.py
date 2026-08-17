@@ -248,14 +248,29 @@ def _has_include_build_context(toks: list[str]) -> bool:
     return any(t.startswith(p) for t in toks for p in _INCLUDE_FLAG_PREFIXES)
 
 
-def _build_context_include_dirs(
+def build_context_include_dirs_ordered(
     toks: list[str],
     *,
     base_dir: str | None = None,
     expand_user: bool = False,
     prefixes: tuple[str, ...] | None = None,
-) -> set[str]:
-    """Resolved include directories the compile-flag *tokens* already search.
+) -> list[str]:
+    """:func:`_build_context_include_dirs`, in **argv order** and de-duplicated.
+
+    The set-returning function below is this one, collapsed — it is the older
+    of the two and every pre-existing caller only ever asks "does the build
+    context already cover this directory", for which order is irrelevant.
+
+    Order is not irrelevant to a caller *resolving a file* through the chain,
+    which is why this variant exists (Codex review, PR D, sixth round): a
+    compiler searches a bucket's directories in the order they appear on the
+    command line and takes the first match, so ``-iquote z -iquote a`` finds
+    ``z/config.h``. Sorting the set — what
+    ``header_compile_context._forced_include_search_dirs`` originally did to
+    get a deterministic chain — is deterministic *and wrong*: it would pin the
+    derived parse to ``a/config.h``, a different file with potentially
+    different macros. First occurrence wins on duplicates, matching the same
+    first-match rule.
 
     Parses every include-search flag (spaced ``-I dir`` / ``-isystem dir`` and
     attached ``-Idir`` forms, GNU and MSVC) out of *toks* and returns their
@@ -287,7 +302,15 @@ def _build_context_include_dirs(
             pp = Path(base) / pp
         return str(pp.resolve())
 
-    dirs: set[str] = set()
+    dirs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(operand: str) -> None:
+        resolved = _resolve(operand)
+        if resolved not in seen:
+            seen.add(resolved)
+            dirs.append(resolved)
+
     i = 0
     while i < len(toks):
         t = toks[i]
@@ -297,15 +320,35 @@ def _build_context_include_dirs(
             continue
         if t == prefix:  # spaced form: the directory is the next token
             if i + 1 < len(toks):
-                dirs.add(_resolve(toks[i + 1]))
+                _add(toks[i + 1])
             i += 2
             continue
         # Attached form ("-Idir" / "/Idir"): t is strictly longer than the prefix
         # here (the exact-match spaced form was handled above), so the operand is
         # always non-empty.
-        dirs.add(_resolve(t[len(prefix) :]))
+        _add(t[len(prefix) :])
         i += 1
     return dirs
+
+
+def _build_context_include_dirs(
+    toks: list[str],
+    *,
+    base_dir: str | None = None,
+    expand_user: bool = False,
+    prefixes: tuple[str, ...] | None = None,
+) -> set[str]:
+    """Resolved include directories the compile-flag *tokens* already search.
+
+    Order-free view of :func:`build_context_include_dirs_ordered` above, which
+    carries the full contract; every caller of this one is asking only whether
+    a directory is covered at all.
+    """
+    return set(
+        build_context_include_dirs_ordered(
+            toks, base_dir=base_dir, expand_user=expand_user, prefixes=prefixes
+        )
+    )
 
 
 def resolve_inferred_header_roots(

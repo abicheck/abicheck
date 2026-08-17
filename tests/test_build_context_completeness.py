@@ -268,6 +268,27 @@ class TestForcedIncludesReachTheDerivedContext:
         toks = _tokens(resolve_header_compile_context(ev, [tmp_path / "widget.h"]))
         assert toks[-2:] == ["-include", forced.as_posix()]
 
+    def test_first_search_dir_in_argv_order_wins_not_alphabetical(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: a compiler takes the *first* match in a bucket.
+
+        `-iquote z -iquote a` searches `z` first, so `z/config.h` is the file
+        the real build uses. Sorting the bucket — deterministic, but by the
+        wrong key — would pin the derived parse to `a/config.h`: a different
+        file, potentially with different macros.
+        """
+        for name in ("z", "a"):
+            d = tmp_path / name
+            d.mkdir()
+            (d / "config.h").write_text(f"#define FROM_{name.upper()} 1\n", "utf-8")
+        ev = self._matched_unit(
+            tmp_path, ["-iquote", "z", "-iquote", "a", "-include", "config.h"]
+        )
+
+        toks = _tokens(resolve_header_compile_context(ev, [tmp_path / "widget.h"]))
+        assert toks[-2:] == ["-include", (tmp_path / "z" / "config.h").as_posix()]
+
     def test_the_units_own_directory_still_wins_over_a_search_dir(
         self, tmp_path: Path
     ) -> None:
