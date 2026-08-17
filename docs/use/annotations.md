@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: intermediate
+canonical_for:
+  - pr-annotations
+lifecycle: active
+generated: false
+---
+
 # GitHub PR Annotations
 
 abicheck can emit [GitHub Actions workflow command annotations][gh-wc] so that
