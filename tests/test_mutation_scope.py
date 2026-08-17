@@ -35,6 +35,11 @@ def test_source_subset_survives_an_unclassified_test_change() -> None:
     ) == ["abicheck/diff_types.py"]
 
 
+def test_malicious_changed_filename_is_data_not_a_selected_module() -> None:
+    malicious = "tests/test_serialization.py;touch /tmp/should-not-run"
+    assert scope.selected_modules({malicious}, MODULES) is None
+
+
 def test_no_detector_change_keeps_full_scope() -> None:
     assert scope.selected_modules({"docs/guide.md"}, MODULES) is None
 
