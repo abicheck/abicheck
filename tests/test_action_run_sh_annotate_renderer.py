@@ -194,6 +194,60 @@ class TestAnnotateRendererReadsThePersistedReport:
         assert result.returncode == 0, result.stdout + result.stderr
         assert _emitted_lines(result) == []
 
+    def test_a_malformed_annotation_string_is_never_echoed(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence: if `_json_report_src` ever resolves
+        to a report this invocation didn't itself produce (e.g. a stale
+        --output-file the abicheck run failed to overwrite), a crafted
+        `annotation` string must not be echoed verbatim -- that would let
+        an attacker smuggle an arbitrary GitHub Actions workflow command
+        (``::stop-commands::``, a spoofed second command via an embedded
+        newline, a `level` that disagrees with the printed prefix, ...)
+        into the log. The renderer must validate the string's own shape
+        (single line, `::{level} ` prefix agreeing with the typed `level`
+        field) rather than trusting it.
+        """
+        malicious_report = {
+            "verdict": "BREAKING",
+            "annotations": [
+                # Embedded newline smuggling a second, unrelated command.
+                {
+                    "level": "error",
+                    "annotation": "::error title=x::ok\n::stop-commands::TOKEN",
+                    "always_visible": True,
+                },
+                # `level` disagrees with the printed prefix.
+                {
+                    "level": "notice",
+                    "annotation": "::error title=spoofed::not really a notice",
+                    "always_visible": True,
+                },
+                # Not even workflow-command-shaped at all.
+                {
+                    "level": "error",
+                    "annotation": "::stop-commands::TOKEN",
+                    "always_visible": True,
+                },
+                # A genuinely well-formed entry, to prove the filter is
+                # selective rather than suppressing everything.
+                {
+                    "level": "warning",
+                    "annotation": "::warning title=real::a real finding",
+                    "always_visible": True,
+                },
+            ],
+        }
+        result = _run_compare(
+            tmp_path, {"INPUT_ANNOTATE": "true"}, stub_report=malicious_report
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        # _emitted_lines is the exact-line filter: it proves the renderer
+        # itself never emitted the malicious lines as workflow commands,
+        # independent of the raw JSON dump elsewhere in this FORMAT=json
+        # run's own primary output legitimately containing the same
+        # substring as inert JSON text.
+        lines = _emitted_lines(result)
+        assert lines == ["::warning title=real::a real finding"]
+
     def test_non_json_write_target_emits_a_diagnostic_not_silence(
         self, tmp_path: Path
     ) -> None:

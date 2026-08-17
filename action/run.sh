@@ -1848,12 +1848,37 @@ elif query == "annotations":
     for e in entries:
         if not isinstance(e, dict) or not e.get("annotation"):
             continue
+        level = e.get("level")
+        annotation = e["annotation"]
+        # Codex review, fresh evidence: `_json_report_src` can, in a rare
+        # failure-before-write case, resolve to a JSON file this
+        # invocation never produced (a stale --output-file/--write
+        # destination that already existed in the checked-out tree before
+        # abicheck ran, e.g. one a PR author committed). Printing
+        # `annotation` verbatim in that case would echo an arbitrary,
+        # attacker-controlled workflow command -- including one designed
+        # to smuggle a *different* command past this check via an
+        # embedded newline (GitHub parses every stdout line as a
+        # potential command). Never trust the string as-is: it must be a
+        # single line (no embedded \n/\r), and its own `::LEVEL ` prefix
+        # must agree with the entry's separately-typed `level` field --
+        # exactly the shape `annotations._format_annotation()` always
+        # produces. Anything else is dropped rather than printed.
+        if (
+            not isinstance(annotation, str)
+            or not isinstance(level, str)
+            or "\n" in annotation
+            or "\r" in annotation
+            or not annotation.startswith(f"::{level} ")
+            or level not in order
+        ):
+            continue
         # `always_visible` is schema 2.44+; a report from an older abicheck
         # (this Action can be pinned to any released version) may carry
         # `annotations` without it -- degrade to "visible unless it's a
         # notice", the same rule `--annotate` (no `--annotate-additions`)
         # already applied before `always_visible` existed.
-        visible = e.get("always_visible", e.get("level") != "notice")
+        visible = e.get("always_visible", level != "notice")
         if additions or visible:
             kept.append(e)
     kept.sort(key=lambda e: order.get(e.get("level"), 99))
