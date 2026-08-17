@@ -302,6 +302,16 @@ class TestCastxmlAtomicType:
 
         assert _CastxmlParser(root, set(), set())._type_name("legacy") == "_Atomic"
 
+    def test_non_atomic_unimplemented_node_keeps_its_default_name(self) -> None:
+        from xml.etree.ElementTree import Element
+
+        from abicheck.dumper_castxml import _CastxmlParser
+
+        root = Element("CastXML")
+        root.append(Element("Unimplemented", id="other", type_class="Other"))
+
+        assert _CastxmlParser(root, set(), set())._type_name("other") == "Unimplemented"
+
 
 class TestCastxmlVtableUnindexed:
     """Regression test: multiple virtuals without vtable_index must not collapse."""
