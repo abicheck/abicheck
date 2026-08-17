@@ -279,6 +279,12 @@ from .model import (
 #     unqualified `typedefs` dict as the fallback source of truth, so
 #     "empty" degrades cleanly to "no extra qualified-identity data
 #     available" rather than being misread as a real fact.
+# v26: CastXML `AtomicType` nodes were previously serialized as the literal
+#     ``"AtomicType"``, losing the wrapped type.  On load, a pre-v26
+#     CastXML/hybrid snapshot's affected type slots are converted to the
+#     existing ``"?"`` no-evidence sentinel so comparing it to a corrected
+#     dump cannot report a spurious ABI change solely because of the parser
+#     correction.  New snapshots retain the precise ``_Atomic(T)`` spelling.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -291,7 +297,7 @@ from .model import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 25
+SCHEMA_VERSION: int = 26
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -853,11 +859,30 @@ def _backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
-    # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
-    # Currently only v1 and v2 exist and have the same on-disk layout, so no
-    # migration is required.  This baseline lets future PRs add migration logic here.
     _schema_version: int = int(d.get("schema_version", 1))
+
+    # A pre-v26 CastXML parser fell through on current AtomicType nodes and
+    # serialized their type spelling as the literal tag name.  The wrapped
+    # type is unrecoverable from a persisted snapshot, so retain neither the
+    # misleading spelling nor a guessed replacement: ``?`` is the model's
+    # established no-evidence sentinel and suppresses only comparisons on the
+    # affected slot.  The producer guard avoids treating a user type literally
+    # named AtomicType in a non-CastXML snapshot as parser damage.
+    #
+    # Hybrid snapshots can retain CastXML-sourced declarations too, hence both
+    # producer values.  The provenance tag has been serialized since v10;
+    # snapshots predating it cannot be identified safely and remain untouched.
+    def _legacy_castxml_atomic_type(type_name: str) -> str:
+        if (
+            _schema_version < 26
+            and d.get("ast_producer") in ("castxml", "hybrid")
+            and type_name == "AtomicType"
+        ):
+            return "?"
+        return type_name
+
+    # Inspect schema version for future migration hooks.
     if (
         _schema_version > SCHEMA_VERSION
         and _schema_version >= _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION
@@ -892,11 +917,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         Function(
             name=f["name"],
             mangled=f["mangled"],
-            return_type=f["return_type"],
+            return_type=_legacy_castxml_atomic_type(f["return_type"]),
             params=[
                 Param(
                     name=p.get("name", ""),
-                    type=p.get("type", ""),
+                    type=_legacy_castxml_atomic_type(p.get("type", "")),
                     kind=ParamKind(p.get("kind", "value")),
                     default=p.get("default", None),
                     pointer_depth=p.get("pointer_depth", 0),
@@ -964,7 +989,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         Variable(
             name=v["name"],
             mangled=v["mangled"],
-            type=v["type"],
+            type=_legacy_castxml_atomic_type(v["type"]),
             visibility=Visibility(v.get("visibility", "public")),
             source_location=v.get("source_location"),
             is_const=v.get("is_const", False),
@@ -992,7 +1017,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             fields=[
                 TypeField(
                     name=f["name"],
-                    type=f["type"],
+                    type=_legacy_castxml_atomic_type(f["type"]),
                     offset_bits=f.get("offset_bits"),
                     is_bitfield=f.get("is_bitfield", False),
                     bitfield_bits=f.get("bitfield_bits"),

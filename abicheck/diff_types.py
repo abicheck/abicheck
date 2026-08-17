@@ -113,6 +113,12 @@ def _field_type_genuinely_changed(
     that one axis of detection is the safer trade-off (Codex review, PR
     #582).
     """
+    # ``?`` is the persisted no-evidence sentinel.  In particular, the
+    # v26 AtomicType migration uses it when a legacy CastXML snapshot lost the
+    # atomic node's wrapped type, so a parser correction cannot become a false
+    # field-type change.
+    if old_type.strip() == "?" or new_type.strip() == "?":
+        return False
     if canonicalize_type_name(old_type) == canonicalize_type_name(new_type):
         return False
     if cv_qualifiers_only_differ(old_type, new_type):

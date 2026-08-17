@@ -292,6 +292,38 @@ class TestCastxmlAtomicType:
             for change in result.changes
         )
 
+    def test_pre_fix_castxml_baseline_does_not_diff_corrected_atomic_type(self) -> None:
+        from abicheck.checker import compare
+        from abicheck.model import AbiSnapshot, Function, Param, Visibility
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        old = AbiSnapshot(
+            library="libtest.so",
+            version="1",
+            from_headers=True,
+            ast_producer="castxml",
+            functions=[Function(
+                name="f", mangled="_Z1fv", return_type="void",
+                params=[Param(name="value", type="AtomicType")],
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        persisted_baseline = snapshot_to_dict(old)
+        persisted_baseline["schema_version"] = 25
+        new = AbiSnapshot(
+            library="libtest.so",
+            version="2",
+            from_headers=True,
+            ast_producer="castxml",
+            functions=[Function(
+                name="f", mangled="_Z1fv", return_type="void",
+                params=[Param(name="value", type="_Atomic(int)")],
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+
+        assert compare(snapshot_from_dict(persisted_baseline), new).changes == []
+
     def test_legacy_atomic_without_type_uses_sentinel(self) -> None:
         from xml.etree.ElementTree import Element
 

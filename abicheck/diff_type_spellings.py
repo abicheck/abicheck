@@ -51,7 +51,13 @@ class TypeSlotChange:
 def _spelling_differ(a: object, b: object) -> bool:
     # Only compare plain string spellings; guard against None/other shapes
     # so a malformed snapshot cannot crash (and thus disable) the caller.
-    return isinstance(a, str) and isinstance(b, str) and a != b
+    return (
+        isinstance(a, str)
+        and isinstance(b, str)
+        and a != b
+        and a.strip() != "?"
+        and b.strip() != "?"
+    )
 
 
 def _emit_function_slot_changes(of: Function, nf: Function) -> Iterator[TypeSlotChange]:
