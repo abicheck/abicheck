@@ -12,8 +12,9 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import subprocess
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG = REPO_ROOT / "pyproject.toml"
