@@ -844,13 +844,19 @@ def explicit_forced_include_keys(explicit: CompileContext | None) -> frozenset[s
     occurrence matches whether the two sides spell it identically or the
     derived one has been pinned to an absolute path by
     :func:`_forced_include_flags`'s own search-chain resolution.
+
+    Flattening goes through :func:`_explicit_pin_tokens`, the one place this
+    module combines a caller's two option spellings, rather than a second copy
+    of it: an unbalanced quote in the free-form ``gcc_options`` string makes
+    ``shlex`` raise, and a duplicated flattening here raised it straight out of
+    a resolution path documented as best-effort — aborting the whole L2
+    compile-context resolution over a malformed *caller* string instead of
+    degrading to "the caller supplies no forced include", which only ever
+    widens what the derived side may contribute.
     """
     if explicit is None:
         return frozenset()
-    tokens = [
-        *explicit.gcc_option_tokens,
-        *split_gcc_options(explicit.gcc_options or ""),
-    ]
+    tokens = _explicit_pin_tokens(explicit)
     keys: set[str] = set()
     for _option, operand in {
         *forced_include_operands(tokens, msvc=False),

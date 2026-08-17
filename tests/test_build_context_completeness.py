@@ -456,6 +456,31 @@ class TestExplicitForcedIncludeIsNotDuplicated:
         )
         assert toks[-2:] == ["-include", "config.h"]
 
+    def test_an_unbalanced_quote_degrades_instead_of_aborting_resolution(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review: ``shlex`` raises on an unbalanced quote.
+
+        The dedup keys were flattened by a second, unguarded copy of the
+        caller-option flattening, so a malformed ``--gcc-options`` string took
+        down the whole compile-context resolution — a path documented as
+        best-effort — rather than degrading to "the caller supplies no forced
+        include". The derived side must still be rendered.
+        """
+        from abicheck.buildsource.header_compile_context import (
+            explicit_forced_include_keys,
+        )
+        from abicheck.compile_context import CompileContext
+
+        explicit = CompileContext(gcc_options='-include "unbalanced')
+
+        # The primitive itself degrades rather than raising...
+        assert explicit_forced_include_keys(explicit) == frozenset()
+
+        # ...and the resolution it feeds still renders the build's own header.
+        toks = self._resolution(tmp_path, explicit)
+        assert toks[-2:] == ["-include", "config.h"]
+
 
 class TestForcedIncludeAmbiguity:
     """A forced include was invisible to the ambiguity signature entirely, so

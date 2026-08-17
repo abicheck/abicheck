@@ -1471,8 +1471,8 @@ Once a root command genuinely clears the bar above, pick the right home:
   `service._attach_header_graph`, the L2 seed's own `derived_include_dirs`
   return) — covers the forced header's directory, closing for this input
   the same staleness class the tenth and seventeenth findings above each
-  had to close individually. **Two follow-on findings from the Codex review
-  of this same change, both real and both fixed.** (1) The cache-key channel
+  had to close individually. **Eight follow-on findings from review of this
+  same change, every one real and every one fixed.** (1) The cache-key channel
   takes directories and walks them with `iter_cache_header_files`, which is
   suffix-filtered by `CACHE_HEADER_SUFFIXES` — correct for "catch transitive
   includes under a search root", wrong for a file named explicitly because it
@@ -1585,6 +1585,21 @@ Once a root command genuinely clears the bar above, pick the right home:
   position, which the structured fields do not record. It can only matter for a
   command mixing spellings in one bucket (a structurally-captured GNU `-I`
   alongside an MSVC `/I`), which no single real driver accepts.
+  (8) An eighth round (CodeRabbit) found the dedup in (6) flattened the
+  caller's two option spellings through its own second copy of that
+  flattening, unguarded — so an unbalanced quote in the free-form
+  `gcc_options` string made `shlex` raise `ValueError: No closing quotation`
+  straight out of `resolve_header_compile_context`, aborting an L2
+  compile-context resolution that every caller treats as best-effort, over a
+  malformed *caller* string. `_explicit_pin_tokens` — the same module's own
+  flattening for the `_ExplicitPin` scan, ten lines away — already had the
+  guard and already documented why ("degrades to 'no tokens from it' rather
+  than raising, since this is only used to *widen* what's accepted"). The
+  duplicate is now routed through it, so there is one flattening definition
+  and one degrade rule rather than two that could disagree again. Worth
+  naming the shape, since it is the same one as (3): a second copy of an
+  existing primitive drifts from it silently, and the drift shows up as the
+  copy lacking a property the original was deliberately given.
   **Residual, deliberately unclosed:** because a
   forced include still never enters `abi_relevant_flags`, it is still not
   projected into a `BuildOption` by `derive_build_options`, so swapping one

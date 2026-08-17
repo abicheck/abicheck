@@ -42,27 +42,12 @@ from ..build_evidence import CompileUnit
 
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
 CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
-#: Compiler basenames that mean the extractor should run in MSVC mode.
-#: ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI DPC++/C++ CL-compatible
-#: driver (the same CL-mode convention as ``clang-cl``, just Intel-branded);
-#: without it here, ``dumper_clang.resolve_source_frontend_clang_bin``'s
-#: ``exclude_cl_style=False`` (L4 source-ABI replay) resolves ``--compiler
-#: dpcpp-cl`` correctly, but this module still built a GNU-shaped command for
-#: it instead of adding ``--driver-mode=cl``, so the CL-mode override never
-#: actually reached the driver (Codex review).
-MSVC_BINARIES = frozenset(
-    {"cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "dpcpp-cl.exe"}
-)
-#: The same names with any ``.exe`` suffix stripped, for matching after a
-#: version suffix has also been removed (``is_msvc_mode`` normalizes both).
-_MSVC_STEMS = frozenset(name.removesuffix(".exe") for name in MSVC_BINARIES)
-#: Matches a trailing numeric version suffix LLVM/Debian packaging commonly
-#: appends to an unversioned driver name (``clang-cl-20``, ``clang-20.1``) --
-#: without stripping it, ``is_msvc_mode("clang-cl-20")`` would miss a real
-#: CL-mode driver just because it carries its LLVM major-version suffix
-#: (Codex review): the S2 pre-scan (and, via ``pick_compiler_binary``, L4
-#: replay) would then drive it with GNU-only flags it silently ignores.
-_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
+# The CL-mode driver vocabulary this module once owned now lives in
+# ``header_utils.is_msvc_driver_stem`` — ``is_msvc_mode`` below delegates to it,
+# so the build-evidence adapter and this replay path cannot drift on which
+# drivers are CL-mode (they had: ``dpcpp-cl`` and version-suffixed spellings
+# such as ``clang-cl-20`` were known here and not there).
+
 #: Compiler-launcher wrappers that prefix the real compiler in a build action
 #: (``ccache clang++ -c foo.cpp``). The extractor must emulate the real compiler,
 #: not the launcher, which would otherwise run without its compiler operand.
