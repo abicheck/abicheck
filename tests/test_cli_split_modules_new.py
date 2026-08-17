@@ -324,6 +324,13 @@ class TestCastxmlAtomicType:
 
         assert compare(snapshot_from_dict(persisted_baseline), new).changes == []
 
+    def test_unknown_atomic_field_spelling_suppresses_both_operand_orders(self) -> None:
+        from abicheck.diff_types import _field_type_genuinely_changed
+
+        assert not _field_type_genuinely_changed("?", "_Atomic(int)", cv_facts_reliable=True)
+        assert not _field_type_genuinely_changed("_Atomic(int)", "?", cv_facts_reliable=True)
+        assert _field_type_genuinely_changed("int", "long", cv_facts_reliable=True)
+
     def test_legacy_atomic_without_type_uses_sentinel(self) -> None:
         from xml.etree.ElementTree import Element
 
