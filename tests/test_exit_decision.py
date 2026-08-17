@@ -439,3 +439,85 @@ class TestIncludeExitDecisionFlag:
         report = json.loads(to_json(result, include_exit_decision=False))
         assert "exit" not in report
         jsonschema.validate(report, load_compare_report_schema())
+
+
+class TestPromotePublishedGateInvariant:
+    """White-box regression pin for ``scan_engine._promote_published_gate``
+    (CLI cleanup phase two, PR E follow-up, Codex review) -- the function
+    that keeps `scan --against`'s persisted ``diff.exit`` block honest when
+    a maintainer-promoted ``--crosscheck KEY=error`` finding raises the
+    process exit after ``_run_baseline_compare`` already built that block.
+
+    An earlier revision hand-patched only ``code``/``reasons`` in place,
+    which (1) broke :class:`ExitDecision`'s own documented invariant that
+    ``code`` equals the max of its contribution fields, since the three
+    pre-existing contributions were left at their pre-promotion values, and
+    (2) used a strict ``>`` check that silently dropped a promotion which
+    only *tied* the block's existing code. Both are fixed by reconstructing
+    the whole block through :func:`resolve_exit_decision`; these tests fail
+    against that earlier revision, not just against the current one.
+    """
+
+    @staticmethod
+    def _exit_block(
+        *, code: int, reasons: list[str], compat: int,
+        coverage: int = 0, assurance: int = 0, crosscheck: int = 0,
+    ) -> dict[str, object]:
+        return {
+            "code": code,
+            "reasons": reasons,
+            "compatibility_contribution": compat,
+            "contract_coverage_contribution": coverage,
+            "analysis_assurance_contribution": assurance,
+            "crosscheck_promotion_contribution": crosscheck,
+        }
+
+    def test_promotion_preserves_the_max_invariant(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "exit": self._exit_block(code=0, reasons=["clean"], compat=0),
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        exit_block = diff_summary["exit"]
+        assert isinstance(exit_block, dict)
+        assert exit_block["code"] == 2
+        assert exit_block["reasons"] == ["promoted_crosscheck"]
+        assert exit_block["crosscheck_promotion_contribution"] == 2
+        assert exit_block["code"] == max(
+            exit_block["compatibility_contribution"],
+            exit_block["contract_coverage_contribution"],
+            exit_block["analysis_assurance_contribution"],
+            exit_block["crosscheck_promotion_contribution"],
+        )
+
+    def test_promotion_names_a_tie_instead_of_dropping_it(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "exit": self._exit_block(
+                code=2, reasons=["compatibility_gate"], compat=2,
+            ),
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        exit_block = diff_summary["exit"]
+        assert isinstance(exit_block, dict)
+        assert exit_block["code"] == 2
+        assert set(exit_block["reasons"]) == {
+            "compatibility_gate", "promoted_crosscheck",
+        }
+        assert exit_block["crosscheck_promotion_contribution"] == 2
+
+    def test_promotion_never_lowers_a_higher_existing_code(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "exit": self._exit_block(
+                code=4, reasons=["compatibility_gate"], compat=4,
+            ),
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        exit_block = diff_summary["exit"]
+        assert isinstance(exit_block, dict)
+        assert exit_block["code"] == 4
+        assert exit_block["reasons"] == ["compatibility_gate"]

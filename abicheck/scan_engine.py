@@ -628,6 +628,18 @@ CROSSCHECK_BLOCKING_CATEGORY = "promoted_crosscheck"
 def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) -> None:
     """Raise the published ``diff.severity`` gate to a promoted cross-check's exit.
 
+    Called by ``run_scan_core`` whenever *sev_exit* is positive at all --
+    not only when it strictly exceeds the baseline compare's own exit code
+    (Codex review, fresh evidence: an earlier revision called this only
+    from inside that stricter guard, so a crosscheck that merely *tied* an
+    already-blocking exit never reached this function at all, and the tie
+    case the ``exit``-block reconstruction below was written to handle was
+    unreachable in practice). The actual process exit code/verdict
+    promotion stays a strict floor at the call site; this function's own
+    job -- keeping the two persisted blocks honest about which axes tied
+    for the published code -- is a separate concern from whether the
+    crosscheck raised the number.
+
     A no-op unless this run published a gate at all (severity scheme only).
 
     Without this the block was written by ``_run_baseline_compare`` from the
@@ -1355,6 +1367,19 @@ def run_scan_core(
             # A cross-check the maintainer promoted to `error` (D6) gates the exit
             # even when the baseline diff itself is clean.
             sev_exit = _crosscheck_severity_exit(cc.findings, severities)
+            # Refold the persisted `exit` block whenever the crosscheck
+            # contributes *anything* positive -- not only when it strictly
+            # exceeds the current exit code (Codex review, fresh evidence).
+            # A crosscheck that only *ties* the baseline compare's own exit
+            # (e.g. both are 2) never reaches the `sev_exit > exit_code`
+            # branch below, but `resolve_exit_decision`'s own tie-inclusive
+            # fold (inside `_promote_published_gate`) still needs to run for
+            # `reasons` to correctly name `promoted_crosscheck` alongside
+            # whichever axis already held that code -- decoupled here from
+            # the actual exit-code/verdict promotion, which stays a strict
+            # floor.
+            if sev_exit > 0:
+                _promote_published_gate(diff_summary, sev_exit)
             if sev_exit > exit_code:
                 exit_code = sev_exit
                 # Keep the reported verdict in sync with the promoted exit code so a
@@ -1378,7 +1403,6 @@ def run_scan_core(
                 # the cross-check's.
                 if verdict not in ("BREAKING", "API_BREAK"):
                     verdict = "API_BREAK"
-                _promote_published_gate(diff_summary, sev_exit)
         _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:
