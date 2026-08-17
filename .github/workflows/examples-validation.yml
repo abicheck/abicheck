@@ -9,6 +9,7 @@ on:
       - "tests/**"
       - "validation/scripts/**"
       - "scripts/check_examples_validation_status_sync.py"
+      - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
   pull_request:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - "tests/**"
       - "validation/scripts/**"
       - "scripts/check_examples_validation_status_sync.py"
+      - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
   workflow_dispatch:
 
@@ -397,23 +399,29 @@ jobs:
       # BREAKING on a case the debug ground truth calls compatible.
       #
       # build-source runs castxml source-replay per case (expensive), so it
-      # stays a representative smoke (fixed case list) rather than the full
-      # catalog the other two modes run — that was already true before this
-      # split and is unrelated to it.
-      - name: Run artifact-mode validation (reported-only + FP guard)
+      # stays a representative fixed set rather than the full catalog. Unlike
+      # release/stripped artifact lanes, it is a required proof lane: it is the
+      # only release evidence that detects the C++ floor/concept/uninstantiated
+      # template regressions in cases 98/105/122, so do not mask a non-zero
+      # validator exit behind the reduced-evidence reported-only policy.
+      - name: Run artifact-mode validation (build-source release proof + reported-only FP guard)
         if: always()
         run: |
-          set +e
           if [ "${{ matrix.mode }}" = "build-source" ]; then
             CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
+            PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant build-source --json \
+              > results/validate_examples-build-source.json
+            cp results/validate_examples-build-source.json results/validate_examples.json
+            ABICHECK_STRICT_KINDS=1 python tests/check_validate_results.py
+            python scripts/verify.py --profile full --only build-source-release-proof
           else
-            CASES=""
+            set +e
+            PYTHONPATH=. python tests/validate_examples.py --artifact-variant ${{ matrix.mode }} --json \
+              > results/validate_examples-${{ matrix.mode }}.json
+            echo "${{ matrix.mode }} run rc=$?"
+            set -e
+            python tests/check_stripped_fp.py results/validate_examples-${{ matrix.mode }}.json ${{ matrix.mode }}
           fi
-          PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant ${{ matrix.mode }} --json \
-            > results/validate_examples-${{ matrix.mode }}.json
-          echo "${{ matrix.mode }} run rc=$?"
-          set -e
-          python tests/check_stripped_fp.py results/validate_examples-${{ matrix.mode }}.json ${{ matrix.mode }}
 
       - name: Upload artifact-mode results
         if: always()
