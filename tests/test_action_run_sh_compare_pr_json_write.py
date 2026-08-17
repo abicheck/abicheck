@@ -33,6 +33,7 @@ reaches the command line rather than what the script appears to intend.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -40,10 +41,22 @@ import pytest
 from _workflow_exec import bash_executable
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+_REAL_ABICHECK = shutil.which("abicheck")
 
 
-def _compare_argv(tmp_path: Path, env_extra: dict[str, str]) -> str:
-    """Run compare mode and return the argv the CLI stub actually received."""
+def _compare_argv(
+    tmp_path: Path,
+    env_extra: dict[str, str],
+    *,
+    old: Path | None = None,
+    new: Path | None = None,
+) -> str:
+    """Run compare mode and return the argv the CLI stub actually received.
+
+    *old*/*new* default to a pair of single-file JSON snapshots; pass a
+    directory to exercise the release-style-operand path instead (CLI
+    cleanup phase two, PR E: `--write` now applies there too).
+    """
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
@@ -57,18 +70,20 @@ def _compare_argv(tmp_path: Path, env_extra: dict[str, str]) -> str:
     )
     stub.chmod(0o755)
 
-    old_json = tmp_path / "old.json"
-    new_json = tmp_path / "new.json"
-    old_json.write_text("{}", encoding="utf-8")
-    new_json.write_text("{}", encoding="utf-8")
+    if old is None:
+        old = tmp_path / "old.json"
+        old.write_text("{}", encoding="utf-8")
+    if new is None:
+        new = tmp_path / "new.json"
+        new.write_text("{}", encoding="utf-8")
 
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env = {
         **base_env,
         "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
         "INPUT_MODE": "compare",
-        "INPUT_OLD_LIBRARY": str(old_json),
-        "INPUT_NEW_LIBRARY": str(new_json),
+        "INPUT_OLD_LIBRARY": str(old),
+        "INPUT_NEW_LIBRARY": str(new),
         "INPUT_FORMAT": "markdown",
         "INPUT_ADD_JOB_SUMMARY": "false",
         "INPUT_PR_COMMENT": "false",
@@ -116,6 +131,140 @@ class TestCompareDoesNotInjectALosingWrite:
         # mistaken for what suppresses this case.
         argv = _compare_argv(tmp_path, {"INPUT_FORMAT": "json"})
         assert "--write" not in argv, argv
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestCompareInjectsWriteForReleaseStyleOperandToo:
+    """CLI cleanup phase two, PR E: the `--write` injection used to skip a
+    directory/package (release-style) operand outright, since the CLI
+    itself used to reject `--write` there. Now that the CLI supports it
+    (see cli_compare_release.py's own `secondary_output_options`), this
+    injection must reach a directory operand's argv exactly the same way
+    it already does for a single-file one -- driven through the real
+    `run.sh` against a fake `abicheck` on `$PATH` that records its own
+    argv, so this proves what reaches the command line, not just what the
+    script's text appears to intend.
+    """
+
+    def test_write_reaches_argv_for_a_directory_operand(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old_release"
+        new_dir = tmp_path / "new_release"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        argv = _compare_argv(tmp_path, {}, old=old_dir, new=new_dir)
+        assert argv.count("--write") == 1, argv
+        assert "abicheck-pr-json" in argv, argv
+
+    def test_a_user_write_still_suppresses_the_internal_one_for_a_directory(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old_release"
+        new_dir = tmp_path / "new_release"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_EXTRA_ARGS": "--write json=mine.json"},
+            old=old_dir,
+            new=new_dir,
+        )
+        assert argv.count("--write") == 1, argv
+        assert "mine.json" in argv
+        assert "abicheck-pr-json" not in argv, argv
+
+
+@pytest.mark.skipif(
+    _REAL_ABICHECK is None or not RUN_SH.is_file(),
+    reason="real abicheck binary or action/run.sh not found",
+)
+class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
+    """The genuinely end-to-end proof this contract needs (not a stub that
+    could pass regardless of what the real CLI does): the real `abicheck`
+    binary, run by the real `run.sh` against a real directory operand with
+    a genuine breaking-change pair of snapshots, actually produces the
+    `--write`-injected JSON file, and that file's `libraries[].annotations`
+    is exactly what CLI cleanup phase two, PR E added.
+    """
+
+    def test_write_json_is_a_real_file_with_persisted_annotations(
+        self, tmp_path: Path
+    ) -> None:
+        import json
+
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        old_dir = tmp_path / "old_release"
+        new_dir = tmp_path / "new_release"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        def _fn(name: str, mangled: str) -> Function:
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+
+        old_snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", "_Z3foov"), _fn("bar", "_Z3barv")],
+            from_headers=True,
+        )
+        new_snap = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            functions=[_fn("foo", "_Z3foov")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(
+            snapshot_to_json(old_snap), encoding="utf-8"
+        )
+        (new_dir / "libfoo.json").write_text(
+            snapshot_to_json(new_snap), encoding="utf-8"
+        )
+
+        # An explicit, own-chosen --write path via extra-args, rather than
+        # relying on the internal $PR_JSON injection: run.sh's own EXIT trap
+        # unconditionally removes $PR_JSON (it exists only to feed the PR
+        # comment step, never meant to survive the run) -- an internally
+        # injected path would already be gone by the time this test's own
+        # subprocess.run() returns and can inspect it. Using extra-args also
+        # suppresses that internal injection outright (already proven by
+        # TestCompareInjectsWriteForReleaseStyleOperandToo above), so there
+        # is exactly one --write in play here.
+        write_path = tmp_path / "release_write.json"
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+        # Real abicheck already resolved via $PATH -- no fake bin prepended.
+        env = {
+            **base_env,
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": str(old_dir),
+            "INPUT_NEW_LIBRARY": str(new_dir),
+            "INPUT_FORMAT": "markdown",
+            "INPUT_ADD_JOB_SUMMARY": "false",
+            "INPUT_PR_COMMENT": "false",
+            "INPUT_EXTRA_ARGS": f"--write json={write_path}",
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
+        }
+        result = subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        )
+        # run.sh's own fail-on-breaking wrapper maps a real ABI break to
+        # exit 1 (its own step-failure convention), not abicheck's raw
+        # exit 4 -- confirmed against the actual output below.
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "verdict: BREAKING" in result.stdout, result.stdout
+        assert write_path.is_file(), result.stdout + result.stderr
+        data = json.loads(write_path.read_text(encoding="utf-8"))
+        [lib] = data["libraries"]
+        assert lib["verdict"] == "BREAKING"
+        assert lib["annotations"], "expected persisted annotations on the write file"
+        assert any(e["level"] == "error" for e in lib["annotations"])
 
 
 def test_both_branches_share_the_same_write_guard() -> None:
