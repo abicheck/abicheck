@@ -365,6 +365,66 @@ class TestAnnotateRendererReadsThePersistedReport:
         lines = _emitted_lines(result)
         assert "::error title=ABI Break::function foo removed" in lines
 
+    def test_a_stale_pre_existing_write_destination_is_neither_trusted_nor_deleted(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, two rounds: (1) a stale file
+        already at the `--write json=PATH` destination before this
+        invocation, left untouched because the stub fails before writing,
+        must not be read as if it were this run's own report (staleness);
+        (2) the fix for that must not delete the file to "prove"
+        freshness either -- `output-file`/`--write`'s PATH is still just an
+        `INPUT_*` value, and unconditionally unlinking a user-controlled
+        path before the invocation is validated risks destroying a real
+        *input* the comparison needed, if that path happens to coincide
+        with one (a first fix attempt did exactly this and was reverted).
+        The actual fix (a non-destructive mtime/size fingerprint) must
+        satisfy both at once: the stale content survives on disk,
+        unmodified, and is never rendered as this run's annotations.
+        """
+        old_json = tmp_path / "old.json"
+        new_json = tmp_path / "new.json"
+        old_json.write_text("{}", encoding="utf-8")
+        new_json.write_text("{}", encoding="utf-8")
+        write_path = tmp_path / "mine.json"
+        stale_content = json.dumps({"verdict": "STALE", "sentinel": "pre-existing"})
+        write_path.write_text(stale_content, encoding="utf-8")
+
+        # A stub that fails WITHOUT touching write_path at all -- mirrors
+        # a real `abicheck` crash before it ever reaches its own --write.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        stub = fake_bin / "abicheck"
+        stub.write_text(
+            "#!/usr/bin/env bash\necho boom >&2\nexit 1\n", encoding="utf-8"
+        )
+        stub.chmod(0o755)
+
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+        env = {
+            **base_env,
+            "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": str(old_json),
+            "INPUT_NEW_LIBRARY": str(new_json),
+            "INPUT_FORMAT": "markdown",
+            "INPUT_ADD_JOB_SUMMARY": "false",
+            "INPUT_PR_COMMENT": "false",
+            "INPUT_ANNOTATE": "true",
+            "INPUT_EXTRA_ARGS": f"--write json={write_path}",
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
+        }
+        result = subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        )
+        # Not deleted, not modified -- the non-destructive half of the fix.
+        assert write_path.is_file(), "the pre-existing file must survive"
+        assert write_path.read_text(encoding="utf-8") == stale_content
+        # Not trusted as this run's report -- the staleness half.
+        assert _emitted_lines(result) == []
+
 
 @pytest.mark.skipif(
     not sys.platform.startswith("linux")

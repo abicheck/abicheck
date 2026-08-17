@@ -1626,29 +1626,56 @@ STDERR_FILE=$(mktemp)
 #: runner accumulates one JSON report per scan run indefinitely.
 trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
-# Codex review, fresh evidence: `_json_report_src`/`_extra_args_write_json_
-# path` below trust `OUTPUT_FILE`/a user-supplied `--write json=PATH`
-# purely on "the file exists and is non-empty" -- both are pure *write*
-# destinations for this invocation (`CMD+=(-o "$OUTPUT_FILE")` above,
-# never read as input), but if either path already held content BEFORE
-# this invocation (a stale file from a previous step, or one a PR author
-# committed into the checked-out tree -- `INPUT_EXTRA_ARGS` and its own
-# `--write` path are PR-controlled per this file's own threat model) and
-# `abicheck` then fails before overwriting it, every downstream consumer
-# of that file (annotations, coverage/severity/verdict queries, the sticky
-# PR comment) would silently read stale or attacker-controlled content as
-# if it were this run's own report. Removing any pre-existing content at
-# either path here, before the one place `${CMD[@]}` actually runs, is
-# what makes "the file exists and is non-empty afterward" into a sound
-# proof that abicheck itself wrote it this run -- an mtime/size comparison
-# would still be racy (same-second writes, no guaranteed sub-second
-# resolution across all runner filesystems).
+# `_json_report_src`/`_extra_args_write_json_path` below trust `OUTPUT_
+# FILE`/a user-supplied `--write json=PATH` purely on "the file exists and
+# is non-empty" -- both are pure *write* destinations for this invocation
+# (`CMD+=(-o "$OUTPUT_FILE")` above), but if either path already held
+# content BEFORE this invocation (a stale file from a previous step, or
+# one a PR author committed into the checked-out tree -- `INPUT_EXTRA_
+# ARGS` and its own `--write` path are PR-controlled per this file's own
+# threat model) and `abicheck` then fails before overwriting it, every
+# downstream consumer of that file (annotations, coverage/severity/
+# verdict queries, the sticky PR comment) would silently read stale or
+# attacker-controlled content as if it were this run's own report.
+#
+# A first fix here deleted any pre-existing content at both paths before
+# `${CMD[@]}` ran -- reverted (Codex review, fresh evidence): `OUTPUT_
+# FILE`/the `--write` destination are still just `INPUT_*` values, and
+# nothing here can prove they don't happen to collide with a real *input*
+# path (`old-library`/`new-library`/a baseline file/etc, whether by an
+# honest misconfiguration or a crafted `extra-args`) -- unconditionally
+# unlinking a user-controlled path before Click has even validated the
+# invocation risks destroying the very input the comparison needed,
+# unconditionally and irrecoverably, which is strictly worse than the
+# staleness bug it was fixing. Fixed non-destructively instead: record
+# each path's (mtime, size) fingerprint before running, and only trust it
+# afterward if that fingerprint changed (or the path didn't exist before).
+# Python, not `stat -c`/`stat -f` (GNU vs. BSD/macOS spell this
+# differently and this script already leans on `_PY_BIN` for exactly this
+# class of portability need -- see `_report_query`'s own docstring).
+_file_fingerprint() {
+  # Empty output means "does not exist" -- a fingerprint that can never
+  # equal a real file's, so "did not exist before, exists now" always
+  # reads as changed without a separate existence check.
+  [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 0
+  "$_PY_BIN" -c '
+import os, sys
+try:
+    st = os.stat(sys.argv[1])
+except OSError:
+    pass
+else:
+    print(f"{st.st_mtime_ns}:{st.st_size}")
+' "$1" 2>/dev/null
+}
+_output_file_pre_fp=""
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
-  rm -f "$OUTPUT_FILE"
+  _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
 fi
-_extra_write_json_pre="$(_extra_args_write_json_path || true)"
-if [[ -n "$_extra_write_json_pre" ]]; then
-  rm -f "$_extra_write_json_pre"
+_extra_write_json_path="$(_extra_args_write_json_path || true)"
+_extra_write_json_pre_fp=""
+if [[ -n "$_extra_write_json_path" ]]; then
+  _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
 fi
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
@@ -1707,19 +1734,27 @@ _is_cli_error() {
 # substitution. Without that file, every decision below took its "no report"
 # fallback for the one configuration that keeps the report on stdout.
 _json_report_src() {
-  local _user_write_json
-  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+  # `OUTPUT_FILE`/the discovered `--write json=PATH` are pure write
+  # destinations that can pre-exist this invocation (see the fingerprint
+  # bookkeeping around the `${CMD[@]}` call above for why) -- trusted only
+  # when non-empty AND its (mtime, size) fingerprint changed since just
+  # before `${CMD[@]}` ran (or it didn't exist then at all, i.e. its pre-
+  # fingerprint was empty). `PR_JSON` (always a fresh mktemp this run) and
+  # `_STDOUT_JSON_FILE` (this run's own captured stdout) need no such
+  # check -- neither can be a pre-existing file.
+  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+     && [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
     echo "${_STDOUT_JSON_FILE}"
-  elif _user_write_json=$(_extra_args_write_json_path) \
-       && [[ -n "$_user_write_json" && -s "$_user_write_json" ]]; then
+  elif [[ -n "$_extra_write_json_path" && -s "$_extra_write_json_path" ]] \
+       && [[ "$(_file_fingerprint "$_extra_write_json_path")" != "$_extra_write_json_pre_fp" ]]; then
     # A user-supplied `--write json=PATH` in extra-args (see
     # `_extra_args_write_json_path`'s own docstring for why this is needed
     # rather than falling through to "no report").
-    echo "$_user_write_json"
+    echo "$_extra_write_json_path"
   fi
 }
 
