@@ -468,27 +468,49 @@ def _collect_annotations_detailed(
     gate_scope = getattr(diff_result, "gate_scope", None)
     if gate_scope is not None:
         from .finding_identity import missing_contract_finding, missing_contract_kind
-        from .severity import missing_contract_exit_code
+        from .severity import SeverityLevel
 
-        # Mirrors sarif._missing_contract_result's own severity decision
-        # exactly: under the legacy scheme (no severity_config) a missing
-        # contract member is unconditionally a hard block; under a severity
-        # scheme it blocks only when that scheme's abi_breaking category is
-        # configured to error, so a --severity-preset that demotes
-        # abi_breaking must not paint this red regardless (Codex review).
-        blocks = (
-            severity_config is None
-            or missing_contract_exit_code(severity_config) != 0
-        )
-        kind = missing_contract_kind(gate_scope)
-        for label in getattr(diff_result, "scoped_missing_labels", ()) or ():
-            level = "error" if blocks else ("notice" if annotate_additions else None)
-            if level is None:
-                continue
-            finding = missing_contract_finding(kind, label)
-            title = f"ABI Break: {kind}" if blocks else f"ABI Notice: {kind}"
-            line = _format_annotation(level, finding, title, finding.description)
-            annotations.append((_SEVERITY_ORDER.get(level, 99), line, blocks))
+        # A missing contract member is the same failure class as
+        # `abi_breaking` (see `severity.missing_contract_exit_code`'s own
+        # docstring), so it is classified by that category's *configured
+        # level* directly -- not collapsed to a bare blocks/doesn't-block
+        # binary. A first revision of this did exactly that collapse,
+        # which silently demoted a `severity.abi_breaking: warning`
+        # configuration's ::warning (always visible, matching how every
+        # ordinary warning-level finding is treated elsewhere in this same
+        # function) down to an opt-in ::notice a plain `annotate: true`
+        # Action run would never show at all (Codex review, fresh
+        # evidence). Under the legacy scheme (no severity_config) it's
+        # unconditionally a hard block, matching
+        # sarif._missing_contract_result's identical "unconditionally
+        # BREAKING" legacy-scheme behaviour.
+        if severity_config is None:
+            missing_level: str | None = "error"
+        elif severity_config.abi_breaking == SeverityLevel.ERROR:
+            missing_level = "error"
+        elif severity_config.abi_breaking == SeverityLevel.WARNING:
+            missing_level = "warning"
+        else:
+            missing_level = "notice" if annotate_additions else None
+        if missing_level is not None:
+            kind = missing_contract_kind(gate_scope)
+            title = (
+                f"ABI Break: {kind}"
+                if missing_level == "error"
+                else f"ABI {missing_level.capitalize()}: {kind}"
+            )
+            for label in getattr(diff_result, "scoped_missing_labels", ()) or ():
+                finding = missing_contract_finding(kind, label)
+                line = _format_annotation(
+                    missing_level, finding, title, finding.description,
+                )
+                annotations.append(
+                    (
+                        _SEVERITY_ORDER.get(missing_level, 99),
+                        line,
+                        missing_level != "notice",
+                    )
+                )
 
     return annotations
 

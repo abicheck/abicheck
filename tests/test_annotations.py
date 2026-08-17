@@ -710,13 +710,16 @@ class TestAnnotationReportEntries:
         [line] = collect_annotations(result)
         assert line[1] == entry["annotation"]
 
-    def test_missing_contract_label_is_not_blocking_under_a_lenient_severity_config(
+    def test_missing_contract_label_stays_a_visible_warning_under_a_warning_severity_config(
         self,
     ):
-        """Mirrors sarif._missing_contract_result's identical severity
-        decision: a severity scheme that doesn't error on abi_breaking must
-        not paint this red -- it becomes an opt-in notice instead, gated on
-        annotate_additions like any other non-blocking finding."""
+        """A `severity.abi_breaking: warning` configuration must not
+        collapse this down to an opt-in notice -- it's classified by the
+        configured level directly, the same as any other warning-level
+        finding elsewhere in this function, so it stays `::warning` and
+        always visible (Codex review, fresh evidence: an earlier revision
+        used a bare blocks/doesn't-block binary that silently demoted this
+        case to a notice a plain `annotate: true` run would never show)."""
         from abicheck.severity import SeverityConfig, SeverityLevel
 
         cfg = SeverityConfig(
@@ -729,8 +732,31 @@ class TestAnnotationReportEntries:
         result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
         result.scoped_missing_labels = ("some_entrypoint",)  # type: ignore[attr-defined]
         [entry] = annotation_report_entries(result, severity_config=cfg)
+        assert entry["level"] == "warning"
+        assert entry["always_visible"] is True
+
+    def test_missing_contract_label_is_an_opt_in_notice_under_an_info_severity_config(
+        self,
+    ):
+        """Mirrors sarif._missing_contract_result's identical severity
+        decision: a severity scheme that doesn't even warn on abi_breaking
+        must not paint this red -- it becomes an opt-in notice, gated on
+        annotate_additions like any other info-level finding."""
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        cfg = SeverityConfig(
+            abi_breaking=SeverityLevel.INFO,
+            potential_breaking=SeverityLevel.INFO,
+            quality_issues=SeverityLevel.INFO,
+            addition=SeverityLevel.INFO,
+        )
+        result = _result(Verdict.BREAKING, [])
+        result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+        result.scoped_missing_labels = ("some_entrypoint",)  # type: ignore[attr-defined]
+        [entry] = annotation_report_entries(result, severity_config=cfg)
         assert entry["level"] == "notice"
         assert entry["always_visible"] is False
+        assert collect_annotations(result, severity_config=cfg) == []
 
 
 # ---------------------------------------------------------------------------
