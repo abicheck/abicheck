@@ -205,9 +205,17 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 python3 -c '
 import json, sys
 report = json.load(open("report.json"))
-for e in report.get("annotations", []):
-    if e["always_visible"]:
-        print(e["annotation"])
+# The persisted array is intentionally uncapped -- sort by severity and
+# apply the same 50-per-step cap the composite Action itself applies
+# (action/run.sh), or a large report can exceed GitHub Actions own limit
+# on visible annotations per step.
+order = {"error": 0, "warning": 1, "notice": 2}
+visible = sorted(
+    (e for e in report.get("annotations", []) if e["always_visible"]),
+    key=lambda e: order.get(e["level"], 99),
+)
+for e in visible[:50]:
+    print(e["annotation"])
 '
 ```
 
@@ -228,14 +236,23 @@ than inline on the diff.
 
 ### Annotation limit
 
-GitHub Actions caps visible annotations at approximately 50 per step.
-The persisted `annotations` array enforces this limit and sorts entries by
-severity so the most important ones (errors first, then warnings, then
-notices) are always visible.
+GitHub Actions caps visible annotations at approximately 50 per step. The
+persisted `annotations` array itself is intentionally **uncapped** —
+`annotation_report_entries()` returns every classified finding, since a
+persisted report is a general-purpose artifact other consumers (SARIF,
+JUnit, a custom script) may want in full. It is the composite Action's own
+renderer (`action/run.sh`'s `_emit_annotations`) that sorts entries by
+severity and applies the 50-per-step cap so the most important ones
+(errors first, then warnings, then notices) are always visible — a
+renderer other than the Action, including the "reading annotations without
+the composite Action" example above, must apply the same cap itself before
+emitting real `::error`/`::warning`/`::notice` workflow commands, or risk
+exceeding GitHub's limit.
 
-For a bundle `compare` (directory/package inputs), the 50-annotation budget is
-shared across all libraries in the release. This ensures a single noisy library doesn't consume all
-available annotation slots.
+For a bundle `compare` (directory/package inputs), the composite Action's
+50-annotation budget is shared across all libraries in the release. This
+ensures a single noisy library doesn't consume all available annotation
+slots.
 
 ### Message truncation
 
