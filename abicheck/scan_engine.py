@@ -652,9 +652,18 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
     the same un-blocking failure the nested-block preference was introduced to
     fix, reached by the other route.
 
-    Raises only, and only to ``max``: a cross-check promotion is a floor
-    (:func:`_crosscheck_severity_exit`), so it can add a blocking reason to a
-    gate but never clear one a severity category already raised.
+    Raises ``exit_code`` only, and only to ``max``: a cross-check promotion
+    is a floor (:func:`_crosscheck_severity_exit`), so it can add a blocking
+    reason to a gate but never clear one a severity category already
+    raised. ``blocking_categories`` gains ``promoted_crosscheck`` on a
+    strict raise *or* an exact tie against the gate's existing exit code
+    (Codex review, fresh evidence: a tie genuinely co-determined the
+    published code and must be named the same way ``diff.exit.reasons``
+    already names a tied axis -- an earlier revision's strict ``>`` here
+    left the two persisted blocks disagreeing about a real tie once the
+    call-site restructuring above made a tie actually reach this
+    function). A *strictly higher* existing gate still adds nothing: the
+    crosscheck didn't determine that code either.
 
     Also keeps the persisted ``exit`` block (CLI cleanup phase two, PR E)
     consistent the same way: that block is built from the baseline compare
@@ -686,8 +695,17 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
     gate = diff_summary.get("severity")
     if isinstance(gate, dict):
         current = gate.get("exit_code")
-        if isinstance(current, int) and sev_exit > current:
-            gate["exit_code"] = sev_exit
+        # `>=`, not `>` (Codex review, fresh evidence): a crosscheck that
+        # only *ties* the gate's existing exit code still genuinely
+        # co-determined it and must be named in `blocking_categories` --
+        # the same tie-inclusive rule `diff.exit`'s own reasons now follow
+        # below. Only raise `exit_code`/`blocking` on a strict `>`, so a
+        # tie never re-derives a value that was already correct; a
+        # strictly higher existing gate (`current > sev_exit`) still adds
+        # nothing, since the crosscheck didn't determine that code either.
+        if isinstance(current, int) and sev_exit >= current:
+            if sev_exit > current:
+                gate["exit_code"] = sev_exit
             gate["blocking"] = True
             cats = gate.get("blocking_categories")
             cats = list(cats) if isinstance(cats, list) else []

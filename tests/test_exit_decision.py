@@ -508,6 +508,48 @@ class TestPromotePublishedGateInvariant:
         }
         assert exit_block["crosscheck_promotion_contribution"] == 2
 
+    def test_severity_gate_tie_also_names_the_crosscheck(self) -> None:
+        """Sibling of the previous test for the *other* persisted block --
+        `diff.severity` -- which used a strict `>` guard even after the
+        `diff.exit` tie fix, leaving the two blocks disagreeing about the
+        same tie (Codex review, fresh evidence: the tie only became
+        reachable once the call-site restructuring stopped gating this
+        whole function on `sev_exit > exit_code`).
+        """
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "severity": {
+                "exit_code": 2,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        gate = diff_summary["severity"]
+        assert isinstance(gate, dict)
+        assert gate["exit_code"] == 2
+        assert gate["blocking"] is True
+        assert set(gate["blocking_categories"]) == {
+            "abi_breaking", "promoted_crosscheck",
+        }
+
+    def test_severity_gate_strictly_higher_stays_untouched(self) -> None:
+        from abicheck.scan_engine import _promote_published_gate
+
+        diff_summary: dict[str, object] = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+        }
+        _promote_published_gate(diff_summary, sev_exit=2)
+        gate = diff_summary["severity"]
+        assert isinstance(gate, dict)
+        assert gate["exit_code"] == 4
+        assert gate["blocking_categories"] == ["abi_breaking"]
+
     def test_promotion_never_lowers_a_higher_existing_code(self) -> None:
         from abicheck.scan_engine import _promote_published_gate
 

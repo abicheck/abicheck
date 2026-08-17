@@ -1579,6 +1579,38 @@ def test_a_tying_promoted_crosscheck_still_names_itself_in_the_exit_block(
     assert exit_block["crosscheck_promotion_contribution"] == 2, exit_block
 
 
+def test_a_tying_promoted_crosscheck_still_names_itself_in_the_severity_gate(
+    runner, tmp_path
+):
+    # Sibling of the previous test for the *other* persisted block --
+    # `diff.severity` -- under the severity exit-code scheme. Codex review,
+    # fresh evidence: the `diff.exit` tie fix above made a tie reach
+    # `_promote_published_gate` at all, but the severity-gate half of that
+    # function still used a strict `>` guard, so the two published gate
+    # explanations disagreed about the same tied crosscheck.
+    old = _api_break_with_build_context_mismatch_snap(tmp_path, "old.abi.json", "100")
+    new = _api_break_with_build_context_mismatch_snap(tmp_path, "new.abi.json", None)
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    gate = payload["diff"]["severity"]
+    assert gate["exit_code"] == 2, gate
+    assert gate["blocking"] is True, gate
+    assert "promoted_crosscheck" in gate["blocking_categories"], gate
+    # And the two blocks must agree, not just each be internally sensible.
+    exit_block = payload["diff"]["exit"]
+    assert exit_block["code"] == gate["exit_code"]
+    assert "promoted_crosscheck" in exit_block["reasons"]
+
+
 def test_a_promoted_crosscheck_never_lowers_an_already_blocking_exit_block(
     runner, baseline_snap, new_snap_breaking
 ):
