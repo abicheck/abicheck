@@ -258,15 +258,10 @@ def test_a_label_forced_run_also_fails_closed() -> None:
     # alone: the run decision one block up ORs the same three variables, so a
     # bare substring match passed against a version that dropped the label
     # from *this* branch (caught by falsifying the fix).
-    guard = next(
-        line
-        for line, nxt in zip(
-            decide["run"].splitlines(), decide["run"].splitlines()[1:], strict=False
-        )
-        if "require_baseline=true" in nxt
-    )
+    guard = decide["run"]
     assert '"$LABELLED" = "true"' in guard, guard
     assert '"$MATCHED_TESTS" = "true"' in guard, guard
+    assert '"$MATCHED" != "true"' in guard, guard
 
 
 def test_the_require_baseline_signal_is_published_by_resolve() -> None:
