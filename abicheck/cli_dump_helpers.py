@@ -1309,11 +1309,10 @@ def handle_non_elf_dump(
             lang_explicit=lang_explicit,
             pending_cleanups=_l2_pending_cleanups,
         )
-        # _l3_include_dirs unused here: dump_native_binary/service.run_dump
-        # has no public extra_hash_dirs hook (unlike perform_elf_dump's own
-        # dump() call below) -- a pre-existing, broader service.py cache-key
-        # gap this PR doesn't scope to fix (Codex review; AGENTS.md "Known
-        # gaps").
+        # _l3_include_dirs is unused by design, not omission: `compile=
+        # l3_effective_ctx` below hands the merged L3 context to service_
+        # header_scoped._try_header_scoped_dump, which derives the identical
+        # cache-relevant paths from those tokens itself (Codex review, PR D).
         snap = dump_native_binary(
             so_path,
             binary_fmt,
