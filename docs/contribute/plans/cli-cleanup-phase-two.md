@@ -520,15 +520,40 @@ since `reporter_contract_blocks.add_annotations` now imports
 `annotations_step_summary.py`, since it was the one function in
 `annotations.py` that reached back into `reporter` (for `to_markdown`).
 
-**What's still open in PR E**, unchanged from before this slice: the
-release-operand half of the persistence prerequisite (a real, uncapped
-per-finding release report so `_collect_release_extras`'s independent
-re-run of every library's comparison is no longer needed, per this
-section's "Second wrong idea" analysis below), `action/run.sh` gaining a
-`--write`-equivalent path for a release operand, the Action's own renderer
-(reading `exit`/`annotations`/`changes` instead of inferring from stderr or
-re-running a comparison), and — gated on both halves of the persistence
-prerequisite — deleting `--annotate`/`--annotate-additions`, defining
+**The persistence prerequisite's release-operand half is now also landed**
+(the capped `findings` list stays, unchanged, as the small human-readable
+summary it always was; this adds alongside it). Every `libraries[]` entry
+in a directory/package `compare --format json` release report now carries
+its own `annotations` array — the identical shape and identical
+`annotation_report_entries` function the single-library slice above uses,
+computed straight from that library's own already-produced `DiffResult`
+(`entry["_diff_result"]`, stashed by the primary per-library pass, after
+SONAME-lockstep-suppression has already run on it) rather than a second,
+independent re-run of that library's comparison.
+`_compare_release_libraries`'s own `--annotate` stderr rendering now reads
+from the same primary-pass results too
+(`_release_annotations_from_primary_pass`), so `_collect_release_extras` is
+called only for JUnit's `collect_diff_results` (which genuinely needs the
+old `AbiSnapshot` alongside the `DiffResult`, something the primary pass
+never stashes) — `--annotate` on a release operand no longer re-runs any
+library's comparison a second time. A Codex review round on the
+single-library slice above also caught a genuine design gap this slice
+closes for both operand shapes at once: `annotation_report_entries`'s
+persisted `"notice"`-level entries conflated two different things — a
+`--contract` finding compatibility policy never evaluated (shown by plain
+`--annotate` alone) and an addition/quality-issue/`info`-severity finding
+(shown only when `--annotate-additions` opts in) — so a renderer that
+dropped every `"notice"` unless `annotate-additions` was on would have
+silently hidden the former. Each entry now also carries `always_visible`
+(schema 2.44): always `true` for `error`/`warning`, and for `notice` only
+`true` for the always-shown contract-audit kind.
+
+**What's still open in PR E**: `action/run.sh` gaining a
+`--write`-equivalent path for a release operand (the persisted report
+above still has nowhere to be read from until this lands), the Action's
+own renderer (reading `exit`/`annotations`/`changes` instead of inferring
+from stderr or re-running a comparison), and — gated on both of those —
+deleting `--annotate`/`--annotate-additions`, defining
 `annotate`/`annotate-additions` inputs in `action.yml`, and updating every
 first-party workflow/recipe/doc snippet currently reaching the flags
 through `extra-args`. A single-library compare report, unmodified by this

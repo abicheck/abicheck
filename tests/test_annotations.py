@@ -600,8 +600,40 @@ class TestAnnotationReportEntries:
         result = _result(Verdict.BREAKING, [c])
         entries = annotation_report_entries(result)
         assert entries == [
-            {"level": "error", "annotation": collect_annotations(result)[0][1]}
+            {
+                "level": "error",
+                "annotation": collect_annotations(result)[0][1],
+                "always_visible": True,
+            }
         ]
+
+    def test_addition_notice_is_not_always_visible(self):
+        """An addition/quality-issue notice only exists because this
+        function computes the `annotate_additions=True` superset -- a
+        renderer honouring the CLI's plain `--annotate` (no
+        `--annotate-additions`) default must be able to tell it apart from
+        the one notice kind `--annotate` alone already shows (see the next
+        test)."""
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.COMPATIBLE, [c])
+        [entry] = annotation_report_entries(result)
+        assert entry["level"] == "notice"
+        assert entry["always_visible"] is False
+
+    def test_not_evaluated_contract_notice_is_always_visible(self):
+        """The contract not-evaluated demotion is a `"notice"` too, but
+        unlike an addition it is surfaced by plain `--annotate` with no
+        `--annotate-additions` -- `always_visible` must say so."""
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Foo", "size changed")
+        c.contract_relevance = ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        result = _result(Verdict.NO_CHANGE, [c])
+        entries = annotation_report_entries(result)
+        assert entries
+        [entry] = entries
+        assert entry["level"] == "notice"
+        assert entry["always_visible"] is True
 
     def test_matches_collect_annotations_when_additions_requested(self):
         """The persisted array is always the superset -- the identical set

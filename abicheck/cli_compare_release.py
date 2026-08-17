@@ -584,11 +584,18 @@ def _compare_release_libraries(
             err=True,
         )
 
-    # collect_diff_results and annotate require re-running comparison for
-    # affected libraries (only used for JUnit / GitHub annotations which
-    # are sequential-only features)
-    if collect_diff_results or annotate:
-        extra_pairs, extra_annotations = _collect_release_extras(
+    # collect_diff_results (JUnit) needs the old AbiSnapshot alongside the
+    # DiffResult, which the primary pass above never stashes -- so it still
+    # requires an independent re-run (see _collect_release_extras's own
+    # docstring). annotate no longer does: every library's DiffResult is
+    # already sitting in its own entry["_diff_result"] from the primary
+    # pass above (post-SONAME-lockstep-suppression, since that runs first),
+    # so annotations are collected directly from it instead of re-running
+    # every library's comparison a second time just to recover the same
+    # DiffResult a `--annotate` release run used to need (CLI cleanup phase
+    # two, PR E: "no comparison re-run").
+    if collect_diff_results:
+        extra_pairs, _ = _collect_release_extras(
             matched_keys,
             old_map,
             new_map,
@@ -607,7 +614,7 @@ def _compare_release_libraries(
             policy_file_path,
             annotate_additions=annotate_additions,
             collect_diff_results=collect_diff_results,
-            annotate=annotate,
+            annotate=False,
             scope_to_public_surface=scope_to_public_surface,
             include_dependencies=include_dependencies,
             severity_config=severity_config,
@@ -617,7 +624,14 @@ def _compare_release_libraries(
             pack_application=pack_application,
         )
         diff_pairs.extend(extra_pairs)
-        all_annotations.extend(extra_annotations)
+    if annotate:
+        all_annotations.extend(
+            _release_annotations_from_primary_pass(
+                library_results,
+                annotate_additions=annotate_additions,
+                severity_config=severity_config,
+            ),
+        )
 
     # Emit annotations once: sort globally across all libraries by severity,
     # then truncate to the cap.  This ensures the most important annotations
@@ -630,6 +644,42 @@ def _compare_release_libraries(
             click.echo(text, err=True)
 
     return library_results, worst_verdict, diff_pairs
+
+
+def _release_annotations_from_primary_pass(
+    library_results: list[dict[str, object]],
+    *,
+    annotate_additions: bool,
+    severity_config: SeverityConfig | None,
+) -> list[tuple[int, str]]:
+    """Collect ``--annotate`` output straight from each entry's stashed diff.
+
+    Replaces the independent re-run :func:`_collect_release_extras` used to
+    perform for this purpose (CLI cleanup phase two, PR E): every entry's
+    ``_diff_result`` is the *exact* :class:`DiffResult` the primary pass
+    already produced -- SONAME-lockstep-suppression included, since that
+    mutation runs before this is ever called -- so this reads it rather
+    than comparing the pair a second time. Only ``GITHUB_ACTIONS=true`` runs
+    collect anything, matching :func:`annotations.collect_annotations`'s own
+    gating so behaviour is unchanged for a local run.
+    """
+    from .annotations import collect_annotations, is_github_actions
+
+    if not is_github_actions():
+        return []
+    out: list[tuple[int, str]] = []
+    for entry in library_results:
+        result = entry.get("_diff_result")
+        if not isinstance(result, DiffResult):
+            continue
+        out.extend(
+            collect_annotations(
+                result,
+                annotate_additions=annotate_additions,
+                severity_config=severity_config,
+            ),
+        )
+    return out
 
 
 def _compare_release_parallel(
@@ -1184,6 +1234,22 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["findings"] = findings
                 if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
                     entry["findings_truncated"] = True
+            # CLI cleanup phase two, PR E: the uncapped, always-classified
+            # counterpart to the capped `findings` list above -- the exact
+            # same shape single-library `compare --format json` persists at
+            # its own top-level `annotations` (schema 2.43,
+            # `annotations.annotation_report_entries`), reused verbatim so
+            # the two can never disagree. This is what lets a future Action
+            # renderer read a release-style operand's report the same way it
+            # reads a single-library one, instead of needing `--annotate`'s
+            # independent per-library re-run this module used to perform
+            # (`_collect_release_extras`) just to recover the same
+            # DiffResult already sitting right here.
+            from .annotations import annotation_report_entries
+
+            entry["annotations"] = annotation_report_entries(
+                diff, severity_config=severity_config
+            )
         entry.pop("_diff_result", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0

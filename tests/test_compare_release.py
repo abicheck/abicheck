@@ -1692,6 +1692,124 @@ def test_release_json_omits_severity_block_without_config() -> None:
     assert "severity" not in json.loads(out)
 
 
+class TestReleaseAnnotationsPersistence:
+    """CLI cleanup phase two, PR E (release-operand half): each library
+    entry in a release JSON report carries its own uncapped ``annotations``
+    array (mirroring single-library ``compare --format json``'s top-level
+    ``annotations``, schema 2.43), and ``--annotate`` no longer re-runs any
+    library's comparison to collect it.
+    """
+
+    def test_annotations_present_on_breaking_library(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        data = json.loads(out)
+        [lib] = data["libraries"]
+        assert lib["annotations"], "expected at least one annotation entry"
+        levels = {entry["level"] for entry in lib["annotations"]}
+        assert "error" in levels
+        for entry in lib["annotations"]:
+            assert set(entry) == {"level", "annotation", "always_visible"}
+            assert entry["level"] in ("error", "warning", "notice")
+            assert entry["annotation"].startswith("::")
+
+    def test_annotations_empty_list_on_no_change(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        snap = _snap()
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 0
+        data = json.loads(out)
+        [lib] = data["libraries"]
+        assert lib["annotations"] == []
+
+    def test_annotate_release_does_not_rerun_comparison(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--annotate`` used to trigger `_collect_release_extras`, which
+        re-ran `_run_compare_pair` for every library a second time purely to
+        recover a `DiffResult` for annotations. That `DiffResult` is now read
+        straight off the primary pass's stashed `entry["_diff_result"]`, so
+        `_run_compare_pair` is called exactly once per library regardless of
+        `--annotate`.
+        """
+        import abicheck.cli_compare_release as release_mod
+
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        real_run_compare_pair = release_mod._run_compare_pair
+        calls: list[object] = []
+
+        def _counting_run_compare_pair(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real_run_compare_pair(*args, **kwargs)
+
+        monkeypatch.setattr(
+            release_mod, "_run_compare_pair", _counting_run_compare_pair
+        )
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--annotate", "--format", "json"],
+        )
+        assert result.exit_code == 4
+        assert len(calls) == 1, f"expected exactly one compare per library, got {calls}"
+        data = json.loads(result.stdout)
+        [lib] = data["libraries"]
+        assert lib["annotations"]
+
+    def test_annotate_release_stderr_matches_persisted_annotations(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The `--annotate` stderr rendering (still live in this slice) and
+        the persisted `annotations` array must describe the same findings --
+        both now come from the identical, single per-library `DiffResult`.
+        """
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--annotate",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        [lib] = data["libraries"]
+        for entry in lib["annotations"]:
+            if entry["level"] == "error":
+                assert "::error" in result.stderr
+
+
 class TestParallelFanOutDedupPropagation:
     """`_compare_release_parallel` -- the ThreadPoolExecutor path `--jobs 0`
     (the CLI default, auto-detecting CPU count) actually dispatches to for

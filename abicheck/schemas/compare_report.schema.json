@@ -1121,12 +1121,13 @@
     },
     "annotations": {
       "type": "array",
-      "description": "CLI cleanup phase two, PR E (schema 2.43): reporter_contract_blocks.add_annotations / annotations.annotation_report_entries. One entry per finding a full annotation pass over this comparison found -- always the superset (as if --annotate-additions had also been given), regardless of whether this run itself was given --annotate. Exists so a rendering front end (the composite Action) reads an already-classified, already-formatted answer instead of inferring one from stderr or re-running the comparison. Unconditionally present, including as [] on a clean comparison.",
+      "description": "CLI cleanup phase two, PR E (schema 2.43, always_visible added at 2.44): reporter_contract_blocks.add_annotations / annotations.annotation_report_entries. One entry per finding a full annotation pass over this comparison found -- always the superset (as if --annotate-additions had also been given), regardless of whether this run itself was given --annotate. Exists so a rendering front end (the composite Action) reads an already-classified, already-formatted answer instead of inferring one from stderr or re-running the comparison. Unconditionally present, including as [] on a clean comparison.",
       "items": {
         "type": "object",
         "required": [
           "level",
-          "annotation"
+          "annotation",
+          "always_visible"
         ],
         "properties": {
           "level": {
@@ -1136,11 +1137,15 @@
               "warning",
               "notice"
             ],
-            "description": "GitHub workflow-command level this finding was classified at. A consumer whose own annotate-additions input is off filters out \"notice\" entries itself."
+            "description": "GitHub workflow-command level this finding was classified at."
           },
           "annotation": {
             "type": "string",
             "description": "The exact, already-escaped/truncated GitHub workflow-command line (::error/::warning/::notice file=...,line=...,title=...::message) -- echo verbatim rather than reassembling it."
+          },
+          "always_visible": {
+            "type": "boolean",
+            "description": "Whether plain --annotate (no --annotate-additions) already shows this entry. Always true for error/warning. For a \"notice\" it is false for an opt-in addition/quality-issue/info-severity finding, but true for the one unconditional notice kind (a --contract finding compatibility policy never evaluated) -- a consumer must gate a \"notice\" entry on this field, not on level alone, or it silently hides that always-shown finding."
           }
         }
       },

@@ -326,37 +326,39 @@ def _format_annotation(
     return f"::{level} {props_str}::{escaped_message}"
 
 
-def collect_annotations(
+def _collect_annotations_detailed(
     diff_result: DiffResult,
     *,
     annotate_additions: bool = False,
     severity_config: SeverityConfig | None = None,
-) -> list[tuple[int, str]]:
-    """Collect raw annotation tuples (sort_key, line) for a single DiffResult.
+) -> list[tuple[int, str, bool]]:
+    """Collect (sort_key, line, always_visible) triples for a DiffResult.
 
-    This is the building block for both single-library and multi-library flows.
-    Callers are responsible for sorting, truncating, and emitting.
+    *always_visible* is True for an entry ``--annotate`` alone (without
+    ``--annotate-additions``) would already show — every ``error``/
+    ``warning`` level, plus the one unconditional ``notice`` this function
+    emits regardless of *annotate_additions* (the not-evaluated-under-
+    contract demotion below). It is False for a ``notice`` that exists only
+    because *annotate_additions* was truthy (an addition/quality-issue, or
+    an ``info``-level severity-config category) — the caller had to opt in
+    for this entry to appear at all. :func:`collect_annotations` is the
+    public two-tuple projection of this; :func:`annotation_report_entries`
+    is the one consumer of the third element, since a persisted report has
+    no live ``annotate_additions`` flag to fall back on the way stderr
+    rendering does (Codex review on PR E: without this, a renderer that
+    drops every ``"notice"`` unless ``annotate-additions`` was requested
+    would also hide a contract audit finding the CLI itself always shows).
 
-    Without *severity_config*, annotation levels follow the fixed
-    kind-set mapping (BREAKING → error, API_BREAK/RISK → warning, additions →
-    notice when opted in) — the legacy, verdict-only behaviour. When
-    *severity_config* is supplied, it takes priority: the annotation level
-    mirrors each finding's actually-configured severity so an annotation is
-    never silently absent (or under/over-stated) for a finding that does (or
-    does not) gate CI — see :func:`_annotation_level_for_category`.
-
-    Both branches classify through each change's *effective* category (via
-    :func:`_category_for_change_severity`, which honours
-    ``DiffResult._effective_verdict_for_change`` semantics) rather than raw
-    kind-set membership, so a per-finding override is never misreported —
-    see :func:`_legacy_level_for_category`.
+    See :func:`collect_annotations` for the rest of this function's
+    contract (severity-config vs. legacy level mapping, effective-category
+    classification) — unchanged, just carrying the extra bit through.
     """
     from .severity import effective_verdict_for_change
 
     kind_sets = diff_result._effective_kind_sets()
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
 
-    annotations: list[tuple[int, str]] = []
+    annotations: list[tuple[int, str, bool]] = []
 
     for change in diff_result.changes:
         # ADR-049 D1: an annotation states how a finding gated, and a
@@ -366,7 +368,9 @@ def collect_annotations(
         # is clean (Codex review, reproduced with a proven-out-of-contract
         # type-size change). Demoted to `::notice` rather than dropped: the
         # fact stays surfaced in the workflow log, it just stops claiming to
-        # be a break. Only reachable under `--contract`.
+        # be a break. Only reachable under `--contract`. Always visible --
+        # unlike every other notice below, this one does not need
+        # *annotate_additions*.
         if not is_evaluated(change):
             annotations.append(
                 (
@@ -377,6 +381,7 @@ def collect_annotations(
                         f"Not evaluated (contract): {change.kind.value}",
                         change.description,
                     ),
+                    True,
                 )
             )
             continue
@@ -403,16 +408,55 @@ def collect_annotations(
         )
         line = _format_annotation(level, change, title, change.description)
         sort_key = _SEVERITY_ORDER.get(level, 99)
-        annotations.append((sort_key, line))
+        # Every non-notice level (error/warning) is always visible; the only
+        # way this loop reaches "notice" here (as opposed to the always-
+        # visible not-evaluated branch above) is that annotate_additions
+        # opted it in.
+        annotations.append((sort_key, line, level != "notice"))
 
     return annotations
+
+
+def collect_annotations(
+    diff_result: DiffResult,
+    *,
+    annotate_additions: bool = False,
+    severity_config: SeverityConfig | None = None,
+) -> list[tuple[int, str]]:
+    """Collect raw annotation tuples (sort_key, line) for a single DiffResult.
+
+    This is the building block for both single-library and multi-library flows.
+    Callers are responsible for sorting, truncating, and emitting.
+
+    Without *severity_config*, annotation levels follow the fixed
+    kind-set mapping (BREAKING → error, API_BREAK/RISK → warning, additions →
+    notice when opted in) — the legacy, verdict-only behaviour. When
+    *severity_config* is supplied, it takes priority: the annotation level
+    mirrors each finding's actually-configured severity so an annotation is
+    never silently absent (or under/over-stated) for a finding that does (or
+    does not) gate CI — see :func:`_annotation_level_for_category`.
+
+    Both branches classify through each change's *effective* category (via
+    :func:`_category_for_change_severity`, which honours
+    ``DiffResult._effective_verdict_for_change`` semantics) rather than raw
+    kind-set membership, so a per-finding override is never misreported —
+    see :func:`_legacy_level_for_category`.
+    """
+    return [
+        (sort_key, line)
+        for sort_key, line, _always_visible in _collect_annotations_detailed(
+            diff_result,
+            annotate_additions=annotate_additions,
+            severity_config=severity_config,
+        )
+    ]
 
 
 def annotation_report_entries(
     diff_result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """Structured, persistable annotation entries for a JSON report.
 
     CLI cleanup phase two, PR E (persistence prerequisite): the plan's own
@@ -435,18 +479,30 @@ def annotation_report_entries(
     answers a different, prior question: what a full annotation pass over
     this comparison found, not what any one caller asked to see.
 
-    Each entry is ``{"level": "error"|"warning"|"notice", "annotation": ...}``
-    -- ``annotation`` is the exact, already-escaped/truncated GitHub
-    workflow-command line :func:`_format_annotation` produces, so a
-    renderer can echo it verbatim rather than reassembling
-    ``file``/``line``/``title``/``message`` itself.
+    Each entry is ``{"level": "error"|"warning"|"notice", "annotation": ...,
+    "always_visible": bool}``. ``annotation`` is the exact, already-escaped/
+    truncated GitHub workflow-command line :func:`_format_annotation`
+    produces, so a renderer can echo it verbatim rather than reassembling
+    ``file``/``line``/``title``/``message`` itself. ``always_visible`` is
+    what a renderer must actually gate a ``"notice"`` entry on instead of
+    the level alone (Codex review on PR E): one class of notice -- a
+    ``--contract`` finding compatibility policy never evaluated -- is
+    surfaced by plain ``--annotate`` with no ``--annotate-additions`` at
+    all, so filtering every ``"notice"`` out by default would silently hide
+    it. ``always_visible`` is always True for ``error``/``warning``.
     """
-    annotations = collect_annotations(
+    detailed = _collect_annotations_detailed(
         diff_result, annotate_additions=True, severity_config=severity_config,
     )
     return [
-        {"level": _LEVEL_BY_SORT_KEY.get(sort_key, "notice"), "annotation": line}
-        for sort_key, line in sorted(annotations, key=lambda item: item[0])
+        {
+            "level": _LEVEL_BY_SORT_KEY.get(sort_key, "notice"),
+            "annotation": line,
+            "always_visible": always_visible,
+        }
+        for sort_key, line, always_visible in sorted(
+            detailed, key=lambda item: item[0]
+        )
     ]
 
 

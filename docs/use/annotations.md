@@ -60,15 +60,25 @@ runners), abicheck appends a full Markdown ABI report to the
 Since report schema 2.43, every `compare --format json` report also carries
 a top-level `annotations` array — one already-classified,
 already-formatted entry (`{"level": "error"|"warning"|"notice",
-"annotation": "::error file=...,line=...,title=...::message"}`) per finding
-a full annotation pass over the comparison found, regardless of whether
-`--annotate` was actually given this run. It's always the superset (as if
-`--annotate-additions` had also been passed); a consumer decides for itself
-whether to keep the `"notice"`-level entries. This is what a rendering
-front end other than the CLI's own stderr output (e.g. a future revision of
-the composite GitHub Action) reads instead of re-parsing stderr or
-re-running the comparison — see `docs/reference/exit-codes.md`'s sibling
-`exit` field for the same pattern applied to the gate decision.
+"annotation": "::error file=...,line=...,title=...::message",
+"always_visible": true}`) per finding a full annotation pass over the
+comparison found, regardless of whether `--annotate` was actually given
+this run. It's always the superset (as if `--annotate-additions` had also
+been passed). A directory/package (release) `compare` persists the
+identical shape per library, at `libraries[].annotations`.
+
+A consumer deciding whether to keep a `"notice"`-level entry must gate on
+`always_visible` (schema 2.44), not on `level` alone: one notice kind — a
+`--contract` finding compatibility policy never evaluated — is shown by
+plain `--annotate` with no `--annotate-additions` at all, so it carries
+`always_visible: true`; every other notice (an addition, a quality issue,
+an `info`-severity finding) only exists because this array computes the
+`--annotate-additions` superset, and carries `always_visible: false`.
+`always_visible` is always `true` for `"error"`/`"warning"`. This is what a
+rendering front end other than the CLI's own stderr output (e.g. a future
+revision of the composite GitHub Action) reads instead of re-parsing
+stderr or re-running the comparison — see `docs/reference/exit-codes.md`'s
+sibling `exit` field for the same pattern applied to the gate decision.
 
 ## Severity mapping
 

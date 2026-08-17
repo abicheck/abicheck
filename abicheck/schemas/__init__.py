@@ -559,7 +559,20 @@ from typing import Any
 #:       persisting two differently-scoped arrays for one comparison.
 #:       Unconditionally present (mirroring ``exit``'s own presence rule),
 #:       including as ``[]`` on a clean comparison. Additive key.
-REPORT_SCHEMA_VERSION = "2.43"
+#: 2.44 -- each ``annotations`` entry gains ``always_visible`` (bool)
+#:       (Codex review on PR E's own persistence prerequisite): 2.43's own
+#:       "filter out notice-level entries when annotate-additions is off"
+#:       guidance was incomplete -- one ``"notice"`` kind (a ``--contract``
+#:       finding compatibility policy never evaluated,
+#:       ``annotations._collect_annotations_detailed``'s not-evaluated
+#:       demotion) is surfaced by plain ``--annotate`` alone, with no
+#:       ``--annotate-additions`` needed, so a renderer dropping every
+#:       ``"notice"`` by default would silently hide it even though the
+#:       CLI's own stderr rendering never does. ``always_visible`` is what a
+#:       renderer must actually gate a ``"notice"`` entry on instead of the
+#:       level alone; it is always ``True`` for ``"error"``/``"warning"``.
+#:       Additive key on an existing array item.
+REPORT_SCHEMA_VERSION = "2.44"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

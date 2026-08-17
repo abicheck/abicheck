@@ -193,7 +193,11 @@ class TestAnnotationsPersistence:
         r = _result(Verdict.COMPATIBLE, changes=[c])
         d = json.loads(to_json(r))
         assert d["annotations"] == [
-            {"level": "notice", "annotation": d["annotations"][0]["annotation"]}
+            {
+                "level": "notice",
+                "annotation": d["annotations"][0]["annotation"],
+                "always_visible": False,
+            }
         ]
         assert "::notice " in d["annotations"][0]["annotation"]
 
