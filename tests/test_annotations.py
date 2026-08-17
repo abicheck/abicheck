@@ -671,6 +671,24 @@ class TestAnnotationReportEntries:
         entries = annotation_report_entries(result)
         assert [e["level"] for e in entries] == ["error", "notice"]
 
+    def test_scoped_only_change_is_included(self):
+        """`--used-by`/`--required-symbol` scoping synthesizes fresh
+        findings onto `result.scoped_only_changes` -- a dynamically
+        attached attribute, never `result.changes` itself -- so a
+        comparison whose *sole* gating finding is scope-synthesized must
+        not silently produce zero annotations (Codex review: the same
+        `list(changes) + list(scoped_only_changes)` fold every other
+        finding-set consumer already applies)."""
+        scoped = Change(ChangeKind.PE_ORDINAL_RETARGETED, "Foo::bar", "retargeted")
+        result = _result(Verdict.BREAKING, [])
+        result.scoped_only_changes = (scoped,)  # type: ignore[attr-defined]
+        entries = annotation_report_entries(result)
+        assert entries
+        assert any("PE_ORDINAL_RETARGETED".lower() in e["annotation"].lower() for e in entries)
+        # collect_annotations (the stderr path) must agree -- both read
+        # through the same _collect_annotations_detailed.
+        assert collect_annotations(result)
+
 
 # ---------------------------------------------------------------------------
 # severity_config-aware annotation levels

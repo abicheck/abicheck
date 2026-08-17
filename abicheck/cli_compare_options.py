@@ -80,7 +80,6 @@ def _reject_set_input_flags(
     exit_code_scheme: str | None,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
-    secondary_fmt: str | None = None,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
     use_cases_manifest: Path | None = None,
@@ -96,6 +95,11 @@ def _reject_set_input_flags(
 
     ``--pack`` is not one of these -- its own, separate resolution (CLI
     cleanup phase two, "PR B" slice 1) decides what to accept or reject.
+    ``--write`` (``secondary_fmt``/``secondary_output``) is not one of these
+    either, as of CLI cleanup phase two, PR E: the release engine now
+    supports it directly (``compare_release_cmd``'s own
+    ``secondary_output_options``/``reject_incoherent_secondary_output``
+    call), so there is nothing left for this function to reject.
     """
     if exit_code_scheme is not None:
         raise click.UsageError(
@@ -116,12 +120,6 @@ def _reject_set_input_flags(
             "--env-matrix is not supported for directory/package (release) "
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
-        )
-    if secondary_fmt is not None:
-        raise click.UsageError(
-            "--write is not supported for directory/package "
-            "(release) comparisons yet; it applies to single-file / snapshot "
-            "inputs. Compare the libraries individually to use it."
         )
     if used_by_apps:
         raise click.UsageError(

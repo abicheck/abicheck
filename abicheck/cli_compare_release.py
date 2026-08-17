@@ -68,6 +68,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_severity_config,
     _run_bundle_analysis,
     apply_release_gate_pack,
+    release_annotations_from_primary_pass,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -80,6 +81,10 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
+from .cli_secondary_output import (
+    reject_incoherent_secondary_output,
+    secondary_output_options,
+)
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot
 from .reporter import to_json
@@ -626,7 +631,7 @@ def _compare_release_libraries(
         diff_pairs.extend(extra_pairs)
     if annotate:
         all_annotations.extend(
-            _release_annotations_from_primary_pass(
+            release_annotations_from_primary_pass(
                 library_results,
                 annotate_additions=annotate_additions,
                 severity_config=severity_config,
@@ -644,42 +649,6 @@ def _compare_release_libraries(
             click.echo(text, err=True)
 
     return library_results, worst_verdict, diff_pairs
-
-
-def _release_annotations_from_primary_pass(
-    library_results: list[dict[str, object]],
-    *,
-    annotate_additions: bool,
-    severity_config: SeverityConfig | None,
-) -> list[tuple[int, str]]:
-    """Collect ``--annotate`` output straight from each entry's stashed diff.
-
-    Replaces the independent re-run :func:`_collect_release_extras` used to
-    perform for this purpose (CLI cleanup phase two, PR E): every entry's
-    ``_diff_result`` is the *exact* :class:`DiffResult` the primary pass
-    already produced -- SONAME-lockstep-suppression included, since that
-    mutation runs before this is ever called -- so this reads it rather
-    than comparing the pair a second time. Only ``GITHUB_ACTIONS=true`` runs
-    collect anything, matching :func:`annotations.collect_annotations`'s own
-    gating so behaviour is unchanged for a local run.
-    """
-    from .annotations import collect_annotations, is_github_actions
-
-    if not is_github_actions():
-        return []
-    out: list[tuple[int, str]] = []
-    for entry in library_results:
-        result = entry.get("_diff_result")
-        if not isinstance(result, DiffResult):
-            continue
-        out.extend(
-            collect_annotations(
-                result,
-                annotate_additions=annotate_additions,
-                severity_config=severity_config,
-            ),
-        )
-    return out
 
 
 def _compare_release_parallel(
@@ -1272,6 +1241,7 @@ def _strip_diff_results_and_adjust_verdict(
     ["json", "markdown", "junit"],
     output_help="Output file for summary report (default: stdout).",
 )
+@secondary_output_options(["json", "markdown", "junit"])
 @click.option(
     "--output-dir",
     "output_dir",
@@ -1436,6 +1406,8 @@ def compare_release_cmd(
     lang: str,
     fmt: str,
     output: Path | None,
+    secondary_fmt: str | None,
+    secondary_output: Path | None,
     output_dir: Path | None,
     suppress: Path | None,
     strict_suppressions: bool,
@@ -1539,6 +1511,19 @@ def compare_release_cmd(
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
+
+    # CLI cleanup phase two, PR E: --write's own internal coherence (no
+    # secondary aimed at the same file as the primary; this command has no
+    # --dry-run of its own to be incoherent with -- a dry run never reaches
+    # this engine at all, see run_compare's own emit_dry_run() call, which
+    # exits before the directory/package dispatch). Shared with single-pair
+    # `compare` so the two commands' --write validation cannot drift.
+    reject_incoherent_secondary_output(
+        dry_run=False,
+        output=output,
+        secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output,
+    )
 
     # Track temporary directory paths for cleanup
     _temp_dir_paths: list[str] = []
@@ -1713,7 +1698,7 @@ def compare_release_cmd(
                 policy,
                 policy_file_path,
                 output_dir,
-                collect_diff_results=(fmt == "junit"),
+                collect_diff_results=(fmt == "junit" or secondary_fmt == "junit"),
                 annotate=annotate,
                 annotate_additions=annotate_additions,
                 jobs=jobs,
@@ -1820,6 +1805,37 @@ def compare_release_cmd(
                     severity_quality_issues,
                     severity_addition,
                 )
+
+            if secondary_output is not None:
+                # CLI cleanup phase two, PR E: --write, now supported for a
+                # directory/package (release) compare. Renders the second
+                # format from the exact same already-computed
+                # library_results/diff_pairs/bundle_result/matrix_result --
+                # no second per-library comparison pass, mirroring how
+                # single-pair `compare`'s own --write reuses its one already-
+                # computed DiffResult (see run_compare's own secondary
+                # _write_or_echo call).
+                assert secondary_fmt is not None  # guaranteed by Click's callback
+                secondary_text = _format_release_summary(
+                    secondary_fmt,
+                    worst_verdict,
+                    old_dir,
+                    new_dir,
+                    library_results,
+                    removed_keys,
+                    added_keys,
+                    old_map,
+                    new_map,
+                    warning_msgs,
+                    diff_pairs=diff_pairs if secondary_fmt == "junit" else None,
+                    bundle_result=bundle_result,
+                    matrix_result=matrix_result,
+                    severity_config=severity_config,
+                    severity_exit_code=severity_exit_code,
+                    contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+                    contract_coverage_failure_count=contract_coverage_failure_count,
+                )
+                _write_or_echo(secondary_output, secondary_text)
 
             _finalize_release_output(
                 fmt,

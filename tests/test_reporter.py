@@ -162,53 +162,6 @@ class TestAnalysisAssuranceExitContributionPersistence:
         d = json.loads(to_json(r, require_complete_analysis=True))
         assert d["analysis_assurance_exit_contribution"] == 1
 
-
-class TestAnnotationsPersistence:
-    """CLI cleanup phase two, PR E's persistence prerequisite (schema
-    2.43): ``compare``'s JSON report always carries ``annotations`` --
-    the same classified, already-formatted answer ``--annotate`` renders to
-    stderr, so a rendering front end (the composite Action) can read it
-    instead of inferring one from stderr or re-running the comparison.
-    """
-
-    def test_present_and_empty_on_a_clean_comparison(self):
-        r = _result(Verdict.NO_CHANGE)
-        d = json.loads(to_json(r))
-        assert d["annotations"] == []
-
-    def test_breaking_change_produces_an_error_entry(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
-        r = _result(Verdict.BREAKING, changes=[c])
-        d = json.loads(to_json(r))
-        assert len(d["annotations"]) == 1
-        entry = d["annotations"][0]
-        assert entry["level"] == "error"
-        assert entry["annotation"].startswith("::error ")
-
-    def test_is_the_superset_regardless_of_this_reports_own_show_only(self):
-        """Always the full, additions-included set -- unlike ``--annotate``
-        on the CLI, this key isn't gated by any flag the report itself was
-        rendered with."""
-        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
-        r = _result(Verdict.COMPATIBLE, changes=[c])
-        d = json.loads(to_json(r))
-        assert d["annotations"] == [
-            {
-                "level": "notice",
-                "annotation": d["annotations"][0]["annotation"],
-                "always_visible": False,
-            }
-        ]
-        assert "::notice " in d["annotations"][0]["annotation"]
-
-    def test_present_across_leaf_and_root_cause_modes(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
-        r = _result(Verdict.BREAKING, changes=[c])
-        for mode in ("leaf", "root-cause"):
-            d = json.loads(to_json(r, report_mode=mode))
-            assert len(d["annotations"]) == 1
-            assert d["annotations"][0]["level"] == "error"
-
     def test_zero_when_the_flag_is_set_and_status_is_complete(self):
         from abicheck.analysis_assurance import AnalysisAssurance
 
@@ -261,6 +214,53 @@ class TestAnnotationsPersistence:
         r = _result(Verdict.COMPATIBLE)
         d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
         assert "analysis_assurance_exit_contribution" not in d
+
+
+class TestAnnotationsPersistence:
+    """CLI cleanup phase two, PR E's persistence prerequisite (schema
+    2.43): ``compare``'s JSON report always carries ``annotations`` --
+    the same classified, already-formatted answer ``--annotate`` renders to
+    stderr, so a rendering front end (the composite Action) can read it
+    instead of inferring one from stderr or re-running the comparison.
+    """
+
+    def test_present_and_empty_on_a_clean_comparison(self):
+        r = _result(Verdict.NO_CHANGE)
+        d = json.loads(to_json(r))
+        assert d["annotations"] == []
+
+    def test_breaking_change_produces_an_error_entry(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r))
+        assert len(d["annotations"]) == 1
+        entry = d["annotations"][0]
+        assert entry["level"] == "error"
+        assert entry["annotation"].startswith("::error ")
+
+    def test_is_the_superset_regardless_of_this_reports_own_show_only(self):
+        """Always the full, additions-included set -- unlike ``--annotate``
+        on the CLI, this key isn't gated by any flag the report itself was
+        rendered with."""
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["annotations"] == [
+            {
+                "level": "notice",
+                "annotation": d["annotations"][0]["annotation"],
+                "always_visible": False,
+            }
+        ]
+        assert "::notice " in d["annotations"][0]["annotation"]
+
+    def test_present_across_leaf_and_root_cause_modes(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        for mode in ("leaf", "root-cause"):
+            d = json.loads(to_json(r, report_mode=mode))
+            assert len(d["annotations"]) == 1
+            assert d["annotations"][0]["level"] == "error"
 
 
 class TestEvidenceStatusInJson:

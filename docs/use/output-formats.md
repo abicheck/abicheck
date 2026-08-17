@@ -320,9 +320,12 @@ abicheck compare old.json new.json \
   secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
   `--show-only`, which describes only the primary format's display.
-- Not supported for directory/package (release) comparisons — the release
-  fan-out doesn't produce a single `DiffResult` to render twice. Compare the
-  libraries individually to use it.
+- Also works for a directory/package (release) comparison: the per-library
+  fan-out renders its second format from the same already-computed
+  per-library results, without re-running any library's comparison. Only
+  `json`/`markdown`/`junit` are available there (the same set `--format`
+  itself accepts for a release operand) — `sarif`/`html`/`review` still
+  require a single-pair comparison.
 
 The bundled GitHub Action uses this to get JSON for its sticky PR comment
 without re-running the whole comparison a second time.

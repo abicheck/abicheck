@@ -1034,7 +1034,7 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context, project_cfg: Any, *,
     exit_code_scheme: str | None, reconcile_build_context: bool,
-    env_matrix_path: Path | None, secondary_fmt: str | None,
+    env_matrix_path: Path | None,
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
     include_labels: dict[Path, str] | None,
@@ -1051,10 +1051,13 @@ def _reject_flags_unsupported_for_set_inputs(
     reject (Codex review).
 
     ``--pack`` is not rejected here (CLI cleanup phase two, "PR B" slice 1):
-    the caller resolves it separately right after this call.
+    the caller resolves it separately right after this call. ``--write``
+    (``secondary_fmt``/``secondary_output``) is not rejected here either, as
+    of CLI cleanup phase two, PR E -- the release engine now supports it
+    directly, so it is simply forwarded to ``_dispatch_release_compare``.
     """
     _reject_set_input_flags(
-        exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
+        exit_code_scheme, reconcile_build_context, env_matrix_path,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
@@ -1532,7 +1535,7 @@ def run_compare(
             ctx, project_cfg,
             exit_code_scheme=exit_code_scheme,
             reconcile_build_context=reconcile_build_context,
-            env_matrix_path=env_matrix_path, secondary_fmt=secondary_fmt,
+            env_matrix_path=env_matrix_path,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
@@ -1659,6 +1662,7 @@ def run_compare(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
             pack_application=release_pack_application,
+            secondary_fmt=secondary_fmt, secondary_output=secondary_output,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

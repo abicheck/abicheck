@@ -352,6 +352,19 @@ def _collect_annotations_detailed(
     See :func:`collect_annotations` for the rest of this function's
     contract (severity-config vs. legacy level mapping, effective-category
     classification) — unchanged, just carrying the extra bit through.
+
+    Also walks ``diff_result.scoped_only_changes`` (Codex review on PR E),
+    the dynamically-attached findings ``--used-by``/``--required-symbol``
+    scoping synthesizes (e.g. ``PE_ORDINAL_RETARGETED``) that never make it
+    into ``diff_result.changes`` itself — the same
+    ``list(result.changes) + list(getattr(result, "scoped_only_changes",
+    ()) or ())`` convention every other consumer of the full finding set
+    already applies (``_fold_scoped_compat_into_text``,
+    ``_attach_suppression_audit``, ``junit_report.py``). Without this, a
+    comparison whose *sole* gating finding is scope-synthesized could exit
+    non-zero with that finding present in the rendered report's
+    ``changes`` but silently absent from both the stderr annotation and
+    the persisted ``annotations`` array.
     """
     from .severity import effective_verdict_for_change
 
@@ -360,7 +373,10 @@ def _collect_annotations_detailed(
 
     annotations: list[tuple[int, str, bool]] = []
 
-    for change in diff_result.changes:
+    all_changes = list(diff_result.changes) + list(
+        getattr(diff_result, "scoped_only_changes", ()) or ()
+    )
+    for change in all_changes:
         # ADR-049 D1: an annotation states how a finding gated, and a
         # NOT_EVALUATED finding did not -- compatibility policy never scored
         # it. Emitting `::error` for one put a red GitHub annotation on a

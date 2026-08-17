@@ -227,13 +227,14 @@ add_single_flag() {
 # an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
 # is_package(), including its magic-byte fallback — abicheck/package.py:547-554
 # — since classify_compare_operand() delegates to it regardless of filename;
-# a name-suffix-only check here would still let the Action add
-# --write for such an operand and have the CLI reject it, Codex
+# a name-suffix-only check here would misidentify such an operand, Codex
 # review, PR #557). `compare` fans such an operand out through the release
-# engine internally regardless of the Action's MODE, and the release engine
-# rejects --write — used to skip the --write
-# optimization for compare mode's PR-comment JSON rather than let it
-# hard-fail a directory/package comparison that used to work.
+# engine internally regardless of the Action's MODE. Since CLI cleanup phase
+# two, PR E, the release engine supports --write directly (json/markdown/
+# junit, the same set --format itself accepts there) -- this helper is no
+# longer needed to skip the --write PR-comment JSON injection, but stays in
+# use for the release-only flags below (--jobs, --output-dir, --dso-only,
+# --require-complete-analysis's own rejection, ...).
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -1120,22 +1121,26 @@ elif [[ "$MODE" == "compare" ]]; then
     # the sticky PR comment (--write), instead of re-invoking
     # abicheck a second time just to get JSON. Only needed when the primary
     # format isn't already JSON — a json primary is reused as-is (see
-    # _can_reuse_primary_json below). The per-library release fan-out
-    # (directory/package operands) rejects --write, so it's
-    # skipped there too, falling back to the rerun path in
-    # _maybe_post_pr_comment (Codex review).
+    # _can_reuse_primary_json below).
     #
-    # Also skipped when the user's own `extra-args` already carries
-    # `--write`, the same guard the scan branch below applies (Codex review):
+    # CLI cleanup phase two, PR E: the per-library release fan-out
+    # (directory/package operands) now supports --write directly --
+    # json/markdown/junit only, the same set --format itself accepts there,
+    # which is exactly what this injection ever requests -- so this no
+    # longer needs the _is_release_style_operand carve-out it used to. The
+    # release engine renders the JSON from the same already-computed
+    # per-library results its primary (markdown, by default) render uses,
+    # without re-running any library's comparison, matching how --write
+    # already worked for a single-pair operand.
+    #
+    # Skipped when the user's own `extra-args` already carries `--write`,
+    # the same guard the scan branch below applies (Codex review):
     # extra-args is appended *after* this, and Click honors the last
     # occurrence, so ours would lose and leave $PR_JSON empty -- at which
     # point _maybe_post_pr_comment reruns the whole comparison just to obtain
     # JSON, doubling a potentially expensive analysis to produce a file this
     # very injection existed to avoid rerunning for.
-    if [[ "$FORMAT" != "json" ]] \
-       && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}" \
-       && ! _extra_args_has_write_flag; then
+    if [[ "$FORMAT" != "json" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi

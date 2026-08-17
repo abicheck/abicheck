@@ -1200,8 +1200,8 @@
         },
         "crosscheck_promotion_contribution": {
           "type": "integer",
-          "minimum": 0,
-          "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes (scan --against only, via scan_engine._promote_published_gate). Always 0 on a native compare report."
+          "const": 0,
+          "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes. This schema validates only native compare reports (scan's own report shape -- ScanOutcome.to_dict() -- is not validated against this file, see test_report_schema.py), where this axis has no meaning outside scan --against's own scan_engine._promote_published_gate and is therefore always 0 -- const, not just a floor, so a malformed compare report claiming a nonzero contribution fails validation instead of silently passing."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."

@@ -1241,6 +1241,27 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
             f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
             f"a time (a single old/new .so pair) to use --format {fmt}."
         )
+    # CLI cleanup phase two, PR E: --write now works for a release operand
+    # (compare_release_cmd's own secondary_output_options only declares
+    # json/markdown/junit, matching _RELEASE_FORMATS) -- but `compare`'s own
+    # --write accepts sarif/html/review too, parsed by its own Click
+    # callback *before* this dispatch ever runs, so an incompatible
+    # secondary format must be rejected here explicitly. Without this,
+    # compare_release_cmd's own callback is reached directly (not through
+    # Click's arg parsing, so its own decorator-level validation never
+    # runs) and _format_release_summary's fallback branch would silently
+    # render markdown to the requested sarif/html/review path instead of
+    # erroring.
+    secondary_fmt = kwargs.get("secondary_fmt")
+    if secondary_fmt is not None and secondary_fmt not in _RELEASE_FORMATS:
+        raise click.UsageError(
+            f"--write {secondary_fmt}=... is not available when comparing "
+            "directories or packages: sarif/html/review require a "
+            "single-pair (non-directory, non-package) comparison. Choose "
+            f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
+            "library at a time (a single old/new .so pair) to use --write "
+            f"{secondary_fmt}=..."
+        )
     from .cli_compare_release import compare_release_cmd
 
     assert compare_release_cmd.callback is not None
@@ -1539,8 +1560,8 @@ def _embed_inline_source_side(
                 "--format markdown for a human alongside --write json=abi.json "
                 "for tooling). FORMAT is one of {formats}; PATH must differ from "
                 "--output/-o. Always renders the full, unfiltered report "
-                "(ignores --show-only). Not supported for "
-                "directory/package (release) comparisons.",
+                "(ignores --show-only). For a directory/package (release) "
+                "comparison, only json/markdown/junit are available.",
 )
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review output (default "

@@ -83,14 +83,20 @@ class ExitReason(str, Enum):
     CLEAN = "clean"
     #: `scan --against` only. A maintainer-promoted `--crosscheck KEY=error`
     #: finding (`scan_engine._crosscheck_severity_exit`) raised the exit code
-    #: past what the three axes above would have produced on their own --
-    #: never resolved by :func:`resolve_exit_decision`/
-    #: `resolve_compare_exit_decision` itself (crosscheck promotion is not
-    #: one of the axes this module models; see its own module docstring),
-    #: only ever stamped after the fact by `scan_engine._promote_published_
-    #: gate`, mirroring how that same function already patches the
-    #: persisted `severity` block for the identical reason -- a published
-    #: `exit` block that still named `compatibility_gate` for a code the
+    #: past what the three compatibility/coverage/assurance axes would have
+    #: produced on their own. :func:`resolve_exit_decision` *does* model
+    #: this as a real fourth contribution
+    #: (`ExitDecision.crosscheck_promotion_contribution`) when a caller
+    #: passes one in -- `resolve_compare_exit_decision` (native `compare`)
+    #: never does, since crosscheck promotion has no meaning outside
+    #: `scan --against`, so it is always `0`/absent there. The scan-only
+    #: half that stays true is *when* the contribution is known:
+    #: `scan_engine._promote_published_gate` re-resolves the whole decision
+    #: through `resolve_exit_decision` (with the crosscheck contribution
+    #: filled in) only *after* the fact, once a promotion actually fires --
+    #: mirroring how that same function already patches the persisted
+    #: `severity` block for the identical reason -- a published `exit`
+    #: block that still named `compatibility_gate` for a code the
     #: crosscheck promotion actually produced would be exactly the kind of
     #: "explains nothing about why the exit is N" trap this enum exists to
     #: avoid.
@@ -102,12 +108,16 @@ class ExitDecision:
     """One comparison's fully explainable exit code.
 
     ``code`` is exactly ``max(compatibility_contribution,
-    contract_coverage_contribution, analysis_assurance_contribution)`` --
-    the identical value today's ad hoc fold chain in
-    ``cli._exit_with_severity_or_verdict`` already produces, computed once
-    here instead of via three separately-called functions. ``reasons``
-    names every axis tied for that maximum; see :class:`ExitReason` for why
-    a lower, non-winning contribution is excluded.
+    contract_coverage_contribution, analysis_assurance_contribution,
+    crosscheck_promotion_contribution)`` -- the first three are the identical
+    value today's ad hoc fold chain in ``cli._exit_with_severity_or_verdict``
+    already produces, computed once here instead of via three separately-
+    called functions; the fourth exists only for `scan --against`'s own
+    maintainer-promoted `--crosscheck KEY=error` finding and is always `0`
+    for a native `compare` report (see :class:`ExitReason.PROMOTED_
+    CROSSCHECK`). ``reasons`` names every axis tied for that maximum; see
+    :class:`ExitReason` for why a lower, non-winning contribution is
+    excluded.
     """
 
     code: int

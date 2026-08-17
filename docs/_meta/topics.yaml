@@ -333,6 +333,7 @@ topics:
       - abicheck/annotations.py
       - abicheck/annotations_step_summary.py
       - abicheck/reporter_contract_blocks.py
+      - abicheck/cli_compare_release.py
       - abicheck/schemas/compare_report.schema.json
     allowed_summaries:
       - use/github-action-recipes.md

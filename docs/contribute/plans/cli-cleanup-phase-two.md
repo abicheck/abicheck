@@ -548,12 +548,35 @@ silently hidden the former. Each entry now also carries `always_visible`
 (schema 2.44): always `true` for `error`/`warning`, and for `notice` only
 `true` for the always-shown contract-audit kind.
 
-**What's still open in PR E**: `action/run.sh` gaining a
-`--write`-equivalent path for a release operand (the persisted report
-above still has nowhere to be read from until this lands), the Action's
-own renderer (reading `exit`/`annotations`/`changes` instead of inferring
-from stderr or re-running a comparison), and — gated on both of those —
-deleting `--annotate`/`--annotate-additions`, defining
+**`action/run.sh`'s `--write`-equivalent path is now also landed.** Rather
+than a new bash-side code path, the actual gap was in the CLI itself:
+`compare --write FORMAT=PATH` used to be rejected outright for a
+directory/package operand (`_reject_set_input_flags`'s `secondary_fmt`
+check). `compare_release_cmd` now carries its own
+`secondary_output_options(["json", "markdown", "junit"])` (the same set
+`--format` itself accepts for a release operand) and renders the
+secondary format from the exact same already-computed
+`library_results`/`diff_pairs`/`bundle_result`/`matrix_result` its primary
+format uses — no second per-library comparison pass, mirroring how
+single-pair `compare`'s own `--write` reuses its one `DiffResult`.
+`_dispatch_release_compare` (`cli.py`) now explicitly rejects a
+release-incompatible secondary format (`sarif`/`html`/`review`) with a
+usage error, since `compare`'s own `--write` still accepts all six formats
+at parse time (before dispatch ever reaches the release engine's own,
+narrower `secondary_output_options` declaration) and `_format_release_
+summary`'s fallback branch would otherwise have silently rendered markdown
+into the requested path instead of erroring. `action/run.sh`'s `--write
+json=$PR_JSON` injection for the sticky PR comment no longer skips
+directory/package operands (the `_is_release_style_operand` guard on that
+one injection was removed; the helper itself stays, used by every other
+release-only flag check).
+
+**What's still open in PR E**: the Action's own renderer (reading
+`exit`/`annotations`/`changes` instead of inferring from stderr or
+re-running a comparison — the persisted report now has somewhere to be
+read from for both operand shapes, but `action/run.sh` doesn't read it yet
+for GitHub annotations specifically, only for the sticky PR comment), and
+— gated on that — deleting `--annotate`/`--annotate-additions`, defining
 `annotate`/`annotate-additions` inputs in `action.yml`, and updating every
 first-party workflow/recipe/doc snippet currently reaching the flags
 through `extra-args`. A single-library compare report, unmodified by this
