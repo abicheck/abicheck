@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`25`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`26`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 25,
+  "schema_version": 26,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -89,7 +89,9 @@ continued) that closes a bare-name collision between two member typedefs
 sharing a spelling in different classes/namespaces — needs no reliability
 flag, since an empty dict degrades identically to "no typedefs at all" for
 a pre-v25 snapshot, unlike the real-but-wrong scalar defaults v19-v23 above
-guard against.
+guard against. Finally, (v26) debug channels persist their evidence source,
+parse state, and CU accounting so completeness gates can distinguish parsed
+facts from section-presence-only or partial extraction evidence.
 
 ### Forward / backward compatibility
 
@@ -165,7 +167,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `25`). |
+| `schema_version` | int | Snapshot format version (currently `26`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -296,7 +298,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `25`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `26`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

@@ -251,6 +251,18 @@ class TestPdbToDwarfMetadata:
         assert meta.evidence_state == "partial"
         assert adv.evidence_state == "parsed"
 
+    def test_skipped_struct_record_marks_both_debug_channels_partial(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
+        """Per-record recovery must not claim complete PDB evidence."""
+        with patch(
+            "abicheck.pdb_metadata._extract_fields", side_effect=RuntimeError("bad record")
+        ):
+            meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
+
+        assert meta.has_dwarf and adv.has_dwarf
+        assert meta.evidence_state == adv.evidence_state == "partial"
+
 
 # ---------------------------------------------------------------------------
 # Data model consistency: AdvancedDwarfMetadata from PDB

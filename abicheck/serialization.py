@@ -292,7 +292,10 @@ from .model import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 25
+# v26 adds debug-evidence provenance (source/state and CU accounting) to the
+# serialized DWARF channels.  Older readers must reject rather than discard
+# these fields and later re-save an assurance-changing snapshot.
+SCHEMA_VERSION: int = 26
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9

@@ -129,7 +129,13 @@ def parse_pdb_debug_info(
     src_files = pdb.udt_source_files
 
     try:
-        _extract_struct_layouts(pdb.types, meta, adv, src_files)
+        skipped_layouts = _extract_struct_layouts(pdb.types, meta, adv, src_files)
+        if skipped_layouts:
+            # A malformed record is handled per type so other usable layouts
+            # can still be compared.  That is nevertheless incomplete basic
+            # layout and advanced packing/method-CC evidence.
+            meta.evidence_state = "partial"
+            adv.evidence_state = "partial"
     except Exception as exc:  # noqa: BLE001
         meta.evidence_state = "partial"
         adv.evidence_state = "partial"
@@ -159,12 +165,13 @@ def _extract_struct_layouts(
     meta: DwarfMetadata,
     adv: AdvancedDwarfMetadata | None = None,
     src_files: dict[str, str] | None = None,
-) -> None:
+) -> bool:
     """Extract struct/class/union layouts from TPI into DwarfMetadata.structs.
 
     Also populates ``adv.all_struct_names`` and ``adv.packed_structs`` in a
     single pass (previously done in a separate ``_extract_calling_conventions``).
     """
+    skipped = False
     for _ti, cv_struct in types.all_structs().items():
         if not _is_user_visible(cv_struct.name, cv_struct.is_forward_ref):
             continue
@@ -181,6 +188,7 @@ def _extract_struct_layouts(
             # same name may succeed and should become the canonical def.
             log.debug("_extract_struct_layouts: bad fields for %s: %s",
                       cv_struct.name, exc)
+            skipped = True
             continue
 
         # Track struct names and packed status in advanced metadata
@@ -201,6 +209,8 @@ def _extract_struct_layouts(
         )
 
         meta.structs[cv_struct.name] = layout
+
+    return skipped
 
 
 def _extract_method_calling_conventions(

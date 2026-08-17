@@ -131,6 +131,9 @@ def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
     raw = json.loads(snapshot_to_json(_debug_snapshot(
         "1.0", DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)
     )))
+    # Provenance arrived in schema v26; a v25 snapshot cannot establish that
+    # its DWARF-shaped blocks came from completed parsing.
+    raw["schema_version"] = 25
     del raw["dwarf"]["evidence_source"]
     del raw["dwarf"]["evidence_state"]
     del raw["dwarf_advanced"]["evidence_state"]
