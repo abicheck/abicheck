@@ -1230,6 +1230,33 @@ def _run_baseline_compare(
     # reads back.
     summary.update(_baseline_contract_block(diff, resolved_config))
 
+    # CLI cleanup phase two, PR E: the same canonical `ExitDecision`
+    # `reporter_contract_blocks.add_contract_context` persists for `compare`
+    # (PR G1, #789), now also persisted here so a `scan --against` report
+    # reader doesn't have to re-derive "why is this exit N" from the
+    # separately-emitted `severity`/`analysis_assurance_exit_contribution`/
+    # `contract_coverage_exit_contribution` fields. Nested under this
+    # baseline-compare summary (`diff.exit`), matching where those same
+    # constituent fields already live -- not at `ScanOutcome`'s own
+    # top-level `verdict`/`exit_code`, which additionally folds the
+    # scan-only budget/not-comparable/crosscheck-promotion axes
+    # `exit_decision.py`'s own module docstring explicitly defers to PR
+    # G2. `exit_scheme` mirrors the exact condition `base_exit` below is
+    # already computed under (not bare `exit_code_scheme`), so a caller
+    # that configured `exit_code_scheme="severity"` without ever resolving
+    # a `sev_config` gets the identical legacy-scheme answer both places
+    # agree on, rather than the resolver's severity branch's own assertion.
+    from .exit_decision import resolve_compare_exit_decision
+
+    exit_scheme = (
+        "severity" if exit_code_scheme == "severity" and sev_config is not None
+        else "legacy"
+    )
+    summary["exit"] = resolve_compare_exit_decision(
+        diff, sev_config, exit_scheme,
+        require_complete_analysis=require_complete_analysis,
+    ).to_dict()
+
     from .cli_compare_helpers import _verdict_exit_code
     from .contract_coverage_exit import fold_coverage_exit
 

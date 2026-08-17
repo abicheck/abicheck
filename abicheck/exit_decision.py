@@ -81,6 +81,20 @@ class ExitReason(str, Enum):
     CONTRACT_COVERAGE = "contract_coverage"
     ANALYSIS_ASSURANCE = "analysis_assurance"
     CLEAN = "clean"
+    #: `scan --against` only. A maintainer-promoted `--crosscheck KEY=error`
+    #: finding (`scan_engine._crosscheck_severity_exit`) raised the exit code
+    #: past what the three axes above would have produced on their own --
+    #: never resolved by :func:`resolve_exit_decision`/
+    #: `resolve_compare_exit_decision` itself (crosscheck promotion is not
+    #: one of the axes this module models; see its own module docstring),
+    #: only ever stamped after the fact by `scan_engine._promote_published_
+    #: gate`, mirroring how that same function already patches the
+    #: persisted `severity` block for the identical reason -- a published
+    #: `exit` block that still named `compatibility_gate` for a code the
+    #: crosscheck promotion actually produced would be exactly the kind of
+    #: "explains nothing about why the exit is N" trap this enum exists to
+    #: avoid.
+    PROMOTED_CROSSCHECK = "promoted_crosscheck"
 
 
 @dataclass(frozen=True)
@@ -176,20 +190,32 @@ def resolve_compare_exit_decision(
     """:func:`resolve_exit_decision`, deriving every contribution from
     *result* the same way `cli._exit_with_severity_or_verdict` does today.
 
-    The single call site a native `compare` invocation needs: it reproduces
+    The call site a native `compare` invocation needs: it reproduces
     that function's exact fold order (compatibility → coverage floor →
     assurance floor, each `max`-based) as one canonical resolution, so a
     caller building the report's ``exit`` block and a caller computing the
     real process exit code cannot read two different numbers for the same
     comparison.
 
-    **`scan --against` does not call this function yet (Codex review, fresh
-    evidence).** `scan_engine.py`/`cli_scan_baseline.py` compute their own
-    exit code and report contributions independently -- their comments
-    describe themselves as *mirroring* `compare`'s pattern, but neither
-    calls `resolve_compare_exit_decision` or emits a top-level ``exit``
-    object. Wiring `scan --against` through this resolver is scoped to a
-    later PR, not this one.
+    **`scan --against` also calls this function (CLI cleanup phase two, PR
+    E), from `cli_scan_baseline._run_baseline_compare`, which nests the
+    result at ``diff.exit`` rather than the report's top level -- matching
+    where its own constituent `analysis_assurance_exit_contribution`/
+    `contract_coverage_exit_contribution` fields already live, not
+    `ScanOutcome`'s own top-level ``verdict``/``exit_code``.** That
+    top-level pair folds strictly more than this function ever will for a
+    scan: budget overflow, `NOT_COMPARABLE`, and a maintainer-promoted
+    `--crosscheck KEY=error` finding (`scan_engine._crosscheck_severity_
+    exit`) are scan-only axes raised through their own code paths, not
+    modeled by this resolver (see this module's own docstring for why).
+    `scan_engine._promote_published_gate` keeps the persisted ``diff.exit``
+    block honest for the one of those three that can happen *after* this
+    function already ran -- crosscheck promotion -- by raising its ``code``
+    and re-stamping ``reasons`` to ``PROMOTED_CROSSCHECK``, the same way it
+    already patches the persisted ``severity`` block. Budget overflow
+    aborts before a report is built at all; `NOT_COMPARABLE` has no
+    `DiffResult` for this resolver to read from, so no ``exit`` block is
+    emitted for that case either.
 
     **`--used-by`/`--required-symbol(s)` scoped gating overrides the
     compatibility axis entirely (Codex review, fresh evidence).**

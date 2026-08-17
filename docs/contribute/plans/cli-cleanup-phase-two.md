@@ -473,27 +473,40 @@ is the *concept* of three fields — `exit`, `contract_coverage_exit_
 contribution`, `analysis_assurance_exit_contribution` — not yet a uniform
 *location* for them today. `compare` puts all three at the report's top
 level, **implemented and merged as #789 (`e43abfd`) — "PR G1" is done.**
-**`scan --against` does not (fresh evidence, Codex review):** `ScanOutcome.to_dict()` (`scan_engine.py`)
-nests its whole `diff_summary` under a `"diff"` key, and `_baseline_summary()`
-(`cli_scan_baseline.py`) writes `analysis_assurance_exit_contribution` and
-the contract-coverage block *into that nested summary*, not the outer
-`ScanOutcome` dict — so today they live at `report["diff"].
-analysis_assurance_exit_contribution`, not `report.
-analysis_assurance_exit_contribution`. G1 never touched
-`cli_scan_baseline.py` at all, so `exit` does not exist for `scan --against`
-yet, in either location. PR E's job is therefore two things, not one: land
-`exit` for `scan --against` (mirroring G1's `compare` wiring, called from
-`_baseline_summary`/`_run_baseline_compare` the way `add_contract_context`
-is called from `compare`'s own JSON path), and decide — as part of that
-wiring, not as a drive-by rename — whether `scan`'s existing nested
-placement moves to the top level to match `compare`, or `compare`'s renderer
-adapter learns to read scan's nested location instead. Whichever is chosen,
-the Action's renderer keeps reading each operand's own existing
-`verdict`/`changes` (single-library), per-library summaries (release), or
-scan's own result shape through the adapter it already has for that shape —
-this section is only about where the *gate-explanation* fields live, not
-about unifying verdict/finding structures. A single-library compare report,
-unmodified by this section, already reads:
+**`scan --against` now does too (first half of PR E, landed).**
+`ScanOutcome.to_dict()` (`scan_engine.py`) nests its whole `diff_summary`
+under a `"diff"` key, and `_baseline_summary()`/`_run_baseline_compare()`
+(`cli_scan_baseline.py`) already wrote `analysis_assurance_exit_contribution`
+and the contract-coverage block *into that nested summary*, not the outer
+`ScanOutcome` dict — so the location question above was answered by
+precedent rather than reopened: `exit` was added at `report["diff"].exit`
+(schema 1.18), matching where its own constituent fields already live,
+**not** moved to the top level to match `compare`'s `report.exit` — the two
+commands keep their own report shapes; only the *concept* is shared, exactly
+as this section's own "not a proposed common envelope" note already argues
+for `verdict`/`findings`. `_run_baseline_compare` calls
+`exit_decision.resolve_compare_exit_decision` directly (the same function
+`add_contract_context` calls for `compare`), so the two commands cannot read
+two different numbers for the same kind of comparison. One scan-only wrinkle
+this block does not, and structurally cannot, resolve on its own: a
+maintainer-promoted `--crosscheck KEY=error` finding (`scan_engine.
+_crosscheck_severity_exit`) can raise the *process* exit code strictly after
+`_run_baseline_compare` already returned its `exit` block — the same
+after-the-fact timing problem `_promote_published_gate` already solved for
+the persisted `severity` block. Fixed the same way: `_promote_published_
+gate` now also raises `diff.exit.code` and re-stamps `diff.exit.reasons` to
+a new `ExitReason.PROMOTED_CROSSCHECK` (a scan-only reason;
+`resolve_compare_exit_decision` itself never emits it) whenever a promotion
+actually fires — never lowering, never firing when the existing code already
+dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by this
+block, matching `exit_decision.py`'s own explicit scope (no `DiffResult`
+exists for `NOT_COMPARABLE`; budget overflow aborts before a report is
+built) — see that module's own docstring for the reasoning. What's still
+open in PR E: the Action's own renderer (reading `exit`/`changes`/findings
+instead of inferring from stderr or re-running a comparison), and — gated on
+the persistence prerequisite described below — deleting `--annotate`/
+`--annotate-additions`. A single-library compare report, unmodified by this
+section, already reads:
 
 ```json
 {

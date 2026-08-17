@@ -643,22 +643,40 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
     Raises only, and only to ``max``: a cross-check promotion is a floor
     (:func:`_crosscheck_severity_exit`), so it can add a blocking reason to a
     gate but never clear one a severity category already raised.
+
+    Also keeps the persisted ``exit`` block (CLI cleanup phase two, PR E)
+    consistent the same way: that block is built from the baseline compare
+    alone, before this promotion runs, so a promoted cross-check left it
+    naming ``compatibility_gate``/etc. for a code lower than the one
+    actually published -- the exact "explains nothing about why the exit
+    is N" trap :class:`~abicheck.exit_decision.ExitReason` exists to avoid.
+    Raising it here reproduces this function's own "raise, never clear, and
+    only past the previous max" discipline, and since a raise only ever
+    happens when *sev_exit* strictly exceeds the block's own prior code, no
+    other axis can be tied for the new maximum -- ``reasons`` becomes
+    exactly ``(PROMOTED_CROSSCHECK,)``, not a guess.
     """
     if not isinstance(diff_summary, dict):
         return
     gate = diff_summary.get("severity")
-    if not isinstance(gate, dict):
-        return
-    current = gate.get("exit_code")
-    if not isinstance(current, int) or sev_exit <= current:
-        return
-    gate["exit_code"] = sev_exit
-    gate["blocking"] = True
-    cats = gate.get("blocking_categories")
-    cats = list(cats) if isinstance(cats, list) else []
-    if CROSSCHECK_BLOCKING_CATEGORY not in cats:
-        cats.append(CROSSCHECK_BLOCKING_CATEGORY)
-    gate["blocking_categories"] = cats
+    if isinstance(gate, dict):
+        current = gate.get("exit_code")
+        if isinstance(current, int) and sev_exit > current:
+            gate["exit_code"] = sev_exit
+            gate["blocking"] = True
+            cats = gate.get("blocking_categories")
+            cats = list(cats) if isinstance(cats, list) else []
+            if CROSSCHECK_BLOCKING_CATEGORY not in cats:
+                cats.append(CROSSCHECK_BLOCKING_CATEGORY)
+            gate["blocking_categories"] = cats
+    exit_block = diff_summary.get("exit")
+    if isinstance(exit_block, dict):
+        from .exit_decision import ExitReason
+
+        current_code = exit_block.get("code")
+        if isinstance(current_code, int) and sev_exit > current_code:
+            exit_block["code"] = sev_exit
+            exit_block["reasons"] = [ExitReason.PROMOTED_CROSSCHECK.value]
 
 
 def _audit_exit_code(

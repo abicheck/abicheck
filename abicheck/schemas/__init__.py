@@ -800,7 +800,28 @@ REPORT_SCHEMA_VERSION = "2.41"
 #:        (``0`` either way when the flag wasn't given or the status was
 #:        already ``complete``). Additive key, absent only for the same
 #:        NOT_COMPARABLE/audit-only shapes ``analysis_assurance`` itself is.
-SCAN_SCHEMA_VERSION = "1.17"
+#: 1.18 -- CLI cleanup phase two, PR E: the ``diff`` block gains ``exit``,
+#:        the same canonical ``ExitDecision`` (``exit_decision.
+#:        resolve_compare_exit_decision``) ``compare``'s own top-level
+#:        ``exit`` key already carries since report_schema_version 2.41 (PR
+#:        G1, #789) -- ``{code, reasons, compatibility_contribution,
+#:        contract_coverage_contribution, analysis_assurance_contribution}``,
+#:        so a reader doesn't have to re-derive "why is this exit N" from
+#:        the separately-emitted ``severity``/``analysis_assurance_exit_
+#:        contribution``/``contract_coverage_exit_contribution`` fields.
+#:        Nested under ``diff`` (not ``ScanOutcome``'s own top-level
+#:        ``verdict``/``exit_code``, which additionally folds the scan-only
+#:        budget/``NOT_COMPARABLE``/crosscheck-promotion axes this key does
+#:        not model -- see ``exit_decision.resolve_compare_exit_decision``'s
+#:        own docstring). A maintainer-promoted ``--crosscheck KEY=error``
+#:        finding raises this block's ``code`` after the fact
+#:        (``scan_engine._promote_published_gate``), the same way it
+#:        already raises the persisted ``severity`` block, and re-stamps
+#:        ``reasons`` to ``["promoted_crosscheck"]`` so the block never
+#:        names an axis that did not actually decide the code. Additive
+#:        key, absent only for the same NOT_COMPARABLE/audit-only shapes
+#:        ``analysis_assurance`` itself is.
+SCAN_SCHEMA_VERSION = "1.18"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
