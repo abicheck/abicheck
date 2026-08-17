@@ -342,6 +342,9 @@ def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
         # read this file directly, and it is the one repository *input* the
         # directory entries do not carry (Codex review).
         "repo_facts.json",
+        # The test-selection configuration has to follow the suite into
+        # `mutants/`, otherwise its slow nested mutmut fixture runs there.
+        "pyproject.toml",
         "scripts",
         "skills-src",
         # `test_gen_agent_skills.py` compares the committed publication trees
