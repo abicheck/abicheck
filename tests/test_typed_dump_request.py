@@ -431,6 +431,117 @@ class TestRunDumpRequest:
         assert captured["ld_library_path"] == "/usr/lib"
 
 
+class TestResolveExecuteDumpRequestSplit:
+    """CLI cleanup phase two, PR C / PR 3A: ``run_dump_request`` is now a
+    thin adapter over :func:`resolve_dump_request` + :func:`execute_dump_request`.
+
+    Pins the split's actual point: ``resolve_dump_request`` never invokes
+    ``resolve_input`` (no castxml/clang, no write), and the two-step path
+    produces the identical snapshot ``run_dump_request`` itself returns.
+    """
+
+    def test_resolve_never_invokes_resolve_input(self, snap_path: Path, monkeypatch):
+        from abicheck import service
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        def _boom(*args, **kwargs):  # pragma: no cover - must never run
+            raise AssertionError("resolve_input reached during resolve-only step")
+
+        monkeypatch.setattr(service, "resolve_input", _boom)
+        resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
+        assert resolved.request.input.path == snap_path
+
+    def test_resolve_validates_before_anything_else(self, snap_path: Path):
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        with pytest.raises(ValidationError):
+            resolve_dump_request(
+                DumpRequest(input=InputSpec(path=snap_path), lang="rust")
+            )
+
+    def test_execute_produces_the_same_snapshot_as_run_dump_request(
+        self, snap_path: Path
+    ):
+        from abicheck.service import run_dump_request
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        via_adapter = run_dump_request(request)
+        result = execute_dump_request(resolve_dump_request(request))
+        assert result.snapshot.library == via_adapter.library == "libfoo.so.1"
+        assert [f.name for f in result.snapshot.functions] == [
+            f.name for f in via_adapter.functions
+        ]
+
+    def test_run_dump_request_is_literally_the_composition(self, snap_path: Path):
+        """``run_dump_request`` cannot silently diverge from the two-step path."""
+        from abicheck import service
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        expected = execute_dump_request(resolve_dump_request(request)).snapshot
+        actual = service.run_dump_request(request)
+        assert actual.library == expected.library
+        assert [f.mangled for f in actual.functions] == [
+            f.mangled for f in expected.functions
+        ]
+
+    def test_depth_floor_raises_only_at_execute_time(self, snap_path: Path):
+        """A ``depth`` requested but not reached is an execution-time failure —
+        the resolve step has no snapshot yet to check it against."""
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_path), depth="build")
+        resolved = resolve_dump_request(request)  # must not raise
+        assert resolved.requested_depth == "build"
+        with pytest.raises(ValidationError, match="only reached 'binary'"):
+            execute_dump_request(resolved)
+
+    def test_resolved_request_reports_requested_depth_and_collect_mode(
+        self, snap_path: Path
+    ):
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        resolved = resolve_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path), depth="binary")
+        )
+        assert resolved.requested_depth == "binary"
+        assert resolved.collect_mode == "off"
+
+    def test_dump_result_effective_depth_matches_gated_source_label(
+        self, snap_path: Path
+    ):
+        from abicheck.cli_dump_helpers import _gated_source_label
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        result = execute_dump_request(resolve_dump_request(request))
+        assert result.effective_depth == _gated_source_label(
+            result.snapshot.build_source, result.snapshot
+        )
+
+    def test_dump_result_has_no_storage_field(self, snap_path: Path):
+        """Storage (writing to disk) stays CLI presentation layer, per this
+        module's own docstring — not something a resolve/execute split adds."""
+        from dataclasses import fields
+
+        from abicheck.service_dump_pipeline import DumpResult
+
+        assert "storage" not in {f.name for f in fields(DumpResult)}
+
+
 # ===================================================================
 # The Phase 5 gate, as an executable check
 # ===================================================================

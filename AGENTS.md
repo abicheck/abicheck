@@ -3917,8 +3917,12 @@ Once a root command genuinely clears the bar above, pick the right home:
   `service_dump_pipeline.run_dump_request` (or the per-input primitives it
   shares via `service_input_resolution.resolve_side_snapshot`), the way
   `compare`'s implicit-dump operand already does, with `dump --dry-run`
-  rendering the same `DumpResult` object the real run executes rather than a
-  separately-computed preview. Read `run_dump_request`, `resolve_side_snapshot`
+  rendering a real `ResolvedDumpRequest` object -- the resolve-only step
+  execution builds on, not the executed `DumpResult` itself (a `--dry-run`
+  that renders `DumpResult` would have to have already executed, which
+  contradicts its own never-executes contract; see the plan's PR 3A section,
+  "ResolvedDumpRequest and DumpResult are two distinct objects") -- rather
+  than a separately-computed preview. Read `run_dump_request`, `resolve_side_snapshot`
   and siblings, `perform_elf_dump` (1999 lines), `handle_non_elf_dump`, and
   `scan_engine._build_new_snapshot` in full before concluding this.
 
@@ -4025,6 +4029,41 @@ Once a root command genuinely clears the bar above, pick the right home:
   them, which is precisely what this file's own "known gaps over risky
   reactive patches" convention exists to avoid. See the plan doc's own PR C
   section for a status note recording the same scope.
+
+  **A second, narrow slice landed (2026-08-18): the first blocker's missing
+  primitive now exists, though nothing consumes it yet.** `service_dump_
+  pipeline.py` gained `ResolvedDumpRequest`/`DumpResult` (additive
+  dataclasses) and split `run_dump_request` into `resolve_dump_request()`
+  (validation + evidence resolution, no castxml/clang, no write) and
+  `execute_dump_request()` (the actual `resolve_side_snapshot` call, the
+  dependency walk, the depth floor). `run_dump_request` itself is now a
+  literal composition of the two (`execute_dump_request(resolve_dump_
+  request(request)).snapshot`) and keeps its existing signature and return
+  type unchanged — no breaking-API decision needed, confirmed by two Codex
+  review rounds on the design before it was coded (see the plan doc's PR C
+  section for what those rounds caught: `ResolvedDumpRequest` and
+  `DumpResult` must stay genuinely distinct objects — a `DumpResult`
+  carrying a real storage result has, by construction, already executed, so
+  it cannot also be what a read-only `--dry-run` renders; and the achieved
+  effective depth belongs on `DumpResult`, not `ResolvedDumpRequest`, since
+  `fold_dump_provenance_into_dict` derives it from the completed snapshot
+  and a resolve-only object has none to derive it from). **This closes only
+  the first blocker's missing capability, not the blocker itself**:
+  `cli_dump_helpers.render_dump_dry_run()` is still the independent,
+  hand-written second implementation it always was — migrating it to build
+  from a real `resolve_dump_request()` call is unattempted, and blockers 2
+  and 3 (the post-processing hooks, the pair-aware scan baseline decision)
+  are both still fully open, for the identical reasons already given above.
+  Verified via new direct tests on the split itself
+  (`tests/test_typed_dump_request.py::TestResolveExecuteDumpRequestSplit` —
+  the resolve step never reaches `resolve_input`, the two-step path
+  produces the identical snapshot `run_dump_request` does, the depth floor
+  raises only at execute time, and `DumpResult.effective_depth` matches
+  `_gated_source_label` computed the same way `fold_dump_provenance_into_dict`
+  already does), the full existing `test_typed_dump_request.py`/
+  `test_header_compile_context.py`/`test_clang_header_backend_integration.py`
+  suites (unchanged, still green), the full fast unit suite, and
+  `mypy`/`ruff` clean on both touched files.
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
