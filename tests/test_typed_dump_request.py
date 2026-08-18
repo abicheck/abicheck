@@ -517,6 +517,40 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.requested_depth == "binary"
         assert resolved.collect_mode == "off"
 
+    def test_resolved_request_headers_property_reads_from_evidence(
+        self, snap_path: Path
+    ):
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
+        assert resolved.headers == tuple(resolved.evidence.headers)
+
+    def test_execute_falls_back_to_conservative_label_on_gated_source_label_error(
+        self, snap_path: Path, monkeypatch
+    ):
+        """The ``except (TypeError, ValueError)`` around ``_gated_source_label``
+        in ``execute_dump_request`` is a defensive backstop for any failure
+        mode beyond the one ``_l4_source_abi_was_attempted`` itself now
+        handles -- still reachable if ``_gated_source_label`` raises for a
+        different reason."""
+        from abicheck import cli_dump_helpers
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        def _boom(*args, **kwargs):
+            raise ValueError("simulated unexpected failure")
+
+        # execute_dump_request imports _gated_source_label locally, re-reading
+        # the module attribute on every call -- patch it there, not on
+        # service_dump_pipeline itself.
+        monkeypatch.setattr(cli_dump_helpers, "_gated_source_label", _boom)
+        result = execute_dump_request(
+            resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
+        )
+        assert result.effective_depth in ("headers", "binary")
+
     def test_dump_result_effective_depth_matches_gated_source_label(
         self, snap_path: Path
     ):
