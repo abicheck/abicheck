@@ -870,8 +870,8 @@ pipelines a fourth time.
   >    "wrap the return in `DumpResult`" as requiring an explicit, coordinated
   >    breaking-API decision before any implementation. That framing itself
   >    was avoidable: `run_dump_request` is a documented, tested Tier-2 entry
-  >    point today (`docs/use/python-api.md`,
-  >    `docs/reference/python-api-reference.md`,
+  >    point today ([Python API guide](../../use/python-api.md),
+  >    [Python API reference](../../reference/python-api-reference.md),
   >    `tests/test_typed_dump_request.py`,
   >    `tests/test_header_compile_context.py`,
   >    `tests/test_clang_header_backend_integration.py`) returning a bare
