@@ -478,9 +478,16 @@ class TestRealAbicheckAnnotationsReachTheActionLog:
             "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
         }
+        # mutmut's trampoline reads pyproject.toml from the subprocess cwd.
+        # Keep action inputs in tmp_path, but run from the copied repo root so
+        # its mutation config remains available during clean-test collection.
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=RUN_SH.parent.parent,
+            check=False,
         )
         combined = result.stdout + result.stderr
         assert "::error" in combined, combined

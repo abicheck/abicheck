@@ -19,6 +19,21 @@ import tomllib
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG = REPO_ROOT / "pyproject.toml"
 
+# These define how the lane selects, runs, or interprets mutation coverage.
+# Their changes can affect every module, so a PR must retain the full scope.
+MUTATION_INFRASTRUCTURE_PATHS = frozenset(
+    {
+        ".github/workflows/mutation.yml",
+        "pyproject.toml",
+        "scripts/check_mutation_score.py",
+        "scripts/mutation_results.py",
+        "scripts/mutation_scope.py",
+        "tests/test_mutation_results.py",
+        "tests/test_mutation_scope.py",
+        "tests/test_mutation_workflow_contract.py",
+    }
+)
+
 
 def selected_modules(changed_paths: set[str], only_mutate: list[str]) -> list[str] | None:
     """Return a safe PR mutation subset, or ``None`` for the full scope.
@@ -28,6 +43,9 @@ def selected_modules(changed_paths: set[str], only_mutate: list[str]) -> list[st
     unclassified test keep the full scope: such a change can affect every
     module's measurement and must not be made cheaper by assumption.
     """
+    if changed_paths & MUTATION_INFRASTRUCTURE_PATHS:
+        return None
+
     selected = {path for path in changed_paths if path in only_mutate}
     known_test_paths = set()
     for module in only_mutate:
