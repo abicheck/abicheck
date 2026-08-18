@@ -386,7 +386,7 @@ def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
     if surface is not None and "compile_units_parsed" in surface.coverage:
         try:
             return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
     return not _layer_payload_empty(build_source, "L4")
 

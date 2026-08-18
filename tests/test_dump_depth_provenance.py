@@ -742,6 +742,29 @@ def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
     assert _l4_source_abi_was_attempted(pack) is True
 
 
+def test_l4_source_abi_was_attempted_false_for_infinite_count() -> None:
+    """``int(float("inf"))`` raises ``OverflowError``, not ``ValueError``/
+    ``TypeError`` -- a distinct exception type the earlier malformed-coverage
+    fix didn't catch. A non-finite ``compile_units_parsed`` survives this
+    repo's own JSON snapshot round trip (Python's ``json`` module accepts
+    ``Infinity``/``-Infinity`` by default), so this isn't a hypothetical
+    input (Codex review, fresh evidence)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_parsed"] = float("inf")
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+
+    assert _l4_source_abi_was_attempted(pack) is False
+
+
 def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth(
     tmp_path,
 ) -> None:

@@ -416,6 +416,6 @@ def execute_dump_request(
         # L3/build-context checks (Codex review, two rounds); this except
         # is a defensive backstop only, matching that same fallback label.
         effective_depth = _gated_source_label(snap.build_source, snap)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         effective_depth = "headers" if snap.from_headers else "binary"
     return DumpResult(resolved=resolved, snapshot=snap, effective_depth=effective_depth)

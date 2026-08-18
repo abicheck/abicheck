@@ -810,10 +810,22 @@ pipelines a fourth time.
   `DumpResult` states the executed outcome: the
   real snapshot and the *achieved* effective depth (only knowable from the
   completed snapshot) — see the "storage result" note two sentences below
-  for why it carries nothing more yet (a resolved compile context,
-  build-query decision, source/dependency scope, and diagnostics are all
-  still CLI-presentation-layer concerns `execute_dump_request()` doesn't
-  touch, not a promised future field of this object).
+  for why it carries nothing more yet. **Corrected ownership (CodeRabbit
+  review, fresh evidence — an earlier draft of this sentence called the
+  omitted fields "CLI-presentation-layer concerns `execute_dump_request()`
+  doesn't touch", which overstates the gap):** the resolved compile
+  context and the dependency scope genuinely *are* computed inside
+  `execute_dump_request()`'s own call chain — `resolve_side_snapshot`
+  performs the P0.3 L3→L2 compile-context fold internally (see
+  `service_input_resolution.py`'s `_seeded_includes_and_compile_context`),
+  and `populate_side_dependency_info` runs directly in
+  `execute_dump_request()` when `follow_dependencies` is set. The gap is
+  narrower than "not touched": these values are computed but not
+  *surfaced* as `DumpResult` fields, an output-shape gap, not a
+  processing one. Only the ADR-039 build-context collector's own
+  diagnostics are a genuine CLI-layer concern here — those post-processing
+  passes live in `perform_elf_dump` alone, which `execute_dump_request`
+  does not call (blocker 2 above).
   Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
   `--dry-run` never reaches that step. **The storage result is not part of
   the `DumpResult` this slice's `execute_dump_request()` produces (Codex
@@ -944,9 +956,17 @@ pipelines a fourth time.
   >    `ResolvedDumpRequest` carries `header_backend`/`effective_header_
   >    backend` (a reporting-only projection; see its own comment for why
   >    it's never fed back into execution) but no resolved compile context
-  >    and no build-query decision — those stay CLI-presentation-layer
-  >    concerns `resolve_dump_request()` doesn't touch, same as
-  >    `DumpResult`'s own field list two sections above this one.** — and
+  >    and no build-query decision — `resolve_dump_request()` itself
+  >    genuinely doesn't touch either (the L3→L2 fold and any build-query
+  >    execution only happen later, inside `resolve_side_snapshot`, which
+  >    only `execute_dump_request()` calls), so this omission is correctly
+  >    scoped to this resolve-only step. **Not a CLI-presentation-layer
+  >    claim (CodeRabbit review, fresh evidence — corrected alongside the
+  >    identical overstatement in `DumpResult`'s own field list two
+  >    sections above this one): both values are computed inside this same
+  >    dump execution pipeline by the time `execute_dump_request()`
+  >    finishes, just not surfaced as a field on either typed object yet.**
+  >    — and
   >    a separate executor (e.g. `execute_dump_request`,
   >    taking a `ResolvedDumpRequest`) that produces `DumpResult` with the
   >    real snapshot and the *achieved* effective depth (a storage field is
