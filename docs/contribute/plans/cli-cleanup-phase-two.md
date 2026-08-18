@@ -852,9 +852,12 @@ pipelines a fourth time.
   > **The rest of PR 3A — routing `perform_elf_dump`/`handle_non_elf_dump`
   > and `scan_engine._build_new_snapshot` themselves through
   > `run_dump_request`, and making `dump --dry-run` render a real
-  > `DumpResult` — was not attempted**, for three concrete reasons found by
-  > reading the code, not assumed: (1) `dump --dry-run`
-  > (`render_dump_dry_run`) is today a hand-written *second*
+  > `ResolvedDumpRequest` (Codex review, fresh evidence — an earlier
+  > draft of this note named `DumpResult` here, which the correction two
+  > sections above this one already retracted: `--dry-run` renders the
+  > resolve-only object, never the executed one) — was not attempted**, for
+  > three concrete reasons found by reading the code, not assumed: (1) `dump
+  > --dry-run` (`render_dump_dry_run`) is today a hand-written *second*
   > implementation, not a dry pass of the same resolver — `run_dump_request`
   > has no "resolve without executing" mode to render from yet; (2)
   > `perform_elf_dump` runs three post-processing passes after the primary
@@ -933,9 +936,18 @@ pipelines a fourth time.
   >    report. The correct shape keeps that split: a resolve-only sibling
   >    (e.g. `resolve_dump_request`) returning `ResolvedDumpRequest` — only
   >    what resolution can determine without a snapshot (requested depth,
-  >    effective *collect mode*, resolved compile context, backend, the
-  >    build-query decision), no snapshot, no I/O beyond what resolution
-  >    already does — and a separate executor (e.g. `execute_dump_request`,
+  >    effective *collect mode*, resolved header backend), no snapshot, no
+  >    I/O beyond what resolution already does. **The landed field set is
+  >    narrower than this sketch's own "resolved compile context, backend,
+  >    the build-query decision" (Codex review, fresh evidence — this
+  >    sketch predates the actual implementation and overclaimed its scope):
+  >    `ResolvedDumpRequest` carries `header_backend`/`effective_header_
+  >    backend` (a reporting-only projection; see its own comment for why
+  >    it's never fed back into execution) but no resolved compile context
+  >    and no build-query decision — those stay CLI-presentation-layer
+  >    concerns `resolve_dump_request()` doesn't touch, same as
+  >    `DumpResult`'s own field list two sections above this one.** — and
+  >    a separate executor (e.g. `execute_dump_request`,
   >    taking a `ResolvedDumpRequest`) that produces `DumpResult` with the
   >    real snapshot and the *achieved* effective depth (a storage field is
   >    a separate, later addition — see the "storage result" correction
