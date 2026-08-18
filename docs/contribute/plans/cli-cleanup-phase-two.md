@@ -842,51 +842,62 @@ pipelines a fourth time.
   > out at this level of detail:
   >
   > 1. **`_build_new_snapshot` cannot call `resolve_side_snapshot` as-is,
-  >    independent of the pair-aware baseline decision (finding 3 above).**
-  >    `resolve_side_snapshot` takes a typed `InputSpec`/`SideEvidence` pair
-  >    (themselves built by `service_compare_evidence` resolution) and
-  >    returns a bare `AbiSnapshot` — the caller never sees the seeded
-  >    `includes` or the folded `compile_context` `resolve_side_snapshot`
-  >    computed internally. `_build_new_snapshot` needs exactly those two
-  >    values back (its own docstring: "the effective compile context
-  >    carries the P0.3 L3→L2 fold's own merged result... so a `--baseline`
-  >    compare can reuse the same extraction recipe"), and its caller,
-  >    `run_scan_core`, forwards them on to `_run_baseline_compare`'s
-  >    side-aware reuse check. Nothing about this is `--against`-specific —
-  >    it would apply to a `--baseline`-free scan too — so it is a real gap
-  >    in `resolve_side_snapshot`'s own return shape (it would need to widen
-  >    to expose `includes`/`compile_context` alongside the snapshot for
-  >    every caller, `compare`'s implicit-dump path included), not only a
-  >    scan-side problem.
-  > 2. **`run_dump_request`'s return type cannot change to a `DumpResult`
-  >    wrapper without a real, coordinated breaking-API step first.** It is
-  >    a documented, tested Tier-2 entry point today
-  >    (`docs/use/python-api.md`, `docs/reference/python-api-reference.md`,
+  >    independent of the pair-aware baseline decision (finding 3 above) —
+  >    and this gap is scoped narrower than an earlier draft of this note
+  >    claimed (Codex review, fresh evidence).** `resolve_side_snapshot`
+  >    takes a typed `InputSpec`/`SideEvidence` pair (themselves built by
+  >    `service_compare_evidence` resolution) and returns a bare
+  >    `AbiSnapshot` — the caller never sees the seeded `includes` or the
+  >    folded `compile_context` `resolve_side_snapshot` computed internally.
+  >    `_build_new_snapshot` returns exactly those two values
+  >    (`effective_includes`/`effective_compile_context`) for its caller,
+  >    `run_scan_core`, to forward on — but checked directly, `run_scan_core`
+  >    only ever reads `eff_includes`/`eff_compile_context` inside its
+  >    `if baseline is not None and scan_mode is not ScanMode.AUDIT:` block,
+  >    feeding `_run_baseline_compare`'s side-aware reuse check
+  >    (`scan_engine.py` ~1253–1329). A baseline-free scan never consumes
+  >    either value — an earlier draft of this note claimed otherwise, which
+  >    was wrong. So the return-shape gap is real, but it belongs entirely to
+  >    the pair-aware baseline path this section's finding 3 already names,
+  >    not to `resolve_side_snapshot`'s general contract — closing it does
+  >    not by itself require widening what every caller (`compare`'s
+  >    implicit-dump path included) gets back; a scan-specific extension
+  >    point (or keeping `_build_new_snapshot`'s own resolution separate for
+  >    this one reason) is the narrower, correctly-scoped fix.
+  > 2. **`run_dump_request`'s return type does not need to change to move
+  >    forward — add an additive sibling instead of breaking the existing
+  >    entry point (Codex review).** An earlier draft of this note framed
+  >    "wrap the return in `DumpResult`" as requiring an explicit, coordinated
+  >    breaking-API decision before any implementation. That framing itself
+  >    was avoidable: `run_dump_request` is a documented, tested Tier-2 entry
+  >    point today (`docs/use/python-api.md`,
+  >    `docs/reference/python-api-reference.md`,
   >    `tests/test_typed_dump_request.py`,
   >    `tests/test_header_compile_context.py`,
   >    `tests/test_clang_header_backend_integration.py`) returning a bare
-  >    `AbiSnapshot`; wrapping it in a `DumpResult` — which "PR C" itself
-  >    requires so `--dry-run` can render the same object the real run
-  >    produces — is a public-API break for every existing caller, not an
-  >    additive change like the two `service_input_resolution.py` helpers
-  >    landed so far. It needs its own explicit sign-off the way any other
-  >    public-API signature change does (root `AGENTS.md`: "changing their
-  >    public surface is a breaking change to the Python API — coordinate
-  >    it"), plus a coordinated update to both docs pages and all three test
-  >    modules, before any code lands — not something to fold into a larger
-  >    PR C change silently.
+  >    `AbiSnapshot`, and nothing about giving `dump --dry-run` a real
+  >    `DumpResult` to render requires changing what that function returns.
+  >    The correct shape is a new sibling (e.g. `resolve_dump_request`)
+  >    that returns the richer `DumpResult` wrapper (snapshot, requested vs.
+  >    effective depth, resolved compile context, backend, storage result),
+  >    with `run_dump_request` kept as-is — either unchanged or reimplemented
+  >    as a thin adapter (`resolve_dump_request(request).snapshot`) — so no
+  >    existing caller, doc page, or test needs to move at all. This is the
+  >    plan's required route now, not merely one option among several.
   >
   > Net: the three blockers this section already named are confirmed, not
-  > merely asserted — narrowing them further needs (1) a `resolve_side_
-  > snapshot` return-shape widening (its own small, explicit design: what it
-  > returns, to whom, and whether `compare`'s pair-resolution path adopts
-  > the same shape) and (2) an explicit decision to break `run_dump_request`'s
-  > return type, taken before any implementation, not as a side effect of
-  > implementing the rest of PR C. Still not attempted here, for the same
-  > reason as before: each is a real, separate, reviewable design decision,
-  > and this file's own "known gaps over risky reactive patches" convention
-  > says do that as its own dedicated pass, not as a rushed follow-on to an
-  > already-large investigation.
+  > merely asserted, and both are narrower than the first pass through this
+  > note stated. (1) needs a small, scoped extension to the scan baseline
+  > path specifically (not a `resolve_side_snapshot`-wide widening). (2)
+  > needs a new, additive `DumpResult`-returning function, not a breaking
+  > change to `run_dump_request` — removing the coordinated-break blocker
+  > entirely for that half. Still not attempted here: each is a real,
+  > separate, reviewable design (what the scan-specific extension point
+  > looks like; the new function's exact signature and where the CLI's
+  > `--dry-run` path starts calling it), and this file's own "known gaps
+  > over risky reactive patches" convention says do that as its own
+  > dedicated pass, not as a rushed follow-on to an already-large
+  > investigation.
 - **PR 3B — build-context completeness (the review's PR D). Implemented.**
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
