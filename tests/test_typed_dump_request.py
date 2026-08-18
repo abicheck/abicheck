@@ -591,6 +591,27 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.header_backend == "auto"
         assert resolved.effective_header_backend == "clang"
 
+    def test_effective_header_backend_preserves_pinned_castxml_error_path(
+        self, snap_path: Path
+    ):
+        """An *explicit* ``--ast-frontend castxml`` combined with a non-"host"
+        ``frontend_context`` doesn't route to clang -- it raises
+        ``AstContextMissingError`` at execution
+        (``dumper._resolve_single_ast_backend``). The reporting projection
+        must not claim "clang" will run in that case (Codex review, two
+        rounds -- the first fix applied the clang override unconditionally,
+        missing this pinned-castxml case)."""
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        resolved = resolve_dump_request(
+            DumpRequest(
+                input=InputSpec(path=snap_path),
+                frontend="castxml",
+                frontend_context="device",
+            )
+        )
+        assert resolved.effective_header_backend == "castxml"
+
     def test_execute_forwards_the_bare_header_backend_not_the_reporting_projection(
         self, snap_path: Path, monkeypatch
     ):

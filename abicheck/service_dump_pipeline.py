@@ -47,7 +47,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .errors import ValidationError
+from .errors import AstContextMissingError, ValidationError
 from .service_input_resolution import (
     enforce_requested_depth,
     is_raw_source_tree,
@@ -288,16 +288,35 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     # clang unconditionally (`if resolved == "clang" or frontend_context !=
     # "host": return _run_clang()`), regardless of what the backend itself
     # resolved to -- mirror that here so this reporting field doesn't claim
-    # castxml for a request that will always run clang (Codex review, fresh
-    # evidence). The one case this doesn't cover -- an *explicit* `--ast-
-    # frontend castxml` with a non-host context, which raises
-    # AstContextMissingError at execution -- is an error path this
-    # best-effort preview isn't expected to predict, same as elsewhere.
+    # castxml for a request that will always run clang. But an *explicit*
+    # `--ast-frontend castxml` (or an env-pinned one) combined with a
+    # non-host context doesn't route to clang at all -- it raises
+    # AstContextMissingError at execution, so claiming "clang" there would
+    # be equally wrong in the other direction (Codex review, two rounds:
+    # the first fix applied the clang override unconditionally, missing
+    # this pinned-castxml case entirely). Reuse dumper's own resolver to
+    # tell the two apart without duplicating its pin/env logic; on the
+    # raising path, leave whatever `_resolve_header_backend` already
+    # produced above -- this best-effort preview never raises.
     if (
         evidence.compile is not None
         and evidence.compile.frontend_context.lower() != "host"
     ):
-        effective_header_backend = "clang"
+        from .dumper import _resolve_single_ast_backend
+
+        requested = (
+            evidence.compile.frontend
+            if evidence.compile.frontend.lower() != "auto"
+            else header_backend
+        )
+        try:
+            _resolve_single_ast_backend(
+                requested, evidence.compile.frontend_context.lower()
+            )
+        except (AstContextMissingError, ValidationError):
+            pass
+        else:
+            effective_header_backend = "clang"
 
     # `headers` doubles as the public-header set for provenance tagging and
     # must be split into files and directories before tagging (an unsplit
