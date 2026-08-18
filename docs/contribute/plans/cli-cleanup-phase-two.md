@@ -888,12 +888,23 @@ pipelines a fourth time.
   >    renders without either violating the dry-run contract (never
   >    executes) or leaving the resolve-only path with no snapshot to
   >    report. The correct shape keeps that split: a resolve-only sibling
-  >    (e.g. `resolve_dump_request`) returning `ResolvedDumpRequest` — the
-  >    same fields `--dry-run` already reports (requested vs. effective
-  >    depth, resolved compile context, backend, build-query decision), no
-  >    snapshot, no I/O beyond what resolution already does — and a separate
-  >    executor (e.g. `execute_dump_request`, taking a `ResolvedDumpRequest`)
-  >    that produces `DumpResult` with the real snapshot and storage result.
+  >    (e.g. `resolve_dump_request`) returning `ResolvedDumpRequest` — only
+  >    what resolution can determine without a snapshot (requested depth,
+  >    effective *collect mode*, resolved compile context, backend, the
+  >    build-query decision), no snapshot, no I/O beyond what resolution
+  >    already does — and a separate executor (e.g. `execute_dump_request`,
+  >    taking a `ResolvedDumpRequest`) that produces `DumpResult` with the
+  >    real snapshot, the *achieved* effective depth, and the storage result.
+  >    **`effective depth` (as opposed to effective collect mode) belongs on
+  >    `DumpResult`, not `ResolvedDumpRequest` (Codex review, fresh
+  >    evidence)**: today's `fold_dump_provenance_into_dict` derives it from
+  >    the completed snapshot via `_gated_source_label(snap.build_source,
+  >    snap)` — there is no snapshot yet at resolve time, so a resolve-only
+  >    object claiming to report it would have to guess, and a guess that
+  >    disagrees with the real run defeats the entire point of rendering
+  >    `--dry-run` from a real resolved object. `--dry-run` therefore reports
+  >    requested depth (a known input) and collect mode (a resolvable
+  >    decision), never a predicted achieved depth.
   >    `run_dump_request` stays as-is — either unchanged, or reimplemented as
   >    a thin adapter over the executor (`execute_dump_request(resolve_dump_
   >    request(request)).snapshot`), never over the resolve-only step alone
