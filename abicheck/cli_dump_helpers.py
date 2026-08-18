@@ -385,18 +385,7 @@ def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
         return False
     surface = build_source.source_abi
     if surface is not None and "compile_units_parsed" in surface.coverage:
-        raw = surface.coverage.get("compile_units_parsed", 0) or 0
-        try:
-            return int(raw) > 0
-        except (TypeError, ValueError):
-            # A forward-compatible or hand-edited snapshot can carry a
-            # non-numeric value here -- degrade to "not attempted" rather
-            # than crash (Codex review, fresh evidence: this function is now
-            # reached unconditionally by execute_dump_request's
-            # DumpResult.effective_depth computation, not just gated behind
-            # an explicit --depth request the way check_requested_depth_
-            # satisfied's own call already was).
-            return False
+        return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
     return not _layer_payload_empty(build_source, "L4")
 
 

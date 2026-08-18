@@ -720,43 +720,23 @@ def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> No
     assert _l4_source_abi_was_attempted(pack) is True
 
 
-def test_l4_source_abi_was_attempted_degrades_on_non_numeric_compile_units_parsed() -> None:
-    """Codex review, fresh evidence: a forward-compatible or hand-edited
-    snapshot can carry a non-numeric ``compile_units_parsed`` — this must
-    degrade to "not attempted" rather than raise, since this function is now
-    reached unconditionally by ``execute_dump_request``'s
-    ``DumpResult.effective_depth`` computation (via ``_gated_source_label``),
-    not just gated behind an explicit ``--depth`` request the way
-    ``check_requested_depth_satisfied``'s own call already was — a plain
-    ``run_dump_request(DumpRequest(...))`` with no ``depth`` at all must not
-    start crashing on input it previously loaded fine."""
-    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
-
-    surface = SourceAbiSurface()
-    surface.coverage["compile_units_parsed"] = "unknown"  # type: ignore[assignment]
-    pack = BuildSourcePack(
-        root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
-        source_abi=surface,
-    )
-    pack.manifest.coverage = [
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL),
-    ]
-
-    assert _l4_source_abi_was_attempted(pack) is False
-
-
 def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth(
     tmp_path,
 ) -> None:
-    """End-to-end: ``run_dump_request``/``execute_dump_request`` must not
-    raise on a snapshot whose embedded build-source pack carries a malformed
-    ``compile_units_parsed`` when no ``--depth`` was requested at all — the
-    real chokepoint the finding above names (Codex review)."""
+    """``execute_dump_request`` must not raise on a snapshot whose embedded
+    build-source pack carries a malformed ``compile_units_parsed`` when no
+    ``--depth`` was requested at all (Codex review, fresh evidence).
+
+    ``_l4_source_abi_was_attempted`` (``cli_dump_helpers.py``) still raises
+    ``ValueError`` on this input, unchanged — its own pre-existing caller,
+    ``check_requested_depth_satisfied``, only ever reaches it behind an
+    explicit ``--depth``, so that latent fragility predates this PR and is
+    out of scope here. What's new is that ``execute_dump_request`` now calls
+    the same chain *unconditionally* (via ``_gated_source_label``, to
+    compute ``DumpResult.effective_depth``) — so it must not let that
+    pre-existing fragility turn into a *new* crash on the default,
+    depth-unspecified path; it degrades to the same conservative label
+    ``_gated_source_label`` itself falls back to."""
     from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack

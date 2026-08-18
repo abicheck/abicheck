@@ -111,6 +111,18 @@ class ResolvedDumpRequest:
     lang: str
     lang_explicit: bool
     header_backend: str
+    # The *concrete* header-AST backend execution will actually use, pinned
+    # once at resolution time -- not a lazily-recomputed property (Codex
+    # review, two rounds: the first fix made this a `@property`, which still
+    # re-read ABICHECK_AST_FRONTEND live on every access, including at
+    # execute_dump_request's own call site -- pinning requires storing the
+    # value, not just moving *where* it's read). `header_backend` alone is
+    # not this: service.py's own eff_backend computation gives an explicit
+    # `evidence.compile.frontend` precedence over the bare `header_backend`
+    # arg, and resolves "auto" to a concrete backend either way -- so a
+    # dry-run render of `header_backend` alone can name a different frontend
+    # than execution resolves to if the environment changes in between.
+    effective_header_backend: str
     fmt: str | None
     debug_format: str | None
     requested_depth: str | None
@@ -127,24 +139,6 @@ class ResolvedDumpRequest:
     def headers(self) -> tuple[Path, ...]:
         """The resolved public-header set (files only; see ``public_header_dirs``)."""
         return tuple(self.evidence.headers)
-
-    @property
-    def effective_header_backend(self) -> str:
-        """The *concrete* header-AST backend execution will actually use.
-
-        ``header_backend`` alone is not this (Codex review, fresh evidence):
-        ``service.py``'s own ``eff_backend`` computation gives an explicit
-        ``evidence.compile.frontend`` (e.g. from ``ABICHECK_AST_FRONTEND`` or
-        a per-input ``--compile-frontend`` override) precedence over the bare
-        ``header_backend`` arg, and resolves ``"auto"`` to a concrete backend
-        either way — so a dry-run render of ``header_backend`` alone can name
-        a different frontend than execution resolves to. Computed the
-        identical way execution does, via
-        :func:`~abicheck.service_compare_evidence.effective_frontend`.
-        """
-        from .service_compare_evidence import effective_frontend
-
-        return effective_frontend(self.evidence.compile, self.header_backend)
 
 
 @dataclass(frozen=True)
@@ -275,6 +269,9 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
 
     evidence = _sce.resolve_dump_request_evidence(request)
     _reject_unsupported_frontends(request, header_backend, evidence)
+    # Pinned once, here -- not a lazily-recomputed property (see
+    # ResolvedDumpRequest.effective_header_backend's own comment).
+    effective_header_backend = _sce.effective_frontend(evidence.compile, header_backend)
 
     # `headers` doubles as the public-header set for provenance tagging and
     # must be split into files and directories before tagging (an unsplit
@@ -292,6 +289,7 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         lang=lang,
         lang_explicit=request.lang_explicit,
         header_backend=header_backend,
+        effective_header_backend=effective_header_backend,
         fmt=fmt,
         debug_format=debug_format,
         requested_depth=request.depth,
@@ -360,5 +358,17 @@ def execute_dump_request(
         )
 
     enforce_requested_depth(resolved.requested_depth, (("input", snap),))
-    effective_depth = _gated_source_label(snap.build_source, snap)
+    try:
+        effective_depth = _gated_source_label(snap.build_source, snap)
+    except (TypeError, ValueError):
+        # _gated_source_label -> _l4_source_abi_was_attempted does
+        # int(coverage["compile_units_parsed"]), which raises on a
+        # non-numeric value from a forward-compatible/hand-edited snapshot.
+        # This call is new here -- unlike check_requested_depth_satisfied's
+        # own call, it runs unconditionally, not just behind an explicit
+        # --depth -- so a plain run_dump_request() with no depth at all
+        # must not start crashing on input it previously loaded fine (Codex
+        # review, fresh evidence). Degrade to the same conservative label
+        # _gated_source_label itself falls back to when nothing else applies.
+        effective_depth = "headers" if snap.from_headers else "binary"
     return DumpResult(resolved=resolved, snapshot=snap, effective_depth=effective_depth)
