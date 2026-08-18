@@ -790,8 +790,24 @@ pipelines a fourth time.
   `ResolvedDumpRequest` states the requested depth, effective collect mode,
   resolved header backend, and detected binary format — everything
   resolvable without invoking castxml/clang or writing anything — and is
-  what `--dry-run` renders, so the printed plan and what execution actually
-  resolves cannot disagree. `DumpResult` states the executed outcome: the
+  what `--dry-run` would render. **Not a hard parity guarantee for the
+  backend field specifically (Codex review, fresh evidence — an earlier
+  draft of this sentence claimed the printed and executed backends "cannot
+  disagree", which the landed code's own class documentation on
+  `effective_header_backend` explicitly disclaims):** `execute_dump_request()`
+  deliberately forwards the *unresolved* `header_backend` (e.g. still the
+  literal `"auto"`) to preserve `dumper`'s own runtime `auto`-specific
+  routing (non-host `frontend_context`, the CastXML-to-Clang fallback) —
+  see that field's own comment for why pre-resolving it before execution is
+  a real regression, not a pin. `effective_header_backend` is therefore a
+  best-effort projection of what resolution currently favors, not what
+  execution is bound to use, and can still diverge if the environment
+  changes between resolve and execute or if the unpinned-fallback path
+  fires — the same class of imprecision the field's own docstring already
+  accepts. `requested_depth`/`collect_mode`/`fmt` carry no such caveat: none
+  of them are re-resolved at execution time the way the backend is.
+
+  `DumpResult` states the executed outcome: the
   real snapshot and the *achieved* effective depth (only knowable from the
   completed snapshot) — see the "storage result" note two sentences below
   for why it carries nothing more yet (a resolved compile context,
