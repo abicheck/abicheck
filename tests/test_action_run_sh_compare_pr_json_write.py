@@ -254,9 +254,16 @@ class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
             "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
         }
+        # The mutmut trampoline discovers its config from the subprocess cwd.
+        # Inputs are absolute, so use the copied repository root rather than
+        # tmp_path when this real action test runs under mutation collection.
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=RUN_SH.parent.parent,
+            check=False,
         )
         # run.sh's own fail-on-breaking wrapper maps a real ABI break to
         # exit 1 (its own step-failure convention), not abicheck's raw
