@@ -375,16 +375,14 @@ def execute_dump_request(
 
     enforce_requested_depth(resolved.requested_depth, (("input", snap),))
     try:
-        effective_depth = _gated_source_label(snap.build_source, snap)
-    except (TypeError, ValueError):
-        # _gated_source_label -> _l4_source_abi_was_attempted does
-        # int(coverage["compile_units_parsed"]), which raises on a
-        # non-numeric value from a forward-compatible/hand-edited snapshot.
         # This call is new here -- unlike check_requested_depth_satisfied's
         # own call, it runs unconditionally, not just behind an explicit
-        # --depth -- so a plain run_dump_request() with no depth at all
-        # must not start crashing on input it previously loaded fine (Codex
-        # review, fresh evidence). Degrade to the same conservative label
-        # _gated_source_label itself falls back to when nothing else applies.
+        # --depth. _l4_source_abi_was_attempted() itself now degrades a
+        # non-numeric compile_units_parsed to "not attempted" rather than
+        # raising, so _gated_source_label still falls through to its own
+        # L3/build-context checks (Codex review, two rounds); this except
+        # is a defensive backstop only, matching that same fallback label.
+        effective_depth = _gated_source_label(snap.build_source, snap)
+    except (TypeError, ValueError):
         effective_depth = "headers" if snap.from_headers else "binary"
     return DumpResult(resolved=resolved, snapshot=snap, effective_depth=effective_depth)

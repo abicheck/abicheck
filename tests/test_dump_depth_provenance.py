@@ -727,16 +727,15 @@ def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth
     build-source pack carries a malformed ``compile_units_parsed`` when no
     ``--depth`` was requested at all (Codex review, fresh evidence).
 
-    ``_l4_source_abi_was_attempted`` (``cli_dump_helpers.py``) still raises
-    ``ValueError`` on this input, unchanged — its own pre-existing caller,
-    ``check_requested_depth_satisfied``, only ever reaches it behind an
-    explicit ``--depth``, so that latent fragility predates this PR and is
-    out of scope here. What's new is that ``execute_dump_request`` now calls
-    the same chain *unconditionally* (via ``_gated_source_label``, to
-    compute ``DumpResult.effective_depth``) — so it must not let that
-    pre-existing fragility turn into a *new* crash on the default,
-    depth-unspecified path; it degrades to the same conservative label
-    ``_gated_source_label`` itself falls back to."""
+    ``_l4_source_abi_was_attempted`` (``cli_dump_helpers.py``) now degrades a
+    non-numeric ``compile_units_parsed`` to "not attempted" instead of
+    raising, so ``_gated_source_label`` still falls through to its own real
+    L3-build-evidence check rather than the whole depth-label computation
+    aborting and downgrading to the conservative "headers"/"binary" fallback
+    (a second, later Codex round: the first fix only prevented the crash,
+    it didn't preserve the lower-tier evidence a completed
+    ``_gated_source_label`` call would have found). This pack carries real
+    L3 ``compile_units`` evidence, so the correct label is "build"."""
     from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
@@ -767,3 +766,7 @@ def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth
     request = DumpRequest(input=InputSpec(path=snap_path))
     result = execute_dump_request(resolve_dump_request(request))  # must not raise
     assert result.snapshot.library == "libfoo.so.1"
+    # Real L3 evidence (compile_units) must not be lost behind the
+    # malformed L4 field -- the label must be "build", not the
+    # last-resort "headers"/"binary" fallback (Codex review).
+    assert result.effective_depth == "build"
