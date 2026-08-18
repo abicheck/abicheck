@@ -832,6 +832,61 @@ pipelines a fourth time.
   > forcing any of the three under continued session pressure risks
   > reopening one of the already-fixed findings this same area has needed
   > many prior review rounds to reach.
+  >
+  > **Follow-up investigation (2026-08-18), no code change.** Re-read
+  > `resolve_side_snapshot`/`_seeded_includes_and_compile_context`
+  > (`service_input_resolution.py`) against `scan_engine._build_new_snapshot`
+  > and `run_dump_request`'s existing callers directly, to check whether any
+  > of the three blockers above could be narrowed safely in one more pass.
+  > Two additional, concrete obstacles confirmed, neither previously spelled
+  > out at this level of detail:
+  >
+  > 1. **`_build_new_snapshot` cannot call `resolve_side_snapshot` as-is,
+  >    independent of the pair-aware baseline decision (finding 3 above).**
+  >    `resolve_side_snapshot` takes a typed `InputSpec`/`SideEvidence` pair
+  >    (themselves built by `service_compare_evidence` resolution) and
+  >    returns a bare `AbiSnapshot` — the caller never sees the seeded
+  >    `includes` or the folded `compile_context` `resolve_side_snapshot`
+  >    computed internally. `_build_new_snapshot` needs exactly those two
+  >    values back (its own docstring: "the effective compile context
+  >    carries the P0.3 L3→L2 fold's own merged result... so a `--baseline`
+  >    compare can reuse the same extraction recipe"), and its caller,
+  >    `run_scan_core`, forwards them on to `_run_baseline_compare`'s
+  >    side-aware reuse check. Nothing about this is `--against`-specific —
+  >    it would apply to a `--baseline`-free scan too — so it is a real gap
+  >    in `resolve_side_snapshot`'s own return shape (it would need to widen
+  >    to expose `includes`/`compile_context` alongside the snapshot for
+  >    every caller, `compare`'s implicit-dump path included), not only a
+  >    scan-side problem.
+  > 2. **`run_dump_request`'s return type cannot change to a `DumpResult`
+  >    wrapper without a real, coordinated breaking-API step first.** It is
+  >    a documented, tested Tier-2 entry point today
+  >    (`docs/use/python-api.md`, `docs/reference/python-api-reference.md`,
+  >    `tests/test_typed_dump_request.py`,
+  >    `tests/test_header_compile_context.py`,
+  >    `tests/test_clang_header_backend_integration.py`) returning a bare
+  >    `AbiSnapshot`; wrapping it in a `DumpResult` — which "PR C" itself
+  >    requires so `--dry-run` can render the same object the real run
+  >    produces — is a public-API break for every existing caller, not an
+  >    additive change like the two `service_input_resolution.py` helpers
+  >    landed so far. It needs its own explicit sign-off the way any other
+  >    public-API signature change does (root `AGENTS.md`: "changing their
+  >    public surface is a breaking change to the Python API — coordinate
+  >    it"), plus a coordinated update to both docs pages and all three test
+  >    modules, before any code lands — not something to fold into a larger
+  >    PR C change silently.
+  >
+  > Net: the three blockers this section already named are confirmed, not
+  > merely asserted — narrowing them further needs (1) a `resolve_side_
+  > snapshot` return-shape widening (its own small, explicit design: what it
+  > returns, to whom, and whether `compare`'s pair-resolution path adopts
+  > the same shape) and (2) an explicit decision to break `run_dump_request`'s
+  > return type, taken before any implementation, not as a side effect of
+  > implementing the rest of PR C. Still not attempted here, for the same
+  > reason as before: each is a real, separate, reviewable design decision,
+  > and this file's own "known gaps over risky reactive patches" convention
+  > says do that as its own dedicated pass, not as a rushed follow-on to an
+  > already-large investigation.
 - **PR 3B — build-context completeness (the review's PR D). Implemented.**
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
