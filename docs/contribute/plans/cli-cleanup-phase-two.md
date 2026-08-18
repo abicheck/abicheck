@@ -865,32 +865,49 @@ pipelines a fourth time.
   >    point (or keeping `_build_new_snapshot`'s own resolution separate for
   >    this one reason) is the narrower, correctly-scoped fix.
   > 2. **`run_dump_request`'s return type does not need to change to move
-  >    forward — add an additive sibling instead of breaking the existing
-  >    entry point (Codex review).** An earlier draft of this note framed
-  >    "wrap the return in `DumpResult`" as requiring an explicit, coordinated
-  >    breaking-API decision before any implementation. That framing itself
-  >    was avoidable: `run_dump_request` is a documented, tested Tier-2 entry
-  >    point today ([Python API guide](../../use/python-api.md),
+  >    forward — add additive siblings instead of breaking the existing
+  >    entry point, and keep the resolve-only and execute steps genuinely
+  >    separate (Codex review, two rounds).** An earlier draft of this note
+  >    framed "wrap the return in `DumpResult`" as requiring an explicit,
+  >    coordinated breaking-API decision before any implementation. That
+  >    framing itself was avoidable: `run_dump_request` is a documented,
+  >    tested Tier-2 entry point today ([Python API guide](../../use/python-api.md),
   >    [Python API reference](../../reference/python-api-reference.md),
   >    `tests/test_typed_dump_request.py`,
   >    `tests/test_header_compile_context.py`,
   >    `tests/test_clang_header_backend_integration.py`) returning a bare
   >    `AbiSnapshot`, and nothing about giving `dump --dry-run` a real
-  >    `DumpResult` to render requires changing what that function returns.
-  >    The correct shape is a new sibling (e.g. `resolve_dump_request`)
-  >    that returns the richer `DumpResult` wrapper (snapshot, requested vs.
-  >    effective depth, resolved compile context, backend, storage result),
-  >    with `run_dump_request` kept as-is — either unchanged or reimplemented
-  >    as a thin adapter (`resolve_dump_request(request).snapshot`) — so no
-  >    existing caller, doc page, or test needs to move at all. This is the
-  >    plan's required route now, not merely one option among several.
+  >    resolved object to render requires changing what that function
+  >    returns. A first fix proposed one new sibling returning `DumpResult`
+  >    (snapshot + storage result) and reused it for both the adapter and
+  >    the dry-run render — but that conflates two things this section's own
+  >    original design already keeps apart ("Click parsing → `DumpRequest` →
+  >    `ResolvedDumpRequest` → dry-run-or-execution → `DumpResult`"): a
+  >    `DumpResult` carrying a real storage result has, by construction,
+  >    already executed, so it cannot also be what a read-only `--dry-run`
+  >    renders without either violating the dry-run contract (never
+  >    executes) or leaving the resolve-only path with no snapshot to
+  >    report. The correct shape keeps that split: a resolve-only sibling
+  >    (e.g. `resolve_dump_request`) returning `ResolvedDumpRequest` — the
+  >    same fields `--dry-run` already reports (requested vs. effective
+  >    depth, resolved compile context, backend, build-query decision), no
+  >    snapshot, no I/O beyond what resolution already does — and a separate
+  >    executor (e.g. `execute_dump_request`, taking a `ResolvedDumpRequest`)
+  >    that produces `DumpResult` with the real snapshot and storage result.
+  >    `run_dump_request` stays as-is — either unchanged, or reimplemented as
+  >    a thin adapter over the executor (`execute_dump_request(resolve_dump_
+  >    request(request)).snapshot`), never over the resolve-only step alone
+  >    — so no existing caller, doc page, or test needs to move. This two-
+  >    function shape is the plan's required route now, not merely one
+  >    option among several.
   >
   > Net: the three blockers this section already named are confirmed, not
   > merely asserted, and both are narrower than the first pass through this
   > note stated. (1) needs a small, scoped extension to the scan baseline
   > path specifically (not a `resolve_side_snapshot`-wide widening). (2)
-  > needs a new, additive `DumpResult`-returning function, not a breaking
-  > change to `run_dump_request` — removing the coordinated-break blocker
+  > needs two new, additive functions (a resolve-only step and a separate
+  > executor), not a breaking change to `run_dump_request` — removing the
+  > coordinated-break blocker
   > entirely for that half. Still not attempted here: each is a real,
   > separate, reviewable design (what the scan-specific extension point
   > looks like; the new function's exact signature and where the CLI's
