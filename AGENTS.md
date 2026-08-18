@@ -3935,15 +3935,19 @@ Once a root command genuinely clears the bar above, pick the right home:
      render_dump_dry_run()` re-derives the resolved depth/collect-mode/
      compile-DB-match/backend from the *same raw inputs* `perform_elf_dump`
      receives, independently, in its own function -- there is no shared
-     `DumpResult` either one builds from. Its own docstring is explicit
-     about the scope this implies: "Cheap, read-only resolution only ...
-     Never runs castxml/clang, a build query, or any I/O beyond stat()/PATH
-     lookups" -- i.e. it is *deliberately* a cheaper, narrower
+     `ResolvedDumpRequest` either one builds from. Its own docstring is
+     explicit about the scope this implies: "Cheap, read-only resolution
+     only ... Never runs castxml/clang, a build query, or any I/O beyond
+     stat()/PATH lookups" -- i.e. it is *deliberately* a cheaper, narrower
      re-implementation, not a dry pass of the same resolver the real run
-     uses. Making `--dry-run` render a genuine `DumpResult` therefore
-     requires `run_dump_request` (or a new sibling) to support a "resolve
-     without executing/writing" mode in the first place -- it does not have
-     one today, it always fully resolves and returns a snapshot.
+     uses. **Half-closed by the slice landed below**: `resolve_dump_request`
+     now IS a real "resolve without executing/writing" mode --
+     `service_dump_pipeline.resolve_dump_request`/`ResolvedDumpRequest`,
+     stopping before any castxml/clang invocation or write, exactly what
+     this blocker originally said didn't exist. What remains open is purely
+     the wiring: `render_dump_dry_run()` has not been migrated to build from
+     a real `resolve_dump_request()` call in place of its own independent
+     re-derivation -- the capability exists, nothing consumes it yet.
   2. **`perform_elf_dump` has real post-processing hooks with no equivalent
      in `run_dump_request` at all.** After the primary header-AST/DWARF
      snapshot, it runs, in a carefully established order: the ADR-039
@@ -4016,19 +4020,24 @@ Once a root command genuinely clears the bar above, pick the right home:
   for the renamed/merged function, not weakened), plus the full fast unit
   suite and `mypy`/`ruff` clean on both touched modules.
 
-  **What remains genuinely open, unattempted, and why forcing it further
-  would be reactive rather than sound**: all three blockers above, in full
-  -- a "resolve without executing" mode for `run_dump_request`, a
-  post-processing hook `perform_elf_dump`'s second-pass attaches can plug
-  into, and a pair-aware primitive `scan`'s baseline-reuse decision can
-  express -- are each their own real, multi-file design, not a follow-up
-  edit to this same PR. Given the density of prior review rounds already
-  recorded against this exact code (the L3→L2-fold entry above alone lists
-  eighteen numbered findings, several reverted-and-refixed), attempting any
-  of the three under continued session pressure risks reopening one of
-  them, which is precisely what this file's own "known gaps over risky
-  reactive patches" convention exists to avoid. See the plan doc's own PR C
-  section for a status note recording the same scope.
+  **What remained genuinely open at the time this paragraph was written,
+  and why forcing it further would have been reactive rather than sound**:
+  all three blockers above, in full -- a "resolve without executing" mode
+  for `run_dump_request`, a post-processing hook `perform_elf_dump`'s
+  second-pass attaches can plug into, and a pair-aware primitive `scan`'s
+  baseline-reuse decision can express -- are each their own real,
+  multi-file design, not a follow-up edit to this same PR. Given the
+  density of prior review rounds already recorded against this exact code
+  (the L3→L2-fold entry above alone lists eighteen numbered findings,
+  several reverted-and-refixed), attempting any of the three under
+  continued session pressure risked reopening one of them, which is
+  precisely what this file's own "known gaps over risky reactive patches"
+  convention exists to avoid. **Superseded for blocker 1 by the slice
+  below**, landed the same day: `resolve_dump_request` now provides that
+  "resolve without executing" mode, so only the wiring (migrating
+  `render_dump_dry_run()` to build from it) remains open for blocker 1;
+  blockers 2 and 3 are still fully open, unchanged. See the plan doc's own
+  PR C section for a status note recording the same scope.
 
   **A second, narrow slice landed (2026-08-18): the first blocker's missing
   primitive now exists, though nothing consumes it yet.** `service_dump_
