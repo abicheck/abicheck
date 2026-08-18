@@ -85,7 +85,7 @@ class ResolvedDumpRequest:
 
     Carries only what :func:`resolve_dump_request` can determine without
     invoking castxml/clang or writing anything: the normalized language, the
-    resolved header-AST backend, the detected binary format, the requested
+    requested header-AST backend, the detected binary format, the requested
     ``depth`` (an input, known up front) and the effective *collect mode*
     (the build/source evidence level ``depth`` resolves to). Deliberately
     does **not** carry an *achieved* depth — that can only be read off the
@@ -127,6 +127,24 @@ class ResolvedDumpRequest:
     def headers(self) -> tuple[Path, ...]:
         """The resolved public-header set (files only; see ``public_header_dirs``)."""
         return tuple(self.evidence.headers)
+
+    @property
+    def effective_header_backend(self) -> str:
+        """The *concrete* header-AST backend execution will actually use.
+
+        ``header_backend`` alone is not this (Codex review, fresh evidence):
+        ``service.py``'s own ``eff_backend`` computation gives an explicit
+        ``evidence.compile.frontend`` (e.g. from ``ABICHECK_AST_FRONTEND`` or
+        a per-input ``--compile-frontend`` override) precedence over the bare
+        ``header_backend`` arg, and resolves ``"auto"`` to a concrete backend
+        either way — so a dry-run render of ``header_backend`` alone can name
+        a different frontend than execution resolves to. Computed the
+        identical way execution does, via
+        :func:`~abicheck.service_compare_evidence.effective_frontend`.
+        """
+        from .service_compare_evidence import effective_frontend
+
+        return effective_frontend(self.evidence.compile, self.header_backend)
 
 
 @dataclass(frozen=True)

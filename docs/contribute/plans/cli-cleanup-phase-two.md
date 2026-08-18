@@ -794,10 +794,22 @@ pipelines a fourth time.
   resolves cannot disagree. `DumpResult` states the executed outcome: the
   real snapshot, the *achieved* effective depth (only knowable from the
   completed snapshot), the resolved compile context, the build-query
-  decision, the source scope, the dependency scope, diagnostics, and the
-  storage result. Execution consumes a `ResolvedDumpRequest` and produces a
-  `DumpResult`; `--dry-run` never reaches that step. See the follow-up
-  investigation below this bullet for the concrete function split
+  decision, the source scope, the dependency scope, and diagnostics.
+  Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
+  `--dry-run` never reaches that step. **The storage result is not part of
+  the `DumpResult` this slice's `execute_dump_request()` produces (Codex
+  review, fresh evidence — an earlier draft of this paragraph still listed
+  it, contradicting the landed code and its own pinned test).**
+  `service_dump_pipeline.py`'s own module docstring already scopes writing
+  as CLI presentation/provenance layer, out of bounds for this module —
+  `execute_dump_request()` genuinely never writes anything, so it has no
+  storage result to report. A storage field is a real, separate addition
+  for whichever future slice folds `cli.py`'s `fold_dump_provenance_into_json`
+  write step into this pipeline (not attempted here) — until then, treat
+  `DumpResult` as snapshot + achieved depth only, and update this paragraph
+  again when that slice actually adds the field, rather than describing a
+  field that does not exist yet. See the follow-up investigation below this
+  bullet for the concrete function split
   (`resolve_dump_request`/`execute_dump_request`) and why `run_dump_request`
   itself keeps returning a bare `AbiSnapshot`. The root `AGENTS.md` "Known
   gaps" entry on `service_dump_pipeline.py` is the same migration seen from
@@ -906,7 +918,9 @@ pipelines a fourth time.
   >    build-query decision), no snapshot, no I/O beyond what resolution
   >    already does — and a separate executor (e.g. `execute_dump_request`,
   >    taking a `ResolvedDumpRequest`) that produces `DumpResult` with the
-  >    real snapshot, the *achieved* effective depth, and the storage result.
+  >    real snapshot and the *achieved* effective depth (a storage field is
+  >    a separate, later addition — see the "storage result" correction
+  >    above this bullet).
   >    **`effective depth` (as opposed to effective collect mode) belongs on
   >    `DumpResult`, not `ResolvedDumpRequest` (Codex review, fresh
   >    evidence)**: today's `fold_dump_provenance_into_dict` derives it from

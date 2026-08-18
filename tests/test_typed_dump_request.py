@@ -541,6 +541,35 @@ class TestResolveExecuteDumpRequestSplit:
 
         assert "storage" not in {f.name for f in fields(DumpResult)}
 
+    def test_effective_header_backend_honors_compile_context_override(
+        self, snap_path: Path
+    ):
+        """An explicit ``InputSpec.compile.frontend`` wins over the bare
+        request-level ``frontend`` — the same precedence ``service.py``'s own
+        ``eff_backend`` computation applies at execution time (Codex review,
+        fresh evidence)."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        request = DumpRequest(
+            input=InputSpec(path=snap_path, compile=CompileContext(frontend="clang")),
+            frontend="auto",
+        )
+        resolved = resolve_dump_request(request)
+        assert resolved.header_backend == "auto"
+        assert resolved.effective_header_backend == "clang"
+
+    def test_effective_header_backend_resolves_auto_without_override(
+        self, snap_path: Path
+    ):
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        resolved = resolve_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path), frontend="auto")
+        )
+        assert resolved.header_backend == "auto"
+        assert resolved.effective_header_backend in ("castxml", "clang")
+
 
 # ===================================================================
 # The Phase 5 gate, as an executable check
