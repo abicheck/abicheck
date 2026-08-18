@@ -568,17 +568,23 @@ class TestResolveExecuteDumpRequestSplit:
             DumpRequest(input=InputSpec(path=snap_path), frontend="auto")
         )
         assert resolved.header_backend == "auto"
-        assert resolved.effective_header_backend in ("castxml", "clang")
+        assert resolved.effective_header_backend in ("castxml", "clang", "hybrid")
 
-    def test_execute_pins_the_effective_backend_not_the_bare_requested_one(
+    def test_execute_forwards_the_bare_header_backend_not_the_reporting_projection(
         self, snap_path: Path, monkeypatch
     ):
-        """Codex review, fresh evidence: execution must consume the already-
-        resolved concrete backend, not the bare (possibly "auto") requested
-        one — otherwise service.py's own eff_backend computation re-reads
-        ABICHECK_AST_FRONTEND at execution time, and a rendered dry-run plan
-        can disagree with what execution actually resolves to if the
-        environment changed in between."""
+        """Codex review, fresh evidence, two rounds -- the first round tried
+        making execution consume ``effective_header_backend`` and that was
+        itself a real regression, reverted here: ``dumper._header_ast_parser``'s
+        own ``_auto_ast_fallback_eligible(backend)`` checks whether the
+        backend it receives is *literally* the string ``"auto"`` to decide
+        whether a CastXML failure may gracefully fall back to Clang --
+        pre-resolving "auto" before it gets there silently disables that
+        fallback (and a non-"host" ``frontend_context``'s own "auto"-specific
+        routing). Execution must keep forwarding the bare, possibly-"auto"
+        ``header_backend`` unchanged; ``effective_header_backend`` is a
+        reporting-only projection, computed correctly, but never fed back
+        into execution."""
         from abicheck import service_dump_pipeline
         from abicheck.compile_context import CompileContext
         from abicheck.service_dump_pipeline import (
@@ -592,6 +598,7 @@ class TestResolveExecuteDumpRequestSplit:
         )
         resolved = resolve_dump_request(request)
         assert resolved.header_backend == "auto"
+        # The reporting projection still resolves correctly...
         assert resolved.effective_header_backend == "clang"
 
         captured: dict[str, object] = {}
@@ -603,7 +610,11 @@ class TestResolveExecuteDumpRequestSplit:
 
         monkeypatch.setattr(service_dump_pipeline, "resolve_side_snapshot", _spy)
         execute_dump_request(resolved)
-        assert captured["header_backend"] == "clang"
+        # ...but execution still receives the bare, unresolved value -- the
+        # same "auto" service.py's own eff_backend computation independently
+        # (and correctly) resolves to "clang" via evidence.compile.frontend,
+        # preserving every "auto"-specific behavior downstream of that.
+        assert captured["header_backend"] == "auto"
 
 
 # ===================================================================

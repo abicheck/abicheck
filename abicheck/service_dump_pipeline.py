@@ -111,17 +111,29 @@ class ResolvedDumpRequest:
     lang: str
     lang_explicit: bool
     header_backend: str
-    # The *concrete* header-AST backend execution will actually use, pinned
-    # once at resolution time -- not a lazily-recomputed property (Codex
-    # review, two rounds: the first fix made this a `@property`, which still
-    # re-read ABICHECK_AST_FRONTEND live on every access, including at
-    # execute_dump_request's own call site -- pinning requires storing the
-    # value, not just moving *where* it's read). `header_backend` alone is
-    # not this: service.py's own eff_backend computation gives an explicit
-    # `evidence.compile.frontend` precedence over the bare `header_backend`
-    # arg, and resolves "auto" to a concrete backend either way -- so a
-    # dry-run render of `header_backend` alone can name a different frontend
-    # than execution resolves to if the environment changes in between.
+    # A *reporting-only* projection of the concrete header-AST backend
+    # resolution currently favors -- what a future `--dry-run` render would
+    # show. `header_backend` alone under-reports this: service.py's own
+    # eff_backend computation gives an explicit `evidence.compile.frontend`
+    # precedence over the bare `header_backend` arg, and resolves "auto" to
+    # a concrete backend either way, so a naive render of `header_backend`
+    # can name a different frontend than what would currently be chosen.
+    #
+    # Deliberately NOT what execute_dump_request passes to execution
+    # (Codex review, two rounds -- the first attempt did pass this value
+    # through, which is a real regression, not a pin: `dumper.
+    # _header_ast_parser`'s own `_auto_ast_fallback_eligible(backend)`
+    # checks whether `backend` is *literally* the string "auto" to decide
+    # whether a CastXML failure may gracefully fall back to Clang, and a
+    # non-"host" `frontend_context` has its own "auto"-specific routing --
+    # pre-resolving "auto" to a concrete choice before it reaches that
+    # function silently strips those behaviors). Execution therefore keeps
+    # passing the bare `header_backend` through unchanged, and this field
+    # is accepted as a best-effort preview that can, in principle, disagree
+    # with what execution ends up doing if the environment changes between
+    # resolve and execute, or if the genuinely-unpinned-"auto" fallback
+    # path fires -- the same class of accepted imprecision every other
+    # resolve-time preview in this object already carries.
     effective_header_backend: str
     fmt: str | None
     debug_format: str | None
@@ -328,15 +340,19 @@ def execute_dump_request(
         resolved.evidence,
         lang=resolved.lang,
         lang_explicit=resolved.lang_explicit,
-        # The *concrete* backend, not the bare requested one (Codex review,
-        # fresh evidence): resolved.header_backend can be "auto", which
-        # service.py's own eff_backend computation would otherwise re-resolve
-        # at execution time via a fresh ABICHECK_AST_FRONTEND env read --
-        # letting execution silently disagree with what resolution (and any
-        # dry-run render of it) already reported as effective_header_backend
-        # if the environment changed in between. Passing the already-resolved
-        # concrete value pins the decision resolution made.
-        header_backend=resolved.effective_header_backend,
+        # The *bare* requested backend, unchanged -- NOT effective_header_
+        # backend (Codex review, fresh evidence, reverting an earlier
+        # attempt at this same line). Passing the pre-resolved concrete
+        # value here was tried and found to be a real regression, not a
+        # pin: `dumper._header_ast_parser`'s own `_auto_ast_fallback_
+        # eligible(backend)` checks whether `backend` is *literally* the
+        # string "auto" to decide whether a CastXML failure may gracefully
+        # fall back to Clang -- pre-resolving "auto" to "castxml" before it
+        # gets here silently disables that fallback. `effective_header_
+        # backend` exists purely for *reporting* (what a future `--dry-run`
+        # projects), not as an execution-time override; see its own
+        # docstring.
+        header_backend=resolved.header_backend,
         fmt=resolved.fmt,
         public_headers=list(resolved.public_headers),
         public_header_dirs=list(resolved.public_header_dirs),
