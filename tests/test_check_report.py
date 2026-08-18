@@ -723,6 +723,78 @@ class TestAugmentReport:
         assert out["exit_code"] == 0
         assert out["diff"]["analysis_assurance_exit_contribution"] == 0
 
+    def test_advisory_neutralizes_the_canonical_exit_block(self):
+        """CLI cleanup phase two, PR G1/PR E: a real ``exit`` object (Codex
+        review, reproduced end to end) -- an advisory report must publish a
+        clean decision on this block too, or a consumer reading it directly
+        (rather than re-deriving from ``severity``/the two contributions
+        above) would treat an explicitly advisory check as blocking.
+        """
+        out = augment_report(
+            {
+                "verdict": "BREAKING",
+                "severity": {"exit_code": 4, "blocking": True},
+                "exit": {
+                    "code": 4,
+                    "reasons": ["compatibility_gate"],
+                    "compatibility_contribution": 4,
+                    "contract_coverage_contribution": 0,
+                    "analysis_assurance_contribution": 0,
+                    "crosscheck_promotion_contribution": 0,
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit"] == {
+            "code": 0,
+            "reasons": ["clean"],
+            "compatibility_contribution": 0,
+            "contract_coverage_contribution": 0,
+            "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
+        }
+
+    def test_advisory_neutralizes_a_scan_reports_nested_exit_block(self):
+        """A ``scan --against`` report carries this block under ``diff``,
+        same as ``severity``/the two contributions -- and includes a
+        maintainer-promoted crosscheck's own nonzero contribution, which an
+        advisory report must also zero, not just the code/reasons."""
+        out = augment_report(
+            {
+                "scan_schema_version": "1.18",
+                "exit_code": 2,
+                "verdict": "API_BREAK",
+                "diff": {
+                    "verdict": "API_BREAK",
+                    "exit": {
+                        "code": 2,
+                        "reasons": ["compatibility_gate", "promoted_crosscheck"],
+                        "compatibility_contribution": 2,
+                        "contract_coverage_contribution": 0,
+                        "analysis_assurance_contribution": 0,
+                        "crosscheck_promotion_contribution": 2,
+                    },
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["diff"]["exit"] == {
+            "code": 0,
+            "reasons": ["clean"],
+            "compatibility_contribution": 0,
+            "contract_coverage_contribution": 0,
+            "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
+        }
+
     def test_neutralization_covers_every_block_the_aggregate_reads(self):
         # The invariant behind the fix: the writer must zero exactly the
         # blocks the reader consults. Asserting it against the shared

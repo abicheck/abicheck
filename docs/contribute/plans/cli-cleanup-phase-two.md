@@ -435,6 +435,15 @@ persistence prerequisite completing first:
    workflow/recipe/doc snippet using `extra-args` for this, and state the
    `extra-args` → `annotate` input migration for external callers.
 
+   **Status: all three steps landed.** Step 1's report persistence and
+   step 2's release `--write` support merged first (see the "Landed since
+   the paragraph above was written" note further up this section); step
+   3 — deleting the flags, adding the `action.yml` inputs, implementing
+   `action/run.sh`'s renderer, and updating first-party workflow/recipe/
+   doc snippets — landed in the same PR. `compare --annotate` now exits
+   `64` with `No such option`, matching the sentence a few paragraphs
+   below this one.
+
 **New invariant (post-#780), and it is the reason PR 1b became PR E in the
 reviewed ordering:**
 
@@ -473,27 +482,116 @@ is the *concept* of three fields — `exit`, `contract_coverage_exit_
 contribution`, `analysis_assurance_exit_contribution` — not yet a uniform
 *location* for them today. `compare` puts all three at the report's top
 level, **implemented and merged as #789 (`e43abfd`) — "PR G1" is done.**
-**`scan --against` does not (fresh evidence, Codex review):** `ScanOutcome.to_dict()` (`scan_engine.py`)
-nests its whole `diff_summary` under a `"diff"` key, and `_baseline_summary()`
-(`cli_scan_baseline.py`) writes `analysis_assurance_exit_contribution` and
-the contract-coverage block *into that nested summary*, not the outer
-`ScanOutcome` dict — so today they live at `report["diff"].
-analysis_assurance_exit_contribution`, not `report.
-analysis_assurance_exit_contribution`. G1 never touched
-`cli_scan_baseline.py` at all, so `exit` does not exist for `scan --against`
-yet, in either location. PR E's job is therefore two things, not one: land
-`exit` for `scan --against` (mirroring G1's `compare` wiring, called from
-`_baseline_summary`/`_run_baseline_compare` the way `add_contract_context`
-is called from `compare`'s own JSON path), and decide — as part of that
-wiring, not as a drive-by rename — whether `scan`'s existing nested
-placement moves to the top level to match `compare`, or `compare`'s renderer
-adapter learns to read scan's nested location instead. Whichever is chosen,
-the Action's renderer keeps reading each operand's own existing
-`verdict`/`changes` (single-library), per-library summaries (release), or
-scan's own result shape through the adapter it already has for that shape —
-this section is only about where the *gate-explanation* fields live, not
-about unifying verdict/finding structures. A single-library compare report,
-unmodified by this section, already reads:
+**`scan --against` now does too (first half of PR E, landed).**
+`ScanOutcome.to_dict()` (`scan_engine.py`) nests its whole `diff_summary`
+under a `"diff"` key, and `_baseline_summary()`/`_run_baseline_compare()`
+(`cli_scan_baseline.py`) already wrote `analysis_assurance_exit_contribution`
+and the contract-coverage block *into that nested summary*, not the outer
+`ScanOutcome` dict — so the location question above was answered by
+precedent rather than reopened: `exit` was added at `report["diff"].exit`
+(schema 1.18), matching where its own constituent fields already live,
+**not** moved to the top level to match `compare`'s `report.exit` — the two
+commands keep their own report shapes; only the *concept* is shared, exactly
+as this section's own "not a proposed common envelope" note already argues
+for `verdict`/`findings`. `_run_baseline_compare` calls
+`exit_decision.resolve_compare_exit_decision` directly (the same function
+`add_contract_context` calls for `compare`), so the two commands cannot read
+two different numbers for the same kind of comparison. One scan-only wrinkle
+this block does not, and structurally cannot, resolve on its own: a
+maintainer-promoted `--crosscheck KEY=error` finding (`scan_engine.
+_crosscheck_severity_exit`) can raise the *process* exit code strictly after
+`_run_baseline_compare` already returned its `exit` block — the same
+after-the-fact timing problem `_promote_published_gate` already solved for
+the persisted `severity` block. Fixed the same way: `_promote_published_
+gate` now also raises `diff.exit.code` and re-stamps `diff.exit.reasons` to
+a new `ExitReason.PROMOTED_CROSSCHECK` (a scan-only reason;
+`resolve_compare_exit_decision` itself never emits it) whenever a promotion
+actually fires — never lowering, never firing when the existing code already
+dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by this
+block, matching `exit_decision.py`'s own explicit scope (no `DiffResult`
+exists for `NOT_COMPARABLE`; budget overflow aborts before a report is
+built) — see that module's own docstring for the reasoning.
+
+**The persistence prerequisite's single-library half is now also landed**
+(schema 2.43): every `compare --format json` report carries a top-level
+`annotations` array (`reporter_contract_blocks.add_annotations` /
+`annotations.annotation_report_entries`) — one already-classified,
+already-formatted entry per finding a full annotation pass over the
+comparison found, always the superset (as if `--annotate-additions` had
+also been given) regardless of what this run's own flags were. It reuses
+`annotations.collect_annotations`/`_format_annotation` exactly (no second,
+independently-maintained rendering path), so the persisted array and
+`--annotate`'s stderr output can never disagree. `annotations.py` itself
+had to stop importing `reporter.py` to land this without growing an import
+cycle (`reporter -> reporter_contract_blocks -> annotations -> reporter`,
+since `reporter_contract_blocks.add_annotations` now imports
+`annotations.py`) — `emit_github_step_summary` moved to a new leaf module,
+`annotations_step_summary.py`, since it was the one function in
+`annotations.py` that reached back into `reporter` (for `to_markdown`).
+
+**The persistence prerequisite's release-operand half is now also landed**
+(the capped `findings` list stays, unchanged, as the small human-readable
+summary it always was; this adds alongside it). Every `libraries[]` entry
+in a directory/package `compare --format json` release report now carries
+its own `annotations` array — the identical shape and identical
+`annotation_report_entries` function the single-library slice above uses,
+computed straight from that library's own already-produced `DiffResult`
+(`entry["_diff_result"]`, stashed by the primary per-library pass, after
+SONAME-lockstep-suppression has already run on it) rather than a second,
+independent re-run of that library's comparison.
+`_compare_release_libraries`'s own `--annotate` stderr rendering now reads
+from the same primary-pass results too
+(`_release_annotations_from_primary_pass`), so `_collect_release_extras` is
+called only for JUnit's `collect_diff_results` (which genuinely needs the
+old `AbiSnapshot` alongside the `DiffResult`, something the primary pass
+never stashes) — `--annotate` on a release operand no longer re-runs any
+library's comparison a second time. A Codex review round on the
+single-library slice above also caught a genuine design gap this slice
+closes for both operand shapes at once: `annotation_report_entries`'s
+persisted `"notice"`-level entries conflated two different things — a
+`--contract` finding compatibility policy never evaluated (shown by plain
+`--annotate` alone) and an addition/quality-issue/`info`-severity finding
+(shown only when `--annotate-additions` opts in) — so a renderer that
+dropped every `"notice"` unless `annotate-additions` was on would have
+silently hidden the former. Each entry now also carries `always_visible`
+(schema 2.44): always `true` for `error`/`warning`, and for `notice` only
+`true` for the always-shown contract-audit kind.
+
+**`action/run.sh`'s `--write`-equivalent path is now also landed.** Rather
+than a new bash-side code path, the actual gap was in the CLI itself:
+`compare --write FORMAT=PATH` used to be rejected outright for a
+directory/package operand (`_reject_set_input_flags`'s `secondary_fmt`
+check). `compare_release_cmd` now carries its own
+`secondary_output_options(["json", "markdown", "junit"])` (the same set
+`--format` itself accepts for a release operand) and renders the
+secondary format from the exact same already-computed
+`library_results`/`diff_pairs`/`bundle_result`/`matrix_result` its primary
+format uses — no second per-library comparison pass, mirroring how
+single-pair `compare`'s own `--write` reuses its one `DiffResult`.
+`_dispatch_release_compare` (`cli.py`) now explicitly rejects a
+release-incompatible secondary format (`sarif`/`html`/`review`) with a
+usage error, since `compare`'s own `--write` still accepts all six formats
+at parse time (before dispatch ever reaches the release engine's own,
+narrower `secondary_output_options` declaration) and `_format_release_
+summary`'s fallback branch would otherwise have silently rendered markdown
+into the requested path instead of erroring. `action/run.sh`'s `--write
+json=$PR_JSON` injection for the sticky PR comment no longer skips
+directory/package operands (the `_is_release_style_operand` guard on that
+one injection was removed; the helper itself stays, used by every other
+release-only flag check).
+
+**Landed since the paragraph above was written**: the Action's own
+renderer now reads the persisted `annotations` report field directly
+(`action/run.sh`'s `_emit_annotations`, driven by the new `annotate`/
+`annotate-additions` `action.yml` inputs) instead of inferring anything
+from stderr or re-running a comparison, and works identically for a
+single pair and a release fan-out. The CLI's own `--annotate`/
+`--annotate-additions` flags (and every internal parameter/code path that
+only existed to render them — `_maybe_emit_annotations`,
+`release_annotations_from_primary_pass`, `_collect_release_extras`) have
+since been deleted entirely; `abicheck compare`/`compare-release` no
+longer accept them at all. A single-library compare report, unmodified by
+this section, already reads:
 
 ```json
 {
@@ -501,6 +599,7 @@ unmodified by this section, already reads:
   "contract_coverage_exit_contribution": 0,
   "analysis_assurance_exit_contribution": 1,
   "exit": {"code": 1, "reasons": ["analysis_assurance"]},
+  "annotations": [],
   "changes": []
 }
 ```
@@ -683,15 +782,70 @@ pipelines a fourth time.
   `scan_engine._build_new_snapshot` both routing through
   `service_dump_pipeline.run_dump_request` (or the per-input primitives it
   shares with `resolve_side_snapshot` — see `service_input_resolution.py`),
-  the way `compare`'s implicit-dump operand already does. `DumpResult` states
-  the snapshot, requested vs. effective depth, the resolved compile context,
-  the build-query decision, the source scope, the dependency scope,
-  diagnostics, and the storage result — and `--dry-run` renders *that
-  object*, so the printed plan and the executed run cannot disagree. The root
-  `AGENTS.md` "Known gaps" entry on `service_dump_pipeline.py` is the same
-  migration seen from the code side; that entry does not yet mention the scan
-  side explicitly, so this plan is the tracking place for that half until it
-  does.
+  the way `compare`'s implicit-dump operand already does.
+  **`ResolvedDumpRequest` and `DumpResult` are two distinct objects, not one
+  renamed in transit (Codex review, fresh evidence — an earlier draft of
+  this paragraph said `--dry-run` renders `DumpResult`, contradicting the
+  investigation below the same paragraph now leads into).**
+  `ResolvedDumpRequest` states the requested depth, effective collect mode,
+  resolved header backend, and detected binary format — everything
+  resolvable without invoking castxml/clang or writing anything — and is
+  what `--dry-run` would render. **Not a hard parity guarantee for the
+  backend field specifically (Codex review, fresh evidence — an earlier
+  draft of this sentence claimed the printed and executed backends "cannot
+  disagree", which the landed code's own class documentation on
+  `effective_header_backend` explicitly disclaims):** `execute_dump_request()`
+  deliberately forwards the *unresolved* `header_backend` (e.g. still the
+  literal `"auto"`) to preserve `dumper`'s own runtime `auto`-specific
+  routing (non-host `frontend_context`, the CastXML-to-Clang fallback) —
+  see that field's own comment for why pre-resolving it before execution is
+  a real regression, not a pin. `effective_header_backend` is therefore a
+  best-effort projection of what resolution currently favors, not what
+  execution is bound to use, and can still diverge if the environment
+  changes between resolve and execute or if the unpinned-fallback path
+  fires — the same class of imprecision the field's own docstring already
+  accepts. `requested_depth`/`collect_mode`/`fmt` carry no such caveat: none
+  of them are re-resolved at execution time the way the backend is.
+
+  `DumpResult` states the executed outcome: the
+  real snapshot and the *achieved* effective depth (only knowable from the
+  completed snapshot) — see the "storage result" note two sentences below
+  for why it carries nothing more yet. **Corrected ownership (CodeRabbit
+  review, fresh evidence — an earlier draft of this sentence called the
+  omitted fields "CLI-presentation-layer concerns `execute_dump_request()`
+  doesn't touch", which overstates the gap):** the resolved compile
+  context and the dependency scope genuinely *are* computed inside
+  `execute_dump_request()`'s own call chain — `resolve_side_snapshot`
+  performs the P0.3 L3→L2 compile-context fold internally (see
+  `service_input_resolution.py`'s `_seeded_includes_and_compile_context`),
+  and `populate_side_dependency_info` runs directly in
+  `execute_dump_request()` when `follow_dependencies` is set. The gap is
+  narrower than "not touched": these values are computed but not
+  *surfaced* as `DumpResult` fields, an output-shape gap, not a
+  processing one. Only the ADR-039 build-context collector's own
+  diagnostics are a genuine CLI-layer concern here — those post-processing
+  passes live in `perform_elf_dump` alone, which `execute_dump_request`
+  does not call (blocker 2 above).
+  Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
+  `--dry-run` never reaches that step. **The storage result is not part of
+  the `DumpResult` this slice's `execute_dump_request()` produces (Codex
+  review, fresh evidence — an earlier draft of this paragraph still listed
+  it, contradicting the landed code and its own pinned test).**
+  `service_dump_pipeline.py`'s own module docstring already scopes writing
+  as CLI presentation/provenance layer, out of bounds for this module —
+  `execute_dump_request()` genuinely never writes anything, so it has no
+  storage result to report. A storage field is a real, separate addition
+  for whichever future slice folds `cli.py`'s `fold_dump_provenance_into_json`
+  write step into this pipeline (not attempted here) — until then, treat
+  `DumpResult` as snapshot + achieved depth only, and update this paragraph
+  again when that slice actually adds the field, rather than describing a
+  field that does not exist yet. See the follow-up investigation below this
+  bullet for the concrete function split
+  (`resolve_dump_request`/`execute_dump_request`) and why `run_dump_request`
+  itself keeps returning a bare `AbiSnapshot`. The root `AGENTS.md` "Known
+  gaps" entry on `service_dump_pipeline.py` is the same migration seen from
+  the code side; that entry does not yet mention the scan side explicitly,
+  so this plan is the tracking place for that half until it does.
 
   > **Investigated in depth; one real, scoped slice landed, the full
   > convergence NOT attempted (2026-08-16).** `service_input_resolution.
@@ -710,9 +864,12 @@ pipelines a fourth time.
   > **The rest of PR 3A — routing `perform_elf_dump`/`handle_non_elf_dump`
   > and `scan_engine._build_new_snapshot` themselves through
   > `run_dump_request`, and making `dump --dry-run` render a real
-  > `DumpResult` — was not attempted**, for three concrete reasons found by
-  > reading the code, not assumed: (1) `dump --dry-run`
-  > (`render_dump_dry_run`) is today a hand-written *second*
+  > `ResolvedDumpRequest` (Codex review, fresh evidence — an earlier
+  > draft of this note named `DumpResult` here, which the correction two
+  > sections above this one already retracted: `--dry-run` renders the
+  > resolve-only object, never the executed one) — was not attempted**, for
+  > three concrete reasons found by reading the code, not assumed: (1) `dump
+  > --dry-run` (`render_dump_dry_run`) is today a hand-written *second*
   > implementation, not a dry pass of the same resolver — `run_dump_request`
   > has no "resolve without executing" mode to render from yet; (2)
   > `perform_elf_dump` runs three post-processing passes after the primary
@@ -733,16 +890,189 @@ pipelines a fourth time.
   > forcing any of the three under continued session pressure risks
   > reopening one of the already-fixed findings this same area has needed
   > many prior review rounds to reach.
-- **PR 3B — build-context completeness (the review's PR D).** Two #782
-  follow-ups that change the *parsed public surface*, not just performance, so
-  they belong before the model is called finished: (1) compile-unit matching —
-  the L2 include-dir seed is still gathered from *every* `CompileUnit` rather
-  than the matched one(s), so an unrelated TU's colliding generated header can
-  shadow the matched TU's; (2) forced includes — `-include`, `-imacros`, `/FI`,
-  `/FU` are absent from `ABI_RELEVANT_FLAG_PREFIXES`, so a matched unit's
-  macro-controlling forced-include header never reaches the derived L2 context
-  even though the run reports a match and stamps `parsed_with_build_context`.
-  Both are already recorded as known gaps in the root `AGENTS.md`.
+  >
+  > **Follow-up investigation (2026-08-18), no code change.** Re-read
+  > `resolve_side_snapshot`/`_seeded_includes_and_compile_context`
+  > (`service_input_resolution.py`) against `scan_engine._build_new_snapshot`
+  > and `run_dump_request`'s existing callers directly, to check whether any
+  > of the three blockers above could be narrowed safely in one more pass.
+  > Two additional, concrete obstacles confirmed, neither previously spelled
+  > out at this level of detail:
+  >
+  > 1. **`_build_new_snapshot` cannot call `resolve_side_snapshot` as-is,
+  >    independent of the pair-aware baseline decision (finding 3 above) —
+  >    and this gap is scoped narrower than an earlier draft of this note
+  >    claimed (Codex review, fresh evidence).** `resolve_side_snapshot`
+  >    takes a typed `InputSpec`/`SideEvidence` pair (themselves built by
+  >    `service_compare_evidence` resolution) and returns a bare
+  >    `AbiSnapshot` — the caller never sees the seeded `includes` or the
+  >    folded `compile_context` `resolve_side_snapshot` computed internally.
+  >    `_build_new_snapshot` returns exactly those two values
+  >    (`effective_includes`/`effective_compile_context`) for its caller,
+  >    `run_scan_core`, to forward on — but checked directly, `run_scan_core`
+  >    only ever reads `eff_includes`/`eff_compile_context` inside its
+  >    `if baseline is not None and scan_mode is not ScanMode.AUDIT:` block,
+  >    feeding `_run_baseline_compare`'s side-aware reuse check
+  >    (`scan_engine.py` ~1253–1329). A baseline-free scan never consumes
+  >    either value — an earlier draft of this note claimed otherwise, which
+  >    was wrong. So the return-shape gap is real, but it belongs entirely to
+  >    the pair-aware baseline path this section's finding 3 already names,
+  >    not to `resolve_side_snapshot`'s general contract — closing it does
+  >    not by itself require widening what every caller (`compare`'s
+  >    implicit-dump path included) gets back; a scan-specific extension
+  >    point (or keeping `_build_new_snapshot`'s own resolution separate for
+  >    this one reason) is the narrower, correctly-scoped fix.
+  > 2. **`run_dump_request`'s return type does not need to change to move
+  >    forward — add additive siblings instead of breaking the existing
+  >    entry point, and keep the resolve-only and execute steps genuinely
+  >    separate (Codex review, two rounds).** An earlier draft of this note
+  >    framed "wrap the return in `DumpResult`" as requiring an explicit,
+  >    coordinated breaking-API decision before any implementation. That
+  >    framing itself was avoidable: `run_dump_request` is a documented,
+  >    tested Tier-2 entry point today ([Python API guide](../../use/python-api.md),
+  >    [Python API reference](../../reference/python-api-reference.md),
+  >    `tests/test_typed_dump_request.py`,
+  >    `tests/test_header_compile_context.py`,
+  >    `tests/test_clang_header_backend_integration.py`) returning a bare
+  >    `AbiSnapshot`, and nothing about giving `dump --dry-run` a real
+  >    resolved object to render requires changing what that function
+  >    returns. A first fix proposed one new sibling returning `DumpResult`
+  >    (snapshot + storage result) and reused it for both the adapter and
+  >    the dry-run render — but that conflates two things this section's own
+  >    original design already keeps apart ("Click parsing → `DumpRequest` →
+  >    `ResolvedDumpRequest` → dry-run-or-execution → `DumpResult`"): a
+  >    `DumpResult` carrying a real storage result has, by construction,
+  >    already executed, so it cannot also be what a read-only `--dry-run`
+  >    renders without either violating the dry-run contract (never
+  >    executes) or leaving the resolve-only path with no snapshot to
+  >    report. The correct shape keeps that split: a resolve-only sibling
+  >    (e.g. `resolve_dump_request`) returning `ResolvedDumpRequest` — only
+  >    what resolution can determine without a snapshot (requested depth,
+  >    effective *collect mode*, resolved header backend), no snapshot, no
+  >    I/O beyond what resolution already does. **The landed field set is
+  >    narrower than this sketch's own "resolved compile context, backend,
+  >    the build-query decision" (Codex review, fresh evidence — this
+  >    sketch predates the actual implementation and overclaimed its scope):
+  >    `ResolvedDumpRequest` carries `header_backend`/`effective_header_
+  >    backend` (a reporting-only projection; see its own comment for why
+  >    it's never fed back into execution) but no resolved compile context
+  >    and no build-query decision — `resolve_dump_request()` itself
+  >    genuinely doesn't touch either (the L3→L2 fold and any build-query
+  >    execution only happen later, inside `resolve_side_snapshot`, which
+  >    only `execute_dump_request()` calls), so this omission is correctly
+  >    scoped to this resolve-only step. **Not a CLI-presentation-layer
+  >    claim (CodeRabbit review, fresh evidence — corrected alongside the
+  >    identical overstatement in `DumpResult`'s own field list two
+  >    sections above this one): both values are computed inside this same
+  >    dump execution pipeline by the time `execute_dump_request()`
+  >    finishes, just not surfaced as a field on either typed object yet.**
+  >    — and
+  >    a separate executor (e.g. `execute_dump_request`,
+  >    taking a `ResolvedDumpRequest`) that produces `DumpResult` with the
+  >    real snapshot and the *achieved* effective depth (a storage field is
+  >    a separate, later addition — see the "storage result" correction
+  >    above this bullet).
+  >    **`effective depth` (as opposed to effective collect mode) belongs on
+  >    `DumpResult`, not `ResolvedDumpRequest` (Codex review, fresh
+  >    evidence)**: today's `fold_dump_provenance_into_dict` derives it from
+  >    the completed snapshot via `_gated_source_label(snap.build_source,
+  >    snap)` — there is no snapshot yet at resolve time, so a resolve-only
+  >    object claiming to report it would have to guess, and a guess that
+  >    disagrees with the real run defeats the entire point of rendering
+  >    `--dry-run` from a real resolved object. `--dry-run` therefore reports
+  >    requested depth (a known input) and collect mode (a resolvable
+  >    decision), never a predicted achieved depth.
+  >    `run_dump_request` stays as-is — either unchanged, or reimplemented as
+  >    a thin adapter over the executor (`execute_dump_request(resolve_dump_
+  >    request(request)).snapshot`), never over the resolve-only step alone
+  >    — so no existing caller, doc page, or test needs to move. This two-
+  >    function shape is the plan's required route now, not merely one
+  >    option among several.
+  >
+  > Net: the three blockers this section already named are confirmed, not
+  > merely asserted, and both are narrower than the first pass through this
+  > note stated. (1) needs a small, scoped extension to the scan baseline
+  > path specifically (not a `resolve_side_snapshot`-wide widening). (2)
+  > needs two new, additive functions (a resolve-only step and a separate
+  > executor), not a breaking change to `run_dump_request` — removing the
+  > coordinated-break blocker
+  > entirely for that half. Still not attempted here: each is a real,
+  > separate, reviewable design (what the scan-specific extension point
+  > looks like; the new function's exact signature and where the CLI's
+  > `--dry-run` path starts calling it), and this file's own "known gaps
+  > over risky reactive patches" convention says do that as its own
+  > dedicated pass, not as a rushed follow-on to an already-large
+  > investigation.
+  >
+  > **Slice landed (2026-08-18): the `resolve_dump_request`/
+  > `execute_dump_request` split from finding 2 above, coded.**
+  > `service_dump_pipeline.py` now has `ResolvedDumpRequest`/`DumpResult`
+  > and the two functions this note specified — `run_dump_request` is a
+  > literal composition of both, unchanged in signature and return type.
+  > This closes the "`run_dump_request`'s return type does not need to
+  > change" question for real (not just as a design conclusion), but is
+  > **not** the same as wiring `dump --dry-run` to `resolve_dump_request()`
+  > — `render_dump_dry_run()` is still its own hand-written implementation.
+  > That migration, blocker (1)'s scan-baseline narrowing, and blockers 2/3
+  > (post-processing hooks, pair-aware scan decision) all remain open. See
+  > the root `AGENTS.md`'s PR C entry for the verification detail.
+  Two #782 follow-ups that change the *parsed public surface*, not just
+  performance, so they belong before the model is called finished: (1)
+  compile-unit matching — the L2 include-dir seed is still gathered from
+  *every* `CompileUnit` rather than the matched one(s), so an unrelated TU's
+  colliding generated header can shadow the matched TU's; (2) forced includes
+  — `-include`, `-imacros`, `/FI`, `/FU` are absent from
+  `ABI_RELEVANT_FLAG_PREFIXES`, so a matched unit's macro-controlling
+  forced-include header never reaches the derived L2 context even though the
+  run reports a match and stamps `parsed_with_build_context`. Both were
+  recorded as known gaps in the root `AGENTS.md`, which now carries the full
+  closure notes.
+
+  > **Landed (2026-08-16).** (1) `HeaderCompileContextResolution` gained
+  > `matched_units` (`matched_unit_count` stays as a derived property, so the
+  > two cannot drift), and `l2_seed.seed_includes_and_fold_compile_context`
+  > now resolves the compile context *before* seeding and restricts
+  > `_existing_include_dirs` to that set — falling back to every unit only
+  > when nothing matched, which is the case the seed was built for (a public
+  > header the compile DB does not cover) and where there is no narrower set
+  > to prefer. The entry's own "two independent call sites" worry
+  > (`_existing_include_dirs`'s caller *and*
+  > `service_input_resolution._seeded_includes`) was obsolete rather than
+  > addressed: PR C merged those two into one, so there was one site left to
+  > restrict.
+  >
+  > (2) **The forced-include fix the `AGENTS.md` entry proposed — a
+  > spaced-value branch in `extract_abi_relevant_flags` — was investigated
+  > and found to be actively wrong, and this is the part worth not
+  > rediscovering.** `source_extractors._argv.replay_extra_flags` already
+  > handles forced includes for L4 by a *different* route: it carries
+  > `abi_relevant_flags` through **and**, separately, re-scans raw `argv` for
+  > the same tokens without consulting the first pass's `seen` set. Capturing
+  > a forced include into that list would therefore have made every L4 replay
+  > command carry `-include config.h` twice — a silent double inclusion that
+  > a header without include guards turns into a hard redefinition error.
+  > Closed at the layer that actually had the gap instead:
+  > `header_utils.forced_include_operands` is the one shared recognizer (the
+  > replay matchers moved into that leaf — the one already owning this
+  > codebase's include-flag vocabulary, which both consumers already sit
+  > above — so L2 and L4 recognize the same spellings from one
+  > implementation) and
+  > `header_compile_context._forced_include_flags` renders it into the L2
+  > command straight from `cu.argv`, leaving L4 bit-for-bit unchanged. Forced
+  > includes also now participate in the ambiguity signature (two units
+  > forcing *different* macro-controlling headers fail closed rather than
+  > silently applying whichever grouped first) and in the AST cache key
+  > (`header_utils.cache_relevant_operand_dirs`, now shared by all three
+  > header-parse cache keys). `-include-pch` and `/FU` are deliberately not
+  > rendered; the ADR-029 D9 *drift-detection* half — a changed forced-include
+  > header does not raise `ABI_RELEVANT_BUILD_FLAG_CHANGED` — stays open,
+  > since closing it needs a structured `CompileUnit` field, a
+  > `BUILD_EVIDENCE_VERSION` bump and `build_diff` wiring, and specifically
+  > *not* another attempt to route it through `ABI_RELEVANT_FLAG_PREFIXES`.
+  > Tests: `tests/test_build_context_completeness.py` (20 cases; 9 verified to
+  > fail against the pre-fix code, and
+  > `TestReplayStillEmitsForcedIncludesExactlyOnce` kept as the executable
+  > record of the rejected fix).
 - **PR 3C — the removal itself** (everything the rest of this section
   describes), landing only after **all three** resolvers converge — 3A (both
   `dump` and `scan`) and 3B. 3C must not land on 3A-covers-`dump`-only; a
@@ -1279,7 +1609,7 @@ PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        resolution, JSON dry-run rendered
                                        from that object
 PR D  build-context completeness      = PR 3B — matched compile-unit
-                                       selection, forced includes, provenance
+      (DONE)                           selection, forced includes, provenance
                                        tests
 PR G1 canonical exit decision, part 1 — ExitDecision + reasons + the report
                                        block, precedence pinned by ADR and

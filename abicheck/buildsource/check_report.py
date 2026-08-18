@@ -345,6 +345,25 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
             node.get("analysis_assurance_exit_contribution")
         ):
             node["analysis_assurance_exit_contribution"] = 0
+        # CLI cleanup phase two, PR G1/PR E: the canonical `exit` block
+        # (`exit_decision.ExitDecision`) lives at exactly the same
+        # locations as the two contributions above -- the document root for
+        # a `compare` report, `diff`/`report.diff` for a scan one -- so the
+        # same `contract_coverage_block_paths` traversal already finds it;
+        # no separate path-finder is needed (Codex review, fresh evidence:
+        # an earlier revision neutralized every axis this block summarizes
+        # except the block itself, so an advisory report could still
+        # publish a nonzero `exit.code` -- and nonzero contributions -- that
+        # a consumer adopting the new canonical field would read as
+        # blocking). Replaced wholesale with the "clean" decision, the same
+        # way the `severity` gate above is replaced rather than
+        # conditionally rewritten: advisory mode means every axis gates
+        # nothing, so the persisted explanation has to say so outright
+        # rather than being left to disagree with the axes it summarizes.
+        if isinstance(node.get("exit"), Mapping):
+            from ..exit_decision import resolve_exit_decision
+
+            node["exit"] = resolve_exit_decision(compatibility_contribution=0).to_dict()
 
 
 def _zero_nested_severity_gates(report: dict[str, Any]) -> None:

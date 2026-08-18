@@ -461,8 +461,6 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate",
-        "--annotate-additions",
         "--allow-ast-frontend-fallback",
         "--allow-unsupported-castxml",
         "--ast-frontend",

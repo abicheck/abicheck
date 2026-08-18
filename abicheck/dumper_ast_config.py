@@ -66,6 +66,18 @@ def _cache_key(
     # (the inferred -H roots when a build context is present) rather than -I, so
     # their contents must be folded in here too — otherwise an edit to a header
     # transitively included from such a root would reuse a stale AST (Codex).
+    #
+    # An entry naming a *file* rather than a directory is hashed directly, the
+    # same way ``headers`` are above (Codex review, PR D). The directory walk
+    # below is deliberately suffix-filtered (#454), which is right for "catch
+    # transitive includes under a search root" but wrong for a file the caller
+    # named explicitly because it is *itself* part of the parse: a forced
+    # pre-include (``-include generated/config``, ``-imacros settings.def``)
+    # routinely carries a suffix ``CACHE_HEADER_SUFFIXES`` does not list, so
+    # hashing only its parent directory would let an edit to it reuse a stale
+    # AST while the unchanged option token kept the key identical. Before this
+    # branch a non-directory entry contributed only its path string, so this is
+    # a strict widening — no previously-hashed input stops being hashed.
     for inc_dir in sorted(str(x) for x in (*extra_includes, *extra_hash_dirs)):
         inc_path = Path(inc_dir)
         h.update(inc_dir.encode())
@@ -78,6 +90,11 @@ def _cache_key(
                     h.update(str(f.stat().st_mtime).encode())
                 except OSError:
                     pass
+        else:
+            try:
+                h.update(str(inc_path.stat().st_mtime).encode())
+            except OSError:
+                pass
     h.update(compiler.encode())
     # Include toolchain parameters so different cross-compilation configs
     # produce distinct cache entries

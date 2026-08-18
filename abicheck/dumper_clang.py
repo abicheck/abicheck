@@ -68,6 +68,7 @@ from pathlib import Path
 from typing import Any
 
 from ._compiler_options import split_gcc_options
+from .dumper_clang_attributes import _clang_contract_attributes
 from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _canonical_expr,
@@ -513,88 +514,6 @@ def _is_noexcept_qualifier(quals: str) -> bool:
     return expr.strip() not in ("false", "0")
 
 
-#: clang attribute node kinds → normalized contract-attribute tokens (matching
-#: the castxml spellings so cross-frontend snapshots stay comparable).
-_CLANG_ATTR_TOKENS: dict[str, str] = {
-    "NoReturnAttr": "noreturn",
-    "C11NoReturnAttr": "noreturn",
-    "NonNullAttr": "nonnull",
-    "ReturnsNonNullAttr": "returns_nonnull",
-    "RestrictAttr": "malloc",
-    "FormatAttr": "format",
-    "FormatArgAttr": "format_arg",
-    "AllocSizeAttr": "alloc_size",
-    "AllocAlignAttr": "alloc_align",
-    "WarnUnusedResultAttr": "warn_unused_result",
-    "SentinelAttr": "sentinel",
-    "CDeclAttr": "cdecl",
-    "StdCallAttr": "stdcall",
-    "FastCallAttr": "fastcall",
-    "ThisCallAttr": "thiscall",
-    "VectorCallAttr": "vectorcall",
-    "MSABIAttr": "ms_abi",
-    "SysVABIAttr": "sysv_abi",
-    "RegparmAttr": "regparm",
-}
-
-
-def _clang_attr_arg_tokens(child: dict[str, Any]) -> list[str]:
-    """Ordered ABI-significant argument scalars of a clang attribute node.
-
-    clang ``-ast-dump=json`` nests an argument-bearing attribute's operands as
-    ``ConstantExpr`` / ``IntegerLiteral`` / ``StringLiteral`` children carrying
-    an evaluated ``value``. Collect those scalars in document order so the
-    normalized token keeps the same arguments castxml preserves — otherwise
-    ``nonnull(1)`` → ``nonnull(2)``, ``format(printf,1,2)`` → ``format(printf,2,3)``
-    or ``regparm(2)`` → ``regparm(3)`` would collapse to identical bare tokens
-    and the contract / calling-convention detectors would never fire (and the
-    two frontends would disagree). Once a node yields a ``value`` we do not
-    descend into it — clang wraps a literal inside its ``ConstantExpr`` with the
-    same value, so recursing would double-count it.
-    """
-    args: list[str] = []
-
-    def _walk(nodes: Any) -> None:
-        for sub in nodes or []:
-            if not isinstance(sub, dict):
-                continue
-            value = sub.get("value")
-            if isinstance(value, bool):
-                # JSON booleans are ints in Python; skip — not an ABI arg.
-                _walk(sub.get("inner", []))
-            elif isinstance(value, int):
-                args.append(str(value))
-            elif isinstance(value, str) and value:
-                # StringLiteral values arrive quoted (e.g. "printf"); strip them
-                # so the token matches castxml's bare-identifier spelling.
-                args.append(value.strip('"'))
-            else:
-                _walk(sub.get("inner", []))
-
-    _walk(child.get("inner", []))
-    return args
-
-
-def _clang_contract_attributes(node: dict[str, Any]) -> list[str]:
-    """Normalized contract/calling-convention attributes of a decl node.
-
-    Argument-bearing attributes keep their operands in the token
-    (``nonnull(1)``, ``format(printf,1,2)``), matching the castxml frontend, so
-    an argument-only change is still a detectable contract change.
-    """
-    tokens: set[str] = set()
-    for child in node.get("inner", []) or []:
-        if not isinstance(child, dict):
-            continue
-        token = _CLANG_ATTR_TOKENS.get(str(child.get("kind", "")))
-        if token:
-            arg_tokens = _clang_attr_arg_tokens(child)
-            if arg_tokens:
-                token = f"{token}({','.join(arg_tokens)})"
-            tokens.add(token)
-    return sorted(tokens)
-
-
 def _clang_exception_spec(quals: str) -> str:
     """The dynamic exception-specification spelling from trailing qualifiers.
 
@@ -725,8 +644,13 @@ class _ClangAstParser:
         exported_static: set[str],
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
+        target_triple: str | None = None,
     ) -> None:
         self._root = root
+        # May be unavailable for synthetic/unit ASTs or an unprobeable
+        # compiler.  In that case attribute spelling remains evidence rather
+        # than being normalized against an assumed host ABI.
+        self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
         (
@@ -1322,7 +1246,9 @@ class _ClangAstParser:
                     # clang stamps "variadic": true on FunctionDecl; the
                     # qualtype spelling ("void (int, ...)") is the fallback.
                     is_variadic=bool(node.get("variadic")) or "..." in qualtype,
-                    contract_attributes=_clang_contract_attributes(node),
+                    contract_attributes=_clang_contract_attributes(
+                        node, target_triple=self._target_triple
+                    ),
                     exception_spec=_clang_exception_spec(quals),
                     deprecated=_clang_deprecated_message(node),
                     # G31 Phase C backend audit -- see _clang_method_is_override.

@@ -113,6 +113,90 @@ class TestMergeSnapshotsBasics:
         # cached index carried over from the castxml snapshot via replace().
         assert merged.func_by_mangled("_Z3foov") is not None
 
+    def test_clang_backfills_ms_abi_when_castxml_drops_it(self):
+        castxml_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["nonnull(1)"],
+        )
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi", "nonnull(1)"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["ms_abi", "nonnull(1)"]
+
+    def test_clang_backfills_cc_when_castxml_has_no_attributes(self):
+        castxml_fn = Function(name="api", mangled="api", return_type="void")
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["ms_abi"]
+        assert merged.fact_provenance[
+            func_fact_key("api", "calling_convention")
+        ] == "clang"
+
+    def test_clang_cc_conflict_keeps_castxml_evidence_and_warns(self, caplog):
+        castxml_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["sysv_abi"],
+        )
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["sysv_abi"]
+        assert merged.fact_provenance[
+            func_fact_key("api", "calling_convention")
+        ] == "castxml"
+        assert "hybrid calling-convention conflict" in caplog.text
+
+    def test_clang_non_cc_attributes_do_not_change_castxml_contract(self):
+        castxml_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["nonnull(1)"],
+        )
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["nonnull(1)"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["nonnull(1)"]
+
+    def test_clang_matching_cc_does_not_replace_existing_contract(self):
+        castxml_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi"],
+        )
+        clang_fn = Function(
+            name="api", mangled="api", return_type="void",
+            contract_attributes=["ms_abi"],
+        )
+        merged = merge_snapshots(
+            _snap(functions=[castxml_fn], ast_producer="castxml"),
+            _snap(functions=[clang_fn], ast_producer="clang"),
+        )
+
+        assert merged.functions[0].contract_attributes == ["ms_abi"]
+
     def test_clang_only_function_is_appended(self):
         clang_only = Function(name="bar", mangled="_Z3barv", return_type="void")
         castxml = _snap(ast_producer="castxml")

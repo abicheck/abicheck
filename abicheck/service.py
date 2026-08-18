@@ -45,8 +45,8 @@ from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
+    cache_relevant_operand_paths,
     deferred_token_dirs,
-    include_operand_dirs,
     resolve_inferred_header_roots,
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
@@ -647,9 +647,15 @@ def _run_dump_uncached(
     )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
+    # .lower() (Codex review, fresh evidence): compile.frontend="AUTO" is an
+    # accepted spelling (validated case-insensitively) that must mean "no
+    # override", not be treated as an explicit one -- otherwise a pinned,
+    # already-resolved header_backend (service_dump_pipeline.ResolvedDumpRequest.
+    # effective_header_backend) can be silently discarded here in favor of
+    # re-resolving "AUTO" against a live ABICHECK_AST_FRONTEND read below.
     eff_backend = (
         compile.frontend
-        if (compile is not None and compile.frontend != "auto")
+        if (compile is not None and compile.frontend.lower() != "auto")
         else header_backend
     )
 
@@ -1049,9 +1055,9 @@ def _attach_header_graph(
             # pass already hashes must be hashed here too, or an edit under
             # it would silently reuse a stale cached graph even though the
             # primary snapshot re-parsed correctly (Codex review).
-            deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
-                cc.gcc_option_tokens
-            )
+            deferred_dirs = tuple(
+                deferred_token_dirs(deferred)
+            ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -1325,9 +1331,9 @@ def _dump_elf(
         # this PRIMARY parse's cache key stays aligned with _attach_header_graph's
         # own identical fold above -- else the two passes could disagree on
         # staleness for the same header (Codex review).
-        deferred_dirs = tuple(deferred_token_dirs(deferred)) + include_operand_dirs(
-            cc.gcc_option_tokens
-        )
+        deferred_dirs = tuple(
+            deferred_token_dirs(deferred)
+        ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
 
     compiler = "cc" if lang == "c" else "c++"
     try:

@@ -29,6 +29,7 @@ Gated on clang + g++ being present; skipped otherwise.
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,8 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.dumper import dump
+from abicheck.dumper import _clang_header_dump, dump
+from abicheck.dumper_clang import _ClangAstParser
 from abicheck.model import Visibility
 
 # Scoped to **Linux/ELF** — the clang L2 backend's target (P1: clang-only Linux
@@ -91,6 +93,21 @@ void scale(Point* p, double factor) { p->x = int(p->x * factor); }
 int Widget::value() const { return hidden_; }
 }  // namespace lib
 """
+
+
+def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(tmp_path: Path) -> None:
+    """Use Clang's real normalized AST spelling, not a hand-written fixture."""
+    if shutil.which("clang") is None or platform.machine().lower() not in {"x86_64", "amd64"}:
+        pytest.skip("requires an x86-64 clang frontend")
+    header = tmp_path / "api.h"
+    header.write_text(
+        "void (__attribute__((ms_abi)) *factory(void))(int);\n", encoding="utf-8"
+    )
+
+    root, _ = _clang_header_dump([header], [], compiler="clang", lang="C")
+    (factory,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
+
+    assert factory.contract_attributes == []
 
 
 def _have(tool: str) -> bool:
@@ -208,6 +225,65 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
         "Widget",
     }
     assert {e.name for e in clang_snap.enums} == {e.name for e in castxml_snap.enums}
+
+
+def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
+    tmp_path: Path,
+) -> None:
+    """Header evidence closes GCC's missing DWARF calling-convention record.
+
+    GCC's ``-g`` output on x86-64 does not record ``ms_abi`` as
+    ``DW_AT_calling_convention``.  The binary-only result must therefore stay
+    unchanged; with the same public headers, hybrid parsing retains clang's
+    AST evidence when CastXML omits the attribute.
+    """
+    if platform.machine().lower() not in {"x86_64", "amd64"}:
+        pytest.skip("ms_abi case is x86-64-specific")
+    if not (_have("gcc") and _have("clang") and _have("castxml")):
+        pytest.skip("gcc, clang, and castxml are required for the hybrid case64 regression")
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    old_header = old_dir / "api.h"
+    new_header = new_dir / "api.h"
+    old_header.write_text("void api(int value);\n")
+    new_header.write_text("__attribute__((ms_abi)) void api(int value);\n")
+    old_src = old_dir / "api.c"
+    new_src = new_dir / "api.c"
+    old_src.write_text('#include "api.h"\nvoid api(int value) { (void)value; }\n')
+    new_src.write_text(
+        '#include "api.h"\n'
+        '__attribute__((ms_abi)) void api(int value) { (void)value; }\n'
+    )
+    old_so = old_dir / "libapi.so"
+    new_so = new_dir / "libapi.so"
+    for source, output, include_dir in (
+        (old_src, old_so, old_dir),
+        (new_src, new_so, new_dir),
+    ):
+        subprocess.run(
+            [
+                "gcc", "-g", "-shared", "-fPIC", "-o", str(output),
+                str(source), f"-I{include_dir}",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    old_snap = dump(old_so, [old_header], compiler="cc", header_backend="hybrid")
+    new_snap = dump(new_so, [new_header], compiler="cc", header_backend="hybrid")
+    # GCC records only the default DWARF convention on both sides; the
+    # ms_abi delta must therefore come from the header AST, not ELF/DWARF.
+    assert old_snap.dwarf_advanced.calling_conventions == {"api": "normal"}
+    assert new_snap.dwarf_advanced.calling_conventions == {"api": "normal"}
+
+    result = compare(old_snap, new_snap)
+
+    assert [change.kind for change in result.changes] == [
+        ChangeKind.CALLING_CONVENTION_CHANGED
+    ]
 
 
 def test_clang_backend_still_false_positives_case61_alignment_risk(

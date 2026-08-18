@@ -46,8 +46,11 @@ def add_contract_context(
     include_exit_decision: bool = True,
 ) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
-    ``analysis_assurance``/``analysis_assurance_exit_contribution``
-    (piggybacked here, unguarded below, to stay under the file-size cap).
+    ``analysis_assurance``/``analysis_assurance_exit_contribution`` and CLI
+    cleanup phase two PR E's ``annotations`` (schema 2.43; see
+    :func:`add_annotations`) -- all piggybacked here, unguarded below, to
+    stay under the file-size cap, exactly the reason ``analysis_assurance``
+    already gives.
     ``contract_context`` itself stays opt-in
     (``compare(..., contract_evaluation=True)``), serialized via
     :mod:`abicheck.contract_context_io` to match
@@ -104,6 +107,7 @@ def add_contract_context(
             result, severity_config, scheme,
             require_complete_analysis=require_complete_analysis,
         ).to_dict()
+    add_annotations(d, result, severity_config=severity_config)
     add_use_case_impact(d, result, displayed)
 
     ctx = result.contract_context
@@ -143,5 +147,32 @@ def add_contract_context(
     # while the failures above stay listed, which is what accepting
     # incomplete assurance means as opposed to hiding it.
     d["contract_coverage_exit_contribution"] = coverage_exit_for_context(ctx)
+
+
+def add_annotations(
+    d: dict[str, Any],
+    result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> None:
+    """CLI cleanup phase two, PR E: persist ``annotations`` (schema 2.43).
+
+    The persistence prerequisite the plan's own PR 1b section names before
+    ``--annotate``/``--annotate-additions`` can move to the Action: a
+    rendering front end must read an already-classified, already-formatted
+    answer here rather than re-deriving one from stderr or a re-run
+    comparison. See :func:`~abicheck.annotations.annotation_report_entries`
+    for what each entry contains and why the superset (``annotate_
+    additions=True``) is always computed regardless of what this *process*
+    was asked to render.
+
+    Unconditional, mirroring ``exit``'s own presence rule (PR G1): every
+    real comparison has *some* answer to "what would --annotate show", even
+    when that answer is ``[]``, so there's no opt-in flag gating this key
+    the way `contract_context` stays opt-in on `--contract`.
+    """
+    from .annotations import annotation_report_entries
+
+    d["annotations"] = annotation_report_entries(result, severity_config=severity_config)
 
 

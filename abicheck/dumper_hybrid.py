@@ -108,6 +108,7 @@ whole purpose is recovering an alias a single backend alone would miss.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -133,6 +134,9 @@ from .name_classification import canonicalize_type_name
 
 _CTOR_MARKER = "{ctor}"
 _DTOR_MARKER = "{dtor}"
+_CALLING_CONVENTION_ATTRIBUTES = frozenset({"ms_abi", "sysv_abi"})
+
+log = logging.getLogger(__name__)
 
 
 def _backfill_fact(
@@ -399,6 +403,41 @@ def _backfill_function_facts(
         )
         if value != getattr(f, attr):
             updates[attr] = value
+    # CastXML can omit GNU x86-64 ABI attributes from its ``attributes``
+    # string even though clang's AST records them.  Backfill only when the
+    # CastXML declaration captured attributes and has *no* calling-convention
+    # claim.  Never union incompatible conventions: one function cannot be
+    # both ms_abi and sysv_abi, and the TU merger rejects that contradiction.
+    # Keep the CastXML-primary value on a disagreement and warn, rather than
+    # silently manufacturing an impossible ABI or selecting clang as an
+    # undocumented override.
+    if clang_f is not None and clang_f.contract_attributes is not None:
+        own_attrs = f.contract_attributes or []
+        own_cc = {
+            attr
+            for attr in own_attrs
+            if attr.split("(", 1)[0] in _CALLING_CONVENTION_ATTRIBUTES
+        }
+        clang_cc = {
+            attr
+            for attr in clang_f.contract_attributes
+            if attr.split("(", 1)[0] in _CALLING_CONVENTION_ATTRIBUTES
+        }
+        cc_key = func_fact_key(f.mangled, "calling_convention")
+        if not own_cc and clang_cc:
+            updates["contract_attributes"] = sorted(set(own_attrs) | clang_cc)
+            provenance[cc_key] = "clang"
+        elif own_cc and clang_cc and own_cc != clang_cc:
+            provenance[cc_key] = "castxml"
+            log.warning(
+                "hybrid calling-convention conflict for %s: castxml=%s, clang=%s; "
+                "keeping castxml evidence",
+                f.mangled,
+                sorted(own_cc),
+                sorted(clang_cc),
+            )
+        elif own_cc:
+            provenance[cc_key] = "castxml"
     # ELF-sourced facts (elf_binding/elf_visibility) are independent of
     # which AST backend produced the declaration -- both backends'
     # dumper_elf_symbols._populate_elf_visibility reads the same .dynsym

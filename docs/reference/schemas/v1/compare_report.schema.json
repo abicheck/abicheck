@@ -44,7 +44,8 @@
           "evidence_tier",
           "evidence_tiers",
           "analysis_assurance",
-          "analysis_assurance_exit_contribution"
+          "analysis_assurance_exit_contribution",
+          "annotations"
         ]
       }
     },
@@ -1118,15 +1119,48 @@
       "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under --require-complete-analysis \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when the flag was given and analysis_assurance.status is not \"complete\", 0 otherwise (including when the flag was never given). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
       "$comment": "aggregate.py's _analysis_assurance_exit reads this field directly rather than recomputing it."
     },
+    "annotations": {
+      "type": "array",
+      "description": "CLI cleanup phase two, PR E (schema 2.43, always_visible added at 2.44): reporter_contract_blocks.add_annotations / annotations.annotation_report_entries. One entry per finding a full annotation pass over this comparison found -- always the superset (as if --annotate-additions had also been given), regardless of whether this run itself was given --annotate. Exists so a rendering front end (the composite Action) reads an already-classified, already-formatted answer instead of inferring one from stderr or re-running the comparison. Unconditionally present, including as [] on a clean comparison.",
+      "items": {
+        "type": "object",
+        "required": [
+          "level",
+          "annotation",
+          "always_visible"
+        ],
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "notice"
+            ],
+            "description": "GitHub workflow-command level this finding was classified at."
+          },
+          "annotation": {
+            "type": "string",
+            "description": "The exact, already-escaped/truncated GitHub workflow-command line (::error/::warning/::notice file=...,line=...,title=...::message) -- echo verbatim rather than reassembling it."
+          },
+          "always_visible": {
+            "type": "boolean",
+            "description": "Whether plain --annotate (no --annotate-additions) already shows this entry. Always true for error/warning. For a \"notice\" it is false for an opt-in addition/quality-issue/info-severity finding, but true for the one unconditional notice kind (a --contract finding compatibility policy never evaluated) -- a consumer must gate a \"notice\" entry on this field, not on level alone, or it silently hides that always-shown finding."
+          }
+        }
+      },
+      "$comment": "annotations.annotation_report_entries is the one function that builds this array; cli._maybe_emit_annotations's stderr rendering (collect_annotations/format_annotations) shares the identical classification and formatting, so the two cannot disagree."
+    },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (crosscheck_promotion_contribution is always 0 for a native compare report — it has no meaning outside scan --against's own maintainer-promoted --crosscheck KEY=error finding). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
       "required": [
         "code",
         "reasons",
         "compatibility_contribution",
         "contract_coverage_contribution",
-        "analysis_assurance_contribution"
+        "analysis_assurance_contribution",
+        "crosscheck_promotion_contribution"
       ],
       "properties": {
         "code": {
@@ -1143,10 +1177,11 @@
               "scoped_gate",
               "contract_coverage",
               "analysis_assurance",
+              "promoted_crosscheck",
               "clean"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution)."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
         },
         "compatibility_contribution": {
           "type": "integer",
@@ -1162,9 +1197,14 @@
           "type": "integer",
           "enum": [0, 1],
           "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when --require-complete-analysis was not given."
+        },
+        "crosscheck_promotion_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes. This schema validates only native compare reports (scan's own report shape -- ScanOutcome.to_dict() -- is not validated against this file, see test_report_schema.py), where this axis has no meaning outside scan --against's own scan_engine._promote_published_gate and is therefore always 0 -- const, not just a floor, so a malformed compare report claiming a nonzero contribution fails validation instead of silently passing."
         }
       },
-      "$comment": "exit_decision.resolve_compare_exit_decision is the one function that builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for the real process exit, so the two cannot disagree."
+      "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
     },
     "analysis_assurance": {
       "type": "object",

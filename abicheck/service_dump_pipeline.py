@@ -44,9 +44,10 @@ import cycle.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .errors import ValidationError
+from .errors import AstContextMissingError, ValidationError
 from .service_input_resolution import (
     enforce_requested_depth,
     is_raw_source_tree,
@@ -56,12 +57,128 @@ from .service_input_resolution import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from .api_types import DumpRequest
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
 
-__all__ = ["run_dump_request"]
+__all__ = [
+    "DumpResult",
+    "ResolvedDumpRequest",
+    "execute_dump_request",
+    "resolve_dump_request",
+    "run_dump_request",
+]
+
+
+@dataclass(frozen=True)
+class ResolvedDumpRequest:
+    """A :class:`DumpRequest` after resolution, before execution.
+
+    CLI cleanup phase two, PR C / PR 3A (see
+    ``docs/contribute/plans/cli-cleanup-phase-two.md``): the object
+    ``dump --dry-run`` is meant to render, once its rendering path
+    (``cli_dump_helpers.render_dump_dry_run``, currently a hand-written
+    second implementation) is migrated to build from this instead of
+    re-deriving the same facts independently.
+
+    Carries only what :func:`resolve_dump_request` can determine without
+    invoking castxml/clang or writing anything: the normalized language, the
+    requested header-AST backend, the detected binary format, the requested
+    ``depth`` (an input, known up front) and the effective *collect mode*
+    (the build/source evidence level ``depth`` resolves to). Deliberately
+    does **not** carry an *achieved* depth — that can only be read off the
+    completed snapshot (``cli_dump_helpers.fold_dump_provenance_into_dict``
+    derives it via ``_gated_source_label(snap.build_source, snap)``), so a
+    resolve-only object reporting it would have to guess, and a guess that
+    disagrees with the real run defeats the point of rendering ``--dry-run``
+    from a real resolved object (Codex review, fresh evidence). See
+    :class:`DumpResult` for the achieved depth.
+
+    Also deliberately excludes the P0.3 L3→L2 compile-context fold's result:
+    that fold (``buildsource.l2_seed.seed_includes_and_fold_compile_context``)
+    can raise ``HeaderCompileContextAmbiguousError`` on genuinely ambiguous
+    build evidence, and ``--dry-run``'s existing contract
+    (``render_dump_dry_run``'s own docstring) is to never raise on anything
+    but a usage error. Folding it in here would be a real behavior change to
+    that contract, not merely an additive one — it stays inside
+    :func:`execute_dump_request`, unchanged from where :func:`run_dump_request`
+    already runs it today (via :func:`~abicheck.service_input_resolution.resolve_side_snapshot`).
+    """
+
+    request: DumpRequest
+    lang: str
+    lang_explicit: bool
+    header_backend: str
+    # A *reporting-only* projection of the concrete header-AST backend
+    # resolution currently favors -- what a future `--dry-run` render would
+    # show. `header_backend` alone under-reports this: service.py's own
+    # eff_backend computation gives an explicit `evidence.compile.frontend`
+    # precedence over the bare `header_backend` arg, and resolves "auto" to
+    # a concrete backend either way, so a naive render of `header_backend`
+    # can name a different frontend than what would currently be chosen.
+    #
+    # Deliberately NOT what execute_dump_request passes to execution
+    # (Codex review, two rounds -- the first attempt did pass this value
+    # through, which is a real regression, not a pin: `dumper.
+    # _header_ast_parser`'s own `_auto_ast_fallback_eligible(backend)`
+    # checks whether `backend` is *literally* the string "auto" to decide
+    # whether a CastXML failure may gracefully fall back to Clang, and a
+    # non-"host" `frontend_context` has its own "auto"-specific routing --
+    # pre-resolving "auto" to a concrete choice before it reaches that
+    # function silently strips those behaviors). Execution therefore keeps
+    # passing the bare `header_backend` through unchanged, and this field
+    # is accepted as a best-effort preview that can, in principle, disagree
+    # with what execution ends up doing if the environment changes between
+    # resolve and execute, or if the genuinely-unpinned-"auto" fallback
+    # path fires -- the same class of accepted imprecision every other
+    # resolve-time preview in this object already carries.
+    effective_header_backend: str
+    fmt: str | None
+    debug_format: str | None
+    requested_depth: str | None
+    evidence: SideEvidence
+    public_headers: tuple[Path, ...]
+    public_header_dirs: tuple[Path, ...]
+
+    @property
+    def collect_mode(self) -> str:
+        """The effective build/source evidence level ``depth`` resolved to."""
+        return self.evidence.collect_mode
+
+    @property
+    def headers(self) -> tuple[Path, ...]:
+        """The resolved public-header set (files only; see ``public_header_dirs``)."""
+        return tuple(self.evidence.headers)
+
+
+@dataclass(frozen=True)
+class DumpResult:
+    """The executed result of a :class:`ResolvedDumpRequest` — a real snapshot,
+    not a preview.
+
+    Additive sibling to :func:`run_dump_request`, which keeps returning a
+    bare :class:`~abicheck.model.AbiSnapshot` unchanged — changing a public
+    function's return type is a breaking Python-API change (root
+    ``AGENTS.md``), coordinated separately from this additive step; see
+    ``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR C section.
+    :func:`run_dump_request` is now a thin adapter over
+    :func:`execute_dump_request`.
+
+    ``effective_depth`` is the *achieved* evidence depth (e.g. ``"source"``,
+    ``"build"``, ``"headers"``, ``"binary"``) — the same value
+    ``cli_dump_helpers.fold_dump_provenance_into_dict`` derives from the
+    completed snapshot, computed here the identical way.
+
+    Storage (writing the snapshot to disk) is deliberately not part of this
+    object — see this module's own docstring, "Not in scope, deliberately":
+    that is CLI presentation/provenance layer, not resolution or execution.
+    """
+
+    resolved: ResolvedDumpRequest
+    snapshot: AbiSnapshot
+    effective_depth: str
 
 
 def _reject_unsupported_frontends(
@@ -112,15 +229,40 @@ def run_dump_request(
     user-facing progress notes ("following a linker script"); ``None`` logs
     them instead.
 
+    A thin adapter over :func:`resolve_dump_request` + :func:`execute_dump_request`
+    (CLI cleanup phase two, PR C / PR 3A) — kept returning a bare
+    :class:`~abicheck.model.AbiSnapshot`, unchanged, since this is a
+    documented, tested public Tier-2 entry point and changing its return
+    type is a breaking Python-API change coordinated separately (root
+    ``AGENTS.md``). Call :func:`execute_dump_request` directly for the
+    richer :class:`DumpResult`.
+
     Raises:
         ValidationError: If the request fails :meth:`DumpRequest.validate`,
             names a frontend with no extractor for its evidence, or requests a
             ``depth`` the resolved snapshot did not reach.
         SnapshotError: If the input cannot be loaded.
     """
+    return execute_dump_request(resolve_dump_request(request), notify=notify).snapshot
+
+
+def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
+    """Resolve *request* into a :class:`ResolvedDumpRequest` — steps 1-2 of
+    :func:`run_dump_request`'s own docstring (validation, evidence
+    resolution), stopping before any castxml/clang invocation or write.
+
+    This is the function ``dump --dry-run``'s rendering path is meant to
+    build from (see :class:`ResolvedDumpRequest`'s own docstring) once
+    ``cli_dump_helpers.render_dump_dry_run`` is migrated to it — not
+    attempted here; see ``docs/contribute/plans/cli-cleanup-phase-two.md``'s
+    PR C section for what that migration still needs.
+
+    Raises:
+        ValidationError: If the request fails :meth:`DumpRequest.validate`
+            or names a frontend with no extractor for its evidence.
+    """
     from . import service, service_compare_evidence as _sce
     from .api_types import HEADER_AST_FRONTENDS
-    from .dependency_info import populate_side_dependency_info
     from .header_utils import split_public_header_inputs
 
     request.validate()
@@ -139,6 +281,42 @@ def run_dump_request(
 
     evidence = _sce.resolve_dump_request_evidence(request)
     _reject_unsupported_frontends(request, header_backend, evidence)
+    # Pinned once, here -- not a lazily-recomputed property (see
+    # ResolvedDumpRequest.effective_header_backend's own comment).
+    effective_header_backend = _sce.effective_frontend(evidence.compile, header_backend)
+    # dumper._header_ast_parser routes ANY non-"host" frontend_context to
+    # clang unconditionally (`if resolved == "clang" or frontend_context !=
+    # "host": return _run_clang()`), regardless of what the backend itself
+    # resolved to -- mirror that here so this reporting field doesn't claim
+    # castxml for a request that will always run clang. But an *explicit*
+    # `--ast-frontend castxml` (or an env-pinned one) combined with a
+    # non-host context doesn't route to clang at all -- it raises
+    # AstContextMissingError at execution, so claiming "clang" there would
+    # be equally wrong in the other direction (Codex review, two rounds:
+    # the first fix applied the clang override unconditionally, missing
+    # this pinned-castxml case entirely). Reuse dumper's own resolver to
+    # tell the two apart without duplicating its pin/env logic; on the
+    # raising path, leave whatever `_resolve_header_backend` already
+    # produced above -- this best-effort preview never raises.
+    if (
+        evidence.compile is not None
+        and evidence.compile.frontend_context.lower() != "host"
+    ):
+        from .dumper import _resolve_single_ast_backend
+
+        requested = (
+            evidence.compile.frontend
+            if evidence.compile.frontend.lower() != "auto"
+            else header_backend
+        )
+        try:
+            _resolve_single_ast_backend(
+                requested, evidence.compile.frontend_context.lower()
+            )
+        except (AstContextMissingError, ValidationError):
+            pass
+        else:
+            effective_header_backend = "clang"
 
     # `headers` doubles as the public-header set for provenance tagging and
     # must be split into files and directories before tagging (an unsplit
@@ -151,19 +329,70 @@ def run_dump_request(
     if request.depth is not None and request.depth.lower() == "binary":
         public_headers, public_header_dirs = [], []
 
-    snap = resolve_side_snapshot(
-        side,
-        evidence,
+    return ResolvedDumpRequest(
+        request=request,
         lang=lang,
         lang_explicit=request.lang_explicit,
         header_backend=header_backend,
+        effective_header_backend=effective_header_backend,
         fmt=fmt,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
+        debug_format=debug_format,
+        requested_depth=request.depth,
+        evidence=evidence,
+        public_headers=tuple(public_headers),
+        public_header_dirs=tuple(public_header_dirs),
+    )
+
+
+def execute_dump_request(
+    resolved: ResolvedDumpRequest,
+    *,
+    notify: Callable[[str], None] | None = None,
+) -> DumpResult:
+    """Execute a :class:`ResolvedDumpRequest` — steps 3-5 of
+    :func:`run_dump_request`'s own docstring (``resolve_input``, the
+    dependency walk, the depth floor).
+
+    *notify* is forwarded to :func:`abicheck.service.resolve_input` for
+    user-facing progress notes ("following a linker script"); ``None`` logs
+    them instead.
+
+    Raises:
+        ValidationError: If *resolved* requests a ``depth`` the resolved
+            snapshot did not reach.
+        SnapshotError: If the input cannot be loaded.
+    """
+    from .cli_dump_helpers import _gated_source_label
+    from .dependency_info import populate_side_dependency_info
+
+    request = resolved.request
+    side = request.input
+
+    snap = resolve_side_snapshot(
+        side,
+        resolved.evidence,
+        lang=resolved.lang,
+        lang_explicit=resolved.lang_explicit,
+        # The *bare* requested backend, unchanged -- NOT effective_header_
+        # backend (Codex review, fresh evidence, reverting an earlier
+        # attempt at this same line). Passing the pre-resolved concrete
+        # value here was tried and found to be a real regression, not a
+        # pin: `dumper._header_ast_parser`'s own `_auto_ast_fallback_
+        # eligible(backend)` checks whether `backend` is *literally* the
+        # string "auto" to decide whether a CastXML failure may gracefully
+        # fall back to Clang -- pre-resolving "auto" to "castxml" before it
+        # gets here silently disables that fallback. `effective_header_
+        # backend` exists purely for *reporting* (what a future `--dry-run`
+        # projects), not as an execution-time override; see its own
+        # docstring.
+        header_backend=resolved.header_backend,
+        fmt=resolved.fmt,
+        public_headers=list(resolved.public_headers),
+        public_header_dirs=list(resolved.public_header_dirs),
         enable_debuginfod=request.enable_debuginfod,
         debuginfod_url=request.debuginfod_url,
         dwarf_only=request.dwarf_only,
-        debug_format=debug_format,
+        debug_format=resolved.debug_format,
         include_labels=dict(request.include_labels) or None,
         notify=notify,
     )
@@ -172,10 +401,21 @@ def run_dump_request(
         populate_side_dependency_info(
             snap,
             side,
-            fmt,
+            resolved.fmt,
             list(request.dependency_search_paths),
             request.ld_library_path,
         )
 
-    enforce_requested_depth(request.depth, (("input", snap),))
-    return snap
+    enforce_requested_depth(resolved.requested_depth, (("input", snap),))
+    try:
+        # This call is new here -- unlike check_requested_depth_satisfied's
+        # own call, it runs unconditionally, not just behind an explicit
+        # --depth. _l4_source_abi_was_attempted() itself now degrades a
+        # non-numeric compile_units_parsed to "not attempted" rather than
+        # raising, so _gated_source_label still falls through to its own
+        # L3/build-context checks (Codex review, two rounds); this except
+        # is a defensive backstop only, matching that same fallback label.
+        effective_depth = _gated_source_label(snap.build_source, snap)
+    except (TypeError, ValueError, OverflowError):
+        effective_depth = "headers" if snap.from_headers else "binary"
+    return DumpResult(resolved=resolved, snapshot=snap, effective_depth=effective_depth)

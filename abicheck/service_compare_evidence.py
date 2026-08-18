@@ -75,14 +75,20 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
     (an explicit `compile.frontend` wins over the bare `header_backend`
     default), resolved to a concrete backend -- reused so `embed_build_
     source`'s `extractor` matches instead of silently diverging (Codex
-    review, two rounds: an explicit override wasn't case-normalized in the
-    first pass, and "auto" itself was forwarded unresolved in the second --
+    review, three rounds: an explicit override wasn't case-normalized in the
+    first pass; "auto" itself was forwarded unresolved in the second --
     `_make_source_extractor` doesn't special-case "auto" and falls back to
-    Clang, while L2's own "auto" resolves to castxml by default)."""
+    Clang, while L2's own "auto" resolves to castxml by default; and the
+    "is this actually 'auto'" check itself was still case-sensitive in the
+    third -- `compile.frontend="AUTO"` is an accepted spelling
+    (`frontend_value_errors` validates case-insensitively) that used to be
+    treated as an *explicit* override instead of the no-op it means)."""
     from .dumper import _resolve_header_backend
 
     requested = (
-        compile.frontend if (compile is not None and compile.frontend != "auto") else header_backend
+        compile.frontend
+        if (compile is not None and compile.frontend.lower() != "auto")
+        else header_backend
     )
     return _resolve_header_backend(requested)
 

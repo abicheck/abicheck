@@ -337,8 +337,7 @@ class DumpDepthNotSatisfiedError(click.ClickException):
 
 
 def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
-    """True when L4 source-ABI extraction genuinely parsed source, regardless
-    of whether it linked any declarations to a binary.
+    """True when L4 source-ABI extraction genuinely parsed source, regardless of whether it linked any declarations to a binary.
 
     Coverage *status* alone (``PRESENT``/``PARTIAL`` vs ``NOT_COLLECTED``) is
     not enough: ``buildsource.inline._run_inline_source_abi`` stamps L4
@@ -385,7 +384,10 @@ def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
         return False
     surface = build_source.source_abi
     if surface is not None and "compile_units_parsed" in surface.coverage:
-        return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+        try:
+            return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+        except (TypeError, ValueError, OverflowError):
+            return False
     return not _layer_payload_empty(build_source, "L4")
 
 
@@ -1309,11 +1311,10 @@ def handle_non_elf_dump(
             lang_explicit=lang_explicit,
             pending_cleanups=_l2_pending_cleanups,
         )
-        # _l3_include_dirs unused here: dump_native_binary/service.run_dump
-        # has no public extra_hash_dirs hook (unlike perform_elf_dump's own
-        # dump() call below) -- a pre-existing, broader service.py cache-key
-        # gap this PR doesn't scope to fix (Codex review; AGENTS.md "Known
-        # gaps").
+        # _l3_include_dirs is unused by design, not omission: `compile=
+        # l3_effective_ctx` below hands the merged L3 context to service_
+        # header_scoped._try_header_scoped_dump, which derives the identical
+        # cache-relevant paths from those tokens itself (Codex review, PR D).
         snap = dump_native_binary(
             so_path,
             binary_fmt,
