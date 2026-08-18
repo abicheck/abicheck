@@ -570,6 +570,41 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.header_backend == "auto"
         assert resolved.effective_header_backend in ("castxml", "clang")
 
+    def test_execute_pins_the_effective_backend_not_the_bare_requested_one(
+        self, snap_path: Path, monkeypatch
+    ):
+        """Codex review, fresh evidence: execution must consume the already-
+        resolved concrete backend, not the bare (possibly "auto") requested
+        one — otherwise service.py's own eff_backend computation re-reads
+        ABICHECK_AST_FRONTEND at execution time, and a rendered dry-run plan
+        can disagree with what execution actually resolves to if the
+        environment changed in between."""
+        from abicheck import service_dump_pipeline
+        from abicheck.compile_context import CompileContext
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(
+            input=InputSpec(path=snap_path, compile=CompileContext(frontend="clang")),
+            frontend="auto",
+        )
+        resolved = resolve_dump_request(request)
+        assert resolved.header_backend == "auto"
+        assert resolved.effective_header_backend == "clang"
+
+        captured: dict[str, object] = {}
+        original = service_dump_pipeline.resolve_side_snapshot
+
+        def _spy(*args, **kwargs):
+            captured["header_backend"] = kwargs.get("header_backend")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(service_dump_pipeline, "resolve_side_snapshot", _spy)
+        execute_dump_request(resolved)
+        assert captured["header_backend"] == "clang"
+
 
 # ===================================================================
 # The Phase 5 gate, as an executable check

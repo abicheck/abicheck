@@ -330,7 +330,15 @@ def execute_dump_request(
         resolved.evidence,
         lang=resolved.lang,
         lang_explicit=resolved.lang_explicit,
-        header_backend=resolved.header_backend,
+        # The *concrete* backend, not the bare requested one (Codex review,
+        # fresh evidence): resolved.header_backend can be "auto", which
+        # service.py's own eff_backend computation would otherwise re-resolve
+        # at execution time via a fresh ABICHECK_AST_FRONTEND env read --
+        # letting execution silently disagree with what resolution (and any
+        # dry-run render of it) already reported as effective_header_backend
+        # if the environment changed in between. Passing the already-resolved
+        # concrete value pins the decision resolution made.
+        header_backend=resolved.effective_header_backend,
         fmt=resolved.fmt,
         public_headers=list(resolved.public_headers),
         public_header_dirs=list(resolved.public_header_dirs),
