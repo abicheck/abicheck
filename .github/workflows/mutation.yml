@@ -205,10 +205,19 @@ jobs:
         # cannot quietly turn this green with zero work done.
         env:
           ABICHECK_MIN_EXECUTED: '1'
-        run: python -m pytest tests/test_mutation_results.py -m slow -q
+        # Preserve complete output: mutmut's own clean-test failure summary
+        # omits the test node id, so this artifact is the evidence needed to
+        # repair a future collector failure rather than guessing at a selector.
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_mutation_results.py -m slow -q 2>&1 \
+            | tee mutmut-real-parser-pytest.txt
 
       - name: Narrow mutation scope to PR-implicated detector modules
-        if: github.event_name == 'pull_request'
+        # A `mutation` label requests the complete baseline-backed check.
+        # Narrowing it would omit configured modules and let the baseline
+        # comparison treat them as zero-mutant successes.
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'mutation')
         # `--diff-scoped` can only fail on functions the PR changed.  Mutating
         # unrelated detector modules first consumed the entire two-hour job
         # budget in #784 and #797 before their changed modules were measured.
@@ -273,6 +282,7 @@ jobs:
         with:
           name: mutmut-results
           path: |
+            mutmut-real-parser-pytest.txt
             mutmut-results.txt
             mutation-receipt.json
             mutation-baseline.json

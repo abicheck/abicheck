@@ -264,6 +264,20 @@ def test_a_label_forced_run_also_fails_closed() -> None:
     assert '"$MATCHED" != "true"' in guard, guard
 
 
+def test_labelled_prs_keep_the_full_mutation_scope() -> None:
+    """The `mutation` label requests a complete baseline-backed run.
+
+    Scope narrowing rewrites `only_mutate`; doing that for a labelled run would
+    omit unmodified configured modules and turn their baseline comparison into
+    a false zero-mutant success.
+    """
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    scope = next(s for s in steps if s.get("name") == "Narrow mutation scope to PR-implicated detector modules")
+    condition = str(scope.get("if", ""))
+    assert "github.event_name == 'pull_request'" in condition
+    assert "!contains(github.event.pull_request.labels.*.name, 'mutation')" in condition
+
+
 def test_the_require_baseline_signal_is_published_by_resolve() -> None:
     """Otherwise the fail-closed branch above reads an always-empty variable
     and silently never fires."""
@@ -633,6 +647,15 @@ def test_checkout_is_unshallow_for_the_diff_scoped_lane() -> None:
         s for s in steps if str(s.get("uses", "")).startswith("actions/checkout")
     )
     assert checkout.get("with", {}).get("fetch-depth") == 0
+
+
+def test_real_mutmut_parser_output_is_saved_for_failures() -> None:
+    """A failed real-tool probe must identify its failing test in CI artifacts."""
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    probe = next(s for s in steps if s.get("name") == "Verify the parser against a real mutmut run")
+    assert "tee mutmut-real-parser-pytest.txt" in probe["run"]
+    upload = next(s for s in steps if s.get("name") == "Upload mutmut results")
+    assert "mutmut-real-parser-pytest.txt" in upload["with"]["path"]
 
 
 def test_the_real_mutmut_parser_test_runs_in_this_lane() -> None:
