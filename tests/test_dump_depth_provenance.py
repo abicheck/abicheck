@@ -720,6 +720,28 @@ def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> No
     assert _l4_source_abi_was_attempted(pack) is True
 
 
+def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
+    """A coercible-but-non-int ``compile_units_parsed`` (e.g. ``"1"``, as a
+    forward-compatible or hand-edited snapshot might carry it) must still
+    count as "attempted" -- only genuinely non-numeric junk (e.g.
+    ``"unknown"``) should degrade to False (Codex review, fresh evidence:
+    an isinstance-only check, tried as an earlier fix, regressed this)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_parsed"] = "1"  # type: ignore[assignment]
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+
+    assert _l4_source_abi_was_attempted(pack) is True
+
+
 def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth(
     tmp_path,
 ) -> None:

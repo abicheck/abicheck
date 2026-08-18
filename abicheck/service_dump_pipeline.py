@@ -284,6 +284,20 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     # Pinned once, here -- not a lazily-recomputed property (see
     # ResolvedDumpRequest.effective_header_backend's own comment).
     effective_header_backend = _sce.effective_frontend(evidence.compile, header_backend)
+    # dumper._header_ast_parser routes ANY non-"host" frontend_context to
+    # clang unconditionally (`if resolved == "clang" or frontend_context !=
+    # "host": return _run_clang()`), regardless of what the backend itself
+    # resolved to -- mirror that here so this reporting field doesn't claim
+    # castxml for a request that will always run clang (Codex review, fresh
+    # evidence). The one case this doesn't cover -- an *explicit* `--ast-
+    # frontend castxml` with a non-host context, which raises
+    # AstContextMissingError at execution -- is an error path this
+    # best-effort preview isn't expected to predict, same as elsewhere.
+    if (
+        evidence.compile is not None
+        and evidence.compile.frontend_context.lower() != "host"
+    ):
+        effective_header_backend = "clang"
 
     # `headers` doubles as the public-header set for provenance tagging and
     # must be split into files and directories before tagging (an unsplit

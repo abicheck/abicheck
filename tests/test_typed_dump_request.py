@@ -570,6 +570,27 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.header_backend == "auto"
         assert resolved.effective_header_backend in ("castxml", "clang", "hybrid")
 
+    def test_effective_header_backend_reports_clang_for_non_host_frontend_context(
+        self, snap_path: Path
+    ):
+        """An unpinned ``auto`` backend under a non-"host" ``frontend_context``
+        is *always* routed to clang at execution
+        (``dumper._header_ast_parser``: ``if resolved == "clang" or
+        frontend_context != "host": return _run_clang()``) -- the reporting
+        projection must reflect that instead of naming the backend "auto"
+        would otherwise default to (Codex review, fresh evidence)."""
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        resolved = resolve_dump_request(
+            DumpRequest(
+                input=InputSpec(path=snap_path),
+                frontend="auto",
+                frontend_context="device",
+            )
+        )
+        assert resolved.header_backend == "auto"
+        assert resolved.effective_header_backend == "clang"
+
     def test_execute_forwards_the_bare_header_backend_not_the_reporting_projection(
         self, snap_path: Path, monkeypatch
     ):

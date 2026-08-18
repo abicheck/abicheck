@@ -792,9 +792,12 @@ pipelines a fourth time.
   resolvable without invoking castxml/clang or writing anything — and is
   what `--dry-run` renders, so the printed plan and what execution actually
   resolves cannot disagree. `DumpResult` states the executed outcome: the
-  real snapshot, the *achieved* effective depth (only knowable from the
-  completed snapshot), the resolved compile context, the build-query
-  decision, the source scope, the dependency scope, and diagnostics.
+  real snapshot and the *achieved* effective depth (only knowable from the
+  completed snapshot) — see the "storage result" note two sentences below
+  for why it carries nothing more yet (a resolved compile context,
+  build-query decision, source/dependency scope, and diagnostics are all
+  still CLI-presentation-layer concerns `execute_dump_request()` doesn't
+  touch, not a promised future field of this object).
   Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
   `--dry-run` never reaches that step. **The storage result is not part of
   the `DumpResult` this slice's `execute_dump_request()` produces (Codex
