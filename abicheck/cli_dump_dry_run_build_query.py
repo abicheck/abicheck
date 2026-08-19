@@ -722,6 +722,34 @@ def add_build_query_dry_run_section(
             f"{_configured_compile_db_hint!r}, but there is no --sources tree "
             "to resolve it against -- the query's own default output location)"
         )
+    elif effective_sources is not None:
+        # No `build.compile_db` hint configured, but `_run_build_query`
+        # still resolves *something*: `_autodiscover_compile_db(sources)`
+        # (a pure, read-only stat/glob search over conventional build-dir
+        # names, then any immediate subdirectory) -- the query's expected
+        # default output location genuinely exists as a concrete path when
+        # a conventional compile DB is already sitting under `--sources`
+        # (Codex review, fresh evidence). Reusing this private helper
+        # mirrors the existing `_compile_db_at` reuse pattern this module
+        # already relies on elsewhere.
+        from .buildsource.inline import _autodiscover_compile_db
+
+        try:
+            discovered_db = _autodiscover_compile_db(effective_sources)
+        except (OSError, ValueError):
+            discovered_db = None
+        if discovered_db is not None:
+            compile_db_line = (
+                f"resulting compile-DB path: {discovered_db} (no build."
+                "compile_db configured; a conventional compile DB already "
+                "exists here, and the query may still recreate/refresh it)"
+            )
+        else:
+            compile_db_line = (
+                "resulting compile-DB path: (build.compile_db not "
+                "configured, and no conventional compile DB exists yet -- "
+                "the query's own default output location)"
+            )
     else:
         compile_db_line = (
             "resulting compile-DB path: (build.compile_db not configured -- "

@@ -1371,6 +1371,55 @@ class TestDumpDryRunBuildQueryTrust:
             not in result.output
         )
 
+    def test_no_compile_db_hint_still_resolves_conventional_compile_db(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: even with no build.compile_db
+        # configured, _run_build_query still resolves *something* --
+        # _autodiscover_compile_db(sources), a pure read-only search over
+        # conventional build-dir names. A conventional compile DB already
+        # sitting under --sources is therefore a concrete, deterministically
+        # resolvable path, not "the query's own default output location".
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        existing_db = tmp_path / "compile_commands.json"
+        existing_db.write_text("[]", encoding="utf-8")
+        cfg = self._write_config(tmp_path)  # no compile_db configured
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert f"resulting compile-DB path: {existing_db}" in result.output
+        assert (
+            "resulting compile-DB path: (build.compile_db not configured -- "
+            "the query's own default output location)"
+        ) not in result.output
+
+    def test_no_compile_db_hint_and_no_conventional_db_reports_generic_message(
+        self, tmp_path: Path
+    ) -> None:
+        # Sibling case: nothing configured, nothing already on disk -- the
+        # generic "own default output location" message is correct here.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (
+            "resulting compile-DB path: (build.compile_db not "
+            "configured, and no conventional compile DB exists yet"
+        ) in result.output
+
     def test_malformed_config_inside_sources_pack_degrades_silently_despite_raw_build_info(
         self, tmp_path: Path
     ) -> None:
