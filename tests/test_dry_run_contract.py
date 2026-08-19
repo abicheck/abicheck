@@ -1268,6 +1268,60 @@ class TestDumpDryRunBuildQueryTrust:
             in result.output
         )
 
+    def test_glob_compile_db_hint_resolves_to_existing_match(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: `build.compile_db` is a *glob
+        # pattern* `_run_build_query` resolves via
+        # `sorted(sources.glob(cfg.compile_db))` -- printing the literal
+        # pattern as "the resulting compile-DB path" is wrong; an already
+        # existing match should be reported as the resolved path, not the
+        # unexpanded pattern.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        build_a = tmp_path / "build" / "a"
+        build_a.mkdir(parents=True)
+        existing_db = build_a / "compile_commands.json"
+        existing_db.write_text("[]", encoding="utf-8")
+        cfg = self._write_config(tmp_path, compile_db="build/*/compile_commands.json")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert f"resulting compile-DB path: {existing_db}" in result.output
+        assert "build/*/compile_commands.json" in result.output  # pattern noted too
+        assert (
+            "resulting compile-DB path: build/*/compile_commands.json"
+            not in result.output
+        )
+
+    def test_glob_compile_db_hint_with_no_match_reports_pattern_only(
+        self, tmp_path: Path
+    ) -> None:
+        # Sibling case: no file matches the glob pattern yet -- the real
+        # run's exact resulting path is only known after the query executes
+        # and (re)writes it, so dry-run must not claim a specific path.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path, compile_db="build/*/compile_commands.json")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "matches no file yet" in result.output
+        assert (
+            "resulting compile-DB path: build/*/compile_commands.json"
+            not in result.output
+        )
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
