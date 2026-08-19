@@ -478,7 +478,31 @@ def add_build_query_dry_run_section(
 
         try:
             src_pack_evidence = BuildSourcePack.load(sources).build_evidence
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 -- best-effort preview load; see
+            # the note above this try (Codex review, fresh evidence): a
+            # structurally malformed manifest (e.g. a JSON `null` where a
+            # dict is expected -- `BuildSourceManifest.from_dict`'s
+            # `dict(d.get("source_root", ...))` raises `TypeError`, not
+            # `OSError`/`ValueError`, for that shape) previously escaped
+            # this narrower catch entirely, crashing the whole `--dry-run`
+            # invocation with a raw traceback instead of a report -- for a
+            # `--depth headers` (`collect_active=False`) invocation where
+            # the real run's own L2 seed (`seed_includes_and_fold_compile_
+            # context`) wraps the identical `BuildSourcePack.load` in a
+            # bare `except Exception:  # noqa: BLE001 -- best-effort` and
+            # completes successfully by degrading silently. Confirmed
+            # empirically: a real gcc-compiled library, a real clang
+            # frontend, and a manifest with `"source_root": null` crash
+            # this function's own load at the identical line the real L2
+            # seed's own (differently-shaped) call site degrades from.
+            # Broadened to match the real call sites' own catch-all
+            # discipline exactly, rather than enumerating every possible
+            # malformed-shape exception `from_dict` could raise one at a
+            # time -- the failure mode here is "this pack's on-disk shape
+            # doesn't parse," which is not narrower than what a corrupt or
+            # adversarially-edited pack can produce, and every consumer of
+            # this exception already branches on `collect_active`/
+            # `l2_seed_reachable`, never on the exception's own type.
             if build_info is not None:
                 # `l2_seed._l2_seed_pack_inputs` only attempts to load
                 # `sources` when `build_info is None` -- with a non-``None``
@@ -573,7 +597,13 @@ def add_build_query_dry_run_section(
 
         try:
             bi_pack_evidence = BuildSourcePack.load(build_info).build_evidence
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 -- best-effort preview load,
+            # broadened for the identical reason the sibling --sources pack
+            # load above was (Codex review, fresh evidence): a structurally
+            # malformed manifest can raise TypeError (or another shape-
+            # mismatch exception `from_dict` doesn't guard), not just
+            # OSError/ValueError, and every branch below already keys off
+            # `collect_active`, never the exception's own type.
             # The real (non-dry) run rejects this identically -- `cli_
             # buildsource._load_pack_or_raise` raises `click.ClickException`
             # (exit 1) for the same load failure -- so a dry run reporting

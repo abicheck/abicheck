@@ -26,6 +26,7 @@ cleanup phase two, PR 3C prerequisite 3).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -515,6 +516,50 @@ class TestDumpDryRunBuildQueryTrust:
         assert "will NOT run" in result.output
         assert "embed_build_source is unreachable anyway" in result.output
         assert "collect mode 'off'" in result.output
+
+    def test_structurally_malformed_pack_manifest_reports_instead_of_crashing(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence (commit 665e13f): a recognized
+        # --sources pack whose manifest.json is structurally malformed in a
+        # way that raises TypeError rather than OSError/ValueError --
+        # BuildSourceManifest.from_dict's `dict(d.get("source_root", ...))`
+        # raises TypeError for a real (JSON null) "source_root": null,
+        # confirmed directly against BuildSourcePack.load(). The prior
+        # `except (OSError, ValueError)` never caught this, so `dump
+        # --depth headers --dry-run` crashed with a raw traceback instead
+        # of a report. The real (non-dry) run completes successfully under
+        # --depth headers: seed_includes_and_fold_compile_context's own
+        # broad `except Exception` degrades silently on the identical load
+        # failure. Confirmed empirically against a real gcc-compiled
+        # library and a marker-writing query: the real run exits 0 with the
+        # marker never created.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+        manifest_path = src_pack / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["source_root"] = None
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--depth", "headers",
+                "--build-query", "touch marker", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Traceback" not in result.output
+        assert "will run" not in result.output
+        assert "will NOT run" in result.output
 
     def test_no_sources_or_build_info_reports_no_collection_attempted(
         self, tmp_path: Path
