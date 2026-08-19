@@ -42,6 +42,7 @@ function-local import also keeps this module out of ``service``'s import cycle
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
@@ -56,12 +57,32 @@ if TYPE_CHECKING:
     from .service_compare_evidence import SideEvidence
 
 __all__ = [
+    "SideResolution",
     "embed_side_build_source",
     "enforce_requested_depth",
     "is_raw_source_tree",
     "reject_hybrid_source_frontend",
     "resolve_side_snapshot",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class SideResolution:
+    """One resolved input side, plus the L2/P0.3 fold's own effective values.
+
+    PR 3A (dump/scan resolver convergence, CLI cleanup phase two). Everything
+    :func:`resolve_side_snapshot` already computed internally -- the seeded
+    ``includes`` and the folded :class:`CompileContext`, both discarded after
+    use -- but callers with a post-resolution hook that must agree with the
+    primary parse (``perform_elf_dump``'s ADR-039 build-context collector and
+    header-graph second pass; ``scan_engine``'s pair-aware baseline-context
+    reuse decision) need these values themselves, not just the snapshot. See
+    :func:`_resolve_side_snapshot_impl`.
+    """
+
+    snapshot: AbiSnapshot
+    effective_includes: tuple[Path, ...]
+    effective_compile_context: CompileContext | None
 
 
 def is_raw_source_tree(path: Path | None) -> bool:
@@ -108,6 +129,9 @@ def _seeded_includes_and_compile_context(
     *,
     lang: str = "c++",
     lang_explicit: bool = False,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -168,6 +192,17 @@ def _seeded_includes_and_compile_context(
     forwarded into a parse that would reject it (e.g. a matched C compile
     unit's ``-std=c17`` forwarded into an explicitly-forced C++ parse).
 
+    *build_config*/*build_query*/*build_compile_db* (PR 3A, dump/scan
+    resolver convergence): optional pass-throughs to
+    :func:`~abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context`,
+    defaulted to ``None`` so every existing caller (``compare``'s typed
+    pipeline, ``dump``'s ``execute_dump_request``) is unaffected. These exist
+    only so a caller resolving a side that still carries the CLI's live
+    ``--build-query``/``--build-compile-db``/``--config`` flags (``dump``'s
+    ELF path, until PR 3C removes them) can route through this one shared
+    primitive instead of a second, independent call to the same underlying
+    function.
+
     Returns ``(includes, context, applied, cleanups)`` — ``includes`` is
     *side.includes* augmented with any build-derived seed dirs; ``applied``
     is True only when a real L3 context was found and folded in, which is
@@ -194,9 +229,9 @@ def _seeded_includes_and_compile_context(
             includes=side.includes,
             sources=side.sources,
             build_info=side.build_info,
-            build_config=None,
-            build_query=None,
-            build_compile_db=None,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=side.build_targets,
             collect_mode="off",
             gcc_path=ctx.gcc_path if ctx is not None else None,
@@ -256,6 +291,70 @@ def resolve_side_snapshot(
     :attr:`abicheck.api_types.CompareRequest.lang_explicit` /
     :attr:`abicheck.api_types.DumpRequest.lang_explicit`. Forwarded to
     :func:`abicheck.service.resolve_input` unchanged.
+
+    A thin wrapper over :func:`_resolve_side_snapshot_impl` (PR 3A, dump/scan
+    resolver convergence) — identical signature, identical behavior, for every
+    existing caller. Use the impl function directly when the caller also
+    needs the fold's effective ``includes``/``CompileContext`` back.
+    """
+    return _resolve_side_snapshot_impl(
+        side,
+        evidence,
+        lang=lang,
+        lang_explicit=lang_explicit,
+        header_backend=header_backend,
+        fmt=fmt,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
+        dwarf_only=dwarf_only,
+        debug_format=debug_format,
+        include_labels=include_labels,
+        notify=notify,
+    ).snapshot
+
+
+def _resolve_side_snapshot_impl(
+    side: InputSpec,
+    evidence: SideEvidence,
+    *,
+    lang: str,
+    lang_explicit: bool = False,
+    header_backend: str,
+    fmt: str | None,
+    public_headers: list[Path],
+    public_header_dirs: list[Path],
+    enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
+    dwarf_only: bool = False,
+    debug_format: str | None = None,
+    include_labels: dict[Path, str] | None = None,
+    notify: Callable[[str], None] | None = None,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    changed_paths: tuple[str, ...] = (),
+    allow_build_query: bool | None = None,
+) -> SideResolution:
+    """The real implementation behind :func:`resolve_side_snapshot`.
+
+    PR 3A (dump/scan resolver convergence, CLI cleanup phase two): everything
+    :func:`resolve_side_snapshot` already did, plus returning the fold's own
+    effective ``includes``/:class:`CompileContext` (see :class:`SideResolution`)
+    and two extra optional pass-throughs (*changed_paths*, *allow_build_query*)
+    that only ``scan``'s candidate-side resolution needs — every other caller
+    leaves them at their no-op defaults, so this is a strict superset of the
+    prior behavior, not a new decision point. *build_config*/*build_query*/
+    *build_compile_db* are the equivalent pass-through for ``dump``'s ELF
+    path, which still has live ``--build-query``/``--build-compile-db``/
+    ``--config`` CLI flags until PR 3C removes them.
+
+    ``allow_build_query=None`` keeps this Tier-2 primitive's existing
+    "never execute a build system as a side effect" default (``False``,
+    matching every pre-existing caller) — only a caller that explicitly
+    passes ``True`` (the CLI, once its own trust gate has already decided
+    the query is authorized) opts into running one.
     """
     from . import service
 
@@ -273,7 +372,13 @@ def resolve_side_snapshot(
     try:
         includes, compile_ctx, context_applied, cleanups = (
             _seeded_includes_and_compile_context(
-                side, evidence, lang=lang, lang_explicit=lang_explicit
+                side,
+                evidence,
+                lang=lang,
+                lang_explicit=lang_explicit,
+                build_config=build_config,
+                build_query=build_query,
+                build_compile_db=build_compile_db,
             )
         )
         snap = service.resolve_input(
@@ -318,6 +423,8 @@ def resolve_side_snapshot(
                 header_backend,
                 public_headers,
                 public_header_dirs,
+                changed_paths=changed_paths,
+                allow_build_query=bool(allow_build_query),
             )
     finally:
         # Only after the L2 parse (and any embed) has consumed the seeded dirs:
@@ -327,7 +434,11 @@ def resolve_side_snapshot(
             from .buildsource.inline import _run_cleanups
 
             _run_cleanups(cleanups)
-    return snap
+    return SideResolution(
+        snapshot=snap,
+        effective_includes=tuple(includes),
+        effective_compile_context=compile_ctx,
+    )
 
 
 def embed_side_build_source(
@@ -337,6 +448,9 @@ def embed_side_build_source(
     header_backend: str,
     public_headers: list[Path],
     public_header_dirs: list[Path],
+    *,
+    changed_paths: tuple[str, ...] = (),
+    allow_build_query: bool = False,
 ) -> None:
     """Embed one side's inline L3-L5 build/source evidence into *snap*.
 
@@ -349,6 +463,13 @@ def embed_side_build_source(
     ``embed_build_source`` — no place in this Tier-2 API's
     ``ValidationError``/``SnapshotError`` contract, so it is translated here
     (Codex review).
+
+    *changed_paths*/*allow_build_query* (PR 3A, dump/scan resolver
+    convergence): optional pass-throughs to ``embed_build_source``, defaulted
+    to their existing no-op values so every pre-existing caller (``compare``,
+    ``dump``'s typed pipeline) is unaffected — only ``scan``'s candidate-side
+    resolution passes non-default values, for its POI-focused L4 replay
+    scoping and its CLI-resolved trusted-build-query permission.
     """
     import click
 
@@ -365,6 +486,8 @@ def embed_side_build_source(
             sources=side.sources,
             build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
+            changed_paths=changed_paths,
+            allow_build_query=allow_build_query,
             extractor=_sce.effective_frontend(evidence.compile, header_backend),
             # L4 source-ABI replay must invoke the compiler this input's own L2
             # header AST was pointed at (`gcc_path`/`gcc_prefix`), not

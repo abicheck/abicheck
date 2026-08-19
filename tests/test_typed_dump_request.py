@@ -575,6 +575,25 @@ class TestResolveExecuteDumpRequestSplit:
 
         assert "storage" not in {f.name for f in fields(DumpResult)}
 
+    def test_dump_result_carries_effective_includes_and_compile_context(
+        self, snap_path: Path
+    ):
+        """PR 3A (dump/scan resolver convergence): DumpResult surfaces the
+        P0.3 L3->L2 fold's own effective includes/compile-context, computed
+        inside execute_dump_request's resolution call but previously
+        discarded after use. No sources/build_info here, so the fold is a
+        no-op -- includes is whatever the request supplied (empty), and the
+        compile context is None (unchanged from the request's own None)."""
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        result = execute_dump_request(resolve_dump_request(request))
+        assert result.effective_includes == ()
+        assert result.effective_compile_context is None
+
     def test_effective_header_backend_honors_compile_context_override(
         self, snap_path: Path
     ):
@@ -678,13 +697,13 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.effective_header_backend == "clang"
 
         captured: dict[str, object] = {}
-        original = service_dump_pipeline.resolve_side_snapshot
+        original = service_dump_pipeline._resolve_side_snapshot_impl
 
         def _spy(*args, **kwargs):
             captured["header_backend"] = kwargs.get("header_backend")
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(service_dump_pipeline, "resolve_side_snapshot", _spy)
+        monkeypatch.setattr(service_dump_pipeline, "_resolve_side_snapshot_impl", _spy)
         execute_dump_request(resolved)
         # ...but execution still receives the bare, unresolved value -- the
         # same "auto" service.py's own eff_backend computation independently

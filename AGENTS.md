@@ -4121,6 +4121,47 @@ Once a root command genuinely clears the bar above, pick the right home:
   `execute_dump_request` split — that split remains real, additive
   progress in its own right, just not yet consumed by `dump_cmd`.
 
+  **Slice landed (2026-08-19, same session): `service_input_resolution.
+  SideResolution`/`_resolve_side_snapshot_impl`, plus two newly-found,
+  narrower blockers on the next step.** `_resolve_side_snapshot_impl`
+  (the real implementation behind `resolve_side_snapshot`, now a one-line
+  wrapper) returns the P0.3 fold's own effective `includes`/
+  `CompileContext` — previously computed inside `resolve_side_snapshot`
+  and discarded after use — as a new `SideResolution` object;
+  `service_dump_pipeline.DumpResult` surfaces the same two fields,
+  populated by `execute_dump_request`. Purely additive, zero behavior
+  change for every existing caller, fully tested
+  (`tests/test_typed_dump_request.py`). This is real progress toward "one
+  shared primitive," but attempting the next step — routing
+  `perform_elf_dump`'s primary parse through it — found the two are not
+  simply duplicate callers of one function: `perform_elf_dump` receives an
+  *already-resolved* `debug_info_path` from its caller (`dump_cmd`, via
+  `_resolve_debug_artifact`), while `service._dump_elf` (which
+  `_resolve_side_snapshot_impl` reaches through `service.resolve_input`)
+  has no such parameter at all and independently *re-derives* the
+  identical fact from raw `debug_roots`/`enable_debuginfod`/
+  `debuginfod_url`. Merging the two needs the two debug-artifact
+  resolutions confirmed equivalent first — a real, separate investigation,
+  not a follow-up edit. A parallel check of `scan_engine._build_new_
+  snapshot` (which already calls `service.resolve_input` directly, so it
+  doesn't share this particular ELF-pipeline divergence) found two
+  different, narrower blockers instead: it passes `symbols_only`/
+  `debug_presence_only` to `resolve_input`, which `_resolve_side_snapshot_
+  impl` never threads through yet (a straightforward additive gap); and
+  its `embed_build_source` call constructs `public_headers` differently
+  from `embed_side_build_source`'s own construction (`_expand_public_
+  headers` over the combined headers+dirs list, vs. the shared wrapper's
+  separate, unexpanded treatment) — a genuine behavioral difference
+  needing reconciliation, not just a naming one. Neither was attempted
+  this session, per this file's own "known gaps over risky reactive
+  patches" convention, given this exact code area's extensive prior
+  history of exactly this shape of subtle divergence (18+ numbered
+  findings on the L3→L2-fold entry above). **PR 3A's full convergence
+  remains open; PR 3C (the "PR F" removal of `dump --build-query`/
+  `dump --build-compile-db`) stays blocked on it**, per the plan doc's own
+  explicit ordering requirement — see `docs/contribute/plans/cli-cleanup-
+  phase-two.md`'s PR 3A section for the equivalent, fuller account.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

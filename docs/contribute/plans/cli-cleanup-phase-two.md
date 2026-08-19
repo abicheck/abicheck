@@ -1004,6 +1004,70 @@ pipelines a fourth time.
   > dedicated pass, not as a rushed follow-on to an already-large
   > investigation.
   >
+  > **Slice landed (2026-08-19, this session): `DumpResult`/
+  > `_resolve_side_snapshot_impl` split, and two concrete new blockers found
+  > while attempting the next slice.** `service_input_resolution.py` gained
+  > `SideResolution` (snapshot + the fold's own effective `includes`/
+  > `CompileContext`, both previously discarded after use) and
+  > `_resolve_side_snapshot_impl` (the real implementation;
+  > `resolve_side_snapshot` is now a one-line wrapper, unchanged for every
+  > existing caller). `service_dump_pipeline.DumpResult` surfaces the same
+  > two fields, populated by `execute_dump_request`. Both additive, fully
+  > tested, zero behavior change for existing callers — a genuinely safe
+  > slice, per this note's own "Net" paragraph above.
+  >
+  > Attempting the *next* slice — routing `perform_elf_dump`'s primary parse
+  > through this shared primitive instead of its own direct
+  > `seed_includes_and_fold_compile_context()` + `dumper.dump()` call — found
+  > this is **not** the small step it looked like: `perform_elf_dump` and
+  > `service._dump_elf` (which `_resolve_side_snapshot_impl` reaches via
+  > `service.resolve_input`) are two **independently evolved** ELF-resolution
+  > pipelines, not one function called from two places. Concretely:
+  > `perform_elf_dump` receives an *already-resolved* `debug_info_path`
+  > (computed by its caller, `dump_cmd`, via `_resolve_debug_artifact`, from
+  > `--debug-root`/`--debuginfod`), while `service._dump_elf` has no
+  > `debug_info_path` parameter at all — it independently *re-derives* the
+  > identical fact from raw `debug_roots`/`enable_debuginfod`/`debuginfod_url`
+  > via its own call to `debug_resolver.resolve_debug_info`. Routing through
+  > `resolve_input` would mean either dropping `perform_elf_dump`'s
+  > already-resolved artifact on the floor, or reconciling two independently
+  > written debug-artifact-resolution implementations to confirm they agree
+  > — itself a real, separate investigation, not a follow-up edit.
+  > `perform_elf_dump`'s `extra_hash_dirs`/`scope_header_dirs` are *not* an
+  > equivalent problem (`_dump_elf` derives its own, deliberately-aligned
+  > versions of both internally — confirmed by its own comments referencing
+  > this exact alignment), so only the debug-artifact-resolution divergence
+  > blocks this specific slice.
+  >
+  > A parallel check of the *other* half — `scan_engine._build_new_snapshot`,
+  > which already calls `service.resolve_input` directly (not `dumper.dump()`,
+  > so it doesn't share `perform_elf_dump`'s ELF-pipeline-divergence problem)
+  > — found a second, independent blocker: `_build_new_snapshot` passes
+  > `symbols_only`/`debug_presence_only` to `resolve_input` (needed for a
+  > binary-depth/debug-presence-only scan), but `_resolve_side_snapshot_impl`
+  > never threads either through (always `False`/`False`) — a real, if
+  > narrower, additive gap to close first. Its `embed_build_source` call also
+  > constructs `public_headers` differently from `embed_side_build_source`'s
+  > (`_expand_public_headers` over the *combined* headers+dirs list, vs. the
+  > shared wrapper's separate, unexpanded treatment of each) — a genuine
+  > behavioral difference, not just a parameter-naming one, that needs
+  > reconciling (which construction is actually correct for which caller)
+  > before scan can safely route through the shared wrapper's embed step.
+  >
+  > **Neither of these two newly-found blockers was attempted this session**
+  > — each needs its own focused investigation (confirm the debug-artifact
+  > resolutions are equivalent before merging them; decide which
+  > public-header construction is correct and unify), and rushing either
+  > under continued session time pressure is exactly what this file's "known
+  > gaps over risky reactive patches" convention exists to prevent, especially
+  > given this exact code area's extensive prior history of exactly this
+  > shape of subtle divergence (see `AGENTS.md`'s L3→L2-fold "Known gaps"
+  > entry, 18+ numbered findings). **PR 3A's full convergence is therefore
+  > still open after this session — PR 3C (PR F) remains blocked** on it, per
+  > this section's own explicit ordering requirement. What this session adds
+  > is a materially more precise map of exactly what blocks it, plus one more
+  > safely-landed, real piece of the eventual solution.
+  >
   > **Slice landed (2026-08-18): the `resolve_dump_request`/
   > `execute_dump_request` split from finding 2 above, coded.**
   > `service_dump_pipeline.py` now has `ResolvedDumpRequest`/`DumpResult`
