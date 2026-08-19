@@ -53,6 +53,7 @@ SECTION_ORDER: tuple[str, ...] = (
     "Resolved depth and source scope",
     "Headers and compile context",
     "Build/source inputs",
+    "Build query (trust)",
     "Tools and frontends",
     "Configuration and value origins",
     "Consumer/contract scoping",

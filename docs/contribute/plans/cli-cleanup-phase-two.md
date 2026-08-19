@@ -1132,6 +1132,55 @@ the parser to lists only — every existing trusted string config would break.
 5. Docs carry a minimal throwaway-config example, so the removed flags have a
    one-paste replacement.
 
+> **Prerequisite status (2026-08-19).** 1 and 2 were already implemented —
+> predating this plan (ADR-032 D5): `cli_buildsource.py`'s
+> `cfg_trusted_for_query = build_config is not None or build_query is not
+> None` is the exact gate, and `buildsource.inline._resolve_compile_db`
+> already skips an auto-discovered `.abicheck.yml`'s `build.query` with a
+> recorded diagnostic rather than running it. 4 was already covered too —
+> `tests/test_dry_run_contract.py::
+> test_depth_source_with_prebuilt_pack_build_info_does_not_block` pins the
+> "gate on achieved depth, not compile-DB presence" behavior this item
+> describes. 5 was already covered by existing docs (`docs/reference/
+> config-file.md`, `docs/start/real-world-example.md`,
+> `docs/learn/build-source-data.md`). **3 was the real gap** — `dump
+> --dry-run` had no visibility into the trust decision at all
+> (`render_dump_dry_run` never received `build_query`/`build_compile_db`).
+> Closed additively: a new leaf module,
+> `cli_dump_dry_run_build_query.add_build_query_dry_run_section()` (split
+> out rather than added inline, since `cli_dump_helpers.py` sits at its
+> 2000-line AI-readiness hard cap), mirrors — read-only, never executing —
+> the exact trust decision and `argv`/`cwd` construction
+> `cli_buildsource.embed_build_source`/`buildsource.inline._run_build_query`
+> make at real-run time, and reports the resulting compile-DB path when
+> `build.compile_db` is configured. Wired into `dump_cmd`'s existing
+> `--dry-run` branch in `cli.py`, after `render_dump_dry_run` builds the rest
+> of the report. `dry_run.py`'s shared `SECTION_ORDER` gained one new title
+> ("Build query (trust)") so the section renders in a stable position for
+> every command using `DryRunResult` (only `dump` populates it today; an
+> unpopulated section renders nothing). Tests:
+> `tests/test_dry_run_contract.py::TestDumpDryRunBuildQueryTrust` (untrusted
+> auto-discovered config, trusted `--config`, trusted CLI `--build-query`
+> overriding config, no query configured, determinism, and 26 review-caught
+> reachability/precedence/pack-normalization/exit-code-class/config-discovery
+> edge cases besides — each asserting the query is never actually executed).
+> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is satisfied for
+> every input shape the module's own docstring doesn't name as an open
+> gap** — `cli_dump_dry_run_build_query.py` documents two deliberately
+> unclosed cases where the report can still claim "will run" when the real
+> input would not: a Flow-2 `abicheck_inputs/` pack as the sole
+> `--sources`/`--build-info` input, and a `-H` directory containing no
+> supported header (this second one predates the module — `render_dump_
+> dry_run` has never expanded `-H` directories for validation). Closing
+> either is a scoped follow-up (a second pack-format recognizer for the
+> first; a design decision about real directory-walk validation for the
+> second), not a blocker for the trust decision this prerequisite exists to
+> make visible — but PR 3C's removal itself (`dump --build-query`/`dump
+> --build-compile-db` deletion) should not proceed until both are closed or
+> explicitly accepted as permanent gaps, on top of still waiting on the
+> ordering's own blocker: PR 3A's full convergence (both `dump` and `scan`
+> resolvers), which remains open per that section's own status notes above.
+
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.
 
