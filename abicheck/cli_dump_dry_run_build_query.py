@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through eighteen review
+patches" convention -- this module has now been through nineteen review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -694,15 +694,56 @@ def add_build_query_dry_run_section(
 
                 raise click.UsageError(f"cannot parse build config {cfg_path}: {exc}") from exc
             result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
+            # `cfg_path` here was discovered from `discover_from` above, which
+            # -- when `l2_seed_reachable` -- is the *unnormalized* `sources`,
+            # not `effective_sources`. `embed_build_source`'s own discovery
+            # always uses `effective_sources`, so whenever the two diverge
+            # (`effective_sources is None`, e.g. because `--sources` is
+            # itself a pack) `embed_build_source` never even attempts to
+            # read *this* `cfg_path` -- it is purely an L2-seed-only
+            # discovery, and this load failure says nothing about whether
+            # `embed_build_source`'s own, independent config resolution
+            # (which may still succeed from a bare CLI `--build-query`
+            # override with no file involved at all) would also fail
+            # (Codex review, fresh evidence: a malformed config nested
+            # inside a `--sources` pack, combined with a raw `--build-info`
+            # and an explicit `--build-query`, previously reported "will NOT
+            # run" here even though the real run's `embed_build_source`
+            # call executes the CLI-overridden query successfully, never
+            # touching this file at all). Fall through with `cfg = None`
+            # rather than returning, so the precedence chain below still
+            # answers correctly from `build_query` alone. When
+            # `effective_sources is not None`, `discover_from` always agrees
+            # with what `embed_build_source` would discover (see the
+            # `raise_on_bad_config` comment above), so this load failure
+            # really does mean both call sites are equally affected --
+            # reporting "will NOT run" there remains correct, and this
+            # `elif` branch is unreached in that case since
+            # `raise_on_bad_config` (which requires `collect_active` too)
+            # would already have raised whenever `embed_build_source` could
+            # actually be reached with a failing config of its own.
+            if effective_sources is not None:
+                result.add(
+                    _SECTION,
+                    "build.query: will NOT run -- the auto-discovered config "
+                    "failed to load, and only the best-effort L2 seed path "
+                    "(which silently degrades on a load failure, rather than "
+                    "raising) could otherwise reach it",
+                )
+                return
             result.add(
                 _SECTION,
-                "build.query: will NOT run -- the auto-discovered config "
-                "failed to load, and only the best-effort L2 seed path "
+                "build.query: the auto-discovered config failed to load, but "
+                "only for the L2 seed path's own pack-rooted discovery "
                 "(which silently degrades on a load failure, rather than "
-                "raising) could otherwise reach it",
+                "raising) -- embed_build_source's own, independent config "
+                "resolution never reads this same file (--sources is a pack, "
+                "so its discovery is nulled), so it is evaluated separately "
+                "below from build_query/an auto-discovered config of its "
+                "own, if any",
             )
-            return
-        cfg_compile_db = cfg.compile_db or None
+        else:
+            cfg_compile_db = cfg.compile_db or None
 
     # NOW the "does the query actually get reached" precedence chain --
     # unaffected by config validation above, since these branches answer

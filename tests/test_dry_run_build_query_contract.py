@@ -603,6 +603,7 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will run" in result.output
         assert f"cwd: {src_pack}" not in result.output
+        assert f"cwd: {Path.cwd()}" in result.output
 
     def test_empty_build_query_reports_will_not_run(self, tmp_path: Path) -> None:
         # Codex review: shlex.split() on a whitespace-only build.query
@@ -1426,5 +1427,55 @@ class TestDumpDryRunBuildQueryTrust:
             ],
         )
         assert result.exit_code == 0, result.output
+
+    def test_malformed_sources_pack_config_with_cli_build_query_still_runs(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence (commit f9fd95d): when --sources is a
+        # valid pack containing a malformed .abicheck.yml, a native artifact
+        # plus headers make L2 seeding reachable, AND an explicit
+        # --build-query is supplied, the previous revision reported
+        # "build.query: will NOT run" unconditionally on this load failure --
+        # even though the real run's embed_build_source call never reads
+        # this same file at all (its own discovery is `discover_build_config
+        # (effective_sources)`, nulled to None because --sources is a pack)
+        # and constructs its own config purely from the CLI --build-query
+        # override, succeeding independently. Only l2_seed's own pack-rooted
+        # discovery (keyed on the *unnormalized* `sources`) reads and fails
+        # on this file; l2_seed already degrades silently on its own load
+        # failure regardless. So the real run genuinely executes the
+        # CLI-overridden query -- this dry-run must not report "will NOT
+        # run". (No raw --build-info here -- that operand independently
+        # takes precedence over build.query regardless of config load
+        # outcome, which would mask the very divergence this test targets.)
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+        (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
+                "--build-query",
+                "echo hi",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --build-query)" in result.output
+        assert "build.query: will NOT run" not in result.output
+        assert "['echo', 'hi']" in result.output
 
 
