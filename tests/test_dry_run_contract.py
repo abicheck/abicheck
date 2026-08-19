@@ -1018,6 +1018,80 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will NOT run" in result.output
 
+    def test_malformed_build_info_pack_under_depth_headers_degrades_silently(
+        self, tmp_path: Path
+    ) -> None:
+        # Sibling of test_malformed_pack_under_depth_headers_degrades_silently
+        # for --build-info specifically (not --sources): under --depth
+        # headers, embed_build_source's own raising load is never reached
+        # (collect_active is False), so a malformed --build-info pack
+        # degrades to a non-blocking diagnostic rather than result.block().
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        bi_pack = tmp_path / "bipack"
+        bi_pack.mkdir()
+        (bi_pack / "manifest.json").write_text(
+            '{"build_source_pack_version": "1.0", "not valid json',
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(bi_pack),
+                "-H", str(header), "--build-query", "cmake -S . -B build",
+                "--dry-run", "--depth", "headers",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+
+    def test_sources_pack_no_headers_and_no_build_info_reports_will_not_run(
+        self, tmp_path: Path
+    ) -> None:
+        # Reaches the --sources-is-a-pack branch specifically (no
+        # --build-info given at all, so the elif chain lands here rather
+        # than the --build-info-is-a-pack branch): an empty pack with no
+        # headers gives no other route to collect_inline_pack.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (
+            "will NOT run -- --sources is a pack with no L3 compile units "
+            "and no headers give another path to collect_inline_pack"
+        ) in result.output
+
+    def test_malformed_build_query_reports_will_not_run(self, tmp_path: Path) -> None:
+        # shlex.split() itself raises ValueError on unbalanced quoting --
+        # _run_build_query never attempts to run such a query.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--build-query", "cmake 'unterminated", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+        assert "could not parse as a command" in result.output
+
     def test_malformed_sources_pack_blocks_even_with_nonpack_build_info(
         self, tmp_path: Path
     ) -> None:
