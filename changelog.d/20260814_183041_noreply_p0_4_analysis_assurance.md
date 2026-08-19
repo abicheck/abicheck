@@ -285,4 +285,40 @@
   what they confirmed" just as much as a fully disjoint pair, and the
   resulting note now names which family/families are confirmed on only
   one side.
+- **`service_compare_pipeline.classify_compare_pair` now stamps
+  `DiffResult.requested_depth` case-normalized, not the raw request
+  string** (P2 review, PR #767 follow-up round 2). `CompareRequest.
+  validation_errors()` accepts `depth` case-insensitively
+  (`depth.lower() in USER_DEPTHS`) and every consumer of the resolved value
+  already normalizes case before using it (`enforce_requested_depth`'s
+  `_DEPTH_RANK` lookup, this same function's own `depth.lower() ==
+  "binary"` check) — so a valid, successfully validated direct-API request
+  like `CompareRequest(..., depth="HEADERS")` reached the just-added
+  `requested_depth` stamp with its original uppercase casing intact. That
+  broke every downstream reader expecting the lowercase
+  `EVIDENCE_DEPTH_VALUES` spelling: `compute_analysis_assurance()`'s
+  depth-rank lookup missed silently, and `validate_evidence_depth()`
+  (every JSON reporter) raised `ValueError` outright. Fixed by stamping
+  `request.depth.lower()`.
+- **`_graph_completeness`'s cross-side family-asymmetry check no longer
+  flags a conditionally-applicable pass family that is genuinely
+  inapplicable on the side lacking confirmation** (P2 review, PR #767
+  follow-up round 2 — a regression in round 9's own `!=` fix, above).
+  `fold_archive_graph()` (`buildsource/inline_graph_fold.py`) deliberately
+  records `archive_graph` only when a side's graph carries at least one
+  `static_library` node, returning with no `ExtractorRecord` at all
+  otherwise — a correct no-op, not a shortfall. A fully collected release
+  that drops its last static-library link input entirely (old side
+  confirmed `archive_graph`, new side genuinely has nothing to introspect)
+  is a legitimate build difference, but the round-9 set-inequality check
+  read it as `graph_completeness="unknown"` regardless, failing
+  `--require-complete-analysis` for a comparison with no real evidence
+  gap. Fixed with a new `_CONDITIONALLY_APPLICABLE_FAMILIES` mapping
+  (family name -> "does this side's own graph carry something for it to
+  examine") consulted by the asymmetry check: a family confirmed on one
+  side but correctly inapplicable on the other is excluded from the
+  asymmetric set, while a family applicable on both sides but confirmed on
+  only one (the pass should have run there but didn't, or ran degraded)
+  still folds into `graph_completeness="unknown"`/`status="partial"`
+  unchanged.
 
