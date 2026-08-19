@@ -227,17 +227,33 @@ def add_build_query_dry_run_section(
         except Exception:
             _binary_fmt = None
         if _binary_fmt in ("pe", "macho"):
-            result.add(
-                _SECTION,
-                "build.query: will NOT run -- --dump-manifest is not yet "
-                f"supported for {_binary_fmt.upper()} binaries (ADR-050 D3); "
-                "the real run rejects this combination before build-source "
-                "collection is ever reached",
+            # `dump_cmd`'s own real (non-dry) rejection is a
+            # `click.UsageError` (exit 64), not a `ClickException`/exit 1 --
+            # raised directly here, matching this module's own documented
+            # exit-64 contract, rather than encoded via `result.block()`
+            # (Codex review, fresh evidence: an earlier revision used
+            # `result.block()`, producing the wrong exit-code class).
+            import click
+
+            raise click.UsageError(
+                f"--dump-manifest is not yet supported for {_binary_fmt.upper()} "
+                "binaries (ADR-050 D3); use a single-header dump for this format."
             )
-            result.block(
-                f"--dump-manifest is not yet supported for {_binary_fmt.upper()} binaries"
-            )
-            return
+
+    # An *explicit* --config is validated unconditionally by `dump_cmd`
+    # itself, before this function is ever called: `resolve_dump_compile_
+    # context()`/`cli_options.merge_compile_config()` -- the L2 compile-
+    # context resolver every `dump` invocation runs, regardless of build-
+    # source collection, and unconditionally before the `--dry-run` branch
+    # -- already raises `click.UsageError` for a malformed *explicit*
+    # config, so a malformed explicit --config never reaches this function
+    # at all. Verified end-to-end: `dump ... --config bad.yml --depth
+    # binary` with no --sources/--build-info exits 64 before ever printing
+    # a dry-run report (CodeRabbit/Codex review, fresh evidence -- this
+    # function does not need its own duplicate check). This is unlike an
+    # *auto-discovered* config, which that same resolver only warns about
+    # and falls back from -- handled further below, gated on whether
+    # `embed_build_source`'s own, stricter load is actually reached.
 
     # Neither real call site is even attempted without --sources/--build-info
     # at all -- `l2_seed`'s own guard is `(sources is None and build_info is
@@ -264,6 +280,28 @@ def add_build_query_dry_run_section(
         )
         return
 
+    # `embed_build_source`'s own pack loading (`_load_pack_or_raise`, a
+    # `click.ClickException`, exit 1) and its own auto-discovered-config
+    # load (further below, a `click.UsageError`, exit 64) are both reached
+    # only *past* its own `if not layers: return` gate
+    # (`collection_for_ci_mode(collect_mode)` returning no layers for an
+    # "off" collect mode) -- under a collect mode that resolves to no
+    # layers (e.g. `--depth headers`, which still leaves `headers`
+    # non-empty and so does not return at the guard above),
+    # `embed_build_source` is never called into far enough to load either,
+    # and `l2_seed`'s own independent pack/config loading (reached via the
+    # headers-gated L2-seed path instead) degrades any load failure to a
+    # silent no-op (no seeded dirs, no fold, no query attempt) rather than
+    # raising through. Verified end-to-end against a real compiled library:
+    # a malformed `--sources` pack, and separately a malformed
+    # auto-discovered config, both exit 0 under `--depth headers` -- the
+    # dump simply proceeds without L3 seeding -- while the identical inputs
+    # under the default (non-"off") collect mode exit 1/64 respectively
+    # (Codex review, fresh evidence). This module therefore only
+    # raises/blocks for a malformed pack or auto-discovered config when
+    # `collect_mode != "off"`.
+    collect_active = collect_mode != "off"
+
     # `embed_build_source` loads `bi_pack`/`src_pack` unconditionally and
     # independently of one another (`_load_pack_or_raise(build_info)` and
     # `_load_pack_or_raise(sources)`, both called regardless of what the
@@ -277,12 +315,135 @@ def add_build_query_dry_run_section(
         from .buildsource.pack import BuildSourcePack
 
         try:
-            BuildSourcePack.load(sources)
+            src_pack_evidence = BuildSourcePack.load(sources).build_evidence
         except (OSError, ValueError) as exc:
-            result.add(_SECTION, f"build.query: could not load --sources pack {sources}: {exc}")
-            result.block(f"--sources names an unloadable pack ({sources}): {exc}")
+            if collect_active:
+                result.add(
+                    _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
+                )
+                result.block(f"--sources names an unloadable pack ({sources}): {exc}")
+            else:
+                result.add(
+                    _SECTION,
+                    f"build.query: will NOT run -- --sources names an "
+                    f"unloadable pack ({sources}: {exc}), and collect mode "
+                    f"{collect_mode!r} means only the best-effort L2 seed "
+                    "path (which silently degrades to no L3 evidence on a "
+                    "load failure, rather than raising) could otherwise "
+                    "reach it",
+                )
             return
+    else:
+        src_pack_evidence = None
 
+    if build_info is not None and is_pack_dir(build_info):
+        from .buildsource.pack import BuildSourcePack
+
+        try:
+            bi_pack_evidence = BuildSourcePack.load(build_info).build_evidence
+        except (OSError, ValueError) as exc:
+            # The real (non-dry) run rejects this identically -- `cli_
+            # buildsource._load_pack_or_raise` raises `click.ClickException`
+            # (exit 1) for the same load failure -- so a dry run reporting
+            # exit 0 here would claim a broken invocation is valid (Codex
+            # review, fresh evidence) -- but only when `collect_active`
+            # (see the note above this precedence chain): under an "off"
+            # collect mode this load is never reached by the real run at all.
+            if collect_active:
+                result.add(
+                    _SECTION,
+                    f"build.query: could not load --build-info pack {build_info}: {exc}",
+                )
+                result.block(f"--build-info names an unloadable pack ({build_info}): {exc}")
+            else:
+                result.add(
+                    _SECTION,
+                    f"build.query: will NOT run -- --build-info names an "
+                    f"unloadable pack ({build_info}: {exc}), and collect mode "
+                    f"{collect_mode!r} means only the best-effort L2 seed "
+                    "path (which silently degrades to no L3 evidence on a "
+                    "load failure, rather than raising) could otherwise "
+                    "reach it",
+                )
+            return
+    else:
+        bi_pack_evidence = None
+
+    # `_l2_seed_pack_inputs` nulls `raw_sources` whenever --sources is itself
+    # a pack directory, unconditionally (independent of --build-info) -- both
+    # config auto-discovery and the query's own cwd must use that same
+    # normalized value, not the pack directory itself (Codex review, fresh
+    # evidence).
+    effective_sources = None if (sources is not None and is_pack_dir(sources)) else sources
+
+    # `embed_build_source`'s own `raw_build_info`/`raw_sources` -- non-None
+    # only for a *non-pack* operand -- gate whether it loads and validates
+    # `cfg_path` **at all**, and it does so *before* ever calling
+    # `collect_inline_pack`/`_resolve_compile_db` (the precedence questions
+    # the branches below answer) -- so config validation must happen here,
+    # ahead of every "will NOT run because X takes precedence" branch below,
+    # not after them (Codex review, fresh evidence: an earlier revision
+    # validated config only after these precedence checks had already
+    # returned, so a malformed auto-discovered config combined with e.g. an
+    # already-resolved --build-info compile database never got validated at
+    # all -- verified end-to-end that the real run still raises for that
+    # exact combination).
+    config_reachable = (build_info is not None and not is_pack_dir(build_info)) or (
+        effective_sources is not None
+    )
+
+    # Same source (source-tree-root-only, no upward walk) `embed_build_source`
+    # itself resolves from for this purpose -- distinct from `discover_project_
+    # config`'s upward walk, which the rest of this dry-run report already uses
+    # for the generic ".abicheck.yml:" info line.
+    cfg_path = build_config or discover_build_config(effective_sources)
+    trusted = build_config is not None or build_query is not None
+
+    # The real path (`cli_buildsource.py`) always loads *cfg_path* when one is
+    # found, whether or not the CLI already supplied --build-query -- an
+    # explicit --build-query overrides only `cfg.query`, never `cfg.
+    # compile_db` (Codex review: an earlier version of this function skipped
+    # loading the config entirely once a CLI query was given, silently
+    # dropping the config's own build.compile_db hint).
+    cfg = None
+    cfg_compile_db: str | None = None
+    if cfg_path is not None and config_reachable:
+        try:
+            cfg = load_build_config(cfg_path)
+        except ValueError as exc:
+            # `build_config is None` here -- the explicit-config case
+            # already raised, unconditionally, at the very top of this
+            # function. This is therefore always an *auto-discovered*
+            # config, which `embed_build_source` validates strictly (a
+            # `click.UsageError`, exit 64) only past its own collect-mode
+            # gate -- the identical `collect_active` reachability this
+            # precedence chain's pack-load checks above already gate on
+            # (CodeRabbit/Codex review, fresh evidence; verified end-to-end:
+            # a malformed auto-discovered config exits 0, warn-only, under
+            # `--depth headers`, but exits 64 under the default collect
+            # mode). Raised directly rather than encoded via
+            # `result.block()`, matching this module's documented exit-64
+            # contract, same as the explicit-config case above.
+            if collect_active:
+                import click
+
+                raise click.UsageError(f"cannot parse build config {cfg_path}: {exc}") from exc
+            result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
+            result.add(
+                _SECTION,
+                "build.query: will NOT run -- the auto-discovered config "
+                f"failed to load, and collect mode {collect_mode!r} means "
+                "only the best-effort L2 seed path (which silently "
+                "degrades on a load failure, rather than raising) could "
+                "otherwise reach it",
+            )
+            return
+        cfg_compile_db = cfg.compile_db or None
+
+    # NOW the "does the query actually get reached" precedence chain --
+    # unaffected by config validation above, since these branches answer
+    # whether `collect_inline_pack`/`_resolve_compile_db` would even look at
+    # `cfg.query` given the operands' own shapes.
     if build_info is not None and is_pack_dir(build_info):
         # `_l2_seed_pack_inputs`/`embed_build_source`'s own `base_build=
         # bi_pack.build_evidence` fold a --build-info pack's own L3 compile
@@ -292,22 +453,7 @@ def add_build_query_dry_run_section(
         # units at all does not short-circuit this way (raw_build_info
         # becomes None, same as if --build-info were absent), so this only
         # reports "will NOT run" when the pack actually carries L3 evidence.
-        from .buildsource.pack import BuildSourcePack
-
-        try:
-            pack_evidence = BuildSourcePack.load(build_info).build_evidence
-        except (OSError, ValueError) as exc:
-            # The real (non-dry) run rejects this identically -- `cli_
-            # buildsource._load_pack_or_raise` raises `click.ClickException`
-            # (exit 1) for the same load failure -- so a dry run reporting
-            # exit 0 here would claim a broken invocation is valid (Codex
-            # review, fresh evidence).
-            result.add(
-                _SECTION, f"build.query: could not load --build-info pack {build_info}: {exc}"
-            )
-            result.block(f"--build-info names an unloadable pack ({build_info}): {exc}")
-            return
-        if pack_evidence is not None and pack_evidence.compile_units:
+        if bi_pack_evidence is not None and bi_pack_evidence.compile_units:
             result.add(
                 _SECTION,
                 f"build.query: will NOT run -- --build-info ({build_info}) is "
@@ -369,19 +515,7 @@ def add_build_query_dry_run_section(
         # --build-info was also given (an explicit --build-info always wins
         # L3 over a --sources pack) -- reached only in this elif branch,
         # since build_info is None here (Codex review, fresh evidence).
-        from .buildsource.pack import BuildSourcePack
-
-        try:
-            pack_evidence = BuildSourcePack.load(sources).build_evidence
-        except (OSError, ValueError) as exc:
-            # Same real-run mismatch as the --build-info pack case above:
-            # `_load_pack_or_raise` rejects this with a nonzero exit, so a
-            # dry run must not report exit 0 for it either (Codex review,
-            # fresh evidence).
-            result.add(_SECTION, f"build.query: could not load --sources pack {sources}: {exc}")
-            result.block(f"--sources names an unloadable pack ({sources}): {exc}")
-            return
-        if pack_evidence is not None and pack_evidence.compile_units:
+        if src_pack_evidence is not None and src_pack_evidence.compile_units:
             result.add(
                 _SECTION,
                 f"build.query: will NOT run -- --sources ({sources}) is a "
@@ -404,45 +538,7 @@ def add_build_query_dry_run_section(
             )
             return
 
-    # `_l2_seed_pack_inputs` nulls `raw_sources` whenever --sources is itself
-    # a pack directory, unconditionally (independent of --build-info) -- both
-    # config auto-discovery and the query's own cwd must use that same
-    # normalized value, not the pack directory itself (Codex review, fresh
-    # evidence).
-    effective_sources = None if (sources is not None and is_pack_dir(sources)) else sources
-
-    # Same source (source-tree-root-only, no upward walk) `embed_build_source`
-    # itself resolves from for this purpose -- distinct from `discover_project_
-    # config`'s upward walk, which the rest of this dry-run report already uses
-    # for the generic ".abicheck.yml:" info line.
-    cfg_path = build_config or discover_build_config(effective_sources)
-    trusted = build_config is not None or build_query is not None
-
-    # The real path (`cli_buildsource.py`) always loads *cfg_path* when one is
-    # found, whether or not the CLI already supplied --build-query -- an
-    # explicit --build-query overrides only `cfg.query`, never `cfg.
-    # compile_db` (Codex review: an earlier version of this function skipped
-    # loading the config entirely once a CLI query was given, silently
-    # dropping the config's own build.compile_db hint).
-    cfg_compile_db: str | None = None
-    if cfg_path is not None:
-        try:
-            cfg = load_build_config(cfg_path)
-        except ValueError as exc:
-            # The real (non-dry) path raises `click.UsageError` (exit 64) for
-            # the identical load failure (`cli_buildsource.py`'s own
-            # `cfg = load_build_config(cfg_path) ... except ValueError as exc:
-            # raise click.UsageError(...)`) -- a dry-run that only records a
-            # diagnostic line and returns at exit 0 would silently promise a
-            # config the real run rejects outright (CodeRabbit review, fresh
-            # evidence, mirroring the identical malformed-pack fix above).
-            result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
-            result.block(f"cannot load build configuration {cfg_path}: {exc}")
-            return
-        cfg_compile_db = cfg.compile_db or None
-        effective_query = build_query if build_query is not None else (cfg.query or None)
-    else:
-        effective_query = build_query
+    effective_query = build_query if build_query is not None else (cfg.query if cfg else None)
     compile_db_hint = build_compile_db if build_compile_db is not None else cfg_compile_db
 
     if not effective_query:

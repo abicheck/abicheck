@@ -906,10 +906,14 @@ class TestDumpDryRunBuildQueryTrust:
 
     def test_malformed_auto_discovered_config_blocks_dry_run(self, tmp_path: Path) -> None:
         # CodeRabbit/Codex review: the real (non-dry) run raises
-        # click.UsageError (exit 64) for a malformed .abicheck.yml
-        # (cli_buildsource.py's own `except ValueError as exc: raise
-        # click.UsageError(...)`) -- a dry run must not report exit 0 for
-        # the same broken config.
+        # click.UsageError (exit 64) for a malformed .abicheck.yml, but only
+        # once `embed_build_source` reaches its own stricter load -- which
+        # requires a non-"off" collect mode (verified end-to-end against a
+        # real compiled library; see the sibling
+        # test_malformed_auto_discovered_config_under_depth_headers_degrades_silently
+        # for the "off" counter-case). Default depth resolves to a non-"off"
+        # collect mode, so this is the collect_active branch: a real
+        # click.UsageError, not a DryRunResult blocker.
         header = tmp_path / "api.h"
         header.write_text("int foo(int x);\n", encoding="utf-8")
         (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
@@ -920,9 +924,83 @@ class TestDumpDryRunBuildQueryTrust:
                 "--build-query", "cmake -S . -B build", "--dry-run",
             ],
         )
-        assert result.exit_code == 1, result.output
-        assert "Exit code: 1" in result.output
-        assert "could not load" in result.output
+        assert result.exit_code == 64, result.output
+        assert "cannot parse build config" in result.output
+
+    def test_malformed_auto_discovered_config_under_depth_headers_degrades_silently(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence, verified end-to-end against a real
+        # compiled library: under `--depth headers` (collect_mode resolves
+        # to "off", but headers stay non-empty), `embed_build_source` bails
+        # at its own `if not layers: return` before ever loading the
+        # auto-discovered config, and `l2_seed`'s own independent load
+        # degrades a parse failure to a silent no-op rather than raising --
+        # the real (non-dry) `dump --depth headers` exits 0 for this exact
+        # input, only warning. This dry run must not report a blocker or a
+        # UsageError for a combination the real run accepts.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+                "--depth", "headers",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+
+    def test_explicit_malformed_config_always_raises_usage_error(self, tmp_path: Path) -> None:
+        # CodeRabbit/Codex review, fresh evidence, verified end-to-end
+        # against the real CLI: an *explicit* --config is validated
+        # unconditionally by `cli_options.merge_compile_config` regardless
+        # of --sources/--build-info/--depth -- even `dump --config bad.yml
+        # --depth binary` with no --sources/--build-info at all exits 64.
+        cfg = tmp_path / "bad.yml"
+        cfg.write_text("build: [not, a, mapping\n", encoding="utf-8")
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--config", str(cfg), "--dry-run",
+                "--depth", "binary",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "cannot parse build config" in result.output
+
+    def test_malformed_pack_under_depth_headers_degrades_silently(self, tmp_path: Path) -> None:
+        # Codex review, fresh evidence, verified end-to-end against a real
+        # compiled library: under `--depth headers`, a malformed --sources
+        # pack is never reached by embed_build_source's own raising load
+        # (gated behind the same collect-mode check as the config case
+        # above); l2_seed's own load degrades silently, and the real
+        # (non-dry) run exits 0.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        (src_pack / "manifest.json").write_text(
+            '{"build_source_pack_version": "1.0", "not valid json',
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--build-query", "cmake -S . -B build",
+                "--dry-run", "--depth", "headers",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
 
     def test_malformed_sources_pack_blocks_even_with_nonpack_build_info(
         self, tmp_path: Path
@@ -955,11 +1033,14 @@ class TestDumpDryRunBuildQueryTrust:
         assert "Exit code: 1" in result.output
         assert "could not load --sources pack" in result.output
 
-    def test_pe_with_dump_manifest_reports_will_not_run(self, tmp_path: Path) -> None:
+    def test_pe_with_dump_manifest_raises_usage_error(self, tmp_path: Path) -> None:
         # Codex review: dump_cmd's own PE/Mach-O dispatch rejects
-        # --dump-manifest outright (ADR-050 D3, click.UsageError) before
-        # embed_build_source is ever reached, so build.query can never run
-        # for this combination regardless of what would otherwise resolve.
+        # --dump-manifest outright (ADR-050 D3, click.UsageError, exit 64)
+        # before embed_build_source is ever reached, so build.query can
+        # never run for this combination regardless of what would
+        # otherwise resolve. A first revision of this fix used
+        # `result.block()` (exit 1) instead -- the wrong exit-code class
+        # (Codex review, fresh evidence).
         pe_path = tmp_path / "lib.dll"
         # Minimal PE signature: "MZ" DOS header magic is enough for
         # binary_utils.detect_binary_format to classify this as PE.
@@ -983,9 +1064,39 @@ class TestDumpDryRunBuildQueryTrust:
                 "--build-query", "cmake -S . -B build", "--dry-run",
             ],
         )
-        assert "Build query (trust):" in result.output
-        assert "will NOT run" in result.output
+        assert result.exit_code == 64, result.output
         assert "--dump-manifest is not yet supported for" in result.output
+
+    def test_malformed_config_validated_even_when_build_info_precedence_wins(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence, verified end-to-end against the real
+        # CLI: `embed_build_source` loads and validates the auto-discovered
+        # config unconditionally (whenever raw_build_info/raw_sources is
+        # present) -- *before* ever calling collect_inline_pack/
+        # _resolve_compile_db, which is where "--build-info already resolves
+        # to a compile database" precedence is decided. A dry run that
+        # returns "will NOT run" for that precedence reason *without* first
+        # validating the config would silently skip a real click.UsageError
+        # the actual run raises.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        compile_db = tmp_path / "compile_commands.json"
+        compile_db.write_text("[]", encoding="utf-8")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(compile_db),
+                "--sources", str(tmp_path), "-H", str(header),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "cannot parse build config" in result.output
 
 
 class TestCompareDryRun:
