@@ -674,41 +674,48 @@ def add_build_query_dry_run_section(
     trust_source = "explicit --config" if build_config is not None else "explicit --build-query"
     cwd = effective_sources if effective_sources is not None and effective_sources.is_dir() else Path.cwd()
     if compile_db_hint:
-        # `_run_build_query`'s own resolution isn't a literal path lookup --
-        # `cfg.compile_db` is a *glob pattern* resolved against `sources`
-        # AFTER the query has run (`sorted(sources.glob(cfg.compile_db))`,
-        # first existing file wins), expecting the query to have (re)written
-        # it -- so the pattern itself, printed verbatim, is not "the
-        # resulting compile-DB path" (Codex review, fresh evidence). Mirror
-        # that resolution against what already exists *now*: a glob-free
-        # literal is unambiguous either way, so report it as before; a real
-        # glob pattern (`*`/`?`/`[`) is resolved the identical way, but the
-        # match found now is only a preview -- the query may still create or
-        # refresh the file the real run would actually pick up, and dry-run
-        # cannot execute it to find out.
-        if any(ch in compile_db_hint for ch in "*?[") and effective_sources is not None:
-            try:
-                existing_match = next(
+        # `_run_build_query`'s own resolution isn't a literal-string label --
+        # `cfg.compile_db`, glob-metacharacter-bearing or not, is resolved
+        # via `sorted(sources.glob(cfg.compile_db))` AFTER the query has run
+        # (first existing file wins), expecting the query to have (re)written
+        # it. `Path.glob()` treats a metacharacter-free pattern as an exact
+        # relative-path existence check, so a plain `build/compile_
+        # commands.json` hint resolves the identical way a real
+        # `build/*/compile_commands.json` glob does -- it is not printed
+        # verbatim as if it were already a path relative to *this process's*
+        # cwd; it is joined onto `sources` and checked for existence. An
+        # earlier revision special-cased "no glob metacharacters" as
+        # "unambiguous, print as-is," but that was wrong for the same reason
+        # a real glob is: whether the file already exists still needs
+        # checking, and the printed value must be the resolved path (or an
+        # explicit "not yet" note), never the bare configured string (Codex
+        # review, fresh evidence -- the common, glob-free `build.compile_db:
+        # build/compile_commands.json` case previously printed the literal
+        # string even when `--sources` was some other, unrelated directory).
+        try:
+            existing_match = (
+                next(
                     (m for m in sorted(effective_sources.glob(compile_db_hint)) if m.is_file()),
                     None,
                 )
-            except (OSError, ValueError):
-                existing_match = None
-            if existing_match is not None:
-                compile_db_line = (
-                    f"resulting compile-DB path: {existing_match} (glob pattern "
-                    f"{compile_db_hint!r} already matches this file; the query "
-                    "may still recreate/refresh it, and the real run always "
-                    "re-resolves the pattern after the query exits)"
-                )
-            else:
-                compile_db_line = (
-                    f"resulting compile-DB path: (glob pattern {compile_db_hint!r} "
-                    "matches no file yet -- the exact path can only be known "
-                    "after the query runs and (re)writes it)"
-                )
+                if effective_sources is not None
+                else None
+            )
+        except (OSError, ValueError):
+            existing_match = None
+        if existing_match is not None:
+            compile_db_line = (
+                f"resulting compile-DB path: {existing_match} (configured as "
+                f"{compile_db_hint!r}; the query may still recreate/refresh "
+                "this file, and the real run always re-resolves the "
+                "configured value after the query exits)"
+            )
         else:
-            compile_db_line = f"resulting compile-DB path: {compile_db_hint}"
+            compile_db_line = (
+                f"resulting compile-DB path: (configured as {compile_db_hint!r}, "
+                "but no file matches it yet -- the exact path can only be "
+                "known after the query runs and (re)writes it)"
+            )
     elif _configured_compile_db_hint and effective_sources is None:
         compile_db_line = (
             f"resulting compile-DB path: (build.compile_db is configured, "

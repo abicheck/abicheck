@@ -491,7 +491,17 @@ class TestDumpDryRunBuildQueryTrust:
         assert "will run (trusted -- explicit --config)" in result.output
         assert "argv: ['cmake', '-S', '.', '-B', 'build'," in result.output
         assert f"cwd: {tmp_path}" in result.output
-        assert "resulting compile-DB path: build/compile_commands.json" in result.output
+        # No compile DB has been written yet (the query never actually ran),
+        # so the literal hint resolves to "no file matches it yet" rather
+        # than being printed as if it were already a determined path (Codex
+        # review, fresh evidence: `_run_build_query` resolves every
+        # `build.compile_db` value -- glob or not -- via `sources.glob(...)`,
+        # so a plain relative hint is joined onto `sources` and checked for
+        # existence exactly like a glob pattern is).
+        assert (
+            "resulting compile-DB path: (configured as "
+            "'build/compile_commands.json', but no file matches it yet"
+        ) in result.output
         # A dry run never actually executes the query.
         assert not (tmp_path / "build").exists()
 
@@ -590,7 +600,13 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will run (trusted -- explicit --config)" in result.output
         assert "argv: ['make', '-n', '-k']" in result.output
-        assert "resulting compile-DB path: out/compile_commands.json" in result.output
+        # No compile DB has been written yet -- resolved the same way a glob
+        # pattern is (Codex review, fresh evidence), not printed as a
+        # determined path.
+        assert (
+            "resulting compile-DB path: (configured as 'out/compile_commands.json', "
+            "but no file matches it yet"
+        ) in result.output
 
     def test_depth_binary_reports_no_collection_requested(self, tmp_path: Path) -> None:
         # Codex review: --depth binary clears the headers
@@ -1316,9 +1332,42 @@ class TestDumpDryRunBuildQueryTrust:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "matches no file yet" in result.output
+        assert "no file matches it yet" in result.output
         assert (
             "resulting compile-DB path: build/*/compile_commands.json"
+            not in result.output
+        )
+
+    def test_literal_compile_db_hint_resolves_against_source_tree(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: `_run_build_query` resolves every
+        # `build.compile_db` value -- glob-metacharacter-bearing or not --
+        # via `sorted(sources.glob(cfg.compile_db))`; a plain relative hint
+        # like `build/compile_commands.json` is therefore joined onto
+        # `sources` and checked for existence exactly like a real glob
+        # pattern is, never printed verbatim as if it were already a
+        # determined path. An earlier revision special-cased the
+        # glob-metacharacter-free case as "unambiguous, print as-is,"
+        # which silently regressed this exact resolution.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        existing_db = build_dir / "compile_commands.json"
+        existing_db.write_text("[]", encoding="utf-8")
+        cfg = self._write_config(tmp_path, compile_db="build/compile_commands.json")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert f"resulting compile-DB path: {existing_db}" in result.output
+        assert (
+            "resulting compile-DB path: build/compile_commands.json"
             not in result.output
         )
 
