@@ -35,7 +35,15 @@ The trust rule mirrored here is ``cli_buildsource.embed_build_source``'s own
 None``) and the command/cwd construction is ``buildsource.inline.
 _run_build_query``'s own (``shlex.split(cfg.query)``, cwd = the ``--sources``
 tree when it is a directory) -- kept in sync by reading, not importing,
-since neither of those is a public, dry-run-safe entry point.
+since neither of those is a public, dry-run-safe entry point. The
+``--build-info``-takes-precedence check mirrors ``buildsource.inline.
+_resolve_compile_db``'s own first branch, which returns *before ever looking
+at* ``cfg.query`` once ``--build-info`` already resolves to a real compile
+database (Codex review, fresh evidence) -- reusing that module's own
+``_compile_db_at`` (a pure stat/glob, read-only, no I/O beyond that) rather
+than re-deriving the same resolution a second, potentially-diverging way;
+other modules already reach into this same private helper across the module
+boundary (e.g. ``service_scan.py``'s ``_find_compile_db_in_dir``).
 """
 
 from __future__ import annotations
@@ -54,12 +62,31 @@ def add_build_query_dry_run_section(
     result: DryRunResult,
     *,
     sources: Path | None,
+    build_info: Path | None,
     build_config: Path | None,
     build_query: str | None,
     build_compile_db: str | None,
 ) -> None:
     """Append the ``build.query`` trust/execution report to *result*."""
-    from .buildsource.inline import discover_build_config, load_build_config
+    from .buildsource.inline import (
+        _compile_db_at,
+        discover_build_config,
+        load_build_config,
+    )
+
+    # `_resolve_compile_db`'s own first branch: an explicit --build-info that
+    # already resolves to a real compile database is returned immediately --
+    # cfg.query, trusted or not, is never even consulted (Codex review).
+    if build_info is not None:
+        found = _compile_db_at(build_info)
+        if found is not None:
+            result.add(
+                _SECTION,
+                f"build.query: will NOT run -- --build-info already resolves "
+                f"to a compile database ({found}), which takes precedence "
+                "over build.query",
+            )
+            return
 
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
     # itself resolves from for this purpose -- distinct from `discover_project_
@@ -68,17 +95,24 @@ def add_build_query_dry_run_section(
     cfg_path = build_config or discover_build_config(sources)
     trusted = build_config is not None or build_query is not None
 
-    effective_query = build_query
-    compile_db_hint: str | None = build_compile_db
-    if effective_query is None and cfg_path is not None:
+    # The real path (`cli_buildsource.py`) always loads *cfg_path* when one is
+    # found, whether or not the CLI already supplied --build-query -- an
+    # explicit --build-query overrides only `cfg.query`, never `cfg.
+    # compile_db` (Codex review: an earlier version of this function skipped
+    # loading the config entirely once a CLI query was given, silently
+    # dropping the config's own build.compile_db hint).
+    cfg_compile_db: str | None = None
+    if cfg_path is not None:
         try:
             cfg = load_build_config(cfg_path)
         except ValueError as exc:
             result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
             return
-        effective_query = cfg.query or None
-        if compile_db_hint is None:
-            compile_db_hint = cfg.compile_db or None
+        cfg_compile_db = cfg.compile_db or None
+        effective_query = build_query if build_query is not None else (cfg.query or None)
+    else:
+        effective_query = build_query
+    compile_db_hint = build_compile_db if build_compile_db is not None else cfg_compile_db
 
     if not effective_query:
         result.add(_SECTION, "build.query: (none configured)")

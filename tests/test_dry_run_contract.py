@@ -539,6 +539,59 @@ class TestDumpDryRunBuildQueryTrust:
         assert first.exit_code == 0
         assert first.output == second.output
 
+    def test_existing_build_info_compile_db_takes_precedence_over_query(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: `_resolve_compile_db`'s own first branch returns an
+        # already-resolved --build-info compile database *before ever
+        # looking at* cfg.query -- an earlier version of this dry-run report
+        # ignored --build-info entirely and claimed a trusted query "will
+        # run" even when it would never actually be reached.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            f'[{{"directory": "{tmp_path}", "command": "cc -c {header} -o f.o", '
+            f'"file": "{header}"}}]',
+            encoding="utf-8",
+        )
+        cfg = self._write_config(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--build-info", str(db), "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Build query (trust):" in result.output
+        assert "will NOT run" in result.output
+        assert "--build-info already resolves to a compile database" in result.output
+        assert not (tmp_path / "build").exists()
+
+    def test_cli_build_query_still_reports_configs_compile_db_hint(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: an explicit CLI --build-query overrides only
+        # `cfg.query`, never `cfg.compile_db` (mirroring `cli_buildsource.
+        # py`'s own dataclasses.replace) -- an earlier version of this
+        # function skipped loading the config entirely once a CLI query was
+        # given, silently dropping the config's own build.compile_db hint.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path, compile_db="out/compile_commands.json")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--build-query", "make -n -k", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+        assert "argv: ['make', '-n', '-k']" in result.output
+        assert "resulting compile-DB path: out/compile_commands.json" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
