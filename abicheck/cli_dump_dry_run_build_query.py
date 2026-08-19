@@ -438,7 +438,25 @@ def add_build_query_dry_run_section(
     # itself resolves from for this purpose -- distinct from `discover_project_
     # config`'s upward walk, which the rest of this dry-run report already uses
     # for the generic ".abicheck.yml:" info line.
-    cfg_path = build_config or discover_build_config(effective_sources)
+    #
+    # But *which* value depends on which real call site is doing the
+    # discovering, and the two disagree (Codex review, fresh evidence):
+    # `embed_build_source` discovers from its own normalized `raw_sources`
+    # (nulled whenever --sources is a pack, matching `effective_sources`
+    # here), while `l2_seed._l2_seed_config` discovers from the *original,
+    # unnormalized* `sources` it is handed
+    # (`_resolve_l2_seed_pack_args`/`seed_includes_and_fold_compile_context`
+    # pass the raw `sources` parameter straight through to it, never the
+    # pack-nulled value) -- so an empty --sources pack carrying its own
+    # .abicheck.yml is genuinely readable by the L2-seed path even though
+    # `effective_sources` alone would report "(none configured)". When
+    # --sources is not itself a pack, `sources` and `effective_sources` are
+    # identical, so this only changes behavior for the pack case. `cwd`/the
+    # compile-DB hint below still use `effective_sources`, matching
+    # `embed_build_source`'s own real cwd/compile-DB resolution -- only
+    # config *discovery* differs between the two real call sites.
+    discover_from = sources if l2_seed_reachable else effective_sources
+    cfg_path = build_config or discover_build_config(discover_from)
     trusted = build_config is not None or build_query is not None
 
     # The real path (`cli_buildsource.py`) always loads *cfg_path* when one is

@@ -1222,6 +1222,52 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will NOT run" in result.output
 
+    def test_config_discovered_inside_empty_sources_pack_for_l2_seed(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: `l2_seed._l2_seed_config` discovers
+        # `.abicheck.yml` from the *original*, unnormalized `sources` it is
+        # handed (`_resolve_l2_seed_pack_args`/
+        # `seed_includes_and_fold_compile_context` pass the raw `sources`
+        # parameter straight through), never the pack-nulled
+        # `effective_sources` value `embed_build_source` itself discovers
+        # from. An empty --sources BuildSourcePack (no L3 compile units)
+        # carrying its own .abicheck.yml with a trusted `build.query` is
+        # therefore genuinely readable by the real L2-seed path (reachable
+        # here via headers + a real artifact) even though
+        # `effective_sources` alone (None, since --sources is a pack) would
+        # report "(none configured)".
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+        (src_pack / ".abicheck.yml").write_text(
+            "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # Not trusted -- sourced only from an auto-discovered .abicheck.yml,
+        # never --config/--build-query -- but discovered nonetheless, which
+        # is what distinguishes this from the pre-fix "(none configured)".
+        assert "build.query: (none configured)" not in result.output
+        assert (
+            "will NOT run (sourced from an auto-discovered .abicheck.yml"
+            in result.output
+        )
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
