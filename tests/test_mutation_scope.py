@@ -29,10 +29,14 @@ def test_unclassified_test_keeps_full_scope_without_detector_source() -> None:
     assert scope.selected_modules({"tests/test_integration_helpers.py"}, MODULES) is None
 
 
-def test_mutation_infrastructure_keeps_full_scope_with_detector_change() -> None:
+def test_mutation_infrastructure_with_detector_change_keeps_detector_subset() -> None:
     assert scope.selected_modules(
         {"abicheck/diff_types.py", "scripts/mutation_scope.py"}, MODULES
-    ) is None
+    ) == ["abicheck/diff_types.py"]
+
+
+def test_mutation_infrastructure_only_keeps_full_scope() -> None:
+    assert scope.selected_modules({"scripts/mutation_scope.py"}, MODULES) is None
 
 
 def test_source_subset_survives_an_unclassified_test_change() -> None:

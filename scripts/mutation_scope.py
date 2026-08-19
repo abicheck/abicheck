@@ -39,13 +39,10 @@ def selected_modules(changed_paths: set[str], only_mutate: list[str]) -> list[st
     """Return a safe PR mutation subset, or ``None`` for the full scope.
 
     A changed detector module selects itself.  A conventional detector-test
-    path selects its paired module.  Changes to mutation infrastructure or an
-    unclassified test keep the full scope: such a change can affect every
-    module's measurement and must not be made cheaper by assumption.
+    path selects its paired module.  Infrastructure-only and unclassified-test
+    changes keep the full scope; when a detector module is also changed, its
+    diff-scoped measurement remains the only bounded PR gate.
     """
-    if changed_paths & MUTATION_INFRASTRUCTURE_PATHS:
-        return None
-
     selected = {path for path in changed_paths if path in only_mutate}
     known_test_paths = set()
     for module in only_mutate:
@@ -62,6 +59,12 @@ def selected_modules(changed_paths: set[str], only_mutate: list[str]) -> list[st
     # module selected, an unclassified test could weaken any module and needs
     # the full drift measurement.
     if changed_tests - known_test_paths and not selected:
+        return None
+    # A full configured run exceeds the CI job budget for mixed
+    # infrastructure+detector changes.  The detector subset still measures
+    # every changed production function; reserve complete coverage for
+    # infrastructure-only changes and scheduled/label-forced runs.
+    if changed_paths & MUTATION_INFRASTRUCTURE_PATHS and not selected:
         return None
     return sorted(selected) or None
 
