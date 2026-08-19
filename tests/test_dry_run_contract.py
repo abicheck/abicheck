@@ -725,6 +725,63 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will run (trusted -- explicit --config)" in result.output
 
+    def test_build_info_bazel_jsonproto_takes_precedence(self, tmp_path: Path) -> None:
+        # Codex review: a pre-captured Bazel aquery/cquery jsonproto
+        # --build-info is routed to the adapter before _resolve_compile_db
+        # is ever reached, and always bypasses it once recognized --
+        # _compile_db_at cannot see this (it's not a compile-DB array).
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        aquery = tmp_path / "aquery.json"
+        aquery.write_text('{"actions": [], "artifacts": []}', encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--build-info", str(aquery),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+        assert "pre-captured Bazel aquery/cquery jsonproto" in result.output
+
+    def test_sources_pack_with_compile_units_takes_precedence(self, tmp_path: Path) -> None:
+        # Codex review: a --sources tree that is itself a pack folds into
+        # base_build the same way a --build-info pack does, but only when
+        # no --build-info was also given.
+        from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        be = BuildEvidence()
+        be.compile_units.append(
+            CompileUnit(id="cu://api.c", source="api.c", directory=str(src_pack))
+        )
+        BuildSourcePack(root=src_pack, build_evidence=be).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--build-query", "cmake -S . -B build",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+        assert "--sources" in result.output
+        assert "already carries L3 compile units" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:

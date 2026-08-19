@@ -83,20 +83,29 @@ units (e.g. a source_abi-only pack) does *not* short-circuit this way, since
 falls through to ``cfg.query`` exactly as if no ``--build-info`` were given
 at all, so this check does not report "will NOT run" for that case.
 
-**Known, deliberately unclosed gap** (documented rather than chased further,
-per this repository's own "known gaps over risky reactive patches"
-convention -- this module has already needed five review rounds to reach
-this point): a ``--sources`` tree that is *itself* a pack directory
-(``is_pack_dir(sources)``) is folded into ``base_build`` the identical way
-under `_l2_seed_pack_inputs`, but only when *no* ``--build-info`` was also
-given -- this module does not check that case, nor does it attempt to
-detect a pre-captured Bazel aquery/cquery jsonproto ``--build-info``
-(``_maybe_collect_bazel_build_info``, which also bypasses
-``_resolve_compile_db``). Both are real, narrower reachability gaps of the
-identical shape to the two closed above; closing them needs the same
-pack-loading treatment applied to one more input combination each, not a
-new mechanism -- left here rather than attempted in the same pass that
-already revised this function three times.
+Two more real call-site precedence gaps (Codex review, fresh evidence),
+closing what is now the exhaustive set of ways ``collect_inline_pack``
+bypasses ``_resolve_compile_db``: (3) a ``--build-info`` file that
+``sniff_build_info_format`` recognizes as a pre-captured Bazel aquery/cquery
+jsonproto is routed to ``_maybe_collect_bazel_build_info`` *before*
+``_resolve_compile_db`` is ever reached (and, once recognized, always
+returns ``True`` regardless of how many compile units the capture yields --
+see that function's own docstring) -- ``_compile_db_at`` cannot see this
+either, since the file is not a compile-commands array. (4) a ``--sources``
+tree that is itself a pack directory folds into ``base_build`` the identical
+way a ``--build-info`` pack does (``l2_seed._l2_seed_pack_inputs``), but
+**only when no ``--build-info`` was also given** -- an explicit
+``--build-info`` always wins L3 over a ``--sources`` pack (Codex review:
+"a raw --build-info must still be resolved... not skipped by folding the
+pack into base_build", `_l2_seed_pack_inputs`'s own docstring). Unlike the
+``--build-info``-is-a-pack case, an empty ``--sources`` pack does *not* make
+this module's own "will NOT run" guard above fire either, since the
+original (pre-transform) ``sources``/``build_info`` values it reads stay
+non-``None`` -- resolution still reaches ``cfg.query`` exactly as coded.
+
+This closes the full set of paths into ``collect_inline_pack`` this module
+is aware of; a new bypass mechanism added to that function in the future
+would need a matching addition here, the same way each of these four did.
 """
 
 from __future__ import annotations
@@ -182,6 +191,25 @@ def add_build_query_dry_run_section(
             )
             return
     elif build_info is not None:
+        # A pre-captured Bazel aquery/cquery jsonproto is routed to the
+        # adapter before _resolve_compile_db is ever reached, and always
+        # bypasses it once recognized -- regardless of how many compile
+        # units the capture itself yields (Codex review, fresh evidence).
+        # sniff_build_info_format never executes anything (its own
+        # docstring), matching this module's read-only contract.
+        from .buildsource.inline import sniff_build_info_format
+
+        if build_info.is_file() and sniff_build_info_format(build_info) in (
+            "bazel_aquery",
+            "bazel_cquery",
+        ):
+            result.add(
+                _SECTION,
+                f"build.query: will NOT run -- --build-info ({build_info}) is "
+                "a pre-captured Bazel aquery/cquery jsonproto, which takes "
+                "precedence over build.query",
+            )
+            return
         # `_resolve_compile_db`'s own first branch: an explicit --build-info
         # that already resolves to a real compile database is returned
         # immediately -- cfg.query, trusted or not, is never even consulted
@@ -193,6 +221,27 @@ def add_build_query_dry_run_section(
                 f"build.query: will NOT run -- --build-info already resolves "
                 f"to a compile database ({found}), which takes precedence "
                 "over build.query",
+            )
+            return
+    elif sources is not None and is_pack_dir(sources):
+        # `_l2_seed_pack_inputs` folds a --sources pack into base_build the
+        # identical way a --build-info pack does, but only when no
+        # --build-info was also given (an explicit --build-info always wins
+        # L3 over a --sources pack) -- reached only in this elif branch,
+        # since build_info is None here (Codex review, fresh evidence).
+        from .buildsource.pack import BuildSourcePack
+
+        try:
+            pack_evidence = BuildSourcePack.load(sources).build_evidence
+        except (OSError, ValueError) as exc:
+            result.add(_SECTION, f"build.query: could not load --sources pack {sources}: {exc}")
+            return
+        if pack_evidence is not None and pack_evidence.compile_units:
+            result.add(
+                _SECTION,
+                f"build.query: will NOT run -- --sources ({sources}) is a "
+                "pack that already carries L3 compile units, which take "
+                "precedence over build.query",
             )
             return
 
