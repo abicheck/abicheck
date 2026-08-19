@@ -126,26 +126,53 @@ normalized value ``collect_inline_pack`` actually receives
 is a pack, unconditionally) -- not the original ``--sources`` pack
 directory itself, which the real query never runs in.
 
-**Known, deliberately unclosed gap** (documented rather than chased
+An eighth refinement (Codex review, fresh evidence): (8) a recognized
+``BuildSourcePack`` (``--build-info`` or ``--sources``) that fails to load
+(a malformed manifest, an unreadable evidence file) now reports a
+``DryRunResult.block()`` alongside its diagnostic, matching the real run's
+own rejection -- ``cli_buildsource._load_pack_or_raise`` raises
+``click.ClickException`` (nonzero exit) for the identical load failure, so
+this dry run must not report exit ``0`` (a valid invocation) for an input
+the real run would reject.
+
+**Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through nine review
-rounds): Flow-2 ``abicheck_inputs/`` packs (recognized by
-``cli_buildsource_helpers._is_inputs_pack_dir``, a *different* recognizer
-from ``BuildSourcePack``'s own ``is_pack_dir``) fold into
-``raw_build_info``/``raw_sources`` the identical way a ``BuildSourcePack``
-does in ``cli_buildsource.embed_build_source``, but this module does not
-detect that input shape at all -- a Flow-2 pack as the sole
-``--build-info``/``--sources`` input, with no discoverable compile DB or
-headers, is still reported as "will run" when it would not. Closing this
-needs importing a second pack-format recognizer and a second, differently-
-shaped facts model (``InputsManifest``/``load_inputs_manifest``) rather
-than reusing anything ``BuildSourcePack``-shaped already handled above --
-a genuinely separate input format, not a follow-up to the same mechanism.
+patches" convention -- this module has now been through ten review
+rounds):
+
+- Flow-2 ``abicheck_inputs/`` packs (recognized by
+  ``cli_buildsource_helpers._is_inputs_pack_dir``, a *different* recognizer
+  from ``BuildSourcePack``'s own ``is_pack_dir``) fold into
+  ``raw_build_info``/``raw_sources`` the identical way a ``BuildSourcePack``
+  does in ``cli_buildsource.embed_build_source``, but this module does not
+  detect that input shape at all -- a Flow-2 pack as the sole
+  ``--build-info``/``--sources`` input, with no discoverable compile DB or
+  headers, is still reported as "will run" when it would not. Closing this
+  needs importing a second pack-format recognizer and a second,
+  differently-shaped facts model (``InputsManifest``/``load_inputs_manifest``)
+  rather than reusing anything ``BuildSourcePack``-shaped already handled
+  above -- a genuinely separate input format, not a follow-up to the same
+  mechanism.
+- Every reachability check above reads the *raw*, unexpanded ``headers``
+  tuple exactly as ``dump_cmd`` receives it from Click -- a directory entry
+  counts as "headers present" even when ``_expand_header_inputs`` (called
+  only inside the real, non-dry execution path, never before the
+  ``--dry-run`` branch) would later find it empty and raise
+  ``click.ClickException`` before either query call site is ever reached.
+  This predates this module: `render_dump_dry_run` itself has never
+  expanded ``-H`` directories for validation purposes, for the "Available
+  data layers"/depth-feasibility sections either -- this module only
+  inherits and extends that same pre-existing blind spot into a new false
+  "will run" claim. Closing it needs a design decision about whether
+  ``--dry-run`` should perform real directory-walk validation at all (a
+  broader change to `render_dump_dry_run`'s own established "cheap,
+  read-only resolution... no I/O beyond stat()/PATH lookups" contract),
+  not a scoped fix to this module alone.
 
 This closes the full set of ``BuildSourcePack``-shaped paths into
-``collect_inline_pack`` this module is aware of (Flow-2 packs excepted, see
-above); a new bypass mechanism added to that function in the future would
-need a matching addition here, the same way each of these did.
+``collect_inline_pack`` this module is aware of (the two gaps above
+excepted); a new bypass mechanism added to that function in the future
+would need a matching addition here, the same way each of these did.
 """
 
 from __future__ import annotations
@@ -218,9 +245,15 @@ def add_build_query_dry_run_section(
         try:
             pack_evidence = BuildSourcePack.load(build_info).build_evidence
         except (OSError, ValueError) as exc:
+            # The real (non-dry) run rejects this identically -- `cli_
+            # buildsource._load_pack_or_raise` raises `click.ClickException`
+            # (exit 1) for the same load failure -- so a dry run reporting
+            # exit 0 here would claim a broken invocation is valid (Codex
+            # review, fresh evidence).
             result.add(
                 _SECTION, f"build.query: could not load --build-info pack {build_info}: {exc}"
             )
+            result.block(f"--build-info names an unloadable pack ({build_info}): {exc}")
             return
         if pack_evidence is not None and pack_evidence.compile_units:
             result.add(
@@ -289,7 +322,12 @@ def add_build_query_dry_run_section(
         try:
             pack_evidence = BuildSourcePack.load(sources).build_evidence
         except (OSError, ValueError) as exc:
+            # Same real-run mismatch as the --build-info pack case above:
+            # `_load_pack_or_raise` rejects this with a nonzero exit, so a
+            # dry run must not report exit 0 for it either (Codex review,
+            # fresh evidence).
             result.add(_SECTION, f"build.query: could not load --sources pack {sources}: {exc}")
+            result.block(f"--sources names an unloadable pack ({sources}): {exc}")
             return
         if pack_evidence is not None and pack_evidence.compile_units:
             result.add(

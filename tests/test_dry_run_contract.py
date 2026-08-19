@@ -857,6 +857,53 @@ class TestDumpDryRunBuildQueryTrust:
         assert "will NOT run" in result.output
         assert "pack with no L3 compile units" in result.output
 
+    def test_malformed_build_info_pack_blocks_dry_run(self, tmp_path: Path) -> None:
+        # Codex review: the real (non-dry) run rejects an unloadable pack
+        # via cli_buildsource._load_pack_or_raise (a nonzero-exit
+        # click.ClickException) -- a dry run must not report exit 0 for the
+        # same broken invocation.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        (pack_dir / "manifest.json").write_text(
+            '{"build_source_pack_version": "1.0", "not valid json',
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(pack_dir),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+
+    def test_malformed_sources_pack_blocks_dry_run(self, tmp_path: Path) -> None:
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        (src_pack / "manifest.json").write_text(
+            '{"build_source_pack_version": "1.0", "not valid json',
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--build-query", "cmake -S . -B build",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
