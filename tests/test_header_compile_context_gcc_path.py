@@ -37,6 +37,7 @@ Covers, in order:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -114,6 +115,65 @@ def test_resolve_derives_gcc_path_behind_launcher_wrapper(tmp_path: Path) -> Non
     result = resolve_header_compile_context(ev, [header])
     assert result.context is not None
     assert result.context.gcc_path == "clang-cl"
+
+
+def test_resolve_derives_gcc_path_behind_launcher_wrapper_generic_driver_name(
+    tmp_path: Path,
+) -> None:
+    """Round 23, Finding 5 (Codex, ``header_compile_context.py:1492``): a
+    GENERIC (non-CL-named) driver behind a launcher, MSVC-dialect detected
+    only via ``--driver-mode=cl`` (not a ``cl``/``clang-cl``-shaped
+    basename). ``msvc_driver_token`` correctly returns ``None`` here (the
+    basename ``clang`` isn't CL-style), but the fallback was ``cu.argv[0]``
+    (the launcher itself, ``sccache``) instead of unwrapping the launcher
+    to find the real driver -- the exact same failure class the CL-named
+    case above was already fixed for, just reached through the
+    ``driver is None`` fallback branch instead."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[
+            "sccache",
+            "/opt/llvm/bin/clang",
+            "--driver-mode=cl",
+            "/c",
+            str(src),
+        ],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "/opt/llvm/bin/clang"
+
+
+def test_resolve_derives_gcc_path_negative_control_bare_slash_c_no_driver_at_all(
+    tmp_path: Path,
+) -> None:
+    """Negative control for Finding 5: when there is truly no driver token
+    anywhere (a bare ``/c`` marker with nothing else in argv), the
+    ``strip_launchers``-based fallback also finds nothing (an empty or
+    flag-shaped stripped result), and ``_derived_gcc_path`` falls all the
+    way back to raw ``cu.argv[0]`` -- unchanged from the pre-fix
+    behavior for this degenerate case."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["/c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "/c"
 
 
 def test_resolve_derives_gcc_path_resolves_relative_driver_against_cu_directory(
@@ -230,7 +290,12 @@ def test_resolve_derives_gcc_path_resolves_bare_driver_via_env_path(
     ev = BuildEvidence(compile_units=[cu])
     result = resolve_header_compile_context(ev, [header])
     assert result.context is not None
-    assert result.context.gcc_path == str(driver)
+    # `shutil.which` on Windows returns the resolved path with PATHEXT's own
+    # extension casing (commonly uppercase `.EXE`), not necessarily matching
+    # the fixture file's own on-disk casing -- both name the same file on a
+    # case-insensitive filesystem (live Windows CI signal, fresh evidence).
+    # `os.path.normcase` is a no-op on POSIX, so this stays exact there.
+    assert os.path.normcase(result.context.gcc_path) == os.path.normcase(str(driver))
 
 
 def test_resolve_derives_gcc_path_bare_driver_unresolvable_env_path_left_bare(

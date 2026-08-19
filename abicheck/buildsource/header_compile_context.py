@@ -1489,6 +1489,28 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     if not cu.argv or not _is_msvc_command(cu.argv):
         return None
     driver = msvc_driver_token(cu.argv)
+    if driver is None:
+        # No CL-style-basename token was found anywhere in the leading
+        # executable/launcher position(s) -- MSVC dialect was detected some
+        # other way (a bare `/c` marker, or `--driver-mode=cl`). The
+        # pre-fix behavior fell back to raw `cu.argv[0]` unconditionally,
+        # which is wrong whenever a compiler-cache/distribution launcher
+        # (or an `env` prefix) precedes a GENERIC (non-CL-named) driver --
+        # e.g. `sccache /opt/llvm/bin/clang --driver-mode=cl /c x.cc`:
+        # `argv[0]` is `sccache`, not the real compiler, so
+        # `dumper_clang._resolve_clang_bin` rejects it as not clang-family
+        # and silently substitutes plain `clang++` (Codex review, Finding
+        # 5, fresh evidence) -- the exact failure class this whole function
+        # exists to prevent. `strip_launchers` unwraps the same
+        # `env`/compiler-launcher prefix `msvc_driver_token` already looks
+        # past for a CL-named driver; reusing it here for the fallback case
+        # too means a launcher-wrapped generic driver is found the same way
+        # a launcher-wrapped CL-named one already is, rather than only the
+        # narrower CL-named case being fixed.
+        from .source_extractors._argv import strip_launchers
+
+        stripped = strip_launchers(cu.argv, directory=cu.directory)
+        driver = stripped[0] if stripped and not stripped[0].startswith("-") else None
     token = driver if driver is not None else cu.argv[0]
     return _resolve_driver_token(token, cu.directory)
 

@@ -30,6 +30,7 @@ from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 from ..source_extractors._argv import (
     _XCLANG_WRAPPED_ABI_FLAG_MARKER,
     SPLIT_OPERAND_ABI_FLAGS,
+    expand_env_split_prefixes,
     is_split_operand_abi_flag_survivor,
     split_operand_survivor as split_operand_survivor,
     strip_launchers,
@@ -617,6 +618,25 @@ def _executable_token_positions(argv: list[str]) -> frozenset[int]:
     is_msvc_mode``) uses too, so ``dpcpp-cl`` and a version-suffixed
     ``clang-cl-20`` are recognized identically on both sides instead of
     drifting apart (Codex review).
+
+    **Callers must pass an already-``env -S``-expanded argv (Codex review,
+    Finding 2, fresh evidence).** ``strip_launchers`` internally expands a
+    leading ``env -S``/``--split-string`` prefix's value into real tokens
+    before computing its own returned length -- so subtracting THIS
+    function's own *un-expanded* input length from that expanded-and-
+    stripped result's length silently computes an index into a token
+    stream that was never actually spelled that way. Confirmed with a
+    minimal repro: for ``["env", "-S", "clang-cl /c x.cc"]`` (length 3),
+    ``strip_launchers`` returns the expanded-and-stripped
+    ``["clang-cl", "/c", "x.cc"]`` (also length 3 -- an unlucky
+    coincidence, not correctness), so the old
+    ``len(argv) - len(strip_launchers(argv))`` computed index 0
+    (``argv[0]``, ``"env"``) instead of the real driver position. See
+    :func:`~abicheck.buildsource.source_extractors._argv.
+    expand_env_split_prefixes` for the shared primitive that makes an
+    already-expanded argv available to :func:`_msvc_driver_scan`, this
+    function's one caller, so both sides of the subtraction below always
+    correspond to the SAME token stream.
     """
     if not argv:
         return frozenset()
@@ -674,7 +694,26 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     losing the recorded compiler for a lone unit. See
     :func:`_executable_token_positions` for exactly which position(s) are
     scanned.
+
+    **Scans the ``env -S``-EXPANDED argv, not the raw input (Codex review,
+    Finding 2, fresh evidence).** ``env -S``/``--split-string``'s value is
+    itself a further, unexpanded command line (``env -S 'clang-cl /c
+    x.cc'``) -- scanning the raw, three-token input directly would see the
+    literal ``-S``/joined-string pair, never the real ``clang-cl``/``/c``
+    tokens hiding inside it, the same failure shape :func:`~abicheck.
+    buildsource.source_extractors._argv.pick_compiler_binary` already
+    avoids by working from :func:`~abicheck.buildsource.source_extractors.
+    _argv.strip_launchers`'s own internally-expanded result. Expanding once
+    here, via :func:`~abicheck.buildsource.source_extractors._argv.
+    expand_env_split_prefixes`, and scanning/indexing into that SAME
+    expanded list throughout (the ``/c`` marker check, the executable-
+    position scan, the ``&&``/``;``/``--driver-mode`` walk, and the
+    driver-index computation in :func:`_executable_token_positions`) is
+    what keeps every one of those consistent with each other -- computing
+    even one of them from the original, un-expanded argv would silently
+    reintroduce the length-mismatch bug this fix closes.
     """
+    argv = expand_env_split_prefixes(argv)
     is_msvc = "/c" in argv
     driver_token: str | None = None
     executable_positions = _executable_token_positions(argv)

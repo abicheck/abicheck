@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import os
+
 from abicheck.buildsource.adapters.base import (
     _is_msvc_command,
     msvc_driver_token,
@@ -197,7 +199,12 @@ def test_msvc_driver_token_resolves_bare_driver_via_env_path(tmp_path):
     driver.write_text("", encoding="utf-8")
     driver.chmod(driver.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     argv = ["env", f"PATH={tmp_path}", "clang-cl", "/c", "foo.cc"]
-    assert msvc_driver_token(argv) == str(driver)
+    # `shutil.which` on Windows returns the resolved path with PATHEXT's own
+    # extension casing (commonly uppercase `.EXE`), not necessarily matching
+    # the fixture file's own on-disk casing -- both name the same file on a
+    # case-insensitive filesystem (live Windows CI signal, fresh evidence).
+    # `os.path.normcase` is a no-op on POSIX, so this stays exact there.
+    assert os.path.normcase(msvc_driver_token(argv)) == os.path.normcase(str(driver))
 
 
 def test_msvc_driver_token_behind_chained_launchers():

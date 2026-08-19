@@ -82,8 +82,21 @@ _ENV_BASENAMES = frozenset({"env", "env.exe"})
 #: applying any ``NAME=VALUE`` assignments; the others are cosmetic/output
 #: modifiers. None of these change which *token* is the real driver, only
 #: how ``env`` itself behaves, so they are skipped rather than parsed.
+#:
+#: ``-v``'s long form is ``--debug``, NOT ``--verbose`` (Codex review,
+#: ``_argv.py:87``, Finding 4, fresh evidence, confirmed against a real
+#: installed ``env --help``/``man env``: GNU coreutils' documented option is
+#: exactly ``-v, --debug`` -- "print verbose information for each
+#: processing step" -- and the real CLI rejects ``--verbose`` outright
+#: (exit code 125, "unrecognized option"). The previous, incorrect
+#: ``--verbose`` spelling meant a real-world recorded command like
+#: ``env --debug clang-cl /c foo.cc`` was never recognized as this flag at
+#: all: :func:`_skip_env_prefix`'s flag loop fell through every other
+#: branch and hit its terminal ``break``, treating the literal ``--debug``
+#: token itself as if it were the compiler driver and losing the real
+#: driver (``clang-cl``) and everything after it.
 _ENV_NO_OPERAND_FLAGS = frozenset(
-    {"-i", "--ignore-environment", "-0", "--null", "-v", "--verbose"}
+    {"-i", "--ignore-environment", "-0", "--null", "-v", "--debug"}
 )
 #: ``env`` flags that take a following, separate-token operand: POSIX
 #: ``-u NAME`` (unset one variable) and GNU's ``-C``/``--chdir DIR``
@@ -504,10 +517,48 @@ def normalize_path_token(token: str) -> str:
     return os.path.normpath(token)
 
 
+def _join_grammar(base: str, token: str) -> str:
+    """Pick ``"nt"``/``"posix"``/``"host"`` -- the grammar :func:`join_path_token`
+    should compose *base* and *token* with (Codex review, "Choose join
+    grammar from an unambiguous base, not the relative token alone", fresh
+    evidence).
+
+    An earlier revision chose the join grammar from *token*'s own separator
+    style alone. That is wrong whenever *base* is itself unambiguously
+    absolute in a DIFFERENT grammar than *token* happens to be spelled in --
+    e.g. a Windows compile-unit ``directory`` (``C:\\work\\build``) composed
+    with a POSIX-spelled relative ``env``-supplied ``PATH=`` entry
+    (``../tool``): the old code picked ``posixpath`` purely because the
+    entry has no backslash, and ``posixpath.join`` then treats the entire
+    Windows base as one opaque path component (it has no concept of ``\\``
+    separators or drive letters), producing a corrupted result (``tool``
+    instead of ``C:\\work\\tool``).
+
+    *base* determines which OS's join/separator rules actually apply at
+    resolution time -- not whichever style happens to spell the (possibly
+    differently-sourced) token -- so *base*'s grammar wins whenever it is
+    unambiguous (absolute in exactly one of the two grammars). Falls back to
+    *token*'s own single-separator-style grammar (the pre-existing behavior)
+    when *base* is not unambiguously one grammar or the other -- relative,
+    empty, or mixing both separator styles itself.
+    """
+    base_win = PureWindowsPath(base).is_absolute()
+    base_posix = PurePosixPath(base).is_absolute()
+    if base_win and not base_posix:
+        return "nt"
+    if base_posix and not base_win:
+        return "posix"
+    if "\\" in token and "/" not in token:
+        return "nt"
+    if "/" in token and "\\" not in token:
+        return "posix"
+    return "host"
+
+
 def join_path_token(base: str, token: str) -> str:
-    """Join *token* onto *base*, then normalize -- both using the grammar
-    *token* itself is spelled in (backslash-only -> ``ntpath``,
-    forward-slash-only -> ``posixpath``), not the host's.
+    """Join *token* onto *base*, then normalize -- choosing a SINGLE,
+    consistent grammar for both operands rather than deriving it from
+    *token* alone (see :func:`_join_grammar`).
 
     Relative *token*s recorded by a build on one OS (``../llvm/bin/
     clang-cl``, POSIX-style) must compose the same way regardless of which
@@ -516,15 +567,27 @@ def join_path_token(base: str, token: str) -> str:
     separators to backslash even though *base* (an ``env -C`` chdir value,
     or a compile unit's own ``directory``) may itself carry no separator at
     all (e.g. a bare ``"build"``), giving a spurious cross-OS mismatch
-    between two otherwise textually-equivalent joins. A *token* containing
-    both separator styles (or neither -- the caller should not reach this
-    function for a separator-free token) falls back to host-native
-    ``os.path.join``/``os.path.normpath``, the pre-existing behavior.
+    between two otherwise textually-equivalent joins.
+
+    Once a grammar is chosen, BOTH operands are composed in it -- ``ntpath``
+    natively accepts ``/`` as an alternate separator, so an ``nt``-grammar
+    join needs no rewriting; a ``posix``-grammar join first rewrites any
+    ``\\`` in either operand to ``/`` (``posixpath`` has no separator
+    concept for ``\\`` at all, so leaving one un-rewritten would otherwise
+    collapse a whole backslash-separated operand into one opaque component,
+    the same corruption this function exists to prevent, just from the
+    other direction). Neither operand being unambiguous in one grammar (both
+    relative, or *base* itself mixing separator styles) falls back to
+    host-native ``os.path.join``/``os.path.normpath``, the pre-existing
+    behavior for that case.
     """
-    if "\\" in token and "/" not in token:
+    grammar = _join_grammar(base, token)
+    if grammar == "nt":
         return ntpath.normpath(ntpath.join(base, token))
-    if "/" in token and "\\" not in token:
-        return posixpath.normpath(posixpath.join(base, token))
+    if grammar == "posix":
+        return posixpath.normpath(
+            posixpath.join(base.replace("\\", "/"), token.replace("\\", "/"))
+        )
     return os.path.normpath(os.path.join(base, token))
 
 
@@ -609,6 +672,28 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
     env_path: str | None = None
     while i < len(argv):
         arg = argv[i]
+        if arg == "-":
+            # GNU/POSIX `env -` is a deprecated, documented equivalent of
+            # `env -i` (clears the inherited environment) -- confirmed
+            # against a real installed `env --help`/`man env` (Codex
+            # review, Finding 6, fresh evidence). Neither this bare `-`
+            # form nor `--` (below) matched any recognized flag/assignment
+            # shape, so the scan fell through to the terminal `break` and
+            # treated the literal `-`/`--` token itself as the command --
+            # losing the real driver and everything after it, the same
+            # failure shape the incorrect `--verbose` spelling produced.
+            # No operand of its own -- like `-i`, only skipped.
+            i += 1
+            continue
+        if arg == "--":
+            # GNU `env`'s option-parsing terminator: everything after `--`
+            # is the command and its arguments, even if it looks like a
+            # flag or a `NAME=VALUE` assignment (Codex review, Finding 6,
+            # fresh evidence, confirmed against a real installed `env
+            # --help`). Consume the terminator itself and stop scanning --
+            # the next token is unconditionally the command.
+            i += 1
+            break
         if arg in _ENV_NO_OPERAND_FLAGS:
             i += 1
             continue
@@ -657,6 +742,61 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
     return i, chdir, env_path
 
 
+def expand_env_split_prefixes(argv: list[str]) -> list[str]:
+    """Return a COPY of *argv* with every leading ``env -S``/``--split-string``
+    prefix's value expanded and spliced in place -- without stripping the
+    ``env``/launcher tokens themselves (Codex review, Finding 2, fresh
+    evidence).
+
+    ``strip_launchers`` already performs this exact splicing internally
+    (via :func:`_skip_env_prefix`) as ONE step of unwrapping the whole
+    ``env``/launcher prefix down to the bare driver. This function exposes
+    just that one step's *result* -- the fully-expanded token stream, still
+    carrying its ``env``/launcher prefix -- for a caller that needs to scan
+    and INDEX INTO the real, post-expansion argv directly, not merely learn
+    which single token is the driver.
+
+    **Why this is needed as its own primitive**: an index computed by
+    subtracting lengths between the ORIGINAL (unexpanded) argv and
+    ``strip_launchers``'s stripped result
+    (``len(original_argv) - len(strip_launchers(original_argv))``) silently
+    breaks whenever ``-S``/``--split-string`` changes the token count -- the
+    two lists no longer correspond position-for-position at all, so the
+    subtraction can land on any token, including one that never existed in
+    the original argv's own prefix. Confirmed with a minimal repro: for
+    ``["env", "-S", "clang-cl /c x.cc"]`` (length 3), the expanded/stripped
+    result is also length 3 (``["clang-cl", "/c", "x.cc"]``), so the
+    subtraction spuriously computes index 0 -- ``argv[0]`` (``"env"``), not
+    the real driver -- purely by length coincidence, not because index 0 is
+    actually correct. See
+    :func:`~abicheck.buildsource.adapters.base._executable_token_positions`
+    for the caller this primitive fixes: it now computes its own
+    length-subtraction index BETWEEN two results of calling
+    :func:`strip_launchers` on THIS function's return value, so both sides
+    of that subtraction are guaranteed to correspond to the same expanded
+    list.
+
+    A nested ``env -S '... env -C build ...'`` (the split string itself
+    happens to start with another ``env`` invocation) is expanded
+    recursively -- the loop below re-checks ``argv[i]`` after each
+    expansion and keeps unwrapping as long as it still names ``env``,
+    mirroring :func:`strip_launchers`'s own repeated-unwrap loop. Only the
+    ``env``-prefix scanning power is reused here (never the compiler-cache
+    launcher stripping, which stays :func:`strip_launchers`'s own job) --
+    the loop stops the moment ``argv[i]`` is not itself an ``env``
+    invocation, leaving any launcher/driver tokens after it completely
+    untouched.
+    """
+    argv = list(argv)
+    i = 0
+    while i < len(argv) and basename(argv[i]).lower() in _ENV_BASENAMES:
+        new_i, _chdir, _env_path = _skip_env_prefix(argv, i)
+        if new_i == i:
+            break
+        i = new_i
+    return argv
+
+
 def _resolve_env_path_entries(
     env_path: str, chdir: str | None, directory: str | None
 ) -> str:
@@ -690,6 +830,21 @@ def _resolve_env_path_entries(
     regardless of *chdir*/*directory*. Uses :func:`join_path_token`, not
     host-native ``os.path.join``, for the same cross-OS-evidence reasons as
     every other join in this module.
+
+    **An EMPTY entry means the effective current directory, per POSIX/GNU
+    ``PATH`` semantics** (Codex review, ``_argv.py:708``, Finding 3, fresh
+    evidence): ``PATH=:`` or ``PATH=/a::/b`` both contain a component
+    between two colons (or a leading/trailing colon) that names no
+    directory at all -- POSIX and GNU coreutils both document this as
+    equivalent to ``.``, the shell's/process's own current directory (here,
+    *base* -- ``directory`` composed with any ``-C``/``--chdir``, exactly
+    the value a genuine ``.`` entry already resolves against). The previous
+    behavior left an empty component unchanged, so it fell through to
+    :func:`_apply_env_context`'s ``shutil.which(token, path=env_path)`` with
+    an empty ``PATH`` entry -- which ``shutil.which`` resolves against
+    ITS OWN caller's (abicheck's) process CWD, not the compile unit's
+    effective directory, the identical wrong-CWD failure mode this whole
+    function exists to prevent for a genuinely relative entry.
     """
     if not directory:
         return env_path
@@ -703,7 +858,9 @@ def _resolve_env_path_entries(
     entries = env_path.split(os.pathsep)
     composed = [
         entry
-        if not entry or is_absolute_path_token(entry)
+        if is_absolute_path_token(entry)
+        else base
+        if not entry
         else join_path_token(base, entry)
         for entry in entries
     ]
@@ -791,6 +948,102 @@ def _apply_env_context(
     return token
 
 
+#: COMBINED-form (single-token, ``-Ivalue``/``/Ivalue``) path-bearing option
+#: prefixes recognized by :func:`_fold_chdir_into_operand` (Codex review,
+#: Finding 8, "propagate the effective cwd to whatever resolves trailing
+#: path operands too, not just the compiler token", fresh evidence). Every
+#: one of these genuinely supports the combined spelling with no space, per
+#: GCC/Clang/MSVC's own documented option grammar. ``-include`` is
+#: deliberately excluded -- GCC never accepts a combined ``-includeFILE``
+#: spelling, only the separate ``-include FILE`` form, which needs no entry
+#: here at all (see :func:`_fold_chdir_into_operand`'s own docstring for why
+#: the separate-form value token is already handled generically).
+_CHDIR_FOLD_COMBINED_PATH_PREFIXES = (
+    "-I",
+    "-iquote",
+    "-idirafter",
+    "-isystem",
+    "-isysroot",
+    "/I",
+    "/FI",
+)
+#: ``=``-joined (``--sysroot=value``) path-bearing option prefixes recognized
+#: by :func:`_fold_chdir_into_operand`, alongside the combined-form set above.
+_CHDIR_FOLD_EQUALS_PATH_PREFIXES = ("--sysroot=",)
+
+
+def _fold_chdir_into_operand(token: str, chdir: str) -> str:
+    """Resolve *token* -- one argv entry AFTER the driver -- against *chdir*
+    the same way :func:`_apply_env_context` already resolves the driver
+    token itself (Codex review, Finding 8, fresh evidence).
+
+    GNU ``env -C DIR`` chdirs the WHOLE invoked process before it
+    ``execvp()``s the real command -- every relative filesystem argument the
+    command receives, not merely its own executable name, is interpreted
+    relative to that same chdir'd directory by the real OS. For ``env -C
+    build clang-cl -I../include /c ../src/x.cpp``, real ``env`` genuinely
+    resolves both ``../include`` and ``../src/x.cpp`` against
+    ``<cu.directory>/build``, not bare ``cu.directory``. The round-19 fix
+    folded ``-C``'s effect into the driver token alone
+    (:func:`_apply_env_context`), leaving every other operand resolved
+    against the wrong, un-chdir'ed directory by any downstream consumer that
+    reads the rest of :func:`strip_launchers`'s result.
+
+    Deliberately conservative about WHICH tokens are corrected, to avoid
+    corrupting an arbitrary flag value that merely happens to contain a path
+    separator (a macro definition like ``-DVERSION=1/2``, an arbitrary
+    string) -- mirroring this module's own existing ``MACRO_DEFINITION_
+    PREFIXES``/``unredact_home`` precedent of never touching a ``-D``/``-U``
+    value:
+
+    * A bare, non-flag token (no leading ``-``/``/``) that contains a path
+      separator and is not already absolute is *always* resolved -- this is
+      unambiguous and covers both a positional source-file operand and the
+      VALUE half of any SEPARATE-form path-taking flag (``-I ../include``'s
+      own ``../include`` token), without this function needing to know
+      which flag preceded it at all.
+    * A COMBINED-form single token spelling a known path-bearing option
+      (:data:`_CHDIR_FOLD_COMBINED_PATH_PREFIXES`/
+      :data:`_CHDIR_FOLD_EQUALS_PATH_PREFIXES`) has its recognized prefix
+      stripped, the remaining path portion resolved the same way, and the
+      prefix reattached.
+    * Anything else (an unrecognized flag, a flag whose value has no
+      separator, ``-D``/``-U``/``/D``/``/U`` macro definitions, an
+      already-absolute value) is returned completely unchanged -- the same
+      conservative, no-worse-than-before default the rest of this module
+      already uses throughout.
+    """
+    if not token or ("/" not in token and "\\" not in token):
+        return token
+    if not token.startswith(("-", "/")):
+        return token if is_absolute_path_token(token) else join_path_token(chdir, token)
+    for prefix in _CHDIR_FOLD_EQUALS_PATH_PREFIXES:
+        if token.startswith(prefix):
+            value = token[len(prefix) :]
+            if not value or is_absolute_path_token(value):
+                return token
+            return prefix + join_path_token(chdir, value)
+    for prefix in _CHDIR_FOLD_COMBINED_PATH_PREFIXES:
+        if token.startswith(prefix) and len(token) > len(prefix):
+            value = token[len(prefix) :]
+            if is_absolute_path_token(value):
+                return token
+            return prefix + join_path_token(chdir, value)
+    return token
+
+
+def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]:
+    """Apply :func:`_fold_chdir_into_operand` across every entry of
+    *tokens* (the driver-command's OWN arguments, never the driver token
+    itself -- see :func:`_apply_env_context` for that). A falsy *chdir*
+    (no ``env -C``/``--chdir`` prefix was seen) is a complete no-op,
+    returning *tokens* unchanged.
+    """
+    if not chdir:
+        return tokens
+    return [_fold_chdir_into_operand(tok, chdir) for tok in tokens]
+
+
 def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[str]:
     """Drop leading ``env``/compiler-launcher tokens (``ccache``/``sccache``/…).
 
@@ -839,6 +1092,28 @@ def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[st
     ``--chdir`` value seen (see :func:`_resolve_env_path_entries`).
     ``None`` (the default) for every caller with no compile-unit context to
     supply -- unchanged from the pre-Finding-3 behavior for those callers.
+
+    **Chained ``env -C`` prefixes COMPOSE (Codex review, Finding 7, fresh
+    evidence).** ``env -C a env -C b driver ...`` -- one ``env`` invocation
+    wrapping another, each with its own ``-C`` -- really does chdir into
+    ``a`` and then, from there, into ``b``: the effective directory is
+    ``a/b``, not bare ``b`` alone. The previous revision simply overwrote
+    ``chdir`` with the most recently seen ``-C`` value every iteration,
+    silently discarding the outer ``-C`` entirely. A later, genuinely
+    ABSOLUTE ``-C`` still fully replaces whatever was accumulated so far
+    (an absolute chdir is a literal directory regardless of any earlier
+    relative one) -- only two RELATIVE values compose.
+
+    **The resolved ``chdir`` is also folded into every OTHER operand in the
+    result, not merely the driver token (Codex review, Finding 8, fresh
+    evidence).** GNU ``env -C DIR`` chdirs the whole invoked process before
+    it execs the real command -- every relative filesystem argument the
+    command receives (a source file operand, an ``-I``/``-isystem``-family
+    include path, ...) is interpreted relative to that same chdir'd
+    directory by the real OS, not merely the executable name. See
+    :func:`_fold_chdir_into_operand`'s own docstring for exactly which
+    tokens are (and, to avoid corrupting an unrelated flag value, are NOT)
+    corrected.
     """
     argv = list(argv)
     i = 0
@@ -852,7 +1127,10 @@ def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[st
             i = new_i
             progressed = True
             if new_chdir is not None:
-                chdir = new_chdir
+                if chdir and not is_absolute_path_token(new_chdir):
+                    chdir = join_path_token(chdir, new_chdir)
+                else:
+                    chdir = new_chdir
             if new_path is not None:
                 env_path = new_path
         while (
@@ -867,9 +1145,10 @@ def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[st
     if not result or (chdir is None and env_path is None):
         return result
     resolved = _apply_env_context(result[0], chdir, env_path, directory)
-    if resolved == result[0]:
+    tail = _fold_chdir_into_operands(result[1:], chdir)
+    if resolved == result[0] and tail == result[1:]:
         return result
-    return [resolved, *result[1:]]
+    return [resolved, *tail]
 
 
 def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:

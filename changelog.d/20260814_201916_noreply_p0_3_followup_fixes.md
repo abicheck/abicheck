@@ -759,3 +759,72 @@
   paths via a self-referential `os.path.normpath(...)` expectation were
   also fixed to pin the actually-correct, host-independent literal value
   instead (discovered via live Windows CI signal on this same commit).
+- **Round 23 (Codex, four findings on `87ec909570`, plus four more found by
+  a parallel triage pass in the same area — all eight in the `env`-prefix
+  unwrapping machinery, `_argv.py`/`adapters/base.py`/
+  `header_compile_context.py`).**
+  (1) `_argv.py`'s `join_path_token()` used to pick its join grammar from
+  the RELATIVE token's own separator style alone — wrong whenever *base*
+  is itself unambiguously absolute in the OTHER grammar (a Windows compile
+  unit `directory` composed with a POSIX-spelled relative `env`-supplied
+  `PATH=` entry treated the whole Windows base as one opaque `posixpath`
+  component, corrupting the result). A new `_join_grammar()` now prefers
+  *base*'s own grammar whenever it is unambiguous, falling back to the
+  token's own style only when *base* isn't.
+  (2) `adapters.base._msvc_driver_scan()`/`_executable_token_positions()`
+  computed the driver's argv index via `len(original_argv) -
+  len(strip_launchers(original_argv))` — silently wrong once `env
+  -S`/`--split-string` changes the token count (e.g. `env -S 'clang-cl /c
+  x.cc'` coincidentally kept the same length, landing on index 0, `"env"`,
+  instead of the real driver). A new shared primitive,
+  `_argv.expand_env_split_prefixes()`, is now applied once and both sides
+  of the scan/subtraction operate on that SAME expanded list.
+  (3) `_argv._resolve_env_path_entries()` left an EMPTY `env`-supplied
+  `PATH=` component (`PATH=:`, `PATH=/a::/b`) unchanged, falling through to
+  `shutil.which` with an empty entry resolved against abicheck's own
+  process CWD rather than the compile unit's effective (chdir'd)
+  directory — POSIX/GNU both document an empty component as `.` (the
+  effective cwd). Now substituted with the same composed base a genuine
+  `.` entry already resolves against.
+  (4) `_argv.py`'s recognized `env` no-operand flag set had the WRONG long
+  spelling for `-v` — `--verbose` instead of GNU env's real, documented
+  `-v, --debug` (confirmed against a real installed `env --help`; a real
+  `env --debug ...` command was not recognized as an `env` prefix at all,
+  losing the real driver entirely). Corrected to `--debug`.
+  (5) `header_compile_context._derived_gcc_path()`'s fallback for a
+  GENERIC (non-CL-named) driver behind a launcher — MSVC dialect detected
+  only via `--driver-mode=cl`, e.g. `sccache /opt/llvm/bin/clang
+  --driver-mode=cl /c x.cc` — used raw `cu.argv[0]` (the launcher itself)
+  instead of unwrapping it via `strip_launchers`, the same fix already
+  applied for the CL-named case.
+  (6) `_argv._skip_env_prefix()` now recognizes GNU/POSIX `env`'s bare `-`
+  (deprecated equivalent of `-i`) and `--` (option-parsing terminator)
+  command-separator forms — previously neither matched any recognized
+  flag/assignment shape, so the scan broke on them and mistook the literal
+  `-`/`--` token itself for the driver.
+  (7) Chained `env -C` prefixes (`env -C a env -C b driver ...`) now
+  COMPOSE their relative chdirs (`a/b`, matching what real `env` actually
+  does) instead of the most recent `-C` value silently overwriting and
+  discarding every earlier one; a later genuinely absolute `-C` still
+  fully replaces the accumulated value, matching real `env` semantics.
+  (8) `env -C DIR`'s effective chdir now folds into every operand AFTER
+  the driver too (a positional source-file argument, and known
+  path-bearing flags like `-I`/`-isystem`/`-iquote`/`-idirafter`/
+  `-isysroot`/`--sysroot`/MSVC `/I`/`/FI`, both combined- and
+  separate-token spellings), not just the driver token itself — real `env
+  -C` chdirs the WHOLE invoked process, so every relative filesystem
+  argument the command receives is affected, not merely its own
+  executable name. Deliberately conservative: an unrecognized flag or a
+  `-D`/`-U` macro value is left untouched to avoid corrupting an unrelated
+  flag that merely contains a path separator.
+  Also fixed, from live Windows CI signal on `87ec909570` (pre-existing,
+  not introduced by this round): two `tests/test_source_extractors_env.py`
+  fixtures omitted capturing `_make_executable()`'s own return value,
+  silently asserting against the wrong (missing-`.exe`) expected path on
+  Windows; and every "resolved via `shutil.which`" assertion across
+  `test_source_extractors_env.py`/`test_adapter_base.py`/
+  `test_header_compile_context_gcc_path.py` now compares case-insensitively
+  (`os.path.normcase`) — Windows' `PATHEXT` resolution can return a
+  resolved path with different extension casing (e.g. `.EXE`) than the
+  fixture file's own on-disk casing, both naming the same file on a
+  case-insensitive filesystem.

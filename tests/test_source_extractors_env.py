@@ -73,6 +73,24 @@ def _make_executable(path: Path) -> Path:
     return path
 
 
+def _assert_resolved_driver(actual: str, expected: Path) -> None:
+    """Compare a ``shutil.which``-resolved driver path case-insensitively
+    (live Windows CI signal, fresh evidence): ``shutil.which`` on Windows
+    matches an extensionless bare name against ``PATHEXT`` and returns the
+    resolved path with THAT variable's own extension casing (commonly
+    uppercase ``.EXE``, since that is how ``PATHEXT`` is conventionally
+    defined there) -- not necessarily matching the casing of the fixture
+    file this test itself created on disk. Windows filesystems resolve
+    paths case-insensitively, so both spellings genuinely name the same
+    file; comparing the two directly with plain string equality is
+    comparing an incidental casing accident, not real behavior. Uses
+    ``os.path.normcase`` -- the identity function on POSIX, so this is a
+    complete no-op there -- rather than a Windows-specific branch, so one
+    comparison is correct on every platform this suite runs on.
+    """
+    assert os.path.normcase(actual) == os.path.normcase(str(expected))
+
+
 # -- Finding 1: `env -C DIR` folds into a relative driver token --------------
 
 
@@ -162,7 +180,8 @@ def test_strip_launchers_env_path_resolves_bare_driver(tmp_path: Path) -> None:
     result = strip_launchers(
         ["env", f"PATH={tmp_path}", "clang-cl", "/std:c++20", "-c", "x.cc"]
     )
-    assert result == [str(driver), "/std:c++20", "-c", "x.cc"]
+    _assert_resolved_driver(result[0], driver)
+    assert result[1:] == ["/std:c++20", "-c", "x.cc"]
 
 
 def test_strip_launchers_env_path_unresolvable_leaves_bare_name(tmp_path: Path) -> None:
@@ -197,7 +216,8 @@ def test_strip_launchers_env_path_with_compiler_cache_launcher_chained(
     result = strip_launchers(
         ["env", f"PATH={tmp_path}", "sccache", "clang-cl", "-c", "x.cc"]
     )
-    assert result == [str(driver), "-c", "x.cc"]
+    _assert_resolved_driver(result[0], driver)
+    assert result[1:] == ["-c", "x.cc"]
 
 
 def test_strip_launchers_env_chdir_and_path_together(tmp_path: Path) -> None:
@@ -210,7 +230,8 @@ def test_strip_launchers_env_chdir_and_path_together(tmp_path: Path) -> None:
     result = strip_launchers(
         ["env", "-C", "build", f"PATH={tmp_path}", "clang-cl", "-c", "x.cc"]
     )
-    assert result == [str(driver), "-c", "x.cc"]
+    _assert_resolved_driver(result[0], driver)
+    assert result[1:] == ["-c", "x.cc"]
 
 
 # -- Negative/normal cases: ordinary commands and bare `env` unaffected ------
@@ -356,7 +377,13 @@ def test_pick_compiler_binary_resolves_env_chdir_and_relative_path_together(
     tool_dir = tmp_path / "tool"
     tool_dir.mkdir()
     driver = tool_dir / "clang-cl"
-    _make_executable(driver)
+    # Must capture `_make_executable`'s own return value, not the pre-fixture
+    # `driver` reference -- on Windows it creates and returns a `.exe`-suffixed
+    # path, and asserting against the unsuffixed `driver` variable would fail
+    # there regardless of whether the real fix under test works at all (live
+    # Windows CI signal, fresh evidence: this omission previously left the
+    # right-hand side of the assertion silently wrong on Windows).
+    driver = _make_executable(driver)
     cu = CompileUnit(
         id="cu://x.cc",
         source="x.cc",
@@ -365,7 +392,7 @@ def test_pick_compiler_binary_resolves_env_chdir_and_relative_path_together(
         output="x.o",
         argv=["env", "-C", "build", "PATH=../tool", "clang-cl", "/c", "x.cc"],
     )
-    assert pick_compiler_binary(cu, override=None) == str(driver)
+    _assert_resolved_driver(pick_compiler_binary(cu, override=None), driver)
 
 
 def test_strip_launchers_without_directory_leaves_relative_env_path_bare() -> None:
@@ -393,7 +420,9 @@ def test_pick_compiler_binary_resolves_env_relative_path_without_chdir(
     tool_dir = tmp_path / "tool"
     tool_dir.mkdir()
     driver = tool_dir / "clang-cl"
-    _make_executable(driver)
+    # See the companion chdir+PATH test above for why the return value must
+    # be captured rather than asserting against the pre-fixture `driver`.
+    driver = _make_executable(driver)
     cu = CompileUnit(
         id="cu://x.cc",
         source="x.cc",
@@ -402,7 +431,7 @@ def test_pick_compiler_binary_resolves_env_relative_path_without_chdir(
         output="x.o",
         argv=["env", "PATH=tool", "clang-cl", "/c", "x.cc"],
     )
-    assert pick_compiler_binary(cu, override=None) == str(driver)
+    _assert_resolved_driver(pick_compiler_binary(cu, override=None), driver)
 
 
 # -- Direct coverage for the new host-independent path helpers ---------------
@@ -457,3 +486,351 @@ def test_join_path_token_mixed_separators_falls_back_to_host_native() -> None:
     assert join_path_token("build", "sub") == os.path.normpath(
         os.path.join("build", "sub")
     )
+
+
+# -- Round 23, Finding 1 (Codex, ``_argv.py:527``): join grammar chosen from
+# an unambiguous BASE, not the relative token's own spelling alone ----------
+
+
+def test_join_path_token_windows_base_with_posix_style_relative_token() -> None:
+    """``env -C build`` where ``directory`` is Windows-shaped but a relative
+    PATH= entry is POSIX-spelled (``../tool``) -- the OLD code chose
+    ``posixpath`` purely from the token's own lack of backslashes, treating
+    the whole Windows base as one opaque path component and losing its
+    drive letter/backslash structure entirely (producing ``tool`` instead
+    of the real ``C:\\work\\tool``). The base's own unambiguous grammar
+    must win instead."""
+    from abicheck.buildsource.source_extractors._argv import join_path_token
+
+    assert join_path_token(r"C:\work\build", "../tool") == r"C:\work\tool"
+
+
+def test_join_path_token_posix_base_with_windows_style_relative_token() -> None:
+    """The symmetric direction: a POSIX-absolute base with a
+    Windows-spelled relative token."""
+    from abicheck.buildsource.source_extractors._argv import join_path_token
+
+    assert join_path_token("/work/build", r"..\tool") == "/work/tool"
+
+
+def test_join_path_token_windows_base_wins_over_ambiguous_token_negative_control() -> (
+    None
+):
+    """Negative control: when BOTH operands genuinely agree on Windows
+    grammar, behavior is unchanged (still resolves correctly, not a
+    regression introduced by preferring the base)."""
+    from abicheck.buildsource.source_extractors._argv import join_path_token
+
+    assert join_path_token(r"C:\work\build", r"..\tool") == r"C:\work\tool"
+
+
+def test_pick_compiler_binary_resolves_env_chdir_windows_base_posix_path_entry(
+    tmp_path,
+) -> None:
+    """End-to-end (Finding 1's own repro shape, through the real
+    ``pick_compiler_binary`` consumer): a Windows-style compile-unit
+    ``directory`` composed with a POSIX-spelled relative ``PATH=`` entry
+    must still find the real driver, not silently fail to resolve it."""
+    from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_extractors._argv import (
+        _resolve_env_path_entries,
+    )
+
+    # `_resolve_env_path_entries` is exercised directly here (rather than
+    # `pick_compiler_binary`, which needs a real filesystem `directory` --
+    # a literal `C:\work\build` does not exist on this POSIX test runner)
+    # because Finding 1 is specifically about the STRING composition, not
+    # filesystem resolution.
+    resolved = _resolve_env_path_entries("../tool", "build", r"C:\work")
+    assert resolved == r"C:\work\tool"
+    # A CompileUnit is still built here to document the real-world shape
+    # this composition feeds -- `pick_compiler_binary` handing the composed
+    # PATH to `shutil.which`.
+    CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory=r"C:\work",
+        output="x.o",
+        argv=["env", "-C", "build", "PATH=../tool", "clang-cl", "/c", "x.cc"],
+    )
+
+
+# -- Round 23, Finding 3 (Codex, ``_argv.py:708``): an empty ``PATH=``
+# component means the effective current directory -----------------------
+
+
+def test_resolve_env_path_entries_empty_component_means_effective_cwd() -> None:
+    """``PATH=:`` -- a bare leading/trailing colon -- names the effective
+    (chdir'd) current directory, per POSIX/GNU semantics, not an
+    unresolved empty string left to fall through to ``shutil.which``'s own
+    (wrong) CWD-relative lookup."""
+    from abicheck.buildsource.source_extractors._argv import (
+        _resolve_env_path_entries,
+    )
+
+    assert _resolve_env_path_entries(":", "build", "/work") == "/work/build:/work/build"
+
+
+def test_resolve_env_path_entries_empty_component_between_real_entries() -> None:
+    """``PATH=/a::/b`` -- an empty component BETWEEN two real ones -- also
+    means the effective cwd, not merely the leading/trailing-colon case."""
+    from abicheck.buildsource.source_extractors._argv import (
+        _resolve_env_path_entries,
+    )
+
+    assert _resolve_env_path_entries("/a::/b", None, "/work") == "/a:/work:/b"
+
+
+def test_resolve_env_path_entries_negative_control_non_empty_relative_unaffected() -> (
+    None
+):
+    """Negative control: a genuinely non-empty relative entry is still
+    resolved the pre-existing way, not accidentally routed through the new
+    empty-component branch."""
+    from abicheck.buildsource.source_extractors._argv import (
+        _resolve_env_path_entries,
+    )
+
+    assert _resolve_env_path_entries("tool", None, "/work") == "/work/tool"
+
+
+def test_strip_launchers_env_path_empty_component_resolves_bare_driver_via_cwd(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: ``env -C sub PATH=: clang-cl ...`` must find a driver
+    that lives in the effective (chdir'd) directory itself, via the empty
+    ``PATH=`` component."""
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    driver = _make_executable(sub / "clang-cl")
+    result = strip_launchers(
+        ["env", "-C", "sub", "PATH=:", "clang-cl", "-c", "x.cc"],
+        directory=str(tmp_path),
+    )
+    _assert_resolved_driver(result[0], driver)
+    assert result[1:] == ["-c", "x.cc"]
+
+
+# -- Round 23, Finding 4 (Codex, ``_argv.py:87``): env's real long-flag
+# spelling is ``--debug``, not ``--verbose`` --------------------------------
+
+
+def test_strip_launchers_env_debug_long_flag_recognized() -> None:
+    """``env --debug clang-cl ...`` -- GNU env's real documented option
+    pair is ``-v, --debug`` (confirmed against a real installed
+    ``env --help``), NOT ``--verbose``. Before the fix, this was not
+    recognized as an env flag at all -- ``--debug`` itself was mistaken for
+    the driver, and the real driver (and everything after it) was lost."""
+    result = strip_launchers(["env", "--debug", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_strip_launchers_env_debug_short_flag_still_recognized() -> None:
+    """The short form, ``-v``, was already correct and must stay that way."""
+    result = strip_launchers(["env", "-v", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_strip_launchers_env_verbose_negative_control_no_longer_special_cased() -> None:
+    """Negative control: ``--verbose`` is not a real ``env`` flag (rejected
+    by a real installed ``env`` with exit code 125) and must NOT be
+    recognized as one -- it is treated like any other unrecognized token,
+    i.e. as the driver itself, the same as before Finding 4 for any other
+    genuinely-unrecognized flag."""
+    result = strip_launchers(["env", "--verbose", "clang-cl", "-c", "x.cc"])
+    assert result == ["--verbose", "clang-cl", "-c", "x.cc"]
+
+
+# -- Round 23, Finding 6 (Codex): ``env -``/``env --`` command separators --
+
+
+def test_skip_env_prefix_bare_dash_means_ignore_environment() -> None:
+    """``env - clang-cl ...`` -- GNU/POSIX's deprecated equivalent of
+    ``env -i`` -- must be skipped like any other no-operand flag, not
+    mistaken for the driver itself."""
+    result = strip_launchers(["env", "-", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_double_dash_terminates_option_parsing() -> None:
+    """``env -- clang-cl ...`` -- GNU's option-parsing terminator -- must be
+    consumed, with the next token unconditionally treated as the command
+    even if it looked flag-shaped."""
+    result = strip_launchers(["env", "--", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_double_dash_before_flag_shaped_command() -> None:
+    """``--`` specifically protects a flag-shaped COMMAND token from being
+    mistaken for one of env's own flags -- the real differentiator from the
+    bare ``--`` case above."""
+    result = strip_launchers(["env", "--", "-oddly-named-tool", "-c", "x.cc"])
+    assert result == ["-oddly-named-tool", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_dash_negative_control_real_flag_unaffected() -> None:
+    """Negative control: an ordinary recognized flag (``-i``) is completely
+    unaffected by the new ``-``/``--`` handling."""
+    result = strip_launchers(["env", "-i", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+# -- Round 23, Finding 7 (Codex): chained ``env -C`` prefixes compose ------
+
+
+def test_strip_launchers_chained_env_chdir_composes() -> None:
+    """``env -C a env -C b ../clang-cl ...`` -- real ``env`` chdirs into
+    ``a``, then ``b`` relative to THAT, giving an effective directory of
+    ``a/b``. The old code overwrote ``chdir`` with the most recent ``-C``
+    value instead of composing them, silently discarding the outer ``-C``
+    entirely."""
+    result = strip_launchers(
+        ["env", "-C", "a", "env", "-C", "b", "../clang-cl", "-c", "x.cc"]
+    )
+    assert result == [
+        os.path.normpath(os.path.join("a", "b", "..", "clang-cl")),
+        "-c",
+        "x.cc",
+    ]
+
+
+def test_strip_launchers_chained_env_chdir_absolute_inner_overrides() -> None:
+    """A later, ABSOLUTE ``-C`` genuinely replaces the accumulated relative
+    chdir rather than composing onto it -- real ``env -C /abs`` is a literal
+    chdir regardless of any earlier relative one."""
+    result = strip_launchers(
+        ["env", "-C", "a", "env", "-C", "/abs", "../clang-cl", "-c", "x.cc"]
+    )
+    assert result == ["/clang-cl", "-c", "x.cc"]
+
+
+def test_strip_launchers_single_env_chdir_negative_control_unchanged() -> None:
+    """Negative control: a single, non-chained ``-C`` behaves exactly as
+    before -- composition logic is a pure no-op when there is only one
+    ``env -C`` prefix to begin with."""
+    result = strip_launchers(
+        ["env", "-C", "build", "../llvm/bin/clang-cl", "-c", "x.cc"]
+    )
+    assert result == ["llvm/bin/clang-cl", "-c", "x.cc"]
+
+
+# -- Round 23, Finding 8 (Codex): ``env -C``'s effective cwd folds into
+# trailing operands too, not just the driver token --------------------------
+
+
+def test_strip_launchers_chdir_folds_into_combined_include_flag() -> None:
+    """``env -C build clang-cl -I../include /c ../src/x.cpp`` -- every
+    relative filesystem argument the real process receives is interpreted
+    relative to the chdir'd directory, not just its own executable name."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang-cl", "-I../include", "/c", "../src/x.cpp"]
+    )
+    assert result == [
+        "clang-cl",
+        "-I" + os.path.normpath(os.path.join("build", "../include")),
+        "/c",
+        os.path.normpath(os.path.join("build", "../src/x.cpp")),
+    ]
+
+
+def test_strip_launchers_chdir_folds_into_separate_form_include_operand() -> None:
+    """The SEPARATE-form spelling (``-I ../include``, two tokens) is
+    resolved via the generic bare-token rule, without this module needing
+    to know ``-I`` specifically preceded it."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang-cl", "-I", "../include", "/c", "x.cpp"]
+    )
+    assert result == [
+        "clang-cl",
+        "-I",
+        os.path.normpath(os.path.join("build", "../include")),
+        "/c",
+        "x.cpp",
+    ]
+
+
+def test_strip_launchers_chdir_does_not_touch_macro_definition_value() -> None:
+    """Negative control: a ``-D`` macro value containing a path separator
+    (``-DDEFAULT_DIR=a/b``) must NOT be resolved -- it is not a path-bearing
+    flag this module recognizes, mirroring ``MACRO_DEFINITION_PREFIXES``'s
+    own existing ``~``-expansion carve-out."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang-cl", "-DDEFAULT_DIR=a/b", "/c", "x.cpp"]
+    )
+    assert result == ["clang-cl", "-DDEFAULT_DIR=a/b", "/c", "x.cpp"]
+
+
+def test_strip_launchers_chdir_does_not_touch_unrecognized_combined_flag() -> None:
+    """Negative control: an unrecognized combined-form flag with a path
+    separator in its value is left completely unchanged."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang-cl", "-Wl,../foo.so", "/c", "x.cpp"]
+    )
+    assert result == ["clang-cl", "-Wl,../foo.so", "/c", "x.cpp"]
+
+
+def test_strip_launchers_chdir_leaves_absolute_operand_unchanged() -> None:
+    """Negative control: an already-absolute operand is passed through
+    unchanged, same as the driver-token case."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang-cl", "-I/opt/include", "/c", "/src/x.cpp"]
+    )
+    assert result == ["clang-cl", "-I/opt/include", "/c", "/src/x.cpp"]
+
+
+def test_strip_launchers_no_chdir_negative_control_operands_unchanged() -> None:
+    """Negative control: with no ``env -C`` prefix at all, every trailing
+    operand is passed through completely unchanged -- the pre-existing
+    behavior for the common (no ``env``) case."""
+    argv = ["clang-cl", "-I../include", "/c", "../src/x.cpp"]
+    assert strip_launchers(argv) == argv
+
+
+# -- Round 23, Finding 2 (Codex, adapters/base.py): MSVC detection over an
+# ``env -S``-expanded argv --------------------------------------------------
+
+
+def test_is_msvc_command_true_for_env_split_string_clang_cl() -> None:
+    """``env -S 'clang-cl /c x.cc'`` must be recognized as MSVC-dialect --
+    the old length-subtraction ``driver_index`` computation coincidentally
+    landed on index 0 (``"env"``) for this exact input shape, since the
+    expanded-and-stripped result happened to share the same length as the
+    original three-token input."""
+    from abicheck.buildsource.adapters.base import _is_msvc_command
+
+    assert _is_msvc_command(["env", "-S", "clang-cl /c x.cc"]) is True
+
+
+def test_msvc_driver_token_resolves_through_env_split_string() -> None:
+    """The driver TOKEN itself, not merely the boolean, must also resolve
+    correctly through the same expansion."""
+    from abicheck.buildsource.adapters.base import msvc_driver_token
+
+    assert msvc_driver_token(["env", "-S", "clang-cl /c x.cc"]) == "clang-cl"
+
+
+def test_is_msvc_command_env_split_string_with_launcher() -> None:
+    """A compiler-cache launcher inside the split string is still unwrapped
+    before CL-style driver-name matching."""
+    from abicheck.buildsource.adapters.base import _is_msvc_command
+
+    assert _is_msvc_command(["env", "-S", "sccache clang-cl /c x.cc"]) is True
+
+
+def test_is_msvc_command_negative_control_env_split_string_gnu_driver() -> None:
+    """Negative control: an ``env -S``-expanded GNU (non-CL) command must
+    still read as non-MSVC -- the fix must not flip every ``-S``-expanded
+    command to MSVC dialect indiscriminately."""
+    from abicheck.buildsource.adapters.base import _is_msvc_command
+
+    assert _is_msvc_command(["env", "-S", "gcc -c x.c"]) is False
+
+
+def test_is_msvc_command_negative_control_ordinary_command_unaffected() -> None:
+    """Negative control: an ordinary (non-``env``) MSVC command is
+    completely unaffected by the expansion step."""
+    from abicheck.buildsource.adapters.base import _is_msvc_command
+
+    assert _is_msvc_command(["clang-cl", "/c", "x.cc"]) is True
+    assert _is_msvc_command(["gcc", "-c", "x.c"]) is False
