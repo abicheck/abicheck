@@ -54,6 +54,7 @@ from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_compile_context import resolve_header_compile_context
 from abicheck.errors import HeaderCompileContextAmbiguousError
 from abicheck.header_utils import (
+    _include_class_path_pairs,
     dedup_paths_preserve_order,
     drop_include_tokens_duplicating_paths,
     forced_include_operands,
@@ -884,6 +885,32 @@ class TestDedupIncludeDirsAcrossCompositionSites:
         toks = ("-isystem", str(d), "-fPIC")
         out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
         assert out == ["-isystem", str(d), "-fPIC"]
+
+    def test_isystem_after_is_not_misparsed_as_attached_isystem(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802: ``-isystem-after <dir>`` is Clang's own,
+        genuinely distinct flag (real ``clang --help-hidden``, always
+        spaced) -- not a longer spelling of ``-isystem``. Before
+        ``_INCLUDE_FLAG_PREFIXES`` carried its own entry for it, the
+        first-match-wins scan misparsed it as an *attached* ``-isystem``
+        flag whose directory was the bogus suffix ``"-after"``, stranding
+        the real directory operand as a stray, unconsumed token."""
+        d = tmp_path / "inc"
+        toks = ("-isystem-after", str(d), "-fPIC")
+        # The (flag-class, directory) pair recognized from "already
+        # covered" tokens must key on the real "-isystem-after" class, not
+        # a corrupted "-isystem"/"-after" split.
+        pairs = _include_class_path_pairs(toks)
+        assert pairs == {("-isystem-after", str(d.resolve()))}
+        # And the real directory operand must never be stranded as an
+        # unconsumed bare token when deduping against an unrelated class.
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-isystem-after", str(d), "-fPIC"]
+        # A genuine duplicate in the same "-isystem-after" class is still
+        # correctly dropped.
+        out2 = drop_include_tokens_duplicating_paths(toks, ["-isystem-after", str(d)])
+        assert out2 == ["-fPIC"]
 
 
 class TestMergeL3CompileContextDropsDuplicateExplicitInclude:

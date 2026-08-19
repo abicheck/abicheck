@@ -111,6 +111,26 @@ CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 #: include-search flag at all. Left as a known gap (see ``AGENTS.md``).
 _INCLUDE_FLAG_PREFIXES = (
     "-I",
+    # Listed ahead of the plain "-isystem" it textually extends: every match
+    # here is a first-match-wins scan (`next(p for p in _INCLUDE_FLAG_
+    # PREFIXES if t.startswith(p))`), and "-isystem-after" is Clang's own,
+    # genuinely distinct flag (`-isystem-after <dir>` -- confirmed against
+    # real `clang --help-hidden`, always spaced, never an attached form) --
+    # not a longer spelling of "-isystem" itself. Ordered after "-I" a real
+    # match would still find first-match-wins if it were left later: a real
+    # "-isystem-after" token also `startswith("-isystem")`, so scanning
+    # "-isystem" first would misparse it as an *attached* "-isystem" flag
+    # whose "directory" is the bogus suffix "-after", stranding the real
+    # directory operand as a bare, unconsumed token (Codex review, PR #802 --
+    # confirmed with the reviewer's own repro: `gcc_options='-isystem-after
+    # /a'` alongside `gcc_option_tokens=('-isystem-after', '/b')` left a bare
+    # `/b` in the composed command). Pre-existing in every consumer that
+    # already did `t.startswith(p)` against this tuple before this PR
+    # (`_has_include_build_context`, `include_operand_dirs`, ...), not
+    # introduced by this PR's own two new functions -- fixed once here,
+    # for the whole shared tuple, rather than only for the two consumers a
+    # reviewer happened to be reading.
+    "-isystem-after",
     "-isystem",
     "-iquote",
     "-idirafter",
