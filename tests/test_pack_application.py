@@ -638,6 +638,64 @@ class TestOnlyAppliedFieldsAreAccepted:
         summary = json.loads(with_pack.output)
         assert summary["verdict"] == "BREAKING"
 
+    def test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """Codex review on #801: the precedence rule D8 states for every
+        other front end -- an explicitly stated value always outranks a
+        pack -- must hold for `scan --against` too. Reproduces the exact
+        repro from that review: a removed export scanned with an explicit
+        `--severity-preset strict` must still exit 4 even when a selected
+        gate pack tries to demote `abi_breaking` to `warning`; without the
+        fix the pack silently won and this exited 0."""
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--severity-preset", "strict",
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads(result.output)
+        assert summary["verdict"] == "BREAKING"
+
+    def test_a_gate_pack_cannot_override_a_project_config_severity_preset(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The project-config (`.abicheck.yml`) tier of the identical
+        precedence bug -- found while fixing the explicit-CLI tier above,
+        by the same mechanism (`cli_scan_receipt`'s ADR-049 receipt not
+        knowing a project-config value was already stated, so a selected
+        pack looked unopposed)."""
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("severity:\n  preset: strict\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--config", str(cfg),
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads(result.output)
+        assert summary["verdict"] == "BREAKING"
+
     def test_scan_rejects_an_unapplied_field_from_the_resolution(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:

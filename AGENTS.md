@@ -287,8 +287,15 @@ Core pipeline (in order of data flow):
      (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
      empty — each is a pack recorded as active configuration that changes
      nothing, which is the single failure all of these guard. `compare`
-     takes all three kinds; `scan --against` takes policy/contract and
-     rejects a gate pack, having no gate of its own. The directory/package
+     takes all three kinds; `scan --against` now takes all three too (CLI
+     cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's
+     `gate.exit_code_scheme`/`gate.severity.*` fold onto the real
+     `ResolvedCompareConfig` `resolve_compare_config` already produces
+     (`pack_application.apply_to_compare_config`, the identical function
+     single-pair `compare` uses, called from `cli_scan._resolve_scan_
+     evaluation_config`), since `scan`'s exit code has honored the resolved
+     severity/exit-code-scheme config since the fix that closed the "scan
+     never consults severity" gap below. The directory/package
      release fan-out (`cli_compare_release.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — it has no `GateOptions`-
      shaped object of its own, so a `kind: gate` pack's `gate.exit_code_
@@ -840,7 +847,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes

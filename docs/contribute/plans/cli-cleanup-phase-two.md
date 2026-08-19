@@ -1489,6 +1489,42 @@ report.
 > `TestOnlyAppliedFieldsAreAccepted::test_a_gate_pack_is_applied_to_scan`,
 > replacing the now-stale `test_a_gate_pack_is_rejected_by_scan_which_has_
 > no_gate`.
+>
+> **Follow-up fix, same day (Codex review on #801, fresh evidence, real
+> reproduction): the initial slice 3 had a real D8-precedence bug, not just
+> an incomplete receipt.** `_resolve_scan_evaluation_config` built the
+> `PackApplication` from `resolve_scan_config`'s own ADR-049 receipt object
+> — but `SCAN_CONFIG_PARAMS` never included `severity_preset`/
+> `exit_code_scheme`, and that receipt's own `_without_gate_settings` helper
+> additionally blanked the six project-config-sourced gate fields to avoid a
+> stale two-resolver disagreement. So neither an explicit
+> `--severity-preset`/`--exit-code-scheme` nor a `.abicheck.yml` `severity:`/
+> `exit_code_scheme:` block was ever visible to this resolver's D7
+> precedence — every selected gate pack looked unopposed regardless of what
+> was actually stated, and `apply_to_compare_config` (correctly assuming its
+> caller's `PackApplication` already respected D7 precedence, the same
+> assumption that holds for `compare`) silently let the pack win. Reproduced
+> concretely: a removed export scanned with `--severity-preset strict` and a
+> `gate.severity.abi_breaking: warning` pack exited 0, not 4. Fixed at the
+> root: `severity_preset`/`exit_code_scheme` joined `SCAN_CONFIG_PARAMS`
+> (closing the explicit-CLI tier), and `_without_gate_settings` was removed
+> entirely rather than merely extended (closing the project-config tier
+> too) — verified safe specifically for `scan`, which has no `--profile`
+> option unlike `compare`, so `ProjectCompatibilityInputs.from_build_config`
+> and `resolve_compare_config` read the identical six fields off the
+> identical `project_cfg` object with the identical `explicit CLI > project
+> config > built-in default` precedence and cannot disagree the way the
+> blanking was originally written to guard against. `service_scan.
+> run_scan`'s hand-built params dict (the API front end, which has no
+> `severity_preset`/`exit_code_scheme` CLI flags to be explicit about) now
+> passes both as `None`, matching every other field `ScanRequest` does not
+> carry. Tests: `tests/test_pack_application.py`'s
+> `test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset` and
+> `test_a_gate_pack_cannot_override_a_project_config_severity_preset` (both
+> confirmed to fail with the pre-fix exit 0, verified via negative control);
+> `tests/test_cli_scan_receipt_unit.py`'s `TestGateConfigReceipt` rewritten
+> from `TestGateBlanking` to assert the new, accurate provenance instead of
+> the old blanked-to-default one.
 
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.

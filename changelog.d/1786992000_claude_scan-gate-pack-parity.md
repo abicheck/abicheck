@@ -8,7 +8,10 @@
   `scan`'s exit code has honored the resolved severity/exit-code-scheme
   configuration since the fix that closed the "scan never consults
   severity" gap, and a gate pack is simply one more source for that same
-  gate, mirroring the release fan-out's identical slice 2 fold.
+  gate, mirroring the release fan-out's identical slice 2 fold. Matching
+  ADR-049 D8's precedence rule, a selected pack cannot override a
+  severity/exit-code-scheme value that was actually stated -- by an
+  explicit `--severity-preset`/`--exit-code-scheme`, or by `.abicheck.yml`.
   `scan --dry-run`'s previewed exit-code scheme now also carries the same
   "a selected --pack may adjust it" caveat `compare --dry-run` already
   shows when a gate pack is selected, instead of asserting the pre-pack
