@@ -655,6 +655,36 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will run (trusted -- explicit --config)" in result.output
 
+    def test_headers_and_active_collect_mode_reports_query_runs_twice(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: verified against the real (non-dry)
+        # CLI with a marker-appending query -- a single `abicheck dump`
+        # invocation with headers, a real artifact, and an active (non-"off")
+        # collect mode appended to the marker file TWICE, not once. Two
+        # independent, non-deduplicated real call sites each reach cfg.query:
+        # l2_seed.seed_includes_and_fold_compile_context (gated on headers +
+        # a real artifact) and embed_build_source (gated on collect_mode !=
+        # "off") -- neither caches or shares its result with the other. The
+        # default (non-depth-restricted) collect mode used here reaches both.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")  # --dry-run never opens/parses it
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "WILL RUN TWICE" in result.output
+        assert "two independent, non-deduplicated call sites" in result.output
+        # A dry run never actually executes the query, twice or otherwise.
+        assert not (tmp_path / "build").exists()
+
     def test_no_sources_or_build_info_reports_no_collection_attempted(
         self, tmp_path: Path
     ) -> None:

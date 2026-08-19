@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through ten review
+patches" convention -- this module has now been through eleven review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -187,6 +187,32 @@ rounds):
   above). Accepted as-is: correctness (matching the real run's actual
   classification) is kept, at the cost of dry-run's cheapness guarantee
   for this one, large-Bazel-capture input shape.
+
+- **The underlying production double-execution this module now *reports*
+  (see ``add_build_query_dry_run_section``'s own "WILL RUN TWICE" note) is
+  itself not fixed here, deliberately.** Verified empirically against a
+  real compiled library with a marker-appending ``build.query``: a single
+  ``abicheck dump`` invocation with headers, a real artifact, and an
+  active (non-``"off"``) collect mode ran the query twice, once via
+  ``l2_seed.seed_includes_and_fold_compile_context`` (the L2 include-dir
+  seed) and once via ``cli_buildsource.embed_build_source`` -- neither
+  caches or shares its resolved ``BuildEvidence``/compile-DB result with
+  the other, and ``_resolve_compile_db``'s own ``cfg.query`` branch has no
+  existing-file check before invoking it (unlike its sibling
+  ``_compile_db_at``/glob branches), so it runs unconditionally on each
+  independent call. This is a real correctness/idempotency issue in
+  ``dump``'s own production execution, not a reporting gap in this
+  read-only preview module -- fixing it means sharing or caching one
+  resolved collection result across two currently-independent call sites
+  in ``cli_dump_helpers.py``/``cli_buildsource.py``, each with its own
+  scope/config-resolution nuances (the L2 seed call happens *before* the
+  primary header-AST parse even runs; ``embed_build_source`` happens
+  *after*, from ``_write_snapshot_output``) -- a real, cross-cutting change
+  to `dump`'s own execution shape, not something this module can or should
+  attempt on its own. This module's contribution is limited to what a
+  read-only preview can honestly do: tell the operator the query is
+  non-idempotent-unsafe for this input shape *before* they run it for
+  real.
 
 This closes the full set of ``BuildSourcePack``-shaped paths into
 ``collect_inline_pack`` this module is aware of (the two gaps above
@@ -837,10 +863,47 @@ def add_build_query_dry_run_section(
             "resulting compile-DB path: (build.compile_db not configured -- "
             "the query's own default output location)"
         )
+    # Two independent real call sites can each reach this identical `cfg.
+    # query` resolution for the SAME operands: `l2_seed.seed_includes_and_
+    # fold_compile_context` (gated on `l2_seed_reachable`) runs first inside
+    # `perform_elf_dump`/`handle_non_elf_dump`, and `embed_build_source`
+    # (gated on `collect_active`, i.e. `collect_mode != "off"`) runs again
+    # afterward from `_write_snapshot_output` -- neither caches or shares its
+    # result with the other, and `_resolve_compile_db`'s own `cfg.query`
+    # branch has no existing-file check before invoking it (unlike its
+    # sibling `_compile_db_at`/glob branches) -- it runs unconditionally
+    # whenever `cfg.query` is set and trusted. Verified empirically against a
+    # real compiled library with a marker-appending query: the marker file
+    # gained two lines from one `abicheck dump` invocation, not one (Codex
+    # review, fresh evidence). Reported here rather than fixed at the
+    # production call sites -- deduplicating the two collections is a real
+    # behavior change to `dump`'s own execution (sharing/caching a resolved
+    # `BuildEvidence` across two currently-independent call sites, each with
+    # its own scope/config-resolution nuances), not a change this read-only
+    # preview module can make on its own; see this module's own "Known,
+    # deliberately unclosed gaps" section.
+    runs_twice = l2_seed_reachable and collect_active
     result.add(
         _SECTION,
-        f"build.query: will run (trusted -- {trust_source})",
+        f"build.query: will run (trusted -- {trust_source})"
+        + (
+            " -- WILL RUN TWICE: once via the L2 include-dir seed, once via "
+            "build-source embedding -- see note below"
+            if runs_twice
+            else ""
+        ),
         f"argv: {argv}",
         f"cwd: {cwd}",
         compile_db_line,
+        *(
+            (
+                "note: this input combination (headers + a real artifact + "
+                "an active collect mode) reaches build.query from two "
+                "independent, non-deduplicated call sites in the real run -- "
+                "a non-idempotent query (e.g. one that appends rather than "
+                "overwrites) executes twice, not once",
+            )
+            if runs_twice
+            else ()
+        ),
     )
