@@ -190,6 +190,8 @@ _SECTION = "Build query (trust)"
 def add_build_query_dry_run_section(
     result: DryRunResult,
     *,
+    so_path: Path | None = None,
+    dump_manifest_given: bool = False,
     sources: Path | None,
     headers: tuple[Path, ...],
     collect_mode: str,
@@ -205,6 +207,37 @@ def add_build_query_dry_run_section(
         is_pack_dir,
         load_build_config,
     )
+
+    # `dump_cmd`'s own dispatch rejects --dump-manifest for a PE/Mach-O
+    # binary outright (`--dump-manifest is not yet supported for {fmt}
+    # binaries`, ADR-050 D3, a `click.UsageError`) before `handle_non_elf_
+    # dump`/`embed_build_source` is ever reached -- so this combination can
+    # never run build.query regardless of how the rest of this function
+    # would otherwise resolve it (Codex review, fresh evidence). Detected
+    # the same cheap, read-only way `render_dump_dry_run`'s own "Available
+    # data layers" section already does (`normalize_binary_input`/
+    # `detect_binary_format`), matching this module's contract.
+    if dump_manifest_given and so_path is not None:
+        from .binary_utils import detect_binary_format, normalize_binary_input
+
+        try:
+            _normalized_path, _binary_fmt = normalize_binary_input(so_path)
+            if _binary_fmt is None:
+                _binary_fmt = detect_binary_format(_normalized_path)
+        except Exception:
+            _binary_fmt = None
+        if _binary_fmt in ("pe", "macho"):
+            result.add(
+                _SECTION,
+                "build.query: will NOT run -- --dump-manifest is not yet "
+                f"supported for {_binary_fmt.upper()} binaries (ADR-050 D3); "
+                "the real run rejects this combination before build-source "
+                "collection is ever reached",
+            )
+            result.block(
+                f"--dump-manifest is not yet supported for {_binary_fmt.upper()} binaries"
+            )
+            return
 
     # Neither real call site is even attempted without --sources/--build-info
     # at all -- `l2_seed`'s own guard is `(sources is None and build_info is
@@ -230,6 +263,25 @@ def add_build_query_dry_run_section(
             f"(collect mode {collect_mode!r} with no headers to parse)",
         )
         return
+
+    # `embed_build_source` loads `bi_pack`/`src_pack` unconditionally and
+    # independently of one another (`_load_pack_or_raise(build_info)` and
+    # `_load_pack_or_raise(sources)`, both called regardless of what the
+    # other operand is) -- a malformed --sources pack blocks the real run
+    # even when an explicit, non-pack --build-info would otherwise take L3
+    # precedence over it below. Checked here, unconditionally, rather than
+    # only inside the --build-info-is-absent-or-non-pack branch further
+    # down, since that branch is an `elif` a non-pack --build-info would
+    # otherwise skip entirely (Codex review, fresh evidence).
+    if sources is not None and is_pack_dir(sources):
+        from .buildsource.pack import BuildSourcePack
+
+        try:
+            BuildSourcePack.load(sources)
+        except (OSError, ValueError) as exc:
+            result.add(_SECTION, f"build.query: could not load --sources pack {sources}: {exc}")
+            result.block(f"--sources names an unloadable pack ({sources}): {exc}")
+            return
 
     if build_info is not None and is_pack_dir(build_info):
         # `_l2_seed_pack_inputs`/`embed_build_source`'s own `base_build=
@@ -377,7 +429,15 @@ def add_build_query_dry_run_section(
         try:
             cfg = load_build_config(cfg_path)
         except ValueError as exc:
+            # The real (non-dry) path raises `click.UsageError` (exit 64) for
+            # the identical load failure (`cli_buildsource.py`'s own
+            # `cfg = load_build_config(cfg_path) ... except ValueError as exc:
+            # raise click.UsageError(...)`) -- a dry-run that only records a
+            # diagnostic line and returns at exit 0 would silently promise a
+            # config the real run rejects outright (CodeRabbit review, fresh
+            # evidence, mirroring the identical malformed-pack fix above).
             result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
+            result.block(f"cannot load build configuration {cfg_path}: {exc}")
             return
         cfg_compile_db = cfg.compile_db or None
         effective_query = build_query if build_query is not None else (cfg.query or None)

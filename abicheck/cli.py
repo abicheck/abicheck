@@ -710,7 +710,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         # CLI cleanup phase two, PR 3C prerequisite 3: show whether/why
         # build.query would execute, without ever running it.
         add_build_query_dry_run_section(
-            _dry_result, sources=sources, headers=headers,
+            _dry_result, so_path=so_path,
+            dump_manifest_given=parsed_dump_manifest is not None,
+            sources=sources, headers=headers,
             collect_mode=collect_mode, build_info=build_info,
             build_config=build_config,
             build_query=build_query, build_compile_db=build_compile_db,

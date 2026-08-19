@@ -904,6 +904,89 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 1, result.output
         assert "Exit code: 1" in result.output
 
+    def test_malformed_auto_discovered_config_blocks_dry_run(self, tmp_path: Path) -> None:
+        # CodeRabbit/Codex review: the real (non-dry) run raises
+        # click.UsageError (exit 64) for a malformed .abicheck.yml
+        # (cli_buildsource.py's own `except ValueError as exc: raise
+        # click.UsageError(...)`) -- a dry run must not report exit 0 for
+        # the same broken config.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+        assert "could not load" in result.output
+
+    def test_malformed_sources_pack_blocks_even_with_nonpack_build_info(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: `embed_build_source` loads bi_pack/src_pack
+        # unconditionally and independently -- a malformed --sources pack
+        # must block the dry run even when --build-info is a plain,
+        # already-resolvable compile database that would otherwise take L3
+        # precedence over it.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        compile_db = tmp_path / "compile_commands.json"
+        compile_db.write_text("[]", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        (src_pack / "manifest.json").write_text(
+            '{"build_source_pack_version": "1.0", "not valid json',
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(compile_db),
+                "--sources", str(src_pack),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+        assert "could not load --sources pack" in result.output
+
+    def test_pe_with_dump_manifest_reports_will_not_run(self, tmp_path: Path) -> None:
+        # Codex review: dump_cmd's own PE/Mach-O dispatch rejects
+        # --dump-manifest outright (ADR-050 D3, click.UsageError) before
+        # embed_build_source is ever reached, so build.query can never run
+        # for this combination regardless of what would otherwise resolve.
+        pe_path = tmp_path / "lib.dll"
+        # Minimal PE signature: "MZ" DOS header magic is enough for
+        # binary_utils.detect_binary_format to classify this as PE.
+        pe_path.write_bytes(b"MZ" + b"\x00" * 62 + b"\x40\x00\x00\x00" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        manifest_path = tmp_path / "manifest.yml"
+        manifest_path.write_text(
+            "roots: [api.h]\ntranslation_units:\n  - name: main\n    forced_includes: [api.h]\n",
+            encoding="utf-8",
+        )
+
+        # --dump-manifest and -H/--header are mutually exclusive (the
+        # manifest's own `roots` field declares the public surface), so no
+        # headers are passed here.
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(pe_path), "--dump-manifest", str(manifest_path),
+                "--sources", str(tmp_path),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert "Build query (trust):" in result.output
+        assert "will NOT run" in result.output
+        assert "--dump-manifest is not yet supported for" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
