@@ -685,6 +685,42 @@ class TestDumpDryRunBuildQueryTrust:
         # A dry run never actually executes the query, twice or otherwise.
         assert not (tmp_path / "build").exists()
 
+    def test_headers_active_collect_mode_and_raw_build_info_reports_maybe_twice(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: with a raw --build-info given (not
+        # yet resolving to a compile DB at dry-run time), whether the SECOND
+        # real call site (embed_build_source) also runs the query is
+        # conditional on whether the FIRST invocation's own query happened
+        # to write a compile DB at --build-info's exact path -- verified
+        # empirically both ways with two real compiled-library runs of the
+        # identical marker-appending query: one marker line when the query
+        # also wrote a compile DB into --build-info's directory, two when it
+        # did not. An earlier revision of this report claimed the
+        # unconditional "WILL RUN TWICE" for this input shape too, which is
+        # provably wrong for the query-writes-into-build-info case.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        cfg = self._write_config(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "--build-info", str(build_dir),
+                "-H", str(header), "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "MAY RUN ONCE OR TWICE" in result.output
+        assert "WILL RUN TWICE" not in result.output
+        assert "cannot be determined without actually running the query" in result.output
+        # A dry run never actually executes the query.
+        assert not (build_dir / "compile_commands.json").exists()
+
     def test_no_sources_or_build_info_reports_no_collection_attempted(
         self, tmp_path: Path
     ) -> None:

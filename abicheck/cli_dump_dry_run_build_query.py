@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through eleven review
+patches" convention -- this module has now been through twelve review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -189,18 +189,28 @@ rounds):
   for this one, large-Bazel-capture input shape.
 
 - **The underlying production double-execution this module now *reports*
-  (see ``add_build_query_dry_run_section``'s own "WILL RUN TWICE" note) is
-  itself not fixed here, deliberately.** Verified empirically against a
-  real compiled library with a marker-appending ``build.query``: a single
-  ``abicheck dump`` invocation with headers, a real artifact, and an
-  active (non-``"off"``) collect mode ran the query twice, once via
-  ``l2_seed.seed_includes_and_fold_compile_context`` (the L2 include-dir
-  seed) and once via ``cli_buildsource.embed_build_source`` -- neither
-  caches or shares its resolved ``BuildEvidence``/compile-DB result with
-  the other, and ``_resolve_compile_db``'s own ``cfg.query`` branch has no
-  existing-file check before invoking it (unlike its sibling
+  (see ``add_build_query_dry_run_section``'s own "WILL RUN TWICE"/"MAY RUN
+  ONCE OR TWICE" notes) is itself not fixed here, deliberately.** Verified
+  empirically against a real compiled library with a marker-appending
+  ``build.query``: a single ``abicheck dump`` invocation with headers, a
+  real artifact, and an active (non-``"off"``) collect mode ran the query
+  twice, once via ``l2_seed.seed_includes_and_fold_compile_context`` (the
+  L2 include-dir seed) and once via ``cli_buildsource.embed_build_source``
+  -- neither caches or shares its resolved ``BuildEvidence``/compile-DB
+  result with the other, and ``_resolve_compile_db``'s own ``cfg.query``
+  branch has no existing-file check before invoking it (unlike its sibling
   ``_compile_db_at``/glob branches), so it runs unconditionally on each
-  independent call. This is a real correctness/idempotency issue in
+  independent call -- **when no raw ``--build-info`` is given at all**.
+  With a raw ``--build-info`` given, whether the second invocation also
+  runs the query is genuinely conditional on whether the first invocation's
+  own query happened to write a compile DB at ``--build-info``'s exact
+  path -- verified empirically both ways with two real compiled-library
+  runs of the identical marker-appending query (one marker line when the
+  query also wrote to ``--build-info``'s path, two when it did not) -- so
+  this module reports "MAY RUN ONCE OR TWICE" for that shape rather than a
+  false certainty in either direction; it cannot resolve the ambiguity
+  without actually running the query, which it deliberately never does.
+  This is a real correctness/idempotency issue in
   ``dump``'s own production execution, not a reporting gap in this
   read-only preview module -- fixing it means sharing or caching one
   resolved collection result across two currently-independent call sites
@@ -869,41 +879,88 @@ def add_build_query_dry_run_section(
     # `perform_elf_dump`/`handle_non_elf_dump`, and `embed_build_source`
     # (gated on `collect_active`, i.e. `collect_mode != "off"`) runs again
     # afterward from `_write_snapshot_output` -- neither caches or shares its
-    # result with the other, and `_resolve_compile_db`'s own `cfg.query`
-    # branch has no existing-file check before invoking it (unlike its
-    # sibling `_compile_db_at`/glob branches) -- it runs unconditionally
-    # whenever `cfg.query` is set and trusted. Verified empirically against a
-    # real compiled library with a marker-appending query: the marker file
-    # gained two lines from one `abicheck dump` invocation, not one (Codex
-    # review, fresh evidence). Reported here rather than fixed at the
-    # production call sites -- deduplicating the two collections is a real
-    # behavior change to `dump`'s own execution (sharing/caching a resolved
-    # `BuildEvidence` across two currently-independent call sites, each with
-    # its own scope/config-resolution nuances), not a change this read-only
-    # preview module can make on its own; see this module's own "Known,
-    # deliberately unclosed gaps" section.
-    runs_twice = l2_seed_reachable and collect_active
-    result.add(
-        _SECTION,
-        f"build.query: will run (trusted -- {trust_source})"
-        + (
+    # result with the other. Whether the SECOND invocation also reaches
+    # `cfg.query` (rather than short-circuiting) depends on `build_info`:
+    #
+    # - `build_info is None` (no raw --build-info given at all): neither
+    #   invocation's own `_resolve_compile_db` call ever takes its `if
+    #   build_info is not None:` short-circuit branch -- `cfg.query` has no
+    #   existing-file check of its own (unlike its sibling `_compile_db_at`/
+    #   glob branches), so BOTH invocations unconditionally reach and run
+    #   it. Verified empirically against a real compiled library with a
+    #   marker-appending query and no --build-info: the marker file gained
+    #   two lines from one `abicheck dump` invocation. Deterministic --
+    #   reported as "WILL RUN TWICE".
+    # - `build_info is not None` (a raw --build-info given, not yet
+    #   resolving to a compile DB at dry-run time -- every earlier
+    #   precedence branch in this function already ruled out the case where
+    #   it currently does): the FIRST invocation also finds nothing via
+    #   `_compile_db_at(build_info)` and runs `cfg.query` -- but if that
+    #   query's own side effect happens to (re)write a compile DB at
+    #   exactly `build_info`'s path (a common real setup: `--build-info
+    #   <dir>` pointing at the same directory `build.query` configures its
+    #   build to output into), the SECOND invocation's own
+    #   `_compile_db_at(build_info)` now finds it and returns early,
+    #   skipping `cfg.query` entirely -- running the query only once, not
+    #   twice (Codex review, fresh evidence: verified empirically with two
+    #   real compiled-library runs of the identical marker-appending query,
+    #   one whose query also wrote a compile DB into `--build-info`'s exact
+    #   path -- one marker line -- and one whose query did not -- two marker
+    #   lines). This module cannot know in advance whether a given query's
+    #   own side effect will land at `build_info`'s path without actually
+    #   running it, which it deliberately never does -- reported as a
+    #   genuinely conditional "MAY RUN ONCE OR TWICE" rather than a false
+    #   certainty in either direction.
+    #
+    # Neither case is fixed at the production call sites here -- deduplicating
+    # the two collections is a real behavior change to `dump`'s own execution
+    # (sharing/caching a resolved `BuildEvidence` across two currently-
+    # independent call sites, each with its own scope/config-resolution
+    # nuances), not a change this read-only preview module can make on its
+    # own; see this module's own "Known, deliberately unclosed gaps" section.
+    both_sites_reachable = l2_seed_reachable and collect_active
+    runs_twice_certain = both_sites_reachable and build_info is None
+    runs_maybe_twice = both_sites_reachable and build_info is not None
+    count_suffix: str
+    count_note: tuple[str, ...]
+    if runs_twice_certain:
+        count_suffix = (
             " -- WILL RUN TWICE: once via the L2 include-dir seed, once via "
             "build-source embedding -- see note below"
-            if runs_twice
-            else ""
-        ),
+        )
+        count_note = (
+            "note: this input combination (headers + a real artifact + an "
+            "active collect mode, and no --build-info to potentially "
+            "short-circuit the second invocation) reaches build.query from "
+            "two independent, non-deduplicated call sites in the real run -- "
+            "a non-idempotent query (e.g. one that appends rather than "
+            "overwrites) executes twice, not once",
+        )
+    elif runs_maybe_twice:
+        count_suffix = (
+            " -- MAY RUN ONCE OR TWICE: reachable from two independent, "
+            "non-deduplicated call sites -- see note below"
+        )
+        count_note = (
+            "note: this input combination (headers + a real artifact + an "
+            "active collect mode + a raw --build-info not yet resolving to "
+            "a compile DB) reaches build.query from two independent, "
+            "non-deduplicated call sites -- whether the second invocation "
+            "also runs it, or short-circuits because the first invocation's "
+            "query happened to write a compile DB at --build-info's own "
+            "path, cannot be determined without actually running the query "
+            "(which this preview never does); a non-idempotent query may "
+            "therefore execute once or twice depending on where it writes "
+            "its output",
+        )
+    else:
+        count_suffix = ""
+        count_note = ()
+    result.add(
+        _SECTION,
+        f"build.query: will run (trusted -- {trust_source})" + count_suffix,
         f"argv: {argv}",
         f"cwd: {cwd}",
         compile_db_line,
-        *(
-            (
-                "note: this input combination (headers + a real artifact + "
-                "an active collect mode) reaches build.query from two "
-                "independent, non-deduplicated call sites in the real run -- "
-                "a non-idempotent query (e.g. one that appends rather than "
-                "overwrites) executes twice, not once",
-            )
-            if runs_twice
-            else ()
-        ),
+        *count_note,
     )
