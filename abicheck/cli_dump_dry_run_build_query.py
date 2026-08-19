@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through nineteen review
+patches" convention -- this module has now been through twenty review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -704,25 +704,47 @@ def add_build_query_dry_run_section(
             # discovery, and this load failure says nothing about whether
             # `embed_build_source`'s own, independent config resolution
             # (which may still succeed from a bare CLI `--build-query`
-            # override with no file involved at all) would also fail
-            # (Codex review, fresh evidence: a malformed config nested
-            # inside a `--sources` pack, combined with a raw `--build-info`
-            # and an explicit `--build-query`, previously reported "will NOT
-            # run" here even though the real run's `embed_build_source`
-            # call executes the CLI-overridden query successfully, never
-            # touching this file at all). Fall through with `cfg = None`
-            # rather than returning, so the precedence chain below still
-            # answers correctly from `build_query` alone. When
-            # `effective_sources is not None`, `discover_from` always agrees
-            # with what `embed_build_source` would discover (see the
+            # override with no file involved at all) would also fail --
+            # BUT ONLY when `embed_build_source` is actually *reachable* at
+            # all: its own dispatch guard is `raw_build_info is not None or
+            # raw_sources is not None`, and `raw_sources` is nulled the exact
+            # same way `effective_sources` is (both collapse to `None`
+            # whenever `--sources` is itself a pack) -- so inside this
+            # `effective_sources is None` branch, `raw_sources` is always
+            # `None` too, and the guard reduces to whether a genuine, raw
+            # (non-pack) `--build-info` was also given. `raw_operand_present`
+            # (computed above) already answers exactly that question in this
+            # branch. Getting this wrong is a real, confirmed regression, not
+            # a hypothetical: an earlier revision of this fix fell through
+            # unconditionally whenever `effective_sources is None`, which
+            # made a `--sources`-only pack (no `--build-info` at all) with a
+            # malformed config and an explicit `--build-query` report "will
+            # run" -- but with `raw_build_info` also `None` in that shape,
+            # `embed_build_source`'s own dispatch guard is never satisfied at
+            # all, so it never reaches the `build_query` override either;
+            # the *only* real call site (the L2 seed) already failed to
+            # load this exact config, so the real run does NOT execute the
+            # query here (Codex review, fresh evidence -- verified by
+            # reading `embed_build_source`'s own `if raw_build_info is not
+            # None or raw_sources is not None:` guard directly). The
+            # original finding this whole branch exists for (Codex review,
+            # commit f9fd95d) specifically named a raw `--build-info` as
+            # part of the scenario -- this fix was too broad in dropping
+            # that qualifier. Fall through with `cfg = None` only when
+            # `raw_operand_present` -- i.e. a raw `--build-info` genuinely
+            # makes `embed_build_source` reachable -- rather than returning,
+            # so the precedence chain below still answers correctly from
+            # `build_query` alone in that case. When `effective_sources is
+            # not None`, `discover_from` always agrees with what
+            # `embed_build_source` would discover (see the
             # `raise_on_bad_config` comment above), so this load failure
             # really does mean both call sites are equally affected --
             # reporting "will NOT run" there remains correct, and this
-            # `elif` branch is unreached in that case since
-            # `raise_on_bad_config` (which requires `collect_active` too)
-            # would already have raised whenever `embed_build_source` could
-            # actually be reached with a failing config of its own.
-            if effective_sources is not None:
+            # branch is unreached in that case since `raise_on_bad_config`
+            # (which requires `collect_active` too) would already have
+            # raised whenever `embed_build_source` could actually be reached
+            # with a failing config of its own.
+            if effective_sources is not None or not raw_operand_present:
                 result.add(
                     _SECTION,
                     "build.query: will NOT run -- the auto-discovered config "
@@ -738,9 +760,10 @@ def add_build_query_dry_run_section(
                 "(which silently degrades on a load failure, rather than "
                 "raising) -- embed_build_source's own, independent config "
                 "resolution never reads this same file (--sources is a pack, "
-                "so its discovery is nulled), so it is evaluated separately "
-                "below from build_query/an auto-discovered config of its "
-                "own, if any",
+                "so its discovery is nulled), and it is reachable at all "
+                f"only because a raw --build-info ({build_info}) was also "
+                "given, so it is evaluated separately below from "
+                "build_query/an auto-discovered config of its own, if any",
             )
         else:
             cfg_compile_db = cfg.compile_db or None

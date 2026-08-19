@@ -1428,26 +1428,28 @@ class TestDumpDryRunBuildQueryTrust:
         )
         assert result.exit_code == 0, result.output
 
-    def test_malformed_sources_pack_config_with_cli_build_query_still_runs(
+    def test_malformed_sources_only_pack_config_with_cli_build_query_still_will_not_run(
         self, tmp_path: Path
     ) -> None:
-        # Codex review, fresh evidence (commit f9fd95d): when --sources is a
-        # valid pack containing a malformed .abicheck.yml, a native artifact
-        # plus headers make L2 seeding reachable, AND an explicit
-        # --build-query is supplied, the previous revision reported
-        # "build.query: will NOT run" unconditionally on this load failure --
-        # even though the real run's embed_build_source call never reads
-        # this same file at all (its own discovery is `discover_build_config
-        # (effective_sources)`, nulled to None because --sources is a pack)
-        # and constructs its own config purely from the CLI --build-query
-        # override, succeeding independently. Only l2_seed's own pack-rooted
-        # discovery (keyed on the *unnormalized* `sources`) reads and fails
-        # on this file; l2_seed already degrades silently on its own load
-        # failure regardless. So the real run genuinely executes the
-        # CLI-overridden query -- this dry-run must not report "will NOT
-        # run". (No raw --build-info here -- that operand independently
-        # takes precedence over build.query regardless of config load
-        # outcome, which would mask the very divergence this test targets.)
+        # Codex review (commit 8f57a41), fresh evidence: a PRIOR revision of
+        # this same fix (commit f9fd95d, for a DIFFERENT scenario naming a
+        # raw --build-info) was over-broadened to fall through to "will run"
+        # whenever `effective_sources is None`, regardless of whether a raw
+        # --build-info was actually also given. That was wrong: with
+        # --sources the SOLE input (no --build-info at all) and it itself a
+        # pack, `embed_build_source`'s own dispatch guard
+        # (`raw_build_info is not None or raw_sources is not None`) is never
+        # satisfied at all -- `raw_sources` is nulled the same way
+        # `effective_sources` is, and `raw_build_info` is None since
+        # --build-info was never given -- so embed_build_source is entirely
+        # UNREACHABLE in this shape, not merely reading a different file.
+        # Only the L2 seed's own pack-rooted discovery is reachable here, and
+        # it already failed to load this exact malformed config -- so the
+        # real run genuinely does NOT execute the CLI-overridden query.
+        # Confirmed empirically against the real (non-dry) CLI with a real
+        # gcc-compiled library and a marker-writing query: the run completes
+        # with "requested evidence layer(s) not collected: L3_build,
+        # L4_source_abi" and the marker file is never created.
         from abicheck.buildsource.pack import BuildSourcePack
 
         so_path = tmp_path / "lib.so"
@@ -1466,6 +1468,59 @@ class TestDumpDryRunBuildQueryTrust:
                 str(so_path),
                 "--sources",
                 str(src_pack),
+                "-H",
+                str(header),
+                "--build-query",
+                "echo hi",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "build.query: will NOT run" in result.output
+
+    def test_malformed_sources_pack_config_with_raw_build_info_and_cli_query_still_runs(
+        self, tmp_path: Path
+    ) -> None:
+        # The scenario the original finding (commit f9fd95d) actually named:
+        # --sources is a valid pack containing a malformed .abicheck.yml, a
+        # native artifact plus headers make L2 seeding reachable, a RAW
+        # (non-pack) --build-info is ALSO given, AND an explicit
+        # --build-query is supplied. Here embed_build_source's own dispatch
+        # guard IS satisfied (`raw_build_info is not None`), so it is
+        # genuinely reachable and constructs its config purely from the CLI
+        # --build-query override, independently of l2_seed's own (failed)
+        # pack-rooted discovery. So the real run genuinely executes the
+        # CLI-overridden query -- this dry-run must not report "will NOT
+        # run". A raw, non-pack --build-info naming an EMPTY directory (not
+        # a file, and not resolving to any compile_commands.json inside it)
+        # is used so the --build-info-already-resolves-to-a-compile-DB
+        # precedence branch doesn't independently mask this case --
+        # `_compile_db_at()` honors any EXISTING FILE whatever its content
+        # ("the user pointed straight at it"), so a raw --build-info file
+        # would always short-circuit through that unrelated precedence
+        # branch instead of reaching the code path this test targets.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+        (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
+        build_info = tmp_path / "emptybuilddir"
+        build_info.mkdir()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "--build-info",
+                str(build_info),
                 "-H",
                 str(header),
                 "--build-query",
