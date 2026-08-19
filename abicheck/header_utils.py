@@ -475,6 +475,23 @@ def _flag_tokens(toks: list[str]) -> list[str]:
     return out
 
 
+#: GCC's plain (non-quote-form) ``-I-`` divider: a bare, operand-less flag,
+#: never an attached-form ``-I<dir>`` whose directory happens to be ``"-"``.
+#: It splits the ``-I`` search list in two with *different* semantics on
+#: each side (GCC docs, "Directory Options") — a directory given before it
+#: is searched only for a quoted (``#include "..."``) include and never for
+#: an angle-bracket one, while a directory given after it is searched for
+#: both, the same as an ordinary ``-I`` with no divider present at all.
+#: Treating the two sides as one interchangeable ``-I`` class (as an
+#: earlier version of :func:`_include_class_path_pairs` effectively did, by
+#: never recognizing this token at all and misparsing it as an attached
+#: ``-I`` flag naming the bogus directory ``"-"``) can drop a *different*
+#: post-divider ``-I <dir>`` as a "duplicate" of an identical-looking
+#: pre-divider one — turning a resolvable ``#include <x.h>`` into
+#: "file not found" (Codex review, PR #802, confirmed against real GCC 13).
+_DASH_I_DIVIDER = "-I-"
+
+
 def _include_class_path_pairs(toks: Sequence[str]) -> set[tuple[str, str]]:
     """Every ``(flag-class, resolved-directory)`` pair present in *toks*.
 
@@ -488,12 +505,25 @@ def _include_class_path_pairs(toks: Sequence[str]) -> set[tuple[str, str]]:
     merely because an unrelated ``-I <dir>`` exists elsewhere would change
     which bucket that directory is searched from for a colliding basename
     (Codex review, PR #802).
+
+    A plain ``-I`` entry is further split into a ``"-I:pre"``/``"-I:post"``
+    sub-class depending on whether it appears before or after a
+    :data:`_DASH_I_DIVIDER` token *within this same sequence* — see that
+    constant's own docstring for why the two sides are not interchangeable
+    either, even though both are nominally "the ``-I`` class". No divider
+    present at all means every ``-I`` entry is ``"-I:pre"``, preserving the
+    pre-existing behaviour for the (overwhelmingly common) undivided case.
     """
     pairs: set[tuple[str, str]] = set()
     i = 0
     n = len(toks)
+    after_divider = False
     while i < n:
         t = toks[i]
+        if t == _DASH_I_DIVIDER:
+            after_divider = True
+            i += 1
+            continue
         matched_prefix = next(
             (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None
         )
@@ -510,7 +540,10 @@ def _include_class_path_pairs(toks: Sequence[str]) -> set[tuple[str, str]]:
             key = str(Path(operand).resolve())
         except OSError:
             key = operand
-        pairs.add((matched_prefix, key))
+        class_key = matched_prefix
+        if matched_prefix == "-I":
+            class_key = "-I:post" if after_divider else "-I:pre"
+        pairs.add((class_key, key))
         i += consumed
     return pairs
 
@@ -559,13 +592,28 @@ def drop_include_tokens_duplicating_paths(
     duplicate. Search-priority is unaffected for the entries that *are*
     dropped: it is always the later, redundant duplicate of an identical
     class+directory pair that goes, never the earlier one.
+
+    A :data:`_DASH_I_DIVIDER` (``"-I-"``) token in *toks* is always kept
+    verbatim — it is never itself a class+path pair to drop — and, per
+    :func:`_include_class_path_pairs`'s own ``"-I:pre"``/``"-I:post"``
+    split, flips which sub-class a subsequent plain ``-I`` in *toks*
+    belongs to, so an ``-I <dir>`` after the divider is never dropped as a
+    "duplicate" of a same-looking ``-I <dir>`` in *already_covered* (which,
+    lacking its own divider, is entirely ``"-I:pre"``) — doing so would
+    silently change which includes that directory is searched for.
     """
     covered = _include_class_path_pairs(already_covered)
     out: list[str] = []
     i = 0
     n = len(toks)
+    after_divider = False
     while i < n:
         t = toks[i]
+        if t == _DASH_I_DIVIDER:
+            after_divider = True
+            out.append(t)
+            i += 1
+            continue
         matched_prefix = next(
             (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None
         )
@@ -583,7 +631,10 @@ def drop_include_tokens_duplicating_paths(
             key = str(Path(operand).resolve())
         except OSError:
             key = operand
-        if (matched_prefix, key) in covered:
+        class_key = matched_prefix
+        if matched_prefix == "-I":
+            class_key = "-I:post" if after_divider else "-I:pre"
+        if (class_key, key) in covered:
             i += consumed
             continue
         out.extend(toks[i : i + consumed])

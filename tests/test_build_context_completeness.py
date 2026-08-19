@@ -54,6 +54,7 @@ from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_compile_context import resolve_header_compile_context
 from abicheck.errors import HeaderCompileContextAmbiguousError
 from abicheck.header_utils import (
+    _DASH_I_DIVIDER,
     _include_class_path_pairs,
     dedup_paths_preserve_order,
     drop_include_tokens_duplicating_paths,
@@ -911,6 +912,40 @@ class TestDedupIncludeDirsAcrossCompositionSites:
         # correctly dropped.
         out2 = drop_include_tokens_duplicating_paths(toks, ["-isystem-after", str(d)])
         assert out2 == ["-fPIC"]
+
+    def test_dash_i_divider_is_preserved_and_splits_pre_post_i_class(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802: GCC's bare ``-I-`` divider changes the
+        search semantics of every ``-I`` after it (searched for both quoted
+        and angle-bracket includes) relative to every ``-I`` before it
+        (quoted only) -- confirmed against real GCC 13. Before this, ``-I-``
+        was misparsed as an attached ``-I`` flag naming the bogus directory
+        ``"-"``, and a post-divider ``-I <dir>`` could be wrongly dropped as
+        a "duplicate" of an unrelated, pre-divider ``-I <dir>`` for the same
+        directory -- silently turning a resolvable ``#include <x.h>`` into
+        "file not found"."""
+        d = tmp_path / "inc"
+        # already_covered carries no divider of its own, so its "-I <dir>"
+        # is entirely pre-divider semantics.
+        already_covered = ["-I", str(d)]
+
+        # A post-divider "-I <dir>" for the identical directory must survive
+        # -- it is a different search class, not a duplicate.
+        toks = (_DASH_I_DIVIDER, "-I", str(d))
+        out = drop_include_tokens_duplicating_paths(toks, already_covered)
+        assert out == [_DASH_I_DIVIDER, "-I", str(d)]
+
+        # A pre-divider "-I <dir>" for the same directory is still
+        # correctly recognized as a real duplicate and dropped.
+        toks_pre = ("-I", str(d), _DASH_I_DIVIDER)
+        out_pre = drop_include_tokens_duplicating_paths(toks_pre, already_covered)
+        assert out_pre == [_DASH_I_DIVIDER]
+
+        # The divider itself is never treated as an attached "-I" flag
+        # naming the directory "-".
+        pairs = _include_class_path_pairs((_DASH_I_DIVIDER,))
+        assert pairs == set()
 
 
 class TestMergeL3CompileContextDropsDuplicateExplicitInclude:
