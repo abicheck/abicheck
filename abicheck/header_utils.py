@@ -455,6 +455,83 @@ def _flag_tokens(toks: list[str]) -> list[str]:
     return out
 
 
+def drop_include_tokens_duplicating_paths(
+    toks: Sequence[str], already_covered: Sequence[Path]
+) -> list[str]:
+    """*toks* with an include-search flag+operand pair dropped when its
+    directory already appears in *already_covered*.
+
+    ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.cli_dump_helpers.
+    perform_elf_dump`/:func:`abicheck.service_header_scoped._try_header_
+    scoped_dump`) both render the L3->L2 fold's merged compile context into
+    ``gcc_option_tokens`` via ``header_compile_context._context_flags`` —
+    which independently renders the *same* matched compile unit's
+    ``include_paths``/``system_include_paths`` as their own ``-I``/
+    ``-isystem`` tokens that the L2 include-dir seed (``eff_includes``,
+    rendered separately as ``extra_includes``) already covers. Both a
+    command builder's ``extra_includes`` loop *and* its verbatim
+    ``gcc_option_tokens`` append then emit an ``-I`` for the identical
+    directory — and since ``dumper_contract._attach_extraction_contract``
+    builds ``declared_includes`` **exclusively** from ``extra_includes``
+    (never ``gcc_option_tokens``), the duplicate never doubles a
+    ``declared_includes``/``include_sequence`` slot by itself, but a
+    real compiler still processes the same ``-I`` twice, and (more load-
+    bearing) a `scan --against` candidate resolution — whose single-pass
+    fold (:func:`abicheck.buildsource.l2_seed.
+    seed_includes_and_fold_compile_context`) never separately renders a
+    matched unit's include dirs into both places — never emits this
+    second copy for the identical project, so the two sides' full argv
+    (and therefore, on backends that fold gcc_option_tokens into their own
+    header-parse identity) can disagree for reasons no diagnostic names.
+    Confirmed via a minimal, castxml-free repro reproducing this exact
+    shape (AGENTS.md's L3->L2-fold "nineteenth finding").
+
+    Applied to ``gcc_option_tokens`` only, against the already-emitted
+    ``extra_includes`` — never the reverse, since ``extra_includes`` is
+    :func:`declared_includes`'s one canonical source and must always keep
+    every entry it's given. Dedup key is the resolved absolute path
+    (mirroring :func:`dedup_paths_preserve_order`), so a relative and an
+    absolute spelling of the same directory both drop. Search-priority is
+    unaffected: dropping a *later* duplicate of a directory
+    ``extra_includes`` already searches first changes nothing about which
+    file a compiler resolves.
+    """
+    covered: set[str] = set()
+    for p in already_covered:
+        try:
+            covered.add(str(p.resolve()))
+        except OSError:
+            covered.add(str(p))
+    out: list[str] = []
+    i = 0
+    n = len(toks)
+    while i < n:
+        t = toks[i]
+        matched_prefix = next(
+            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None
+        )
+        if matched_prefix is None:
+            out.append(t)
+            i += 1
+            continue
+        if t == matched_prefix and i + 1 < n:
+            operand = toks[i + 1]
+            consumed = 2
+        else:
+            operand = t[len(matched_prefix) :]
+            consumed = 1
+        try:
+            key = str(Path(operand).resolve())
+        except OSError:
+            key = operand
+        if key in covered:
+            i += consumed
+            continue
+        out.extend(toks[i : i + consumed])
+        i += consumed
+    return out
+
+
 def _msvc_deferred_flag(toks: list[str]) -> str:
     """The MSVC/clang-cl bucket to defer an inferred root below *toks* (#454).
 
@@ -510,6 +587,54 @@ def _deferred_include_flag(toks: list[str]) -> str:
     if any(t.startswith(p) for t in toks for p in _ABOVE_SYSTEM_GNU_PREFIXES):
         return "-isystem"
     return "-idirafter"
+
+
+def dedup_paths_preserve_order(paths: Sequence[Path]) -> list[Path]:
+    """*paths* with exact duplicates dropped, first-occurrence order kept.
+
+    ``dump``'s ELF and PE/Mach-O paths both compose their final
+    ``extra_includes``/``declared_includes`` list as an L2-seeded include
+    list *plus* :func:`resolve_inferred_header_roots`'s own inferred-root
+    additions (``eff_includes + inc_extra``) — two independently derived
+    lists that can resolve to the *same* directory (e.g. a matched compile
+    unit's own ``-I`` dir, once from the L3->L2 fold's seed and again from
+    the inferred-root resolver's own, separate lookup over the *pre-fold*
+    tokens). Left undeduped, that directory gets two ``declared_includes``
+    slots for one real include root, and
+    ``comparability_fields._include_slot_tokens`` tokenizes one slot per
+    entry — so the resulting ``include_sequence`` carries an extra token a
+    `scan --against` candidate resolution (which folds the seed and the L3
+    context in one pass, with no separate ``inc_extra`` add — see
+    ``scan_engine._build_new_snapshot``) never produces for the identical
+    project, and the two sides spuriously fail ``profile_fingerprint``
+    comparability on ``include_sequence`` alone (AGENTS.md's "nineteenth
+    finding" on the L3->L2-fold known gap, candidate mechanism (b) —
+    confirmed via a minimal, castxml-free repro: two independent
+    ``dump`` calls of the same project agree bit-for-bit, but a `dump`
+    baseline's own duplicated ``-I`` disagrees with `scan`'s deduped
+    candidate).
+
+    Dedup key is the resolved absolute path (mirroring
+    :func:`_implicit_header_includes`'s own ``_add`` helper above) so a
+    relative and an absolute spelling of the same directory collapse too,
+    not just two textually-identical entries. Order is preserved rather
+    than sorted: an include-search directory is first-match-wins, so
+    reordering could change which same-named header a real compile picks
+    up (the same reasoning ``build_context_include_dirs_ordered`` already
+    documents for its own dedup).
+    """
+    seen: set[str] = set()
+    out: list[Path] = []
+    for p in paths:
+        try:
+            key = str(p.resolve())
+        except OSError:
+            key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
 
 
 def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:

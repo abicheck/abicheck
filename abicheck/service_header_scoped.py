@@ -45,6 +45,7 @@ from . import deadline
 from .errors import AstContextAmbiguousError, AstContextMissingError
 from .header_utils import (
     cache_relevant_operand_paths,
+    dedup_paths_preserve_order,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
@@ -129,7 +130,17 @@ def _try_header_scoped_dump(
             gcc_options=cc.gcc_options,
             gcc_option_tokens=cc.gcc_option_tokens,
         )
-        eff_includes += inc_extra
+        # Deduped the same way the ELF `dump` path composes its own
+        # `eff_includes + inc_extra` (AGENTS.md's L3->L2-fold "nineteenth
+        # finding", candidate mechanism (b)): `includes` may already carry
+        # an L3-seeded directory, and `resolve_inferred_header_roots`'s own,
+        # separate lookup can independently resolve the same directory --
+        # left undeduped, the extra `declared_includes` slot tokenizes into
+        # an `include_sequence` a `scan --against` candidate (which folds
+        # the seed and inferred roots in one pass) never produces for the
+        # identical project, spuriously failing profile_fingerprint
+        # comparability.
+        eff_includes = dedup_paths_preserve_order(eff_includes + inc_extra)
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
         # Plus every include-search dir and forced pre-include the *caller's
         # own* context tokens name — the identical fold ``service._dump_elf``
