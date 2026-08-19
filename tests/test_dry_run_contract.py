@@ -1048,6 +1048,45 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will NOT run" in result.output
 
+    def test_malformed_sources_pack_ignored_under_depth_headers_with_raw_build_info(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: `l2_seed._l2_seed_pack_inputs` only
+        # attempts `BuildSourcePack.load(sources)` when `build_info is
+        # None` -- with a raw (non-pack) --build-info given, it nulls
+        # `raw_sources` unconditionally but never loads the pack at all, so
+        # a malformed --sources pack manifest is genuinely irrelevant: the
+        # real query still runs via --build-info's own path. Under
+        # --depth headers (collect_active False, so embed_build_source's
+        # own unconditional pack-loading is never reached either), an
+        # earlier revision unconditionally treated this malformed pack as
+        # blocking, reporting "will NOT run" even though the real command
+        # succeeds.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        (src_pack / "manifest.json").write_text(
+            '{"build_source_pack_version": "1.0", "not valid json',
+            encoding="utf-8",
+        )
+        build_info_dir = tmp_path / "raw_build_info"
+        build_info_dir.mkdir()  # no compile_commands.json inside
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "--build-info", str(build_info_dir), "-H", str(header),
+                "--build-query", "cmake -S . -B build",
+                "--dry-run", "--depth", "headers",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --build-query)" in result.output
+
     def test_sources_pack_no_headers_and_no_build_info_reports_will_not_run(
         self, tmp_path: Path
     ) -> None:

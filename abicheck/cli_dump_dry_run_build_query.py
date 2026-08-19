@@ -343,7 +343,15 @@ def add_build_query_dry_run_section(
                     _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
                 )
                 result.block(f"--sources names an unloadable pack ({sources}): {exc}")
-            else:
+                return
+            if build_info is None:
+                # `l2_seed._l2_seed_pack_inputs` only attempts to load
+                # `sources` when `build_info is None` -- with a non-``None``
+                # `build_info`, it is never even reached (nulling
+                # `raw_sources` is unconditional, but the `BuildSourcePack.
+                # load(sources)` call is gated behind that same check), so
+                # this malformed pack is genuinely the thing standing
+                # between here and the query running.
                 result.add(
                     _SECTION,
                     f"build.query: will NOT run -- --sources names an "
@@ -353,7 +361,19 @@ def add_build_query_dry_run_section(
                     "load failure, rather than raising) could otherwise "
                     "reach it",
                 )
-            return
+                return
+            # `build_info is not None` here: `_l2_seed_pack_inputs` never
+            # attempts to load this pack at all in that shape -- it only
+            # nulls `raw_sources` and passes `build_info`'s own value
+            # through unchanged -- so a malformed manifest here is
+            # genuinely irrelevant to whether the real run's query
+            # executes (Codex review, fresh evidence: an earlier revision
+            # unconditionally treated any malformed --sources pack as
+            # blocking resolution once `collect_active` was False,
+            # regardless of `build_info`, hiding that the real command can
+            # still succeed via `build_info`'s own path). Fall through with
+            # no L3 evidence from this pack, same as a valid-but-empty one.
+            src_pack_evidence = None
     else:
         src_pack_evidence = None
 
