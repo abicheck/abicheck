@@ -11,6 +11,7 @@ on:
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
+      - ".github/actions/install-system-deps/action.yml"
   pull_request:
     branches: [main]
     paths:
@@ -21,6 +22,7 @@ on:
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
+      - ".github/actions/install-system-deps/action.yml"
   workflow_dispatch:
 
 concurrency:
