@@ -1,0 +1,46 @@
+name: Install system deps (apt, with retry/timeout)
+description: >-
+  Runs `apt-get update`/`apt-get install` for the given packages, bounded by a
+  per-attempt timeout and retried a few times, instead of a bare `sudo
+  apt-get ...` with no timeout of its own.
+
+  Motivation: PR #800's CI run hit a real, reproducible hang in a bare
+  `apt-get update && apt-get install` step on a GitHub-hosted runner -- the
+  step produced zero output (not even the download-progress lines a slow but
+  progressing install would print) for the entire duration until GitHub's own
+  *job*-level `timeout-minutes` (45) killed it. With no step-level timeout,
+  a stalled apt mirror or a stuck package-manager lock consumes the whole job
+  budget silently, and -- since this step gates every downstream step in the
+  job -- cascades into every job that depends on this one's output (a shard's
+  own merge step, and in turn the full-matrix collector that reads the merged
+  result). Bounding each attempt and retrying turns a silent 45-minute hang
+  into, worst case, a few minutes before either succeeding on a retry or
+  failing fast with a clear diagnostic -- and it still cannot fix a truly
+  unavailable mirror, since no CI-side retry substitutes for the mirror
+  actually coming back.
+
+inputs:
+  packages:
+    description: Space-separated apt package list to install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: apt-get update/install (retried, each attempt bounded)
+      shell: bash
+      run: |
+        set -u
+        attempts=3
+        for attempt in $(seq 1 "$attempts"); do
+          if timeout 120 sudo apt-get update -qq \
+              && timeout 240 sudo apt-get install -y ${{ inputs.packages }}; then
+            exit 0
+          fi
+          if [ "$attempt" -lt "$attempts" ]; then
+            echo "::warning::apt-get attempt $attempt/$attempts failed or timed out, retrying in 10s..."
+            sleep 10
+          fi
+        done
+        echo "::error::apt-get install failed after $attempts attempts (packages: ${{ inputs.packages }})"
+        exit 1
