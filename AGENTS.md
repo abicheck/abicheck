@@ -3917,8 +3917,12 @@ Once a root command genuinely clears the bar above, pick the right home:
   `service_dump_pipeline.run_dump_request` (or the per-input primitives it
   shares via `service_input_resolution.resolve_side_snapshot`), the way
   `compare`'s implicit-dump operand already does, with `dump --dry-run`
-  rendering the same `DumpResult` object the real run executes rather than a
-  separately-computed preview. Read `run_dump_request`, `resolve_side_snapshot`
+  rendering a real `ResolvedDumpRequest` object -- the resolve-only step
+  execution builds on, not the executed `DumpResult` itself (a `--dry-run`
+  that renders `DumpResult` would have to have already executed, which
+  contradicts its own never-executes contract; see the plan's PR 3A section,
+  "ResolvedDumpRequest and DumpResult are two distinct objects") -- rather
+  than a separately-computed preview. Read `run_dump_request`, `resolve_side_snapshot`
   and siblings, `perform_elf_dump` (1999 lines), `handle_non_elf_dump`, and
   `scan_engine._build_new_snapshot` in full before concluding this.
 
@@ -3931,15 +3935,19 @@ Once a root command genuinely clears the bar above, pick the right home:
      render_dump_dry_run()` re-derives the resolved depth/collect-mode/
      compile-DB-match/backend from the *same raw inputs* `perform_elf_dump`
      receives, independently, in its own function -- there is no shared
-     `DumpResult` either one builds from. Its own docstring is explicit
-     about the scope this implies: "Cheap, read-only resolution only ...
-     Never runs castxml/clang, a build query, or any I/O beyond stat()/PATH
-     lookups" -- i.e. it is *deliberately* a cheaper, narrower
+     `ResolvedDumpRequest` either one builds from. Its own docstring is
+     explicit about the scope this implies: "Cheap, read-only resolution
+     only ... Never runs castxml/clang, a build query, or any I/O beyond
+     stat()/PATH lookups" -- i.e. it is *deliberately* a cheaper, narrower
      re-implementation, not a dry pass of the same resolver the real run
-     uses. Making `--dry-run` render a genuine `DumpResult` therefore
-     requires `run_dump_request` (or a new sibling) to support a "resolve
-     without executing/writing" mode in the first place -- it does not have
-     one today, it always fully resolves and returns a snapshot.
+     uses. **Half-closed by the slice landed below**: `resolve_dump_request`
+     now IS a real "resolve without executing/writing" mode --
+     `service_dump_pipeline.resolve_dump_request`/`ResolvedDumpRequest`,
+     stopping before any castxml/clang invocation or write, exactly what
+     this blocker originally said didn't exist. What remains open is purely
+     the wiring: `render_dump_dry_run()` has not been migrated to build from
+     a real `resolve_dump_request()` call in place of its own independent
+     re-derivation -- the capability exists, nothing consumes it yet.
   2. **`perform_elf_dump` has real post-processing hooks with no equivalent
      in `run_dump_request` at all.** After the primary header-AST/DWARF
      snapshot, it runs, in a carefully established order: the ADR-039
@@ -4012,19 +4020,59 @@ Once a root command genuinely clears the bar above, pick the right home:
   for the renamed/merged function, not weakened), plus the full fast unit
   suite and `mypy`/`ruff` clean on both touched modules.
 
-  **What remains genuinely open, unattempted, and why forcing it further
-  would be reactive rather than sound**: all three blockers above, in full
-  -- a "resolve without executing" mode for `run_dump_request`, a
-  post-processing hook `perform_elf_dump`'s second-pass attaches can plug
-  into, and a pair-aware primitive `scan`'s baseline-reuse decision can
-  express -- are each their own real, multi-file design, not a follow-up
-  edit to this same PR. Given the density of prior review rounds already
-  recorded against this exact code (the L3→L2-fold entry above alone lists
-  eighteen numbered findings, several reverted-and-refixed), attempting any
-  of the three under continued session pressure risks reopening one of
-  them, which is precisely what this file's own "known gaps over risky
-  reactive patches" convention exists to avoid. See the plan doc's own PR C
-  section for a status note recording the same scope.
+  **What remained genuinely open at the time this paragraph was written,
+  and why forcing it further would have been reactive rather than sound**:
+  all three blockers above, in full -- a "resolve without executing" mode
+  for `run_dump_request`, a post-processing hook `perform_elf_dump`'s
+  second-pass attaches can plug into, and a pair-aware primitive `scan`'s
+  baseline-reuse decision can express -- are each their own real,
+  multi-file design, not a follow-up edit to this same PR. Given the
+  density of prior review rounds already recorded against this exact code
+  (the L3→L2-fold entry above alone lists eighteen numbered findings,
+  several reverted-and-refixed), attempting any of the three under
+  continued session pressure risked reopening one of them, which is
+  precisely what this file's own "known gaps over risky reactive patches"
+  convention exists to avoid. **Superseded for blocker 1 by the slice
+  below**, landed the same day: `resolve_dump_request` now provides that
+  "resolve without executing" mode, so only the wiring (migrating
+  `render_dump_dry_run()` to build from it) remains open for blocker 1;
+  blockers 2 and 3 are still fully open, unchanged. See the plan doc's own
+  PR C section for a status note recording the same scope.
+
+  **A second, narrow slice landed (2026-08-18): the first blocker's missing
+  primitive now exists, though nothing consumes it yet.** `service_dump_
+  pipeline.py` gained `ResolvedDumpRequest`/`DumpResult` (additive
+  dataclasses) and split `run_dump_request` into `resolve_dump_request()`
+  (validation + evidence resolution, no castxml/clang, no write) and
+  `execute_dump_request()` (the actual `resolve_side_snapshot` call, the
+  dependency walk, the depth floor). `run_dump_request` itself is now a
+  literal composition of the two (`execute_dump_request(resolve_dump_
+  request(request)).snapshot`) and keeps its existing signature and return
+  type unchanged — no breaking-API decision needed, confirmed by two Codex
+  review rounds on the design before it was coded (see the plan doc's PR C
+  section for what those rounds caught: `ResolvedDumpRequest` and
+  `DumpResult` must stay genuinely distinct objects — a `DumpResult`
+  carrying a real storage result has, by construction, already executed, so
+  it cannot also be what a read-only `--dry-run` renders; and the achieved
+  effective depth belongs on `DumpResult`, not `ResolvedDumpRequest`, since
+  `fold_dump_provenance_into_dict` derives it from the completed snapshot
+  and a resolve-only object has none to derive it from). **This closes only
+  the first blocker's missing capability, not the blocker itself**:
+  `cli_dump_helpers.render_dump_dry_run()` is still the independent,
+  hand-written second implementation it always was — migrating it to build
+  from a real `resolve_dump_request()` call is unattempted, and blockers 2
+  and 3 (the post-processing hooks, the pair-aware scan baseline decision)
+  are both still fully open, for the identical reasons already given above.
+  Verified via new direct tests on the split itself
+  (`tests/test_typed_dump_request.py::TestResolveExecuteDumpRequestSplit` —
+  the resolve step never reaches `resolve_input`, the two-step path
+  produces the identical snapshot `run_dump_request` does, the depth floor
+  raises only at execute time, and `DumpResult.effective_depth` matches
+  `_gated_source_label` computed the same way `fold_dump_provenance_into_dict`
+  already does), the full existing `test_typed_dump_request.py`/
+  `test_header_compile_context.py`/`test_clang_header_backend_integration.py`
+  suites (unchanged, still green), the full fast unit suite, and
+  `mypy`/`ruff` clean on both touched files.
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode

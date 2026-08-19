@@ -2266,6 +2266,35 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
+    def test_uppercase_auto_compile_frontend_is_not_treated_as_explicit(
+        self, monkeypatch
+    ):
+        """Codex review, fresh evidence: `compile.frontend="AUTO"` is an
+        accepted spelling (validated case-insensitively,
+        `api_types.frontend_value_errors`), but `effective_frontend`'s own
+        "is this an explicit override" check used to be case-sensitive
+        (`compile.frontend != "auto"`) -- so "AUTO" read as an explicit
+        override instead of the no-op it means, and its own `_resolve_header_
+        backend` re-resolution then re-read `ABICHECK_AST_FRONTEND` live
+        instead of honoring the already-resolved `header_backend` argument
+        (the exact mechanism `service_dump_pipeline.ResolvedDumpRequest.
+        effective_header_backend`'s pin relies on not happening)."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.service_compare_evidence import effective_frontend
+
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        assert (
+            effective_frontend(CompileContext(frontend="AUTO"), "clang") == "clang"
+        )
+        assert (
+            effective_frontend(CompileContext(frontend="Auto"), "clang") == "clang"
+        )
+        # An explicit non-auto override still wins, case as given.
+        assert (
+            effective_frontend(CompileContext(frontend="castxml"), "clang")
+            == "castxml"
+        )
+
     def test_public_headers_forwarded_to_embed_build_source(
         self, tmp_path, monkeypatch
     ):

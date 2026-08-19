@@ -647,9 +647,15 @@ def _run_dump_uncached(
     )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
+    # .lower() (Codex review, fresh evidence): compile.frontend="AUTO" is an
+    # accepted spelling (validated case-insensitively) that must mean "no
+    # override", not be treated as an explicit one -- otherwise a pinned,
+    # already-resolved header_backend (service_dump_pipeline.ResolvedDumpRequest.
+    # effective_header_backend) can be silently discarded here in favor of
+    # re-resolving "AUTO" against a live ABICHECK_AST_FRONTEND read below.
     eff_backend = (
         compile.frontend
-        if (compile is not None and compile.frontend != "auto")
+        if (compile is not None and compile.frontend.lower() != "auto")
         else header_backend
     )
 

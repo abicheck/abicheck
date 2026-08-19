@@ -337,8 +337,7 @@ class DumpDepthNotSatisfiedError(click.ClickException):
 
 
 def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
-    """True when L4 source-ABI extraction genuinely parsed source, regardless
-    of whether it linked any declarations to a binary.
+    """True when L4 source-ABI extraction genuinely parsed source, regardless of whether it linked any declarations to a binary.
 
     Coverage *status* alone (``PRESENT``/``PARTIAL`` vs ``NOT_COLLECTED``) is
     not enough: ``buildsource.inline._run_inline_source_abi`` stamps L4
@@ -385,7 +384,10 @@ def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
         return False
     surface = build_source.source_abi
     if surface is not None and "compile_units_parsed" in surface.coverage:
-        return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+        try:
+            return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+        except (TypeError, ValueError, OverflowError):
+            return False
     return not _layer_payload_empty(build_source, "L4")
 
 

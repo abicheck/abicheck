@@ -782,15 +782,70 @@ pipelines a fourth time.
   `scan_engine._build_new_snapshot` both routing through
   `service_dump_pipeline.run_dump_request` (or the per-input primitives it
   shares with `resolve_side_snapshot` — see `service_input_resolution.py`),
-  the way `compare`'s implicit-dump operand already does. `DumpResult` states
-  the snapshot, requested vs. effective depth, the resolved compile context,
-  the build-query decision, the source scope, the dependency scope,
-  diagnostics, and the storage result — and `--dry-run` renders *that
-  object*, so the printed plan and the executed run cannot disagree. The root
-  `AGENTS.md` "Known gaps" entry on `service_dump_pipeline.py` is the same
-  migration seen from the code side; that entry does not yet mention the scan
-  side explicitly, so this plan is the tracking place for that half until it
-  does.
+  the way `compare`'s implicit-dump operand already does.
+  **`ResolvedDumpRequest` and `DumpResult` are two distinct objects, not one
+  renamed in transit (Codex review, fresh evidence — an earlier draft of
+  this paragraph said `--dry-run` renders `DumpResult`, contradicting the
+  investigation below the same paragraph now leads into).**
+  `ResolvedDumpRequest` states the requested depth, effective collect mode,
+  resolved header backend, and detected binary format — everything
+  resolvable without invoking castxml/clang or writing anything — and is
+  what `--dry-run` would render. **Not a hard parity guarantee for the
+  backend field specifically (Codex review, fresh evidence — an earlier
+  draft of this sentence claimed the printed and executed backends "cannot
+  disagree", which the landed code's own class documentation on
+  `effective_header_backend` explicitly disclaims):** `execute_dump_request()`
+  deliberately forwards the *unresolved* `header_backend` (e.g. still the
+  literal `"auto"`) to preserve `dumper`'s own runtime `auto`-specific
+  routing (non-host `frontend_context`, the CastXML-to-Clang fallback) —
+  see that field's own comment for why pre-resolving it before execution is
+  a real regression, not a pin. `effective_header_backend` is therefore a
+  best-effort projection of what resolution currently favors, not what
+  execution is bound to use, and can still diverge if the environment
+  changes between resolve and execute or if the unpinned-fallback path
+  fires — the same class of imprecision the field's own docstring already
+  accepts. `requested_depth`/`collect_mode`/`fmt` carry no such caveat: none
+  of them are re-resolved at execution time the way the backend is.
+
+  `DumpResult` states the executed outcome: the
+  real snapshot and the *achieved* effective depth (only knowable from the
+  completed snapshot) — see the "storage result" note two sentences below
+  for why it carries nothing more yet. **Corrected ownership (CodeRabbit
+  review, fresh evidence — an earlier draft of this sentence called the
+  omitted fields "CLI-presentation-layer concerns `execute_dump_request()`
+  doesn't touch", which overstates the gap):** the resolved compile
+  context and the dependency scope genuinely *are* computed inside
+  `execute_dump_request()`'s own call chain — `resolve_side_snapshot`
+  performs the P0.3 L3→L2 compile-context fold internally (see
+  `service_input_resolution.py`'s `_seeded_includes_and_compile_context`),
+  and `populate_side_dependency_info` runs directly in
+  `execute_dump_request()` when `follow_dependencies` is set. The gap is
+  narrower than "not touched": these values are computed but not
+  *surfaced* as `DumpResult` fields, an output-shape gap, not a
+  processing one. Only the ADR-039 build-context collector's own
+  diagnostics are a genuine CLI-layer concern here — those post-processing
+  passes live in `perform_elf_dump` alone, which `execute_dump_request`
+  does not call (blocker 2 above).
+  Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
+  `--dry-run` never reaches that step. **The storage result is not part of
+  the `DumpResult` this slice's `execute_dump_request()` produces (Codex
+  review, fresh evidence — an earlier draft of this paragraph still listed
+  it, contradicting the landed code and its own pinned test).**
+  `service_dump_pipeline.py`'s own module docstring already scopes writing
+  as CLI presentation/provenance layer, out of bounds for this module —
+  `execute_dump_request()` genuinely never writes anything, so it has no
+  storage result to report. A storage field is a real, separate addition
+  for whichever future slice folds `cli.py`'s `fold_dump_provenance_into_json`
+  write step into this pipeline (not attempted here) — until then, treat
+  `DumpResult` as snapshot + achieved depth only, and update this paragraph
+  again when that slice actually adds the field, rather than describing a
+  field that does not exist yet. See the follow-up investigation below this
+  bullet for the concrete function split
+  (`resolve_dump_request`/`execute_dump_request`) and why `run_dump_request`
+  itself keeps returning a bare `AbiSnapshot`. The root `AGENTS.md` "Known
+  gaps" entry on `service_dump_pipeline.py` is the same migration seen from
+  the code side; that entry does not yet mention the scan side explicitly,
+  so this plan is the tracking place for that half until it does.
 
   > **Investigated in depth; one real, scoped slice landed, the full
   > convergence NOT attempted (2026-08-16).** `service_input_resolution.
@@ -809,9 +864,12 @@ pipelines a fourth time.
   > **The rest of PR 3A — routing `perform_elf_dump`/`handle_non_elf_dump`
   > and `scan_engine._build_new_snapshot` themselves through
   > `run_dump_request`, and making `dump --dry-run` render a real
-  > `DumpResult` — was not attempted**, for three concrete reasons found by
-  > reading the code, not assumed: (1) `dump --dry-run`
-  > (`render_dump_dry_run`) is today a hand-written *second*
+  > `ResolvedDumpRequest` (Codex review, fresh evidence — an earlier
+  > draft of this note named `DumpResult` here, which the correction two
+  > sections above this one already retracted: `--dry-run` renders the
+  > resolve-only object, never the executed one) — was not attempted**, for
+  > three concrete reasons found by reading the code, not assumed: (1) `dump
+  > --dry-run` (`render_dump_dry_run`) is today a hand-written *second*
   > implementation, not a dry pass of the same resolver — `run_dump_request`
   > has no "resolve without executing" mode to render from yet; (2)
   > `perform_elf_dump` runs three post-processing passes after the primary
@@ -832,7 +890,132 @@ pipelines a fourth time.
   > forcing any of the three under continued session pressure risks
   > reopening one of the already-fixed findings this same area has needed
   > many prior review rounds to reach.
-- **PR 3B — build-context completeness (the review's PR D). Implemented.**
+  >
+  > **Follow-up investigation (2026-08-18), no code change.** Re-read
+  > `resolve_side_snapshot`/`_seeded_includes_and_compile_context`
+  > (`service_input_resolution.py`) against `scan_engine._build_new_snapshot`
+  > and `run_dump_request`'s existing callers directly, to check whether any
+  > of the three blockers above could be narrowed safely in one more pass.
+  > Two additional, concrete obstacles confirmed, neither previously spelled
+  > out at this level of detail:
+  >
+  > 1. **`_build_new_snapshot` cannot call `resolve_side_snapshot` as-is,
+  >    independent of the pair-aware baseline decision (finding 3 above) —
+  >    and this gap is scoped narrower than an earlier draft of this note
+  >    claimed (Codex review, fresh evidence).** `resolve_side_snapshot`
+  >    takes a typed `InputSpec`/`SideEvidence` pair (themselves built by
+  >    `service_compare_evidence` resolution) and returns a bare
+  >    `AbiSnapshot` — the caller never sees the seeded `includes` or the
+  >    folded `compile_context` `resolve_side_snapshot` computed internally.
+  >    `_build_new_snapshot` returns exactly those two values
+  >    (`effective_includes`/`effective_compile_context`) for its caller,
+  >    `run_scan_core`, to forward on — but checked directly, `run_scan_core`
+  >    only ever reads `eff_includes`/`eff_compile_context` inside its
+  >    `if baseline is not None and scan_mode is not ScanMode.AUDIT:` block,
+  >    feeding `_run_baseline_compare`'s side-aware reuse check
+  >    (`scan_engine.py` ~1253–1329). A baseline-free scan never consumes
+  >    either value — an earlier draft of this note claimed otherwise, which
+  >    was wrong. So the return-shape gap is real, but it belongs entirely to
+  >    the pair-aware baseline path this section's finding 3 already names,
+  >    not to `resolve_side_snapshot`'s general contract — closing it does
+  >    not by itself require widening what every caller (`compare`'s
+  >    implicit-dump path included) gets back; a scan-specific extension
+  >    point (or keeping `_build_new_snapshot`'s own resolution separate for
+  >    this one reason) is the narrower, correctly-scoped fix.
+  > 2. **`run_dump_request`'s return type does not need to change to move
+  >    forward — add additive siblings instead of breaking the existing
+  >    entry point, and keep the resolve-only and execute steps genuinely
+  >    separate (Codex review, two rounds).** An earlier draft of this note
+  >    framed "wrap the return in `DumpResult`" as requiring an explicit,
+  >    coordinated breaking-API decision before any implementation. That
+  >    framing itself was avoidable: `run_dump_request` is a documented,
+  >    tested Tier-2 entry point today ([Python API guide](../../use/python-api.md),
+  >    [Python API reference](../../reference/python-api-reference.md),
+  >    `tests/test_typed_dump_request.py`,
+  >    `tests/test_header_compile_context.py`,
+  >    `tests/test_clang_header_backend_integration.py`) returning a bare
+  >    `AbiSnapshot`, and nothing about giving `dump --dry-run` a real
+  >    resolved object to render requires changing what that function
+  >    returns. A first fix proposed one new sibling returning `DumpResult`
+  >    (snapshot + storage result) and reused it for both the adapter and
+  >    the dry-run render — but that conflates two things this section's own
+  >    original design already keeps apart ("Click parsing → `DumpRequest` →
+  >    `ResolvedDumpRequest` → dry-run-or-execution → `DumpResult`"): a
+  >    `DumpResult` carrying a real storage result has, by construction,
+  >    already executed, so it cannot also be what a read-only `--dry-run`
+  >    renders without either violating the dry-run contract (never
+  >    executes) or leaving the resolve-only path with no snapshot to
+  >    report. The correct shape keeps that split: a resolve-only sibling
+  >    (e.g. `resolve_dump_request`) returning `ResolvedDumpRequest` — only
+  >    what resolution can determine without a snapshot (requested depth,
+  >    effective *collect mode*, resolved header backend), no snapshot, no
+  >    I/O beyond what resolution already does. **The landed field set is
+  >    narrower than this sketch's own "resolved compile context, backend,
+  >    the build-query decision" (Codex review, fresh evidence — this
+  >    sketch predates the actual implementation and overclaimed its scope):
+  >    `ResolvedDumpRequest` carries `header_backend`/`effective_header_
+  >    backend` (a reporting-only projection; see its own comment for why
+  >    it's never fed back into execution) but no resolved compile context
+  >    and no build-query decision — `resolve_dump_request()` itself
+  >    genuinely doesn't touch either (the L3→L2 fold and any build-query
+  >    execution only happen later, inside `resolve_side_snapshot`, which
+  >    only `execute_dump_request()` calls), so this omission is correctly
+  >    scoped to this resolve-only step. **Not a CLI-presentation-layer
+  >    claim (CodeRabbit review, fresh evidence — corrected alongside the
+  >    identical overstatement in `DumpResult`'s own field list two
+  >    sections above this one): both values are computed inside this same
+  >    dump execution pipeline by the time `execute_dump_request()`
+  >    finishes, just not surfaced as a field on either typed object yet.**
+  >    — and
+  >    a separate executor (e.g. `execute_dump_request`,
+  >    taking a `ResolvedDumpRequest`) that produces `DumpResult` with the
+  >    real snapshot and the *achieved* effective depth (a storage field is
+  >    a separate, later addition — see the "storage result" correction
+  >    above this bullet).
+  >    **`effective depth` (as opposed to effective collect mode) belongs on
+  >    `DumpResult`, not `ResolvedDumpRequest` (Codex review, fresh
+  >    evidence)**: today's `fold_dump_provenance_into_dict` derives it from
+  >    the completed snapshot via `_gated_source_label(snap.build_source,
+  >    snap)` — there is no snapshot yet at resolve time, so a resolve-only
+  >    object claiming to report it would have to guess, and a guess that
+  >    disagrees with the real run defeats the entire point of rendering
+  >    `--dry-run` from a real resolved object. `--dry-run` therefore reports
+  >    requested depth (a known input) and collect mode (a resolvable
+  >    decision), never a predicted achieved depth.
+  >    `run_dump_request` stays as-is — either unchanged, or reimplemented as
+  >    a thin adapter over the executor (`execute_dump_request(resolve_dump_
+  >    request(request)).snapshot`), never over the resolve-only step alone
+  >    — so no existing caller, doc page, or test needs to move. This two-
+  >    function shape is the plan's required route now, not merely one
+  >    option among several.
+  >
+  > Net: the three blockers this section already named are confirmed, not
+  > merely asserted, and both are narrower than the first pass through this
+  > note stated. (1) needs a small, scoped extension to the scan baseline
+  > path specifically (not a `resolve_side_snapshot`-wide widening). (2)
+  > needs two new, additive functions (a resolve-only step and a separate
+  > executor), not a breaking change to `run_dump_request` — removing the
+  > coordinated-break blocker
+  > entirely for that half. Still not attempted here: each is a real,
+  > separate, reviewable design (what the scan-specific extension point
+  > looks like; the new function's exact signature and where the CLI's
+  > `--dry-run` path starts calling it), and this file's own "known gaps
+  > over risky reactive patches" convention says do that as its own
+  > dedicated pass, not as a rushed follow-on to an already-large
+  > investigation.
+  >
+  > **Slice landed (2026-08-18): the `resolve_dump_request`/
+  > `execute_dump_request` split from finding 2 above, coded.**
+  > `service_dump_pipeline.py` now has `ResolvedDumpRequest`/`DumpResult`
+  > and the two functions this note specified — `run_dump_request` is a
+  > literal composition of both, unchanged in signature and return type.
+  > This closes the "`run_dump_request`'s return type does not need to
+  > change" question for real (not just as a design conclusion), but is
+  > **not** the same as wiring `dump --dry-run` to `resolve_dump_request()`
+  > — `render_dump_dry_run()` is still its own hand-written implementation.
+  > That migration, blocker (1)'s scan-baseline narrowing, and blockers 2/3
+  > (post-processing hooks, pair-aware scan decision) all remain open. See
+  > the root `AGENTS.md`'s PR C entry for the verification detail.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
