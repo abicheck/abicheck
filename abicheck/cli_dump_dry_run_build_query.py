@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through seventeen review
+patches" convention -- this module has now been through eighteen review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -897,10 +897,24 @@ def add_build_query_dry_run_section(
         except (OSError, ValueError):
             discovered_db = None
         if discovered_db is not None:
+            # PROVISIONAL, same as the configured-glob branch above:
+            # `_run_build_query` runs the arbitrary query BEFORE
+            # `_autodiscover_compile_db` is ever consulted for real, so the
+            # query may delete this file, create a higher-precedence
+            # candidate (a conventional dir name earlier in
+            # `_autodiscover_compile_db`'s own search order), or leave it
+            # unchanged -- the real run can select a different path, or
+            # none at all (Codex review, fresh evidence).
             compile_db_line = (
-                f"resulting compile-DB path: {discovered_db} (no build."
-                "compile_db configured; a conventional compile DB already "
-                "exists here, and the query may still recreate/refresh it)"
+                f"resulting compile-DB path (provisional, pre-query "
+                f"snapshot): {discovered_db} (no build.compile_db "
+                "configured; a conventional compile DB already exists "
+                "here, but the query runs BEFORE this auto-discovery is "
+                "actually performed for real, so it may delete this file, "
+                "create a higher-precedence candidate, or leave it "
+                "unchanged -- the real run always re-discovers fresh after "
+                "the query exits, and can select a different path or none "
+                "at all)"
             )
         else:
             compile_db_line = (

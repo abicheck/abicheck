@@ -1290,6 +1290,32 @@ class TestDumpDryRunBuildQueryTrust:
             not in result.output
         )
 
+    def test_autodiscovered_compile_db_match_is_labeled_provisional(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: mirrors the configured-glob fix --
+        # _run_build_query executes the arbitrary query BEFORE
+        # _autodiscover_compile_db is ever consulted for real, so an
+        # already-existing conventional compile DB at dry-run time is only
+        # a pre-query snapshot; the query may delete it, create a
+        # higher-precedence candidate, or leave it unchanged, and the real
+        # run can select a different path or none at all.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        existing_db = tmp_path / "compile_commands.json"
+        existing_db.write_text("[]", encoding="utf-8")
+        cfg = self._write_config(tmp_path)  # no compile_db configured
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "resulting compile-DB path (provisional, pre-query snapshot):" in result.output
+        assert "can select a different path or none at all" in result.output
+
     def test_no_compile_db_hint_still_resolves_conventional_compile_db(
         self, tmp_path: Path
     ) -> None:
@@ -1312,7 +1338,7 @@ class TestDumpDryRunBuildQueryTrust:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert f"resulting compile-DB path: {existing_db}" in result.output
+        assert f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}" in result.output
         assert (
             "resulting compile-DB path: (build.compile_db not configured -- "
             "the query's own default output location)"
