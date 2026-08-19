@@ -601,12 +601,28 @@ def drop_include_tokens_duplicating_paths(
     "duplicate" of a same-looking ``-I <dir>`` in *already_covered* (which,
     lacking its own divider, is entirely ``"-I:pre"``) — doing so would
     silently change which includes that directory is searched for.
+
+    The divider state also carries **across** the *already_covered* ->
+    *toks* boundary, not just within *toks* itself (Codex review, PR #802):
+    every caller renders *already_covered* into the command *before* *toks*
+    (``cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens,
+    cmd)``), so a ``"-I-"`` anywhere in *already_covered* means every plain
+    ``-I`` in *toks* is *already* past the divider by the time the real
+    compiler sees it — even one with no ``"-I-"`` of its own. Scanning
+    *toks* from a fresh ``"-I:pre"`` state regardless of what
+    *already_covered* ended in would misclassify such an entry as
+    pre-divider, letting it be dropped as a false "duplicate" of an
+    unrelated pre-divider ``-I <dir>`` in *already_covered* that is not
+    actually the same search class once the real, composed argv is
+    considered.
     """
     covered = _include_class_path_pairs(already_covered)
     out: list[str] = []
     i = 0
     n = len(toks)
-    after_divider = False
+    # A "-I-" anywhere in *already_covered* means *toks* -- rendered after
+    # it in the real command -- starts life already past the divider.
+    after_divider = _DASH_I_DIVIDER in already_covered
     while i < n:
         t = toks[i]
         if t == _DASH_I_DIVIDER:

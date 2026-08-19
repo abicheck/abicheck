@@ -947,6 +947,33 @@ class TestDedupIncludeDirsAcrossCompositionSites:
         pairs = _include_class_path_pairs((_DASH_I_DIVIDER,))
         assert pairs == set()
 
+    def test_dash_i_divider_state_carries_from_already_covered_into_toks(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802 (second round): the divider state must
+        carry *across* the already_covered -> toks boundary, not just
+        within toks itself. Every caller renders already_covered (the
+        already-built command, e.g. `extra_includes`) into the argv
+        *before* toks (`gcc_option_tokens`) -- `cmd += drop_include_tokens_
+        duplicating_paths(gcc_option_tokens, cmd)` -- so a "-I-" anywhere in
+        already_covered means toks starts life already past the divider,
+        even though toks itself carries no "-I-" of its own. Scanning toks
+        from a fresh pre-divider state regardless of what already_covered
+        ended in would wrongly classify its "-I <dir>" as the same class as
+        an unrelated pre-divider entry in already_covered, and silently
+        drop it -- reproducing `-I A -I- -I A` collapsing to `-I A -I-`."""
+        d = tmp_path / "inc"
+        # already_covered = "-I A -I-": a pre-divider "-I A" followed by the
+        # divider itself.
+        already_covered = ["-I", str(d), _DASH_I_DIVIDER]
+        # toks = the trailing "-I A", rendered *after* already_covered in
+        # the real command and therefore already past the divider -- it
+        # must survive, not be dropped as a duplicate of the pre-divider
+        # entry inside already_covered.
+        toks = ("-I", str(d))
+        out = drop_include_tokens_duplicating_paths(toks, already_covered)
+        assert out == ["-I", str(d)]
+
 
 class TestMergeL3CompileContextDropsDuplicateExplicitInclude:
     """A second, deeper mechanism behind the same nineteenth finding:
