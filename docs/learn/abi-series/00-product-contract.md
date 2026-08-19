@@ -8,7 +8,7 @@
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
 > [7. Designing for Stability](07-designing-for-stability.md) ·
-> [8. Detecting Breaks](08-detection.md)
+> [Detecting Breaks](08-detection.md)
 
 **What you'll learn on this page**
 
@@ -84,7 +84,7 @@ actually asking about:
 | [**Deployment / environment compatibility**](../dependency-floors.md) | Will the binary still run on every platform/OS version it was promised to support? | A dependency's minimum runtime version (glibc floor, macOS deployment target) was silently raised by a rebuild |
 | [**Ecosystem / consumer compatibility**](../../use/plugin-systems.md) | Does *this specific* application, plugin, or binding keep working? | A plugin's vtable/callback contract changed; a language binding's assumed struct layout moved |
 | [**Operational compatibility**](../compatibility-direction.md) | Can you upgrade, roll back, or run two versions side by side? | A SONAME wasn't bumped for an incompatible change, so upgrade-in-place breaks running processes |
-| **Build-profile comparability** | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
+| [**Build-profile comparability**](../build-profile-comparability.md) | Were the two things being compared even built under conditions that make the comparison meaningful? | Comparing a GCC build against a Clang build of "the same" library, or two different C++ standard-library ABI modes |
 
 Three more contracts don't map to a single row above — each cuts across
 several rows at once, so each gets its own page rather than forcing a
@@ -127,13 +127,17 @@ data/wire-format compatibility — don't read a clean binary-compatibility
 result as a behavioral or wire-format guarantee it never claimed to make.
 The other dimensions get their own, narrower
 treatment where the series already covers them —
-[deployment/runtime floors](../dependency-floors.md) and
-[plugin/ecosystem contracts](../../use/plugin-systems.md) each have their
-own page; build-profile comparability doesn't yet have a single narrative
-page of its own — its mechanics are documented where they're enforced, in
-the [exit-code reference](../../reference/exit-codes.md) and
-[CLI reference](../../reference/cli-reference.md) — rather than being folded
-into "ABI" generically.
+[deployment/runtime floors](../dependency-floors.md),
+[plugin/ecosystem contracts](../../use/plugin-systems.md), and
+[build-profile comparability](../build-profile-comparability.md) each have
+their own page — rather than being folded into "ABI" generically. The
+mechanics build-profile comparability *enforces* — the exact exit codes and
+the `--diagnostic-comparison` opt-out — are documented where they're
+enforced, in the [exit-code reference](../../reference/exit-codes.md) and
+[CLI reference](../../reference/cli-reference.md); the narrative page
+explains *why* the gate exists and what its two possible gate outcomes
+(comparable, sitting in front of the ordinary verdict space; or
+not-comparable, a hard failure) mean.
 
 > **Rule of thumb:** name the dimension before you argue about whether a
 > change is "a break." A change that's a real source break and a total binary
@@ -191,9 +195,16 @@ then the version number communicates compatibility:
 - **MINOR** — backward-compatible additions.
 - **PATCH** — backward-compatible bug fixes.
 
-That maps cleanly onto abicheck's [verdicts](../verdicts.md) — *but only after*
-the public API is declared (§3). abicheck detects the change and classifies it;
-**you** decide what the classification means for your version number and release.
+A verdict **constrains** the version number; it does not choose it. Read the
+table below in one direction only: a finding can tell you a version bump is
+*not sufficient*, but no finding can tell you a release is *only* a bug fix.
+That is a claim about everything the release changed — behavior, wire formats,
+performance and concurrency contracts, documentation promises — and a scan of
+two binaries has no visibility into most of it.
+
+abicheck detects the change and classifies it; **you** decide what the
+classification means for your version number and release, *and only after* the
+public API is declared (§3).
 
 ### abicheck verdict → SemVer action
 
@@ -203,8 +214,15 @@ the public API is declared (§3). abicheck detects the change and classifies it;
 | **`API_BREAK`** | **Source** users may fail to recompile, but already-built binaries may still load | **Major** bump *if source compatibility is promised*; otherwise a documented source migration |
 | **`COMPATIBLE` (addition)** | Existing users keep working; new public API added | Usually **minor** bump |
 | **`COMPATIBLE_WITH_RISK`** | ABI likely intact, but a deployment/security/runtime assumption changed | Usually a **release note** + policy review; sometimes block |
-| **`NO_CHANGE`** | No relevant public-contract change detected | **Patch** / implementation-only release |
+| **`NO_CHANGE`** | No relevant public-contract change detected *in the evidence provided* | **Not a version decision on its own.** It says this scan found no ABI/API diff — not that the release is a bug fix. Any level from patch to major can still be correct; behavioral, wire-format, and semantic changes are invisible here |
 | **Internal / private change** | No public-contract change *if truly hidden* | **No** SemVer impact |
+
+A `NO_CHANGE` release still lands at minor if it added public functionality
+somewhere this scan didn't look, and at major if it made an **incompatible**
+change to a documented behavior, a serialized format, or a threading guarantee. Those contracts are
+covered by [Behavioral](../behavioral-compatibility.md) and
+[Data/Wire](../data-wire-compatibility.md) compatibility, and neither is
+provable by comparing two artifacts.
 
 > abicheck's `compare` mode is the only one with the full verdict vocabulary —
 > in particular the `API_BREAK` distinction between *source* breaks and *binary*
@@ -230,7 +248,11 @@ different rows above depending on policy:
 ## 5. Name your contract shape
 
 "Public surface" looks different for different kinds of products. Identify which
-shape you are before reasoning about breaks.
+shape you are before reasoning about breaks. This section covers four common
+product shapes narratively; [Consumer Models](../consumer-models.md) formalizes
+all eight consumer shapes (including FFI bindings, header-only consumers, and
+static-linked consumers) into one table and composes that axis with the
+dimension/direction/surface/build-profile questions this page already covers.
 
 ### Traditional C shared library
 

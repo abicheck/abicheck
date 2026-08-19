@@ -41,7 +41,6 @@ from .cli import (
     _safe_write_output,
     _setup_verbosity,
     _write_or_echo,
-    _write_release_step_summary,
 )
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
@@ -67,6 +66,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_headers,
     _resolve_release_severity_config,
     _run_bundle_analysis,
+    apply_release_gate_pack,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -79,11 +79,16 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
+from .cli_secondary_output import (
+    reject_incoherent_secondary_output,
+    secondary_output_options,
+)
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot
 from .reporter import to_json
 
 if TYPE_CHECKING:
+    from .pack_application import PackApplication
     from .severity import SeverityConfig
 
 # ---------------------------------------------------------------------------
@@ -111,6 +116,7 @@ def _run_compare_pair(
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    pack_application: PackApplication | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -121,13 +127,22 @@ def _run_compare_pair(
     default drift). ``include_dependencies`` (default ``True``) is the same
     reasoning applied to dependency-scope: without threading it through here
     too, a directory/package `compare` would silently stay unfiltered
-    regardless of `--include-dependencies`, drifting from a single-pair
+    regardless of `--include-system-declarations`, drifting from a single-pair
     `compare` of the identical library (Codex review). ``contract_evaluation``/
     ``contract_mode`` (CLI-audit P1, release/package contract parity) are the
     same pass-through: ``service.run_compare`` already runs ADR-049's whole
     contract-relevance pipeline internally when asked, so threading these two
     flags here is what makes a library compared through the release fan-out
     get the identical contract decision it would from comparing it alone.
+
+    *pack_application* (CLI cleanup phase two, "PR B" slice 1) is this run's
+    already-resolved ``--pack`` contribution (``resolve_release_pack_
+    application``, resolved once for the whole release, not per library) --
+    forwarded to ``service.run_compare`` as ``pack_policy_overrides``/
+    ``pack_internal_namespaces``, which ``service_compare_pipeline.
+    classify_compare_pair`` folds into *this pair's own* freshly-loaded
+    ``PolicyFile`` the same way a single-pair ``compare`` folds its packs
+    into its one ambient policy file.
     """
     from . import service
 
@@ -156,6 +171,12 @@ def _run_compare_pair(
         scope_to_public_surface=scope_to_public_surface,
         pattern_verdicts=pattern_verdicts,
         include_dependencies=include_dependencies,
+        pack_policy_overrides=(
+            dict(pack_application.policy_overrides) if pack_application else None
+        ),
+        pack_internal_namespaces=(
+            pack_application.internal_namespaces if pack_application else None
+        ),
     )
 
 
@@ -180,6 +201,9 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     str | None,
+    "SeverityConfig | None",
+    "PackApplication | None",
+    bool,
 ]
 
 
@@ -222,6 +246,9 @@ def _compare_one_library(
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    severity_config: SeverityConfig | None = None,
+    pack_application: PackApplication | None = None,
+    collect_diff_results: bool = False,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -233,6 +260,26 @@ def _compare_one_library(
     the ``"_diff_result"`` key. Callers that need the full diff (the
     bundle layer, JUnit aggregation) pop it from the entry before
     JSON-serialising — keeps the per-library compare a single-pass.
+
+    *collect_diff_results* additionally stashes the old
+    :class:`AbiSnapshot` under ``"_old_snapshot"`` -- needed only for a
+    JUnit render (``--format junit``/``--write junit=...``), which is the
+    one output shape that needs the pair, not just the diff. Gated behind
+    this flag (Codex review, fresh evidence) rather than stashed
+    unconditionally: an `AbiSnapshot` can be large, and every entry in
+    ``library_results`` is held until the whole release finishes, so an
+    unconditional stash would grow a large release's peak memory by the
+    combined size of every library's old snapshot even for the common
+    markdown/JSON-only case that never reads it.
+
+    *severity_config* is forwarded to the per-library ``--output-dir`` JSON
+    write below (Codex review, fresh evidence): without it, that write
+    always used the legacy exit-code scheme's ``ExitDecision`` regardless of
+    whether the release itself resolved and gates on a severity
+    configuration — so a severity-aware release (``severity.addition:
+    error``, say) could exit non-zero at the release level while every
+    per-library report it wrote said ``exit.code: 0``, ``reasons:
+    ["clean"]``, disagreeing with the release's own real exit.
     """
     old_path = old_map[key]
     new_path = new_map[key]
@@ -258,13 +305,14 @@ def _compare_one_library(
             include_dependencies=include_dependencies,
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
+            pack_application=pack_application,
         )
         result = compare_result.diff
         v = result.verdict.value
         # compatible_additions historically counts *all* compatible changes
         # (additions + quality issues). Emit the quality subset separately so
         # downstream consumers (e.g. the PR-comment renderer) can gate the two
-        # categories independently under --severity-quality-issues.
+        # categories independently under the config's severity.quality_issues.
         from .checker_policy import ADDITION_KINDS
 
         n_quality = sum(1 for c in result.compatible if c.kind not in ADDITION_KINDS)
@@ -278,6 +326,19 @@ def _compare_one_library(
             "quality_issues": n_quality,
             "_diff_result": result,
         }
+        if collect_diff_results:
+            # CodeRabbit review, PR #798: stashed alongside `_diff_result`
+            # so a secondary JUnit render (`--write junit=...`/`--format
+            # junit`) can build its (DiffResult, old_snapshot) pairs
+            # straight from this single primary pass, the same way
+            # annotations already do -- instead of
+            # `_collect_release_extras`'s old independent re-run, whose own
+            # failure path silently *dropped* a pair from the secondary
+            # report on a rerun error even though the primary pass had
+            # already succeeded for it (a truncated JUnit report next to a
+            # complete primary one). Gated on the flag (Codex review,
+            # fresh evidence) -- see this function's own docstring for why.
+            entry["_old_snapshot"] = compare_result.old_snapshot
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -308,7 +369,9 @@ def _compare_one_library(
             entry["filtered_internal_count"] = result.out_of_surface_count
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
-            _safe_write_output(lib_report_path, to_json(result))
+            _safe_write_output(
+                lib_report_path, to_json(result, severity_config=severity_config)
+            )
         return entry
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         # ADR-050 D2 — ordered before the generic except Exception below.
@@ -317,7 +380,11 @@ def _compare_one_library(
         # abicheck bug), so it gets its own "not_comparable" verdict string
         # instead of falling into the same "ERROR"/exit-4 bucket a genuine
         # crash uses — see _RELEASE_VERDICT_ORDER's dedicated rank for it.
-        kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+        kind = (
+            "profile_mismatch"
+            if isinstance(exc, ProfileMismatchError)
+            else "scope_mismatch"
+        )
         if output_dir:
             from .schemas import REPORT_SCHEMA_VERSION
 
@@ -350,6 +417,7 @@ def _suppress_lockstep_soname_findings(
     library_results: list[dict[str, object]],
     worst_verdict: str,
     output_dir: Path | None,
+    severity_config: SeverityConfig | None = None,
 ) -> int:
     """Drop ``SONAME_BUMP_UNNECESSARY`` when the release is a coordinated break.
 
@@ -359,7 +427,14 @@ def _suppress_lockstep_soname_findings(
     SONAME in lockstep is the correct, intentional practice — so the per-library
     "unnecessary" signal is a false positive at the release level. Mutates the
     affected per-library results (and re-writes their JSON when ``output_dir`` is
-    set) and returns the number of findings suppressed.
+    set) and returns the number of findings suppressed. *severity_config* is
+    forwarded to that re-write's own ``to_json`` call (Codex review, fresh
+    evidence): without it, a severity-aware release's per-library report file
+    would revert to the legacy exit-code scheme's ``exit`` block on this
+    second write, even though ``_compare_one_library``'s first write already
+    used the severity-aware one — so which scheme a report's ``exit`` block
+    reflects would depend on whether this suppression fired, not on the
+    release's actual configuration.
 
     Only a binary-incompatible (``BREAKING``) finding justifies a SONAME bump; a
     source-only ``API_BREAK`` does not, so the warning is preserved in that case.
@@ -394,25 +469,10 @@ def _suppress_lockstep_soname_findings(
         )
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
-            _safe_write_output(lib_report_path, to_json(result))
+            _safe_write_output(
+                lib_report_path, to_json(result, severity_config=severity_config)
+            )
     return suppressed
-
-
-def _drop_lockstep_soname_finding(result: DiffResult) -> None:
-    """Mirror ``_suppress_lockstep_soname_findings``'s per-result filter.
-
-    Called on the independent re-run :func:`_collect_release_extras` performs
-    for JUnit/annotations, only when the caller has already confirmed
-    ``worst_verdict == "BREAKING"`` (the same release-level condition
-    ``_suppress_lockstep_soname_findings`` gates on) — so this stays a no-op
-    unless the primary pass would also have suppressed the finding.
-    """
-    from .checker_policy import ChangeKind
-
-    if any(c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY for c in result.changes):
-        result.changes = [
-            c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
-        ]
 
 
 def _compare_release_libraries(
@@ -435,14 +495,13 @@ def _compare_release_libraries(
     output_dir: Path | None,
     collect_diff_results: bool = False,
     *,
-    annotate: bool = False,
-    annotate_additions: bool = False,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    pack_application: PackApplication | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -462,7 +521,6 @@ def _compare_release_libraries(
     library_results: list[dict[str, object]] = []
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
     worst_verdict = "NO_CHANGE"
-    all_annotations: list[tuple[int, str]] = []
 
     common_args = (
         old_map,
@@ -485,6 +543,9 @@ def _compare_release_libraries(
         include_dependencies,
         contract_evaluation,
         contract_mode,
+        severity_config,
+        pack_application,
+        collect_diff_results,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -523,6 +584,7 @@ def _compare_release_libraries(
         library_results,
         worst_verdict,
         output_dir,
+        severity_config,
     )
     if suppressed_soname:
         click.echo(
@@ -532,49 +594,25 @@ def _compare_release_libraries(
             err=True,
         )
 
-    # collect_diff_results and annotate require re-running comparison for
-    # affected libraries (only used for JUnit / GitHub annotations which
-    # are sequential-only features)
-    if collect_diff_results or annotate:
-        extra_pairs, extra_annotations = _collect_release_extras(
-            matched_keys,
-            old_map,
-            new_map,
-            old_debug_dir,
-            new_debug_dir,
-            resolve_debug_info,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
-            annotate_additions=annotate_additions,
-            collect_diff_results=collect_diff_results,
-            annotate=annotate,
-            scope_to_public_surface=scope_to_public_surface,
-            include_dependencies=include_dependencies,
-            severity_config=severity_config,
-            worst_verdict=worst_verdict,
-            contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
-        )
-        diff_pairs.extend(extra_pairs)
-        all_annotations.extend(extra_annotations)
-
-    # Emit annotations once: sort globally across all libraries by severity,
-    # then truncate to the cap.  This ensures the most important annotations
-    # (errors) are always visible regardless of which library they came from.
-    if all_annotations:
-        from .annotations import format_annotations
-
-        text = format_annotations(all_annotations)
-        if text:
-            click.echo(text, err=True)
+    # collect_diff_results (JUnit / a secondary `--write junit=...` render)
+    # used to need an independent re-run (`_collect_release_extras`) purely
+    # to recover the old `AbiSnapshot` alongside each `DiffResult` -- the
+    # primary pass above now stashes both directly in each library's own
+    # `entry["_diff_result"]`/`entry["_old_snapshot"]`, so building the
+    # pairs is a plain read, not a second comparison (CodeRabbit review,
+    # PR #798): the old re-run's own failure handling silently *dropped* a
+    # pair from the secondary report on a rerun error even when the
+    # primary pass had already succeeded for it, which this can no longer
+    # do since there is nothing left to fail. Annotations were fixed the
+    # identical way earlier in this same PR (see `annotation_report_
+    # entries`/`reporter_contract_blocks.add_annotations`); the Action
+    # reads them straight off the JSON report.
+    if collect_diff_results:
+        for entry in library_results:
+            diff = entry.get("_diff_result")
+            old_snap = entry.get("_old_snapshot")
+            if isinstance(diff, DiffResult) and isinstance(old_snap, AbiSnapshot):
+                diff_pairs.append((diff, old_snap))
 
     return library_results, worst_verdict, diff_pairs
 
@@ -669,97 +707,6 @@ def _compare_release_sequential(
     return [_compare_one_library(key, *common_args) for key in matched_keys]
 
 
-def _collect_release_extras(
-    matched_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_debug_dir: Path | None,
-    new_debug_dir: Path | None,
-    resolve_debug_info: Callable[[Path, Path], Path | None],
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
-    *,
-    annotate_additions: bool,
-    collect_diff_results: bool,
-    annotate: bool,
-    scope_to_public_surface: bool = True,
-    include_dependencies: bool = True,
-    severity_config: SeverityConfig | None = None,
-    worst_verdict: str = "NO_CHANGE",
-    contract_evaluation: bool = False,
-    contract_mode: str | None = None,
-) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
-    """Collect optional re-run artifacts for JUnit and annotations.
-
-    *worst_verdict* mirrors the condition ``_suppress_lockstep_soname_findings``
-    uses on the primary per-library pass. This function re-runs comparison
-    independently (see its docstring), so a coordinated-release SONAME bump
-    that pass judged intentional and dropped must be dropped here too — else
-    JUnit/annotations disagree with the primary report and can surface (or
-    even gate on, under a severity config) a finding the release-level report
-    no longer shows at all.
-    """
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
-    annotations: list[tuple[int, str]] = []
-    for key in matched_keys:
-        old_path = old_map[key]
-        new_path = new_map[key]
-        old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
-        new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
-        try:
-            compare_result = _run_compare_pair(
-                old_path,
-                new_path,
-                old_h,
-                new_h,
-                old_inc,
-                new_inc,
-                old_version,
-                new_version,
-                lang,
-                suppress,
-                policy,
-                policy_file_path,
-                old_pdb_path=old_dbg,
-                new_pdb_path=new_dbg,
-                scope_to_public_surface=scope_to_public_surface,
-                include_dependencies=include_dependencies,
-                contract_evaluation=contract_evaluation,
-                contract_mode=contract_mode,
-            )
-        except Exception as exc:
-            click.echo(
-                f"Warning: failed to re-run comparison for {old_path.name}: {exc}",
-                err=True,
-            )
-            continue
-        result, old_snap = compare_result.diff, compare_result.old_snapshot
-        if worst_verdict == "BREAKING":
-            _drop_lockstep_soname_finding(result)
-        if collect_diff_results:
-            diff_pairs.append((result, old_snap))
-        if annotate:
-            from .annotations import collect_annotations, is_github_actions
-
-            if is_github_actions():
-                annotations.extend(
-                    collect_annotations(
-                        result,
-                        annotate_additions=annotate_additions,
-                        severity_config=severity_config,
-                    ),
-                )
-    return diff_pairs, annotations
-
-
 def _write_release_summary_file(
     output_dir: Path,
     worst_verdict: str,
@@ -791,6 +738,7 @@ def _collect_matrix_result(
     policy_file_path: Path | None = None,
     old_version: str = "",
     new_version: str = "",
+    pack_application: PackApplication | None = None,
 ) -> tuple[DiffResult | None, str]:
     """Load probe-matrix snapshots, run them through the compare pipeline, fold.
 
@@ -809,6 +757,13 @@ def _collect_matrix_result(
     override is honoured identically on both commands. The returned
     :class:`DiffResult` carries the post-suppression kept findings, which the
     report (JSON / markdown / JUnit) renders.
+
+    *pack_application* (CLI cleanup phase two, "PR B" slice 1) folds the
+    release's already-resolved ``--pack`` contribution into this pair's own
+    ``PolicyFile`` too -- these matrix findings go through the same
+    ``--policy-file`` per-kind overrides every other library does, so a
+    pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
+    identically, not only to the per-library comparisons.
     """
     from .cli import _load_probe_matrix_changes
 
@@ -820,6 +775,10 @@ def _collect_matrix_result(
     from .service import compare_snapshots
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if pack_application is not None:
+        from .pack_application import policy_file_with_packs
+
+        pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
     # Empty snapshots contribute no per-binary changes; the matrix findings
     # ride in as extra_changes and inherit the full post-processing pipeline.
     name = "<build-config matrix>"
@@ -855,7 +814,6 @@ def _finalize_release_output(
     bundle_result: BundleDiffResult | None,
     output: Path | None,
     output_dir: Path | None,
-    annotate: bool,
     fail_on_removed: bool,
     matrix_result: DiffResult | None = None,
     severity_exit_code: int | None = None,
@@ -885,8 +843,12 @@ def _finalize_release_output(
     )
     _write_or_echo(output, text)
 
-    if annotate:
-        _write_release_step_summary(text, fmt)
+    # CLI cleanup phase two, PR E removed --annotate/--annotate-additions,
+    # the flag that used to gate a $GITHUB_STEP_SUMMARY write here. This no
+    # longer writes one at all -- see cli.py's _finalize_compare_result's
+    # own, longer comment for why "unconditional in CI" (an earlier
+    # revision of this comment) was itself a real regression through the
+    # composite Action, which already writes its own job summary.
 
     if output_dir:
         _write_release_summary_file(
@@ -1005,7 +967,7 @@ def _release_gating_buckets(
     only the three verdict buckets that ever gate the legacy exit code are
     used. With *severity_config* active, the release can instead exit
     non-zero because a category that's normally compatible (additions,
-    quality issues) was promoted to ``error`` — e.g. ``--severity-addition
+    quality issues) was promoted to ``error`` — e.g. ``severity.addition:
     error`` — so every category the active config gates to ``error`` is
     used instead (Codex review on #557: walking only the legacy buckets left
     a library reporting ``severity.exit_code: 1`` with an empty ``findings``
@@ -1029,7 +991,10 @@ def _release_gating_buckets(
             policy_file=diff.policy_file,
         )
         categorized = categorize_changes(
-            diff.changes, policy=diff.policy, kind_sets=kind_sets, policy_file=diff.policy_file,
+            diff.changes,
+            policy=diff.policy,
+            kind_sets=kind_sets,
+            policy_file=diff.policy_file,
         )
         cat_changes_by_name = {
             "abi_breaking": categorized.abi_breaking,
@@ -1080,6 +1045,8 @@ def _strip_diff_results_and_adjust_verdict(
     removed_keys: list[str],
     worst_verdict: str,
     severity_config: SeverityConfig | None = None,
+    *,
+    needs_annotations: bool = True,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -1098,6 +1065,18 @@ def _strip_diff_results_and_adjust_verdict(
     release and the verdict has not already been escalated, the verdict is
     bumped to at least ``COMPATIBLE_WITH_RISK``.
 
+    *needs_annotations* gates whether the uncapped ``annotations`` array
+    (unlike ``findings`` above, deliberately unbounded -- see its own
+    comment) is built at all (Codex review, fresh evidence): only a JSON
+    render (primary ``--format json`` or a secondary ``--write
+    json=...``) ever reads it, but every entry in ``library_results`` is
+    held until the whole release finishes, so building it unconditionally
+    grew a large release's peak memory by the combined size of every
+    library's full finding set even for the common markdown/JUnit-only
+    case that never reads it -- the same class of gap the sibling
+    ``_old_snapshot``/``collect_diff_results`` gate already closed for
+    JUnit specifically.
+
     Returns the (possibly updated) *worst_verdict* string.
     """
     for entry in library_results:
@@ -1114,7 +1093,26 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["findings"] = findings
                 if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
                     entry["findings_truncated"] = True
+            # CLI cleanup phase two, PR E: the uncapped, always-classified
+            # counterpart to the capped `findings` list above -- the exact
+            # same shape single-library `compare --format json` persists at
+            # its own top-level `annotations` (schema 2.43,
+            # `annotations.annotation_report_entries`), reused verbatim so
+            # the two can never disagree. This is what lets the Action's own
+            # renderer (`action/run.sh`'s `_emit_annotations`) read a
+            # release-style operand's report the same way it reads a
+            # single-library one, instead of needing an independent
+            # per-library re-run this module used to perform
+            # (`_collect_release_extras`, since removed) just to recover the
+            # same DiffResult already sitting right here.
+            if needs_annotations:
+                from .annotations import annotation_report_entries
+
+                entry["annotations"] = annotation_report_entries(
+                    diff, severity_config=severity_config
+                )
         entry.pop("_diff_result", None)
+        entry.pop("_old_snapshot", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
@@ -1136,6 +1134,7 @@ def _strip_diff_results_and_adjust_verdict(
     ["json", "markdown", "junit"],
     output_help="Output file for summary report (default: stdout).",
 )
+@secondary_output_options(["json", "markdown", "junit"])
 @click.option(
     "--output-dir",
     "output_dir",
@@ -1204,20 +1203,6 @@ def _strip_diff_results_and_adjust_verdict(
     is_flag=True,
     default=False,
     help="Keep extracted temporary files for debugging.",
-)
-@click.option(
-    "--annotate",
-    is_flag=True,
-    default=False,
-    help="Emit GitHub Actions workflow command annotations to stdout. "
-    "Only effective when GITHUB_ACTIONS=true.",
-)
-@click.option(
-    "--annotate-additions",
-    is_flag=True,
-    default=False,
-    help="Include additions/compatible changes as ::notice annotations "
-    "(requires --annotate).",
 )
 @verbose_option
 @click.option(
@@ -1300,6 +1285,8 @@ def compare_release_cmd(
     lang: str,
     fmt: str,
     output: Path | None,
+    secondary_fmt: str | None,
+    secondary_output: Path | None,
     output_dir: Path | None,
     suppress: Path | None,
     strict_suppressions: bool,
@@ -1314,8 +1301,6 @@ def compare_release_cmd(
     dso_only: bool,
     include_private_dso: bool,
     keep_extracted: bool,
-    annotate: bool,
-    annotate_additions: bool,
     verbose: bool,
     jobs: int,
     manifest_path: Path | None,
@@ -1327,13 +1312,27 @@ def compare_release_cmd(
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
     severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
+    # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
+    # this engine with the *already-merged* per-category severity levels it
+    # resolved from `.abicheck.yml` (the four `--severity-<category>` CLI
+    # flags were removed -- see `cli_options.severity_options`). Plain
+    # keyword parameters, so the fan-out can still state them without
+    # re-exposing a user-facing flag on an unregistered internal command.
+    severity_abi_breaking: str | None = None,
+    severity_potential_breaking: str | None = None,
+    severity_quality_issues: str | None = None,
+    severity_addition: str | None = None,
     release_exit_code_scheme: str | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    # CLI cleanup phase two, PR B slice 1: `compare`'s directory/package
+    # fan-out resolves any `--pack` once, ahead of dispatch
+    # (resolve_release_pack_application), and hands over the pack's
+    # policy/contract-surface contribution here -- same internal-parameter
+    # shape as severity_abi_breaking et al. above. `None` (the default) is a
+    # true no-op: every library is compared exactly as it was before this
+    # parameter existed.
+    pack_application: PackApplication | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1349,7 +1348,7 @@ def compare_release_cmd(
       8  Library removed (only when --fail-on-removed-library)
 
     \b
-    With any --severity-* option, exit codes follow the severity-aware scheme
+    With a severity setting in effect, exit codes follow the severity-aware scheme
     aggregated across all libraries (and bundle/matrix findings):
       0  no error-level findings
       1  error in quality/addition categories only
@@ -1359,7 +1358,7 @@ def compare_release_cmd(
     comparison ERROR still floors the exit at 4, regardless of severity settings.
 
     \b
-    Under --contract-evaluation, each library's own ADR-049 Phase 7 contract-
+    Under --contract, each library's own ADR-049 Phase 7 contract-
     coverage floor (0/1) folds into the release exit code with max() -- the
     same orthogonal axis a single-pair `compare` applies: it can raise a
     clean 0 to 1 but never lowers a real 2/4/8.
@@ -1387,8 +1386,18 @@ def compare_release_cmd(
 
     _setup_verbosity(verbose)
 
-    if annotate_additions and not annotate:
-        raise click.UsageError("--annotate-additions requires --annotate")
+    # CLI cleanup phase two, PR E: --write's own internal coherence (no
+    # secondary aimed at the same file as the primary; this command has no
+    # --dry-run of its own to be incoherent with -- a dry run never reaches
+    # this engine at all, see run_compare's own emit_dry_run() call, which
+    # exits before the directory/package dispatch). Shared with single-pair
+    # `compare` so the two commands' --write validation cannot drift.
+    reject_incoherent_secondary_output(
+        dry_run=False,
+        output=output,
+        secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output,
+    )
 
     # Track temporary directory paths for cleanup
     _temp_dir_paths: list[str] = []
@@ -1424,7 +1433,11 @@ def compare_release_cmd(
     with dedup_validate_overrides_warnings():
         # Validate suppression file early (before per-library loop)
         _validate_suppression_early(
-            suppress, policy, policy_file_path, strict_suppressions, require_justification
+            suppress,
+            policy,
+            policy_file_path,
+            strict_suppressions,
+            require_justification,
         )
 
         try:
@@ -1469,13 +1482,42 @@ def compare_release_cmd(
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
+            # CLI cleanup phase two, "PR B" slice 2: fold a selected `kind:
+            # gate` pack's gate.exit_code_scheme/gate.severity.<category>
+            # into these same raw inputs, once, before every downstream
+            # consumer below (this function's own severity_config, the
+            # per-library JSON write inside _compare_release_libraries,
+            # _compute_release_severity_exit_code,
+            # _fold_release_global_severity) reads them — mirroring the
+            # `.abicheck.yml`-only `severity_preset = "default"` reassignment
+            # a few lines below, which the same downstream consumers already
+            # rely on seeing applied exactly once. A no-op without --pack or
+            # without a selected gate pack.
+            (
+                release_exit_code_scheme,
+                severity_preset,
+                severity_abi_breaking,
+                severity_potential_breaking,
+                severity_quality_issues,
+                severity_addition,
+            ) = apply_release_gate_pack(
+                pack_application,
+                release_exit_code_scheme=release_exit_code_scheme,
+                severity_preset=severity_preset,
+                severity_abi_breaking=severity_abi_breaking,
+                severity_potential_breaking=severity_potential_breaking,
+                severity_quality_issues=severity_quality_issues,
+                severity_addition=severity_addition,
+            )
+
             # Resolved before the compare pass (its inputs are plain CLI values, no
-            # dependency on compare results) so --annotate's GitHub annotations —
-            # collected inside _compare_release_libraries, same pass as the
-            # per-library JUnit re-run — reflect the same severity-aware gate as
-            # the exit code below, instead of the legacy kind-set mapping. Returns
-            # None when no --severity-* option was supplied, or when compare's
-            # resolved config pins the legacy scheme for set inputs.
+            # dependency on compare results) so persisted per-library annotations
+            # (schema 2.43/2.44, computed inside _compare_release_libraries's
+            # primary pass and read by the Action, not the CLI) reflect the same
+            # severity-aware gate as the exit code below, instead of the legacy
+            # kind-set mapping. Returns None when no severity setting was in
+            # effect, or when compare's resolved config pins the legacy scheme
+            # for set inputs.
             severity_config = _resolve_release_severity_config(
                 severity_preset,
                 severity_abi_breaking,
@@ -1486,7 +1528,7 @@ def compare_release_cmd(
             if release_exit_code_scheme == "severity" and severity_config is None:
                 # The resolved scheme is "severity" (e.g. .abicheck.yml's
                 # exit_code_scheme: severity with no severity: block at all) but
-                # no --severity-* flag was ever set, so the raw-args resolution
+                # no severity setting was ever in effect, so the raw-args resolution
                 # above returned None. The single-file compare path never hits
                 # this: its resolved_cfg.severity is unconditionally populated
                 # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not
@@ -1504,15 +1546,15 @@ def compare_release_cmd(
             if release_exit_code_scheme == "legacy":
                 severity_config = None
 
-            # JUnit still re-runs pairs in _collect_release_extras because it
-            # needs old AbiSnapshot too. Bundle analysis reuses the
-            # _diff_result stashed in each library entry from the first pass.
+            # JUnit, bundle analysis, and annotations all reuse the
+            # _diff_result (and, for JUnit, _old_snapshot) stashed in each
+            # library entry from this single primary pass -- no independent
+            # re-run.
             #
-            # This fan-out (plus JUnit's re-run inside it) reloads the same
-            # --policy-file once per library; the enclosing
-            # dedup_validate_overrides_warnings() scope above is what keeps a
-            # single risky override from logging its validate_overrides()
-            # warning once per library (Codex review).
+            # This fan-out reloads the same --policy-file once per library;
+            # the enclosing dedup_validate_overrides_warnings() scope above
+            # is what keeps a single risky override from logging its
+            # validate_overrides() warning once per library (Codex review).
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 matched_keys,
                 old_map,
@@ -1531,22 +1573,21 @@ def compare_release_cmd(
                 policy,
                 policy_file_path,
                 output_dir,
-                collect_diff_results=(fmt == "junit"),
-                annotate=annotate,
-                annotate_additions=annotate_additions,
+                collect_diff_results=(fmt == "junit" or secondary_fmt == "junit"),
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,
                 include_dependencies=include_dependencies,
                 severity_config=severity_config,
                 contract_evaluation=contract_evaluation,
                 contract_mode=contract_mode,
+                pack_application=pack_application,
             )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
             # across every library with max() -- one library's incomplete
             # evidence must still raise the release's exit code, the same rule
             # contract_coverage_exit.fold_coverage_exit applies to a single pair.
-            # `0` (the default fold value) when --contract-evaluation was never
+            # `0` (the default fold value) when --contract was never
             # given, or every library's own selected domain closed cleanly.
             contract_coverage_exit_contribution = max(
                 (
@@ -1554,7 +1595,9 @@ def compare_release_cmd(
                     for entry in library_results
                     if isinstance(entry, dict)
                     and isinstance(
-                        contribution := entry.get("contract_coverage_exit_contribution", 0),
+                        contribution := entry.get(
+                            "contract_coverage_exit_contribution", 0
+                        ),
                         int,
                     )
                 ),
@@ -1565,7 +1608,7 @@ def compare_release_cmd(
             # how many failures exist across the whole release -- real even
             # when `contract.unresolved: warn` zeroed every library's own
             # exit contribution. Stays 0 (not omitted) for a run that never
-            # passed --contract-evaluation, same as the count field above.
+            # passed --contract, same as the count field above.
             contract_coverage_failure_count = sum(
                 count
                 for entry in library_results
@@ -1604,7 +1647,11 @@ def compare_release_cmd(
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
             worst_verdict = _strip_diff_results_and_adjust_verdict(
-                library_results, removed_keys, worst_verdict, severity_config
+                library_results,
+                removed_keys,
+                worst_verdict,
+                severity_config,
+                needs_annotations=(fmt == "json" or secondary_fmt == "json"),
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).
@@ -1619,6 +1666,7 @@ def compare_release_cmd(
                 policy_file_path=policy_file_path,
                 old_version=old_version,
                 new_version=new_version,
+                pack_application=pack_application,
             )
 
             # Fold release-global bundle/matrix findings into the severity exit so a
@@ -1635,6 +1683,37 @@ def compare_release_cmd(
                     severity_addition,
                 )
 
+            if secondary_output is not None:
+                # CLI cleanup phase two, PR E: --write, now supported for a
+                # directory/package (release) compare. Renders the second
+                # format from the exact same already-computed
+                # library_results/diff_pairs/bundle_result/matrix_result --
+                # no second per-library comparison pass, mirroring how
+                # single-pair `compare`'s own --write reuses its one already-
+                # computed DiffResult (see run_compare's own secondary
+                # _write_or_echo call).
+                assert secondary_fmt is not None  # guaranteed by Click's callback
+                secondary_text = _format_release_summary(
+                    secondary_fmt,
+                    worst_verdict,
+                    old_dir,
+                    new_dir,
+                    library_results,
+                    removed_keys,
+                    added_keys,
+                    old_map,
+                    new_map,
+                    warning_msgs,
+                    diff_pairs=diff_pairs if secondary_fmt == "junit" else None,
+                    bundle_result=bundle_result,
+                    matrix_result=matrix_result,
+                    severity_config=severity_config,
+                    severity_exit_code=severity_exit_code,
+                    contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+                    contract_coverage_failure_count=contract_coverage_failure_count,
+                )
+                _write_or_echo(secondary_output, secondary_text)
+
             _finalize_release_output(
                 fmt,
                 worst_verdict,
@@ -1650,7 +1729,6 @@ def compare_release_cmd(
                 bundle_result,
                 output,
                 output_dir,
-                annotate,
                 fail_on_removed,
                 matrix_result=matrix_result,
                 severity_exit_code=severity_exit_code,

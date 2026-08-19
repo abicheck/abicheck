@@ -207,31 +207,39 @@ def _coverage_message(
 
 #: The one output format that already carries the ledger, so the stderr
 #: notice would be a second copy of what the report states -- but only when
-#: the *full* report is rendered. ``--stat``'s ``to_stat_json`` is a summary
-#: that omits both ledger keys, so a stat run is ledgerless whatever its
-#: ``--format`` says (Codex review).
+#: the *full* report is rendered. The internal ``"oneline"`` fmt (CLI cleanup
+#: phase two, PR 1 -- see ``service_render.ONELINE_FORMAT``; reached only via
+#: the built-in ``quick`` --profile, ``--stat``'s sole surviving use) is a
+#: summary that omits both ledger keys, so a run rendering it is ledgerless
+#: whatever else it also renders (Codex review, originally about ``--stat``'s
+#: `to_stat_json`, same reasoning now applies to `to_stat`).
 _LEDGER_BEARING_FORMAT = "json"
+
+#: Duplicated literal, not an import of ``service_render.ONELINE_FORMAT``:
+#: both are leaf modules and this keeps them independent rather than adding
+#: a cross-module coupling for one shared string.
+_ONELINE_FORMAT = "oneline"
 
 
 def report_carries_the_ledger(
-    fmt: str | None, *, stat: bool = False, secondary_fmt: str | None = None
+    fmt: str | None, *, secondary_fmt: str | None = None
 ) -> bool:
     """Does *every* output this invocation renders already state the ledger?
 
     The condition for staying quiet, and it has to hold for all of them:
-    `--format json --secondary-format markdown` writes a second report that
+    `--format json --write markdown=abi.md` writes a second report that
     carries none of the ledger, so answering from the primary alone let the
     markdown say the change is safe while the process exited 1 (Codex
     review). Getting this wrong in the permissive direction is exactly what
     makes a run fail with no explanation anywhere.
 
-    ``--stat`` is the same problem one level in: `to_stat_json` is a summary
-    that omits both ledger keys, so a stat run is ledgerless whatever its
-    ``--format`` says.
+    The internal one-line format is the same problem one level in: it is a
+    summary that omits both ledger keys, so a run rendering it is ledgerless
+    whatever its other ``--format`` says.
     """
-    if stat:
-        return False
     rendered = [fmt] + ([secondary_fmt] if secondary_fmt is not None else [])
+    if _ONELINE_FORMAT in rendered:
+        return False
     return all(f == _LEDGER_BEARING_FORMAT for f in rendered)
 
 
@@ -240,7 +248,6 @@ def announce_coverage_floor(
     *,
     base_exit: int,
     fmt: str | None = None,
-    stat: bool = False,
     secondary_fmt: str | None = None,
 ) -> None:
     """Print the coverage notice to stderr, unless the report already says it.
@@ -253,7 +260,7 @@ def announce_coverage_floor(
 
     stderr, not stdout: the report a caller pipes onward stays intact.
     """
-    if report_carries_the_ledger(fmt, stat=stat, secondary_fmt=secondary_fmt):
+    if report_carries_the_ledger(fmt, secondary_fmt=secondary_fmt):
         return
     diagnostic = coverage_failure_diagnostic(result, base_exit=base_exit)
     if diagnostic is None:

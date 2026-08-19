@@ -165,7 +165,7 @@ def emit_facts_for_command(
     # PATH) and make the clang backend read as unavailable with no
     # diagnostic, even though it could have run against the wrapped compiler.
     # Reuses the same resolver `dump --sources`/`--build-info` already use
-    # for their own `--gcc-path`-driven L4 replay (dumper_clang.py's own
+    # for their own `--compiler`-driven L4 replay (dumper_clang.py's own
     # docstring: "a dump/scan driven by a non-default toolchain... always
     # shelled out to a plain clang/clang++ ... instead, failing every
     # invocation") — one tested implementation for "derive the real

@@ -25,8 +25,10 @@ Covers, in order:
 1. ``header_compile_context._derived_gcc_path`` -- the matched compile
    unit's own compiler binary, derived only for a genuinely MSVC/clang-cl
    compile unit, a no-op otherwise.
-2. ``service_input_resolution._merge_l3_compile_context``'s "derived leads,
-   explicit wins" precedence for ``gcc_path``/``gcc_prefix``.
+2. ``buildsource.l2_seed._merge_l3_compile_context``'s "derived leads,
+   explicit wins" precedence for ``gcc_path``/``gcc_prefix`` (moved there
+   from ``service_input_resolution`` by the ``main``-side PR C dedup this
+   branch merged against -- see that function's own docstring).
 3. An end-to-end regression through ``service_input_resolution.
    resolve_side_snapshot`` proving the derived ``gcc_path`` actually reaches
    the ``CompileContext`` passed to ``service.resolve_input``.
@@ -340,7 +342,7 @@ def test_merge_l3_compile_context_derived_gcc_path_used_when_explicit_unset() ->
     """service_input_resolution's merge step actually folds the derived
     gcc_path in when the caller did not already pin one -- without this,
     resolve_header_compile_context's own gcc_path was silently discarded."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("/std:c++20",), gcc_path="clang-cl")
     explicit = CompileContext(gcc_option_tokens=("-DFOO=1",))
@@ -352,7 +354,7 @@ def test_merge_l3_compile_context_derived_gcc_path_used_when_explicit_unset() ->
 def test_merge_l3_compile_context_explicit_gcc_path_wins_over_derived() -> None:
     """A caller's own explicit --gcc-path is never overridden by a derived
     one, mirroring every other _ExplicitPin-covered dimension."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("/std:c++20",), gcc_path="clang-cl")
     explicit = CompileContext(gcc_path="/opt/custom/clang-cl")
@@ -371,7 +373,7 @@ def test_merge_l3_compile_context_explicit_prefix_only_not_overridden_by_derived
     no path override") must not have a *different* derived ``gcc_path``
     merged in for the unset explicit slot, since that derived path would then
     silently win over the caller's actual intent."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(gcc_option_tokens=("/std:c++20",), gcc_path="clang-cl")
     explicit = CompileContext(gcc_prefix="/opt/llvm/bin/")
@@ -387,7 +389,7 @@ def test_merge_l3_compile_context_explicit_path_only_not_paired_with_derived_pre
     """Companion, opposite direction: an explicit ``gcc_path`` alone must not
     pick up a derived ``gcc_prefix`` either -- the pair is adopted from
     ``derived`` together, or not at all."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(
         gcc_option_tokens=("/std:c++20",), gcc_prefix="/opt/derived/bin/"
@@ -405,7 +407,7 @@ def test_merge_l3_compile_context_neither_explicit_adopts_derived_pair_together(
     """Companion positive case: when the caller set neither field, the
     derived ``(gcc_path, gcc_prefix)`` pair is adopted together, from the
     same source -- unchanged from the pre-fix behavior for this case."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
+    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
 
     derived = CompileContext(
         gcc_option_tokens=("/std:c++20",),

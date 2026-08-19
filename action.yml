@@ -110,19 +110,75 @@ inputs:
       Directory whose headers are treated as public for provenance
       classification (repeatable, space-separated) — establishes the
       public/internal boundary so leakage/RTTI/exported-vs-public
-      cross-checks run instead of skipping. dump and scan modes only
-      (`--public-header-dir` on the CLI); compare has no equivalent flag.
+      cross-checks run instead of skipping. dump mode forwards it as one
+      more `-H/--header` root, which is where `dump` reads declaration
+      provenance from AND extracts headers from (a directory entry tags
+      everything under it public and expands to every header inside). scan
+      mode forwards it both as `--public-header-dir` (scope only) and as an
+      `-H` root, so its own header extraction expands the same directory
+      `dump` does — keeping a `scan --against` a fresh `dump` baseline of
+      the same inputs comparable instead of drifting apart on
+      `include_sequence` for no real recipe difference (lab report). The
+      `-H` root is candidate-sided (`new=...`) for a scalar scan with a
+      resolved baseline — so it never leaks into the baseline/old side's
+      own header parse even when `old-header` is also given — and bare
+      (both-sided) for an audit-only or `--artifact-set` scan, which has no
+      old side to protect. compare has no equivalent flag.
+    required: false
+  build-target:
+    description: >
+      Explicit build-system root target(s) to scope L3 evidence collection
+      to, instead of a workspace-wide query (P0.2; Bazel only so far, e.g.
+      `//:math`). Space-separated, repeatable — each root's transitive
+      dependency closure is unioned. Forwarded identically to both dump and
+      scan mode (`--build-target`, same flag and semantics on both); CLI
+      equivalent of `.abicheck.yml`'s `build.targets`, overrides it when
+      both are given. Without this, a multi-package workspace with
+      fixture/test targets alongside the real library is collected in
+      full, which can pollute L3 evidence with unrelated compile units and
+      diverge a `scan --against` a target-scoped `dump` baseline's own
+      evidence (lab report). compare has no equivalent flag.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
   include:
-    description: 'Extra include directories for castxml, applied to both sides. Space-separated.'
+    description: >
+      Extra include directories for header AST parsing (castxml or clang).
+      Space-separated. Set this (or `old-include`/`new-include` for a
+      side-specific root) whenever a header passed via `header` itself
+      `#include`s a *dependency's* header from a separate include root
+      (e.g. PVXS's own `version.h` pulling in EPICS Base's
+      `epicsVersion.h`, found in a real PVXS Action acceptance run) --
+      `header`/`public-header-dir` alone never cover a dependency's own
+      headers. On ELF the parse then aborts on the first such include with
+      a "file not found" error; on Mach-O/PE it can instead warn and fall
+      back to export-table scoping (`--header`/`--include` are silently
+      ignored for that dump), which is quieter but leaves header-based
+      coverage incomplete rather than failing loud. In
+      `compare` mode, `old-include`/`new-include` *replace* this list for
+      their side rather than adding to it (repeat any shared directory
+      there too); in `dump`/`scan`, a side-specific include is added
+      alongside this list instead. (`sources`/`build-info` can sometimes
+      auto-derive a build's own include dirs for this instead of a manual
+      `-I`, when neither side has any explicit include input of its own.)
     required: false
   old-include:
-    description: 'Include directories for old side only. Space-separated.'
+    description: >
+      Include directories for old side only. Space-separated. Used by
+      `compare` and by `scan --against` (the baseline side); `dump` and
+      scan's audit-only `new-library-set` mode have no old side. In
+      `compare`, replaces `include` for this side rather than adding to
+      it (repeat any directory `include` also lists that's still
+      needed); in `scan --against`, it is added alongside `include`
+      instead.
     required: false
   new-include:
-    description: 'Include directories for new side only. Space-separated.'
+    description: >
+      Include directories for new side only. Space-separated. In
+      `compare` mode, replaces `include` for this side rather than adding
+      to it (repeat any directory `include` also lists that the new side
+      still needs); in `dump`/`scan`, it is added alongside `include`
+      instead.
     required: false
 
   # ── Version labels ──────────────────────────────────────────────────────────
@@ -173,14 +229,16 @@ inputs:
     required: false
   gcc-path:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary. Applies to dump,
+      Path to GCC/G++ (or clang) cross-compiler binary (maps to the CLI's
+      --compiler). Applies to dump,
       scan, and compare mode with a single-pair (non-directory, non-package)
       operand — a directory/package compare rejects it with an error (same
       restriction as ast-frontend above).
     required: false
   gcc-prefix:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Applies to dump,
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu- (maps to the CLI's
+      --compiler-prefix). Applies to dump,
       scan, and compare mode with a single-pair (non-directory, non-package)
       operand — a directory/package compare rejects it with an error (same
       restriction as ast-frontend above).
@@ -188,7 +246,7 @@ inputs:
   gcc-options:
     description: >
       Extra compiler flags passed through to the header frontend (maps to
-      the CLI's --compiler-option, CLI audit PR 5/5). A single-line value is
+      the CLI's --compiler-option). A single-line value is
       split on whitespace into separate flags, same as before; a multi-line
       (YAML block scalar) value keeps each line as one flag verbatim,
       spaces included — use that form for a flag whose value contains a
@@ -247,16 +305,6 @@ inputs:
       with required-symbol/required-symbols (the CLI rejects both being
       set). compare mode only.
     required: false
-  verify-runtime:
-    description: >
-      With used-by: actually run each consumer binary once against the old
-      library and once against the new one (LD_BIND_NOW=1), recording a
-      runtime-load-failure finding when the dynamic linker reports an
-      undefined symbol against the new library after loading cleanly
-      against the old one. Linux-only; a no-op elsewhere. Ignored without
-      used-by. compare mode only.
-    required: false
-    default: 'false'
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym
@@ -299,9 +347,11 @@ inputs:
     required: false
   compile-db:
     description: >
-      Explicit path to a compile_commands.json (scan mode; also compare
-      mode's new side when build-info is unset). For dump mode this is
-      folded into build-info. Use when the compile DB is not under sources.
+      Explicit path to a compile_commands.json, when it is not under
+      `sources`. Folded into `--build-info` for every mode (scan, dump, and
+      compare mode's new side) — `--build-info` already accepts a build dir,
+      a compile_commands.json, or a pre-captured pack, so it is the one flag
+      that takes this operand.
     required: false
   build-config:
     description: >
@@ -511,7 +561,12 @@ inputs:
     required: false
     default: 'strict_abi'
   policy-file:
-    description: 'Path to a YAML policy file with per-kind (overrides:) or selector-scoped (reclassify:) verdict re-classification.'
+    description: >
+      Path to a YAML policy document with per-kind (overrides:) or
+      selector-scoped (reclassify:) verdict re-classification, or the name of
+      a packaged built-in one (e.g. `security`). Forwarded as `--policy`,
+      which takes a profile name or a document; setting this outranks
+      `policy` for the run, exactly as the removed `--policy-file` flag did.
     required: false
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes.'
@@ -578,12 +633,25 @@ inputs:
       Severity preset: 'default', 'strict', or 'info-only'.
       Controls exit codes and report labels. Only applies to compare mode.
     required: false
-  severity-addition:
+  require-complete-analysis:
     description: >
-      Severity for new public API additions: 'error', 'warning', or 'info'.
-      Set to 'error' to fail the step when additions are detected.
-      Only applies to compare mode.
+      Fail the step (P0.4's orthogonal ANALYSIS_INCOMPLETE axis) when
+      analysis_assurance.status is not 'complete', independent of the
+      compatibility verdict. Mirrors `compare`/`scan --against`'s own
+      --require-complete-analysis flag. Applies to single-pair compare
+      (old-library/new-library are individual files, not a directory or
+      package) and scan (--against) modes only -- rejected outright
+      (step fails) for a directory/package compare's per-library release
+      fan-out, which has no single analysis_assurance result to gate on.
+      Has no effect for an audit-only scan (new-library with no
+      against/abi-baseline): the CLI itself rejects this flag without a
+      baseline, so run.sh never forwards it in that shape. A dedicated
+      input rather than routing through extra-args, so this Action's own
+      detection of whether the flag was requested is never ambiguous
+      with a value some other option in extra-args happens to spell the
+      same way.
     required: false
+    default: 'false'
   jobs:
     description: >
       Number of parallel library comparisons for compare mode when
@@ -591,6 +659,30 @@ inputs:
       (CPU count). Default: 0.
     required: false
     default: '0'
+  annotate:
+    description: >
+      Emit GitHub Actions workflow command annotations (inline PR-diff
+      comments) for ABI/API findings, in compare mode (single-pair and
+      directory/package release operands alike). Rendered by this Action
+      itself from the run's own persisted JSON report (schema 2.43+), not
+      by passing --annotate to the abicheck CLI -- no second comparison is
+      ever run to collect them, for either operand shape. Has no effect on
+      scan mode as of this Action version. A dedicated input rather than
+      routing through extra-args, for the same reason
+      require-complete-analysis is: this Action's own detection of whether
+      annotations were requested is never ambiguous with some other
+      extra-args value.
+    required: false
+    default: 'false'
+  annotate-additions:
+    description: >
+      Include additions and other compatible-but-notable changes as
+      ::notice annotations. Off by default (only errors/warnings, plus the
+      one notice kind that is always shown regardless of this input -- a
+      --contract finding compatibility policy did not evaluate). Has no
+      effect unless annotate is also true.
+    required: false
+    default: 'false'
   extra-args:
     description: 'Additional CLI arguments passed directly to the abicheck command.'
     required: false
@@ -646,18 +738,26 @@ outputs:
   verdict:
     description: >
       ABI verdict. For compare (single-pair or directory/package operands):
-      COMPATIBLE, SEVERITY_ERROR (with --severity-* via extra-args, or when
-      --severity-addition=error detects new public API additions),
-      COVERAGE_INCOMPLETE (with --contract-evaluation via extra-args, when
+      COMPATIBLE, SEVERITY_ERROR (with the severity-preset input, or when a
+      `severity.addition: error` key in the repository's .abicheck.yml
+      detects new public API additions),
+      COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
-      compatibility verdict unchanged), API_BREAK, BREAKING,
-      REMOVED_LIBRARY (directory/package operands with
+      compatibility verdict unchanged), ANALYSIS_INCOMPLETE (single-pair
+      operands only, with the require-complete-analysis input, when
+      analysis_assurance.status is not "complete" -- P0.4's orthogonal
+      assurance axis, which likewise leaves the compatibility verdict
+      unchanged; rejected outright for a directory/package operand, so
+      this verdict never applies there), API_BREAK,
+      BREAKING, REMOVED_LIBRARY (directory/package operands with
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
-      `--severity-*` or `--exit-code-scheme` setting, when an error-level
-      category has findings), COVERAGE_INCOMPLETE, API_BREAK, BREAKING,
+      severity or `--exit-code-scheme` setting, when an error-level
+      category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
+      (with --against and the require-complete-analysis input, same
+      axis as compare's), API_BREAK, BREAKING,
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
       D2 -- so no comparison could run at all; this verdict fails the step
@@ -688,14 +788,19 @@ outputs:
     value: ${{ steps.run-abicheck.outputs.verdict }}
   exit-code:
     description: >
-      abicheck exit code. compare: 0 (compatible), 1 (severity error, or
-      incomplete contract coverage -- the two share the code and are told
-      apart by the report's pre-fold severity.exit_code), 2 (API break),
+      abicheck exit code. compare: 0 (compatible), 1 (severity error,
+      incomplete contract coverage, or incomplete analysis assurance with
+      the require-complete-analysis input -- the three share the code and
+      are told apart by the report's pre-fold severity.exit_code /
+      contract_coverage_exit_contribution / analysis_assurance.status),
+      2 (API break),
       4 (ABI break), 8 (library removed; directory/package operands with
       fail-on-removed-library set).
-      scan: 0 (compatible/advisory), 1 (with --against: severity error, or
-      incomplete contract coverage -- as on compare, the two share the code
-      and are told apart by the report's pre-fold diff.severity.exit_code),
+      scan: 0 (compatible/advisory), 1 (with --against: severity error,
+      incomplete contract coverage, or incomplete analysis assurance with
+      the require-complete-analysis input -- as on compare, the three
+      share the code and are told apart the same way, one level down
+      under diff),
       2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
       candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE).
       deps-compare: 0 (pass), 1 (warn),
@@ -749,11 +854,34 @@ runs:
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_USED_BY: ${{ inputs.used-by }}
-        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_BUILD_TARGET: ${{ inputs.build-target }}
+        # validate-inputs.sh's own compile-context guard (ast-frontend/
+        # gcc-*/sysroot/nostdinc for a directory/package compare operand)
+        # and its new require-complete-analysis release-operand guard both
+        # read these -- previously missing from this step's env block
+        # entirely, so both checks always read their inputs as unset/false
+        # here regardless of what the workflow set, and only the identical
+        # check re-run inside run.sh (which *is* wired) ever actually fired
+        # (Codex review; found while wiring require-complete-analysis
+        # through this same step).
+        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
+        INPUT_GCC_PATH: ${{ inputs.gcc-path }}
+        INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
+        INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
+        INPUT_SYSROOT: ${{ inputs.sysroot }}
+        INPUT_NOSTDINC: ${{ inputs.nostdinc }}
+        INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
+        # The scan build-info/compile-db conflict guard below also reads
+        # these -- same previously-missing-from-this-step-entirely gap,
+        # caught by the same generalized contract test
+        # (test_every_validate_inputs_var_is_set_by_its_own_step) once it
+        # existed, rather than found by review a second time.
+        INPUT_BUILD_INFO: ${{ inputs.build-info }}
+        INPUT_COMPILE_DB: ${{ inputs.compile-db }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────
@@ -877,6 +1005,7 @@ runs:
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
         INPUT_PUBLIC_HEADER_DIR: ${{ inputs.public-header-dir }}
+        INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_NEW_INCLUDE: ${{ inputs.new-include }}
@@ -900,7 +1029,6 @@ runs:
         INPUT_OLD_ROOT: ${{ inputs.old-root }}
         INPUT_NEW_ROOT: ${{ inputs.new-root }}
         INPUT_USED_BY: ${{ inputs.used-by }}
-        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_AGAINST: ${{ inputs.against }}
@@ -909,7 +1037,9 @@ runs:
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}
         INPUT_FAIL_ON_API_BREAK: ${{ inputs.fail-on-api-break }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
-        INPUT_SEVERITY_ADDITION: ${{ inputs.severity-addition }}
+        INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
+        INPUT_ANNOTATE: ${{ inputs.annotate }}
+        INPUT_ANNOTATE_ADDITIONS: ${{ inputs.annotate-additions }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}

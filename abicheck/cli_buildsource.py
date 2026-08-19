@@ -378,8 +378,8 @@ def dump_source_only(
     no-op on a snapshot with no header-derived declarations
     (``from_headers`` stays ``False``) either way.
 
-    ``gcc_path``/``gcc_prefix`` are the dump's own ``--gcc-path``/
-    ``--gcc-prefix`` (there is no header AST here to have already resolved a
+    ``gcc_path``/``gcc_prefix`` are the dump's own ``--compiler``/
+    ``--compiler-prefix`` (there is no header AST here to have already resolved a
     ``CompileContext`` from — a source-only dump has no ``-H`` headers
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.
@@ -561,7 +561,7 @@ def _write_snapshot_output(
     the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).
     *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when given,
     ``check_requested_depth_satisfied`` raises if the snapshot did not actually reach
-    it. Unless *include_dependencies* is set (``dump --include-dependencies``),
+    it. Unless *include_dependencies* is set (``dump --include-system-declarations``),
     toolchain/system-header declarations are excluded from the snapshot right before
     serialization by default, once every embed step above has had its chance to fill
     in the snapshot — see ``dumper_scoping.py`` for what "dependency" means here.
@@ -611,7 +611,7 @@ def _write_snapshot_output(
                 # Genuinely absent: no extractor / no compile DB / layer never ran.
                 parts.append(
                     f"not collected: {', '.join(absent)} — supply "
-                    "--build-info/--compile-db (a compile_commands.json, e.g. from "
+                    "--build-info (a compile_commands.json or build dir, e.g. from "
                     "`bear -- make`), or install the clang/castxml source frontend"
                 )
             if ran_empty:

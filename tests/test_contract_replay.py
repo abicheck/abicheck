@@ -290,7 +290,7 @@ class TestReevaluateFromEvidence:
         roots = domain_roots(block, ContractMode.PUBLIC)
         assert "decl:_ZN2ns3fooEv" not in roots
         # The looser overlay keeps its own semantics: the same bare spelling
-        # under `--public-symbol` still resolves through the alias tier.
+        # under `scope.public_symbols` still resolves through the alias tier.
         forced = collect_contract_evidence(
             snap, snap, surf, surf, force_public_symbols={"foo"}
         )
@@ -328,7 +328,7 @@ class TestReevaluateFromEvidence:
         """A decision resting on an overlay root names that overlay.
 
         Citing ``public_header`` for a declaration retained solely by
-        ``--public-symbol`` names evidence the decision never used (Codex
+        ``scope.public_symbols`` names evidence the decision never used (Codex
         review, fresh evidence).
         """
         hidden = Function(

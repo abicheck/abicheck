@@ -260,7 +260,7 @@ class _CastxmlParser:
         self._exported_static = exported_static
         # Public-header surface used to scope constant extraction
         # (parse_constants). Seeded from the parsed headers (-H/--header) plus
-        # any explicit --public-header / --public-header-dir inputs, and matched
+        # any explicit public-header inputs, and matched
         # with the same provenance segment logic used elsewhere — so constants
         # reached via an umbrella header or a public include dir are kept, while
         # transitively-included system/private-header constants are excluded.
@@ -1319,7 +1319,7 @@ class _CastxmlParser:
 
         Scoped to the public-header surface via provenance: a constant is kept
         only when its declaring header classifies as ``PUBLIC_HEADER`` (the
-        parsed ``-H`` headers, plus any ``--public-header``/``--public-header-dir``
+        parsed ``-H`` headers, plus any other public-header
         inputs — so constants reached through an umbrella header or a public
         include dir are captured, while transitively-included system/private
         headers are excluded). Returns ``name -> value``; empty when no public

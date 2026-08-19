@@ -21,7 +21,6 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from abicheck.api_types import CompareResult
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot
 
@@ -168,7 +167,10 @@ class TestCompareReleaseErrorPaths:
         assert doc["verdict"] is None
         assert doc["reason"] == {"kind": "profile_mismatch", "message": "profile drift"}
 
-    def test_annotate_additions_requires_annotate(self, tmp_path: Path) -> None:
+    def test_annotate_flags_were_removed(self, tmp_path: Path) -> None:
+        # CLI cleanup phase two, PR E: see test_cov95_cli.py's own comment
+        # for why this is now a plain Click usage error, not an
+        # abicheck-specific one.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -178,8 +180,8 @@ class TestCompareReleaseErrorPaths:
             "compare", str(old_dir), str(new_dir),
             "--annotate-additions",
         ])
-        assert result.exit_code != 0
-        assert "--annotate-additions requires --annotate" in result.output
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_empty_input_dir_errors(self, tmp_path: Path) -> None:
         """Empty directories produce a clear 'no supported ABI inputs' error."""
@@ -367,7 +369,7 @@ class TestCompareReleaseErrorPaths:
         assert [c.kind.value for c in result.changes] == ["cxx_standard_floor_raised"]
 
     def test_collect_matrix_result_respects_policy_file_override(self, tmp_path: Path) -> None:
-        """A --policy-file override (e.g. ignore) applies to matrix findings,
+        """A --policy override (e.g. ignore) applies to matrix findings,
         matching the single-pair compare path (checker.compare → PolicyFile)."""
         from abicheck import cli_compare_release
 
@@ -389,6 +391,35 @@ class TestCompareReleaseErrorPaths:
             )
         # The override downgrades the finding, so it must NOT escalate the
         # incoming COMPATIBLE verdict to API_BREAK.
+        assert verdict == "COMPATIBLE"
+
+    def test_collect_matrix_result_applies_pack_policy(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, PR B slice 1: a release-wide --pack's
+        policy.overrides applies to matrix findings too, not only to each
+        library's own per-pair comparison -- `_collect_matrix_result` folds
+        it via `pack_application.policy_file_with_packs` directly, since it
+        builds its own local `PolicyFile` rather than routing through
+        `service.run_compare`."""
+        from abicheck import cli_compare_release
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.pack_application import PackApplication
+
+        pack_app = PackApplication(
+            policy_overrides={ChangeKind.CXX_STANDARD_FLOOR_RAISED: Verdict.COMPATIBLE},
+        )
+        fake = [self._matrix_change()]
+        old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
+        with patch(
+            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+        ):
+            _, verdict = cli_compare_release._collect_matrix_result(
+                old_m, new_m, "strict_abi", "COMPATIBLE",
+                pack_application=pack_app,
+            )
+        # The pack's override downgrades the finding, so it must NOT escalate
+        # the incoming COMPATIBLE verdict to API_BREAK -- same outcome as the
+        # equivalent --policy-file override test above, via a pack instead.
         assert verdict == "COMPATIBLE"
 
     def test_collect_matrix_result_respects_suppression(self, tmp_path: Path) -> None:
@@ -522,161 +553,6 @@ class TestCompareReleaseErrorPaths:
                     manifest_path=bad_manifest,
                     bundle_system_providers="",
                 )
-
-    def test_collect_release_extras_handles_compare_failure(
-        self, tmp_path: Path,
-    ) -> None:
-        """When _run_compare_pair raises inside _collect_release_extras,
-        the function logs a warning and continues with subsequent
-        libraries instead of aborting."""
-        from abicheck.cli_compare_release import _collect_release_extras
-
-        old_path = tmp_path / "libfoo.so"
-        new_path = tmp_path / "libfoo.so"
-        old_path.write_bytes(b"\x7fELF")
-        new_path.write_bytes(b"\x7fELF")
-
-        with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
-            side_effect=RuntimeError("retry-boom"),
-        ):
-            pairs, annotations = _collect_release_extras(
-                matched_keys=["libfoo.so"],
-                old_map={"libfoo.so": old_path},
-                new_map={"libfoo.so": new_path},
-                old_debug_dir=None, new_debug_dir=None,
-                resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[], new_h=[],
-                old_inc=[], new_inc=[],
-                old_version="1", new_version="2",
-                lang="c++",
-                suppress=None, policy="", policy_file_path=None,
-                annotate_additions=False,
-                collect_diff_results=True,
-                annotate=False,
-            )
-        assert pairs == []
-        assert annotations == []
-
-    def test_collect_release_extras_forwards_severity_config_to_annotations(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """`compare-release --annotate` must reflect the same severity-aware
-        gate as the exit code (Codex review on #549): an addition promoted to
-        `error` should surface as `::error`, not the legacy silent/notice
-        annotation, in the per-library re-run `_collect_release_extras` drives.
-        """
-        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_release import _collect_release_extras
-        from abicheck.severity import resolve_severity_config
-
-        old_path = tmp_path / "libfoo.so"
-        new_path = tmp_path / "libfoo.so"
-        old_path.write_bytes(b"\x7fELF")
-        new_path.write_bytes(b"\x7fELF")
-
-        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
-        result = DiffResult(
-            old_version="1", new_version="2", library="libfoo.so",
-            changes=[c], verdict=Verdict.COMPATIBLE,
-        )
-
-        monkeypatch.setattr(
-            "abicheck.cli_compare_release._run_compare_pair",
-            lambda *a, **kw: CompareResult(result, _SNAP, _SNAP),
-        )
-        monkeypatch.setattr(
-            "abicheck.annotations.is_github_actions", lambda: True,
-        )
-
-        cfg = resolve_severity_config("default", addition="error")
-        _pairs, annotations = _collect_release_extras(
-            matched_keys=["libfoo.so"],
-            old_map={"libfoo.so": old_path},
-            new_map={"libfoo.so": new_path},
-            old_debug_dir=None, new_debug_dir=None,
-            resolve_debug_info=lambda *_a, **_kw: None,
-            old_h=[], new_h=[],
-            old_inc=[], new_inc=[],
-            old_version="1", new_version="2",
-            lang="c++",
-            suppress=None, policy="", policy_file_path=None,
-            annotate_additions=False,
-            collect_diff_results=False,
-            annotate=True,
-            severity_config=cfg,
-        )
-        assert len(annotations) == 1
-        _sort_key, line = annotations[0]
-        assert line.startswith("::error ")
-
-    def test_collect_release_extras_drops_suppressed_soname_finding(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A `SONAME_BUMP_UNNECESSARY` finding the primary pass suppressed as a
-        coordinated lockstep bump (Codex review on #549) must not resurface via
-        the independent JUnit/annotate re-run `_collect_release_extras` drives
-        — that re-run builds a fresh `DiffResult` the primary pass's mutation
-        never touched, so it must re-apply the same suppression itself.
-        """
-        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_release import _collect_release_extras
-        from abicheck.severity import resolve_severity_config
-
-        old_path = tmp_path / "libfoo.so"
-        new_path = tmp_path / "libfoo.so"
-        old_path.write_bytes(b"\x7fELF")
-        new_path.write_bytes(b"\x7fELF")
-
-        c = Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "libfoo.so", "unnecessary bump")
-
-        def _fake_run_compare_pair(*a, **kw):  # noqa: ANN002, ANN003
-            # A fresh DiffResult each call, mirroring the real re-run —
-            # asserts the suppression is applied per-call, not by mutating a
-            # shared fixture.
-            return CompareResult(
-                DiffResult(
-                    old_version="1", new_version="2", library="libfoo.so",
-                    changes=[c], verdict=Verdict.COMPATIBLE,
-                ),
-                _SNAP,
-                _SNAP,
-            )
-
-        monkeypatch.setattr(
-            "abicheck.cli_compare_release._run_compare_pair", _fake_run_compare_pair,
-        )
-        monkeypatch.setattr("abicheck.annotations.is_github_actions", lambda: True)
-
-        # A permissive severity config would otherwise surface this quality
-        # finding as ::warning regardless of --annotate-additions.
-        cfg = resolve_severity_config("default")
-        pairs, annotations = _collect_release_extras(
-            matched_keys=["libfoo.so"],
-            old_map={"libfoo.so": old_path},
-            new_map={"libfoo.so": new_path},
-            old_debug_dir=None, new_debug_dir=None,
-            resolve_debug_info=lambda *_a, **_kw: None,
-            old_h=[], new_h=[],
-            old_inc=[], new_inc=[],
-            old_version="1", new_version="2",
-            lang="c++",
-            suppress=None, policy="", policy_file_path=None,
-            annotate_additions=False,
-            # Also exercise the JUnit re-run path (CodeRabbit review): the
-            # suppression must apply to diff_pairs too, not just annotations
-            # — both consumers share the same independently-fetched DiffResult.
-            collect_diff_results=True,
-            annotate=True,
-            severity_config=cfg,
-            worst_verdict="BREAKING",
-        )
-        assert annotations == []
-        assert len(pairs) == 1
-        assert all(
-            change.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
-            for change in pairs[0][0].changes
-        )
 
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""

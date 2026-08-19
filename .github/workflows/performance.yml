@@ -31,55 +31,20 @@ on:
     - cron: "42 6 * * 1"
   pull_request:
     types: [opened, reopened, synchronize, labeled]
-    paths:
-      - "abicheck/diff_*.py"
-      - "abicheck/checker.py"
-      - "abicheck/checker_policy.py"
-      - "abicheck/post_processing.py"
-      - "abicheck/internal_leak.py"
-      - "abicheck/demangle.py"
-      - "abicheck/binary_fingerprint.py"
-      - "abicheck/diff_namespaces.py"
-      - "abicheck/versioned_symbol_scheme.py"
-      - "abicheck/surface.py"
-      - "abicheck/suppression.py"
-      - "abicheck/html_report.py"
-      - "abicheck/sarif.py"
-      - "abicheck/junit_report.py"
-      - "abicheck/severity.py"
-      - "abicheck/serialization.py"
-      - "abicheck/pe_metadata.py"
-      - "abicheck/macho_metadata.py"
-      - "abicheck/cli_scan.py"
-      - "abicheck/dumper.py"
-      - "abicheck/dwarf_presence.py"
-      - "abicheck/service.py"
-      - "scripts/benchmark_scaling.py"
-      - "tests/test_performance.py"
-      - "tests/test_perf_binary_scan.py"
-      - "tests/test_perf_dump_scaling.py"
-      - "tests/test_benchmark_scaling.py"
-      - "abicheck/buildsource/header_graph.py"
-      - "abicheck/buildsource/include_graph.py"
-      - "abicheck/buildsource/call_graph.py"
-      - "abicheck/buildsource/source_graph.py"
-      - "abicheck/buildsource/graph_facts.py"
-      - "abicheck/buildsource/type_graph.py"
-      - "abicheck/provenance.py"
-      - "abicheck/dumper_cache.py"
-      - "abicheck/dumper_ast_config.py"
-      - "abicheck/dumper_sysinc.py"
-      - "abicheck/dumper_clang.py"
-      - "abicheck/dumper_clang_errors.py"
-      - "abicheck/dumper_toolchain.py"
-      - "abicheck/dumper_castxml.py"
-      - "abicheck/compile_context.py"
-      - "abicheck/castxml_policy.py"
-      - "abicheck/header_utils.py"
-      - "action/install-castxml.sh"
-      - "scripts/check_header_graph_perf.py"
-      - "tests/test_header_graph_perf_gate.py"
-      - ".github/workflows/performance.yml"
+    # No `paths:` filter here (deliberately removed — see the `classify` job
+    # below). A trigger-level `paths:` filter means the workflow itself never
+    # registers a check run on a non-matching PR, and the pattern list lived
+    # only in unversioned, untestable YAML glob strings, hand-maintained by
+    # inspection — both a real, not theoretical, cost: two genuinely
+    # perf-sensitive changes (Bazel/CMake aquery/cquery scoping, auto-applied
+    # L3 compiler context onto every L2 header parse) merged with no
+    # Performance check run at all because the list hadn't been updated (see
+    # docs/contribute/performance.md "Coverage gaps this workflow does not
+    # close"). The classify job below always runs and diffs changed files
+    # against scripts/classify_perf_paths.py's PERF_SENSITIVE_PATTERNS (the
+    # exact same file set this filter used to enumerate, now a tested Python
+    # module instead of inline YAML) to decide whether the expensive
+    # downstream jobs actually run.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -88,15 +53,91 @@ concurrency:
 permissions:
   contents: read
 
-# The PR lane runs whenever a PR changes the detector core (the `paths` filter
-# above), plus on the weekly schedule and on manual dispatch. It now gates on the
-# `--max-exponent` / `--max-rss-mb` budgets, so a catastrophic scaling regression
-# on such a PR blocks until the threshold is met or loosened. Adding the
-# `performance` label re-triggers the lane on a PR (the `labeled` event); for an
-# arbitrary PR that does not touch the detector core, use `workflow_dispatch`.
 jobs:
+  # Classifier-job pattern: this job always runs (no `paths:` gates the
+  # trigger itself), so the workflow's check run always registers on every
+  # qualifying PR event — closing the structural gap a trigger-level `paths:`
+  # filter has (a required check that may never appear for a given PR is a
+  # different, riskier failure mode than one that appears and reports
+  # "skipped"). `run` decides whether the four expensive downstream jobs
+  # actually execute:
+  #  - pull_request: diffs the PR's changed files against
+  #    scripts/classify_perf_paths.py's PERF_SENSITIVE_PATTERNS.
+  #  - labeled event with the `performance` label: force-runs regardless of
+  #    changed paths (this is the actual fix for a pre-existing gap — the
+  #    workflow used to claim in a comment that adding this label re-triggers
+  #    the lane, but nothing ever checked the label name, so it silently
+  #    didn't unless the changed paths also happened to match).
+  #  - schedule / workflow_dispatch: always runs (there is no PR base to diff
+  #    against, and `paths:` never applied to these triggers either — this
+  #    preserves that pre-existing behaviour).
+  classify:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.classify.outputs.run }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # fetch-depth 0: a shallow (default depth-1) checkout has no
+          # history to diff a PR's base against. This job does no other
+          # git-history-sensitive work, and a full clone is cheap next to the
+          # venv-install-and-benchmark cost the downstream jobs pay.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+
+      - name: Determine changed files and classify
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          # The PR's *current* label set, not github.event.label.name --
+          # the latter is populated only on the one labeled/unlabeled event
+          # that added/removed a label and is empty on every other
+          # pull_request sub-event in this workflow's trigger list
+          # (opened/reopened/synchronize). Reading only that field meant a
+          # 'performance' label force-ran the lane on the labeling push
+          # itself, then silently stopped force-running on every later push
+          # to the same still-labeled PR (Codex review) --
+          # pull_request.labels always reflects the PR's current labels
+          # regardless of which sub-event delivered this run.
+          CURRENT_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # --no-renames: with rename detection on (the default), `git
+            # diff --name-only` prints only a renamed file's DESTINATION
+            # path, silently dropping the source -- a perf-sensitive file
+            # renamed to a non-matching destination (e.g.
+            # abicheck/checker.py -> abicheck/core/checker.py) would then be
+            # invisible to classification even though the change is exactly
+            # as perf-sensitive as an in-place edit (Codex review, verified
+            # with a real R100 rename: --name-only printed only the new
+            # path, --no-renames printed both). Disabling detection reports
+            # a rename as a plain delete+add, so both paths always appear.
+            git diff --no-renames --name-only "${BASE_SHA}...${HEAD_SHA}" \
+              | python scripts/classify_perf_paths.py \
+                  --force-label performance --current-labels "${CURRENT_LABELS:-}"
+          else
+            # schedule / workflow_dispatch: no PR base to diff against.
+            python scripts/classify_perf_paths.py --always
+          fi
+
+  # The PR lane runs whenever the `classify` job above decides the PR touches
+  # performance-sensitive code, plus on the weekly schedule and on manual
+  # dispatch. It gates on the `--max-exponent` / `--max-rss-mb` budgets, so a
+  # catastrophic scaling regression on such a PR blocks until the threshold
+  # is met or loosened.
   scaling:
     name: Comparison scaling benchmark
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Gating: every compare() scenario is linear (fixes #8/#9), so a generous
@@ -122,21 +163,61 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y binutils
 
       - name: Run scaling benchmark
+        # workflow_dispatch inputs are attacker-shapeable free text (unlike
+        # github.event_name, a fixed trigger-kind string) -- routing them
+        # through `env:` and referencing only `$SIZES_INPUT`/
+        # `$MAX_SECONDS_INPUT` below means GitHub's own ${{ }} template
+        # engine substitutes into a plain YAML string value, never into this
+        # script's literal source text, so a crafted input (e.g. embedding
+        # `; curl ... | sh`) can't break out into new shell syntax the way
+        # inlining `${{ github.event.inputs.sizes }}` directly into `run:`
+        # could (CodeRabbit review — a real, if write-access-gated, RCE
+        # class GitHub's own docs warn against this exact pattern for).
+        env:
+          SIZES_INPUT: ${{ github.event.inputs.sizes }}
+          MAX_SECONDS_INPUT: ${{ github.event.inputs.max_seconds }}
         run: |
           set -euo pipefail
           mkdir -p reports/perf
-          SIZES="${{ github.event.inputs.sizes || '500 1000 2000 4000' }}"
-          GATE=""
-          if [ -n "${{ github.event.inputs.max_seconds }}" ]; then
-            GATE="--max-seconds ${{ github.event.inputs.max_seconds }}"
+          # Only override --sizes when workflow_dispatch explicitly asked for
+          # one. Unconditionally passing a global --sizes here used to
+          # silently override EVERY scenario's own individually-tuned sweep
+          # (scripts/benchmark_scaling.py's SCENARIOS table) with the same
+          # 500/1000/2000/4000 ladder -- so onedal_large_surface never swept
+          # past 4k (it's tuned for 5k-20k), nested_types collapsed to one
+          # point (no tail exponent computable), and rename_churn/
+          # opaque_filter kept only two of their three tuned points. Omitting
+          # --sizes on every non-dispatch trigger (PR/schedule) restores each
+          # scenario's own default sweep. Built as bash arrays (not a plain
+          # string) so an empty value expands to zero argv words rather than
+          # one empty-string word, and --sizes' own multi-value input word-
+          # splits into separate array elements the way argparse's nargs="+"
+          # expects.
+          SIZES_ARG=()
+          if [ -n "${SIZES_INPUT:-}" ]; then
+            SIZES_ARG=(--sizes ${SIZES_INPUT})
+          fi
+          GATE=()
+          if [ -n "${MAX_SECONDS_INPUT:-}" ]; then
+            GATE=(--max-seconds "$MAX_SECONDS_INPUT")
+          fi
+          # 5 timed repeats (+1 untimed warmup, always run — see
+          # scripts/benchmark_scaling.py) on every trigger; the weekly
+          # schedule affords more since it isn't blocking a PR merge. Each
+          # point's reported figure is the MEDIAN of these repeats, not the
+          # fastest one (docs/contribute/performance.md "Baseline
+          # regression").
+          REPEAT=5
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            REPEAT=7
           fi
           python scripts/benchmark_scaling.py \
-            --sizes $SIZES \
-            --repeat 2 \
+            "${SIZES_ARG[@]}" \
+            --repeat "$REPEAT" \
             --max-exponent 1.4 \
             --max-rss-mb 2048 \
             --json-out reports/perf/scaling.json \
-            $GATE | tee reports/perf/scaling.txt
+            "${GATE[@]}" | tee reports/perf/scaling.txt
 
       - name: Run slow perf tests
         run: |
@@ -166,11 +247,22 @@ jobs:
   # runs on PRs (there is no baseline branch for schedule/dispatch). Base and
   # head are installed into separate venvs so the same package name can coexist;
   # the comparison is over the scenarios present on *both* branches. Gating: the
-  # step fails (and blocks) on a >50% slowdown — loosen --regress-tolerance rather
-  # than re-adding continue-on-error if runner variance proves too noisy.
+  # step fails (and blocks) on a regression exceeding max(15%, 100ms) per point
+  # (the "stable synthetic PR scenario" tier — see docs/contribute/
+  # performance.md "Baseline regression") — loosen --regress-tolerance/
+  # --regress-min-delta-seconds rather than re-adding continue-on-error if
+  # runner variance proves too noisy. The base-measurement step is NOT allowed
+  # to fail silently (no `|| true`): a base measurement that never ran (a
+  # broken venv, a crash, an install failure) must fail this job, not degrade
+  # to comparing head against nothing — scripts/benchmark_scaling.py's own
+  # main() additionally fails closed if --baseline loads to zero points, or if
+  # zero (scenario, size) points end up shared between the two runs, so a
+  # scenario-set/--sizes mismatch between base and head can't silently turn
+  # this into a no-op comparison either.
   regression:
     name: Baseline regression (PR vs base)
-    if: github.event_name == 'pull_request'
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -193,15 +285,45 @@ jobs:
 
       - name: Measure base branch
         run: |
+          set -euo pipefail
           sudo apt-get update -qq && sudo apt-get install -y binutils
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
-          # The base script may predate newer flags/scenarios; only the scenarios
-          # present on both branches are compared, so `|| true` keeps it robust.
-          ./base_env/bin/python base/scripts/benchmark_scaling.py \
-            --sizes 500 1000 2000 --repeat 2 \
-            --json-out base.json || true
+          # Run HEAD's own copy of the harness (not base's stale one) against
+          # base's installed package: benchmark_scaling.py prefers an
+          # already-importable `abicheck` over a same-directory checkout
+          # specifically so this works (see its own sys.path comment). Two
+          # reasons this matters, not just one: (1) the base branch's copy of
+          # this script may not support a flag this PR just added (e.g.
+          # --meta) -- a bare `set -e` failure here previously blocked the
+          # whole job before base.json was even written; (2) if this PR also
+          # changed the measurement *statistic* (as it did: median replaces
+          # min), running each side's own script would compare two different
+          # statistics against each other, a systematic bias independent of
+          # any real performance change (Codex review on PR #768). Running one
+          # harness against both installs removes both problems at the root
+          # instead of chasing them per-flag/per-methodology-change.
+          #
+          # --no-memory on BOTH sides (Codex review, fresh evidence after the
+          # median-statistic fix above): measure()'s memory pass isn't free
+          # timing-wise -- between each size's timed repeats and the next
+          # size's, it clears every live functools.lru_cache (including
+          # abicheck/demangle.py's) and runs one extra untimed "cold" call to
+          # trace peak heap. A scenario whose per-size inputs share cached
+          # state across sizes (e.g. overlapping demangled symbol names as n
+          # grows) would then start each next size's timed loop from a
+          # cache state base's own memory pass just cleared, while head (with
+          # --no-memory, no clear) carries that cache warmth forward -- a
+          # systematic timing bias between the two sides with nothing to do
+          # with any real product change. Timing-only on both sides removes
+          # this at the root instead of accepting it as comparison noise.
+          ./base_env/bin/python head/scripts/benchmark_scaling.py \
+            --sizes 500 1000 2000 --repeat 5 --no-memory \
+            --meta git_sha=${{ github.event.pull_request.base.sha }} \
+            --meta side=base \
+            --meta os_image=${ImageOS:-unknown} \
+            --json-out base.json
 
       - name: Measure head and compare to base
         run: |
@@ -214,8 +336,12 @@ jobs:
           ./head_env/bin/pip install -q --upgrade pip
           ./head_env/bin/pip install -q -e "./head[dev]"
           ./head_env/bin/python head/scripts/benchmark_scaling.py \
-            --sizes 500 1000 2000 --repeat 2 --no-memory \
-            --baseline base.json --regress-tolerance 0.5 \
+            --sizes 500 1000 2000 --repeat 5 --no-memory \
+            --meta git_sha=${{ github.event.pull_request.head.sha }} \
+            --meta side=head \
+            --meta os_image=${ImageOS:-unknown} \
+            --baseline base.json \
+            --regress-tolerance 0.15 --regress-min-delta-seconds 0.1 \
             | tee regression.txt
 
       - name: Write job summary
@@ -245,6 +371,8 @@ jobs:
   # version gate rejects, silently narrowing every run to clang-only).
   header-graph-perf:
     name: Header-graph attach-cost (trend)
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
     # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
     # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
     # asset for. The floating alias silently moves between releases, so it
@@ -312,7 +440,8 @@ jobs:
   # needs no bootstrap period the way a committed number would.
   header-graph-regression:
     name: Header-graph attach-cost regression (PR vs base)
-    if: github.event_name == 'pull_request'
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.run == 'true'
     # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
     # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
     # asset for. The floating alias silently moves between releases, so it
@@ -360,40 +489,49 @@ jobs:
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
-          # The base script may predate this gate entirely (a PR introducing
-          # it, or one from before it existed) -- that specific "script not
-          # present on base" case is the only one allowed to fall through to
-          # the report-only path below. Any other failure (a fixture-compile
-          # crash, a clang crash, the AST-attach verification catching a
-          # degraded pass) must fail this job rather than be silently
-          # swallowed by a blanket `|| true` (Codex review, fresh evidence).
-          if [ -f base/scripts/check_header_graph_perf.py ]; then
-            set +e
-            ./base_env/bin/python base/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 --require-castxml \
-              --json-out base_header_graph.json 2>&1 | tee base_measure.log
-            status=${PIPESTATUS[0]}
-            set -e
-            if [ "$status" -ne 0 ]; then
-              # --require-castxml turns *any* castxml unusability into a
-              # hard failure -- including the one case that's a legitimate
-              # cross-checkout mismatch rather than a real regression: a PR
-              # that bumps the pinned castxml version together with its
-              # supported-range policy leaves the base checkout's *older*
-              # castxml_policy.py rejecting the single castxml install this
-              # job set up from head's script, since only one system castxml
-              # is installed for both measurements. That specific rejection
-              # degrades to report-only, exactly like "script not present on
-              # base" above; every other failure still propagates (Codex
-              # review, fresh evidence).
-              if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
-                echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
-              else
-                exit "$status"
-              fi
+          # Run HEAD's own copy of the gate (not base's stale one) against
+          # base's installed abicheck package -- see benchmark_scaling.py's
+          # identical fix (and its own, more detailed comment) for the full
+          # reasoning: comparing a median computed by head's harness against
+          # a min() a stale base-branch copy of this same script would
+          # compute biases every comparison independent of any real
+          # performance change, and a base script predating a flag this PR
+          # just added would simply crash the step outright (Codex review on
+          # PR #768).
+          set +e
+          ./base_env/bin/python head/scripts/check_header_graph_perf.py \
+            --sizes 25 100 400 --repeat 5 --require-castxml \
+            --json-out base_header_graph.json 2>&1 | tee base_measure.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            # Two legitimate, non-regression reasons head's harness can fail
+            # against base's installed package -- both degrade to report-only
+            # exactly like a genuinely absent base measurement; every OTHER
+            # failure (a fixture-compile crash, a clang crash, the AST-attach
+            # verification catching a degraded pass) still propagates and
+            # fails this job rather than being silently swallowed (Codex
+            # review, fresh evidence):
+            # (1) --require-castxml turns any castxml unusability into a hard
+            #     failure -- including a legitimate cross-checkout mismatch: a
+            #     PR that bumps the pinned castxml version together with its
+            #     supported-range policy leaves base's *older*
+            #     castxml_policy.py rejecting the one system castxml this job
+            #     installed (from head's install script) for both sides;
+            # (2) base's installed abicheck package predates the header-graph
+            #     feature this gate measures entirely -- head's harness
+            #     imports service._attach_header_graph unconditionally, so a
+            #     base commit from before that existed (G31 Phase A) surfaces
+            #     as an ImportError rather than the old "script file not
+            #     present on base" signal (which no longer applies now that
+            #     head's copy always exists).
+            if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
+              echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
+            elif grep -qE "(ImportError|ModuleNotFoundError):.*_attach_header_graph" base_measure.log; then
+              echo "Base branch's installed abicheck predates the header-graph feature this gate measures -- report-only." >&2
+            else
+              exit "$status"
             fi
-          else
-            echo "Gate not present on base branch -- report-only." >&2
           fi
 
       - name: Measure head and compare to base
@@ -404,14 +542,15 @@ jobs:
           ./head_env/bin/pip install -q -e "./head[dev]"
           if [ -s base_header_graph.json ]; then
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 --require-castxml \
-              --baseline base_header_graph.json --regress-tolerance 0.5 \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
+              --baseline base_header_graph.json \
+              --regress-tolerance 0.3 --regress-min-delta-ms 10 \
               | tee header_graph_regression.txt
           else
-            echo "No base measurement available (gate not present on base branch) -- report-only." \
+            echo "No base measurement available (base predates this gate's feature, or a cross-checkout castxml-policy mismatch) -- report-only." \
               | tee header_graph_regression.txt
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 --require-castxml \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
               | tee -a header_graph_regression.txt
           fi
 

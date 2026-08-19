@@ -100,7 +100,7 @@ checks the installed version before doing anything else rather than degrading
 silently. The current portfolio targets **0.6.x**: several commands and
 options these workflows depend on (`aggregate`, `project plan`,
 `--report-mode root-cause`, `--diagnostic-comparison`,
-`--contract-evaluation`) postdate the 0.5.0 release, so an older installation
+`--contract`) postdate the 0.5.0 release, so an older installation
 is refused up front instead of failing partway through a workflow.
 
 ## Contributing

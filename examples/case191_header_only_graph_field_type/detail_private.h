@@ -1,4 +1,4 @@
-// case191 — internal header, never passed as --public-header/-H.
+// case191 — internal header, never passed as -H/--header.
 #pragma once
 
 namespace demo::detail {

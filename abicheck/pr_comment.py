@@ -256,7 +256,7 @@ def _incomplete_is_blocking(
     regardless of *which exit-code scheme actually produced the report* —
     but the two schemes disagree on what a bare ``risk``-severity finding
     contributes. *legacy* scheme (``report["severity"]`` absent — no
-    ``--severity-*`` flags; *levels* is ``{}``) maps every verdict to a
+    a severity setting; *levels* is ``{}``) maps every verdict to a
     **fixed** exit code via ``severity.legacy_exit_code`` regardless of any
     per-category config: ``BREAKING`` → 4, ``API_BREAK`` → 2, and
     critically ``COMPATIBLE_WITH_RISK`` (a bare ``risk`` finding) → **0** —
@@ -715,7 +715,7 @@ def _release_contract_coverage_findings(
     *which provider* fell short within them — a caller wanting that detail
     still needs ``--format json``'s per-library section.
 
-    Always ``([], False)`` when the run never passed ``--contract-evaluation``
+    Always ``([], False)`` when the run never passed ``--contract``
     — both keys are entirely absent then, mirroring the single-pair report's
     own "no key" (not "empty list") convention.
     """
@@ -1269,7 +1269,7 @@ def _suppression_note(model: CommentModel) -> list[str]:
     if model.reclassified_count:
         n = model.reclassified_count
         parts.append(
-            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy-file`"
+            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy`"
         )
     if not parts:
         return []

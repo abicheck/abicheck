@@ -36,8 +36,17 @@ finishes in ~45 seconds.
   *modification* detectors.
 - `test_fp_rate_gate.py` — mirrors `scripts/check_fp_rate.py`; per-case FP/FN
   checks under public-surface scoping (baselines 0/0).
-- `test_mutation_score_gate.py` — unit-tests the mutation-score gate parser so
-  it works without `mutmut` installed.
+- `test_mutation_score_gate.py` / `test_mutation_results.py` — the mutation
+  gate's drift logic and its parsing/attribution primitives. The latter
+  includes one *real* end-to-end `mutmut` run (marked `slow`), because the
+  previous fixtures encoded a key format mutmut never emits and so passed
+  against a parser that misread real output.
+- `test_canonical_finding_id_completeness.py` — every `ChangeKind` must be
+  classified for canonical identity, so an omission cannot be silent the way
+  the #753 -> #759 escape was. Pins both directions: a declared type-bearing
+  kind must be backend-spelling-stable, *and* distinct transitions must not
+  collide (stability alone is satisfiable by hashing everything to a
+  constant).
 - **Silent-skip guard** (`conftest.py`): export `ABICHECK_MIN_EXECUTED=<n>` and
   the session fails unless ≥ n tests actually ran — used by the marker lanes in
   CI so a missing tool can't pass with 0 tests. Every `test_*` should assert
@@ -60,6 +69,27 @@ finishes in ~45 seconds.
   `test_abi_examples.py` to validate example case ground truth.
 - `conftest.py` — shared fixtures, including temp-dir helpers and
   binary-skip markers.
+- `_strict_process.py` — `StrictProcessRunner`, the scripted stand-in for
+  external-process invocation. **Use this instead of a hand-rolled
+  `def fake_run(cmd, **kw)` that branches on a substring and falls through to a
+  catch-all return.** A catch-all answers any command, so it cannot detect an
+  extra call, a missing call, two calls in the wrong order, a dropped
+  argument, or a fallback path reusing the previous command's fixture. Script
+  the calls with `.expect(...)`, then `.assert_exhausted()`; failures print the
+  full transcript of what actually ran. See `test_strict_process.py` for the
+  contract and `test_bazel_root_targets.py` for a migrated call site.
+- `canonical_identity_contract.py` — the exhaustive per-`ChangeKind` identity
+  classification enforced by `test_canonical_finding_id_completeness.py`; a new
+  `ChangeKind` fails CI until it is placed in a bucket.
+- `_workflow_exec.py` — executes a workflow's `run:` steps for real, in a
+  throwaway workspace with a real `$GITHUB_OUTPUT` and a sentinel tree *outside*
+  it. Use it whenever a security property of a workflow step matters: asserting
+  the step's *text* (which is what `test_reusable_workflows.py` does, and what
+  it should keep doing as a cheap guard) proves nothing about behaviour under a
+  hostile value — that is exactly how #705 shipped and #758 had to follow.
+  `StepResult.output_lines` exposes the raw records, so an *injected extra*
+  `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
+  `test_reusable_workflow_execution.py`.
 
 ## What NOT to do
 

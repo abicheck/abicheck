@@ -424,7 +424,7 @@ def with_resolved_gate(
     core verb finishes. So it recorded a default :class:`GateConfig` --
     which claims the built-in ``severity`` scheme and the built-in severity
     levels for *every* run, including a ``legacy``-scheme one and one whose
-    ``--severity-*`` flags moved a category (Codex review, fresh evidence).
+    a severity setting moved a category (Codex review, fresh evidence).
     The persisted ``evaluation_context`` is documented as the *complete*
     resolved configuration, so that default is a false receipt of the same
     kind a fabricated digest would be, not a harmless omission.
@@ -436,7 +436,7 @@ def with_resolved_gate(
 
     *severity_provenance* is keyed **per category**, not one entry for the
     whole block, because the four categories are resolved independently and
-    routinely come from different layers: ``--severity-abi-breaking error``
+    routinely come from different layers: ``severity.abi_breaking: error``
     on the command line beside an ``addition`` level only ``.abicheck.yml``
     supplied. Collapsing them into a single ``gate.severity`` entry labelled
     the project-config category as CLI-selected, and used a key the canonical

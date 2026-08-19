@@ -27,7 +27,7 @@ ADR-049's contract-relevance/evidence/coverage machinery
 (``contract_evaluation.py``, ``contract_coverage_ledger.py``,
 ``contract_coverage_exit.py``, ...) already answers a *narrower* version of
 this question -- "was there enough evidence to trust a *contract-relevance*
-decision" -- and only when a caller opts into ``--contract-evaluation``. This
+decision" -- and only when a caller opts into ``--contract``. This
 module answers the broader question for *every* comparison, opt-in or not:
 did the analysis itself (depth, translation-unit accounting, export
 accounting, header/build/source-graph evidence) come back complete, whatever
@@ -273,7 +273,13 @@ class ExportAccounting:
     matching source declaration found), and
     ``mappings["non_public_symbol_to_reason"]`` (internal -- an export the
     source linker itself classified as non-public). ``source_linked`` is
-    ``total - unaccounted`` when both are known. All fields stay ``None``
+    ``total - unaccounted - internal`` when all three are known -- a true
+    three-way partition (``source_linked + internal + unaccounted ==
+    total``), not merely "not unaccounted" (Codex review: an earlier
+    ``total - unaccounted`` formula silently double-counted every
+    ``internal`` export as ALSO ``source_linked`` once ``unaccounted`` no
+    longer overlapped it; see :func:`_export_accounting`'s own docstring for
+    the full history). All fields stay ``None``
     when no L4 source-ABI surface was linked (the ordinary case for a plain
     ELF/DWARF/header comparison) -- this is a rollup of the existing L4
     linker output, not a new detector, so it has nothing to report without
@@ -964,6 +970,38 @@ def _export_accounting(
     EITHER side now always contributes to the combined ``export_accounting``
     rather than being silently shadowed by whichever side the old
     "new-first" selection happened to prefer.
+
+    Finding (Codex review, PR #788): once ``source_link.link_source_abi``
+    stopped leaving a classified ``non_public`` symbol in
+    ``symbols_without_decl`` too (the double-count fix this rollup exists
+    alongside), ``source_linked = total - unaccounted`` started silently
+    counting every ``internal``-classified export as ALSO ``source_linked``
+    -- correct arithmetically (the two no longer sum past ``total``), but
+    wrong in what ``source_linked`` claims: a ``dependency:stdlib`` export
+    is definitionally not linked to *this* library's own source. Fixed by
+    also subtracting ``internal``, so the three categories are now a true
+    partition of ``total`` (``source_linked + internal + unaccounted ==
+    total``), not just two of the three kept mutually exclusive.
+
+    Finding (Codex review, PR #788): the fix above assumed every
+    ``SourceAbiSurface`` reaching this rollup was already produced by the
+    fixed ``link_source_abi``/``relink_surface_exports`` (which now folds a
+    classified symbol into ``all_matched``, so it can no longer appear in
+    ``symbols_without_decl`` too). A *persisted* surface produced by a
+    pre-fix build -- the ordinary "compare an existing baseline JSON against
+    a fresh candidate" workflow -- round-trips through
+    ``SourceAbiSurface.from_dict()`` with that stale overlap still intact:
+    the same symbol sits in both ``symbols_without_decl`` and
+    ``non_public_symbol_to_reason``. Counting ``len(...)`` of each
+    independently double-subtracts that symbol (once as ``unaccounted``,
+    once as ``internal``), so ``source_linked`` under-reports (or clamps to
+    0) and ``unaccounted`` stays nonzero even though the symbol IS
+    genuinely classified -- ``--require-complete-analysis`` still fails on
+    this upgrade path. Fixed by deduplicating per side: a symbol already
+    classified into ``non_public_symbol_to_reason`` no longer counts toward
+    ``unaccounted`` here regardless of whether the surface that produced it
+    already excluded it from ``symbols_without_decl`` -- this rollup is now
+    correct for both a freshly-linked surface and a legacy persisted one.
     """
     total: int | None = None
     unaccounted: int | None = None
@@ -973,14 +1011,21 @@ def _export_accounting(
         if sa is None:
             continue
         side_total = len(sa.roots.get("exported_symbols", []))
-        side_unaccounted = len(sa.unmatched.get("symbols_without_decl", []))
-        side_internal = len(sa.mappings.get("non_public_symbol_to_reason", {}))
+        non_public_keys = set(sa.mappings.get("non_public_symbol_to_reason", {}))
+        # Subtract any overlap rather than trusting symbols_without_decl to
+        # already be disjoint from non_public_symbol_to_reason -- true for a
+        # freshly-linked surface, not guaranteed for one persisted before
+        # this fix (see the Codex-review docstring paragraph above).
+        side_unaccounted = len(
+            set(sa.unmatched.get("symbols_without_decl", [])) - non_public_keys
+        )
+        side_internal = len(non_public_keys)
         total = (total or 0) + side_total
         unaccounted = (unaccounted or 0) + side_unaccounted
         internal = (internal or 0) + side_internal
     if total is None:
         return ExportAccounting()
-    source_linked = max(0, total - (unaccounted or 0))
+    source_linked = max(0, total - (unaccounted or 0) - (internal or 0))
     return ExportAccounting(
         total=total,
         source_linked=source_linked,

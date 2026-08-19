@@ -469,7 +469,110 @@ from typing import Any
 #:       rebase claimed that version first for P0.2's ``layer_coverage``
 #:       root-target keys (same "renumber, don't reuse" convention as the
 #:       2.32/2.36 entries above).
-REPORT_SCHEMA_VERSION = "2.38"
+#: 2.39 — new top-level ``use_case_impact`` object, present only under
+#:       ``compare --use-cases MANIFEST`` (``impact/use_case_impact.py``):
+#:       the manifest's declared use cases, each one's resolved and
+#:       unresolved entrypoints, and this comparison's own findings
+#:       attributed to the use cases whose entrypoints can be *shown* to
+#:       reach them, plus an ``unattributed_changes`` count for the
+#:       remainder. Read-only evidence -- it never reaches a verdict, a
+#:       gate, or an exit code, because an unattributed finding is an
+#:       absence of proof rather than proof the finding is harmless. Omitted
+#:       entirely without the flag rather than emitted empty (an empty block
+#:       would read as "no use case is affected" for a run that never
+#:       resolved a manifest). Replaces the ``project validate-use-cases
+#:       --against/--against-new`` report, which diffed two snapshots inside
+#:       a manifest validator. Each attributed row carries the report's own
+#:       ``finding_id`` alongside ``symbol``/``kind``, since those two do not
+#:       identify a finding (one symbol can emit one ``ChangeKind`` more than
+#:       once), so a row joins back to ``changes``/``findings``. Under
+#:       ``--show-only`` the block is projected onto the displayed findings,
+#:       so it never names a change the report itself omits. Additive
+#:       optional top-level key.
+#: 2.40 -- new top-level ``analysis_assurance_exit_contribution`` (``0``/``1``),
+#:       the exact sibling of the pre-existing ``contract_coverage_exit_
+#:       contribution`` for P0.4's own orthogonal analysis-assurance axis.
+#:       Persisted alongside ``analysis_assurance`` (present whenever a real
+#:       ``AnalysisAssurance`` is attached to the result -- in practice every
+#:       real ``compare()`` call) rather than unconditionally: read directly
+#:       by ``aggregate.py``'s ``_analysis_assurance_exit`` the same way the
+#:       coverage sibling already is, since without it a report whose
+#:       severity/compatibility gate read a clean 0 while this axis
+#:       independently floored the *real* exit to 1 fed ``abicheck aggregate``
+#:       a green result for it (Codex review). Additive key.
+#: 2.41 -- new top-level ``exit`` object (CLI cleanup phase two, PR G1 --
+#:       ``exit_decision.ExitDecision``): ``code``, ``reasons`` (which
+#:       orthogonal axis or axes actually determined ``code`` -- a
+#:       lower, non-winning contribution is excluded, since it explains
+#:       nothing about why the exit is what it is),
+#:       ``compatibility_contribution``, ``contract_coverage_contribution``,
+#:       and ``analysis_assurance_contribution``. The exact number
+#:       ``cli._exit_with_severity_or_verdict`` computes for the real
+#:       process exit, persisted so a report reader does not have to
+#:       re-derive it from ``severity.exit_code``/
+#:       ``contract_coverage_exit_contribution``/
+#:       ``analysis_assurance_exit_contribution`` independently and risk
+#:       disagreeing with the number that actually gated the run.
+#:       Emitted by every native ``compare`` JSON report -- every comparison
+#:       has a compatibility contribution, so there is always a decision to
+#:       report, unlike ``contract_context`` which stays opt-in -- but is
+#:       schema-optional, not required: an
+#:       ``include_exit_decision=False`` caller (``compat check``'s own
+#:       ABICC 0/1/2 exit scheme differs from native ``compare``'s, so its
+#:       report omits this block rather than emit a ``code`` that would
+#:       disagree with the real process exit for the same run -- Codex
+#:       review) still validates against schema 2.41 with the key absent.
+#:       ``scan --against`` emits the identical block too, since schema 1.18
+#:       (CLI cleanup phase two, PR E) -- nested at ``diff.exit``, not this
+#:       top-level key, matching where its own constituent contribution
+#:       fields already live; see ``SCAN_SCHEMA_VERSION``'s own 1.18 entry.
+#:       Deliberately does not yet cover ``not_comparable``/scan-budget/
+#:       release-removed-library exits, which are raised through different
+#:       code paths today; see ``exit_decision.py``'s own module docstring.
+#:       Additive key.
+#: 2.42 -- the ``exit`` object gains ``crosscheck_promotion_contribution``
+#:       (CLI cleanup phase two, PR E follow-up, Codex review): a fourth
+#:       axis alongside the three schema 2.41 introduced, always ``0`` for
+#:       a native ``compare`` report (this axis has no meaning outside
+#:       ``scan --against``'s own maintainer-promoted ``--crosscheck
+#:       KEY=error`` finding -- see ``SCAN_SCHEMA_VERSION``'s own 1.18
+#:       entry). Added so ``code == max(`` the four contributions ``)``
+#:       stays true for every ``exit`` block this package emits, on both
+#:       commands, rather than holding only for ``compare``'s three-axis
+#:       case. ``reasons`` may now also contain ``"promoted_crosscheck"``.
+#:       Additive key.
+#: 2.43 -- new top-level ``annotations`` array (CLI cleanup phase two, PR
+#:       E's persistence prerequisite -- ``reporter_contract_blocks.
+#:       add_annotations``/``annotations.annotation_report_entries``): one
+#:       ``{"level": "error"|"warning"|"notice", "annotation": <the exact
+#:       GitHub workflow-command line ``compare --annotate`` would emit>}``
+#:       entry per finding a full annotation pass over this comparison
+#:       found -- always the *superset* (as if ``--annotate-additions`` had
+#:       also been given), regardless of whether this run itself was given
+#:       ``--annotate``. Exists so a rendering front end (the composite
+#:       Action) can read an already-classified, already-formatted answer
+#:       instead of inferring one from stderr or re-running the comparison
+#:       -- the plan's own "New invariant" for this PR, already true for
+#:       ``exit``/``analysis_assurance`` and now true for annotations too.
+#:       A consumer filters out ``"notice"``-level entries itself when its
+#:       own ``annotate-additions`` input is off, rather than this package
+#:       persisting two differently-scoped arrays for one comparison.
+#:       Unconditionally present (mirroring ``exit``'s own presence rule),
+#:       including as ``[]`` on a clean comparison. Additive key.
+#: 2.44 -- each ``annotations`` entry gains ``always_visible`` (bool)
+#:       (Codex review on PR E's own persistence prerequisite): 2.43's own
+#:       "filter out notice-level entries when annotate-additions is off"
+#:       guidance was incomplete -- one ``"notice"`` kind (a ``--contract``
+#:       finding compatibility policy never evaluated,
+#:       ``annotations._collect_annotations_detailed``'s not-evaluated
+#:       demotion) is surfaced by plain ``--annotate`` alone, with no
+#:       ``--annotate-additions`` needed, so a renderer dropping every
+#:       ``"notice"`` by default would silently hide it even though the
+#:       CLI's own stderr rendering never does. ``always_visible`` is what a
+#:       renderer must actually gate a ``"notice"`` entry on instead of the
+#:       level alone; it is always ``True`` for ``"error"``/``"warning"``.
+#:       Additive key on an existing array item.
+REPORT_SCHEMA_VERSION = "2.44"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -590,8 +693,7 @@ REPORT_SCHEMA_VERSION = "2.38"
 #:       ``exit_code``/``blocking``/``blocking_categories``, built by the one
 #:       shared ``reporter._build_severity_json``), emitted when ``scan
 #:       --against`` resolves the ``severity`` exit-code scheme. Under that
-#:       scheme a *compatible* diff can exit non-zero (``--severity-addition
-#:       error`` on an additions-only diff exits 1), so without this block a
+#:       scheme a *compatible* diff can exit non-zero (``severity.addition: error`` on an additions-only diff exits 1), so without this block a
 #:       report read ``COMPATIBLE`` with exit 1 and no stated cause --
 #:       indistinguishable from ADR-049 Phase 7's orthogonal
 #:       contract-coverage 1 (Codex review). Absent under the default legacy
@@ -706,7 +808,62 @@ REPORT_SCHEMA_VERSION = "2.38"
 #:        2.36's identical addition to ``compare``'s ``changes[]`` -- the two
 #:        bump together since ``finding_id``/``canonical_finding_id`` are
 #:        joinable across both report shapes by design). Additive key.
-SCAN_SCHEMA_VERSION = "1.15"
+#: 1.16 -- P0.4: the ``diff`` block gains ``analysis_assurance`` (the same
+#:        shape ``compare``'s own top-level ``analysis_assurance`` key
+#:        already carries, via the identical ``analysis_assurance_report_
+#:        dict`` narrowing helper), always present on a real ``--against``
+#:        comparison regardless of whether ``--require-complete-analysis``
+#:        was passed (Codex review: a consumer dispatching on
+#:        ``scan_schema_version`` had no way to detect this additive
+#:        contract change). Reports how complete/trustworthy the run's own
+#:        evidence was -- depth, TU/export accounting, fact-set
+#:        comparability, header-context drift, source-graph completeness --
+#:        independently of the compatibility verdict; the flag only
+#:        controls whether an incomplete status additionally floors the
+#:        exit code. Additive key, absent only for the ``NOT_COMPARABLE``/
+#:        audit-only ``diff`` shapes that never reach a real comparison.
+#: 1.17 -- P0.4: the ``diff`` block gains ``analysis_assurance_exit_
+#:        contribution`` (``0``/``1``), the exact sibling of the pre-existing
+#:        ``contract_coverage_exit_contribution`` for the analysis-assurance
+#:        axis -- read directly rather than recomputed by
+#:        ``aggregate.GateInfo.from_scan_report``/``_analysis_assurance_exit``,
+#:        since the aggregate holds none of the evidence needed to answer it
+#:        again (Codex review: without this field, a target whose severity
+#:        gate read ``0`` but whose analysis-assurance axis independently
+#:        floored the real exit to ``1`` fed the aggregate a green result for
+#:        that target). Always present on a real ``--against`` comparison,
+#:        regardless of whether ``--require-complete-analysis`` was passed
+#:        (``0`` either way when the flag wasn't given or the status was
+#:        already ``complete``). Additive key, absent only for the same
+#:        NOT_COMPARABLE/audit-only shapes ``analysis_assurance`` itself is.
+#: 1.18 -- CLI cleanup phase two, PR E: the ``diff`` block gains ``exit``,
+#:        the same canonical ``ExitDecision`` (``exit_decision.
+#:        resolve_compare_exit_decision``) ``compare``'s own top-level
+#:        ``exit`` key already carries since report_schema_version 2.41 (PR
+#:        G1, #789) -- ``{code, reasons, compatibility_contribution,
+#:        contract_coverage_contribution, analysis_assurance_contribution,
+#:        crosscheck_promotion_contribution}`` (the last one added by
+#:        report_schema_version 2.42 -- see that entry), so a reader
+#:        doesn't have to re-derive "why is this exit N" from the
+#:        separately-emitted ``severity``/``analysis_assurance_exit_
+#:        contribution``/``contract_coverage_exit_contribution`` fields.
+#:        Nested under ``diff`` (not ``ScanOutcome``'s own top-level
+#:        ``verdict``/``exit_code``, which additionally folds the scan-only
+#:        budget/``NOT_COMPARABLE`` axes this key does not model -- see
+#:        ``exit_decision.resolve_compare_exit_decision``'s own docstring).
+#:        A maintainer-promoted ``--crosscheck KEY=error`` finding raises
+#:        this block's ``code`` after the fact
+#:        (``scan_engine._promote_published_gate``), the same way it
+#:        already raises the persisted ``severity`` block -- by
+#:        reconstructing the whole decision through ``exit_decision.
+#:        resolve_exit_decision`` with ``crosscheck_promotion_contribution``
+#:        set to the promoted finding's own exit contribution, rather than
+#:        hand-patching ``code``/``reasons`` in place (an earlier revision
+#:        did exactly that and broke this class's own ``code == max(the
+#:        contributions)`` invariant -- Codex review). Additive key, absent
+#:        only for the same NOT_COMPARABLE/audit-only shapes
+#:        ``analysis_assurance`` itself is.
+SCAN_SCHEMA_VERSION = "1.18"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
@@ -779,9 +936,20 @@ def current(name: str) -> str | int:
         from ..buildsource.build_output import BUILD_OUTPUT_SCHEMA
 
         return BUILD_OUTPUT_SCHEMA
-    from ..buildsource.run_plan import RUN_PLAN_SCHEMA
+    # RUN_PLAN_SCHEMA_GATE, not the base RUN_PLAN_SCHEMA -- a run-plan.json
+    # is stamped one of two schema strings depending on whether it carries a
+    # `gate` block (CLI cleanup phase two, PR 2 continuation), so there is
+    # no single fixed "the" version this artifact always emits. This
+    # registry promises "the current version abicheck emits" (this
+    # function's own docstring); the highest version abicheck can produce
+    # is the truthful answer an external integrator/doc generator needs to
+    # be prepared to parse, not the lower, conditionally-emitted one (Codex
+    # review, fresh evidence -- reporting the base RUN_PLAN_SCHEMA here made
+    # this registry silently unaware of the newly emitted gate-bearing
+    # format).
+    from ..buildsource.run_plan import RUN_PLAN_SCHEMA_GATE
 
-    return RUN_PLAN_SCHEMA
+    return RUN_PLAN_SCHEMA_GATE
 
 
 __all__ = [

@@ -145,7 +145,7 @@ def test_skill_declares_an_abicheck_version_range(skill_dir: Path):
 #: every later PR over surface that had in fact already shipped).
 #:
 #: 0.6.0 because `aggregate`, `project plan`, `--report-mode root-cause`,
-#: `--diagnostic-comparison`, and `--contract-evaluation` all postdate the
+#: `--diagnostic-comparison`, and `--contract` all postdate the
 #: 0.5.0 release. Raise this only when a skill starts depending on surface
 #: that first ships in a later release — not when the tree's version moves.
 SURFACE_FLOOR = (0, 6, 0)
@@ -161,7 +161,7 @@ def test_declared_minimum_is_not_a_release_that_lacks_the_surface(skill_dir: Pat
     reports the *last published* version (there is no separate dev marker), so
     satisfying that assertion forced the minimum down to a release that
     predates `aggregate`, `project plan`, `--report-mode root-cause`,
-    `--diagnostic-comparison`, and `--contract-evaluation`. The preflight then
+    `--diagnostic-comparison`, and `--contract`. The preflight then
     approved exactly the installation the workflow cannot run on — the failure
     the version range exists to prevent.
 

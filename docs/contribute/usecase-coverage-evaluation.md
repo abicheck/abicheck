@@ -20,7 +20,7 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **396 `ChangeKind`s**
+thin on the breadth axes.** The "what changed" dimension — **395 `ChangeKind`s**
 in a 5-tier policy model, **193 calibrated example cases** (159 binary shared-library competitor lanes plus 34 dedicated fixture/source lanes), ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
@@ -72,7 +72,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 396 change kinds; 193 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
+| Change taxonomy | `complete` | 395 change kinds; 193 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
@@ -84,7 +84,7 @@ A real invocation is a point in this space:
 | Build-config matrix (`probe`) | `complete` | **G2 closed**: wired into `compare`; both CXX floor and API_DEPENDS proven e2e (`.o` `.symtab` surface capture fixed) |
 | Bundle / multi-library | `complete` | all detectors run via `compare-release`; case84 validated e2e (Linux-only by design; cross-platform → G1) |
 | Plugin (host↔plugin) | `complete` | **G5 closed**: `plugin-check` CLI + `check_plugin_host_contract` API + plugin_abi policy |
-| Security-hardening drift | `complete` | **G12 closed**: full checksec surface (RELRO/BIND_NOW/PIE/canary/FORTIFY/W^X) diffed; shipped `--policy-file security` gate |
+| Security-hardening drift | `complete` | **G12 closed**: full checksec surface (RELRO/BIND_NOW/PIE/canary/FORTIFY/W^X) diffed; shipped `--policy security` gate |
 | GNU Make / EPICS-style zero-config build evidence | `complete` | **PR #464**: `--sources` auto-runs fixed GNU Make dry-run query when no compile DB exists; CI covers GNU/BSD launcher selection and make/gmake/gnumake/mingw32 transcript parsing |
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
 | Kernel / eBPF (BTF/CTF) | `complete` | **G6 closed**: BTF + CTF struct-change run through `compare`; committed `case121` BTF blobs + bare-blob CLI ingestion + `gcc -gbtf` integration fixture |
@@ -117,7 +117,7 @@ A real invocation is a point in this space:
 | **G18** | modeled | Bazel L3 build-evidence adapter (`buildsource/adapters/bazel.py`, `cquery`/`aquery` jsonproto → `BuildEvidence`) exists but has never been validated end-to-end on a real Bazel C++ project (blocked on oneDAL's Bazel + legacy-makefile, no-CMake toolchain). |
 | **G19** | complete | PR-tier source intelligence (ADR-035, D1–D10): always-on compiler-free pre-scan + risk-scored escalation, intra-version cross-source validation findings (six checks + FP-rate-gate corpus), single-release hygiene audit, evidence-directed scan focusing, build-emitted source-facts protocol, and a typed `run_scan`/`ScanResult` API + per-level provider protocol with per-project cost estimate. |
 | **G20** | partial | Source-scan & cross-source example corpus (ADR-035 demonstration): single-release audit cases, cross-source corroboration cases (combination beats any single source), and evidence-directed focusing scenarios. Grows the `examples/` catalog + test suites to demonstrate the G19 engine; no engine change. |
-| **G21** | partial | One-shot deep compare + CLI usability (oneDAL eval). **Shipped (PR #422):** the `--depth headers\|build\|graph\|source\|full` dial (`--max`=full, reusing the `scan --depth` vocabulary) on `dump`; rich-click option-group `--help` panels (collapse M1); and the strict-mode honesty fix (empty requested L4 → `skipped`). **Remaining:** the one-shot `compare` orchestrator (dump both sides with `--sources`, then compare) + header/source auto-discovery, a cross-platform list-threaded `--gcc-option`, `compile_commands.json` auto-synthesis, a fail-loud signal on an empty requested layer, and vocab unification (M5). |
+| **G21** | partial | One-shot deep compare + CLI usability (oneDAL eval). **Shipped (PR #422):** the `--depth headers\|build\|graph\|source\|full` dial (`--max`=full, reusing the `scan --depth` vocabulary) on `dump`; rich-click option-group `--help` panels (collapse M1); and the strict-mode honesty fix (empty requested L4 → `skipped`). **Remaining:** the one-shot `compare` orchestrator (dump both sides with `--sources`, then compare) + header/source auto-discovery, a cross-platform list-threaded `--compiler-option`, `compile_commands.json` auto-synthesis, a fail-loud signal on an empty requested layer, and vocab unification (M5). |
 | **G22** | ✅ closed | CLI interface contract, config balance, and extension policy ([ADR-037](adr/037-cli-interface-contract.md)). Followed G21's depth dial with the structural cleanup the flag-divergence audit surfaced: three named tiers with `service.py` as the only compare chokepoint (fixes `compare-release` bypassing it with a different `scope_public` default), typed `CompareRequest` dataclasses, one decorator per shared option family (kills the severity/header/policy/debug copy-paste drift), a single `--depth` vocabulary (drops the "evidence" naming and the user-facing L5-graph rung), folding `compare-release`/`deep-compare` into `compare`, `--header-backend` → `--ast-frontend`, a CLI↔`.abicheck.yml` rebalance, an explicit `--exit-code-scheme`, and a `cli-contract` CI gate. Backward-compat mechanism designed, left advisory until 1.0. |
 | **G16** | ✅ closed | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. Actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure; a dedicated `HeaderToolchainError` (a `SnapshotError` subclass) so callers can branch on "this failure carries an actionable remediation"; and a real-host `integration` end-to-end check (`tests/test_header_scope_toolchain.py`) over a `<math.h>`-including header. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure for a too-old host toolchain remains a newer-Clang castxml or the libclang extractor (G4). |
 | **G25** | planned | Cython API/ABI frontend (`.pxd` + `__pyx_capi__` capsule surface) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#1-a-first-class-cython-apiabi-frontend). Neither the native C-ABI check (G14) nor the Python-level API check (G23) see a capsule signature change. |

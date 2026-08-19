@@ -271,9 +271,10 @@ class BuildConfig:
     #: newer schema read by an older abicheck) **warns**, never errors, so a
     #: project can adopt a future key without breaking older installs. Keys parsed
     #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
-    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline`` →
-    #: ``project_targets.py``, ADR-047 §3/G30 P1.5) are listed so they don't trip
-    #: the warning.
+    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline``/
+    #: ``aggregate`` → ``project_targets.py``, ADR-047 §3/G30 P1.5; CLI cleanup
+    #: phase two, PR 2 follow-up for ``aggregate``) are listed so they don't
+    #: trip the warning.
     _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "build",
@@ -292,6 +293,7 @@ class BuildConfig:
             "bundles",
             "profiles",
             "baseline",
+            "aggregate",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -1726,7 +1728,7 @@ def _make_source_extractor(
 
     # pick_compiler_binary() only consults compiler_binary for CL-vs-GNU mode
     # detection, not clang_bin (the binary to invoke) -- forward an explicit
-    # --gcc-path override (e.g. dpcpp-cl) so mode detection sees it too,
+    # --compiler override (e.g. dpcpp-cl) so mode detection sees it too,
     # instead of silently falling back to each CompileUnit's own argv[0]
     # (Codex review). Skip it for the generic "clang" default so
     # auto-detection from a mixed-toolchain compile database still works.

@@ -1325,11 +1325,25 @@ def link_source_abi(
         surface.mappings["non_public_symbol_to_reason"] = dict(
             sorted(non_public.items())
         )
+    # `non_public` is folded into `all_matched` (Codex/lab review): it is an
+    # ACCOUNTING classification, not a source match, but `_classify_non_public_
+    # exports`'s own docstring is explicit that it exists precisely so a
+    # dependency/internal/own export is not double-counted as a "genuinely
+    # unclassified gap" -- leaving it out of `all_matched` did exactly that:
+    # every symbol classified here (a strict subset of what was fed in) still
+    # landed in `symbols_without_decl` below, so ExportAccounting's rollup
+    # (analysis_assurance._export_accounting) summed both `internal` and
+    # `unaccounted` from overlapping sets instead of disjoint ones -- e.g. 6
+    # exports all classified as internal read as `internal=6,
+    # unaccounted=6` (12 > 6 total) instead of `internal=6, unaccounted=0`,
+    # keeping a fully-accounted comparison stuck at `analysis_assurance.
+    # status="partial"` under `--require-complete-analysis` for no real gap.
     all_matched = (
         decl_matched
         | set(synthesized)
         | set(template_instantiations)
         | set(allocator_interposers)
+        | set(non_public)
     )
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)
@@ -1449,11 +1463,15 @@ def relink_surface_exports(
         surface=surface,
     )
     surface.mappings["non_public_symbol_to_reason"] = dict(sorted(non_public.items()))
+    # See link_source_abi's identical fold for the full rationale: `non_public`
+    # must join `all_matched` or its symbols double-count as both `internal`
+    # and `unaccounted` downstream (analysis_assurance._export_accounting).
     all_matched = (
         matched
         | set(synthesized)
         | set(template_instantiations)
         | set(allocator_interposers)
+        | set(non_public)
     )
 
     surface.unmatched["symbols_without_decl"] = sorted(exported - all_matched)

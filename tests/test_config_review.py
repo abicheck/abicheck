@@ -3,7 +3,7 @@
 - compare: tri-state --demangle (default ON for human formats, OFF for json/sarif)
 - compare: explicit exit-code-scheme announcement on stderr
 - compare / dump: --debug-format selector superseding --btf/--ctf/--dwarf
-- compare: --report-mode impact == full + --show-impact
+- compare: --report-mode impact is the one way to ask for the impact table
 - compare-release: --scope-public-headers default ON + toggle, -j default 0,
   severity-aware exit aggregation
 - appcompat: --scope-public-headers wiring, -H/-I ignored-mode warning,
@@ -247,13 +247,13 @@ class TestCompareReleaseDefaults:
 
     def test_severity_options_present(self):
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
-        # `compare` now drives directory/package (release) comparisons too. It
-        # surfaces the full severity family (the coarse --severity-preset plus the
-        # per-category overrides) — unlike the removed `compare-release` command,
-        # which hid the per-category knobs. The per-category overrides are in
-        # the advanced tier (G21.8 collapse M2), folded behind --help-all.
+        # `compare` now drives directory/package (release) comparisons too, and
+        # --severity-preset is the whole of its CLI severity surface: the four
+        # per-category overrides were hidden duplicates of `.abicheck.yml`'s
+        # own `severity:` block and have been removed, so the config file is
+        # their one spelling.
         assert "--severity-preset" in out
-        assert "--severity-abi-breaking" in out
+        assert "--severity-abi-breaking" not in out
 
 
 # ── §5 compare-release severity-aware exit aggregation ──────────────────────

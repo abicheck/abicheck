@@ -8,7 +8,7 @@
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
 > [7. Designing for Stability](07-designing-for-stability.md) ·
-> [8. Detecting Breaks](08-detection.md)
+> [Detecting Breaks](08-detection.md)
 
 **What you'll learn on this page**
 
@@ -201,15 +201,36 @@ mangler ignored it: `void reset() noexcept` and `void reset()` both mangle to
 `_ZN6Buffer5resetEv` and resolve to the *same* `.dynsym` entry. Removing
 `noexcept` therefore **does not break linkage** — hence not BREAKING.
 
-What it *does* break is the caller's **unwinding assumption**. The v1 compiler
-saw `noexcept`, so it omitted exception landing pads, cleanup frames, and
-`.eh_frame` entries at the call site. If v2 now throws, the exception propagates
-into a frame with no unwinding metadata and `std::terminate()` fires
-unconditionally — every destructor skipped, every `catch` bypassed.
+What it *does* put at risk is the caller's **unwinding assumption**. The v1
+compiler saw `noexcept` and compiled the call site on the promise that nothing
+would propagate out of it — typically emitting no cleanup landing pad for that
+call. If v2 now throws, an exception travels through a frame that was never
+compiled to cooperate with it.
+
+Keep four independent facts separate here, because they have different
+mechanisms and different verdicts:
+
+1. **Linkage.** On an ordinary member or free function, toggling `noexcept`
+   leaves the mangled symbol unchanged — so nothing breaks at link or load
+   time.
+2. **Type system.** Since C++17 `noexcept` *is* part of the function type, so it
+   does participate in mangling wherever a full function type is encoded (see
+   the C++17 note below).
+3. **Behavioral contract.** Letting an exception escape where a compiled caller
+   was promised none is a real incompatibility — but what actually *happens*
+   (local cleanups skipped, an outer handler still reached, or
+   `std::terminate()`) depends on the compiled caller, the toolchain, and the
+   control flow. It is not one fixed outcome, and this page deliberately does
+   not assert one; the mechanics are owned by
+   [Exception Unwinding](../exception-unwinding-abi.md).
+4. **Scanner behavior.** The bare `noexcept` toggle, a runtime-floor finding,
+   and a genuine symbol/type break are three *different* findings from
+   different evidence — don't explain them with one mechanism (see the note
+   below).
 
 This is the deployment-risk shape: binary-linkable, source-recompilable, but
-**semantically unsafe** for binaries built under the stricter old contract — the
-kind of change that merits review rather than a silent pass.
+**semantically riskier** for binaries built under the stricter old contract —
+the kind of change that merits review rather than a silent pass.
 
 !!! note "How abicheck sees it"
     abicheck classifies the bare change kinds `func_noexcept_removed` /
@@ -226,13 +247,31 @@ kind of change that merits review rather than a silent pass.
 
 !!! note "The C++17 subtlety"
     C++17 made `noexcept` part of the function *type*, but under Itanium that
-    only changes mangling where the *full function-type* is encoded — function
-    pointers, references to functions, and templates parameterized by function
-    type — **not** the `<bare-function-type>` used for ordinary member/free
-    symbols. So toggling `noexcept` on a plain declaration leaves the direct
-    symbol unchanged (abicheck: 🟢 COMPATIBLE), but the **same change escalates
-    to 🔴 BREAKING** for callers that pass the function through a pointer or
-    template where the `E` tag now participates in the mangled name.
+    only changes mangling where the *full function-type* is encoded — **not**
+    the `<bare-function-type>` used for ordinary member/free symbols. So
+    toggling `noexcept` on a plain declaration leaves the direct symbol
+    unchanged (abicheck: 🟢 COMPATIBLE).
+
+    Be precise about what escalates. Simply *taking the address* of
+    `reset() noexcept` does not: the compiled pointer still targets the same
+    unchanged `_ZN6Buffer5resetEv`, so nothing breaks at link or load. The
+    **🔴 BREAKING** case is narrower — the function type has to be embedded in
+    some *other* ABI-visible mangled entity, so that entity's own name moves:
+    an exported function taking `void (*)() noexcept` as a parameter, or a
+    template specialization instantiated on the function type. The component
+    that encodes it is **`Do`**, not the `E` that terminates every function
+    type regardless:
+
+    ```text
+    void take(void (*)() noexcept);   →  _Z4takePDoFvvE
+    void take(void (*)());            →  _Z4takePFvvE
+    ```
+
+    Same function name, same everything else — `Do` is the only difference,
+    and dropping `noexcept` from the parameter type is what makes the old
+    symbol vanish.
+
+    The old symbol disappears and consumers of it fail to link.
 
 ---
 
@@ -261,12 +300,20 @@ cross-DSO RTTI trap, and what abicheck can and cannot observe about it.
 
 ## 6. Trivial → non-trivial: the invisible calling-convention flip
 
-The System V AMD64 convention passes **trivially-copyable** aggregates directly
-in registers, but passes **non-trivially-copyable** ones *by invisible
-reference* — the caller materializes the object on the stack and hands the callee
-a pointer. Whether a class is trivially copyable is decided by whether it has
-*user-provided* copy/move/destructor special members. **A single line flips the
-register/memory decision.**
+An aggregate that is **trivial for the purposes of calls** is passed according
+to the platform's own C ABI — often in registers, though System V AMD64 still
+classifies it as `MEMORY` when it is too large or has unaligned fields. A
+**non-trivial** one is instead passed *by invisible reference*: the caller
+materializes the object on the stack and hands the callee a pointer. Flipping
+a type between the two therefore changes how every existing caller passes it. The governing property is the Itanium ABI's
+[*non-trivial for the purposes of calls*](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#non-trivial-parameters)
+rule — related to, but not identical with, `std::is_trivially_copyable`. A type
+qualifies when it has a **non-trivial** copy constructor, move constructor, or
+destructor, *or* when all of its eligible copy and move constructors are
+**deleted**. Note that "non-trivial" is not the same as "user-provided": an
+*implicit* special member is non-trivial too if the class has virtual functions
+or virtual bases, or if a base or member's own corresponding member is
+non-trivial. **A single line flips the register/memory decision.**
 
 ```cpp
 /* v1 */ struct Point { double x, y; };                 // trivially copyable
@@ -280,9 +327,18 @@ garbage, with no toolchain diagnostic
 ([case69](../../reference/examples/case69_trivial_to_nontrivial.md)).
 
 !!! note "How abicheck sees it"
-    No header-diff tool that looks only at declarations catches this. abicheck
-    reports `value_abi_trait_changed` by inspecting the DWARF
-    trivially-copyable flag.
+    No header-diff tool that looks only at declarations catches this. Two
+    *different* findings cover it, from two different evidence sources — the
+    exact per-kind mapping is owned by
+    [Class Layout ABI & API](../class-layout-abi.md#the-class-layout-change-catalog-mapped-to-abicheck):
+
+    - `value_abi_trait_changed` (L1, DWARF). DWARF has no
+      "trivially copyable" attribute; abicheck *infers* non-triviality-for-calls
+      from the DIE structure (a user-provided destructor or copy/move
+      constructor, a base class, or a member whose own type is non-trivial).
+    - `trivially_copyable_lost` (L2, header AST). Read from the compiler's own
+      trait, which only the direct-clang AST path supplies — not castxml, and
+      not DWARF.
 
     **Design rule:** pin the trivially-copyable status of any by-value type
     from version 1. If cleanup might ever be needed, commit *from day one* to
@@ -356,7 +412,7 @@ The common thread: these layouts are computed from *the whole inheritance and
 member graph*, so the break surfaces in classes the author never edited.
 Detection therefore needs the compiler's own record of the final layout — DWARF
 sizes/offsets (L1) or the header AST (L2); see
-[Part 8](08-detection.md) for the full evidence story.
+[Detecting Breaks](08-detection.md) for the full evidence story.
 
 ---
 

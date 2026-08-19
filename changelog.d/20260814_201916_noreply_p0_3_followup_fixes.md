@@ -668,3 +668,46 @@
   root-caused fix — a future contributor hitting the same shape of
   CI-only, unreproducible `NameError`/mypy `name-defined` failure should
   not assume this file's `import os` is the only place it could recur.
+- Merged `main` (27 commits of drift since this branch's original base)
+  into this branch to resolve real conflicts (`mergeable_state: "dirty"`)
+  across the four files this PR revises most:
+  `abicheck/buildsource/adapters/base.py`,
+  `abicheck/buildsource/header_compile_context.py`,
+  `abicheck/buildsource/source_extractors/_argv.py`, and
+  `abicheck/service_input_resolution.py`. Every conflict was a genuine
+  case of both sides adding real, compatible work to the same region, not
+  a duplicate or a stale change — resolved by preserving both:
+  `adapters/base.py`'s MSVC/clang-cl driver-name recognition now goes
+  through `main`'s single `header_utils.is_msvc_driver_stem` vocabulary
+  (dropping this PR's own narrower, dumper_clang-based
+  `_is_cl_style_driver_name`, which it subsumes) while keeping this PR's
+  own executable-position restriction fix (never matching a source file
+  whose name happens to end in `-cl`); `header_compile_context.py` keeps
+  both branches' new `_EffectiveContextSignature` fields (`gcc_path` here,
+  `forced_includes` from `main`'s PR D/3B) and both new `CompileContext`
+  fields in the rendered command and the ambiguity-error message;
+  `_argv.py` keeps this PR's new split-operand-ABI-flag decoding
+  (`SPLIT_OPERAND_ABI_FLAGS`/`split_operand_survivor`) while adopting
+  `main`'s move of the forced-include matchers into `header_utils` (a
+  strict supersession of this PR's own now-dead local copies, verified
+  identical logic); `service_input_resolution.py` drops this PR's own
+  `_seeded_includes`/`_merge_l3_compile_context`/`_seeded_compile_context`
+  in favor of `main`'s consolidated `_seeded_includes_and_compile_context`
+  (`main`'s independent PR C dedup, landed after this PR's own Finding-3
+  fix and superseding its home for that logic) — but `main`'s own moved
+  copy of `_merge_l3_compile_context` (now living in
+  `buildsource/l2_seed.py`) had NOT picked up this PR's Finding-3
+  `gcc_path`/`gcc_prefix` "derived leads, explicit wins" precedence fix,
+  since `main`'s move predates this PR's fix landing — ported forward into
+  `l2_seed._merge_l3_compile_context` so the fix is not silently lost by
+  the consolidation. Also fixed two merge-adjacent issues the merge itself
+  exposed rather than caused: `tests/test_verify_profiles.py`'s
+  `test_an_ordinary_failure_is_still_a_failure` (a `main`-only test)
+  needed its mock subprocess result to carry `stdout`/`stderr` attributes
+  once combined with this PR's own `run_step` diagnostic-printing change;
+  and `tests/test_header_compile_context.py`/`tests/test_build_source_pack.py`
+  both grew past the 2000-line AI-readiness hard cap once both branches'
+  independent additions landed together, split into two new sibling files
+  (`tests/test_header_compile_context_merge.py`,
+  `tests/test_build_source_pack_redaction.py`) following this repo's
+  established sibling-split convention.

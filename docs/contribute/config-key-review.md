@@ -20,9 +20,9 @@ This document answers three questions:
 
 | Mode | Command(s) | Knob count (approx) | Policy | Severity | Public-surface scoping | Exit-code scheme |
 |------|-----------|--------------------:|:------:|:--------:|:----------------------:|------------------|
-| Compare | `compare` | ~55 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` | ✅ **default ON** | 0/2/4 (legacy) **or** 0/1/2/4 (severity) |
-| Multi-binary | `compare-release` | ~45 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` (aggregated) | ✅ **default ON, toggle** | 0/2/4/8 (+severity) |
-| App-centric | `appcompat` | ~27 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` (app-scoped) | ✅ **default ON, toggle** | 0/1/2/4 |
+| Compare | `compare` | ~55 | ✅ `--policy`/`--policy` | ✅ `--severity-*` | ✅ **default ON** | 0/2/4 (legacy) **or** 0/1/2/4 (severity) |
+| Multi-binary | `compare-release` | ~45 | ✅ `--policy`/`--policy` | ✅ `--severity-*` (aggregated) | ✅ **default ON, toggle** | 0/2/4/8 (+severity) |
+| App-centric | `appcompat` | ~27 | ✅ `--policy`/`--policy` | ✅ `--severity-*` (app-scoped) | ✅ **default ON, toggle** | 0/1/2/4 |
 | Snapshot | `dump` | ~30 | ❌ | ❌ | n/a | 0/1/2 |
 | ABICC drop-in | `compat check`/`dump` | ~110 (≈24 no-op stubs) | ❌ (hard-wired) | ❌ | ❌ | 0/1/2, 3–11 errors |
 | Stack | `stack-check`, `deps` | ~7 each | ❌ | ❌ | n/a | 0/1/4 / 0/1 |
@@ -80,7 +80,7 @@ severity scheme with no signal.
 **Resolution (implemented, see §7 do-first #2):**
 - The `--severity-preset`/`--severity-*` option group was added to
   `compare-release` (aggregated across per-library, bundle, and matrix findings,
-  honoring per-library `--policy-file` overrides; removed-library exit `8` still
+  honoring per-library `--policy` overrides; removed-library exit `8` still
   wins) and `appcompat` (full-compare mode only; app-scoped to `breaking_for_app`,
   with missing required symbols/versions floored at `4`).
 - `compare` now **prints the active exit-code scheme to stderr** for human
@@ -95,7 +95,7 @@ removing the "which scheme am I in?" confusion.
 
 ### 🟠 2.3 Policy availability is uneven
 
-`--policy` + `--policy-file` exist on `compare`, `compare-release`, `appcompat`,
+`--policy` + `--policy` exist on `compare`, `compare-release`, `appcompat`,
 and `probe compare`. They are **absent** on `compat` (hard-wired `strict_abi`,
 by ABICC-parity design) and on `dump`/`stack-check`/`deps`. The asymmetry is
 defensible per-mode, but it isn't surfaced anywhere; a user migrating an ABICC
@@ -198,13 +198,13 @@ priority — the redundancy is cosmetic.
 
 ### 3.3 The report-content "show-*" family overlaps
 
-`compare` carries: `--show-redundant`, `--show-filtered`, `--show-impact`,
+`compare` carries: `scope.show_redundant: true`, `--show-filtered`, `--show-impact`,
 `--show-only`, `--report-mode {full,leaf}`, `--recommend`, `--stat`
 (plus `appcompat --show-irrelevant`). Two genuine overlaps:
 
 - `--report-mode leaf` and `--show-impact` both surface "root change → affected
   interfaces" grouping. A user must learn both to discover they're related.
-- `--show-redundant` (un-filter derived changes) vs `--report-mode full/leaf`
+- `scope.show_redundant: true` (un-filter derived changes) vs `--report-mode full/leaf`
   (group vs flat) vs `--show-filtered` (out-of-surface audit) are three separate
   axes that read as one "verbosity" concept to newcomers.
 
@@ -277,7 +277,7 @@ changes recommended.
 
 ## 6. Config-file keys (policy / suppression / severity)
 
-**Policy file** (`--policy-file`, `policy_file.py`): `base_policy`
+**Policy file** (`--policy`, `policy_file.py`): `base_policy`
 (default `strict_abi`), `overrides` (ChangeKind → `break|warn|risk|ignore`),
 `frozen_namespaces` (glob patterns that block downgrades). Clean, minimal, no
 redundancy. Unknown `base_policy` values are **rejected** with a `PolicyError`
@@ -287,7 +287,7 @@ previously warned-and-skipped as intentional typo tolerance, changed because a
 silently-dropped override for a renamed/misspelled kind can leave that kind on
 its base-policy verdict with no indication the override was ever dropped).
 The silent `strict_abi` fallback that exists in the low-level `get_policy()`
-helper (`checker_policy.py:715`) is **not** reachable through `--policy-file`,
+helper (`checker_policy.py:715`) is **not** reachable through `--policy`,
 because `PolicyFile.load()` validates the name first. No change needed here.
 
 **Suppression file** (`--suppress`, `suppression.py`): selectors `symbol`,
@@ -321,8 +321,10 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    `compare`/`dump`; the legacy `--btf/--ctf/--dwarf` flags are hidden but still
    functional. `--dwarf-only` was **not** renamed (a rename breaks documented
    command lines; left as-is). (§3.4)
-4. ✅ **Done.** `--report-mode` gained `impact` (sugar for `full` +
-   `--show-impact`); `--show-impact` still works standalone. (§3.3)
+4. ✅ **Done, and since completed.** `--report-mode` first gained `impact`
+   as sugar for `full` + the standalone flag; that flag has since been
+   removed, so `--report-mode impact` is now the only way to ask for the
+   impact table. (§3.3)
 5. ✅ **Done.** `--compile-db` is hidden from `--help` but still functional as an
    alias of `-p/--build-dir`. (§3.2)
 

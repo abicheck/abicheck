@@ -69,6 +69,7 @@ topics:
       - abicheck/cli_scan.py
       - abicheck/cli_scan_baseline.py
       - abicheck/scan_engine.py
+      - abicheck/exit_decision.py
     reference_page: reference/exit-codes.md
     task_pages:
       - use/ci-gating.md
@@ -281,7 +282,14 @@ topics:
     fact_sources:
       - abicheck/analysis_assurance.py
       - abicheck/schemas/compare_report.schema.json
+      # The composite Action's own require-complete-analysis input (a
+      # dedicated boolean mirroring the CLI flag, ADR-058-adjacent Action
+      # gating) implements this axis's opt-in exit-code gate at the Action
+      # layer, not just the CLI layer.
+      - action.yml
     reference_page: use/output-formats.md
+    task_pages:
+      - reference/github-action-inputs.md
     allowed_summaries:
       - learn/verdicts.md
 
@@ -293,12 +301,18 @@ topics:
     canonical_page: use/aggregate-reports.md
     fact_sources:
       - abicheck/aggregate.py
+      - abicheck/aggregate_manifest.py
       - abicheck/aggregate_findings.py
       - abicheck/cli_aggregate.py
+      - abicheck/buildsource/run_plan.py
+      - abicheck/buildsource/project_targets.py
+      - abicheck/schemas/aggregate_report.schema.json
     reference_page: reference/exit-codes.md
     task_pages:
       - use/github-action-recipes.md
       - integration/scenarios/multi-platform.md
+      - reference/run-plan-schema.md
+      - reference/project-targets-schema.md
 
   suppressions:
     canonical_page: use/suppressions.md
@@ -307,6 +321,24 @@ topics:
       - abicheck/suppression_yaml.py
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
+
+  # GitHub Actions workflow-command annotations (stderr rendering) and,
+  # since report schema 2.43, the same classification persisted as a
+  # `compare --format json` report field (CLI cleanup phase two, PR E) --
+  # distinct from `github-actions-surface` (the Action's own inputs/wiring)
+  # and `output-formats` (the report envelope in general).
+  pr-annotations:
+    canonical_page: use/annotations.md
+    fact_sources:
+      - abicheck/annotations.py
+      - abicheck/annotations_step_summary.py
+      - abicheck/reporter_contract_blocks.py
+      - abicheck/cli_compare_release.py
+      - abicheck/schemas/compare_report.schema.json
+      - action/run.sh
+      - action.yml
+    allowed_summaries:
+      - use/github-action-recipes.md
 
   output-formats:
     canonical_page: use/output-formats.md
@@ -447,3 +479,78 @@ topics:
       - learn/abi-series/04-cpp-abi.md
       - learn/abi-api-handling.md
       - learn/exception-unwinding-abi.md
+
+  # Part 0 names build-profile comparability as one of the eight
+  # compatibility dimensions but historically had no narrative page of its
+  # own for it (docs/AGENTS.md criterion 2: a new mental model — "which
+  # outcome, not just which finding" — was missing a home).
+  build-profile-comparability:
+    canonical_page: learn/build-profile-comparability.md
+    fact_sources:
+      - abicheck/comparability.py
+      - abicheck/checker.py
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - learn/environment-drift.md
+
+  # A separate axis from the eight compatibility dimensions in Part 0 §2:
+  # "which shape is the consumer" rather than "which kind of promise broke".
+  # Part 0 §5's "Name your contract shape" section already covers four of
+  # these shapes narratively; this page formalizes all eight into one table
+  # and composes the axis with dimension/direction/surface/build-profile
+  # (docs/AGENTS.md criterion 2: a genuinely new mental model, not just
+  # another variant of an already-explained mechanism).
+  consumer-models:
+    canonical_page: learn/consumer-models.md
+    fact_sources:
+      - abicheck/appcompat.py
+      - abicheck/cli_compare_helpers.py
+    allowed_summaries:
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-api-handling.md
+      - use/plugin-systems.md
+
+  # Parts 3-5 build their mental model from the Itanium C++ ABI, which
+  # Windows/MSVC does not use (docs/AGENTS.md criterion 2: a genuinely
+  # different mental model, not another Itanium variant). The exact
+  # capability facts stay owned by reference/platforms.md and Part 5's
+  # PE/COFF parallels table; this page is the narrative "why" companion.
+  msvc-pe-abi-model:
+    canonical_page: learn/msvc-pe-abi-model.md
+    fact_sources:
+      - abicheck/diff_cxx_rules.py
+      - abicheck/pdb_metadata.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/abi-series/05-linker-elf.md
+
+  # P0.2: explicit build-system root-target scoping (Bazel only so far) --
+  # dump/scan/the typed API/the Action all declaring which specific
+  # target(s) are the library under test instead of a workspace-wide query.
+  # learn/build-source-data.md's own "Scoping a Bazel query to specific root
+  # targets" section is the narrative home; registered per docs/AGENTS.md's
+  # "every new public-facing... Action input" rule (Codex review, PR #788).
+  build-target-scoping:
+    canonical_page: learn/build-source-data.md
+    fact_sources:
+      - abicheck/buildsource/l2_seed.py
+      - abicheck/buildsource/adapters/bazel.py
+      - abicheck/buildsource/build_evidence.py
+      - abicheck/cli_scan.py
+      - abicheck/cli_dump_helpers.py
+      - abicheck/scan_engine.py
+      - abicheck/service_scan.py
+      - action.yml
+      - action/run.sh
+      - action/validate-inputs.sh
+    # --build-target is primarily a CLI concept (cli-reference.md), extended
+    # identically to the typed API and the Action -- both already-registered
+    # generated references (cli-surface/python-api/github-actions-surface
+    # each own one), reused here the same way reference/exit-codes.md is
+    # already shared by two other topics above (no reference_page uniqueness
+    # constraint; Codex review, fresh evidence after the first fix).
+    reference_page: reference/cli-reference.md
+    task_pages:
+      - reference/python-api-reference.md
+      - reference/github-action-inputs.md

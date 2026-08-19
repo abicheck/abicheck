@@ -1599,7 +1599,7 @@ def test_scan_not_evaluated_addition_not_counted_as_promoted():
     # Codex review, two rounds. Round 1: severity.categorize_changes's
     # per-category `count` is a *display* count -- it classifies purely by
     # kind over diff.changes (unfiltered) and does not exclude a
-    # --contract-evaluation finding ADR-049 D1 left NOT_EVALUATED (proven
+    # --contract finding ADR-049 D1 left NOT_EVALUATED (proven
     # outside the declared contract). compute_gate_decision (the real exit
     # code) correctly excludes it via gate_eligible_changes, so an
     # `addition: error`-configured category whose only finding is

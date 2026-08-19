@@ -38,14 +38,14 @@ Key asymmetries worth stating explicitly to a user:
 
 The exit code follows that same split — `0` / `2` / `4`, plus `16` for a pair
 that could not be compared at all — **only on the legacy path**, meaning a run
-with no severity-aware grading and no `--contract-evaluation`. Two further
+with no severity-aware grading and no `--contract`. Two further
 axes can raise it, and neither is visible in the verdict:
 
 - **The severity gate.** Once severity-aware grading is resolved — from a
   `--severity-*` flag, `.abicheck.yml`, a run profile, or a gate pack — the
   exit code is the gate's, and an error-level finding in additions or quality
   alone exits `1` on a `COMPATIBLE` verdict.
-- **Contract coverage.** Under `--contract-evaluation`, a selected `--contract`
+- **Contract coverage.** Under `--contract`, a selected `--contract`
   domain short of evidence contributes `1`, folded with `max`: it raises a
   clean `0` and never lowers a `2`/`4`.
 

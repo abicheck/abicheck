@@ -15,26 +15,26 @@ report is graded* — and only one of them can hide a real break.
 
 ## Policy profiles — what a change kind means for this project
 
-`--policy strict_abi|sdk_vendor|plugin_abi` selects a built-in profile;
-`--policy-file FILE` supplies a project's own YAML profile, which can
-override the verdict for specific change kinds and declare internal
-namespaces. Policy answers "for a library of this shape, is this kind of
+`--policy strict_abi|sdk_vendor|plugin_abi` selects a built-in profile, and
+the same `--policy` takes a policy document instead — a path, or a packaged
+built-in name — supplying a project's own YAML profile, which can override
+the verdict for specific change kinds and declare internal namespaces. Policy answers "for a library of this shape, is this kind of
 change breaking?" — a plugin ABI and a vendored SDK genuinely disagree.
 
 Owned by [the policy profiles page](../../docs/use/policies.md).
 
 ## Severity and the gate — how a report becomes an exit code
 
-`--severity-abi-breaking`, `--severity-potential-breaking`,
-`--severity-addition`, `--severity-quality-issues`, and
-`--severity-preset default|strict|info-only` set the severity assigned per
-category; `--exit-code-scheme auto|legacy|severity` selects which exit-code
-contract applies.
+`--severity-preset default|strict|info-only` sets the coarse severity
+grading; a `.abicheck.yml` `severity:` map sets an individual category
+(abi_breaking, potential_breaking, addition, quality_issues), which has no
+CLI flag of its own. `--exit-code-scheme
+auto|legacy|severity` selects which exit-code contract applies.
 
 In the report, `severity.exit_code`, `severity.blocking`, and
 `severity.blocking_categories` express the gate decision. The block is present
-whenever severity-aware grading was **resolved from any source** — a
-`--severity-*` flag, a `.abicheck.yml` `severity:` map or
+whenever severity-aware grading was **resolved from any source** —
+`--severity-preset`, a `.abicheck.yml` `severity:` map or
 `exit_code_scheme: severity`, a run profile, or a gate pack — not only from a
 flag you passed. Absent means no gate was resolved anywhere and the exit code
 follows the legacy verdict mapping. (`policy_gate_decision` is an Action `check-target` field, not
@@ -49,8 +49,8 @@ say both.
 ## Suppressions — hiding a known, accepted finding
 
 `--suppress FILE` applies a suppression file (abicheck YAML or ABICC format);
-`--strict-suppressions` and `--audit-suppressions` make stale or overbroad
-rules visible, and the report's `suppression` / `suppression_audit` blocks
+`--audit-suppressions` (and a `.abicheck.yml` `suppression:` map's `strict`
+key) makes stale or overbroad rules visible, and the report's `suppression` / `suppression_audit` blocks
 record what was applied.
 
 Owned by [the suppressions page](../../docs/use/suppressions.md).

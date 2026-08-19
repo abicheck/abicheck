@@ -203,13 +203,13 @@ inputs:
     description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid. Forwarded to the internal analysis step.'
     required: false
   gcc-path:
-    description: 'Path to GCC/G++ cross-compiler binary. Forwarded to the internal analysis step.'
+    description: 'Path to GCC/G++ cross-compiler binary (the CLI --compiler). Forwarded to the internal analysis step.'
     required: false
   gcc-prefix:
-    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Forwarded to the internal analysis step.'
+    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu- (the CLI --compiler-prefix). Forwarded to the internal analysis step.'
     required: false
   gcc-options:
-    description: 'Extra compiler flags passed through to castxml. Forwarded to the internal analysis step.'
+    description: 'Extra compiler flags passed through to the header frontend (the CLI --compiler-option). Forwarded to the internal analysis step.'
     required: false
   sysroot:
     description: 'Alternative system root directory for cross-compilation. Forwarded to the internal analysis step.'
@@ -233,10 +233,6 @@ inputs:
   consumer-binary:
     description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison (forwarded as --used-by).'
     required: false
-  verify-runtime:
-    description: 'target-kind: app-consumer only. Forwarded to --verify-runtime.'
-    required: false
-    default: 'false'
   contract-file:
     description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line, # comments allowed), forwarded as --required-symbols.'
     required: false
@@ -262,9 +258,6 @@ inputs:
       channel: none), which always carries its own top-level exit_code.
     required: false
     default: 'default'
-  severity-addition:
-    description: 'Severity for new public API additions: error, warning, or info. Forwarded to the internal analysis step.'
-    required: false
   extra-args:
     description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
     required: false
@@ -564,13 +557,11 @@ runs:
         build-config: ${{ inputs.build-config }}
         depth: ${{ inputs.requested-depth }}
         used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
-        verify-runtime: ${{ inputs.target-kind == 'app-consumer' && inputs.verify-runtime || 'false' }}
         required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract-file || '' }}
         policy: ${{ inputs.policy }}
         policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
-        severity-addition: ${{ inputs.severity-addition }}
         extra-args: ${{ inputs.extra-args }}
         format: 'json'
         output-file: 'check-target-analysis.json'

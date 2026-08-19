@@ -35,6 +35,7 @@ GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}"
 SYSROOT="${INPUT_SYSROOT:-}"
 NOSTDINC="${INPUT_NOSTDINC:-false}"
 SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-}"
+REQUIRE_COMPLETE_ANALYSIS="${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
 # format (RPM, Deb, tar, conda, wheel) — mirrors action/run.sh's
@@ -188,6 +189,17 @@ case "$MODE" in
         _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       fi
     fi
+    # P0.4: require-complete-analysis is rejected outright by run.sh for a
+    # directory/package operand too -- the per-library release fan-out has
+    # no single analysis_assurance result to gate on -- so mirror that
+    # check here as well (same rationale as the compile-context guard
+    # immediately above: without it, a slow dependency-install step still
+    # runs before the request is rejected).
+    if [[ "$REQUIRE_COMPLETE_ANALYSIS" == "true" ]] \
+       && { { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
+            || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; }; then
+      _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
+    fi
     ;;
   *)
     # An unrecognized mode (e.g. a typo like 'scna') has no arm above, so
@@ -248,7 +260,7 @@ if [[ "$_JOBS" != "0" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_
   _warn "jobs is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
 fi
 
-# used-by/verify-runtime/required-symbol/required-symbols: compare mode only
+# used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/
 # --required-symbols are mutually exclusive on the CLI itself, but that
 # UsageError only surfaces after Python setup/dependency install/pip
@@ -262,9 +274,9 @@ _REQUIRED_SYMBOLS="${INPUT_REQUIRED_SYMBOLS:-}"
 if [[ -n "$_USED_BY" && ( -n "$_REQUIRED_SYMBOL" || -n "$_REQUIRED_SYMBOLS" ) ]]; then
   _fail "used-by is mutually exclusive with required-symbol/required-symbols -- set only one contract per check."
 fi
-_scoped_input_names=(used-by verify-runtime required-symbol required-symbols)
-_scoped_input_values=("$_USED_BY" "${INPUT_VERIFY_RUNTIME:-false}" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
-_scoped_input_unset_values=("" "false" "" "")
+_scoped_input_names=(used-by required-symbol required-symbols)
+_scoped_input_values=("$_USED_BY" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
+_scoped_input_unset_values=("" "" "")
 for _i in "${!_scoped_input_names[@]}"; do
   if [[ "${_scoped_input_values[$_i]}" != "${_scoped_input_unset_values[$_i]}" && "$MODE" != "compare" ]]; then
     _warn "${_scoped_input_names[$_i]} is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
@@ -323,6 +335,15 @@ if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" && "$MODE" != "scan" ]]; the
   _warn "public-header-dir is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
 fi
 
+# build-target: dump and scan modes only, same restriction and reasoning as
+# public-header-dir directly above (the CLI's own --build-target flag exists
+# on those two subcommands only; compare has no equivalent). run.sh's
+# compare/deps-tree/deps-compare branches never forward it (Codex review).
+_BUILD_TARGET="${INPUT_BUILD_TARGET:-}"
+if [[ -n "$_BUILD_TARGET" && "$MODE" != "dump" && "$MODE" != "scan" ]]; then
+  _warn "build-target is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
+fi
+
 # new-library-set: scan mode only (ADR-056). The scan-mode arm above already
 # fails outright on an invalid combination (new-library also set, or
 # against/abi-baseline also set) -- this only covers the inert case (set on
@@ -371,4 +392,15 @@ fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$FORMAT" != "sarif" ]]; then
   _fail "upload-sarif requires format: sarif (got '${FORMAT:-markdown}') — without it there is no SARIF report for the upload-sarif step to find."
+fi
+
+# build-info + compile-db, scan mode: the same conflict `action/run.sh`
+# rejects when it assembles argv, checked here so it fails before Python
+# setup, dependency install and toolchain provisioning -- this script's whole
+# reason for existing (Codex review). Kept scan-only for the same reason
+# run.sh keeps it scan-only: scan is the mode whose behavior changed, having
+# forwarded both operands and preferred compile-db, while compare and dump
+# have always resolved this pair by the documented build-info-wins fallback.
+if [[ "$MODE" == "scan" && -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
+  _fail "build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
 fi

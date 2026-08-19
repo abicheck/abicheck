@@ -54,15 +54,18 @@ encodes several layout facts in the *sizes* of the objects it emits into
 |--------|--------|-----------------|------|
 | Exported-symbol set | `.dynsym` names | Added/removed/renamed functions & objects (the `.dump`-equivalent) | `func_removed`, `func_removed_elf_only`, … |
 | Object symbol size | `st_size` of data symbols | `sizeof` of exported global objects | `symbol_size_changed` |
-| **Vtable slot count** | `st_size` of `_ZTV<class>` (`slots ≈ size/ptr − 2`) | A virtual method was added/removed/reordered | `vtable_slot_count_changed` |
-| **Inheritance shape** | `st_size` of `_ZTI<class>` (2 words = no base, 3 = single base, ≥4 = multiple/virtual) | Base-class set changed | `rtti_inheritance_changed` |
+| **Vtable group size** | `st_size` of `_ZTV<class>` (`slots ≈ size/ptr - 2`) | Vtable entries were net added or removed, *or* the inheritance shape changed. Not a pure reorder, which keeps the size identical — see [Class Layout ABI](../learn/class-layout-abi.md#3-binary-only-c-layout-diff_elf_layoutpy-l0) | `vtable_slot_count_changed` |
+| **Inheritance shape** | `st_size` of `_ZTI<class>` (2 words = no base, 3 = single base, ≥4 = multiple/virtual) | Base-class set changed *by enough to resize the typeinfo object* | `rtti_inheritance_changed` |
 | Mangled-name signature | demangled `.dynsym` entries | Parameter/return types & the owning class of each method | feeds the symbol diff |
 
 The vtable and RTTI signals are the important addition: a virtual-method change
-or a base-class change need **not** rename any mangled symbol, yet it resizes
-the class's `_ZTV`/`_ZTI` object — so abicheck sees it even on a fully stripped
-library. This is the binary-only analogue of upstream's `vtable.cpp` and the
-inheritance half of the `layout_*` goldens.
+or a base-class change need **not** rename any mangled symbol, yet a
+*size-changing* one resizes the class's `_ZTV`/`_ZTI` object — so abicheck sees
+it even on a fully stripped library. The qualifier matters: a change that leaves
+both emitted objects the same size (a pure virtual reorder, or a base swap that
+preserves the typeinfo runtime class and entry count) stays invisible at L0, and
+L0 never identifies *which* slot or base moved. This is the binary-only analogue
+of upstream's `vtable.cpp` and the inheritance half of the `layout_*` goldens.
 
 **What still needs DWARF, headers, or a golden:** exact member *offsets* and the
 `sizeof` of a type that is *not* backed by a sized data symbol (e.g. a class only

@@ -104,7 +104,7 @@ def _severity(
     (:func:`abicheck.severity.classify_effective_change`) — the same
     classification the exit code and ``severityGate`` properties block use —
     so a SARIF consumer keying off ``level`` never disagrees with the
-    configured gate (e.g. ``--severity-addition error`` must show additions
+    configured gate (e.g. ``severity.addition: error`` must show additions
     as ``level: error``, not the legacy policy severity).
 
     Without a *severity_config*, whenever the canonical per-finding verdict
@@ -292,10 +292,10 @@ def _contract_properties(
     """The per-finding ADR-049 contract fields, in reporter.py's canonical shape.
 
     ``contract_relevance_of`` returns ``None`` for a run that never opted into
-    ``--contract-evaluation``, which is what keeps this inert for every
+    ``--contract``, which is what keeps this inert for every
     pre-existing SARIF report. Before this shape was unified, only the
     ``NOT_EVALUATED`` case set any of these, so an ``IN_CONTRACT`` /
-    ``NOT_APPLICABLE`` finding under ``--contract-evaluation`` carried no
+    ``NOT_APPLICABLE`` finding under ``--contract`` carried no
     contract properties at all even though it has a real, stamped decision
     (CLI-audit P1).
     """
@@ -376,8 +376,8 @@ def _result_for(
     *evidence_status_override*, when given, wins over the kind-derived
     :func:`evidence_status_for_result` — mirrors ``reporter._change_to_dict``'s
     own override, for a scoped-only finding (``PE_ORDINAL_RETARGETED``,
-    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``, ``CONSUMER_RUNTIME_LOAD_FAILED``)
-    proven by the real consumer's own import table/execution, not by an
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``)
+    proven by the real consumer's own import table, not by an
     artifact-level library diff (Codex review).
     """
     library, old_version, new_version = (
@@ -440,10 +440,10 @@ def _result_for(
     # contract_reason_code/contract_assurance/compatibility_evaluation_status/
     # compatibility_decision/gate_contribution/contract_evidence_refs) --
     # previously only the NOT_EVALUATED case below set any of these, so an
-    # IN_CONTRACT/NOT_APPLICABLE finding under --contract-evaluation carried
+    # IN_CONTRACT/NOT_APPLICABLE finding under --contract carried
     # no contract properties at all in SARIF even though it has a real,
     # stamped decision. `contract_relevance_of` returns None for a run that
-    # never opted into --contract-evaluation, which is what keeps this
+    # never opted into --contract, which is what keeps this
     # unconditional call inert for every pre-existing SARIF report.
     relevance = contract_relevance_of(change)
     properties.update(_contract_properties(change, relevance, result, severity_config))
@@ -643,7 +643,7 @@ def _coverage_notifications(result: object) -> dict[str, object]:
 
     Returns an empty mapping -- so the key is absent, not empty -- when the
     run built no contract context, which is every run without
-    ``--contract-evaluation``. A run whose domain *closed* yields an empty
+    ``--contract``. A run whose domain *closed* yields an empty
     list, because "checked, nothing missing" and "never checked" are
     different states and a consumer must be able to tell them apart.
 

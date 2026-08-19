@@ -395,6 +395,13 @@ jobs:
   heavy-parity-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # Same dorny/paths-filter requirement as mutation.yml's resolve job —
+      # fixed in both places rather than only where it was reported, since
+      # one job silently losing its filter would skip the parity lanes it
+      # gates.
+      pull-requests: read
     outputs:
       run-heavy: ${{ steps.resolve.outputs.run-heavy }}
       reason: ${{ steps.resolve.outputs.reason }}
@@ -521,3 +528,152 @@ jobs:
           pip install build twine
           python -m build
           twine check dist/*
+
+  # ── PR A / PR 0B (CLI cleanup phase two): neutral-aggregate required
+  # checks for path-filtered workflows ────────────────────────────────────
+  #
+  # docs-pr.yml and test-action.yml are both `paths:`-filtered at the
+  # workflow level -- they simply don't run on a PR that doesn't touch their
+  # paths, and GitHub's branch-protection/Ruleset required-status-checks
+  # mechanism has no native way to say "required only when these paths
+  # changed" (checked directly against the GitHub REST/GraphQL API surface;
+  # confirmed absent). Requiring `build-docs`/`test-action-summary` directly
+  # would therefore strand every PR that never touches `docs/**`/
+  # `action/**`, since GitHub blocks merge on a required check that never
+  # reports at all, the same as on a failing one.
+  #
+  # These two jobs are the fix: `ci.yml` itself carries no `paths:` filter
+  # (it always runs), so each job independently re-evaluates the SAME path
+  # filter the target workflow's own trigger uses. When the paths don't
+  # match, there is nothing to gate and the job succeeds immediately. When
+  # they do match, the target workflow is guaranteed to have been triggered
+  # by the same `pull_request` event (running in parallel with this one), so
+  # this job polls that workflow's own aggregate check for the same head SHA
+  # and mirrors its conclusion -- succeeding, failing, or timing out loudly
+  # if the target check never completes. Only meaningful for `pull_request`
+  # events: neither `docs-pr.yml` nor `test-action.yml`'s `build-docs`/
+  # `test-action-summary` check re-runs on a `push`-triggered merge commit
+  # (a different, untested SHA), so waiting on `push` would only time out.
+  docs-pr-required:
+    name: docs-pr (required)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - name: Detect whether docs-pr.yml's own paths changed
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - 'abicheck/schemas/**'
+              - 'examples/**'
+              - 'mkdocs.yml'
+              - 'scripts/gen_examples_docs.py'
+              - 'scripts/publish_schemas.py'
+              - '.github/workflows/pages.yml'
+              - '.github/workflows/docs-pr.yml'
+      - name: Wait for docs-pr.yml's build-docs check and mirror its outcome
+        if: steps.filter.outputs.docs == 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
+        with:
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+            const checkName = 'build-docs';
+            const timeoutMs = 25 * 60 * 1000;
+            const pollMs = 15 * 1000;
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+                per_page: 100,
+              });
+              const run = data.check_runs.find(r => r.name === checkName);
+              if (run && run.status === 'completed') {
+                core.info(`${checkName} completed with conclusion: ${run.conclusion}`);
+                if (!['success', 'neutral'].includes(run.conclusion)) {
+                  core.setFailed(`${checkName} did not succeed (conclusion: ${run.conclusion})`);
+                }
+                return;
+              }
+              core.info(run
+                ? `${checkName} status: ${run.status} -- waiting`
+                : `${checkName} not reported yet -- waiting`);
+              await new Promise(r => setTimeout(r, pollMs));
+            }
+            core.setFailed(`Timed out waiting for ${checkName} to complete`);
+      - name: Nothing to gate
+        if: steps.filter.outputs.docs != 'true'
+        run: echo "docs-pr.yml's own paths didn't change -- nothing to gate."
+
+  test-action-required:
+    name: test-action (required)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - name: Detect whether test-action.yml's own paths changed
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4
+        with:
+          filters: |
+            action:
+              - 'action.yml'
+              - 'action/**'
+              - 'actions/check-target/**'
+              - 'actions/resolve-baseline/**'
+              - 'abicheck/**'
+              - 'pyproject.toml'
+              - 'pixi.lock'
+              - '.github/workflows/test-action.yml'
+              - '.github/workflows/check-single.yml'
+              - 'tests/fixtures/action/**'
+      - name: Wait for test-action.yml's summary check and mirror its outcome
+        if: steps.filter.outputs.action == 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
+        with:
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+            const checkName = 'test-action summary';
+            const timeoutMs = 35 * 60 * 1000;
+            const pollMs = 15 * 1000;
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+                per_page: 100,
+              });
+              const run = data.check_runs.find(r => r.name === checkName);
+              if (run && run.status === 'completed') {
+                core.info(`${checkName} completed with conclusion: ${run.conclusion}`);
+                if (!['success', 'neutral'].includes(run.conclusion)) {
+                  core.setFailed(`${checkName} did not succeed (conclusion: ${run.conclusion})`);
+                }
+                return;
+              }
+              core.info(run
+                ? `${checkName} status: ${run.status} -- waiting`
+                : `${checkName} not reported yet -- waiting`);
+              await new Promise(r => setTimeout(r, pollMs));
+            }
+            core.setFailed(`Timed out waiting for ${checkName} to complete`);
+      - name: Nothing to gate
+        if: steps.filter.outputs.action != 'true'
+        run: echo "test-action.yml's own paths didn't change -- nothing to gate."

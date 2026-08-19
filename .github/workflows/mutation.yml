@@ -2,16 +2,36 @@ name: Mutation testing
 
 # Mutation testing is the direct measure of test *quality* (vs. coverage, which
 # measures only test *reach*): a surviving mutant is a line that runs but is not
-# verified by any assertion. A full mutmut pass over the detector core is slow,
-# so this runs on a schedule and on demand — not on every PR. Add the
-# ``mutation`` label to a PR to run it against that branch.
+# verified by any assertion.
+#
+# Three lanes, because one lane cannot serve both purposes:
+#
+#   pull_request (paths-filtered) -> `--diff-scoped`
+#     Gates only the functions the branch changed. Absolute: no baseline to be
+#     under. This is what makes mutation testing actionable on a PR, and it
+#     fires automatically on the mutated modules instead of waiting for someone
+#     to remember the `mutation` label.
+#
+#   schedule -> per-module baseline drift
+#     Full run, compared against the committed `mutation-baseline.json`. Per
+#     module, so a regression in one module cannot be paid for by an unrelated
+#     module's improvement.
+#
+#   workflow_dispatch (write_baseline: true) -> record the baseline
+#     Deliberately manual: refreshing the baseline accepts the current survivor
+#     set, which is a review decision, not something a cron should do silently.
 on:
   workflow_dispatch:
+    inputs:
+      write_baseline:
+        description: 'Rewrite mutation-baseline.json from this run'
+        type: boolean
+        default: false
   schedule:
     # Weekly, Monday 06:11 UTC (offset from other crons to avoid contention).
     - cron: "11 6 * * 1"
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -21,28 +41,215 @@ permissions:
   contents: read
 
 jobs:
+  # Path-match OR label, resolved at job level. A workflow-level `paths:`
+  # filter is ANDed with the activity `types:`, so applying the `mutation`
+  # label to a PR that touches none of these files would not start the
+  # workflow at all — the documented label override could never fire
+  # (Codex review). Same dorny/paths-filter shape as ci.yml's
+  # heavy-parity-gate.
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # dorny/paths-filter reads the changed-file list from the pull-requests
+      # REST API, which its own documented requirements list as needing
+      # `pull-requests: read`; naming any `permissions:` block sets every
+      # unlisted scope to none. Precautionary rather than a repair: the step
+      # is currently succeeding on this public repository with `contents:
+      # read` alone (run 31865060159's resolve job emitted `MATCHED: true`),
+      # so this is here for the cases that evidence does not cover — a fork
+      # PR, or this repository becoming private — not for one that is broken
+      # today (Codex review).
+      pull-requests: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      require_baseline: ${{ steps.decide.outputs.require_baseline }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Detect changes to mutated modules (PR only)
+        id: changed
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4
+        with:
+          filters: |
+            mutated:
+              - 'abicheck/diff_symbols.py'
+              - 'abicheck/diff_types.py'
+              - 'abicheck/diff_platform.py'
+              - 'abicheck/diff_vtable_layout.py'
+              - 'abicheck/diff_filtering.py'
+              - 'abicheck/checker_policy.py'
+              - 'abicheck/idioms.py'
+              - 'abicheck/pattern_verdicts.py'
+              - 'abicheck/surface_graph.py'
+              - 'abicheck/finding_identity.py'
+              - 'abicheck/name_classification.py'
+              - 'abicheck/suppression.py'
+              - 'abicheck/snapshot_io.py'
+              - 'abicheck/serialization.py'
+              # The lane's own infrastructure. Without these a change to
+              # the parser, its config, or this workflow does not start
+              # the lane — and the real-mutmut test is `slow`, excluded
+              # from every other selector, so it would run nowhere at
+              # all (Codex review).
+              - 'scripts/mutation_results.py'
+              - 'scripts/check_mutation_score.py'
+              - 'tests/test_mutation_results.py'
+              - '.github/workflows/mutation.yml'
+              - 'pyproject.toml'
+            # The mutated modules' own tests, kept as their own filter so the
+            # run below can tell "a detector test changed" from "the lane's
+            # own infrastructure changed" — only the former has something to
+            # gate and therefore has to fail closed (Codex review). A PR that
+            # only weakens or deletes assertions in a detector test changes no
+            # production file, so `mutated` alone never started this lane at
+            # all. One glob per mutated module, mechanically enforced by
+            # tests/test_mutation_workflow_contract.py.
+            #
+            # Known limit, deliberately not widened here: these are naming
+            # convention matches. 257 of the ~450 test files import a mutated
+            # module directly (measured), so a trigger that is *complete*
+            # rather than conventional is effectively `tests/**` — i.e. a
+            # 120-minute job on most PRs. That is a CI-cost decision, not a
+            # drive-by change; the weekly full run and the `mutation` label
+            # remain the complete checks.
+            mutated_tests:
+              - 'tests/test_diff_symbols*.py'
+              - 'tests/test_diff_types*.py'
+              - 'tests/test_diff_platform*.py'
+              - 'tests/test_diff_vtable_layout*.py'
+              - 'tests/test_diff_filtering*.py'
+              - 'tests/test_checker_policy*.py'
+              - 'tests/test_idioms*.py'
+              - 'tests/test_pattern_verdicts*.py'
+              - 'tests/test_surface_graph*.py'
+              - 'tests/test_finding_identity*.py'
+              - 'tests/test_name_classification*.py'
+              - 'tests/test_suppression*.py'
+              - 'tests/test_snapshot_io*.py'
+              - 'tests/test_serialization*.py'
+      - name: Decide whether to run
+        id: decide
+        env:
+          MATCHED: ${{ steps.changed.outputs.mutated }}
+          MATCHED_TESTS: ${{ steps.changed.outputs.mutated_tests }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'mutation') }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "require_baseline=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$MATCHED" = "true" ] || [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Which PR runs must have a *drift* reference, not just
+          # --diff-scoped (which only looks at the functions this branch
+          # changed):
+          #   - a detector test changed: the branch may have changed no
+          #     production function at all, so there is nothing to scope to
+          #     and the answer exists only as drift;
+          #   - the `mutation` label: it is documented as the complete check,
+          #     and a label-forced run on a test-only diff outside the globs
+          #     above would otherwise print "gated nothing" and exit 0 —
+          #     green for precisely the run someone asked to be thorough
+          #     (Codex review).
+          if [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
+            echo "require_baseline=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "require_baseline=false" >> "$GITHUB_OUTPUT"
+          fi
+
   mutmut:
     name: mutmut (detector core)
-    # On PRs, only run when explicitly opted in via the `mutation` label.
-    if: >-
-      github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'mutation')
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          # --diff-scoped diffs against the base branch, so the merge-base has
+          # to be present; a shallow clone would report every function changed.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.14'
+          python-version: '3.13'
           cache: 'pip'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" mutmut
-      - name: Run mutation testing and check survivor baseline
-        # Report-only until SURVIVOR_BASELINE is set in the script (the first
-        # scheduled run records the number); after that it gates on drift.
-        run: python scripts/check_mutation_score.py --run
+          # Pinned: mutmut's config keys changed incompatibly between 2.x and
+          # 3.x (`tests_dir` as a string aborts the run outright, `runner` is
+          # silently ignored). An unpinned install is how this lane could go
+          # from "gating" to "crashing before the first mutant" without any
+          # change to this repository.
+          pip install -e ".[dev]" 'mutmut>=3.7,<4'
+      - name: Verify the parser against a real mutmut run
+        # This job is the only CI lane with mutmut installed, and every pytest
+        # selector in the repo (including this workflow's own
+        # pytest_add_cli_args) excludes `slow` — so without an explicit step
+        # the one test that validates the parser against mutmut's *actual*
+        # output never runs anywhere, and the parser's validation collapses
+        # back to hand-written fixtures. That is the failure AGENTS.md's
+        # third-party-boundary rule is about (Codex review).
+        #
+        # ABICHECK_MIN_EXECUTED is conftest.py's silent-skip guard: the session
+        # fails unless a test actually ran, so a skipif that starts matching
+        # cannot quietly turn this green with zero work done.
+        env:
+          ABICHECK_MIN_EXECUTED: '1'
+        run: python -m pytest tests/test_mutation_results.py -m slow -q
+
+      - name: Run mutation testing (diff-scoped)
+        if: github.event_name == 'pull_request'
+        # --require-baseline for the runs whose question --diff-scoped
+        # cannot answer (see the resolve job): without it the job reports
+        # "gated nothing" and still exits 0 — green for a run that checked
+        # nothing, which is the shape this lane exists to remove (Codex
+        # review). It fails until mutation-baseline.json is recorded
+        # (workflow_dispatch, write_baseline: true), which is the honest
+        # state: a weakened test is only detectable as drift.
+        env:
+          REQUIRE_BASELINE: ${{ needs.resolve.outputs.require_baseline }}
+          # Through `env`, not expanded into the script: a branch name is
+          # attacker-chosen on a fork PR, and `${{ }}` inside `run:` is
+          # substituted before the shell ever sees it (CodeRabbit review,
+          # zizmor template-injection).
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          require=""
+          if [ "$REQUIRE_BASELINE" = "true" ]; then
+            require="--require-baseline"
+          fi
+          python scripts/check_mutation_score.py --run --diff-scoped \
+            --base-ref "origin/$BASE_REF" \
+            $require \
+            --json mutation-receipt.json
+      - name: Run mutation testing (baseline drift)
+        if: github.event_name == 'schedule'
+        # --require-baseline: with no baseline recorded, this lane would return
+        # 0 no matter how many mutants survived — a lane that advertises drift
+        # gating while being report-only. Fail loudly and point at the dispatch
+        # lane instead (Codex review).
+        run: |
+          python scripts/check_mutation_score.py --run --require-baseline \
+            --json mutation-receipt.json
+      - name: Run mutation testing (record baseline)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          WRITE_BASELINE: ${{ inputs.write_baseline }}
+        run: |
+          if [ "$WRITE_BASELINE" = "true" ]; then
+            python scripts/check_mutation_score.py --run --write-baseline
+            echo '--- mutation-baseline.json ---'
+            cat mutation-baseline.json
+          else
+            python scripts/check_mutation_score.py --run --json mutation-receipt.json
+          fi
       - name: Save mutmut results
         if: always()
         run: mutmut results > mutmut-results.txt 2>&1 || true
@@ -51,4 +258,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: mutmut-results
-          path: mutmut-results.txt
+          path: |
+            mutmut-results.txt
+            mutation-receipt.json
+            mutation-baseline.json
+          if-no-files-found: ignore

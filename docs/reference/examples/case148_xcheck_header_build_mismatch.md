@@ -94,7 +94,7 @@ a wrong layout report.
 ## Safe redesign
 
 Parse the public headers with the same ABI-relevant flags the build uses —
-feed abicheck the project's compile database (`--sources`/`--compile-db`)
+feed abicheck the project's compile database (`--sources`/`--build-info`)
 so the header AST is built under the real macro context, instead of a bare
 `-H include/` pass with no build integration.
 

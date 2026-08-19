@@ -1631,7 +1631,8 @@ class SuppressionList:
                 raise ValueError(
                     f"Suppression rule {i} has no 'reason' field. "
                     "All suppression rules must include a justification "
-                    "when --require-justification is set."
+                    "when suppression.require_justification is set in "
+                    ".abicheck.yml."
                 )
             suppressions.append(sup)
 

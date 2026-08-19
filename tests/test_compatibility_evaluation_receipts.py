@@ -182,7 +182,7 @@ class TestOverridesContributors:
             )
         )
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
-        assert options == {"--policy-file"}
+        assert options == {"--policy"}
 
     def test_a_fully_shadowed_policy_pack_is_not_credited(self, tmp_path):
         pack = _write_pack(
@@ -205,7 +205,7 @@ class TestOverridesContributors:
         )
         assert cfg.policy.overrides["soname_changed"] is Verdict.COMPATIBLE
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
-        assert options == {"--policy-file"}
+        assert options == {"--policy"}
 
     def test_a_contributing_policy_pack_is_credited(self, tmp_path):
         pack = _write_pack(
@@ -227,7 +227,7 @@ class TestOverridesContributors:
             )
         )
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
-        assert options == {"--policy-file", "--pack"}
+        assert options == {"--policy", "--pack"}
 
 
 class TestPathInputsAreNotSilentlyIgnored:
@@ -269,9 +269,15 @@ class TestPathInputsAreNotSilentlyIgnored:
         entries = {
             (e.option, e.path) for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
         }
+        # Both spell the *config* key at the CLI layer: --public-symbol and
+        # --public-symbols-list were hidden duplicates of scope.public_symbols
+        # and were removed, so a CLI-front-end value can only have come from
+        # .abicheck.yml and a receipt naming a flag would send a replay to an
+        # unknown option. What still separates the two sources is `path`, not
+        # `option` -- which is the property this test is actually about.
         assert entries == {
-            ("--public-symbol", None),
-            ("--public-symbols-list", str(listed)),
+            ("scope.public_symbols", None),
+            ("scope.public_symbols", str(listed)),
         }
 
     def test_a_list_only_invocation_names_the_file_in_its_receipt(self, tmp_path):
@@ -280,7 +286,7 @@ class TestPathInputsAreNotSilentlyIgnored:
         cfg = _resolve(explicit=compare_cli_inputs({"public_symbols_list": listed}))
         selected_by = cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
         assert [(e.option, e.path) for e in selected_by] == [
-            ("--public-symbols-list", str(listed))
+            ("scope.public_symbols", str(listed))
         ]
 
     def test_cli_policy_file_path_is_loaded_when_not_pre_supplied(self, tmp_path):
@@ -521,7 +527,7 @@ class TestOverridesReceiptNamesEachContributingPack:
             for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by
         ]
         assert entries == [
-            ("--policy-file", str(tmp_path / "policy.yml")),
+            ("--policy", str(tmp_path / "policy.yml")),
             ("--pack", str(contributing)),
         ]
 
@@ -562,7 +568,7 @@ class TestSelectedButEmptySources:
         prov = cfg.provenance[EXPLICIT_SCOPE_FIELD]
         assert prov.layer is SelectorLayer.EXPLICIT_CLI
         assert [(e.option, e.path) for e in prov.selected_by] == [
-            ("--public-symbols-list", str(listed))
+            ("scope.public_symbols", str(listed))
         ]
 
     def test_no_source_at_all_stays_none(self):
@@ -626,7 +632,7 @@ class TestProjectDerivedFieldsNameTheirConfigDigest:
         assert [
             (e.option, e.sha256)
             for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
-        ] == [("--public-symbols-list", listed.sha256)]
+        ] == [("scope.public_symbols", listed.sha256)]
 
 
 class TestExplicitScopeIdentityCoversItsSources:
@@ -815,7 +821,7 @@ class TestReceiptNamesTheStatingFrontEnd:
             e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by
         ] == ["--no-scope-public-headers"]
         assert [e.option for e in cfg.provenance[POLICY_BASE_FIELD].selected_by] == [
-            "--policy-file"
+            "--policy"
         ]
 
 

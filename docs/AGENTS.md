@@ -191,6 +191,21 @@ duplication, not a structural ownership conflict):
   in a documentation review: ADR-058/G36 still described the just-removed
   MCP server as a live, optional execution adapter. Add a registry entry
   whenever a PR deletes a flag/command/file another doc might still name.
+  This sweep also reads `examples/case*/README.md`, since those are the
+  generator sources for the published `docs/reference/examples/` case pages
+  — the generated pages themselves are skipped, so a stale flag left in a
+  case README would otherwise reproduce into a public page on the next
+  regeneration with nothing to catch it, and over `tests/scenarios/*.yaml`,
+  whose `flow:` entries are commands a reader is meant to be able to run --
+  the catalogue's structural tests check that a flow *has* an automated
+  counterpart, not that the command it prints still parses;
+- a documented `abicheck <subcommand> ...` line — or an Action `extra-args`
+  value, which is raw argv by another name — passing a `.abicheck.yml` key as
+  an operand (`abicheck compare a b severity.addition: error`). This is what a
+  mechanical flag-to-config-key rewrite produces when it reaches an *example*
+  rather than the prose naming the key: correct-looking, and exit 64 for
+  anyone who copies it. Prose and YAML config blocks are deliberately
+  untouched, since the same token is the right spelling there;
 
 ## Terminology registry
 

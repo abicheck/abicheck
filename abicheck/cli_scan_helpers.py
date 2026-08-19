@@ -117,7 +117,7 @@ def reject_incoherent_scan_secondary_output(
         secondary_fmt is not None or secondary_output is not None
     ):
         raise click.UsageError(
-            "--secondary-format/--secondary-output are not supported with "
+            "--write is not supported with "
             "--artifact-set -- there is no single-artifact report to render "
             "a second time."
         )
@@ -493,7 +493,7 @@ def _severity_gate_lines(diff_summary: dict[str, Any]) -> list[str]:
 
     Text is the *default* format, so the JSON ``severity`` block alone left
     the common case unexplained: an additions-only scan under
-    ``--severity-addition error`` printed ``Verdict: COMPATIBLE`` and exited
+    a ``severity.addition: error`` config printed ``Verdict: COMPATIBLE`` and exited
     1 with nothing naming the cause -- indistinguishable in a CI log from
     ADR-049 §7's orthogonal contract-coverage 1 (Codex review). Empty for a
     legacy-scheme scan, which runs no severity gate and whose text output is

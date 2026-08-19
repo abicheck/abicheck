@@ -34,31 +34,21 @@ import re
 import shutil
 from collections.abc import Sequence
 
+from ...header_utils import (
+    is_msvc_driver_stem,
+    match_gnu_forced_include,
+    match_msvc_forced_include,
+)
 from ..build_evidence import CompileUnit
 
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
 CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
-#: Compiler basenames that mean the extractor should run in MSVC mode.
-#: ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI DPC++/C++ CL-compatible
-#: driver (the same CL-mode convention as ``clang-cl``, just Intel-branded);
-#: without it here, ``dumper_clang.resolve_source_frontend_clang_bin``'s
-#: ``exclude_cl_style=False`` (L4 source-ABI replay) resolves ``--gcc-path
-#: dpcpp-cl`` correctly, but this module still built a GNU-shaped command for
-#: it instead of adding ``--driver-mode=cl``, so the CL-mode override never
-#: actually reached the driver (Codex review).
-MSVC_BINARIES = frozenset(
-    {"cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "dpcpp-cl.exe"}
-)
-#: The same names with any ``.exe`` suffix stripped, for matching after a
-#: version suffix has also been removed (``is_msvc_mode`` normalizes both).
-_MSVC_STEMS = frozenset(name.removesuffix(".exe") for name in MSVC_BINARIES)
-#: Matches a trailing numeric version suffix LLVM/Debian packaging commonly
-#: appends to an unversioned driver name (``clang-cl-20``, ``clang-20.1``) --
-#: without stripping it, ``is_msvc_mode("clang-cl-20")`` would miss a real
-#: CL-mode driver just because it carries its LLVM major-version suffix
-#: (Codex review): the S2 pre-scan (and, via ``pick_compiler_binary``, L4
-#: replay) would then drive it with GNU-only flags it silently ignores.
-_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
+# The CL-mode driver vocabulary this module once owned now lives in
+# ``header_utils.is_msvc_driver_stem`` — ``is_msvc_mode`` below delegates to it,
+# so the build-evidence adapter and this replay path cannot drift on which
+# drivers are CL-mode (they had: ``dpcpp-cl`` and version-suffixed spellings
+# such as ``clang-cl-20`` were known here and not there).
+
 #: Compiler-launcher wrappers that prefix the real compiler in a build action
 #: (``ccache clang++ -c foo.cpp``). The extractor must emulate the real compiler,
 #: not the launcher, which would otherwise run without its compiler operand.
@@ -335,15 +325,15 @@ def is_split_operand_abi_flag_survivor(flag: str) -> bool:
     return sep != "" and name in SPLIT_OPERAND_ABI_FLAGS
 
 
-#: GNU forced-include options. Only ``-include``/``-imacros`` also have a joined
-#: ``-include<file>`` spelling; ``-include-pch`` is separate-operand only (clang
-#: ``-include-pch <file>``) and must not be read as a joined ``-include``.
-_GNU_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
-_GNU_SEPARATE_INCLUDE_OPTS = frozenset({"-include", "-imacros", "-include-pch"})
-#: MSVC/clang-cl forced-include options in their separate-operand spelling
-#: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
-#: prefix.
-_MSVC_FORCED_INCLUDE_OPTS = frozenset({"/FI", "-FI"})
+#: The forced-include option vocabulary and its two matchers now live in
+#: ``abicheck.header_utils`` (the leaf that already owns this codebase's
+#: include-flag vocabulary, and which both this module and
+#: ``buildsource.header_compile_context`` already sit above), so the L4 replay
+#: path here and the L2 header-parse path there recognize exactly the same
+#: spellings from one implementation. Re-bound to the historical private names
+#: so the call sites below read unchanged.
+_match_gnu_forced_include = match_gnu_forced_include
+_match_msvc_forced_include = match_msvc_forced_include
 #: GNU include-search options that take a directory operand and are NOT
 #: normalized into the structured ``include_paths``/``system_include_paths``
 #: buckets (those cover ``-I``/``-isystem`` only). Dropping them makes the
@@ -697,10 +687,12 @@ def is_msvc_mode(cc_bin: str) -> bool:
     back to the same check with a trailing version suffix stripped, so a
     packaged ``clang-cl-20``/``clang-cl-20.exe`` is still recognized.
     """
-    stem = basename(cc_bin).lower()
-    if stem in MSVC_BINARIES:
-        return True
-    return _VERSION_SUFFIX_RE.sub("", stem.removesuffix(".exe")) in _MSVC_STEMS
+    # The name test itself is header_utils.is_msvc_driver_stem -- the one
+    # vocabulary buildsource.adapters.base._is_msvc_command now shares, after
+    # the two drifted apart (Codex review, PR D). Behaviour here is unchanged:
+    # that function is this test, relocated. Only the basename derivation
+    # stays local, since the adapter's is backslash-aware and this one is not.
+    return is_msvc_driver_stem(basename(cc_bin).lower())
 
 
 def _carry_abi_relevant_flags(
@@ -781,24 +773,6 @@ def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str])
     return i
 
 
-def _match_gnu_forced_include(tok: str, argv: list[str], i: int, out: list[str]) -> int:
-    """Try to match a GNU forced-include token (``-include``/``-imacros``/``-include-pch``).
-
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    The separate-operand spelling (all three options) and the joined spelling
-    (``-include``/``-imacros`` only, never ``-include-pch``) are both handled.
-    """
-    if tok in _GNU_SEPARATE_INCLUDE_OPTS and i + 1 < len(argv):
-        out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
-        return i + 2
-    if tok not in _GNU_SEPARATE_INCLUDE_OPTS and any(
-        tok.startswith(opt) and len(tok) > len(opt) for opt in _GNU_FORCED_INCLUDE_OPTS
-    ):
-        out.append(tok)  # -includefile / -imacrosfile (joined)
-        return i + 1
-    return i
-
-
 def _match_msvc_include_search(
     tok: str, argv: list[str], i: int, out: list[str]
 ) -> int:
@@ -816,24 +790,6 @@ def _match_msvc_include_search(
     return i
 
 
-def _match_msvc_forced_include(
-    tok: str, argv: list[str], i: int, out: list[str]
-) -> int:
-    """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
-
-    Returns the new ``i`` after consumption, or the original ``i`` if no match.
-    Both the separate (``/FI file``) and joined (``/FIfile``, ``-FIfile``)
-    spellings are handled.
-    """
-    if tok in _MSVC_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
-        out += [tok, argv[i + 1]]  # /FI file (separate operand)
-        return i + 2
-    if len(tok) > 3 and (tok.startswith("/FI") or tok.startswith("-FI")):
-        out.append(tok)  # /FIfile (joined)
-        return i + 1
-    return i
-
-
 def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> None:
     """Walk ``argv`` and append forced-include / include-search tokens to ``out``.
 
@@ -844,13 +800,17 @@ def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> N
     i = 0
     while i < len(argv):
         tok = argv[i]
-        new_i = _match_gnu_forced_include(tok, argv, i, out)
+        # The two forced-include matchers are shared with the L2 header-parse
+        # path (header_utils) and return (new_i, option, operand); only the
+        # index matters here, since replay hands `out`'s verbatim tokens
+        # straight back to the real compiler.
+        new_i, _opt, _operand = _match_gnu_forced_include(tok, argv, i, out)
         if new_i == i:
             new_i = _match_gnu_include_search(tok, argv, i, out)
         if new_i == i and cc_id == "msvc":
             new_i = _match_msvc_include_search(tok, argv, i, out)
         if new_i == i and cc_id == "msvc":
-            new_i = _match_msvc_forced_include(tok, argv, i, out)
+            new_i, _opt, _operand = _match_msvc_forced_include(tok, argv, i, out)
         i = new_i if new_i != i else i + 1
 
 

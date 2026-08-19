@@ -1328,7 +1328,8 @@ def _check_identity_collision(
 # ---------------------------------------------------------------------------
 
 _NO_PROVENANCE = (
-    "no public-header provenance (supply --public-header/--public-header-dir so "
+    "no public-header provenance (supply -H/--header, or scan's "
+    "--public-header-dir, so "
     "declarations are classified)"
 )
 

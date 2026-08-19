@@ -18,7 +18,7 @@
 parity").
 
 The three CLI subcommands all share ``compile_context_options``
-(``--ast-frontend``/``--gcc-path``/``--gcc-prefix``/``--gcc-options``/
+(the ``ast-frontend``/``gcc-path``/``gcc-prefix``/``gcc-options``/
 ``--sysroot``/``--nostdinc``, ADR-037 D3) — but ``action/run.sh`` used to
 forward all six only in ``dump`` mode, only ``--ast-frontend`` in ``compare``
 mode (behind a comment incorrectly claiming the rest were "dump-only flags...
@@ -32,7 +32,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
+from typing import Any
+
+import pytest
+
+from abicheck._compiler_options import split_gcc_options
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -104,6 +111,40 @@ def _add_flag_source() -> str:
     return text[start:end]
 
 
+# $_PY_SAFE_DIR is referenced (not redefined) inside add_flag_shlex_split's
+# real body -- extracted verbatim (Codex review: a harness that silently left
+# it unset would make every "(cd \"$_PY_SAFE_DIR\" && ...)" wrapper `cd` into
+# an empty string, i.e. a no-op staying in the untrusted checkout, exercising
+# *none* of the CWD-shadowing fix that variable exists for, while every test
+# here kept passing regardless). Fails loud (exit 1) rather than falling
+# back to a shared directory, so the extracted block is the whole
+# if/fi -- not a single line.
+_PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
+_PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
+
+# $_PY_BIN_HAS_ABICHECK is referenced (not redefined) inside
+# add_flag_shlex_split's real guard -- extracted verbatim for the identical
+# reason as $_PY_SAFE_DIR above (Codex review: a harness silently leaving it
+# unset/empty would always take the plain-whitespace-split fallback branch,
+# exercising none of the real shlex-aware splitting any test here checks).
+_PY_BIN_HAS_ABICHECK_START = '_PY_BIN_HAS_ABICHECK="false"'
+_PY_BIN_HAS_ABICHECK_END = "\nfi\n"
+
+
+def _py_safe_dir_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PY_SAFE_DIR_START)
+    end = text.index(_PY_SAFE_DIR_END, start) + len(_PY_SAFE_DIR_END)
+    return text[start:end]
+
+
+def _py_bin_has_abicheck_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PY_BIN_HAS_ABICHECK_START)
+    end = text.index(_PY_BIN_HAS_ABICHECK_END, start) + len(_PY_BIN_HAS_ABICHECK_END)
+    return text[start:end]
+
+
 def _compile_context_region(
     mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
 ) -> str:
@@ -149,6 +190,51 @@ _FULL_ENV = {
 }
 
 
+def _run_bash_script(
+    script: str,
+    env: dict[str, str] | None = None,
+    *,
+    check: bool = True,
+    text: bool = True,
+    cwd: Path | None = None,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[Any]:
+    """Run ``script`` via a real bash, from a temp file rather than as an
+    inline ``-c`` argument (Codex review, fresh evidence: windows-latest CI
+    failure, this module only). Windows processes have no real argv --
+    Python's ``subprocess`` reconstructs one command-line string via
+    ``list2cmdline`` (MSVC/CRT backslash-run-parity quoting), but Git Bash's
+    MSYS runtime re-derives its own argv from that same string using a
+    materially different convention. For a script this size, with many
+    nested/embedded single and double quotes (the extracted
+    ``add_flag_shlex_split`` region alone), the two conventions don't always
+    round-trip losslessly -- confirmed on windows-latest: a script verified
+    syntactically valid via ``bash -n`` on Linux produced a genuine bash
+    *parse* error when passed this way (\"unexpected EOF while looking for
+    matching `\"'\"), i.e. corruption in transit, not a real syntax defect
+    in the script text itself. A path argument sidesteps command-line
+    reconstruction entirely -- the same pattern already used by
+    ``test_action_run_sh_severity_summary.py``'s ``_run()`` and
+    ``test_action_run_sh_py_safe_path.py``."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=text,
+            env=env,
+            check=check,
+            cwd=cwd,
+            timeout=timeout,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 def _run_region(
     mode_marker: str,
     env_extra: dict[str, str],
@@ -166,7 +252,11 @@ def _run_region(
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
+        # $_PY_SAFE_DIR (extracted verbatim, not redefined -- see its own
+        # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -177,13 +267,7 @@ def _run_region(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    out = subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
+    out = _run_bash_script(script, env, check=True)
     return out.stdout.splitlines(), out.stderr
 
 
@@ -201,7 +285,11 @@ def _run_region_raw(
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
+        # $_PY_SAFE_DIR (extracted verbatim, not redefined -- see its own
+        # extraction function's docstring) is the second such prerequisite.
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
@@ -212,13 +300,7 @@ def _run_region_raw(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    return subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
+    return _run_bash_script(script, env, check=False)
 
 
 class TestCompileContextForwardingParity:
@@ -227,8 +309,8 @@ class TestCompileContextForwardingParity:
     def test_dump_forwards_all_six_flags(self) -> None:
         cmd, _ = _run_region(_DUMP_MODE_MARKER, _FULL_ENV)
         assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
+        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
+        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
@@ -247,8 +329,8 @@ class TestCompileContextForwardingParity:
         }
         cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
         assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
+        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
+        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
@@ -259,8 +341,8 @@ class TestCompileContextForwardingParity:
         decorator with dump (ADR-037 D3 / ADR-035 amendment)."""
         cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV)
         assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
+        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
+        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
         assert "--sysroot" in cmd and "/opt/sysroot" in cmd
         assert "--nostdinc" in cmd
@@ -269,9 +351,9 @@ class TestCompileContextForwardingParity:
         # scalar --gcc-options (last-of-two-identical-values wins), but
         # --compiler-option is `multiple=True` and genuinely accumulates every
         # occurrence, so the duplicate silently doubled every forwarded
-        # --gcc-path/--gcc-prefix/--compiler-option/--sysroot token.
-        assert cmd.count("--gcc-path") == 1
-        assert cmd.count("--gcc-prefix") == 1
+        # --compiler/--compiler-prefix/--compiler-option/--sysroot token.
+        assert cmd.count("--compiler") == 1
+        assert cmd.count("--compiler-prefix") == 1
         assert cmd.count("--compiler-option") == 1
         assert cmd.count("--sysroot") == 1
 
@@ -293,19 +375,264 @@ class TestCompileContextForwardingParity:
         assert '-DMSG="hello' not in cmd
         assert 'world"' not in cmd
 
+    def test_gcc_options_hash_character_is_not_treated_as_a_comment(self) -> None:
+        """Regression (Codex review, PR #774): an earlier revision of
+        add_flag_shlex_split()'s inline Python lexer disabled backslash
+        escaping via a hand-rolled shlex.shlex(escape=""), which left
+        shlex's default #-starts-a-comment behavior active and silently
+        truncated any token containing `#`, dropping every flag after it.
+        Mirrors abicheck._compiler_options.split_gcc_options's own
+        regression test for the identical Python-side fix."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-I/build/#generated -DOK=1"}
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 2
+        assert "-I/build/#generated" in cmd
+        assert "-DOK=1" in cmd
+
+    def test_gcc_options_backslash_escaped_space_is_honored(self) -> None:
+        """Sibling regression (Codex review, PR #774): the same hand-rolled
+        lexer broke a real POSIX backslash-escaped space into two tokens
+        instead of one.
+
+        Like :func:`test_gcc_options_unquoted_backslash_matches_the_real_python_helper`
+        below, a backslash-before-whitespace's correct handling is
+        platform-dependent by design: real POSIX collapses it into one
+        token, but the Windows-only tokenizer deliberately does not (see
+        ``_split_gcc_options_windows``'s own docstring, item #5) -- a
+        revision hardcoding the POSIX answer here failed on windows-latest
+        for exactly that reason. Asserted dynamically against the real
+        Python helper instead of one hardcoded platform's answer."""
+        value = r"-DMSG=hello\ world"
+        expected_tokens = split_gcc_options(value)
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == len(expected_tokens)
+        for token in expected_tokens:
+            assert token in cmd
+
+    def test_gcc_options_unquoted_backslash_matches_the_real_python_helper(
+        self,
+    ) -> None:
+        """Third- and fourth-round regression (Codex review, PR #774): an
+        unquoted backslash's correct handling is platform-dependent by
+        design (``abicheck._compiler_options.split_gcc_options`` dispatches
+        on ``os.name`` -- see that function's own docstring), so this test
+        cannot hardcode one platform's answer without failing on the other
+        CI lanes (a revision doing exactly that failed here on
+        ubuntu-latest/macos-latest for hardcoding the Windows answer).
+        Instead it asserts run.sh's forwarding stays in lockstep with
+        whatever the real Python helper actually resolves to on *this*
+        host -- proving the delegation (added specifically so run.sh
+        carries no second copy of the tokenizer to drift out of sync) is
+        faithful, independent of which platform runs the test. The
+        Windows-specific tokenizer behavior itself is covered directly,
+        regardless of host OS, by
+        ``tests/test_compiler_options.py::TestSplitGccOptionsWindows``."""
+        value = r"-IC:\mypath\include -DFOO=bar"
+        expected_tokens = split_gcc_options(value)
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == len(expected_tokens)
+        for token in expected_tokens:
+            assert token in cmd
+
+    def _env_with_unusable_python(self, tmp_path: Path) -> dict[str, str]:
+        """A fake ``python3`` on ``PATH`` that can run but can never import
+        ``abicheck`` -- makes ``$_PY_BIN_HAS_ABICHECK`` resolve ``false``
+        without needing a second, genuinely abicheck-less Python
+        installation."""
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        fake_python3 = fake_bin / "python3"
+        fake_python3.write_text("#!/bin/bash\nexit 1\n")
+        fake_python3.chmod(0o755)
+        return {"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    def test_gcc_options_needing_real_parser_fails_loud_without_one(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, second round: falling back to
+        add_flag()'s naive whitespace split when the real Python parser is
+        unavailable silently corrupted a quoted value
+        (``-DMSG="hello world"``) into malformed tokens under a wrong
+        compile context instead of failing. A value that actually needs
+        real quote-aware parsing must fail the Action loud."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_unusable_python(tmp_path),
+            "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1',
+        }
+        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "quoting/escaping" in result.stdout
+
+    def test_gcc_options_simple_value_still_falls_back_without_real_parser(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion to the test above: a value with no quoting/escaping at
+        all is provably identical whether split by the real parser or by
+        add_flag()'s naive whitespace split, so this must still succeed via
+        the plain-whitespace-split fallback rather than fail unnecessarily."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_unusable_python(tmp_path),
+            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+        }
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        assert cmd.count("--compiler-option") == 2
+        assert "-DFOO=1" in cmd
+        assert "-DBAR=2" in cmd
+
+    def test_gcc_options_glob_metacharacters_fail_loud_without_real_parser(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, third round: add_flag()'s own
+        unquoted `for item in $value` performs pathname (glob) EXPANSION,
+        not just whitespace splitting -- a value like `-DPATTERN=*` would
+        silently rewrite to whatever filenames exist in the current
+        directory (the analyzed, potentially PR-controlled checkout) at
+        the time this fallback runs. A value containing a glob
+        metacharacter must fail loud the same way a quoted/escaped one
+        does, not be treated as safe to fall back on."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_unusable_python(tmp_path),
+            "INPUT_GCC_OPTIONS": "-DPATTERN=*",
+        }
+        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "glob metacharacters" in result.stdout
+
+    def test_without_the_fix_glob_expansion_actually_reproduces(
+        self, tmp_path: Path
+    ) -> None:
+        """Proves the test above isn't vacuously passing -- add_flag()'s own
+        unquoted `for item in $value`, with no glob-metacharacter guard at
+        all, really does expand a glob pattern against files present in the
+        current directory rather than treating it as a literal value. The
+        whole token is the glob pattern (bash word-splits on whitespace
+        first, then glob-expands each resulting word), so the planted file
+        must match the *entire* value, matching the original finding's own
+        reproduction shape (a configured `-DPATTERN=*` rewritten by a
+        checked-out `-DPATTERN=x`)."""
+        (tmp_path / "-DPATTERN=PLANTED_FILE").write_text("")
+        script = (
+            "CMD=()\n"
+            + _add_flag_source()
+            + 'add_flag "--compiler-option" "-DPATTERN=*"\n'
+            + "printf '%s\\n' \"${CMD[@]}\"\n"
+        )
+        result = _run_bash_script(script, check=False, cwd=tmp_path, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert "-DPATTERN=PLANTED_FILE" in result.stdout.splitlines()
+        assert "-DPATTERN=*" not in result.stdout.splitlines()
+
+    def test_gcc_options_malformed_quoting_fails_loud(self) -> None:
+        """Codex review, fresh evidence, second round: split_gcc_options()
+        raises ValueError on malformed quoting (e.g. an unbalanced quote);
+        without checking the command substitution's exit status (this
+        script deliberately has no `set -e`), execution silently continued
+        with an empty $split, dropping every requested compiler option
+        instead of failing on the invalid input."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="unterminated'}
+        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "could not be parsed" in result.stdout
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The CRLF transport is simulated with a bash `python3` wrapper; a "
+            "Windows interpreter path embedded in that script would itself be "
+            "corrupted by backslash escaping, and the scenario this test "
+            "reproduces (fake python3 standing in for python.exe) is POSIX-only "
+            "by its own premise -- a real windows-latest run already exercises "
+            "the real CRLF transport directly."
+        ),
+    )
+    def test_gcc_options_strips_crlf_from_windows_python_output(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, seventh round: on windows-latest, ``$_PY_BIN``
+        resolves to native ``python.exe``, whose ``print()`` writes CRLF
+        line endings by default (Python's text-mode stdout translates
+        ``"\\n"`` to ``os.linesep`` on write, regardless of whether stdout
+        is a console or -- as here -- a pipe). bash's ``read`` only splits
+        on LF, so without stripping it, every forwarded token would gain a
+        trailing ``\\r`` (e.g. ``-DFOO=1`` arriving as ``-DFOO=1\\r``),
+        corrupting every downstream compiler invocation. This can't be
+        reproduced with the real ``python3`` on this (POSIX) host --
+        ``os.linesep`` is already ``"\\n"`` here -- so a fake ``python3`` on
+        ``PATH`` stands in for ``python.exe``, wrapping the real
+        interpreter's output with a CRLF-emitting filter, the same
+        transport shape a real Windows run would produce.
+
+        Deliberately does NOT go through :func:`_run_region` -- its own
+        ``printf '%s\\n' "${CMD[@]}"`` capture, read back via
+        ``subprocess.run(text=True)`` /``.splitlines()``, treats a
+        corrupted ``token\\r`` immediately followed by that printf's own
+        ``\\n`` as one ordinary CRLF line ending and silently normalizes it
+        away -- exactly the masking Codex's review comment named, and
+        confirmed here by first writing this test against the *unfixed*
+        code: ``_run_region``-based assertions kept passing even with
+        ``action/run.sh``'s CR-stripping line deleted. A NUL-delimited,
+        raw-bytes capture (no ``text=True``, no intervening ``\\n`` anywhere
+        near the ``\\r``) is the one shape that can't launder the bug away
+        the same way.
+        """
+        real_python3 = sys.executable
+        fake_python3 = tmp_path / "python3"
+        fake_python3.write_text(
+            # Plain `sed` (not GNU-only `sed -u`): the test reads the full
+            # output only after the process exits, so line buffering buys
+            # nothing here, and `-u` is unsupported by macOS's stock `sed`
+            # (Codex review, fresh evidence).
+            f'#!/bin/bash\nexec "{real_python3}" "$@" | sed $\'s/$/\\r/\'\n'
+        )
+        fake_python3.chmod(0o755)
+        harness = (
+            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + _py_safe_dir_source()
+            + _py_bin_has_abicheck_source()
+            + _add_flag_source()
+            + _is_release_style_operand_source()
+            + "\nCMD=()\n"
+        )
+        script = (
+            harness
+            + _compile_context_region(_SCAN_MODE_MARKER)
+            + "\nprintf '%s\\0' \"${CMD[@]}\"\n"
+        )
+        env = {
+            **os.environ,
+            **_FULL_ENV,
+            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        }
+        result = _run_bash_script(script, env, check=True, text=False)
+        cmd = [tok.decode("utf-8") for tok in result.stdout.split(b"\0") if tok]
+        assert cmd.count("--compiler-option") == 2
+        assert "-DFOO=1" in cmd
+        assert "-DBAR=2" in cmd
+        assert not any("\r" in token for token in cmd)
+
     def test_compare_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,
             {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        assert "--gcc-path" not in cmd
+        assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 
     def test_scan_omits_unset_flags(self) -> None:
         cmd, _ = _run_region(_SCAN_MODE_MARKER, {})
-        assert "--gcc-path" not in cmd
+        assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 

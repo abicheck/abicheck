@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -25,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import click
 
 from . import dumper_cache
+from ._compiler_options import split_gcc_options
 from .dumper import dump
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
@@ -90,11 +90,11 @@ def _user_define_flags(
     """The user's *global* define-affecting flags for the ADR-039 collector.
 
     Combines the ``-D``/``-U`` in the ``--gcc-options`` string with the repeatable
-    ``--gcc-option`` tokens, **in the same order the real dump applies them** —
+    ``--compiler-option`` tokens, **in the same order the real dump applies them** —
     ``dumper._castxml_cmd`` appends ``gcc_options`` first, then
     ``gcc_option_tokens`` (see ``dumper.py``), so the collector must too (Codex
     review #498). Order is significant because ``defines_from_flags`` honours
-    ``-D``/``-U`` sequence: ``--gcc-options=-DKEEP --gcc-option=-UKEEP`` must leave
+    ``-D``/``-U`` sequence: a composed ``-DKEEP`` followed by ``--compiler-option=-UKEEP`` must leave
     ``KEEP`` *inactive* on both the parse and the harvest, else the reconciler
     would add back a field the real parse pruned. These flags are applied on top
     of the compile-DB intersection, so a user ``-UKEEP`` also overrides a database
@@ -102,12 +102,19 @@ def _user_define_flags(
     excluded (it must not be unioned snapshot-wide).
 
     A malformed ``--gcc-options`` (e.g. an unbalanced quote) must not abort the
-    dump — ``shlex.split`` errors are swallowed and only the tokens are used
-    (CodeRabbit review)."""
+    dump — ``split_gcc_options`` errors are swallowed and only the tokens are
+    used (CodeRabbit review). ``split_gcc_options`` (not a bare
+    ``shlex.split``) so this collector tokenizes ``user_gcc_options``
+    identically to the real header-AST parse on every platform — a plain
+    POSIX ``shlex.split`` would silently disagree with the Windows tokenizer
+    on an unquoted Windows path (e.g. combining ``-IC:\\sdk\\ -UKEEP`` into
+    one token instead of two), which could make the harvested define set
+    diverge from what the real parse actually saw (Codex review, PR #774
+    follow-up)."""
     flags: list[str] = []
     if user_gcc_options:
         try:
-            flags += shlex.split(user_gcc_options)
+            flags += split_gcc_options(user_gcc_options)
         except ValueError:
             pass  # bad optional define flags are skipped, not fatal
     flags += list(gcc_option_tokens)
@@ -330,8 +337,7 @@ class DumpDepthNotSatisfiedError(click.ClickException):
 
 
 def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
-    """True when L4 source-ABI extraction genuinely parsed source, regardless
-    of whether it linked any declarations to a binary.
+    """True when L4 source-ABI extraction genuinely parsed source, regardless of whether it linked any declarations to a binary.
 
     Coverage *status* alone (``PRESENT``/``PARTIAL`` vs ``NOT_COLLECTED``) is
     not enough: ``buildsource.inline._run_inline_source_abi`` stamps L4
@@ -378,7 +384,10 @@ def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
         return False
     surface = build_source.source_abi
     if surface is not None and "compile_units_parsed" in surface.coverage:
-        return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+        try:
+            return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+        except (TypeError, ValueError, OverflowError):
+            return False
     return not _layer_payload_empty(build_source, "L4")
 
 
@@ -843,14 +852,11 @@ def _add_dump_depth_feasibility(
         depth is not None
         and depth != "binary"
         and sources is None
+        # A compile database is now read off --build-info rather than named by
+        # its own flag, so "no --sources/--build-info" already excludes every
+        # case a database could supply L3 "build" evidence for; the precise
+        # block/no-signal handling below covers those instead.
         and build_info is None
-        # A matched -p/--compile-db is genuine L3 "build" evidence -- this
-        # generic "only L0-L2 data" warning is accurate for --depth
-        # headers/source regardless of a compile database (neither rung is
-        # satisfiable from one), but not for --depth build once the database
-        # actually matches (external review): the more precise, definitive
-        # block/no-signal handling below covers that specific case instead.
-        and not (depth == "build" and compile_db_matched is True)
     ):
         result.warn(
             f"--depth {depth} was requested but no --sources/--build-info was given; "
@@ -877,8 +883,8 @@ def _add_dump_depth_feasibility(
     if depth == "source" and sources is None and not build_info_is_pack:
         result.block(
             "--depth source was requested but no --sources was given -- a "
-            "raw --build-info/-p compile database supplies L3 build "
-            "context only, never L4 source-ABI replay -- the resolved "
+            "raw --build-info compile database or build directory supplies "
+            "L3 build context only, never L4 source-ABI replay -- the resolved "
             "evidence depth check_requested_depth_satisfied would raise "
             "on this: the real run would exit 1."
         )
@@ -903,14 +909,9 @@ def _add_dump_depth_feasibility(
             "if it doesn't, the real run's evidence depth check would "
             "reject it."
         )
-    elif (
-        depth == "build"
-        and sources is None
-        and build_info is None
-        and not has_compile_db
-    ):
+    elif depth == "build" and sources is None and build_info is None:
         result.block(
-            "--depth build was requested but no --sources/--build-info/-p "
+            "--depth build was requested but no --sources/--build-info "
             "was given -- the resolved evidence depth "
             "check_requested_depth_satisfied would raise on this: the "
             "real run would exit 1."
@@ -918,7 +919,6 @@ def _add_dump_depth_feasibility(
     elif (
         depth == "build"
         and sources is None
-        and build_info is None
         and has_compile_db
         and compile_db_matched is False
     ):
@@ -933,8 +933,8 @@ def _add_dump_depth_feasibility(
         # certainly reject this in the real run (parsed_with_build_context
         # never gets stamped), so this is a blocker, not a soft warning.
         result.block(
-            "--depth build was requested with -p/--compile-db, but the "
-            "compilation database has no entry matching the resolved "
+            "--depth build was requested and --build-info resolved to a "
+            "compilation database, but it has no entry matching the resolved "
             "headers (empty, entirely filtered-out, or malformed) -- the "
             "resolved evidence depth check_requested_depth_satisfied would "
             "raise on this: the real run would exit 1."
@@ -956,7 +956,6 @@ def render_dump_dry_run(
     has_compile_db: bool = False,
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
-    compile_db_reused_as_l3: bool = False,
     dump_manifest: Any | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
@@ -1025,7 +1024,7 @@ def render_dump_dry_run(
     ``--btf``/``--ctf`` selection against a PE/Mach-O binary, are genuine
     usage errors in the real run (``click.UsageError``/``BadParameter``,
     exit 64) -- ``cli.dump_cmd`` checks both, via
-    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`,
+    :func:`check_dump_debug_format_error`,
     and raises directly *before* branching on ``dry_run`` at all, so this
     function is never even reached for that input on either path. Do not
     re-encode either as a :meth:`DryRunResult.block` (exit 1) here -- that
@@ -1060,17 +1059,14 @@ def render_dump_dry_run(
         "Build/source inputs",
         f"--sources: {sources}" if sources else None,
         f"--build-info: {build_info}" if build_info else None,
-        # AC-007: the real run reuses a matched -p/--compile-db as the L3 build
-        # source when no --build-info is given, so report that here and do not
-        # also claim "L0-L2 only" (Codex review).
-        "L3 build source: reused from -p/--compile-db (no --build-info needed)"
-        if compile_db_reused_as_l3
+        # AC-007: --build-info *is* the L3 build source now -- a compile
+        # database is read off it rather than promoted into it -- so there is
+        # no separate "reused as L3" state to report alongside it.
+        "L3 build source: --build-info resolved to a compilation database"
+        if has_compile_db
         else None,
         "no --sources/--build-info given -- L0-L2 only"
-        if sources is None
-        and build_info is None
-        and not compile_db_reused_as_l3
-        and collect_mode != "off"
+        if sources is None and build_info is None and collect_mode != "off"
         else None,
     )
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
@@ -1116,141 +1112,89 @@ def render_dump_dry_run(
     return result
 
 
-def check_dump_compile_db_error(
-    compile_db_path: Path | None,
-    compile_db_path_alt: Path | None,
-    headers: tuple[Path, ...],
-) -> str | None:
-    """Pure predicate for the -p/--compile-db-requires-headers check.
-
-    Mirrors :func:`resolve_dump_compile_db`'s ``click.UsageError`` condition as
-    a plain string instead of raising -- shared with ``dump --dry-run``, which
-    previously never ran this check at all (it only existed in the real path,
-    after the dry-run branch), so ``dump foo.so -p compile_commands.json``
-    with no ``-H`` reported dry-run success on an invocation the real run
-    would immediately reject.
-    """
-    effective_compile_db = compile_db_path or compile_db_path_alt
-    if effective_compile_db and not headers:
-        return (
-            "Compilation database (-p / --compile-db) requires -H/--header. "
-            "Without headers, CastXML has nothing to parse."
-        )
-    return None
-
-
-def has_other_l3_source(
-    build_query: str | None,
-    build_compile_db: str | None,
-    build_config: Path | None,
-    sources: Path | None,
-) -> bool:
-    """True when some L3 build source other than a bare ``-p``/``--compile-db``
-    could resolve.
-
-    AC-007's ``-p`` → L3 reuse hijacks ``build_info``, which
-    ``inline._resolve_compile_db`` ranks *above* every other L3 source (trusted
-    config ``build.query``, a ``build.compile_db`` glob from the CLI / an explicit
-    or auto-discovered ``.abicheck.yml``, and an auto-discovered
-    ``compile_commands.json``). Rather than guard each of those individually — a
-    losing game, as each new source becomes a fresh override (Codex reviews) —
-    observe that they **all** require a ``--sources`` tree to resolve, and that
-    the CLI ``--build-query``/``--build-compile-db`` flags and an explicit
-    ``--config`` are the only sources that don't. So the ``-p`` DB is the *sole*
-    possible L3 source — and can override nothing — exactly when none of those is
-    present. In every other case the reuse is suppressed and the tree's own
-    resolution (or the explicit selector) supplies L3. Conservative on
-    ``--sources``/``--config`` *presence* (they may resolve no L3 at all), but
-    never silently overriding a configured source is the safe direction; the user
-    can still force the ``-p`` reuse by naming ``--build-info``."""
-    return (
-        build_query is not None
-        or build_compile_db is not None
-        or build_config is not None
-        or sources is not None
-    )
-
-
-def resolve_compile_db_l3_reuse(
-    depth: str | None,
+def compile_db_from_build_info(
     build_info: Path | None,
-    effective_compile_db: Path | None,
-    *,
-    matched: bool = True,
-    compile_db_filter: str | None = None,
-    explicit_l3_selector: bool = False,
-) -> tuple[Path | None, str | None]:
-    """AC-007: decide whether to reuse a ``-p``/``--compile-db`` DB as L3.
-
-    Returns ``(build_info, note)`` — the (possibly rewritten) ``build_info`` and
-    an optional message to echo to stderr. Kept pure so the whole decision is
-    unit-tested and only the ``click.echo`` stays in the CLI.
-
-    When an explicit ``--depth build``/``source`` is requested and a real compile
-    database was supplied for the L2 header parse but no dedicated ``--build-info``
-    was given, that same ``compile_commands.json`` is authoritative L3 evidence,
-    so it is returned as ``build_info`` instead of re-running a build-system query
-    (cmake/bazel/make). Every other case leaves ``build_info`` unchanged (no
-    explicit deep depth, an explicit ``--build-info`` already set, or no compile
-    DB), so a plain ``dump -p db -H h.h`` L2-only run is unaffected.
-
-    Two guards keep the reuse honest:
-
-    - *matched* (``_resolve_build_context_flags``'s ``compile_db_matched``): an
-      unrelated or entirely filtered-out DB is **not** reused, or the strict
-      ``--depth`` gate would accept a header snapshot parsed without that build
-      context and disagree with the dry-run's ``compile_db_matched is False``
-      blocker (Codex review).
-    - *compile_db_filter*: ``--compile-db-filter`` scopes only the **L2** header
-      parse (``_resolve_build_context_flags`` proves the match on the filtered
-      subset). Reusing the raw DB path as L3 would load *every* entry — the whole
-      monorepo — ignoring the filter, so it is **not** reused when a filter is
-      active; the note tells the user to pass a pre-filtered ``--build-info`` /
-      ``--build-compile-db`` for filtered L3 (Codex review).
-    - *explicit_l3_selector*: whether another dedicated L3 build-source selector
-      (``--build-query`` / ``--build-compile-db``) was given. ``build_info is
-      None`` alone is not enough — ``inline._resolve_compile_db`` gives
-      ``build_info`` precedence over ``cfg.query``/``cfg.compile_db``, so reusing
-      the ``-p`` header DB as ``build_info`` would silently override an explicit
-      ``--build-query``/``--build-compile-db`` L3 selector. The ``-p`` DB is only
-      reused when *all* dedicated build-source inputs are absent (Codex review).
-    """
-    reuse_applies = (
-        depth in ("build", "source")
-        and build_info is None
-        and not explicit_l3_selector
-        and effective_compile_db is not None
-        and matched
-    )
-    if not reuse_applies:
-        return build_info, None
-    if compile_db_filter:
-        return build_info, (
-            "warning: --compile-db-filter scopes the L2 header parse only, so the "
-            "-p/--compile-db database was not reused as the L3 build source (it "
-            "would load every entry, ignoring the filter). Pass a pre-filtered "
-            "--build-info/--build-compile-db for filtered L3."
-        )
-    return effective_compile_db, (
-        f"Using compile database {effective_compile_db} as the L3 build source "
-        "(from -p/--compile-db; pass --build-info to override)."
-    )
-
-
-def resolve_dump_compile_db(
-    compile_db_path: Path | None,
-    compile_db_path_alt: Path | None,
     headers: tuple[Path, ...],
 ) -> Path | None:
-    """Resolve -p / --compile-db aliases and validate header requirement.
+    """The L2 compile database ``--build-info`` names, when it names one.
 
-    Raises :class:`click.UsageError` if a compile DB is given but no headers.
-    Returns the effective compile DB path (or *None*).
+    ``--build-info``'s operand is "a build dir, a compile_commands.json, or a
+    pre-captured pack" -- the first two are exactly what the removed
+    ``-p/--build-dir`` (and its ``--compile-db`` alias) took, so the database
+    that drives deterministic header parsing is read back off the one
+    remaining build-context flag rather than a second spelling of the same
+    path.
+
+    ``None`` without headers: a compile database only feeds the header AST,
+    and a headerless ``--build-info`` run is an ordinary L3-only dump, not the
+    usage error the dedicated flag used to raise ("requires -H/--header").
+
+    ``None`` for a *file* that is not a compile database, too. ``--build-info``
+    also accepts a Bazel aquery/cquery jsonproto, which
+    ``buildsource.inline._maybe_collect_bazel_build_info`` routes through the
+    Bazel adapter -- but only if it gets that far. Returning any file here
+    handed such a run to ``load_compile_db()``, which rejects a JSON object
+    with "compile_commands.json must be a JSON array" long before the adapter
+    is reached, so `--build-info aquery.json -H api.h` failed outright
+    (Codex review). ``sniff_build_info_format`` is the same content-based
+    classifier that dispatch uses, so the two cannot disagree about what a
+    given file is.
     """
-    error = check_dump_compile_db_error(compile_db_path, compile_db_path_alt, headers)
-    if error is not None:
-        raise click.UsageError(error)
-    return compile_db_path or compile_db_path_alt
+    from .buildsource.inline import sniff_build_info_format
+
+    if build_info is None or not headers:
+        return None
+    if build_info.is_file():
+        return build_info if sniff_build_info_format(build_info) == "compile_db" else None
+    db = build_info / "compile_commands.json"
+    # Sniffed for the same reason: a build directory holding a non-array
+    # compile_commands.json is the identical mis-route one level down.
+    return db if db.is_file() and sniff_build_info_format(db) == "compile_db" else None
+
+
+def compile_db_filter_scope_error(
+    compile_db_filter: str | None,
+    compile_db_path: Path | None,
+    collect_mode: str,
+) -> str | None:
+    """Refuse a filter that would scope L2 but silently not L3.
+
+    ``--compile-db-filter`` parameterizes the **header parse** only: the
+    filtered subset is what ``_resolve_build_context_flags`` proves a match
+    against and what the AST is built from. L3 collection reads the database
+    through ``embed_build_source``'s own adapter, which has no filter of its
+    own -- so on a monorepo database the embedded build facts cover every
+    translation unit while the headers cover the requested subset, and the
+    resulting snapshot carries unrelated build evidence that can produce
+    false differences.
+
+    The removed ``-p``/``--compile-db`` spelling refused exactly this: its
+    ``resolve_compile_db_l3_reuse`` declined to promote the header database
+    to L3 whenever a filter was active, and said so. Folding the operand into
+    ``--build-info`` removed that decision -- ``--build-info`` *is* the L3
+    selector now, so there is nothing left to decline -- which turned a loud
+    refusal into a silent unfiltered collection (Codex review). This restores
+    the refusal as a usage error, since the honest alternative (threading the
+    filter through ``embed_build_source`` into the compile-DB adapter) is a
+    change to ``buildsource/`` with its own evidence gates, not something to
+    infer from one review round.
+
+    ``None`` when the combination cannot arise: no filter, a ``--build-info``
+    that is not a compile database (a pack or Bazel jsonproto routes through
+    a different adapter), or ``collect_mode == "off"``, where no build
+    evidence is embedded for the filter to be inconsistent with.
+    """
+    if not compile_db_filter or compile_db_path is None or collect_mode == "off":
+        return None
+    return (
+        "--compile-db-filter scopes the L2 header parse only; the L3 build "
+        "evidence embedded from the same --build-info compilation database is "
+        "collected unfiltered, so the snapshot would carry build facts for "
+        "translation units the filter excludes. Pass a pre-filtered "
+        "compile_commands.json as --build-info (then --compile-db-filter is "
+        "unnecessary), or drop --compile-db-filter to accept the whole "
+        "database on both layers."
+    )
 
 
 def handle_non_elf_dump(
@@ -1327,23 +1271,50 @@ def handle_non_elf_dump(
     # (--depth headers/binary) gates the executing inferred build query. dump has no
     # defer_cleanup channel, so temp-build-dir cleanups come back pending and run in
     # the finally, after the header parse has consumed the dirs.
+    #
+    # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path never
+    # applies L3 build context..." known gap; PE/Mach-O shared the identical
+    # gap) is combined into the SAME collection as the include seed above
+    # (seed_includes_and_fold_compile_context, not two separate calls) --
+    # two independent collect_inline_pack calls for the same --sources tree
+    # could otherwise contend on the same inferred-build-query lock and wait
+    # up to its 600s timeout (Codex review; see that function's own
+    # docstring).
     from .buildsource.inline import _run_cleanups
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
-    eff_includes, _l2_pending_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        gcc_options=getattr(compile_context, "gcc_options", None),
-        gcc_option_tokens=getattr(compile_context, "gcc_option_tokens", ()),
-        allow_inferred_build_query=collect_mode != "off",
-    )
+    _l2_pending_cleanups: list[Callable[[], None]] = []
     try:
+        (
+            eff_includes,
+            l3_context_applied,
+            l3_effective_ctx,
+            _l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
+            headers=headers,
+            includes=includes,
+            sources=sources,
+            build_info=build_info,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db, build_targets=build_targets,
+            collect_mode=collect_mode,
+            gcc_path=getattr(compile_context, "gcc_path", None),
+            gcc_prefix=getattr(compile_context, "gcc_prefix", None),
+            gcc_options=getattr(compile_context, "gcc_options", None),
+            gcc_option_tokens=getattr(compile_context, "gcc_option_tokens", ()),
+            sysroot=getattr(compile_context, "sysroot", None),
+            nostdinc=getattr(compile_context, "nostdinc", False),
+            frontend=header_backend,
+            frontend_context=getattr(compile_context, "frontend_context", "host"),
+            lang=lang,
+            lang_explicit=lang_explicit,
+            pending_cleanups=_l2_pending_cleanups,
+        )
+        # _l3_include_dirs is unused by design, not omission: `compile=
+        # l3_effective_ctx` below hands the merged L3 context to service_
+        # header_scoped._try_header_scoped_dump, which derives the identical
+        # cache-relevant paths from those tokens itself (Codex review, PR D).
         snap = dump_native_binary(
             so_path,
             binary_fmt,
@@ -1356,7 +1327,7 @@ def handle_non_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
-            compile=compile_context,
+            compile=l3_effective_ctx,
         )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.
@@ -1381,7 +1352,13 @@ def handle_non_elf_dump(
     # matched compile DB, but the snapshot that was actually written never
     # used either, so stamping build-context evidence on it would let
     # `--depth build` accept a plain export-table dump (Codex review).
-    if headers and compile_db_context_matched and snap.from_headers:
+    # `l3_context_applied` (P0.3 fold, above) is an independent OR'd source
+    # for this same stamp, mirroring perform_elf_dump's identical rule.
+    if (
+        headers
+        and (compile_db_context_matched or l3_context_applied)
+        and snap.from_headers
+    ):
         snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     from .dumper_clang import resolve_source_frontend_clang_bin
@@ -1417,16 +1394,15 @@ def resolve_dump_collect_context(
     sources: Path | None,
     build_info: Path | None,
     headers: tuple[Path, ...],
-    compile_db_path: Path | None,
-    compile_db_path_alt: Path | None,
     inputs_pack: Path | None = None,
-) -> tuple[str, tuple[Path, ...], Path | None, Path | None]:
+) -> tuple[str, tuple[Path, ...]]:
     """Resolve the --depth preset into the internal collect mode for a dump.
 
-    Returns the ``(collect_mode, headers, compile_db_path, compile_db_path_alt)``
-    tuple the caller should proceed with — ``--depth binary`` suppresses the L2
-    header AST and its compile DB, and an explicitly-requested deep depth without
-    a source tree / build context warns loudly (G21.7-style fail-loud).
+    Returns the ``(collect_mode, headers)`` pair the caller should proceed
+    with — ``--depth binary`` suppresses the L2 header AST (and, with it, the
+    compile database the caller derives from ``--build-info``), and an
+    explicitly-requested deep depth without a source tree / build context
+    warns loudly (G21.7-style fail-loud).
     """
     # Resolve the --depth preset into the internal collect mode before any dump
     # path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the same
@@ -1441,14 +1417,10 @@ def resolve_dump_collect_context(
     else:
         collect_mode = resolve_dump_depth(depth, "source-target")
     # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
-    # A compile DB only feeds the header parse, so discard it with the headers --
-    # otherwise resolve_dump_compile_db would reject the now-headerless invocation
-    # even though the user did supply headers, blocking the switch to the fast
-    # binary rung (Codex review).
+    # A compile DB only feeds the header parse, and the caller derives it from
+    # these headers, so dropping them drops it too.
     if depth == "binary":
         headers = ()
-        compile_db_path = None
-        compile_db_path_alt = None
 
     # An *explicitly* requested deep evidence depth (--depth) collects nothing
     # without a source tree / build context: _write_snapshot_output only embeds
@@ -1458,19 +1430,12 @@ def resolve_dump_collect_context(
     # silent -- embedding is a no-op there by design. G21.7-style fail-loud (a
     # warning, not an error).
     depth_requested = depth is not None
-    # AC-007: a real compile DB supplied via -p/--compile-db serves as the L3
-    # build source for an explicit --depth build/source (the caller wires it into
-    # build_info), so it is not a "no build/source input" case — don't warn.
-    _compile_db_serves_l3 = (
-        compile_db_path is not None or compile_db_path_alt is not None
-    )
     if (
         depth_requested
         and collect_mode != "off"
         and sources is None
         and build_info is None
         and inputs_pack is None
-        and not _compile_db_serves_l3
     ):
         click.echo(
             f"Warning: evidence depth '{collect_mode}' was requested but no "
@@ -1479,16 +1444,13 @@ def resolve_dump_collect_context(
             "--build-info, or --inputs, or use --depth headers for an L2-only dump.",
             err=True,
         )
-    return collect_mode, headers, compile_db_path, compile_db_path_alt
+    return collect_mode, headers
 
 
 def resolve_dump_compile_context(
     resolved_compile_context: CompileContext | None,
     *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
     gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
     nostdinc: bool,
     header_backend: str,
@@ -1518,10 +1480,7 @@ def resolve_dump_compile_context(
 
     return resolve_compile_context(
         click.get_current_context(),
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         header_backend=header_backend,
@@ -1631,7 +1590,7 @@ def perform_elf_dump(
     no ABI-relevant flags to forward is still real build-context evidence,
     not an absent one — Codex review, second finding on this signal).
 
-    ``include_dependencies`` (``dump --include-dependencies``): by default,
+    ``include_dependencies`` (``dump --include-system-declarations``): by default,
     ``write_snapshot_output`` excludes toolchain/system-header declarations
     from the written snapshot right before serialization via
     :func:`abicheck.dumper_scoping.scope_snapshot_excluding_dependencies`;
@@ -1702,29 +1661,78 @@ def perform_elf_dump(
     # headers that reach into a dependency SDK (the pvxs/EPICS case). dump has no
     # defer_cleanup channel, so any inferred temp-build-dir cleanups come back as
     # pending and are run below, after the header parse has consumed the dirs.
+    #
+    # P0.3 L3->L2 fold (AGENTS.md "The native ELF `abicheck dump` path never
+    # applies L3 build context..." known gap) is combined into the SAME
+    # collection as the include seed above (seed_includes_and_fold_
+    # compile_context, not two separate calls) -- two independent
+    # collect_inline_pack calls for the same --sources tree could otherwise
+    # contend on the same inferred-build-query lock and wait up to its 600s
+    # timeout (Codex review; see that function's own docstring).
     from .buildsource.inline import _run_cleanups
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
-    eff_includes, _l2_pending_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        # Include dirs supplied via --gcc-options/--gcc-option are as explicit as
-        # -I and must suppress the seed so the user's search precedence is kept.
-        gcc_options=effective_gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        # An L2-only dump (--depth headers → collect_mode "off") requested no build/
-        # source evidence, so don't let the include-dir seed run a build system;
-        # only the zero-config inferred query is gated, passive discovery stays
-        # (Codex review).
-        allow_inferred_build_query=collect_mode != "off",
-    )
+    # The ADR-039 collector's _user_define_flags() call below must see only
+    # the *user's own* global tokens, never the L3 fold's per-header-matched
+    # derived ones (Codex review) -- the same "deliberately excluded" rule
+    # its own docstring and the comment at that call site already state for
+    # effective_gcc_options, which the fold's l3_context_applied reassignment
+    # below would otherwise silently defeat for gcc_option_tokens too, since
+    # that reassignment folds the derived flags in before this variable is
+    # read again. Captured here, before any L3 reassignment.
+    _user_gcc_option_tokens = gcc_option_tokens
+    _l2_pending_cleanups: list[Callable[[], None]] = []
     try:
+        (
+            eff_includes,
+            l3_context_applied,
+            l3_effective_ctx,
+            l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
+            headers=resolved_headers,
+            includes=includes,
+            sources=sources,
+            build_info=build_info,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db, build_targets=build_targets,
+            collect_mode=collect_mode,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            # Include dirs supplied via --compiler-option are as explicit as
+            # -I and must suppress the seed so the user's search precedence
+            # is kept. `deferred` excluded (Codex review): already implied
+            # by these tokens when non-empty, and including it would wrongly
+            # rank it ahead of L3-derived includes -- appended back below.
+            gcc_options=effective_gcc_options,
+            gcc_option_tokens=tuple(gcc_option_tokens),
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            frontend=header_backend,
+            frontend_context=(
+                compile_context.frontend_context
+                if compile_context is not None
+                else "host"
+            ),
+            lang=lang,
+            lang_explicit=lang_explicit,
+            pending_cleanups=_l2_pending_cleanups,
+        )
+        if l3_context_applied:
+            gcc_path = l3_effective_ctx.gcc_path
+            gcc_prefix = l3_effective_ctx.gcc_prefix
+            effective_gcc_options = l3_effective_ctx.gcc_options
+            gcc_option_tokens = l3_effective_ctx.gcc_option_tokens + tuple(deferred)
+            sysroot = l3_effective_ctx.sysroot
+            nostdinc = l3_effective_ctx.nostdinc
+            deferred = []
+            # A derived -I/-isystem dir reaches the header parse only as an
+            # opaque gcc_option_tokens string, which extra_includes' own
+            # directory-mtime hashing never inspects -- fold it into
+            # deferred_dirs (extra_hash_dirs below) too, or an edit under
+            # this dir would reuse a stale cached AST (Codex review).
+            deferred_dirs = deferred_dirs + l3_include_dirs
+
         # Scoped so a clang primary parse is handed off in-process to the
         # `_attach_header_graph` pass below (G31 Phase C) -- this ELF `dump`
         # CLI path reaches `dumper.dump` directly, not `service.run_dump`,
@@ -1788,13 +1796,14 @@ def perform_elf_dump(
         # returns a DWARF-built snapshot with from_headers left False), so a -p compile
         # database matching the originally *requested* headers must not be recorded as
         # real build-context evidence for a snapshot that never actually parsed them
-        # (Codex review).
+        # (Codex review). ``l3_context_applied`` (P0.3 fold, above) is an independent
+        # OR'd source for this same stamp -- either mechanism finding real build
+        # context for these headers is enough; mirrors resolve_side_snapshot's own
+        # "context_applied and snap.from_headers" condition for the typed pipeline.
         if (
-            effective_compile_db
-            and resolved_headers
-            and compile_db_context_matched
-            and snap.from_headers
-        ):
+            (effective_compile_db and resolved_headers and compile_db_context_matched)
+            or l3_context_applied
+        ) and snap.from_headers:
             snap.parsed_with_build_context = True
 
         # ADR-039 collection layer — when a compile DB is available, harvest the
@@ -1804,18 +1813,22 @@ def perform_elf_dump(
         # and additive: absent/empty on a plain context-free dump.
         if effective_compile_db and resolved_headers:
             # Augment the sound per-command compile-DB intersection with the user's
-            # *global* flags only: the repeatable ``--gcc-option`` tokens and the
+            # *global* flags only: the repeatable ``--compiler-option`` tokens and the
             # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
             # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
             # review #498). We deliberately do NOT feed ``effective_gcc_options``,
             # which also carries the *first* resolved header's auto-derived build
             # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
-            # active for every scanned header.
+            # active for every scanned header. The P0.3 L3->L2 fold's own derived
+            # flags are excluded for the identical reason: ``_user_gcc_option_tokens``
+            # is captured before the fold's ``l3_context_applied`` reassignment, so a
+            # per-header-matched compile unit's own ``-D``/``-U`` never leaks into this
+            # snapshot-wide harvest either (Codex review).
             _attach_build_context(
                 snap,
                 effective_compile_db,
                 resolved_headers,
-                _user_define_flags(gcc_option_tokens, user_gcc_options),
+                _user_define_flags(_user_gcc_option_tokens, user_gcc_options),
                 source_filter=compile_db_filter,
             )
 
@@ -1876,22 +1889,19 @@ def perform_elf_dump(
         # (Codex review). Shared by BOTH post-processing steps below, since
         # each runs its own independent second clang pass over the same
         # headers and needs the identical fix for the identical reason.
-        effective_compile_context = compile_context
-        if effective_gcc_options != (
-            compile_context.gcc_options if compile_context is not None else None
-        ):
-            import dataclasses
-
-            if compile_context is not None:
-                effective_compile_context = dataclasses.replace(
-                    compile_context, gcc_options=effective_gcc_options
-                )
-            else:
-                from .service_scan import CompileContext
-
-                effective_compile_context = CompileContext(
-                    gcc_options=effective_gcc_options
-                )
+        #
+        # l3_effective_ctx (P0.3 fold, above) already IS that fully-merged
+        # context -- gcc_path/gcc_prefix/gcc_options/gcc_option_tokens/
+        # sysroot/nostdinc/frontend/frontend_context all reflect exactly
+        # what the main dump() call above just used, deferred roots and any
+        # L3-derived ABI-relevant flags included. Using it directly here
+        # (rather than re-deriving from compile_context/effective_gcc_options
+        # by hand) is a strict superset of the old gcc_options-string-only
+        # comparison: it also carries deferred and any L3-derived
+        # gcc_option_tokens/sysroot the old comparison never looked at, so
+        # this second clang pass can no longer silently disagree with the
+        # primary one on those either.
+        effective_compile_context = l3_effective_ctx
 
         from .service import (
             _HEADER_GRAPH_ENABLED,

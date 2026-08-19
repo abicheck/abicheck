@@ -335,6 +335,35 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
             node.get("contract_coverage_exit_contribution")
         ):
             node["contract_coverage_exit_contribution"] = 0
+        # P0.4's orthogonal analysis-assurance contribution is the exact
+        # sibling of the contract-coverage one just above -- a second,
+        # independent way this report can raise an exit code, so "advisory
+        # means this check gates nothing" has to hold on this axis too, not
+        # just the coverage one. Same block, same validity check (both are
+        # plain 0/1 floors), same fail-open reasoning.
+        if _is_valid_coverage_contribution(
+            node.get("analysis_assurance_exit_contribution")
+        ):
+            node["analysis_assurance_exit_contribution"] = 0
+        # CLI cleanup phase two, PR G1/PR E: the canonical `exit` block
+        # (`exit_decision.ExitDecision`) lives at exactly the same
+        # locations as the two contributions above -- the document root for
+        # a `compare` report, `diff`/`report.diff` for a scan one -- so the
+        # same `contract_coverage_block_paths` traversal already finds it;
+        # no separate path-finder is needed (Codex review, fresh evidence:
+        # an earlier revision neutralized every axis this block summarizes
+        # except the block itself, so an advisory report could still
+        # publish a nonzero `exit.code` -- and nonzero contributions -- that
+        # a consumer adopting the new canonical field would read as
+        # blocking). Replaced wholesale with the "clean" decision, the same
+        # way the `severity` gate above is replaced rather than
+        # conditionally rewritten: advisory mode means every axis gates
+        # nothing, so the persisted explanation has to say so outright
+        # rather than being left to disagree with the axes it summarizes.
+        if isinstance(node.get("exit"), Mapping):
+            from ..exit_decision import resolve_exit_decision
+
+            node["exit"] = resolve_exit_decision(compatibility_contribution=0).to_dict()
 
 
 def _zero_nested_severity_gates(report: dict[str, Any]) -> None:

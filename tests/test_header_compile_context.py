@@ -1410,100 +1410,73 @@ def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
     assert derive_l2_compile_context([header], pack_dir, None) == (None, [])
 
 
-# ---------------------------------------------------------------------------
-# 3. service_input_resolution wiring
-# ---------------------------------------------------------------------------
+# seed_includes_and_fold_compile_context's own direct branch coverage lives
+# in tests/test_non_elf_dump_l2_seed.py (room there; this file is near the
+# 2000-line hard cap) -- see its "seed_includes_and_fold_compile_context
+# branch coverage" section.
 
 
-def test_merge_l3_compile_context_derived_leads_explicit_wins() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-DFOO=1", "-fPIC"))
-    explicit = CompileContext(gcc_option_tokens=("-DFOO=2",), sysroot=Path("/x"))
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    # Finding 2: explicit's structured `sysroot` is folded into a trailing
-    # token (and the structured field cleared) so it lands strictly after
-    # every derived token in the actually-rendered command, not before it.
-    assert merged.gcc_option_tokens == (
-        "-DFOO=1",
-        "-fPIC",
-        "--sysroot=/x",
-        "-DFOO=2",
-    )
-    assert merged.sysroot is None
-
-
-def test_merge_l3_compile_context_explicit_gcc_options_string_folded_after_derived() -> (
-    None
-):
-    """Finding 2: the free-form ``gcc_options`` string channel, not just
-    ``sysroot``, must also land after every derived token."""
-    from abicheck.service_input_resolution import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-DFOO=1",))
-    explicit = CompileContext(gcc_options="-DFOO=2 -DBAR=3")
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    assert merged.gcc_option_tokens == ("-DFOO=1", "-DFOO=2", "-DBAR=3")
-    assert merged.gcc_options is None
-
-
-def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_command(
-    tmp_path: Path,
-) -> None:
-    """End-to-end-shaped: build the actual castxml command from a merged
-    context carrying a derived AND an explicit, conflicting sysroot, and
-    assert the *last* --sysroot= token (the one that wins under real
-    compiler last-flag-wins semantics) is the explicit one."""
-    from abicheck.dumper_ast_config import _build_castxml_command
-    from abicheck.service_input_resolution import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("--sysroot=/derived",))
-    explicit = CompileContext(sysroot=Path("/explicit"))
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    cmd = _build_castxml_command(
-        "g++",
-        "gnu",
-        [],
-        tmp_path / "out.xml",
-        tmp_path / "agg.h",
-        sysroot=merged.sysroot,
-        gcc_options=merged.gcc_options,
-        gcc_option_tokens=merged.gcc_option_tokens,
-        force_cpp=True,
-    )
-    sysroot_tokens = [tok for tok in cmd if tok.startswith("--sysroot=")]
-    assert sysroot_tokens == ["--sysroot=/derived", "--sysroot=/explicit"]
-    assert sysroot_tokens[-1] == "--sysroot=/explicit"  # last-flag-wins: explicit
-
-
-def test_merge_l3_compile_context_none_derived_is_noop() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
-
-    explicit = CompileContext(gcc_options="-DX=1")
-    assert _merge_l3_compile_context(explicit, None) is explicit
-
-
-def test_merge_l3_compile_context_none_explicit_uses_derived() -> None:
-    from abicheck.service_input_resolution import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-std=c++20",))
-    assert _merge_l3_compile_context(None, derived) is derived
+# section 3 (service_input_resolution / buildsource.l2_seed._merge_l3_compile_context
+# wiring) moved to tests/test_header_compile_context_merge.py -- split out
+# during the P0.3 follow-up round 2 merge against main to keep this file
+# under the 2000-line hard cap.
 
 
 def test_seeded_compile_context_noop_without_sources(tmp_path: Path) -> None:
     from abicheck.api_types import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_compile_context
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
 
     side = InputSpec(path=tmp_path / "lib.so", headers=(tmp_path / "h.h",))
     evidence = SideEvidence(
         headers=[tmp_path / "h.h"], compile=None, collect_mode="off", dump_manifest=None
     )
-    ctx, applied, cleanups = _seeded_compile_context(side, evidence)
-    assert (ctx, applied, cleanups) == (None, False, [])
+    includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+        side, evidence
+    )
+    assert (includes, ctx, applied, cleanups) == ([], None, False, [])
+
+
+def test_seeded_includes_and_compile_context_preserves_none_on_no_op_fold(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: `seed_includes_and_fold_compile_context`
+    always returns a real `CompileContext` for its own `l3_effective_context`
+    (built fresh from individual kwargs, never literally the caller's
+    `evidence.compile`) -- so when the fold finds nothing (`applied=False`)
+    and the caller supplied no context of its own, the wrapper must convert
+    that fabricated default back to `None` rather than silently promoting a
+    `None` into a real object. `service_dump_cache._dump_is_cacheable` only
+    permits caching when `compile is None`, so losing this distinction would
+    silently disable caching for an otherwise-cacheable typed dump/compare
+    operand whenever unrelated build evidence was supplied and matched
+    nothing."""
+    from abicheck.api_types import InputSpec
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+
+    def _fake_seed(*, pending_cleanups, **kwargs):
+        # Mirrors the real primitive's own no-op-fold return shape: a fresh,
+        # default-valued CompileContext, not the caller's (here None) one.
+        return [], False, CompileContext(), ()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        _fake_seed,
+    )
+
+    header = tmp_path / "h.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    side = InputSpec(path=tmp_path / "lib.so", sources=tmp_path, headers=(header,))
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+        side, evidence
+    )
+    assert applied is False
+    assert ctx is None
 
 
 def test_resolve_side_snapshot_stamps_parsed_with_build_context(

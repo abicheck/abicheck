@@ -283,7 +283,7 @@ REGISTRY = ChangeKindRegistry([
     _E("symbol_size_changed_internal", _B,
        impact="ELF size changed on an internal-looking (reserved/underscore-prefixed) exported data symbol; "
               "exported data remains part of the dynamic ABI and size changes can break copy relocations "
-              "or direct data consumers. Override severity via --policy-file only when the symbol is known private.",
+              "or direct data consumers. Override severity via --policy only when the symbol is known private.",
        description_template="Symbol size changed: {name} ({old} → {new} bytes)"),
     _E("symbol_size_changed_const_object", _B,
        impact="ELF size changed on a public const string-like object declared without a fixed bound in headers. "
@@ -1555,13 +1555,15 @@ REGISTRY = ChangeKindRegistry([
     # typeinfo (`_ZTI`) objects, so these break detections work on libraries
     # shipped without any DWARF debug info or public headers.
     _E("vtable_slot_count_changed", _B,
-       impact="A polymorphic class's vtable changed size — its `_ZTV` object now holds "
-              "a different number of virtual-function slots (a virtual method was added, "
-              "removed, or reordered). Existing binaries dispatch through fixed vtable "
-              "offsets, so they call the wrong slot or run off the end of the table. "
-              "Recovered from the ELF symbol size without DWARF — the binary-only analogue "
-              "of FUNC_VIRTUAL_ADDED / TYPE_VTABLE_CHANGED.",
-       description_template="Vtable for '{name}' changed size: {old} → {new} bytes ({detail}). A virtual method was added, removed, or reordered; existing binaries dispatch through fixed vtable offsets and will call the wrong slot. Detected from the ELF symbol size without debug info."),
+       impact="A polymorphic class's emitted vtable group changed size. The `_ZTV` object "
+              "spans the primary table plus any vcall/vbase offsets and secondary tables, "
+              "so the cause is either virtual functions net added/removed or a change in "
+              "the inheritance shape — the symbol size alone cannot say which. Either way "
+              "existing binaries dispatch through fixed vtable offsets, so they may call "
+              "the wrong slot or run off the end of the table. Recovered from the ELF "
+              "symbol size without DWARF — the binary-only analogue of FUNC_VIRTUAL_ADDED "
+              "/ TYPE_VTABLE_CHANGED; identifying which slot moved needs DWARF or headers.",
+       description_template="Vtable for '{name}' changed size: {old} → {new} bytes ({detail}). Virtual functions were net added or removed, or the inheritance shape changed — the symbol size cannot distinguish them; existing binaries dispatch through fixed vtable offsets and may call the wrong slot. Detected from the ELF symbol size without debug info."),
     _E("rtti_inheritance_changed", _B,
        impact="A polymorphic class's RTTI typeinfo (`_ZTI`) object changed size, which in "
               "the Itanium C++ ABI means its base-class shape changed: no-base "

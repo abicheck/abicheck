@@ -45,6 +45,7 @@ from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
+    cache_relevant_operand_paths,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
@@ -646,9 +647,15 @@ def _run_dump_uncached(
     )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
+    # .lower() (Codex review, fresh evidence): compile.frontend="AUTO" is an
+    # accepted spelling (validated case-insensitively) that must mean "no
+    # override", not be treated as an explicit one -- otherwise a pinned,
+    # already-resolved header_backend (service_dump_pipeline.ResolvedDumpRequest.
+    # effective_header_backend) can be silently discarded here in favor of
+    # re-resolving "AUTO" against a live ABICHECK_AST_FRONTEND read below.
     eff_backend = (
         compile.frontend
-        if (compile is not None and compile.frontend != "auto")
+        if (compile is not None and compile.frontend.lower() != "auto")
         else header_backend
     )
 
@@ -1039,8 +1046,18 @@ def _attach_header_graph(
             # never inspects option-token content, only extra_includes/
             # extra_hash_dirs, so without this a header changed under an
             # inferred root would reuse a stale cached AST (Codex review;
-            # mirrors _dump_elf's own deferred_dirs handling).
-            deferred_dirs = tuple(deferred_token_dirs(deferred))
+            # mirrors _dump_elf's own deferred_dirs handling). Also fold in
+            # any include-search directory riding in `cc.gcc_option_tokens`
+            # itself (an explicit --gcc-options/--compiler-option -I, or —
+            # since the P0.3 L3->L2 fold — a compile-DB-derived one), for
+            # the identical reason: this second, independent header parse
+            # has its own cache key, so a directory the primary snapshot
+            # pass already hashes must be hashed here too, or an edit under
+            # it would silently reuse a stale cached graph even though the
+            # primary snapshot re-parsed correctly (Codex review).
+            deferred_dirs = tuple(
+                deferred_token_dirs(deferred)
+            ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -1097,7 +1114,7 @@ def _attach_header_graph(
         # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
         #
         # Resolve the same clang driver `_clang_header_dump` above used
-        # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
+        # (honoring `--compiler`/`--compiler-prefix`) rather than defaulting to
         # the bare "clang++" — otherwise a hermetic/cross toolchain selected
         # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
         # edge (or resolves them against the host's clang instead) even
@@ -1310,7 +1327,13 @@ def _dump_elf(
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
         # Deferred roots ride in gcc_option_tokens (-isystem), not extra_includes,
         # so hash their contents into the AST cache key explicitly (Codex review).
-        deferred_dirs = tuple(deferred_token_dirs(deferred))
+        # Also fold in any include-search dir in cc.gcc_option_tokens itself, so
+        # this PRIMARY parse's cache key stays aligned with _attach_header_graph's
+        # own identical fold above -- else the two passes could disagree on
+        # staleness for the same header (Codex review).
+        deferred_dirs = tuple(
+            deferred_token_dirs(deferred)
+        ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
 
     compiler = "cc" if lang == "c" else "c++"
     try:
@@ -1455,7 +1478,7 @@ def _dump_pe(
     # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
     # castxml could not resolve a surface (commonly the MSVC C++-mangling gap),
     # recover declared types — *with their defining source header* — from the
-    # PDB debug info so that --public-header scoping still has a provenance
+    # PDB debug info so that public-header scoping still has a provenance
     # signal to classify against. Bounded to this fallback branch so default
     # PE diffs (no --header) are unaffected.
     pdb_types: list[RecordType] = []
@@ -1605,8 +1628,13 @@ def load_suppression_and_policy(
         except (ValueError, OSError) as e:
             raise ValidationError(f"Invalid policy file: {e}") from e
         if policy != "strict_abi":
+            # Named as Tier-2 *parameters*, not CLI flags: the CLI merged
+            # --policy/--policy-file into one --policy that routes an operand
+            # to exactly one of these, so it can no longer set both and this
+            # branch is now reachable only from a typed API caller, for whom
+            # the flag spellings would name nothing.
             _logger.warning(
-                "--policy=%r is ignored when --policy-file is given. "
+                "policy=%r is ignored when policy_file_path is given. "
                 "Set base_policy in the YAML file to override the base policy.",
                 policy,
             )
@@ -1754,138 +1782,27 @@ def compare_snapshots(
     )
 
 
-def run_compare_request(request: CompareRequest) -> CompareResult:
-    """Compare two ABI inputs described by a :class:`CompareRequest`.
-
-    The single classification chokepoint (ADR-037 D1/D2): every front-end
-    builds a ``CompareRequest`` and calls this, so defaults cannot diverge
-    between invocation paths. The keyword-argument :func:`run_compare` is a
-    thin shim that builds the request and delegates here.
-
-    Exactly the composition of the two phases in
-    :mod:`abicheck.service_compare_pipeline` —
-    :func:`~abicheck.service_compare_pipeline.resolve_compare_request` then
-    :func:`~abicheck.service_compare_pipeline.classify_compare_pair`. A front
-    end that must configure the run between them (the native ``compare`` CLI's
-    ADR-049 ``resolve_and_apply``, whose ``--pack`` can move the policy file
-    and severity levels the classification is scored under) calls the two
-    phases directly rather than keeping a second resolution implementation.
-
-    Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
-    bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
-    gain a field without breaking positional callers, which a tuple cannot.
-    ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
-    wants it back in one line.
-
-    Raises:
-        ValidationError: If the request fails :meth:`CompareRequest.validate`.
-        SnapshotError: If either input cannot be loaded.
-    """
-    return classify_compare_pair(request, resolve_compare_request(request))
-
-
-def run_compare(
-    old_input: Path,
-    new_input: Path,
-    old_headers: list[Path] | None = None,
-    new_headers: list[Path] | None = None,
-    old_includes: list[Path] | None = None,
-    new_includes: list[Path] | None = None,
-    old_version: str = "",
-    new_version: str = "",
-    lang: str = "c++",
-    frontend: str = "auto",
-    suppress: Path | None = None,
-    policy: str = "strict_abi",
-    policy_file_path: Path | None = None,
-    old_pdb_path: Path | None = None,
-    new_pdb_path: Path | None = None,
-    old_debug_roots: list[Path] | None = None,
-    new_debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
-    scope_to_public_surface: bool = True,
-    force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = False,
-    public_surface_allowlist: set[str] | None = None,
-    debuginfod_url: str | None = None,
-    diagnostic_comparison: bool = False,
-    contract_evaluation: bool = False,
-    include_dependencies: bool = True,
-    contract_mode: str | None = None,
-) -> CompareResult:
-    """Compare two ABI inputs and return the classified diff result.
-
-    Keyword-argument shim over :func:`run_compare_request`: it assembles a
-    :class:`CompareRequest` from loose arguments and delegates, so existing
-    callers keep working while the typed request is the real chokepoint
-    (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
-    Trailing keyword-only params (``debuginfod_url`` onward) are appended
-    after every pre-existing one, never alongside a thematically-closer
-    neighbor, so a positional caller keeps binding each argument to the same
-    parameter it always did (Codex review, PR #551). ``include_dependencies``
-    applies to *both* sides — build a ``CompareRequest`` for a per-side override.
-    Returns:
-        A :class:`~abicheck.api_types.CompareResult`. This returned the bare
-        ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
-        shape back for a caller that unpacks positionally.
-    Raises:
-        SnapshotError: If either input cannot be loaded.
-        ValidationError: If inputs have unrecognised formats.
-    """
-    request = CompareRequest(
-        old=InputSpec(
-            path=old_input,
-            headers=tuple(old_headers or ()),
-            includes=tuple(old_includes or ()),
-            version=old_version,
-            pdb=old_pdb_path,
-            debug_roots=tuple(old_debug_roots or ()),
-            include_dependencies=include_dependencies,
-        ),
-        new=InputSpec(
-            path=new_input,
-            headers=tuple(new_headers or ()),
-            includes=tuple(new_includes or ()),
-            version=new_version,
-            pdb=new_pdb_path,
-            debug_roots=tuple(new_debug_roots or ()),
-            include_dependencies=include_dependencies,
-        ),
-        lang=lang,
-        frontend=frontend,
-        policy=policy,
-        policy_file_path=policy_file_path,
-        suppress=suppress,
-        scope_public=scope_to_public_surface,
-        force_public_symbols=(
-            frozenset(force_public_symbols) if force_public_symbols else None
-        ),
-        public_surface_allowlist=(
-            frozenset(public_surface_allowlist)
-            if public_surface_allowlist is not None
-            else None
-        ),
-        pattern_verdicts=pattern_verdicts,
-        enable_debuginfod=enable_debuginfod,
-        debuginfod_url=debuginfod_url,
-        diagnostic_comparison=diagnostic_comparison,
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
-    )
-    return run_compare_request(request)
+# run_compare_request/run_compare moved to service_compare_pipeline.py (CLI
+# cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
+# cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
+# -- re-exported below, same pattern as resolve_compare_request/
+# classify_compare_pair already use.
 
 
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
 # the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can
 # run its Click-dependent ADR-049 ``resolve_and_apply`` step between them and
 # still share this resolution instead of keeping a second copy. Re-exported here
-# so ``from abicheck.service import resolve_compare_request`` works and
-# ``run_compare_request`` above resolves both names at call time. ──────────────
+# so ``from abicheck.service import resolve_compare_request`` works.
+# ``run_compare_request``/``run_compare`` (their composition and its
+# keyword-argument shim) live there too now, for the same file-size reason. ──
 from .service_compare_pipeline import (  # noqa: E402,F401
     ResolvedComparePair,
     classify_compare_pair,
     resolve_compare_request,
     resolve_sides_sequentially,
+    run_compare,
+    run_compare_request,
 )
 
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the

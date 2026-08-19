@@ -86,13 +86,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--output",
                 "--format",
                 "--demangle",
-                "--stat",
                 "--report-mode",
-                "--show-impact",
-                "--recommend",
                 "--show-only",
-                "--annotate",
-                "--annotate-additions",
                 "--config",
                 "--exit-code-scheme",
                 "--verbose",
@@ -102,8 +97,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Toolchain (header parsing)",
             "options": [
                 "--ast-frontend",
-                "--old-ast-frontend",
-                "--new-ast-frontend",
                 "--compiler",
                 "--compiler-prefix",
                 "--compiler-option",
@@ -115,15 +108,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Policy & severity",
             "options": [
                 "--policy",
-                "--policy-file",
                 "--suppress",
-                "--strict-suppressions",
-                "--require-justification",
                 "--severity-preset",
-                "--severity-abi-breaking",
-                "--severity-potential-breaking",
-                "--severity-quality-issues",
-                "--severity-addition",
             ],
         },
         {
@@ -131,10 +117,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--scope-public-headers",
                 "--show-filtered",
-                "--show-redundant",
-                "--collapse-versioned-symbols",
-                "--public-symbol",
-                "--public-symbols-list",
             ],
         },
         {
@@ -196,8 +178,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--header",
                 "--include",
-                "--public-header",
-                "--public-header-dir",
                 "--version",
                 "--lang",
             ],
@@ -231,7 +211,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--depth",
                 "--build-info",
                 "--sources",
-                "--build-dir",
                 "--compile-db-filter",
                 "--build-query",
                 "--build-compile-db",
@@ -255,10 +234,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--binary",
                 "--header",
                 "--include",
-                "--public-header-dir",
                 "--sources",
                 "--build-info",
-                "--compile-db",
                 "--config",
             ],
         },
@@ -298,22 +275,14 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Policy & severity",
             "options": [
                 "--policy",
-                "--policy-file",
                 "--suppress",
-                "--strict-suppressions",
                 "--severity-preset",
-                "--severity-abi-breaking",
-                "--severity-potential-breaking",
-                "--severity-quality-issues",
-                "--severity-addition",
             ],
         },
         {
             "name": "Public-surface scoping",
             "options": [
                 "--scope-public-headers",
-                "--public-symbol",
-                "--public-symbols-list",
             ],
         },
         {
@@ -435,12 +404,10 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "output",
         "fmt",
         "show_only",
-        "stat",
         "demangle",
         # Policy & severity
         "config",
         "policy",
-        "policy_file_path",
         "suppress",
         "severity_preset",
         # Scoped comparison (ADR-043) — headline feature, not a long-tail knob
@@ -454,9 +421,8 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Public-surface scoping
         "scope_public_headers",
         # Contract domain (ADR-049 Phase 6/7) -- headline feature per the CLI
-        # audit's proposed clean `compare` surface; `contract_evaluation`
-        # itself stays advanced-tier since `--contract` alone now implies it
-        # (CLI audit PR 3/5, cli_options.resolve_contract_evaluation).
+        # audit's proposed clean `compare` surface, and the one flag that asks
+        # for a contract decision at all (cli_options.resolve_contract_evaluation).
         "contract_mode",
         # Debug info -- only the coarse per-run override stays visible; the
         # format/debuginfod/dwarf-only knobs are demoted to the `debug:`
@@ -513,8 +479,8 @@ def _make_help_callback(
         # for a folded option that --help-all can actually render. A Click-``hidden``
         # option renders there too *only* if some OPTION_GROUPS panel lists one
         # of its flag strings (same bypass noted above); one that is hidden and
-        # unlisted (a deprecated no-op shim like --header-graph, or a superseded
-        # alias like --gcc-path) never appears even there (Codex review, PR #757).
+        # unlisted (a deprecated no-op shim like --header-graph) never appears
+        # even there (Codex review, PR #757).
         # Counting those in "advanced option(s) hidden" would overstate what
         # --help-all actually recovers, so they're excluded from the count here
         # -- they were never part of this M2 disclosure axis to begin with.
@@ -649,12 +615,9 @@ SCAN_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Policy & contract
         "policy",
         "suppress",
-        # `--contract` now implies `--contract-evaluation` when only the former
-        # is given (CLI audit PR 3/5, cli_options.resolve_contract_evaluation) --
-        # `--contract-evaluation` stays in the common set anyway since it is
-        # still meaningful on its own (domain-less, following
-        # --scope-public-headers) and the two are commonly paired.
-        "contract_evaluation",
+        # `--contract` is the whole request now -- naming a domain is what
+        # turns the ADR-049 evaluator on (cli_options.resolve_contract_evaluation),
+        # so there is one option here rather than a switch plus a selector.
         "contract_mode",
         # Output
         "fmt",

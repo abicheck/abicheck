@@ -28,6 +28,7 @@ MODE.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -72,7 +73,9 @@ def _mode_and_verdict_gate_fragment() -> str:
     """
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_START_MARKER)
-    end = text.index(_VERDICT_GUARDS_END_MARKER, start) + len(_VERDICT_GUARDS_END_MARKER)
+    end = text.index(_VERDICT_GUARDS_END_MARKER, start) + len(
+        _VERDICT_GUARDS_END_MARKER
+    )
     body = text[start:end]
     return body + '  echo "PAST_VERDICT_GUARDS"\n  return 0\n}\n'
 
@@ -90,7 +93,9 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run(mode: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run(
+    mode: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     script = _mode_gate_fragment() + '\n_maybe_post_pr_comment\necho "REACHED"\n'
     env = dict(os.environ)
     env["MODE"] = mode
@@ -181,7 +186,7 @@ def _run_verdict_guards(verdict: str) -> subprocess.CompletedProcess:
 def test_budget_overflow_verdict_skips_the_comment():
     # Codex review: scan's own `_BudgetOverflow` handler
     # (`abicheck/cli_scan.py`) exits 5 before `_emit_scan_report` ever runs,
-    # so there is no `--secondary-output`/primary JSON to reuse -- letting
+    # so there is no `--write`/primary JSON to reuse -- letting
     # this VERDICT through re-runs the identical budget-limited scan a
     # second time only to hit the same overflow again.
     result = _run_verdict_guards("BUDGET_OVERFLOW")
@@ -210,6 +215,26 @@ def test_pr_comment_renderer_uses_resolved_py_bin_not_bare_python3():
     # skipped or an existing sticky one deleted. Every other Python
     # invocation in this script already goes through the resolved
     # $_PY_BIN; the renderer must too.
+    #
+    # A later Codex review (fresh evidence, PR #774) found the original
+    # `-m abicheck.cli_pr_comment` shape inserts this process's CWD into
+    # sys.path[0], letting a malicious PR's own checked-out
+    # abicheck/cli_pr_comment.py shadow the real, pip-installed module --
+    # converted to an equivalent `-c '...runpy.run_module(...)...'`
+    # invocation running from $_PY_SAFE_DIR (the same checkout-isolation
+    # mechanism every other abicheck-importing inline script in this file
+    # now uses) to close that. runpy.run_module's own module-name string
+    # argument is asserted here instead of the old literal `-m` spelling.
     text = RUN_SH.read_text(encoding="utf-8")
-    assert '"$_PY_BIN" -m abicheck.cli_pr_comment' in text
+    # Codex review (fresh evidence): assert the isolation wrapper and the
+    # runpy call as one connected block, not as two independent substring
+    # matches -- either alone could pass against a script that moved the
+    # renderer back out of $_PY_SAFE_DIR while some *other* invocation still
+    # contains a matching wrapper/runpy line elsewhere in the file.
+    assert re.search(
+        r'cd "\$_PY_SAFE_DIR" && PYTHONPATH= "\$_PY_BIN" -c \'\n'
+        r"import runpy\n+"
+        r'runpy\.run_module\("abicheck\.cli_pr_comment", run_name="__main__"\)',
+        text,
+    ), "the PR-comment renderer is no longer invoked from inside the isolation wrapper"
     assert "python3 -m abicheck.cli_pr_comment" not in text

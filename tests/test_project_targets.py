@@ -15,8 +15,10 @@
 
 """Tests for ``buildsource.project_targets`` (ADR-047 §3, G30 P1.5).
 
-Covers the schema round-trip, ``BuildConfig``'s recognition of the four new
-top-level ``.abicheck.yml`` keys, and the cross-reference validator's rules:
+Covers the schema round-trip, ``BuildConfig``'s recognition of the five new
+top-level ``.abicheck.yml`` keys (``targets``/``bundles``/``profiles``/
+``baseline``/``aggregate`` -- the last added by CLI cleanup phase two, PR 2's
+follow-up), and the cross-reference validator's rules:
 kind-specific required/forbidden fields, ``library``/``bundle``/``channel``/
 ``profiles`` reference resolution, and the identifier charset every id must
 satisfy to stay embeddable in a report ``check_id``.
@@ -135,7 +137,7 @@ def test_empty_config_is_all_defaults() -> None:
     assert report.warnings
 
 
-# ── BuildConfig recognizes the four new top-level keys ─────────────────────
+# ── BuildConfig recognizes the five new top-level keys ─────────────────────
 
 
 def test_build_config_does_not_reject_the_new_top_level_keys() -> None:

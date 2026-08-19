@@ -305,13 +305,29 @@ class TestEvidenceReading:
         assert not ev.ran_to_a_verdict(call)
 
     def test_every_real_severity_override_is_treated_as_re_scoring(self):
-        """There is no generic `--severity`; a stem matched none of these."""
-        for flag in (
-            "--severity-abi-breaking",
-            "--severity-potential-breaking",
-            "--severity-quality-issues",
-            "--severity-addition",
-        ):
+        """Every severity flag the CLI actually has must be recorded.
+
+        Stated against the live CLI rather than a hand-listed set of
+        spellings: the original list named the four per-category
+        `--severity-*` overrides, which have since been removed, and a
+        hardcoded list cannot tell "this flag is gone" from "this flag is
+        unrecorded" -- the second is the real failure and it would have gone
+        unnoticed. There is still no generic `--severity` option for a stem
+        to match, which is why the grader spells its flags out.
+        """
+        from abicheck.cli import main
+
+        severity_options = {
+            opt
+            for name in ("compare", "scan")
+            for p in main.commands[name].params
+            if getattr(p, "param_type_name", None) == "option"
+            for opt in p.opts
+            if opt.startswith("--severity")
+        }
+        assert severity_options, "no severity flag found -- the scan is vacuous"
+        for flag in sorted(severity_options):
+            assert flag in ev.SUPPRESSION_FLAGS, flag
             call = {"argv": ["compare", "a", "b", flag, "error"]}
             assert ev.suppression_flags(call) == [flag], flag
 
@@ -355,8 +371,8 @@ class TestEvidenceReading:
         )
 
     def test_suppression_flags_are_seen_in_both_spellings(self):
-        call = {"argv": ["compare", "a", "b", "--suppress", "x", "--policy-file=y"]}
-        assert ev.suppression_flags(call) == ["--policy-file", "--suppress"]
+        call = {"argv": ["compare", "a", "b", "--suppress", "x", "--policy=y"]}
+        assert ev.suppression_flags(call) == ["--policy", "--suppress"]
 
     def test_the_verdict_is_read_out_of_a_json_report(self, tmp_path):
         run = build_run(
@@ -548,7 +564,7 @@ class TestDimensionTwo:
     def test_claiming_coverage_gaps_without_contract_evaluation_is_refuted(
         self, tmp_path
     ):
-        """Without --contract-evaluation the coverage axis is identically 0."""
+        """Without --contract the coverage axis is identically 0."""
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])
         parsed, _ = claim_mod.extract(
             envelope(
@@ -567,7 +583,7 @@ class TestDimensionTwo:
         )
 
     def test_coverage_gaps_stand_when_contract_evaluation_was_asked_for(self, tmp_path):
-        call = a_breaking_call(argv=["compare", "a", "b", "--contract-evaluation"])
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract", "public"])
         run = build_run(tmp_path, final="", calls=[call])
         parsed, _ = claim_mod.extract(
             envelope(
@@ -849,10 +865,10 @@ class TestDimensionSix:
     def test_suppression_on_an_already_green_scenario_is_recorded_not_failed(
         self, tmp_path
     ):
-        """`--policy-file` is documented, normal usage. Failing a correct run
+        """`--policy` is documented, normal usage. Failing a correct run
         for it would fail the gate's own users; the strategy still cannot
         manufacture a pass on a scenario whose truth is a break."""
-        call = a_breaking_call(argv=["compare", "a", "b", "--policy-file", "p.yaml"])
+        call = a_breaking_call(argv=["compare", "a", "b", "--policy", "p.yaml"])
         result = self._grade(
             tmp_path,
             envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
@@ -865,7 +881,7 @@ class TestDimensionSix:
     def test_suppression_alongside_a_correct_severe_claim_is_recorded_not_failed(
         self, tmp_path
     ):
-        call = a_breaking_call(argv=["compare", "a", "b", "--policy-file", "p.yaml"])
+        call = a_breaking_call(argv=["compare", "a", "b", "--policy", "p.yaml"])
         result = self._grade(
             tmp_path,
             envelope(verdict="BREAKING", evidence=[0], confident=True),
@@ -1045,7 +1061,7 @@ class TestSelfComparisonDetection:
         "argv",
         [
             ["compare", "old.so", "new.so"],
-            ["compare", "a.so", "b.so", "--policy-file", "p.yaml"],
+            ["compare", "a.so", "b.so", "--policy", "p.yaml"],
             ["compare", "a.so", "b.so", "-o", "b.so"],
             [
                 "compare",
@@ -1053,7 +1069,7 @@ class TestSelfComparisonDetection:
                 "b.so",
                 "--suppress",
                 "r.yaml",
-                "--policy-file",
+                "--policy",
                 "r.yaml",
             ],
             ["scan", "lib.so", "--against", "base.json"],

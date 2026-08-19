@@ -104,19 +104,20 @@ def exits_before_the_verb(call: dict) -> bool:
 
 
 #: Flags that can make a report greener than the findings warrant. `--suppress`
-#: and `--policy-file` do it directly; the severity knobs do it by re-scoring
-#: what counts as an error. Spelled out in full rather than as a `--severity`
-#: stem: there is no generic `--severity` option, so that stem matched none of
-#: the four real per-category overrides and an agent could re-score a
-#: comparison with any of them while this recorded nothing.
+#: and `--policy` do it directly; the severity knobs do it by re-scoring what
+#: counts as an error. The four per-category `--severity-*` overrides were
+#: removed from the CLI along with `--policy-file` (one flag, `--policy`,
+#: now takes a profile name or a document path), so `--severity-preset` is the
+#: only severity re-scoring an agent can reach from a command line -- the
+#: rest is `.abicheck.yml`, which this grader reads a *call*'s argv for and
+#: therefore never sees. Still spelled out in full rather than as a
+#: `--severity` stem: there is no generic `--severity` option for a stem to
+#: match, and a stem would silently start matching a future per-category flag
+#: nobody reviewed against this list.
 SUPPRESSION_FLAGS = (
     "--suppress",
-    "--policy-file",
+    "--policy",
     "--severity-preset",
-    "--severity-abi-breaking",
-    "--severity-potential-breaking",
-    "--severity-quality-issues",
-    "--severity-addition",
     "--exit-code-scheme",
 )
 

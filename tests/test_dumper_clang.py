@@ -23,6 +23,7 @@ the live ``clang -ast-dump=json`` run live in the integration lane
 
 from __future__ import annotations
 
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
+    _configured_target_triple,
     _header_ast_parser,
     _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
@@ -131,6 +133,258 @@ def test_parse_functions_signature_and_qualifiers() -> None:
     # value is preserved so a changed default fires PARAM_DEFAULT_VALUE_CHANGED.
     assert fn.params[0].default is None
     assert fn.params[1].default == "1"
+
+
+@pytest.mark.parametrize("attr_kind, expected", [
+    ("MSABIAttr", "ms_abi"),
+    ("SysVABIAttr", "sysv_abi"),
+])
+def test_parse_functions_preserves_x86_64_abi_attributes(
+    attr_kind: str, expected: str,
+) -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": attr_kind}],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == [expected]
+
+
+def test_parse_functions_recovers_outer_ms_abi_from_qual_type_when_attr_node_is_omitted() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void (int) __attribute__((ms_abi))"},
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == ["ms_abi"]
+
+
+def test_parse_functions_skips_typeof_return_type_before_outer_convention() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {
+                "qualType": "typeof (1) () __attribute__((ms_abi))",
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == ["ms_abi"]
+
+
+def test_parse_functions_does_not_claim_nested_callback_abi_attribute() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {
+                "qualType": "void (void (*)(int) __attribute__((ms_abi)))"
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_does_not_claim_nested_return_function_abi_attribute() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "factory",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "factory",
+            "type": {
+                "qualType": "void (__attribute__((sysv_abi)) *())()"
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_does_not_claim_real_clang_returned_callback_abi_spelling() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "factory",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "factory",
+            # This is the real Clang JSON AST spelling for:
+            # void (__attribute__((ms_abi)) *factory(void))(int);
+            "type": {
+                "qualType": "void (*(void))(int) __attribute__((ms_abi))"
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_configured_target_triple_uses_frontend_option_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        captured["cmd"] = cmd
+        return type("Result", (), {"returncode": 0, "stdout": "x86_64-pc-linux-gnu\n"})()
+
+    monkeypatch.setattr(dumper.subprocess, "run", _run)
+
+    assert _configured_target_triple(
+        "--target=first -DFROM_OPTIONS", ("--target=last", "@flags.rsp"), "clang"
+    ) == "x86_64-pc-linux-gnu"
+    assert captured["cmd"] == [
+        "clang", "--target=first", "-DFROM_OPTIONS", "--target=last", "@flags.rsp",
+        "-print-target-triple",
+    ]
+
+
+def test_configured_target_triple_honors_clang_response_file(tmp_path: Path) -> None:
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("requires clang")
+    response = tmp_path / "target.rsp"
+    response.write_text("--target=x86_64-pc-windows-msvc\n", encoding="utf-8")
+
+    assert _configured_target_triple(None, (f"@{response}",), clang) == (
+        "x86_64-pc-windows-msvc"
+    )
+
+
+def test_parse_functions_uses_desugared_outer_type_for_typedef_abi_attribute() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {
+                "qualType": "ApiFn",
+                "desugaredQualType": "void (int) __attribute__((sysv_abi))",
+            },
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == ["sysv_abi"]
+
+
+def test_parse_functions_does_not_make_ignored_attribute_spelling_a_fact() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            # Clang drops unknown/ignored spellings from its AST type.  The
+            # fallback must only recognize its two supported ABI spellings.
+            "type": {"qualType": "void () __attribute__((unknown_thing))"},
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_discards_explicit_sysv_default_for_known_target() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((sysv_abi))"}, "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(
+        root, {"api"}, set(), target_triple="x86_64-pc-linux-gnu"
+    ).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_discards_explicit_ms_default_for_known_target() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((ms_abi))"}, "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(
+        root, {"api"}, set(), target_triple="x86_64-pc-windows-msvc"
+    ).parse_functions()
+
+    assert fn.contract_attributes == []
+
+
+def test_parse_functions_keeps_abi_spelling_without_known_x86_default() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((ms_abi))"}, "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(
+        root, {"api"}, set(), target_triple="aarch64-unknown-linux-gnu"
+    ).parse_functions()
+
+    assert fn.contract_attributes == ["ms_abi"]
+
+
+def test_parse_functions_ignores_non_string_qual_type_for_abi_fallback() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": None},
+            "inner": [],
+        }
+    )
+
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+
+    assert fn.contract_attributes == []
 
 
 def test_parse_functions_method_const_and_access() -> None:
@@ -2952,7 +3206,7 @@ def test_build_clang_header_command_stock_clang_sycl_not_gated(tmp_path: Path) -
     # Codex review (PR #643): stock upstream clang accepts a bare -fsycl and
     # parses it as a single pass fine, but does not recognize
     # -fsycl-host-only at all -- it hard-rejects it with "unknown argument".
-    # Appending it here would turn a working --gcc-path clang + -fsycl parse
+    # Appending it here would turn a working --compiler clang + -fsycl parse
     # into a guaranteed failure, so this must stay gated on the resolved
     # binary actually being an Intel oneAPI driver (icx/icpx/dpcpp[-cl]).
     agg = tmp_path / "agg.hpp"
@@ -2963,7 +3217,7 @@ def test_build_clang_header_command_stock_clang_sycl_not_gated(tmp_path: Path) -
 
 
 def test_build_clang_header_command_sycl_via_gcc_option_tokens(tmp_path: Path) -> None:
-    # The repeatable --gcc-option path (gcc_option_tokens) must be checked the
+    # The repeatable --compiler-option path (gcc_option_tokens) must be checked the
     # same way as the shlex-split --gcc-options string.
     agg = tmp_path / "agg.hpp"
     cmd = _build_clang_header_command(
@@ -3469,6 +3723,27 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert isinstance(parser, _ClangAstParser)
     assert [f.name for f in parser.parse_functions()] == ["foo"]
+
+
+def test_header_ast_parser_passes_explicit_target_to_clang_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ast = _tu(
+        {
+            "kind": "FunctionDecl", "name": "api",
+            "loc": {"file": "api.h", "line": 1}, "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((sysv_abi))"},
+        }
+    )
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
+    parser = _header_ast_parser(
+        [], [], backend="clang", compiler="c++", gcc_path=None, gcc_prefix=None,
+        gcc_options="--target=x86_64-pc-linux-gnu", sysroot=None, nostdinc=False,
+        lang=None, exported_dynamic={"api"}, exported_static=set(),
+        public_header_paths=[], public_dir_paths=[],
+    )
+
+    assert [f.contract_attributes for f in parser.parse_functions()] == [[]]
 
 
 def test_header_ast_parser_clang_branch_records_abi_dialect(
@@ -5076,7 +5351,7 @@ def test_clang_header_dump_nonzero_exit_raises(
     ],
 )
 def test_is_clang_family_binary(path: str, expected: bool) -> None:
-    """Pure-function unit test for the --gcc-path clang-family classifier,
+    """Pure-function unit test for the --compiler clang-family classifier,
     directly exercising both the "clang" substring branch and the vendor
     alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
     _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
@@ -5110,7 +5385,7 @@ def test_is_intel_sycl_driver(path: str, expected: bool) -> None:
 def test_clang_header_dump_gcc_path_not_used_as_clang(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # A --gcc-path pointing at g++ must NOT become the clang executable.
+    # A --compiler pointing at g++ must NOT become the clang executable.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     seen = {}
@@ -5158,7 +5433,7 @@ def test_clang_header_dump_gcc_path_recognizes_icx_family(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gcc_path: str
 ) -> None:
     # Intel's oneAPI DPC++/C++ compiler is clang-based (accepts -Xclang directly)
-    # but is not spelled "clang" -- --gcc-path must still be honored for it
+    # but is not spelled "clang" -- --compiler must still be honored for it
     # instead of silently falling back to a plain "clang" on PATH (a different,
     # possibly differently-configured compiler than the one the real build used).
     header = tmp_path / "foo.h"
@@ -5422,7 +5697,7 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
     from abicheck import dumper_sysinc
 
     monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
-    # An explicit GNU --gcc-path is used verbatim…
+    # An explicit GNU --compiler is used verbatim…
     assert _resolve_probe_compiler("c++", "/opt/gcc-13/bin/g++", None) == (
         "/opt/gcc-13/bin/g++"
     )
@@ -5439,7 +5714,7 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
 def test_resolve_probe_compiler_skips_clang_family_aliases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A --gcc-path icx/icpx/dpcpp/dpcpp-cl is clang-family, not GNU — probing it
+    """A --compiler icx/icpx/dpcpp/dpcpp-cl is clang-family, not GNU — probing it
     (instead of a real g++/gcc on PATH) yields incomplete system include dirs
     (e.g. missing /usr/include with stdlib.h), since these are the same clang
     binary under a different name, not real gcc/g++."""
@@ -5578,7 +5853,7 @@ def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> 
 def test_resolve_clang_system_includes_respects_passthrough(
     monkeypatch: pytest.MonkeyPatch, gcc_options, gcc_option_tokens
 ) -> None:
-    # Hermetic/cross flags supplied via --gcc-options/--gcc-option must suppress
+    # Hermetic/cross flags supplied via --compiler-option must suppress
     # the host probe too, not just the structured nostdinc/sysroot (Codex review).
     from abicheck import dumper_sysinc
 
@@ -5720,7 +5995,7 @@ def test_resolve_source_frontend_clang_bin_no_overrides() -> None:
 
 
 def test_resolve_source_frontend_clang_bin_honors_clang_family_gcc_path() -> None:
-    """A ``--gcc-path`` pointing at a clang-family binary (e.g. an Intel oneAPI
+    """A ``--compiler`` pointing at a clang-family binary (e.g. an Intel oneAPI
     ``icpx`` symlink) is used directly for L4/S2 replay, not a plain fallback —
     otherwise a non-default toolchain's real compiler is silently ignored."""
     from abicheck.dumper_clang import resolve_source_frontend_clang_bin
@@ -5749,7 +6024,7 @@ def test_resolve_source_frontend_clang_bin_keeps_cl_style_when_not_excluded() ->
     """L4 source-ABI replay (``ClangSourceExtractor``) already detects a CL
     compile unit and re-drives it with ``--driver-mode=cl`` -- unlike the S2
     preprocessor pre-scan, it must not fall back to a plain, non-CL
-    ``clang``/``clang++`` for a ``--gcc-path clang-cl``/``dpcpp-cl`` build,
+    ``clang``/``clang++`` for a ``--compiler clang-cl``/``dpcpp-cl`` build,
     or an Intel DPC++/SYCL context parsed at L2 gets replayed through stock
     Clang at L4 and silently loses source-ABI coverage."""
     from abicheck.dumper_clang import resolve_source_frontend_clang_bin

@@ -86,7 +86,15 @@ exported ABI is unchanged.
 **Severity: CRITICAL (behavioral, not linkage)**
 
 **Scenario:** app compiled against v1 (`reset()` declared `noexcept`, so
-the compiler omits landing pads) calls v2's `reset()`, which throws.
+the compiler omits the cleanup landing pad for that call) calls v2's
+`reset()`, which throws.
+
+`app.cpp` deliberately wraps the call in a `try`/`catch` **and** puts a
+destructor-bearing `Sentinel` in scope. Both are load-bearing: without them
+the program would abort on any uncaught exception, which would prove nothing
+about `noexcept`. With them, the two outcomes are distinguishable — a handler
+that runs and a destructor that fires is an ordinary exception; neither
+happening is the contract violation.
 
 ```bash
 # Build v1 + app (app includes v1.h, which declares reset() noexcept)
@@ -95,6 +103,8 @@ g++ -std=c++17 -g app.cpp -I. -L. -lbuf -Wl,-rpath,. -o app
 ./app
 # → Calling reset()...
 # → reset() completed OK
+# → SENTINEL DESTRUCTOR RAN
+# → main returning normally
 
 # Swap in v2 (reset() now throws)
 g++ -shared -fPIC -std=c++17 -g v2.cpp -o libbuf.so
@@ -104,10 +114,20 @@ g++ -shared -fPIC -std=c++17 -g v2.cpp -o libbuf.so
 # → Aborted (core dumped)
 ```
 
+Note what is *absent* from the second run: no `CAUGHT:` line and no
+`SENTINEL DESTRUCTOR RAN`. The handler that plainly exists in the source
+never runs, and neither does the local destructor.
+
 **Why CRITICAL:** the caller was compiled trusting the `noexcept`
-guarantee, so no exception-handling frame was generated for that call.
-When v2 throws, `std::terminate` fires unconditionally — no `catch` clause
-anywhere in the call stack can intercept it. Binary linkage is fine
+guarantee, so no cleanup landing pad was generated for that call. When v2
+throws, the exception travels through a frame that was never compiled to
+cooperate with it — in the run above (GCC, x86-64) that ends in
+`std::terminate`, with a present-in-source `catch` bypassed and a local
+destructor skipped. Treat the *outcome* as toolchain- and
+control-flow-dependent rather than fixed; what is guaranteed is that the
+caller's no-throw assumption no longer holds. See
+[Exception Unwinding](../../learn/exception-unwinding-abi.md) for the
+machinery. Binary linkage is fine
 (the symbol resolves); the crash is a source-level contract violation
 `abicheck compare` cannot see from the binaries alone, which is exactly
 why the verdict is `COMPATIBLE_WITH_RISK` rather than `BREAKING`.

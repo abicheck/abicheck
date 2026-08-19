@@ -560,7 +560,7 @@ def test_scan_engine_clang_bin_defaults_to_clang_plusplus() -> None:
 
 
 def test_scan_engine_clang_bin_honors_clang_family_gcc_path() -> None:
-    """A ``--gcc-path`` pointing at a clang-family binary (icx/icpx/dpcpp/…)
+    """A ``--compiler`` pointing at a clang-family binary (icx/icpx/dpcpp/…)
     must be threaded through to the S2 pre-scan's own ``clang -E`` invocation
     instead of a hardcoded ``clang++`` — otherwise every preprocessor pass
     fails on an Intel-only flag like ``-no-intel-lib`` that a real ``clang++``
@@ -575,7 +575,7 @@ def test_scan_engine_clang_bin_honors_clang_family_gcc_path() -> None:
 
 
 def test_scan_engine_clang_bin_ignores_non_clang_gcc_path() -> None:
-    """A ``--gcc-path`` pointing at a real GCC binary (castxml's compiler
+    """A ``--compiler`` pointing at a real GCC binary (castxml's compiler
     emulation target) is never dereferenced for the clang-only ``-E -dM``/``-M``
     pre-scan — same "clang-family only" rule as
     :func:`abicheck.dumper_clang._resolve_clang_bin`."""

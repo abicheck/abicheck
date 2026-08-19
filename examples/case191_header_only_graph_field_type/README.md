@@ -6,7 +6,7 @@
 
 `demo::Config` gains a field typed `detail::RawConfig*` — a type declared
 only in an internal, non-public header (`detail_private.h`, never passed as
-`--public-header`). The struct grows from 4 to 16 bytes. Any binary that
+not named as a public header). The struct grows from 4 to 16 bytes. Any binary that
 allocates `Config` (e.g. an array on the stack) with the old size and is
 then handed a v2-compiled library writes past the end of its own
 allocation — a stack buffer overflow.

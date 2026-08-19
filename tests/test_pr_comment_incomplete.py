@@ -321,7 +321,7 @@ def test_real_review_finding_keeps_headline_over_advisory_incomplete():
 
 
 def test_incomplete_blocking_when_policy_promotes_severity_to_breaking():
-    # Codex review: a named policy / --policy-file override can promote
+    # Codex review: a named policy / --policy override can promote
     # layer_coverage_asymmetric all the way to `severity: "breaking"` in the
     # JSON without touching the `potential_breaking` severity-config knob at
     # all — blocking-ness must follow the finding's own resolved severity,
@@ -655,7 +655,7 @@ def test_contract_coverage_exit_contribution_zero_is_advisory():
 
 
 def test_report_without_contract_evaluation_is_unaffected():
-    # A report that never ran --contract-evaluation carries neither key at
+    # A report that never ran --contract carries neither key at
     # all — must not fabricate an incomplete finding or force blocking.
     report = _compare_report()
     assert "contract_coverage_failures" not in report

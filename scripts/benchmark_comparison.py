@@ -956,22 +956,21 @@ def run_abicheck_full(
                 # dump() -- castxml's bundled Clang frontend can't parse C23
                 # _BitInt(N); this lane now dumps the same real binary that
                 # lane does (case180 fix above), so it hits the same gap.
-                # --gcc-path pins the actual discovered clang binary --
+                # --compiler pins the actual discovered clang binary --
                 # --ast-frontend alone falls back to a bare "clang" on PATH,
                 # absent on hosts that only ship a versioned clang-18.
                 case115_clang = _first_available_tool("clang-18", "clang")
                 dump += ["--ast-frontend", "clang"]
                 if case115_clang:
-                    dump += ["--gcc-path", case115_clang]
+                    dump += ["--compiler", case115_clang]
             if header and header.exists():
-                # -H alone only feeds castxml which headers to parse; it does
-                # NOT mark them public for provenance classification (that's
-                # the separate, opt-in --public-header flag per ADR-015 D4).
-                # Without it every declaration's origin stays UNKNOWN, which
-                # demotes surface-scope confidence to "reduced"/"no-provenance"
-                # across the board. The benchmark's headers ARE the case's
-                # real public headers, so tell the classifier that.
-                dump += ["-H", str(header), "--public-header", str(header)]
+                # -H is now the whole provenance story: the separate, opt-in
+                # --public-header flag it used to need alongside it (ADR-015
+                # D4) is gone, and the headers -H names are classified as the
+                # library's own public headers directly. The benchmark's
+                # headers ARE the case's real public headers, so this is the
+                # classification it wants.
+                dump += ["-H", str(header)]
             dr = subprocess.run(
                 dump, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV
             )
@@ -1107,11 +1106,10 @@ def _run_abicheck_dump_compare(
             version,
         ]
         if header and header.exists():
-            # See run_abicheck_full's dump() for why --public-header is
-            # needed alongside -H: without it, origin stays UNKNOWN for
-            # every declaration (ADR-015 D4 opt-in), demoting surface-scope
-            # confidence to "reduced"/"no-provenance" across the board.
-            cmd += ["-H", str(header), "--public-header", str(header)]
+            # See run_abicheck_full's dump() for why -H alone now carries the
+            # provenance classification the removed --public-header flag used
+            # to have to opt into.
+            cmd += ["-H", str(header)]
         if case == "case115_bit_int_width_changed":
             # castxml's bundled Clang frontend (13.x as of castxml 0.4.5) does
             # not parse C23 _BitInt(N), independent of the GCC version used to
@@ -1120,14 +1118,14 @@ def _run_abicheck_dump_compare(
             # shells out to the installed system clang instead of castxml's
             # bundled one). This is the one case in the catalog where the
             # castxml frontend itself is the bottleneck, not the compiler.
-            # --gcc-path pins the actual discovered clang binary: --ast-frontend
+            # --compiler pins the actual discovered clang binary: --ast-frontend
             # only selects the clang backend, it does not resolve which clang to
             # run, and that resolution falls back to a bare "clang" on PATH --
             # absent on hosts that only ship a versioned clang-18.
             case115_clang = _first_available_tool("clang-18", "clang")
             cmd += ["--ast-frontend", "clang"]
             if case115_clang:
-                cmd += ["--gcc-path", case115_clang]
+                cmd += ["--compiler", case115_clang]
         run = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV
         )
@@ -3181,11 +3179,14 @@ def _abicheck_tier_result(
             ver,
         ]
         if h and h.exists():
-            # See _run_abicheck_dump_compare's dump() for why --public-header
-            # is needed alongside -H (ADR-015 D4 opt-in provenance).
-            cmd += ["-H", str(h), "--public-header", str(h)]
+            # See _run_abicheck_dump_compare's dump() for why -H alone now
+            # carries the provenance classification.
+            cmd += ["-H", str(h)]
         if build_dir is not None:
-            cmd += ["-p", str(build_dir)]
+            # The removed -p/--build-dir spelling: a build directory is read
+            # off --build-info now, which resolves its compile_commands.json
+            # exactly as -p did.
+            cmd += ["--build-info", str(build_dir)]
         try:
             run = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV

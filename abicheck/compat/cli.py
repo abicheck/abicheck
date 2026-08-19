@@ -1410,7 +1410,15 @@ def _generate_compat_report(
             compiler=_detect_compiler_version(gcc_path),
         )
     elif fmt == "json":
-        path.write_text(to_json(r), encoding="utf-8")
+        # `include_exit_decision=False`: this is ABICC-compat's own
+        # `report-format json`, whose real process exit follows the
+        # 0/1/2 ABICC scheme (`_classify_compat_error_exit_code`), not the
+        # native `legacy_exit_code`/`compute_exit_code` PR G1's `exit` block
+        # would compute -- emitting it here would disagree with the actual
+        # `compat check` exit code for the same run (Codex review).
+        path.write_text(
+            to_json(r, include_exit_decision=False), encoding="utf-8"
+        )
     else:
         path.write_text(to_markdown(r), encoding="utf-8")
 

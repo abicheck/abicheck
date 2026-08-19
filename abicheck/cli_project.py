@@ -292,28 +292,6 @@ def project_validate_build_cmd(
     "manifest",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
-@click.option(
-    "--against",
-    "against",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="A dumped .abi.json snapshot (dump --sources/--build-info, or one "
-    "carrying the always-on header-only graph) to resolve MANIFEST's "
-    "entrypoints against. Without it, only the manifest's own structure is "
-    "checked — no entrypoint is resolved or reported as unresolved.",
-)
-@click.option(
-    "--against-new",
-    "against_new",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="A second .abi.json snapshot (the NEW side) to diff against "
-    "--against (the OLD side) and report which declared use cases the "
-    "resulting changes reach — the manifest folded into a real diff (G29 "
-    "Phase 4). Requires --against. A use case is only ever named for a "
-    "change its own resolved entrypoints can be shown to reach; this is a "
-    "read-only report, not a compare exit-code/verdict input.",
-)
 @output_options(
     ["text", "json"],
     default="text",
@@ -322,8 +300,6 @@ def project_validate_build_cmd(
 @verbose_option
 def project_validate_use_cases_cmd(
     manifest: Path,
-    against: Path | None,
-    against_new: Path | None,
     fmt: str,
     output: Path | None,
     verbose: bool,
@@ -331,41 +307,26 @@ def project_validate_use_cases_cmd(
     """Validate MANIFEST, an ``impact-use-cases.yaml`` file (G29 Phase 4,
     ADR-057 amendment; see docs/contribute/use-case-impact.md).
 
-    Checks the manifest is a well-formed YAML list of use cases (a
+    Checks the manifest is a well-formed YAML list of use cases: a
     non-mapping entry, an unrecognized field, or a missing/blank
-    ``use_case`` name is a usage error). With ``--against``, additionally
-    resolves each use case's declared ``entrypoints`` against the
-    snapshot's own source graph and reports, per use case, which
-    entrypoints matched a real public entry point and which didn't —
-    exactly the resolution :func:`abicheck.impact.use_cases.
-    build_use_case_graph` performs silently when folding the manifest into
-    a real comparison, given visibility here for the first time. With
-    ``--against-new`` too, additionally diffs ``--against`` (OLD) against
-    it (NEW) and reports which declared use cases each resulting change
-    reaches, via :func:`abicheck.impact.use_cases.explain_use_case_impact`.
-    An unresolved entrypoint is reported, never treated as a failure: per
-    this manifest format's own documented discipline, an entrypoint the
-    graph can't yet resolve is not evidence the entrypoint doesn't exist
-    (a header-only graph, a not-yet-covered declaration, or simply a typo
-    all look identical from here) — see the module's own docstring.
+    ``use_case`` name is a usage error.
+
+    Structure only. Resolving a manifest's entrypoints against a real
+    library, and attributing a real comparison's findings to the use cases
+    that reach them, is ``abicheck compare --use-cases MANIFEST`` -- one
+    comparison, reported in the same place as every other finding, rather
+    than a second snapshot-diffing surface grown inside a validator (the
+    ``--against``/``--against-new`` pair that used to live here).
 
     \b
     Exit codes:
-      0   Valid — manifest is well-formed (some entrypoints may be
-          unresolved, and some changes may name no use case; both are
-          reported, not a failure).
-      64  Usage error (MANIFEST is malformed, AGAINST has no source graph
-          to resolve against, AGAINST_NEW given without AGAINST, or either
-          snapshot fails to load/compare).
+      0   Valid — the manifest is well-formed.
+      64  Usage error (MANIFEST is malformed or unreadable).
     """
     _setup_verbosity(verbose)
 
-    from .errors import AbicheckError, UseCaseManifestError
-    from .impact.use_cases import (
-        UseCaseResolution,
-        load_use_case_manifest,
-        resolve_use_case_entrypoints,
-    )
+    from .errors import UseCaseManifestError
+    from .impact.use_cases import load_use_case_manifest
 
     try:
         definitions = load_use_case_manifest(manifest)
@@ -379,161 +340,22 @@ def project_validate_use_cases_cmd(
         # with a bare traceback instead of the documented usage-error path.
         raise click.UsageError(str(exc)) from exc
 
-    if against_new is not None and against is None:
-        raise click.UsageError("--against-new requires --against.")
-
-    resolutions: list[UseCaseResolution] | None = None
-    diff_by_use_case: dict[str, list[tuple[str, str]]] | None = None
-    unattributed_count = 0
-    total_changes = 0
-    if against is not None:
-        from .serialization import load_snapshot
-
-        try:
-            snapshot = load_snapshot(against)
-        except Exception as exc:
-            # Broad by necessity, not laziness: AGAINST is arbitrary
-            # user-supplied JSON, and snapshot_from_dict's own raise surface
-            # for a malformed document isn't a closed set (KeyError for a
-            # missing required field, TypeError/ValueError for a wrong-typed
-            # one, json.JSONDecodeError for invalid JSON, OSError for a
-            # read failure) — every one of them means the same thing here:
-            # a usage error, not an internal crash to show a traceback for.
-            raise click.UsageError(f"cannot read {against}: {exc}") from exc
-        build_source = getattr(snapshot, "build_source", None)
-        library_graph = getattr(build_source, "source_graph", None)
-        if library_graph is None:
-            raise click.UsageError(
-                f"{against} carries no source graph to resolve against "
-                "(dump with --sources/--build-info, or ensure the "
-                "always-on header-only graph attached)."
-            )
-        resolutions = resolve_use_case_entrypoints(definitions, library_graph)
-
-        if against_new is not None:
-            try:
-                new_snapshot = load_snapshot(against_new)
-            except Exception as exc:
-                raise click.UsageError(f"cannot read {against_new}: {exc}") from exc
-            from .impact.use_cases import explain_use_case_impact
-            from .service import compare_snapshots
-
-            try:
-                diff = compare_snapshots(snapshot, new_snapshot)
-            except AbicheckError as exc:
-                # ADR-050's comparability contract (ScopeMismatchError,
-                # IncompatibleSnapshotSchemaError, ...) is a real, expected
-                # usage error here -- AGAINST/AGAINST_NEW are two arbitrary
-                # user-supplied snapshots, not a pair this command already
-                # knows are comparable.
-                raise click.UsageError(
-                    f"cannot compare {against} to {against_new}: {exc}"
-                ) from exc
-            total_changes = len(diff.changes)
-            symbols = {c.symbol for c in diff.changes if c.symbol}
-            # Codex review, fresh evidence: a symbol *added* on the NEW side
-            # (e.g. a use case's own entrypoint just introduced) never
-            # existed in OLD's graph at all, so resolving only against
-            # library_graph (OLD) could never attribute it -- every added
-            # change would silently read as "unattributed" regardless of
-            # whether the NEW side's own graph proves it reachable. Explains
-            # against each side's own graph independently (an added
-            # declaration's edges only ever exist on the NEW side; a removed
-            # one's only on OLD) and unions the two per symbol, mirroring
-            # post_processing_reachability.MarkReachability's own
-            # old_paths+new_paths merge for the identical asymmetry.
-            new_library_graph = getattr(
-                getattr(new_snapshot, "build_source", None), "source_graph", None
-            )
-            mapping_old = explain_use_case_impact(definitions, library_graph, symbols)
-            mapping_new = (
-                explain_use_case_impact(definitions, new_library_graph, symbols)
-                if new_library_graph is not None
-                else {}
-            )
-            mapping: dict[str, tuple[str, ...]] = {}
-            for symbol in symbols:
-                names = set(mapping_old.get(symbol, ())) | set(
-                    mapping_new.get(symbol, ())
-                )
-                if names:
-                    mapping[symbol] = tuple(sorted(names))
-            diff_by_use_case = {}
-            for change in diff.changes:
-                for use_case in mapping.get(change.symbol, ()):
-                    diff_by_use_case.setdefault(use_case, []).append(
-                        (change.symbol, change.kind.value)
-                    )
-                if not mapping.get(change.symbol):
-                    unattributed_count += 1
-
     if fmt == "json":
-        payload: dict[str, object] = {
-            "manifest": str(manifest),
-            "ok": True,
-            "use_case_count": len(definitions),
-        }
-        if against is not None:
-            payload["against"] = str(against)
-        if resolutions is not None:
-            payload["use_cases"] = [
-                {
-                    "use_case": r.use_case,
-                    "resolved_entrypoints": list(r.resolved_entrypoints),
-                    "unresolved_entrypoints": list(r.unresolved_entrypoints),
-                    "tests": list(r.tests),
-                }
-                for r in resolutions
-            ]
-        if diff_by_use_case is not None:
-            payload["against_new"] = str(against_new)
-            payload["diff_impact"] = {
-                "total_changes": total_changes,
-                "unattributed_changes": unattributed_count,
-                "by_use_case": {
-                    use_case: [
-                        {"symbol": symbol, "kind": kind} for symbol, kind in changes
-                    ]
-                    for use_case, changes in diff_by_use_case.items()
-                },
-            }
-        text = json.dumps(payload, indent=2)
+        text = json.dumps(
+            {
+                "manifest": str(manifest),
+                "ok": True,
+                "use_case_count": len(definitions),
+            },
+            indent=2,
+        )
     else:
-        lines = [f"use-case manifest validation: {manifest}"]
-        lines.append(f"OK — {len(definitions)} use case(s), structurally well-formed.")
-        if resolutions is not None:
-            lines.append(f"Resolved against: {against}")
-            for r in resolutions:
-                lines.append(f"  {r.use_case}:")
-                if r.resolved_entrypoints:
-                    lines.append(f"    resolved: {', '.join(r.resolved_entrypoints)}")
-                if r.unresolved_entrypoints:
-                    lines.append(
-                        "    unresolved (not evidence they don't exist): "
-                        f"{', '.join(r.unresolved_entrypoints)}"
-                    )
-                if not r.resolved_entrypoints and not r.unresolved_entrypoints:
-                    lines.append("    (no entrypoints declared)")
-                if r.tests:
-                    lines.append(f"    tests: {', '.join(r.tests)}")
-        if diff_by_use_case is not None:
-            lines.append(
-                f"Diff impact ({against} -> {against_new}): "
-                f"{total_changes} change(s), "
-                f"{total_changes - unattributed_count} attributed to a "
-                "declared use case."
-            )
-            if diff_by_use_case:
-                for use_case in sorted(diff_by_use_case):
-                    lines.append(f"  {use_case}:")
-                    for symbol, kind in diff_by_use_case[use_case]:
-                        lines.append(f"    {kind}: {symbol}")
-            else:
-                lines.append(
-                    "  (no change is reachable from any declared use case's "
-                    "own entrypoints)"
-                )
-        text = "\n".join(lines)
+        text = "\n".join(
+            [
+                f"use-case manifest validation: {manifest}",
+                f"OK — {len(definitions)} use case(s), structurally well-formed.",
+            ]
+        )
 
     if output is not None:
         _safe_write_output(output, text)
@@ -661,6 +483,19 @@ def project_plan_cmd(
 ) -> None:
     """Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
 
+    CONFIG's optional ``aggregate: gate:`` block (CLI cleanup phase two, PR 2
+    follow-up) is stamped onto the generated ``run-plan.json``'s own ``gate``
+    block, exactly as a hand-authored ``aggregate --manifest``'s own ``gate``
+    block would be -- so ``abicheck aggregate --run-plan run-plan.json``
+    applies the same policy either way. This replaces the former
+    ``--gate-missing-required``/``--gate-unexpected-target`` flags (removed,
+    no CLI alias): the policy is durable project configuration, not
+    something to re-type on every invocation. Omitting ``aggregate:`` (or
+    either of its ``gate:`` sub-keys) leaves the field unset on the plan, and
+    ``aggregate``'s own hard-coded defaults (``missing_required: fail``,
+    ``unexpected_target: include``) apply, unchanged from before this block
+    existed.
+
     CONFIG defaults to ``.abicheck.yml``. For every ``checks[]`` entry (per
     target or per bundle), resolves which ``(target, profile)`` cells
     actually apply: an explicit ``checks[].profiles:`` selector must resolve
@@ -736,6 +571,12 @@ def project_plan_cmd(
         project=project,
         head_sha=head_sha,
         resolved_bindings=resolved_bindings,
+        gate_missing_required=(
+            parsed.aggregate_gate.missing_required if parsed.aggregate_gate else None
+        ),
+        gate_unexpected_target=(
+            parsed.aggregate_gate.unexpected_target if parsed.aggregate_gate else None
+        ),
     )
 
     if bindings_file_for_identity is not None:

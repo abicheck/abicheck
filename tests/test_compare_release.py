@@ -464,9 +464,12 @@ class TestDirVsDir:
         its `augment_usage_errors` wrapper so the formatted CLI error got a
         "Usage: ..." header; `_dispatch_release_compare` now does that
         backfill by hand -- this proves a validation error raised inside the
-        release engine (`--annotate-additions` without `--annotate`) still
-        exits 64 with the same "Usage:" header through a directory compare,
-        not just a degraded one-line "Error: ..." message."""
+        release engine (`reject_incoherent_secondary_output`'s "two reports
+        aimed at the same file" check -- CLI cleanup phase two, PR E's
+        earlier `--annotate-additions` trigger for this same test was
+        removed along with the flag itself) still exits 64 with the same
+        "Usage:" header through a directory compare, not just a degraded
+        one-line "Error: ..." message."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -474,15 +477,17 @@ class TestDirVsDir:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
+        same_path = tmp_path / "out.json"
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
-            "--annotate-additions",
+            "-o", str(same_path),
+            "--write", f"json={same_path}",
         )
         assert code == 64
         assert "Usage:" in out
-        assert "--annotate-additions requires --annotate" in out
+        assert "--write's PATH must differ from --output/-o" in out
 
     def test_json_output_multi(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
@@ -575,14 +580,19 @@ class TestDirVsDir:
         new = _snap("2.0", new_funcs, library="libfoo.so")
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
+        # --severity-addition duplicated `severity.addition` and was removed;
+        # the release fan-out reads the resolved severity config either way,
+        # which is the point of driving it from .abicheck.yml here.
+        cfg = tmp_path / "addition-error.abicheck.yml"
+        cfg.write_text("severity:\n  addition: error\n", encoding="utf-8")
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--format",
             "json",
-            "--severity-addition",
-            "error",
+            "--config",
+            str(cfg),
         )
         assert code == 1
         data = json.loads(out)
@@ -792,6 +802,72 @@ class TestOutputDir:
         assert code == 0
         assert (out_dir / "libfoo.json").exists()
         assert (out_dir / "summary.json").exists()
+
+    def test_per_library_report_exit_block_honors_release_severity(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR G1 follow-up (fresh evidence): ``_compare_one_
+        library`` wrote each per-library ``--output-dir`` report via
+        ``to_json(result)`` with no ``severity_config``, so the persisted
+        ``exit`` block (schema 2.41, ``exit_decision.ExitDecision``) always
+        used the legacy verdict-based scheme regardless of whether the
+        release itself resolved and gated on a severity configuration.
+        Reproduced with ``--severity-preset strict`` (additions are error):
+        the release process exits ``1``, but the per-library report's own
+        ``exit.code`` read ``0``/``reasons: ["clean"]`` before this fix --
+        disagreeing with the process it was supposedly explaining.
+        """
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        out_dir = tmp_path / "reports"
+        old = _snap(
+            "1.0",
+            [
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="bar",
+                    mangled="_Z3barv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, _ = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--output-dir",
+            str(out_dir),
+            "--severity-preset",
+            "strict",
+        )
+        assert code == 1
+        report = json.loads((out_dir / "libfoo.json").read_text())
+        # The addition-error gate is severity-scheme-only -- a report built
+        # under the legacy scheme's ExitDecision would read code 0, reasons
+        # ["clean"], disagreeing with the real (severity-gated) release exit.
+        assert report["exit"]["code"] == 1
+        assert "compatibility_gate" in report["exit"]["reasons"]
 
     def test_summary_json_structure(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

@@ -4,6 +4,45 @@
 # runs abicheck, captures the exit code, and sets outputs.
 set -uo pipefail
 
+# `$OSTYPE` is a bash builtin, always set, no external command needed --
+# Git Bash on GitHub's windows-latest runners reports "msys" (Cygwin
+# reports "cygwin"), every other supported runner reports something else
+# ("linux-gnu", "darwin*", ...). Computed once, used below by
+# `_is_path_already_qualified` to gate Windows-only path forms (a
+# drive-letter prefix, a leading backslash) behind actually running on
+# Windows -- see that function's own docstring for why (Codex review,
+# fresh evidence: a POSIX relative filename that happens to start with a
+# single character followed by a literal `:`, e.g. `a:baseline.json`,
+# would otherwise be misrecognized as an already-qualified Windows path on
+# every platform, not just Windows).
+case "$OSTYPE" in
+  msys* | cygwin* | win32*) _RUNNING_ON_WINDOWS=true ;;
+  *) _RUNNING_ON_WINDOWS=false ;;
+esac
+
+# Shared by every `$PWD`-anchoring decision below ($_PY_BIN canonicalization,
+# `_report_query`'s report-path anchoring): a path is "already qualified" --
+# must NOT get a `$PWD/` prefix -- when it's POSIX-absolute on any platform,
+# or (Windows only) drive-absolute (`C:\...`), drive-relative (`C:foo`, no
+# separator after the drive letter -- relative to that drive's own current
+# directory, a distinct real Windows path form this script has no way to
+# resolve either way, so a `$PWD/` prefix would be unconditionally wrong),
+# UNC (`\\server\share\...`), or root-relative (`\foo`). Gated on
+# `$_RUNNING_ON_WINDOWS` rather than applied unconditionally, since a bare
+# `?:*`/`\\*` pattern would otherwise also match a genuine POSIX relative
+# filename that happens to start with that shape (e.g. `a:baseline.json`).
+_is_path_already_qualified() {
+  case "$1" in
+    /*) return 0 ;;
+  esac
+  if [[ "$_RUNNING_ON_WINDOWS" == "true" ]]; then
+    case "$1" in
+      ?:* | \\*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Helper: append a flag with value(s) to the command array.
 # Prefer one item per line (a YAML block scalar, e.g. `headers: |`) — that
@@ -38,28 +77,51 @@ add_flag() {
 
 # ---------------------------------------------------------------------------
 # Helper: like add_flag(), but a single-line value is split the way
-# abicheck's own shlex.split() splits a compiler-flags string server-side
-# (quote-aware -- a value like -DMSG="hello world" stays one token), not
-# add_flag()'s plain bash word-splitting (Codex review, PR #757: routing
-# gcc-options through add_flag()'s unquoted `for item in $value` broke a
-# quoted value into malformed tokens, since bash word-splitting treats `"`
-# as a literal character once the string is already sitting in a variable,
-# unlike a real shell command line). Used only for the gcc-options ->
-# --compiler-option conversion, where the CLI flag it now maps to used to
-# be one scalar --gcc-options string abicheck itself shlex-split.
+# abicheck's own compiler-flags string splitting works server-side
+# (quote-aware -- a value like -DMSG="hello world" stays one token, and an
+# unquoted Windows path's backslashes survive intact), not add_flag()'s
+# plain bash word-splitting (Codex review, PR #757: routing gcc-options
+# through add_flag()'s unquoted `for item in $value` broke a quoted value
+# into malformed tokens, since bash word-splitting treats `"` as a literal
+# character once the string is already sitting in a variable, unlike a
+# real shell command line). Used only for the gcc-options -> --compiler-
+# -option conversion, where the CLI flag it now maps to used to be one
+# scalar --gcc-options string abicheck itself shlex-split.
 #
-# Delegates to `python3`/`python` (`_PY_BIN`, resolved once above) rather
-# than `eval`: xargs-style or eval-based quote parsing would either use its
-# own, different quoting dialect or -- for eval -- actually execute a
-# `$(...)`/backtick command substitution embedded in untrusted Action input,
-# which this must not do. Falls back to add_flag()'s plain whitespace split
-# only if no Python interpreter is on PATH, which should not happen in this
-# Action's own runtime (it needs one to run abicheck itself).
+# Delegates to the real `abicheck._compiler_options.split_gcc_options`
+# (imported, not reimplemented) via `python3`/`python` (`_PY_BIN`, resolved
+# once above) rather than `eval`: xargs-style or eval-based quote parsing
+# would either use its own, different quoting dialect or -- for eval --
+# actually execute a `$(...)`/backtick command substitution embedded in
+# untrusted Action input, which this must not do. Importing the real
+# function (rather than an inline reimplementation) is deliberate: three
+# earlier revisions of an inline copy each independently regressed a real
+# case a review round caught (real POSIX escape sequences, `#`-as-comment
+# truncation, unquoted Windows-path corruption -- see that function's own
+# docstring for the full history) precisely because there were two copies
+# of the same non-trivial tokenizer to keep in sync. `abicheck` is always
+# importable here in the common case: action.yml's "Install abicheck" step
+# runs `pip install` before "Run abicheck" invokes this script, so `_PY_BIN`
+# (found via the same `command -v python3`/`python` PATH lookup pip itself
+# resolved against) already has it on its import path -- verified once, up
+# front, via `$_PY_BIN_HAS_ABICHECK` (see its own definition above), for the
+# self-hosted-runner case where that assumption doesn't hold.
+#
+# Falls back to add_flag()'s plain whitespace split ONLY when doing so is
+# provably equivalent to real quote-aware parsing -- the value contains
+# none of `"`/`'`/`\`, so there is nothing for real parsing to interpret
+# differently from bash's own unquoted word-splitting in the first place.
+# When the real parser is unavailable AND the value actually needs one
+# (Codex review, fresh evidence: an earlier revision fell back
+# unconditionally, silently corrupting a quoted value like
+# `-DMSG="hello world"` into malformed tokens under a different, wrong
+# compile context instead of failing), this fails the Action loud rather
+# than guess.
 # ---------------------------------------------------------------------------
 add_flag_shlex_split() {
   local flag="$1"
   local value="$2"
-  local item split
+  local item split py_exit
   if [[ -z "$value" ]]; then
     return
   fi
@@ -70,19 +132,64 @@ add_flag_shlex_split() {
     add_flag "$flag" "$value"
     return
   fi
-  if [[ -z "$_PY_BIN" ]]; then
+  if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    # add_flag()'s own `for item in $value` is unquoted, so beyond just
+    # whitespace-splitting it also performs pathname (glob) EXPANSION --
+    # `*`/`?`/`[` are not provably safe to fall back on the same way
+    # quote/backslash characters aren't (Codex review, fresh evidence): a
+    # configured value like `-DPATTERN=*` would silently rewrite to
+    # whatever filenames exist in the current directory at the time this
+    # runs (the analyzed, potentially PR-controlled checkout -- unlike the
+    # real parser's own invocation, this naive fallback never `cd`s
+    # anywhere), letting untrusted checkout content influence the compile
+    # context.
+    if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* \
+          || "$value" == *'*'* || "$value" == *'?'* || "$value" == *'['* ]]; then
+      echo "::error::$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
+      exit 1
+    fi
     add_flag "$flag" "$value"
     return
   fi
-  split="$("$_PY_BIN" -c '
-import os
-import shlex
+  # $value is passed on stdin, not as a positional argv element (Codex
+  # review, fresh evidence: a value containing a POSIX-style path segment,
+  # e.g. -I/build/generated, triggered Git Bash/MSYS's automatic argv
+  # path-conversion on the windows-latest CI runner when forwarded as a
+  # positional arg to this native, non-MSYS python.exe -- silently
+  # rewriting it into a Windows path, e.g. inserting "Program Files" and
+  # its embedded space, before this script ever saw it. stdin content is
+  # never subject to that conversion (only actual argv strings are), so
+  # this sidesteps the whole class of corruption regardless of the exact
+  # value shape that triggers it -- not just the one case that surfaced it.
+  split="$(printf '%s' "$value" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 
-for tok in shlex.split(sys.argv[1], posix=(os.name != "nt")):
+from abicheck._compiler_options import split_gcc_options
+
+for tok in split_gcc_options(sys.stdin.read()):
     print(tok)
-' "$value")"
+'))"
+  py_exit=$?
+  # This script deliberately has no `set -e` (Codex review, fresh evidence):
+  # split_gcc_options() raises ValueError on malformed quoting (e.g. an
+  # unbalanced quote), which without this check would silently leave $split
+  # empty and every requested compiler option dropped instead of failing --
+  # an invalid configuration must not produce an apparently-successful
+  # comparison under the wrong macros/include paths.
+  if [[ $py_exit -ne 0 ]]; then
+    echo "::error::$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
+    exit 1
+  fi
   while IFS= read -r item; do
+    # Codex review, fresh evidence: on windows-latest, $_PY_BIN resolves to
+    # native python.exe, whose print() writes CRLF line endings by default
+    # (Python's text-mode stdout translates "\n" to os.linesep on write,
+    # regardless of whether stdout is a console or -- as here -- a pipe).
+    # bash's `read` only splits on LF, so it would otherwise leave a
+    # trailing \r glued onto every token, corrupting each forwarded flag
+    # (e.g. -DFOO=1 arrives as -DFOO=1\r). Harmless no-op on POSIX, where
+    # this never appears in the first place.
+    item="${item%$'\r'}"
     [[ -n "$item" ]] && CMD+=("$flag" "$item")
   done <<< "$split"
 }
@@ -120,13 +227,14 @@ add_single_flag() {
 # an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
 # is_package(), including its magic-byte fallback — abicheck/package.py:547-554
 # — since classify_compare_operand() delegates to it regardless of filename;
-# a name-suffix-only check here would still let the Action add
-# --secondary-format for such an operand and have the CLI reject it, Codex
+# a name-suffix-only check here would misidentify such an operand, Codex
 # review, PR #557). `compare` fans such an operand out through the release
-# engine internally regardless of the Action's MODE, and the release engine
-# rejects --secondary-format — used to skip the --secondary-format
-# optimization for compare mode's PR-comment JSON rather than let it
-# hard-fail a directory/package comparison that used to work.
+# engine internally regardless of the Action's MODE. Since CLI cleanup phase
+# two, PR E, the release engine supports --write directly (json/markdown/
+# junit, the same set --format itself accepts there) -- this helper is no
+# longer needed to skip the --write PR-comment JSON injection, but stays in
+# use for the release-only flags below (--jobs, --output-dir, --dso-only,
+# --require-complete-analysis's own rejection, ...).
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -153,12 +261,12 @@ _is_release_style_operand() {
 }
 
 # Whether the user's own `extra-args` passthrough already requests
-# `--secondary-format`/`--secondary-output` (documented, supported usage —
-# `extra-args` is a general CLI escape hatch). If it does, injecting our own
-# internal pair ahead of it is unsafe: Click applies both occurrences and
-# the *last* one wins, so the actual scan/compare run would silently honor
-# the user's pair instead of ours, writing their chosen format/path rather
-# than the internal `$PR_JSON` sidecar this script expects to read back --
+# `--write` (documented, supported usage — `extra-args` is a general CLI
+# escape hatch). If it does, injecting our own internal one ahead of it is
+# unsafe: Click applies both occurrences and the *last* one wins, so the
+# actual scan/compare run would silently honor the user's value instead of
+# ours, writing their chosen format/path rather than the internal
+# `$PR_JSON` sidecar this script expects to read back --
 # `$PR_JSON` then stays an empty mktemp file, and `_maybe_post_pr_comment`
 # falls through to a full rerun anyway (which the internal injection exists
 # specifically to avoid), except now confusingly alongside a stray empty
@@ -166,17 +274,78 @@ _is_release_style_operand() {
 # present restores the older, always-correct "no PR_JSON at all" fallback
 # path instead.
 #
-# A simple substring/word-boundary check on the raw string, matching this
-# script's existing extra-args handling (`CMD+=($INPUT_EXTRA_ARGS)`, plain
-# word-splitting, not full shell quoting) -- good enough to catch the
-# documented flag spellings without parsing arbitrary quoting.
-_extra_args_has_secondary_output() {
-  case " ${INPUT_EXTRA_ARGS:-} " in
-    *' --secondary-format '* | *' --secondary-format='* \
-      | *' --secondary-output '* | *' --secondary-output='*)
-      return 0
-      ;;
-  esac
+# Answered by splitting the value the same way the command line itself does
+# rather than by matching the raw string. `CMD+=($INPUT_EXTRA_ARGS)` is an
+# unquoted expansion, so bash word-splits on IFS -- space, tab AND newline --
+# and a `extra-args: |` YAML literal block (or anything with a tab, or with
+# another argument before it) produces a real `--write` token that a
+# literal-space substring check does not see (Codex review). It then injected
+# ours anyway and lost to the user's, which is precisely the case this guard
+# exists to prevent. `set --` reuses that identical splitting, so the guard
+# and the argv can never disagree about what a token is; it also inherits the
+# same pathname expansion, deliberately, for the same reason.
+#
+# Still not full shell-quoting parsing: an exotically quoted `--write` evades
+# this, matching this script's existing plain word-splitting handling of
+# extra-args everywhere else.
+_extra_args_has_write_flag() {
+  local _arg
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    case "$_arg" in
+      --write | --write=*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+# Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
+# extra-args, printing it (and nothing else) when found. Empty output means
+# "no such flag" -- callers treat that as "cannot tell", same as every other
+# report-discovery helper here.
+#
+# Why this exists (Codex review, PR #798): when the primary FORMAT isn't
+# json and the user's own extra-args already carries `--write`,
+# `_extra_args_has_write_flag` above correctly suppresses the internal
+# `PR_JSON` injection (so the two `--write`s don't collide and Click's
+# last-flag-wins doesn't silently drop the user's own path) -- but that
+# means `_json_report_src` had no JSON source to fall back to at all, so
+# `annotate: true` silently emitted nothing even though the user's own
+# `--write` destination held a perfectly good report the whole time. This
+# recovers that path so `_json_report_src` can read it directly, instead of
+# either rejecting the combination outright or (worse) silently doing
+# nothing.
+#
+# Same word-splitting caveat as `_extra_args_has_write_flag`: an exotically
+# quoted `--write` evades this. `--write` and its value can be one token
+# (`--write=json=PATH`) or two (`--write json=PATH`); both spellings are
+# documented and handled.
+_extra_args_write_json_path() {
+  local _arg _value _prev_was_write=0
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ "$_prev_was_write" == "1" ]]; then
+      _value="$_arg"
+      _prev_was_write=0
+    elif [[ "$_arg" == "--write" ]]; then
+      _prev_was_write=1
+      continue
+    elif [[ "$_arg" == --write=* ]]; then
+      _value="${_arg#--write=}"
+    else
+      continue
+    fi
+    case "$_value" in
+      json=*)
+        printf '%s' "${_value#json=}"
+        return 0
+        ;;
+    esac
+  done
   return 1
 }
 
@@ -196,6 +365,124 @@ MODE="${INPUT_MODE:-compare}"
 # no single-snapshot asset would otherwise fail with "command not found"
 # on exactly the runners this fallback exists to serve (Codex review).
 _PY_BIN="$(command -v python3 || command -v python || true)"
+# `command -v` can return a path relative to the CURRENT working directory
+# when PATH itself contains a relative entry (e.g. a self-hosted runner
+# configured with PATH=tools:$PATH) -- a real, if unusual, configuration.
+# Every inline Python invocation below runs as `(cd "$_PY_SAFE_DIR" && ...
+# "$_PY_BIN" ...)`, so a relative $_PY_BIN would resolve against the new
+# CWD after that `cd`, not the directory it was actually found relative to,
+# making a genuinely working, abicheck-capable interpreter falsely resolve
+# as unusable (Codex review, fresh evidence). Anchored to $PWD here, before
+# any `cd` happens, using the same portable absolute-path check
+# (`_report_query` below) already uses for the identical reason.
+if [[ -n "$_PY_BIN" ]] && ! _is_path_already_qualified "$_PY_BIN"; then
+  _PY_BIN="$PWD/$_PY_BIN"
+fi
+
+# ---------------------------------------------------------------------------
+# Security: `python -c`/`python -m` insert this process's current working
+# directory ('' in sys.path, i.e. wherever this script's caller checked out
+# code for abicheck to analyze -- untrusted on a `pull_request`-triggered
+# workflow, since a PR author controls the checked-out tree) as sys.path[0],
+# and Python's automatic `site` module processing (which runs during
+# interpreter *startup*, before any `-c` script body gets to run a single
+# line of its own) auto-imports a discoverable `sitecustomize.py`/
+# `usercustomize.py` from anywhere on the resulting `sys.path` -- including
+# a `PYTHONPATH` entry resolved relative to that same untrusted checkout.
+# Any inline script below that imports a real `abicheck` submodule would,
+# without mitigation, prefer a same-named module/package the checked-out
+# tree happens to contain (e.g. a malicious PR adding its own
+# `abicheck/_compiler_options.py`, or a top-level `sitecustomize.py`) over
+# the actual, trusted, pip-installed package -- executing attacker-
+# controlled code inside this Action's own process (Codex review, fresh
+# evidence, empirically confirmed for both shapes).
+#
+# Three earlier revisions of this mitigation each tried to *filter*
+# sys.path from *inside* the `-c` script body after the fact (strip the
+# resolved CWD; strip a resolved PYTHONPATH=. entry; strip any descendant
+# path, not just an exact match; pair every call site with `-S` plus a
+# manual `site.main()` re-run to also outrun the sitecustomize auto-import
+# window) -- each fixed a real, independently-confirmed gap the previous
+# one left open, but the cumulative `-S` + manual `site.main()` re-
+# processing broke real `abicheck` importability on a `windows-latest` CI
+# runner for reasons that could not be fully root-caused remotely (exit
+# code 2 from the wrapping bash invocation, no further diagnostic
+# available). Rather than a fourth patch on the same fragile foundation,
+# this revision removes the foundation's own premise: instead of trying to
+# clean up `sys.path` *after* Python has already started resolving it
+# (racing `site`'s own automatic sitecustomize import), every inline script
+# that imports an `abicheck` module now runs from a freshly created, empty
+# temporary directory with `PYTHONPATH` cleared for that one invocation --
+# so the untrusted checkout is never on `sys.path` in the first place, at
+# any point during interpreter startup or after. `-S` and the whole
+# `sys.path`-filtering script are no longer needed: normal, unmodified
+# `site` processing runs, and it can only ever find a *real*
+# `sitecustomize.py` (if any) from actual site-packages, never one placed
+# in the checkout. A script with no `abicheck` import (e.g. the plain
+# `json`/`sys` JSON-parsing snippet elsewhere in this file) has nothing to
+# shadow and does not need this.
+#
+# The real, pip-installed `abicheck` package is never located inside the
+# analyzed repository's own checkout, so neither the temp-directory CWD nor
+# the cleared `PYTHONPATH` can remove it -- even this action's own self-
+# referential dogfooding CI installs it via a plain, non-editable
+# `pip install <path>` (action.yml's "Install abicheck" step), which
+# copies into site-packages, and a `pip install -e .` (editable) install's
+# own import-hook mechanism (a `.pth` file registering a `sys.meta_path`
+# finder, confirmed directly against a real editable install) is likewise
+# unaffected by either change -- neither depends on `sys.path` carrying
+# the checkout, or on `PYTHONPATH` being set, to resolve `abicheck`.
+#
+# Fails the Action outright if a fresh, private directory can't be created
+# (Codex review, fresh evidence) -- falling back to a pre-existing shared
+# directory (e.g. bare `${TMPDIR:-/tmp}`) would silently reintroduce the
+# exact risk this mechanism exists to close: on a constrained or shared
+# self-hosted runner, that directory is neither guaranteed empty nor
+# private, so a same-named `abicheck` package or `sitecustomize.py`
+# planted (or left over) there could shadow the real package again. A
+# `mktemp -d` failure is rare enough, and this variable is needed by every
+# `--gcc-options`-forwarding and baseline-set-archive-extraction code path
+# below, that failing loud here is strictly better than silently degrading
+# the one guarantee this whole mechanism provides.
+if ! _PY_SAFE_DIR="$(mktemp -d)"; then
+  echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helpers without risking a checked-out repository shadowing the installed package."
+  exit 1
+fi
+# Registered immediately, not left to the main EXIT trap much further down
+# this script (Codex review, fresh evidence): an early exit -- argument
+# validation, a no-baseline dry-run success, any error path before this
+# script reaches that later trap -- would otherwise leave $_PY_SAFE_DIR
+# behind uncleaned, accumulating private temporary directories across
+# repeated invocations on a persistent self-hosted runner. A later `trap
+# ... EXIT` (this script's main one) replaces this handler outright rather
+# than chaining it, which is fine here: that later trap already includes
+# `${_PY_SAFE_DIR:-}` in its own cleanup, so nothing is lost when it
+# installs -- this one only needs to cover the gap before it does.
+trap 'rm -rf "$_PY_SAFE_DIR"' EXIT
+
+# On most runners this is exactly the interpreter action.yml's own "Install
+# abicheck" step just `pip install`ed into, since `pip` itself resolves
+# against the same PATH lookup -- but a self-hosted runner can expose
+# `pip`/`abicheck` from one Python environment while `command -v python3`
+# above resolves a *different* one (e.g. a system Python ahead of a pyenv
+# shim on PATH, Codex review, fresh evidence). Checked once, up front,
+# rather than assumed: `add_flag_shlex_split` (below) fails loud instead of
+# silently invoking a `$_PY_BIN` that can't import `abicheck` and dropping
+# or corrupting every requested `--gcc-options` token. Run through the same
+# `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other `abicheck`-
+# importing invocation in this file (Codex review, fresh evidence, second
+# round): this preflight itself imports `abicheck`, so running it from the
+# untrusted checkout with an inherited `PYTHONPATH` before `$_PY_SAFE_DIR`
+# existed would have reopened the exact code-execution path the isolation
+# elsewhere in this file exists to close -- `$_PY_SAFE_DIR` is therefore
+# created (immediately above) before this check ever runs, not after.
+_PY_BIN_HAS_ABICHECK="false"
+if [[ -n "$_PY_BIN" ]] \
+  && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c "import abicheck") >/dev/null 2>&1; then
+  _PY_BIN_HAS_ABICHECK="true"
+elif [[ -n "$_PY_BIN" ]]; then
+  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
+fi
 
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
@@ -334,7 +621,14 @@ _try_baseline_set_fallback() {
   fi
   local existing_url=""
   if [[ -n "$assets_json" ]]; then
-    existing_url=$(printf '%s' "$assets_json" | "$_PY_BIN" -c '
+    # Isolated the same way as every abicheck-importing invocation, even
+    # though this one only uses stdlib `json`/`sys` (Codex review, fresh
+    # evidence): the sitecustomize.py auto-import vector this mechanism
+    # guards against fires during interpreter *startup*, before a single
+    # line of this script body runs -- it doesn't depend on what (if
+    # anything) the body itself imports, so "no abicheck import" was never
+    # a reason to skip the isolation.
+    existing_url=$(printf '%s' "$assets_json" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import json
 import sys
 
@@ -347,7 +641,7 @@ for asset in data.get("assets") or []:
     if asset.get("name") == name:
         print(asset.get("apiUrl") or "")
         break
-' "$asset_name")
+' "$asset_name"))
   fi
 
   # A fixed, platform-safe local filename, NOT "$set_download_dir/$asset_name"
@@ -387,23 +681,23 @@ for asset in data.get("assets") or []:
   # extraction safety here.
   case "$asset_name" in
     *.tar.zst)
-      "$_PY_BIN" -c '
+      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
 
 TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir" \
+' "$archive_path" "$extracted_dir") \
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' (.tar.zst) -- it is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available."; return 1; }
       ;;
     *.tar.gz | *.tgz | *.tar)
-      "$_PY_BIN" -c '
+      (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 from abicheck.package import TarExtractor
 
 TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
-' "$archive_path" "$extracted_dir" \
+' "$archive_path" "$extracted_dir") \
         || { _baseline_unavailable "failed to extract baseline-set archive '$asset_name' -- it is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."; return 1; }
       ;;
     *)
@@ -443,7 +737,7 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
   fi
 
   local resolve_output
-  resolve_output=$("$_PY_BIN" -c '
+  resolve_output=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -530,6 +824,23 @@ if [[ -n "$ABI_BASELINE" \
    && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
    && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
   BASELINE_DIR=$(mktemp -d)
+  # Canonicalized to an absolute path immediately (Codex review, fresh
+  # evidence): `mktemp -d` returns a path relative to `$TMPDIR` when that
+  # variable itself holds a relative value (a real, if unusual, self-hosted
+  # runner configuration -- confirmed directly: `TMPDIR=relbase mktemp -d`
+  # really does emit a relative path). Every path derived from
+  # `$BASELINE_DIR` by string concatenation below (`set_download_dir`,
+  # `extracted_dir`, `archive_path`, `manifest_root`) is passed as a
+  # positional argument into a `(cd "$_PY_SAFE_DIR" && ...)`-wrapped Python
+  # invocation elsewhere in this function -- a relative path there resolves
+  # against the *new* CWD instead of the original one, making an otherwise
+  # valid baseline-set archive read as corrupt or missing. Resolving once
+  # here, at the source, fixes every path derived from it without touching
+  # each call site individually.
+  if ! BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd); then
+    echo "::error::failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
+    exit 1
+  fi
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
   BASELINE_FILE=""
@@ -661,14 +972,17 @@ if [[ "$MODE" == "dump" ]]; then
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
-  add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  # `public-header-dir` has no dedicated dump flag any more -- `dump` derives
+  # declaration provenance from -H/--header itself (a directory entry tags
+  # everything under it public), so forward it as one more -H root.
+  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -690,6 +1004,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
@@ -757,8 +1072,8 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
   else
     add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-    add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-    add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+    add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+    add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
     add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
     add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -834,7 +1149,7 @@ elif [[ "$MODE" == "compare" ]]; then
   CMD+=(--format "$FORMAT")
 
   # dry-run performs no analysis and writes nothing, so it is mutually
-  # exclusive with -o/--output AND --secondary-output/--secondary-format on
+  # exclusive with -o/--output AND --write on
   # the CLI -- skip both entirely when set, rather than passing them and
   # letting the CLI reject the combination.
   DRY_RUN="${INPUT_DRY_RUN:-false}"
@@ -850,28 +1165,62 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
 
     # Render a second, always-unfiltered JSON report from this same run for
-    # the sticky PR comment (--secondary-format), instead of re-invoking
+    # the sticky PR comment (--write), instead of re-invoking
     # abicheck a second time just to get JSON. Only needed when the primary
     # format isn't already JSON — a json primary is reused as-is (see
-    # _can_reuse_primary_json below). The per-library release fan-out
-    # (directory/package operands) rejects --secondary-format, so it's
-    # skipped there too, falling back to the rerun path in
-    # _maybe_post_pr_comment (Codex review).
-    if [[ "$FORMAT" != "json" ]] \
-       && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # _can_reuse_primary_json below).
+    #
+    # CLI cleanup phase two, PR E: the per-library release fan-out
+    # (directory/package operands) now supports --write directly --
+    # json/markdown/junit only, the same set --format itself accepts there,
+    # which is exactly what this injection ever requests -- so this no
+    # longer needs the _is_release_style_operand carve-out it used to. The
+    # release engine renders the JSON from the same already-computed
+    # per-library results its primary (markdown, by default) render uses,
+    # without re-running any library's comparison, matching how --write
+    # already worked for a single-pair operand.
+    #
+    # Skipped when the user's own `extra-args` already carries `--write`,
+    # the same guard the scan branch below applies (Codex review):
+    # extra-args is appended *after* this, and Click honors the last
+    # occurrence, so ours would lose and leave $PR_JSON empty -- at which
+    # point _maybe_post_pr_comment reruns the whole comparison just to obtain
+    # JSON, doubling a potentially expensive analysis to produce a file this
+    # very injection existed to avoid rerunning for.
+    if [[ "$FORMAT" != "json" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+      CMD+=(--write "json=$PR_JSON")
     fi
   fi
 
-  add_single_flag "--policy" "${INPUT_POLICY:-}"
-  add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
+  # `--policy` takes both operands now: a built-in profile name, or a policy
+  # document (a path, or a packaged built-in like `security`). A policy-file
+  # input therefore *is* the policy for this run and outranks the profile,
+  # exactly as the removed `--policy-file` flag did.
+  add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
 
   # Severity configuration
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
-  add_single_flag "--severity-addition" "${INPUT_SEVERITY_ADDITION:-}"
+
+  # P0.4: single-pair compares only -- the CLI itself rejects this flag
+  # outright (a UsageError) for a directory/package release fan-out, which
+  # has no single analysis_assurance result to gate on. Fail loud rather
+  # than silently drop the request (Codex review): action.yml documents
+  # this input as applying to compare mode with no release-operand
+  # carve-out, so a release workflow that explicitly asks for the
+  # assurance gate must not run ungated without any indication the gate
+  # was never applied -- the same "explicit request, not silently
+  # ignorable" treatment the L2 compile-context and evidence-flag guards
+  # above already give their own release-incompatible inputs.
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
+    if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+       || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
+      exit 1
+    fi
+    CMD+=(--require-complete-analysis)
+  fi
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
@@ -884,9 +1233,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # mutual exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
-  if [[ "${INPUT_VERIFY_RUNTIME:-false}" == "true" ]]; then
-    CMD+=(--verify-runtime)
-  fi
   add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
   add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
 
@@ -1051,6 +1397,51 @@ elif [[ "$MODE" == "scan" ]]; then
   # --public-header-dir is not side-aware on the CLI (unlike -H/-I above),
   # so it's forwarded once regardless of which branch above ran.
   add_flag "--public-header-dir" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  # ALSO forwarded as a bare -H root (lab report, fresh evidence): unlike
+  # `dump` mode above, which has no separate flag at all and folds
+  # public-header-dir into -H itself (dump derives provenance AND extraction
+  # scope from -H's own directory semantics -- see the comment there), scan's
+  # --public-header-dir is scope-only and does NOT add to the header
+  # extraction candidates the way dump's -H <dir> does (see the CLI option's
+  # own --help text: "A directory passed via -H also counts" -- extraction
+  # only ever comes from -H). With only --public-header-dir set (the common
+  # Action shape: one explicit new-header plus a public-header-dir covering
+  # the whole public tree), scan's own header extraction stayed narrowed to
+  # just the explicit header while a fresh `dump` of the identical inputs
+  # extracted the WHOLE public-header-dir tree (dump's own -H forwarding
+  # above) -- two genuinely different header candidate sets/include_sequence
+  # for the "same" logical Action inputs, so scan --against a fresh dump
+  # baseline of the same project spuriously read NOT_COMPARABLE
+  # (profile_fingerprint mismatch on include_sequence) with no real recipe
+  # difference. scan's own -H <dir> expansion (service_scan.
+  # expand_header_inputs) recursively extracts every header under a
+  # directory identically to dump's (header_utils.iter_directory_headers),
+  # so forwarding the same value as -H here closes the gap with no CLI
+  # change needed -- scan's own docs already note a directory via -H
+  # subsumes --public-header-dir's scope-establishing role, so the two
+  # forwards are redundant for scope (harmless) and now agree on extraction
+  # too. Bare (unsided) ONLY when there is no old side to contaminate --
+  # new-library-set audits (no old side at all, ADR-056) and a plain
+  # audit-only scalar scan (no --against resolved) both describe a single
+  # library's public surface, matching --header's own bare/unsided
+  # forwarding just above for those same shapes.
+  #
+  # For a scalar scan with a resolved baseline, forward it sided as
+  # `-H new=...` instead (lab report, fresh evidence, Codex review):
+  # _resolve_baseline_header_scope() treats a bare -H root as describing
+  # BOTH sides, so with old-header also supplied (or even without it) the
+  # candidate's public-header-dir tree was parsed into the OLD/baseline
+  # side's header set too -- the baseline binary got scanned through the
+  # *candidate's* headers, which can hide a removed declaration (still
+  # present in the candidate's tree) or fabricate a spurious difference
+  # (a candidate-only header reachable from the baseline side). Mirrors the
+  # exact condition the real `--against` forward below uses, so the two
+  # stay in lockstep.
+  if [[ -z "$SCAN_ARTIFACT_SET" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
+    add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  else
+    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  fi
 
   # Cross-compiler flags -- documented root-Action inputs. Forwarded once,
   # below, grouped with --ast-frontend (matching compare mode's own single
@@ -1063,11 +1454,32 @@ elif [[ "$MODE" == "scan" ]]; then
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
-  add_single_flag "--build-info" "${INPUT_BUILD_INFO:-}"
-  add_single_flag "--compile-db" "${INPUT_COMPILE_DB:-}"
+  # `scan --compile-db` is gone: --build-info already accepts a build dir, a
+  # compile_commands.json, or a pack, so a compile-db input is one more way
+  # to name the same operand.
+  #
+  # Rejected rather than resolved by the fallback below when both are set,
+  # and *only* in scan mode. Scan is the one mode whose behavior this changed:
+  # it used to forward both operands (`--build-info` AND `--compile-db`) and
+  # the scan pipeline gave `compile-db` precedence, so collapsing them onto
+  # one flag silently analyzes a different build context than the same
+  # workflow used to (Codex review). Compare and dump have always used this
+  # same fallback -- `compare` never had a `--compile-db` flag to forward --
+  # so their "build-info wins" precedence is pre-existing, documented
+  # behavior, not a regression, and is deliberately left alone.
+  if [[ -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
+    echo "::error::build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
+    exit 1
+  fi
+  add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # --build-target (P0.2, lab report follow-up): scan now supports the same
+  # root-target scoping dump does (scan_engine.run_scan_core), so forward it
+  # identically -- an unscoped scan of a multi-package workspace previously
+  # diverged from a --build-target-scoped dump baseline's own L3 evidence.
+  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   # Omitting --against is already a one-build audit-only run; the preferred
   # way to force one for a single step is to simply not set against/
   # abi-baseline there. The deprecated `audit: true` back-compat alias
@@ -1081,8 +1493,8 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
@@ -1114,9 +1526,17 @@ elif [[ "$MODE" == "scan" ]]; then
   # every existing audit-only (no baseline) scan step with a usage error
   # (Codex review, P1).
   if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" && -n "${INPUT_AGAINST:-}" ]]; then
-    add_single_flag "--policy" "${INPUT_POLICY:-}"
-    add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
+    # `--policy` takes both operands now: a built-in profile name, or a
+    # policy document (a path, or a packaged built-in like `security`). A
+    # policy-file input therefore *is* the policy for this run and outranks
+    # the profile, exactly as the removed `--policy-file` flag did.
+    add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
     add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+    # P0.4, same "--against only" contract: cli_scan.py rejects this flag
+    # outright without a baseline (_COMPARISON_ONLY_FLAGS).
+    if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
+      CMD+=(--require-complete-analysis)
+    fi
   fi
 
   # --allow-build-query removed from `scan` (CLI audit PR 5/5): scan never
@@ -1149,9 +1569,9 @@ elif [[ "$MODE" == "scan" ]]; then
     fi
 
     # Render a second, always-unfiltered JSON report from this same scan run
-    # for the sticky PR comment (--secondary-format), instead of re-invoking
+    # for the sticky PR comment (--write), instead of re-invoking
     # abicheck a second time just to get JSON -- the same reasoning compare
-    # mode's own --secondary-format wiring above already documents, and the
+    # mode's own --write wiring above already documents, and the
     # cost is sharper here: a re-run could redo a --depth build/source scan
     # (Codex review — a naive rerun-on-text-format fallback would double
     # potentially expensive work and describe a second, separately
@@ -1159,14 +1579,14 @@ elif [[ "$MODE" == "scan" ]]; then
     # step). Only needed when the primary format isn't already JSON, and
     # --artifact-set has no single-artifact JSON shape to render a second
     # time (the CLI itself rejects --secondary-* there too). Also skipped
-    # when the user's own `extra-args` already requests `--secondary-format`/
-    # `--secondary-output` (Codex review, follow-up) -- see
-    # `_extra_args_has_secondary_output`'s own docstring for why injecting
+    # when the user's own `extra-args` already requests `--write`/
+    # `--write` (Codex review, follow-up) -- see
+    # `_extra_args_has_write_flag`'s own docstring for why injecting
     # ours anyway would be actively wrong, not merely redundant.
     if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
-       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_secondary_output; then
+       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+      CMD+=(--write "json=$PR_JSON")
     fi
   fi
 
@@ -1196,7 +1616,7 @@ ABICHECK_EXIT=0
 ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
 #: PR_JSON (Codex review) is created well after this trap is installed --
-#: either by the primary CMD's own --secondary-format/--secondary-output
+#: either by the primary CMD's own --write
 #: (compare/scan, non-JSON primary format) or by `_maybe_post_pr_comment`'s
 #: reuse-or-rerun fallback -- but bash re-evaluates a single-quoted trap
 #: string at EXIT time, so referencing it here (like `_STDOUT_JSON_FILE`/
@@ -1204,7 +1624,59 @@ STDERR_FILE=$(mktemp)
 #: a non-PR-comment run or `pr-comment-on: never` where the temp file was
 #: still created but never posted. Without this, a persistent self-hosted
 #: runner accumulates one JSON report per scan run indefinitely.
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
+
+# `_json_report_src`/`_extra_args_write_json_path` below trust `OUTPUT_
+# FILE`/a user-supplied `--write json=PATH` purely on "the file exists and
+# is non-empty" -- both are pure *write* destinations for this invocation
+# (`CMD+=(-o "$OUTPUT_FILE")` above), but if either path already held
+# content BEFORE this invocation (a stale file from a previous step, or
+# one a PR author committed into the checked-out tree -- `INPUT_EXTRA_ARGS`
+# and its own `--write` path are PR-controlled per this file's own threat
+# model) and `abicheck` then fails before overwriting it, every
+# downstream consumer of that file (annotations, coverage/severity/
+# verdict queries, the sticky PR comment) would silently read stale or
+# attacker-controlled content as if it were this run's own report.
+#
+# A first fix here deleted any pre-existing content at both paths before
+# `${CMD[@]}` ran -- reverted (Codex review, fresh evidence): `OUTPUT_
+# FILE`/the `--write` destination are still just `INPUT_*` values, and
+# nothing here can prove they don't happen to collide with a real *input*
+# path (`old-library`/`new-library`/a baseline file/etc, whether by an
+# honest misconfiguration or a crafted `extra-args`) -- unconditionally
+# unlinking a user-controlled path before Click has even validated the
+# invocation risks destroying the very input the comparison needed,
+# unconditionally and irrecoverably, which is strictly worse than the
+# staleness bug it was fixing. Fixed non-destructively instead: record
+# each path's (mtime, size) fingerprint before running, and only trust it
+# afterward if that fingerprint changed (or the path didn't exist before).
+# Python, not `stat -c`/`stat -f` (GNU vs. BSD/macOS spell this
+# differently and this script already leans on `_PY_BIN` for exactly this
+# class of portability need -- see `_report_query`'s own docstring).
+_file_fingerprint() {
+  # Empty output means "does not exist" -- a fingerprint that can never
+  # equal a real file's, so "did not exist before, exists now" always
+  # reads as changed without a separate existence check.
+  [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 0
+  "$_PY_BIN" -c '
+import os, sys
+try:
+    st = os.stat(sys.argv[1])
+except OSError:
+    pass
+else:
+    print(f"{st.st_mtime_ns}:{st.st_size}")
+' "$1" 2>/dev/null
+}
+_output_file_pre_fp=""
+if [[ -n "${OUTPUT_FILE:-}" ]]; then
+  _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
+fi
+_extra_write_json_path="$(_extra_args_write_json_path || true)"
+_extra_write_json_pre_fp=""
+if [[ -n "$_extra_write_json_path" ]]; then
+  _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
+fi
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
@@ -1253,7 +1725,7 @@ _is_cli_error() {
 # The JSON report this run produced, if any — the primary output when
 # format=json, or (the common case: default format=markdown) the
 # always-unfiltered secondary JSON the compare-mode command setup above
-# already asks the same invocation to write via --secondary-format. Empty
+# already asks the same invocation to write via --write. Empty
 # when neither exists. One function because three separate decisions below
 # read the same report and must not disagree about which one it is.
 #
@@ -1262,12 +1734,47 @@ _is_cli_error() {
 # substitution. Without that file, every decision below took its "no report"
 # fallback for the one configuration that keeps the report on stdout.
 _json_report_src() {
-  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+  # `OUTPUT_FILE`/the discovered `--write json=PATH` are pure write
+  # destinations that can pre-exist this invocation (see the fingerprint
+  # bookkeeping around the `${CMD[@]}` call above for why) -- trusted only
+  # when non-empty AND its (mtime, size) fingerprint changed since just
+  # before `${CMD[@]}` ran (or it didn't exist then at all, i.e. its pre-
+  # fingerprint was empty). `PR_JSON` (always a fresh mktemp this run) and
+  # `_STDOUT_JSON_FILE` (this run's own captured stdout) need no such
+  # check -- neither can be a pre-existing file.
+  #
+  # `${_output_file_pre_fp+x}`/`${_extra_write_json_pre_fp+x}` (POSIX
+  # parameter-expansion existence tests, not bash-4.2+'s `-v` -- this repo
+  # targets macOS's stock bash 3.2 too) distinguish "the pre-run bookkeeping
+  # ran and found no file there" (set, empty) from "the bookkeeping never
+  # ran at all" -- several existing tests (`test_action_run_sh_severity_
+  # summary.py`, `test_action_run_sh_pr_json.py`, ...) extract `_json_
+  # report_src` and its sibling helpers as an isolated snippet, deliberately
+  # never executing the `${CMD[@]}` invocation section this bookkeeping
+  # lives in -- so in that narrower context the freshness variables are
+  # never assigned at all, not even to "". Enforcing freshness there would
+  # silently reject every report those tests hand it (Codex review, fresh
+  # evidence -- the fingerprint feature caught two of its own consuming
+  # tests as a false positive, not a real staleness case). Degrading to the
+  # pre-fingerprint "exists and non-empty" rule exactly when the bookkeeping
+  # never ran preserves this file's real, in-production freshness guarantee
+  # unchanged, since the real script always assigns both variables (even to
+  # "") before `_json_report_src` can ever be called.
+  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+     && { [[ -z "${_output_file_pre_fp+x}" ]] \
+          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
     echo "${_STDOUT_JSON_FILE}"
+  elif [[ -n "${_extra_write_json_path:-}" && -s "${_extra_write_json_path:-}" ]] \
+       && { [[ -z "${_extra_write_json_pre_fp+x}" ]] \
+            || [[ "$(_file_fingerprint "$_extra_write_json_path")" != "$_extra_write_json_pre_fp" ]]; }; then
+    # A user-supplied `--write json=PATH` in extra-args (see
+    # `_extra_args_write_json_path`'s own docstring for why this is needed
+    # rather than falling through to "no report").
+    echo "$_extra_write_json_path"
   fi
 }
 
@@ -1296,11 +1803,31 @@ _json_report_src() {
 # fallback (which runs long before this function is ever reached) can use
 # the same resolved interpreter too.
 _report_query() {
-  # $1 = report path, $2 = query name. Prints nothing when the report cannot
-  # be read or parsed, which every caller treats as "cannot tell" rather than
-  # as an answer.
+  # $1 = report path, $2 = query name, $3 = optional query-specific argument
+  # (only the "annotations" query reads it, as a "1"/"" additions flag).
+  # Prints nothing when the report cannot be read or parsed, which every
+  # caller treats as "cannot tell" rather than as an answer.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
-  "$_PY_BIN" - "$1" "$2" <<'PYQUERY' 2>/dev/null
+  # Isolated the same way as every other Python invocation in this file
+  # (Codex review, fresh evidence): the sitecustomize.py auto-import vector
+  # fires during interpreter *startup*, before this heredoc body ever runs
+  # a single line -- it doesn't depend on what the body imports, only on
+  # where the interpreter starts.
+  #
+  # $1 is NOT reliably absolute -- unlike $_STDOUT_JSON_FILE (mktemp-
+  # rooted), $OUTPUT_FILE (this function's other caller shape, via
+  # $_json_report_src) can be a bare user-supplied INPUT_OUTPUT_FILE value
+  # or a relative default (e.g. "abicheck-baseline.json"), relative to the
+  # workflow's own working directory -- which the `cd "$_PY_SAFE_DIR"`
+  # below would otherwise resolve it against instead (the identical class
+  # of bug this same pass already fixed for $BASELINE_DIR). Anchored to
+  # $PWD *before* that cd, since that's the correct base directory at this
+  # point in the script.
+  local report_path="$1"
+  if ! _is_path_already_qualified "$report_path"; then
+    report_path="$PWD/$report_path"
+  fi
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2" "${3:-}") <<'PYQUERY' 2>/dev/null
 import json
 import sys
 
@@ -1365,14 +1892,149 @@ elif query == "coverage_where":
             )
         )
     )
+elif query == "assurance_notes":
+    # `analysis_assurance.notes` — same field name and shape on both compare
+    # (document root) and scan (nested under `diff`), read through the same
+    # `_either` fallback the coverage/severity queries above already use.
+    aa = _either("analysis_assurance", {})
+    notes = aa.get("notes") if isinstance(aa, dict) else None
+    print("; ".join(str(n) for n in (notes or [])))
+elif query == "assurance_status":
+    aa = _either("analysis_assurance", {})
+    print(aa.get("status", "") if isinstance(aa, dict) else "")
+elif query == "annotations":
+    # CLI cleanup phase two, PR E: the Action's own renderer -- reads the
+    # persisted `annotations` array (schema 2.43/2.44) instead of relying
+    # on `compare --annotate`'s own stderr rendering, so this works for
+    # BOTH a single-library compare (top-level `annotations`) and a
+    # directory/package release compare (`libraries[].annotations`,
+    # flattened here across every library) uniformly. `scan --against`
+    # carries no `annotations` field as of this schema version, so this
+    # query prints nothing for a scan report -- not an error, just no
+    # entries to emit yet.
+    additions = len(sys.argv) > 3 and sys.argv[3] == "1"
+    entries = report.get("annotations")
+    if not isinstance(entries, list):
+        entries = []
+        libs = report.get("libraries")
+        if isinstance(libs, list):
+            for lib in libs:
+                if isinstance(lib, dict) and isinstance(
+                    lib.get("annotations"), list
+                ):
+                    entries.extend(lib["annotations"])
+    order = {"error": 0, "warning": 1, "notice": 2}
+    kept = []
+    for e in entries:
+        if not isinstance(e, dict) or not e.get("annotation"):
+            continue
+        level = e.get("level")
+        annotation = e["annotation"]
+        # Codex review, fresh evidence: `_json_report_src` can, in a rare
+        # failure-before-write case, resolve to a JSON file this
+        # invocation never produced (a stale --output-file/--write
+        # destination that already existed in the checked-out tree before
+        # abicheck ran, e.g. one a PR author committed). Printing
+        # `annotation` verbatim in that case would echo an arbitrary,
+        # attacker-controlled workflow command -- including one designed
+        # to smuggle a *different* command past this check via an
+        # embedded newline (GitHub parses every stdout line as a
+        # potential command). Never trust the string as-is: it must be a
+        # single line (no embedded \n/\r), and its own `::LEVEL ` prefix
+        # must agree with the entry's separately-typed `level` field --
+        # exactly the shape `annotations._format_annotation()` always
+        # produces. Anything else is dropped rather than printed.
+        if (
+            not isinstance(annotation, str)
+            or not isinstance(level, str)
+            or "\n" in annotation
+            or "\r" in annotation
+            or not annotation.startswith(f"::{level} ")
+            or level not in order
+        ):
+            continue
+        # `always_visible` is schema 2.44+; a report from an older abicheck
+        # (this Action can be pinned to any released version) may carry
+        # `annotations` without it -- degrade to "visible unless it's a
+        # notice", the same rule `--annotate` (no `--annotate-additions`)
+        # already applied before `always_visible` existed.
+        visible = e.get("always_visible", level != "notice")
+        if additions or visible:
+            kept.append(e)
+    kept.sort(key=lambda e: order.get(e.get("level"), 99))
+    # Matches annotations.py's own _MAX_ANNOTATIONS -- GitHub Actions caps
+    # visible annotations per step at roughly the same figure, and sorting
+    # by severity first means a truncated tail is the least important one.
+    for e in kept[:50]:
+        print(e["annotation"])
 else:
     raise SystemExit(2)
 PYQUERY
 }
 
+# CLI cleanup phase two, PR E: the Action's own annotation renderer. Reads
+# the persisted `annotations` array (schema 2.43/2.44) off whichever JSON
+# report this run produced -- the same `_json_report_src` every other
+# post-processing decision in this script already reads -- instead of
+# asking `abicheck` itself to render `::error`/`::warning`/`::notice`
+# workflow commands to its own stderr via `--annotate`. Works uniformly for
+# a single-library `compare` (top-level `annotations`) and a
+# directory/package release `compare` (`libraries[].annotations`), since
+# the `annotations` query above already flattens both shapes -- and for a
+# release operand this also means no second per-library comparison is ever
+# run just to render annotations, the same "no comparison re-run" this
+# whole persisted-report design exists for.
+#
+# Deliberately does not touch `scan --against`: that report carries no
+# `annotations` field as of this schema version (the query prints nothing
+# for it, not an error), so this is a genuine no-op there rather than a
+# scoped-out branch to maintain.
+_emit_annotations() {
+  if [[ "${INPUT_ANNOTATE:-false}" != "true" ]]; then
+    # `annotate-additions: true` alone, with `annotate` left at its
+    # default `false`, used to be a hard CLI usage error
+    # (`--annotate-additions requires --annotate`, removed along with the
+    # flags themselves). An Action input has no equivalent usage-error
+    # mechanism, but silently rendering nothing for this combination is
+    # still a real, surprising behaviour change from that (CodeRabbit
+    # review) -- say so instead.
+    if [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]]; then
+      echo "::notice title=abicheck annotate::annotate-additions is true but annotate is false, so no annotations are rendered. Set annotate: true as well."
+    fi
+    return 0
+  fi
+  local _src _additions
+  _src=$(_json_report_src)
+  if [[ -z "$_src" ]]; then
+    # A user-supplied `--write FORMAT=PATH` in extra-args targeting a
+    # non-json FORMAT (markdown/junit/sarif/html/review) leaves genuinely
+    # no JSON report anywhere: the primary format isn't json either (or
+    # _json_report_src would already have found it), and `--write` only
+    # ever has room for one secondary format -- appending our own
+    # `--write json=...` after the user's own would silently drop theirs
+    # (the exact collision `_extra_args_has_write_flag` exists to prevent),
+    # not add a second report. Unlike the `json=` case
+    # `_extra_args_write_json_path` recovers, there is nothing to discover
+    # here, so say so rather than silently emitting nothing (Codex review,
+    # fresh evidence).
+    if [[ "${FORMAT:-}" != "json" ]] && _extra_args_has_write_flag \
+       && [[ -z "$(_extra_args_write_json_path)" ]]; then
+      echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own --write targets a non-json format -- no JSON report is available to render annotations from. Use format: json, or point --write at json=PATH instead."
+    fi
+    return 0
+  fi
+  _additions="0"
+  [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]] && _additions="1"
+  # Deliberately NOT captured via $(...) -- each printed line is a real
+  # GitHub Actions workflow command and must reach the actual log/stdout,
+  # not be swallowed into a shell variable the way every other
+  # `_report_query` caller above wants it.
+  _report_query "$_src" annotations "$_additions"
+}
+
 # Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
 #
-# Since ADR-049 Phase 7, a run passing --contract-evaluation (via extra-args)
+# Since ADR-049 Phase 7, a run passing --contract (via extra-args)
 # whose selected contract domain cannot be closed on the available evidence
 # contributes exit 1 — independently of the compatibility verdict, which the
 # axis deliberately never rewrites. Without asking, `scan` published
@@ -1382,7 +2044,7 @@ PYQUERY
 # Two signals, mirroring where abicheck itself puts the answer: the JSON
 # report carries `contract_coverage_exit_contribution`, and for every other
 # renderer — which omits the ledger — the same fact is announced on stderr.
-# Absent both (no --contract-evaluation), the field reads 0 and the mapping
+# Absent both (no --contract), the field reads 0 and the mapping
 # below is exactly what it was.
 #
 # The JSON answer is AUTHORITATIVE when readable, and the stderr grep is
@@ -1420,6 +2082,76 @@ _coverage_gated() {
   # signal available at all.
   echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete' \
     && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by contract.unresolved=warn'
+}
+
+# Did P0.4's orthogonal analysis-assurance axis (--require-complete-analysis,
+# analysis_assurance.py) contribute to this exit?
+#
+# Unlike `_coverage_gated` above, the JSON report's own `analysis_assurance`
+# block is NOT self-describing here: `checker.compare` always attaches it
+# (status included) regardless of whether `--require-complete-analysis` was
+# ever passed, so a present, non-"complete" status alone cannot tell "this
+# run asked to gate on it" apart from "this run's evidence happens to be
+# partial and nobody asked".
+#
+# The FIRST, load-bearing check is therefore whether this Action's own
+# dedicated `require-complete-analysis` boolean input is `true`. This is the
+# third revision of this check, and the earlier two are worth recording
+# because each was a real, Codex-found bug in trying to infer the flag from
+# *other* signals, before a dedicated input existed to ask directly:
+#
+#   1. An unanchored stderr grep as the sole signal, which a hostile input
+#      (a header/symbol name, or any other value an `abicheck` diagnostic
+#      echoes back) could forge to spoof the whole match string and fail
+#      an otherwise clean, flag-less run through this axis's own
+#      unconditional gate.
+#   2. The fix for (1) scanned the fully-built `$CMD` array instead -- safe
+#      from (1)'s forgery, but `$CMD` also carries values a *different*,
+#      structured Action input supplied (e.g. `output-file:
+#      --require-complete-analysis` legitimately produces the adjacent
+#      tokens `-o --require-complete-analysis`, with Click consuming the
+#      second one as `-o`'s filename argument, never parsing it as a
+#      flag), so a bare token scan over the merged array could
+#      true-positive on a value that was never parsed as this flag at all.
+#   3. Scoping the scan to `extra-args`'s own split tokens closed (2)'s
+#      collision with *other* inputs, but not an identical collision
+#      *within* `extra-args` itself -- e.g. `--header
+#      --require-complete-analysis` (a real `--header old=|new=PATH` option
+#      consuming the next token as its own value) still false-positives,
+#      since no amount of scoping proves a token was parsed as *this* flag
+#      rather than as some other option's argument. No token-scan of any
+#      input can be sound against this class of collision in general.
+#
+# A dedicated `require-complete-analysis` Action input (mirroring
+# `fail-on-breaking`) eliminates the whole class: this Action's own
+# detection is a plain boolean read, never a guess at how `abicheck`'s CLI
+# parser will tokenize some other string. `extra-args` is no longer
+# consulted for this flag at all -- a caller who still passes
+# `--require-complete-analysis` via `extra-args` gets correct CLI exit-code
+# behavior from Python (the flag still works), just an un-relabeled
+# `ERROR`/`SEVERITY_ERROR` verdict from this wrapper rather than
+# `ANALYSIS_INCOMPLETE`; the dedicated input is the documented way to get
+# the labeled verdict.
+#
+# Once the input is confirmed set, the JSON report's own
+# `analysis_assurance.status` is the authoritative answer (mirroring
+# `_coverage_gated`'s JSON-first preference) -- `assurance_floor_
+# diagnostic`'s stderr line is only the fallback for when there is no
+# readable JSON report at all (a non-JSON-format run, or the report file
+# is otherwise unreadable), the same "genuine cannot-tell" shape
+# `_coverage_gated`'s own stderr fallback exists for.
+_assurance_gated() {
+  [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
+
+  local _src _status
+  _src=$(_json_report_src)
+  _status=$(_report_query "$_src" assurance_status)
+  if [[ -n "$_status" ]]; then
+    [[ "$_status" != "complete" ]]
+    return
+  fi
+  echo "$STDERR_CONTENT" \
+    | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
@@ -1526,7 +2258,7 @@ _report_compat_verdict() {
   # macOS while passing on Linux. `-E` is accepted by both.
   #
   # `Verdict(:|**)` covers both spellings, because the per-library release
-  # fan-out has no third option: `--secondary-format` is rejected for a
+  # fan-out has no third option: `--write` is rejected for a
   # directory/package operand, so a markdown release compare reaches this
   # fallback with no JSON at all -- and its renderer writes the verdict as a
   # table row, `| **Verdict** | 💥 \`BREAKING\` |`, with no colon. Matching
@@ -1621,6 +2353,15 @@ _blocking_gate_note() {
     echo ">"
     echo "> ⚠️ Contract coverage also contributed to this run's exit$(_coverage_where_suffix). Orthogonal to the compatibility verdict and to the severity policy — see \`contract_coverage_failures\` in the JSON report."
   fi
+  # P0.4's analysis-assurance axis, mirroring the coverage block immediately
+  # above and for the identical reason (Codex review): orthogonal, so it is
+  # reported on its own terms rather than only when it happens to own
+  # GATE_TIER -- with a coincident severity/coverage tier winning the slot,
+  # the assurance gap would otherwise go unmentioned entirely.
+  if _assurance_gated && [[ "$GATE_TIER" != "ANALYSIS_INCOMPLETE" ]]; then
+    echo ">"
+    echo "> ⚠️ Analysis assurance also contributed to this run's exit. Orthogonal to the compatibility verdict and to the severity policy — see \`analysis_assurance\` in the JSON report."
+  fi
   [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
   echo ">"
   if [[ "$GATE_TIER" == "COVERAGE_INCOMPLETE" ]]; then
@@ -1631,6 +2372,12 @@ _blocking_gate_note() {
     # missing-provider explanation with it -- so render that here rather than
     # leave the reader with a bare tier name (Codex review).
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal contract-coverage axis$(_coverage_where_suffix). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\`."
+  elif [[ "$GATE_TIER" == "ANALYSIS_INCOMPLETE" ]]; then
+    # P0.4's assurance axis, mirroring the COVERAGE_INCOMPLETE branch
+    # immediately above -- same orthogonal-axis shape, different evidence
+    # question (completeness of this run's own evidence, not closure of a
+    # selected --contract domain).
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
   elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
     # A promoted `--crosscheck KEY=error` raises the published gate the same
     # way a severity category does, but it is not one: `_severity_gate_
@@ -1761,9 +2508,23 @@ elif [[ "$MODE" == "scan" ]]; then
           if _coverage_gated; then
             echo "::warning::abicheck scan also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
           fi
+          if _assurance_gated; then
+            echo "::warning::abicheck scan also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+          fi
         elif _coverage_gated; then
           VERDICT="COVERAGE_INCOMPLETE"
           echo "::warning::abicheck scan could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI or API break — the compatibility verdict is unchanged; the contract-coverage axis is reporting that part of the surface could not be checked."
+          if _assurance_gated; then
+            echo "::warning::abicheck scan also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+          fi
+        elif _assurance_gated; then
+          # P0.4's orthogonal analysis-assurance axis (--require-complete-
+          # analysis), mirroring the coverage branch immediately above --
+          # same "not a break, not this run's compatibility verdict" shape,
+          # different axis (evidence completeness rather than contract
+          # domain closure).
+          VERDICT="ANALYSIS_INCOMPLETE"
+          echo "::warning::abicheck scan's own evidence was not fully complete under --require-complete-analysis (exit code 1). This is NOT an ABI or API break — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
         else
           VERDICT="ERROR"
         fi
@@ -1817,21 +2578,39 @@ else
           VERDICT="ERROR"
           echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 1)."
           echo "::error::Check the command and inputs above."
-        elif _coverage_gated; then
-          # `compare` shares exit 1 between two independent axes, so the
-          # report's pre-fold `severity.exit_code` is what tells them apart
-          # rather than a guess. Only when the severity gate itself did not
-          # produce 1 is this run gated by coverage *alone*.
+        elif _coverage_gated || _assurance_gated; then
+          # `compare` shares exit 1 between up to three independent axes
+          # (severity policy, ADR-049 contract coverage, P0.4 analysis
+          # assurance), so the report's pre-fold `severity.exit_code` is
+          # what tells them apart rather than a guess. Only when the
+          # severity gate itself did not produce 1 is this run gated by
+          # coverage and/or assurance *alone*.
           _sev_exit=$(_severity_gate_exit)
           if [[ "$_sev_exit" == "0" ]]; then
-            VERDICT="COVERAGE_INCOMPLETE"
-            echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
+            if _coverage_gated; then
+              VERDICT="COVERAGE_INCOMPLETE"
+              echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
+              if _assurance_gated; then
+                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+              fi
+            else
+              # P0.4's orthogonal analysis-assurance axis alone (no
+              # contract-coverage gap this run) -- same "not a break, not a
+              # severity-policy failure" shape as the coverage branch above.
+              VERDICT="ANALYSIS_INCOMPLETE"
+              echo "::warning::abicheck's own evidence was not fully complete under --require-complete-analysis (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
+            fi
           else
             # Either severity gated too, or there is no readable JSON report
             # to tell. Keep the established verdict rather than overwrite it
-            # on a guess, and say that coverage also contributed.
+            # on a guess, and say that coverage/assurance also contributed.
             VERDICT="SEVERITY_ERROR"
-            echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+            if _coverage_gated; then
+              echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+            fi
+            if _assurance_gated; then
+              echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+            fi
           fi
         else
           VERDICT="SEVERITY_ERROR"
@@ -1893,7 +2672,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # case: default FORMAT=markdown with PR comments on) $PR_JSON — the
         # always-unfiltered secondary JSON report the compare-mode command
         # setup above already asks the same abicheck invocation to write via
-        # --secondary-format/--secondary-output, so it's already populated
+        # --write, so it's already populated
         # by this point without a second run (Codex review). Falls back to
         # the generic message when no report is readable.
         # Through `_severity_gate_categories`, which falls back to the text
@@ -1956,6 +2735,21 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
           echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence: \`$_coverage_where\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\` (which keeps the findings reported, and only zeroes this contribution)."
         else
           echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`contract_coverage_failures\` in the JSON report."
+        fi
+        ;;
+      ANALYSIS_INCOMPLETE)
+        # P0.4's orthogonal analysis-assurance axis (exit code 1,
+        # --require-complete-analysis). `analysis_assurance.notes` names
+        # what actually fell short (depth, TU/export accounting,
+        # fact-set comparability, header-context drift, ...) the same way
+        # `coverage_where` does for the contract-coverage sibling above.
+        _assurance_notes=""
+        _json_src=$(_json_report_src)
+        _assurance_notes=$(_report_query "$_json_src" assurance_notes)
+        if [[ -n "$_assurance_notes" ]]; then
+          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
+        else
+          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`analysis_assurance\` in the JSON report."
         fi
         ;;
       PASS)
@@ -2045,9 +2839,12 @@ _can_reuse_primary_json() {
   # falls back from $OUTPUT_FILE through the stdout-mode $_STDOUT_JSON_FILE;
   # its middle fallback, $PR_JSON, is always empty at this call site, since
   # the caller only reaches here after its own "already populated" check on
-  # PR_JSON came back empty), and free of display filters (--show-only /
-  # --stat) that hide gated changes from the comment (which _build_json_cmd
-  # strips for exactly that reason).
+  # PR_JSON came back empty), and free of the --show-only display filter
+  # that hides gated changes from the comment (which _build_json_cmd strips
+  # for exactly that reason). --stat no longer exists as a CLI flag (CLI
+  # cleanup phase two, PR 1) -- a $CMD array containing it would already
+  # have failed the abicheck invocation itself before this script's
+  # post-processing logic ever ran, so there is nothing left to check here.
   #
   # Codex review: the stdout-JSON case (format: json, no output-file) used
   # to fall through this check — it only ever looked at $OUTPUT_FILE, never
@@ -2060,7 +2857,7 @@ _can_reuse_primary_json() {
   local arg
   for arg in ${CMD[@]+"${CMD[@]}"}; do
     case "$arg" in
-      --show-only | --show-only=* | --stat) return 1 ;;
+      --show-only | --show-only=*) return 1 ;;
     esac
   done
   return 0
@@ -2083,10 +2880,6 @@ _build_json_cmd() {
         ;;
       --show-only=*)
         : # same display filter, inline value form — drop it for the re-run.
-        ;;
-      --stat)
-        : # display-only flag (no value); it suppresses the changes array in
-          # JSON, which the comment parser needs — drop it for the re-run.
         ;;
       *)
         PR_CMD_JSON+=("${CMD[$i]}")
@@ -2118,7 +2911,7 @@ _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
   # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before
-  # _emit_scan_report ever runs, so neither --secondary-output nor a JSON
+  # _emit_scan_report ever runs, so neither --write nor a JSON
   # primary output was written -- there is no report to reuse, and
   # re-running would just re-execute the same budget-limited (and
   # potentially expensive) scan only to hit the identical overflow again
@@ -2151,7 +2944,7 @@ _maybe_post_pr_comment() {
   fi
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
   if [[ -s "$PR_JSON" ]]; then
-    : # Already populated by the primary run's --secondary-format (compare
+    : # Already populated by the primary run's --write (compare
       # or scan mode, non-json primary format) — nothing left to do.
   elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead
@@ -2205,7 +2998,22 @@ _maybe_post_pr_comment() {
   # below), leaving PR_BODY empty and the comment skipped or an existing
   # sticky one deleted. `$_PY_BIN` is the same resolved interpreter every
   # other Python invocation in this script already uses.
-  "$_PY_BIN" -m abicheck.cli_pr_comment "$PR_JSON" \
+  #
+  # `-c '...runpy.run_module(...)...'` rather than the more obvious
+  # `-m abicheck.cli_pr_comment`, so this can run from `$_PY_SAFE_DIR` (see
+  # its own definition above) the same way every other `abicheck`-importing
+  # invocation in this file does -- `-m` inserts the CWD into sys.path[0]
+  # exactly like `-c` does, and this is the one inline-Python invocation in
+  # this file that isn't already `-c`-shaped. Functionally identical to
+  # `-m abicheck.cli_pr_comment` from click's own perspective (it reads
+  # sys.argv[1:], unaffected by this); the only observable difference is
+  # the program name `--help`/usage text shows ("-c" instead of the
+  # resolved module path), which this Action does not depend on.
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import runpy
+
+runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
+' "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
@@ -2213,7 +3021,7 @@ _maybe_post_pr_comment() {
     ${run_url:+--report-url "$run_url"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
-    -o "$PR_BODY" || true
+    -o "$PR_BODY") || true
 
   if [[ ! -s "$PR_BODY" ]]; then
     echo "abicheck: no comment to post (no changes / --on=${INPUT_PR_COMMENT_ON:-changes})."
@@ -2307,6 +3115,7 @@ _post_pr_comment() {
     || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
+_emit_annotations
 _maybe_post_pr_comment
 
 # ---------------------------------------------------------------------------
@@ -2423,6 +3232,16 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
+  # P0.4's analysis-assurance axis, unconditional for the identical reason
+  # the contract-coverage axis immediately above is: no fail-on-* flag
+  # governs it, and `_assurance_gated()` is read directly rather than the
+  # VERDICT/GATE_TIER label so a higher-priority BREAKING/API_BREAK exit
+  # cannot silently swallow it.
+  if _assurance_gated; then
+    echo "::error::abicheck scan's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
+    FINAL_EXIT=1
+  fi
+
 else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
@@ -2458,6 +3277,13 @@ else
   # step green) cannot silently swallow it.
   if _coverage_gated; then
     echo "::error::abicheck could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
+    FINAL_EXIT=1
+  fi
+
+  # P0.4's analysis-assurance axis, unconditional exactly like the
+  # contract-coverage check immediately above and for the same reason.
+  if _assurance_gated; then
+    echo "::error::abicheck's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
     FINAL_EXIT=1
   fi
 fi

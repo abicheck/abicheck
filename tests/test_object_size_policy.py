@@ -27,7 +27,7 @@ symbol looks like part of the intended public ABI:
   exported data is part of the dynamic ABI and can be used by copy relocations
   or direct data consumers.
 
-Either classification can be overridden via a ``--policy-file``.
+Either classification can be overridden via a ``--policy``.
 """
 
 from __future__ import annotations

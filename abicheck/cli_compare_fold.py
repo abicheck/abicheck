@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contract_gating import zero_scoped_out_gate_contributions
+from .service_render import ONELINE_FORMAT
 
 # Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
 # and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
@@ -74,7 +75,7 @@ def _fold_scoped_compat_into_text(
     scoped-only fold-in unfiltered would let a `--show-only` run re-surface a
     finding it explicitly excluded (Codex review, mirrors the identical
     ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
-    deliberately always-unfiltered, e.g. the ``--secondary-format`` render,
+    deliberately always-unfiltered, e.g. the ``--write`` render,
     which ignores the primary format's own ``--show-only``.
 
     *report_mode* ``"root-cause"`` skips the markdown/text
@@ -116,6 +117,21 @@ def _fold_scoped_compat_into_text(
         return fold.into_json(text)
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
+    if fmt == ONELINE_FORMAT:
+        # The built-in `quick` --profile's output. Unlike markdown/text/
+        # review's into_text (which appends a scoped section after the
+        # existing report), the incoming `text` here is the *unscoped*
+        # one-liner and must be replaced outright, not appended to --
+        # appending would break the one-line contract --profile quick
+        # exists to guarantee, and leaving it as the leading line would
+        # print the wrong (full-library) verdict/counts next to a process
+        # exit code computed from the scoped result (Codex review, fresh
+        # evidence). Imported rather than duplicated as a literal --
+        # cli_compare_helpers.py already imports the same constant, so the
+        # leaf-module-independence argument contract_coverage_exit.py's own
+        # `_ONELINE_FORMAT` duplicate makes doesn't hold here (CodeRabbit
+        # review).
+        return fold.into_oneline()
     return text
 
 
@@ -194,6 +210,150 @@ class _ScopedFold:
         elif isinstance(full_summary, dict):
             self._fold_findings_into_stat_summary(payload, full_summary)
         return json.dumps(payload, indent=2)
+
+    # ── One-line (service_render.ONELINE_FORMAT, the built-in `quick`
+    #    --profile's output) ──────────────────────────────────────────────
+
+    def into_oneline(self) -> str:
+        """The one-line summary, but for the *scoped* gate.
+
+        CLI cleanup phase two, PR 1 (Codex review, fresh evidence): before
+        this method existed, `--profile quick` combined with `--used-by`/
+        `--required-symbol` fell through `_fold_scoped_compat_into_text`'s
+        dispatch untouched (only json/markdown/text/review were handled),
+        so the printed one-liner showed the full-library verdict/counts even
+        though the process actually exits on the *scoped* result -- e.g.
+        removing an irrelevant symbol while breaking a required one could
+        print "BREAKING: 1 breaking" while exiting 0, or the reverse.
+
+        The verdict/exit-code halves reuse :meth:`into_json` over a
+        `to_stat_json`-shaped payload -- the exact same scoped-verdict-swap
+        and severity-recompute logic the JSON path already uses and this
+        module's own tests already cover. The *counts* are deliberately
+        NOT read from that payload's `summary`, though (Codex review, fresh
+        evidence, second round): JSON's own `_fold_findings_into_stat_summary`
+        ADDS scoped-only contributions on top of the full-library counts
+        rather than replacing them -- correct for JSON, which also carries
+        `changes`/`full_summary` so a reader can see *why* an unrelated
+        full-library finding is still counted despite a COMPATIBLE scoped
+        verdict. The one-line format has no such context: a bare
+        "COMPATIBLE: 1 breaking" with nothing explaining the 1 reads as a
+        genuine contradiction, not a nuance. So the counts here are
+        recomputed from scratch out of *only* the findings that actually
+        decide the scoped verdict/exit code: `_scoped_gate_findings()`'s
+        `scoped_only` changes and `missing_labels`, mirroring
+        `_fold_findings_into_stat_summary`'s own per-finding severity-bucket
+        tally -- PLUS (Codex review, fresh evidence, third round) every
+        entry of `result.changes` itself that the scoped gate also counts.
+        `scoped_only`/`missing_labels` cover only the *synthesized*
+        scoped-relevant findings (e.g. a missing required symbol, or a
+        `PE_ORDINAL_RETARGETED` with no backing full-library `Change`) --
+        the ordinary case, a real full-library finding that is ALSO
+        scoped-relevant (e.g. removing a function `--required-symbol`
+        itself names), lives in `result.changes` and is marked relevant via
+        `result.scoped_relevant_finding_ids` (the same set
+        `sarif.py`/`junit_report.py`'s own scoped-gate folds already read).
+        Omitting it reproduced exactly the bug the earlier revision of this
+        fix was written to close, just for the far more common shape of
+        input: an ordinary in-scope removal exiting 4 while printing
+        "no changes (0 total)".
+        """
+        import json
+
+        from .checker_policy import EvidenceStatus
+        from .reporter import _change_to_dict, _finding_id, to_stat_json
+        from .reporter_markdown import _VERDICT_LABEL
+        from .stat_line import format_stat_line
+
+        base = to_stat_json(self.result, severity_config=self.severity_config)
+        folded = json.loads(self.into_json(base))
+        verdict_value = folded.get("verdict") or _VERDICT_LABEL[self.result.verdict]
+        gate_note = ""
+        severity_block = folded.get("severity")
+        if isinstance(severity_block, dict):
+            # Read back the already-scoped-swapped block `into_json`'s own
+            # `_swap_in_scoped_severity` produced (when the run's exit-code
+            # scheme is severity-aware) instead of recomputing from
+            # `self.result.changes` (full-library) here -- recomputing would
+            # reproduce, for this one-line path, exactly the full-vs-scoped
+            # severity mismatch `_swap_in_scoped_severity` exists to fix for
+            # the JSON path.
+            exit_code = severity_block.get("exit_code", 0)
+            gate_note = (
+                f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
+            )
+
+        # Deliberately unfiltered by self.show_only (Codex review, fresh
+        # evidence): self._scoped_gate_findings() applies --show-only to
+        # scoped_only/missing_labels for *display* purposes (so markdown/
+        # json don't re-surface an excluded finding), but this method's own
+        # counts must track what actually decided the scoped verdict/exit
+        # code, which --show-only never changes -- `blocks` above (and the
+        # exit code read from `severity_block`) are already computed from
+        # the unfiltered set. Filtering scoped_only/missing_labels here but
+        # not relevant_in_changes below let a --show-only run print "no
+        # changes (0 total)" while still exiting non-zero on a synthesized
+        # scoped-only break (e.g. PE_ORDINAL_RETARGETED) that show_only
+        # happened to exclude from the display list.
+        from .reporter import _resolve_scoped_gate_findings
+
+        scoped_only, missing_labels, blocks, _missing_kind = (
+            _resolve_scoped_gate_findings(self.result, self.severity_config, None)
+        )
+        relevant_ids = (
+            getattr(self.result, "scoped_relevant_finding_ids", None) or frozenset()
+        )
+        relevant_in_changes = [
+            c for c in self.result.changes if _finding_id(c) in relevant_ids
+        ]
+        counts = {
+            "breaking": 0,
+            "source_breaks": 0,
+            "risk_changes": 0,
+            "compatible_additions": 0,
+        }
+        eff_sets = self.result._effective_kind_sets()
+
+        def _tally(c: Any, *, consumer_proven: bool) -> None:
+            entry = _change_to_dict(
+                c,
+                policy=self.result.policy or "strict_abi",
+                kind_sets=eff_sets,
+                policy_file=self.result.policy_file,
+                severity_config=self.severity_config,
+                evidence_status_override=(
+                    EvidenceStatus.CONSUMER_PROVEN if consumer_proven else None
+                ),
+            )
+            severity = entry.get("severity")
+            bucket = (
+                _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
+                if isinstance(severity, str)
+                else None
+            )
+            if bucket:
+                counts[bucket] += 1
+
+        for c in relevant_in_changes:
+            # A real full-library finding, not synthesized -- its own
+            # already-computed severity applies, same as every other
+            # `result.changes` entry.
+            _tally(c, consumer_proven=False)
+        for c in scoped_only:
+            _tally(c, consumer_proven=True)
+        for _label in missing_labels:
+            bucket = _SEVERITY_TO_SUMMARY_BUCKET["breaking" if blocks else "compatible"]
+            counts[bucket] += 1
+        return format_stat_line(
+            str(verdict_value),
+            breaking=counts["breaking"],
+            source_breaks=counts["source_breaks"],
+            risk_count=counts["risk_changes"],
+            compatible_additions=counts["compatible_additions"],
+            total_changes=sum(counts.values()),
+            redundant_count=0,
+            gate_note=gate_note,
+        )
 
     def _swap_in_scoped_severity(self, payload: dict[str, Any]) -> None:
         """Move the full-library severity block aside for the scoped one.
@@ -306,7 +466,7 @@ class _ScopedFold:
         # published `gate_contribution: 4` on a run that exited 0 (Codex
         # review, reproduced with a removal outside the required-symbol
         # contract). Only entries that already carry the field are
-        # touched, so a run without --contract-evaluation is unaffected.
+        # touched, so a run without --contract is unaffected.
         # Called here, *before* the scoped-only/missing-contract fold-in
         # below: those are the scoped gate's own findings and only the
         # ones tracked in `scoped_relevant_finding_ids` would survive it.
@@ -339,8 +499,8 @@ class _ScopedFold:
                 # gate, so this is not one of the always-0 ledger cases.
                 severity_config=severity_config,
                 # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
-                # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
-                # is proven by the real consumer's own import table/execution,
+                # CONSUMER_REQUIRED_SYMBOL_REMOVED) is proven by the real
+                # consumer's own import table,
                 # not by an artifact-level library diff -- evidence_status_for_change
                 # would otherwise report "artifact_proven" purely from the kind's
                 # BREAKING/RISK category, same as appcompat_to_json's own
@@ -800,6 +960,97 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     if selectors:
         return selectors
     return f"rule#{index}"
+
+
+#: The formats a ``--use-cases`` attribution actually reaches a reader
+#: through. Two mechanisms, one set: the JSON paths emit ``use_case_impact``
+#: straight off the ``DiffResult`` (``reporter._add_use_case_impact``), and
+#: the three text-shaped formats get the section folded in by
+#: :func:`_fold_use_case_impact_into_text` below. sarif/junit/html render
+#: from the same attributed result and carry none of it. ``text`` is here
+#: because the fold accepts it, not because ``compare --format`` offers it.
+_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
+
+
+def format_carries_use_case_impact(fmt: str | None) -> bool:
+    """Would a report rendered as *fmt* carry the use-case attribution?
+
+    Asked once per rendered output, so ``compare``'s preflight can reject
+    ``--use-cases`` on the real condition -- *no* output carries it -- rather
+    than on the primary format alone. A ``--format html --write json=PATH``
+    run renders the secondary from the same attributed result, at
+    ``report_mode="full"``, so the attribution does reach the caller and
+    rejecting it was arbitrary (Codex review); the primary's own error
+    message had already been proposing that exact arrangement.
+
+    Note the quantifier is the caller's, and it is the opposite of
+    :func:`contract_coverage_exit.report_carries_the_ledger`'s: that one asks
+    whether *every* output states the ledger, because it is deciding whether
+    a stderr notice would be a redundant second copy. This one feeds an
+    *any* -- one output carrying the block is enough for the run to be
+    meaningful.
+
+    No ``stat`` parameter (CLI cleanup phase two, PR 1): the internal
+    one-line format (``service_render.ONELINE_FORMAT``) is simply not in
+    :data:`_USE_CASE_IMPACT_BEARING_FORMATS`, so ``fmt in
+    _USE_CASE_IMPACT_BEARING_FORMATS`` already answers correctly for it with
+    no separate boolean needed.
+    """
+    if fmt is None:
+        return False
+    return fmt in _USE_CASE_IMPACT_BEARING_FORMATS
+
+
+def _fold_use_case_impact_into_text(
+    text: str, fmt: str, result: Any, show_only: str | None = None
+) -> str:
+    """Fold ``compare --use-cases``'s attribution into the rendered report.
+
+    Markdown/text/review only. The JSON paths already carry the block --
+    ``reporter._add_use_case_impact`` emits it straight off
+    ``DiffResult.use_case_impact`` -- so folding it again here would write
+    the key twice; the structured formats (sarif, junit, html) are left
+    untouched, the same scope boundary
+    :func:`_fold_suppression_audit_into_text` uses.
+
+    *show_only* projects the attribution onto the findings the report above
+    it actually lists, so the section cannot resurface a change the filter
+    removed (Codex review) -- the same thing
+    :func:`_fold_scoped_compat_into_text` does for its own scoped-only
+    changes, and the same projection the JSON paths apply.
+    """
+    from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
+
+    impact = getattr(result, "use_case_impact", None)
+    if not isinstance(impact, UseCaseImpact) or fmt not in (
+        "markdown",
+        "text",
+        "review",
+    ):
+        return text
+    if show_only:
+        from .reporter import apply_show_only
+        from .root_cause_evidence import scoped_only_changes_filtered
+
+        # Every argument the JSON paths pass, so a policy-sensitive token
+        # ("breaking") filters identically in both renders rather than
+        # against the default policy here. Scoped-only findings are appended
+        # through the shared filter for the same reason the JSON paths' own
+        # `_displayed_with_scoped_only` does: this fold runs alongside
+        # `_fold_scoped_compat_into_text`, which puts them in the findings
+        # list above, so projecting onto `result.changes` alone would drop
+        # every attribution that landed on one.
+        impact = impact.restricted_to(
+            apply_show_only(
+                list(result.changes),
+                show_only,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+            )
+            + scoped_only_changes_filtered(result, show_only)
+        )
+    return "\n".join([text, *render_use_case_impact_lines(impact)])
 
 
 def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:

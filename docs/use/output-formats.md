@@ -26,9 +26,11 @@ All five formats support the report filtering options described below.
 The ABICC-compatible XML output (via `abicheck compat check`) includes
 redundancy annotations but does not support `--show-only` filtering.
 
-In addition to report formats, abicheck can emit **GitHub Actions workflow
-command annotations** (`--annotate`) that appear as inline comments on PR
-diffs. See [GitHub PR Annotations](annotations.md) for details.
+In addition to report formats, the composite GitHub Action can emit
+**GitHub Actions workflow command annotations** (`annotate: true`) that
+appear as inline comments on PR diffs, rendered from the persisted
+`annotations` report field. See [GitHub PR Annotations](annotations.md) for
+details.
 
 ## Redundancy filtering
 
@@ -40,7 +42,7 @@ annotated with:
 - `caused_count` — number of derived changes collapsed
 - `affected_symbols` — list of affected interface names
 
-This keeps reports focused on root causes. Use `--show-redundant` to disable
+This keeps reports focused on root causes. Use `scope.show_redundant: true` to disable
 filtering and see all changes.
 
 ### How it appears in each format
@@ -48,7 +50,7 @@ filtering and see all changes.
 **Markdown**: An info note at the bottom:
 ```
 > ℹ️ 12 redundant change(s) hidden (derived from root type changes).
-> Use `--show-redundant` to show all.
+> Use `scope.show_redundant: true` to show all.
 ```
 
 **JSON**: A top-level `redundant_count` field, and per-change `caused_by_type`
@@ -85,7 +87,7 @@ regardless of surface).
 
 Use `--show-filtered` to print the ledger on the terminal.
 
-### Widening the surface (`--public-symbol`)
+### Widening the surface (`scope.public_symbols`)
 
 Some symbols you *do* guarantee as public can't be seen by header provenance —
 hand-written asm stubs, `.def` exports, `extern "C"` shims, or symbols whose
@@ -96,11 +98,11 @@ than demoted:
 ```bash
 # Force individual symbols (repeatable), à la abi-compliance-checker -symbols-list
 abicheck compare old.so new.so --scope-public-headers \
-    --public-symbol my_asm_stub --public-symbol _ZN3foo3barEv
+    scope.public_symbols my_asm_stub scope.public_symbols _ZN3foo3barEv
 
 # Or from a file (one symbol per line; '#' comments and blank lines ignored)
 abicheck compare old.so new.so --scope-public-headers \
-    --public-symbols-list public.syms
+    scope.public_symbols public.syms
 ```
 
 Matching is on the symbol as recorded on the finding (mangled or demangled),
@@ -124,8 +126,9 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
   reachability-based rather than provenance-confirmed (reduced confidence).
 
 The `private-header` / `system-header` reasons are provenance-derived: they
-only appear when the snapshots were produced with `--public-header` /
-`--public-header-dir` (ADR-015). `--public-header` is supported for
+only appear when the snapshots were produced with a `-H`/`--header`
+public-header set (ADR-015) -- `dump` derives provenance from it directly, and
+`scan` additionally accepts `--public-header-dir`. Provenance is supported for
 ELF, PE (provenance from PDB `LF_UDT_SRC_LINE`), and Mach-O inputs. Without a
 public-header set, every declaration's origin is `unknown` and only the
 linkage/reachability reasons above are emitted.
@@ -188,17 +191,29 @@ output.
 **JUnit XML**: The `show_only` parameter filters which test cases appear in the
 output. Filtered-out changes are omitted entirely.
 
-## `--stat` mode
+## One-line summary (`--profile quick`)
 
-One-line summary for CI gates:
+`--stat` was removed (CLI cleanup phase two, PR 1). For a compact one-line
+summary in a CI log, use the built-in `quick` profile instead:
 
 ```bash
-$ abicheck compare old.json new.json --stat
+$ abicheck compare old.json new.json --profile quick
 BREAKING: 3 breaking, 1 risk (42 total) [12 redundant hidden]
-
-$ abicheck compare old.json new.json --stat --format json
-{"library": "libfoo", "verdict": "BREAKING", "summary": {...}}
 ```
+
+For a machine-readable summary, use plain `--format json` and read the
+`summary` object — it is already present in the full JSON report alongside
+`changes`, so there is no separate summary-only shape to ask for:
+
+```bash
+$ abicheck compare old.json new.json --format json
+{"library": "libfoo", "verdict": "BREAKING", "summary": {...}, "changes": [...]}
+```
+
+An explicit `--format` on the command line always overrides `--profile
+quick`'s own one-line default (`--profile quick --format json` returns the
+full JSON report above, not the one-line text) — the profile only supplies a
+default when nothing else asked for a specific format.
 
 ## `--report-mode leaf`
 
@@ -278,18 +293,18 @@ abicheck compare old.so new.so --report-mode root-cause --format sarif
 }
 ```
 
-## `--show-impact`
+## `--report-mode impact`
 
-Appends an impact summary table to the report, showing root changes and how many
-interfaces each affects. Available in Markdown and HTML formats.
+Renders the `full` report plus an impact summary table showing root changes and
+how many interfaces each affects. Available in Markdown and HTML formats.
 
 ```bash
-abicheck compare old.json new.json --show-impact
+abicheck compare old.json new.json --report-mode impact
 ```
 
-## A second output format from the same run (`--secondary-format`)
+## A second output format from the same run (`--write`)
 
-`compare` computes its comparison once; `--secondary-format` renders that
+`compare` computes its comparison once; `--write FORMAT=PATH` renders that
 same result into a second format/file, instead of requiring a second
 `abicheck compare` invocation to get a different format:
 
@@ -298,19 +313,21 @@ same result into a second format/file, instead of requiring a second
 # one comparison, two outputs.
 abicheck compare old.json new.json \
   --format markdown \
-  --secondary-format json --secondary-output report.json
+  --write json=report.json
 ```
 
-- `--secondary-format` and `--secondary-output` require each other — either
-  alone is rejected (passing just `--secondary-output` would otherwise
-  silently produce no secondary artifact at all).
-- `--secondary-output` must point at a different file than `--output`/`-o` —
-  otherwise the secondary render would silently overwrite the primary report.
+- One `FORMAT=PATH` operand: the format and its destination are stated
+  together, so neither half can be given without the other.
+- `PATH` must point at a different file than `--output`/`-o` — otherwise the
+  secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
-  `--show-only`/`--stat`, which describe only the primary format's display.
-- Not supported for directory/package (release) comparisons — the release
-  fan-out doesn't produce a single `DiffResult` to render twice. Compare the
-  libraries individually to use it.
+  `--show-only`, which describes only the primary format's display.
+- Also works for a directory/package (release) comparison: the per-library
+  fan-out renders its second format from the same already-computed
+  per-library results, without re-running any library's comparison. Only
+  `json`/`markdown`/`junit` are available there (the same set `--format`
+  itself accepts for a release operand) — `sarif`/`html`/`review` still
+  require a single-pair comparison.
 
 The bundled GitHub Action uses this to get JSON for its sticky PR comment
 without re-running the whole comparison a second time.
@@ -537,7 +554,7 @@ gets two additional fields alongside the existing `config`/`categories`/
 
 ### Contract-evaluation report fields (`contract_relevance`, `contract_coverage_failures`)
 
-Under `--contract-evaluation`, two field groups appear that aren't present
+Under `--contract`, two field groups appear that aren't present
 in a plain `compare` report — mental model and command reference:
 [Contract-Aware Compatibility](../learn/contract-aware-compatibility.md),
 [Contract Evaluation](contract-evaluation.md).
@@ -648,7 +665,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.38",
+  "report_schema_version": "2.44",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -720,7 +737,7 @@ The block also carries `policy` — the resolved compatibility policy name
 real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
 shapes, which never reach policy classification).
 
-Since schema 1.14, the block also discloses the active `--policy-file`
+Since schema 1.14, the block also discloses the active `--policy`
 audit trail — previously a `scan --format json` reader could see a
 downgraded verdict with no way to tell which rule produced it, unlike the
 `compare`/report path. `policy_overrides` (a `ChangeKind -> verdict` map)
@@ -790,26 +807,32 @@ jsonschema.validate(report, load_compare_report_schema())
 `abicheck aggregate --format json` is a **separate document**, not a
 `compare`/`scan` report — it's versioned by its own
 `aggregate_schema_version` and describes a fan-in over already-produced
-reports rather than one comparison. Its four independent axes
-(`compatibility`/`coverage`/`gate`/`contract_coverage`) and the
-`profile_matrix`/`finding_matrix` reconciliation blocks are documented,
-with a fully annotated example, in [Aggregate
+reports rather than one comparison. Its five independent axes
+(`compatibility`/`coverage`/`gate`/`contract_coverage`/`analysis_assurance`)
+and the `profile_matrix`/`finding_matrix` reconciliation blocks are
+documented, with a fully annotated example, in [Aggregate
 Reports](aggregate-reports.md) rather than repeated here.
 
 ---
 
-## Release recommendation (`--recommend`)
+## Release recommendation
 
 Translates the verdict into the maintainer's actual question — *what version do
 I release, and do I need to bump the SONAME?* — as a recommended semantic-version
-bump (`major`/`minor`/`patch`/`none`) plus a SONAME action.
+bump (`major`/`minor`/`patch`/`none`) plus a SONAME action. Unconditional in
+`json`, `markdown`, and `review` (CLI cleanup phase two, PR 1 removed the
+`--recommend` opt-in flag that used to gate it): JSON always carries it under
+`release_recommendation`, and Markdown/`review` always render it as a
+section — no flag needed. `html` does not render it (the HTML report has no
+recommendation section), and `sarif`/`junit` intentionally omit it — neither
+format has a natural slot for a release verdict.
 
 ```bash
-abicheck compare old.so new.so -H include/ --recommend
+abicheck compare old.so new.so -H include/
 ```
 
 The recommendation is **policy-aware** (it honours `--policy` and
-`--policy-file`):
+`--policy`):
 
 | Verdict | Bump | SONAME |
 |---------|------|--------|

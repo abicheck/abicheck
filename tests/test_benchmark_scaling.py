@@ -23,17 +23,40 @@ bench = importlib.util.module_from_spec(_spec)
 sys.modules["benchmark_scaling"] = bench
 _spec.loader.exec_module(bench)
 
+# The baseline-regression comparison functions live in the sibling
+# scripts/perf_baseline.py (split out to keep benchmark_scaling.py under the
+# file-size cap) — importing benchmark_scaling.py above already put
+# scripts/ on sys.path as a side effect, so a plain import resolves it.
+import perf_baseline  # noqa: E402
+
 
 # ── Baseline regression comparison ────────────────────────────────────────────
 def test_baseline_points_parses_scenarios() -> None:
     base = {"scenarios": {"add_remove": {"points": [{"size": 500, "seconds": 0.1}]}}}
-    assert bench._baseline_points(base) == {("add_remove", 500): 0.1}
+    assert perf_baseline.baseline_points_from_report(base) == {("add_remove", 500): 0.1}
 
 
 def test_baseline_points_tolerates_garbage() -> None:
-    assert bench._baseline_points({}) == {}
-    assert bench._baseline_points({"scenarios": "nope"}) == {}
-    assert bench._baseline_points({"scenarios": {"x": "bad"}}) == {}
+    assert perf_baseline.baseline_points_from_report({}) == {}
+    assert perf_baseline.baseline_points_from_report({"scenarios": "nope"}) == {}
+    assert perf_baseline.baseline_points_from_report({"scenarios": {"x": "bad"}}) == {}
+    assert (
+        perf_baseline.baseline_points_from_report(
+            {"scenarios": {"x": {"points": "nope"}}}
+        )
+        == {}
+    )
+
+
+def test_baseline_points_tolerates_non_dict_top_level() -> None:
+    # CodeRabbit review: a syntactically valid JSON document whose top level
+    # isn't an object (a bare list, a string, a number, ...) has no .get()
+    # and previously raised an unhandled AttributeError instead of degrading
+    # like every other malformed-shape case above.
+    assert perf_baseline.baseline_points_from_report([]) == {}
+    assert perf_baseline.baseline_points_from_report("nope") == {}
+    assert perf_baseline.baseline_points_from_report(1) == {}
+    assert perf_baseline.baseline_points_from_report(None) == {}
 
 
 def test_check_regressions_flags_slowdown() -> None:
@@ -59,6 +82,46 @@ def test_check_regressions_skips_unknown_size() -> None:
     # Size absent from the baseline (e.g. a scenario new in this PR) is skipped.
     bp = {("s", 500): 0.2}
     assert bench.check_regressions([bench.Point(1000, 5.0, 1000)], "s", bp, 0.5) == []
+
+
+def test_check_regressions_combined_threshold_absolute_floor_protects_tiny_baseline() -> (
+    None
+):
+    # A tiny baseline (well under regress-min-delta-seconds) must not flag on
+    # a relatively huge but absolutely tiny slowdown.
+    bp = {("s", 1000): 0.10}
+    msgs = bench.check_regressions(
+        [bench.Point(1000, 0.15, 1000)],  # +50% but only +0.05s
+        "s",
+        bp,
+        0.15,
+        min_delta_seconds=0.1,
+    )
+    assert msgs == []
+
+
+def test_check_regressions_combined_threshold_still_catches_a_real_regression() -> None:
+    bp = {("s", 1000): 0.10}
+    msgs = bench.check_regressions(
+        [bench.Point(1000, 0.30, 1000)],  # +200%, well past both floors
+        "s",
+        bp,
+        0.15,
+        min_delta_seconds=0.1,
+    )
+    assert len(msgs) == 1
+
+
+def test_matched_baseline_points_empty_when_no_overlap() -> None:
+    points = [bench.Point(1000, 0.4, 1000)]
+    bp = {("s", 999): 0.2}  # different size entirely
+    assert bench.matched_baseline_points(points, "s", bp) == []
+
+
+def test_matched_baseline_points_returns_overlapping_subset() -> None:
+    points = [bench.Point(1000, 0.4, 1000), bench.Point(2000, 0.8, 2000)]
+    bp = {("s", 1000): 0.2}
+    assert bench.matched_baseline_points(points, "s", bp) == [points[0]]
 
 
 # ── Every scenario is wired correctly ─────────────────────────────────────────
@@ -203,3 +266,48 @@ def test_check_rss_gate_flags_over_budget() -> None:
     assert bench._check_rss_gate("s", under, 512.0) == []
     # No RSS data (e.g. Windows) → never gates.
     assert bench._check_rss_gate("s", [bench.Point(1000, 0.1, 1000)], 1.0) == []
+
+
+def test_sizes_and_repeat_reject_non_positive_values() -> None:
+    # CodeRabbit review: a plain `type=int` let --repeat 0 through, leaving
+    # measure() an empty samples list and crashing with an unhandled
+    # ValueError from summarize_samples() instead of a clean argparse usage
+    # error. --sizes shares the same positive_int_arg validator for the
+    # identical reason check_header_graph_perf.py's own --sizes already had.
+    for bad_args in (
+        ["--sizes", "0"],
+        ["--repeat", "0"],
+        ["--sizes", "-5"],
+        ["--repeat", "-1"],
+    ):
+        with pytest.raises(SystemExit):
+            bench.parse_args(bad_args)
+
+
+def test_sizes_and_repeat_accept_positive_values() -> None:
+    args = bench.parse_args(["--sizes", "10", "20", "--repeat", "3"])
+    assert args.sizes == [10, 20]
+    assert args.repeat == 3
+
+
+def test_regress_flags_reject_non_finite_and_negative_values() -> None:
+    # Codex review, fresh evidence: a plain `type=float` let
+    # --regress-tolerance/--regress-min-delta-seconds through as nan/inf (or
+    # an overflowing literal like "1e309", which float() also parses as
+    # inf) -- combined_regression_threshold()'s allowed delta then becomes
+    # infinite (or the comparison against it always False), silently
+    # reporting every regression as a pass. Both flags now share
+    # check_header_graph_perf.py's own finite/non-negative validator via
+    # perf_measurement.finite_nonnegative_float_arg.
+    for flag in ("--regress-tolerance", "--regress-min-delta-seconds"):
+        for bad_value in ("nan", "inf", "-inf", "1e309", "-0.1"):
+            with pytest.raises(SystemExit):
+                bench.parse_args([flag, bad_value])
+
+
+def test_regress_flags_accept_finite_nonnegative_values() -> None:
+    args = bench.parse_args(
+        ["--regress-tolerance", "0.15", "--regress-min-delta-seconds", "0.1"]
+    )
+    assert args.regress_tolerance == pytest.approx(0.15)
+    assert args.regress_min_delta_seconds == pytest.approx(0.1)

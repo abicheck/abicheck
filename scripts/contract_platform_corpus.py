@@ -96,7 +96,7 @@ LANE_C = "c"
 #: is bounded by what was actually run, not by what the list mentions.
 UNCOVERED_LANES: dict[str, str] = {
     "package": (
-        "compare rejects --contract-evaluation for directory/package operands "
+        "compare rejects --contract for directory/package operands "
         "(the same fan-out limitation --contract itself carries), so there is "
         "no contract decision on a package pair to measure"
     ),

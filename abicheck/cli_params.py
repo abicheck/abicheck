@@ -16,6 +16,7 @@
 """Shared custom Click parameter types for the abicheck CLI."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -26,12 +27,25 @@ if TYPE_CHECKING:
     from .suppression import SuppressionList
 
 
+#: The built-in verdict-classification profiles ``--policy`` accepts by name,
+#: as opposed to a policy *document* it resolves to a path.
+BUILTIN_POLICY_PROFILES: tuple[str, ...] = ("strict_abi", "sdk_vendor", "plugin_abi")
+
+#: The profile a run classifies under when ``--policy`` named a document
+#: rather than a profile, and when it was not given at all.
+DEFAULT_POLICY_PROFILE = "strict_abi"
+
+
 class PolicyFileParam(click.ParamType):
-    """Click type for ``--policy-file``: an existing file or a built-in name.
+    """Click type for a policy *document*: an existing file or a built-in name.
 
     Accepts a real path (which must exist) or a bare built-in policy name such
     as ``security`` that resolves to a packaged ``abicheck/policies/*.yaml``
     (see ``abicheck.policy_file.builtin_policy_path``).
+
+    Not an option type of its own any more -- ``--policy`` takes both a
+    profile name and a document, and resolves the document half through this
+    converter (see ``cli_options.policy_options``).
     """
 
     name = "policy"
@@ -49,15 +63,16 @@ class PolicyFileParam(click.ParamType):
         if p.exists():
             return p
         names = ", ".join(builtin_policy_names())
+        profiles = ", ".join(BUILTIN_POLICY_PROFILES)
         raise click.BadParameter(
-            f"{value!r}: no such file, and not a built-in policy "
-            f"(available built-ins: {names})",
+            f"{value!r}: not a built-in profile ({profiles}), no such file, "
+            f"and not a built-in policy document (available: {names})",
             ctx=ctx,
             param=param,
         )
 
 
-#: Shared instance for all ``--policy-file`` options.
+#: Shared instance for resolving a ``--policy`` document operand.
 POLICY_FILE_PARAM = PolicyFileParam()
 
 
@@ -311,6 +326,47 @@ class SidedStrParam(click.ParamType):
 SIDED_STR_PARAM = SidedStrParam()
 
 
+class SidedChoiceParam(click.ParamType):
+    """Side-aware option drawn from a fixed choice set -- e.g. ``--ast-frontend``.
+
+    :class:`SidedStrParam` with the value half validated against *choices*, so
+    a side-scoped option keeps the ``click.Choice`` error message it had
+    before it grew an ``old=``/``new=`` prefix. A bare value is the base for
+    both sides; ``old=``/``new=`` override one side.
+    """
+
+    name = "sided-choice"
+
+    def __init__(self, choices: Sequence[str], *, case_sensitive: bool = False):
+        self.choices = tuple(choices)
+        self.case_sensitive = case_sensitive
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[str, str]:
+        s = str(value)
+        side = "both"
+        for candidate in _SIDES:
+            prefix = f"{candidate}="
+            if s.startswith(prefix):
+                side, s = candidate, s[len(prefix) :]
+                break
+        normalized = s if self.case_sensitive else s.lower()
+        allowed = (
+            self.choices
+            if self.case_sensitive
+            else tuple(c.lower() for c in self.choices)
+        )
+        if normalized not in allowed:
+            self.fail(
+                f"{s!r} is not one of {', '.join(repr(c) for c in self.choices)}.",
+                param,
+                ctx,
+            )
+        return (side, normalized)
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        return "[old=|new=][" + "|".join(self.choices) + "]"
+
+
 def _load_suppression_and_policy(
     suppress: Path | None, policy: str, policy_file_path: Path | None,
     *,
@@ -377,18 +433,12 @@ def _load_suppression_and_policy(
         except ImportError as e:
             raise click.ClickException(str(e)) from e
         except (ValueError, OSError) as e:
-            raise click.BadParameter(str(e), param_hint="--policy-file") from e
-        if policy != "strict_abi":
-            click.echo(
-                f"Warning: --policy={policy!r} is ignored when --policy-file is given. "
-                "Set base_policy in the YAML file to override the base policy.",
-                err=True,
-            )
+            raise click.BadParameter(str(e), param_hint="--policy") from e
         # A policy override that downgrades a critical or otherwise-BREAKING
         # kind is exactly the kind of mistake `validate_overrides()` exists to
         # catch -- but the method was previously dead code, called from
         # nowhere in the CLI, so nobody ever saw its warnings. Surface them
-        # here, the one place every `--policy-file` consumer (`compare`,
+        # here, the one place every policy-document consumer (`compare`,
         # `compare-release`, `scan --against`, `appcompat`) already funnels
         # through, so a risky override is flagged regardless of which command
         # loaded it. Routed through `pending_validate_overrides_warnings`

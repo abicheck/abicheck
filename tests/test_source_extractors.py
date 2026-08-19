@@ -1823,8 +1823,7 @@ _PLAIN_TOKEN = st.text(
     lambda t: (
         t.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
         not in _LAUNCHERS
-        and t.replace("\\", "/").rsplit("/", 1)[-1].lower()
-        not in ("env", "env.exe")
+        and t.replace("\\", "/").rsplit("/", 1)[-1].lower() not in ("env", "env.exe")
     )
 )
 

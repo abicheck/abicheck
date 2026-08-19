@@ -632,7 +632,7 @@ def _normalized_identities(paths: Sequence[Path], root: Path | None) -> list[str
     ``sorted(set(...))``, not ``sorted(...)`` (Codex review, PR #624): the same
     logical header reaching :func:`compute_extraction_contract` through both
     ``declared_headers`` and ``public_header_paths`` on one side (e.g. a full L2
-    dump that also passes ``--public-header`` for the same file) must not retain
+    dump that also declares the same file public) must not retain
     a duplicate entry a side naming it only once wouldn't have --
     ``["foo.h", "foo.h"]`` vs. ``["foo.h"]`` would otherwise mismatch on element
     count alone, despite describing the identical declared surface.
@@ -651,7 +651,7 @@ def _compute_scope_fields(
 
     All scope-identity inputs normalize against a shared, side-local root —
     never raw absolute paths (Codex review, PR #624): a lone
-    ``--public-header``/``--public-header-dir`` provenance input (the
+    public-header provenance input (the
     symbols-only-with-provenance case, no ``declared_headers`` at all) is
     exactly as checkout-root-dependent as ``declared_headers``, and hashing it
     unnormalized would make an ordinary two-checkout compare relying only on
@@ -660,7 +660,7 @@ def _compute_scope_fields(
     combined "headers" identity, not two separate ``scope_fields`` entries
     (Codex review, PR #624): both name individual public header *files* — the
     same declared surface, captured by two different mechanisms (a full L2
-    header-AST dump's ``-H`` vs. a symbols-only dump's ``--public-header``
+    header-AST dump's ``-H`` vs. a symbols-only dump's own public-header set
     provenance tag). Keeping them in separate fields made an ordinary depth
     difference between two dumps of the *same* header (one via each mechanism)
     fingerprint as a scope mismatch, even though nothing about the declared

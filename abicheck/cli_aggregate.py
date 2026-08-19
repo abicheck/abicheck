@@ -44,20 +44,10 @@ from .aggregate import (
     DEFAULT_REPORT_PREFIX,
     AggregateError,
     ExpectedTargets,
-    OnMissingRequired,
-    OnUnexpectedTarget,
     aggregate_reports_dir,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
-
-
-def _split_csv(values: tuple[str, ...]) -> list[str]:
-    """Flatten repeatable + comma-separated option values into a clean list."""
-    out: list[str] = []
-    for value in values:
-        out.extend(part.strip() for part in value.split(",") if part.strip())
-    return out
 
 
 @main.command("aggregate")
@@ -87,57 +77,14 @@ def _split_csv(values: tuple[str, ...]) -> list[str]:
     "writes as every report's target_id.",
 )
 @click.option(
-    "--expect",
-    "expect",
-    multiple=True,
-    help="Required target id(s), as an alternative to --manifest (repeatable / "
-    "comma-separated). A required target with no report is unavailable and "
-    "fails the coverage gate — never treated as compatible.",
-)
-@click.option(
-    "--optional",
-    "optional",
-    multiple=True,
-    help="Optional target id(s) (used with --expect): analyzed when present, "
-    "but a missing one never fails the coverage gate.",
-)
-@click.option(
     "--discovered-only",
     "discovered_only",
     is_flag=True,
     default=False,
     help="Explicitly aggregate whatever reports are present, with NO coverage "
-    "gate. Required to run without a manifest/--expect — because with no "
+    "gate. Required to run without --manifest/--run-plan — because with no "
     "declared target set the gate cannot tell a missing required target from "
     "an intentionally absent one.",
-)
-@click.option(
-    "--report-prefix",
-    "report_prefix",
-    default=DEFAULT_REPORT_PREFIX,
-    show_default=True,
-    help="Filename prefix stripped when deriving a target id from a report "
-    "file that does not self-identify a 'target_id' "
-    "(e.g. 'abi-report-linux.json' -> 'linux').",
-)
-@click.option(
-    "--on-missing-required",
-    type=click.Choice(["fail", "warn"]),
-    default="fail",
-    show_default=True,
-    help="How an unavailable required target affects the exit code: 'fail' "
-    "makes incomplete required coverage a gate failure (exit 1); 'warn' "
-    "reports the gap but lets the per-target gate decisions alone decide.",
-)
-@click.option(
-    "--on-unexpected-target",
-    type=click.Choice(["include", "warn", "fail", "ignore"]),
-    default="include",
-    show_default=True,
-    help="How a report for a target not in the expected set is handled: "
-    "'include' counts its real findings in the gate (but not in coverage); "
-    "'warn' surfaces it without gating; 'fail' fails the gate on any such "
-    "target; 'ignore' drops it.",
 )
 @output_options(
     ["text", "json"],
@@ -149,12 +96,7 @@ def aggregate_cmd(
     reports_dir: Path,
     manifest: Path | None,
     run_plan_path: Path | None,
-    expect: tuple[str, ...],
-    optional: tuple[str, ...],
     discovered_only: bool,
-    report_prefix: str,
-    on_missing_required: str,
-    on_unexpected_target: str,
     fmt: str,
     output: Path | None,
     verbose: bool,
@@ -163,10 +105,20 @@ def aggregate_cmd(
 
     REPORTS_DIR holds the per-target ``compare``/``scan`` JSON reports
     downloaded from the build matrix (one ``abi-report-<target>.json`` per
-    leg). Provide the expected-target set with ``--manifest``, ``--run-plan``
-    (recommended for a `project plan`-driven workflow), or
-    ``--expect``/``--optional``; or opt into ``--discovered-only`` to aggregate
-    whatever is present with no coverage gate.
+    leg). Provide the expected-target set with ``--manifest`` or
+    ``--run-plan`` (recommended for a `project plan`-driven workflow), or opt
+    into ``--discovered-only`` to aggregate whatever is present with no
+    coverage gate.
+
+    The gate policy for an unavailable required target
+    (``missing_required: fail|warn``) or a report outside the expected set
+    (``unexpected_target: include|warn|fail|ignore``) is no longer a pair of
+    CLI flags -- CLI cleanup phase two, PR 2 folded them into the manifest's
+    (or run-plan-projected manifest's) own ``gate`` block, so expectation and
+    the consequence of breaking it are one versioned contract instead of two
+    independently-typeable inputs. Omitting ``gate`` keeps the same defaults
+    this command always had (``fail``/``include``); see
+    ``docs/use/aggregate-reports.md`` for the manifest shape.
 
     Exit code: 0 pass / 1 required-coverage gap, a policy-blocked
     addition-or-quality finding, or a non-verdict per-report failure (e.g. a
@@ -176,8 +128,8 @@ def aggregate_cmd(
     """
     _setup_verbosity(verbose)
 
-    expected = _resolve_expected(
-        manifest, run_plan_path, expect, optional, discovered_only
+    expected, policy_source_hint = _resolve_expected(
+        manifest, run_plan_path, discovered_only
     )
 
     try:
@@ -185,9 +137,8 @@ def aggregate_cmd(
             reports_dir,
             expected=expected,
             discovered_only=discovered_only,
-            on_missing_required=OnMissingRequired(on_missing_required),
-            on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
-            prefix=report_prefix,
+            policy_source_hint=policy_source_hint,
+            prefix=DEFAULT_REPORT_PREFIX,
         )
     except AggregateError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -208,43 +159,40 @@ def aggregate_cmd(
 def _resolve_expected(
     manifest: Path | None,
     run_plan_path: Path | None,
-    expect: tuple[str, ...],
-    optional: tuple[str, ...],
     discovered_only: bool,
-) -> ExpectedTargets | None:
+) -> tuple[ExpectedTargets | None, str]:
     """Resolve the expected-target set from exactly one source, or usage error.
 
     Precedence is deliberately *exclusive*, not merging: ``--discovered-only``,
-    ``--manifest``, ``--run-plan``, and ``--expect/--optional`` are four
-    distinct ways to say what the target set is, and combining them is
-    ambiguous.
-    """
-    expect_list = _split_csv(expect)
-    optional_list = _split_csv(optional)
-    flags_given = bool(expect_list or optional_list)
-    sources_given = sum([manifest is not None, run_plan_path is not None, flags_given])
+    ``--manifest``, and ``--run-plan`` are three distinct ways to say what the
+    target set is, and combining them is ambiguous. (The ad-hoc
+    ``--expect``/``--optional`` id lists were a fourth; they are gone --
+    an expected-target set is a file the plan job and the gate share, and
+    retyping it on the command line was the drift the manifest exists to
+    prevent.)
 
-    if optional_list and not expect_list:
-        # --optional is a modifier on --expect (a target set that is all
-        # optional has no required coverage to gate, turning an omitted
-        # --expect into a fail-open gate). Reject it explicitly.
-        raise click.UsageError("--optional requires at least one --expect target")
+    Returns the expected-target set plus a ``policy_source_hint`` label
+    (``"manifest"``/``"run-plan"``) naming which source it came from --
+    :func:`~.aggregate.resolve_gate_policy` reports this back in the
+    result's ``effective_policy.source`` whenever that source's own ``gate``
+    block actually supplied a value.
+    """
+    sources_given = sum([manifest is not None, run_plan_path is not None])
 
     if discovered_only:
         if sources_given:
             raise click.UsageError(
-                "--discovered-only cannot be combined with --manifest/"
-                "--run-plan/--expect/--optional"
+                "--discovered-only cannot be combined with --manifest/--run-plan"
             )
-        return None
+        return None, "default"
     if sources_given > 1:
         raise click.UsageError(
-            "--manifest, --run-plan, and --expect/--optional are mutually "
-            "exclusive expected-target sources"
+            "--manifest and --run-plan are mutually exclusive expected-target "
+            "sources"
         )
     if manifest is not None:
         try:
-            return ExpectedTargets.from_manifest_file(manifest)
+            return ExpectedTargets.from_manifest_file(manifest), "manifest"
         except AggregateError as exc:
             raise click.UsageError(str(exc)) from exc
     if run_plan_path is not None:
@@ -256,9 +204,15 @@ def _resolve_expected(
             raise click.UsageError(f"cannot read {run_plan_path}: {exc}") from exc
         if not isinstance(raw, dict):
             raise click.UsageError(f"{run_plan_path} must contain a JSON object.")
-        plan = RunPlan.from_dict(raw)
         try:
-            return ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
+            plan = RunPlan.from_dict(raw)
+        except AggregateError as exc:
+            raise click.UsageError(f"{run_plan_path}: {exc}") from exc
+        try:
+            return (
+                ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan)),
+                "run-plan",
+            )
         except AggregateError as exc:
             raise click.UsageError(
                 f"{run_plan_path}: {exc} — an empty run-plan.json has no "
@@ -266,11 +220,8 @@ def _resolve_expected(
                 "plan` (dropping --allow-empty), or aggregate with "
                 "--discovered-only instead"
             ) from exc
-    if flags_given:
-        # from_lists only raises on an empty set, which flags_given rules out.
-        return ExpectedTargets.from_lists(expect_list, optional_list)
     raise click.UsageError(
-        "no expected-target set: pass --manifest, --run-plan, or --expect "
-        "(the targets the matrix must produce), or --discovered-only to "
-        "aggregate whatever is present with no coverage gate"
+        "no expected-target set: pass --manifest or --run-plan (the targets "
+        "the matrix must produce), or --discovered-only to aggregate whatever "
+        "is present with no coverage gate"
     )

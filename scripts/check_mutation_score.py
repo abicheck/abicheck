@@ -14,230 +14,914 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mutation-score gate — baseline-drift check for the core detector modules.
+"""Mutation-score gate — the direct measure of whether tests *verify* or merely
+*execute* the detector core.
 
-Mutation testing is the direct answer to "are these tests generalized, or do
-they just execute lines without checking the result?". ``mutmut`` mutates the
-detector logic (the modules listed under ``[tool.mutmut]`` in pyproject.toml)
-and re-runs the suite; a *surviving* mutant is a line that is covered but not
-actually verified by any assertion — exactly the coverage-filling failure mode.
+Coverage measures reach; a surviving mutant is a line that runs but is not
+checked by any assertion. ``mutmut`` mutates the modules listed under
+``[tool.mutmut]`` in pyproject.toml and re-runs the suite.
 
-This script runs (or reads) ``mutmut`` results, counts survivors, and compares
-them to a documented baseline, the same way ``check_ai_readiness.py`` guards
-the mypy error count:
+Three gates, in increasing order of how much they need a baseline:
 
-* survivors **above** the baseline  -> ERROR (a test regressed / weakened);
-* survivors **below** the baseline  -> note to lower the baseline deliberately;
-* baseline **unset**                -> report-only (used to establish the first
-  number on a scheduled run, since a full mutmut pass is too slow for every PR).
+``--diff-scoped``
+    **Absolute, needs no baseline.** Any survivor in a function this branch
+    touched fails. This is the gate that makes mutation testing useful on a
+    PR: a global count can stay flat while a newly-weakened function quietly
+    accumulates survivors and an unrelated module's improvement pays for it.
 
-Because a full mutation run is minutes-to-hours, this is wired as a scheduled /
-on-demand lane (``.github/workflows/mutation.yml``), not a per-PR gate.
+``--baseline-file`` (per-module)
+    Survivors are attributed to their source module, and *each module* is
+    compared to its own recorded number. A module going 3 -> 5 fails even if
+    the repository total went down.
+
+``--baseline`` / :data:`SURVIVOR_BASELINE` (global total)
+    The original whole-repository drift check, kept for continuity.
+
+Regardless of gate, an *unresolved* run (timeout / suspicious / no-tests /
+segfault / interrupted) is a failed measurement, never a clean zero.
 
 Usage::
 
-    # Run mutmut then check (CI, scheduled):
-    python scripts/check_mutation_score.py --run --baseline 0
+    # CI (scheduled): full run, write/refresh the per-module baseline
+    python scripts/check_mutation_score.py --run --write-baseline
 
-    # Check an existing run's output:
-    mutmut results | python scripts/check_mutation_score.py --results-file -
+    # CI (PR touching the detector core): only gate what this branch changed
+    python scripts/check_mutation_score.py --run --diff-scoped --base-ref origin/main
 
-The survivor-count *parser* is pure and unit-tested
-(``tests/test_mutation_score_gate.py``) so the gate logic stays correct even on
-machines without mutmut installed.
+    # Check an existing run's output without re-running mutmut
+    python scripts/check_mutation_score.py --results-file mutmut-results.txt
+
+Why the parsing is careful (a real defect this gate had): ``mutmut run``
+re-renders its progress summary continuously, starting at ``🙁 0``, and those
+renders survive into piped CI output. Reading the *first* ``🙁 <n>`` — which a
+plain ``re.search`` over run-then-results text does — reported **0 survivors
+for a run that genuinely had 4**, reproduced against mutmut 3.7.0. Had
+``SURVIVOR_BASELINE`` been set to ``0`` as intended, the gate would have passed
+green forever. Survivor counting now comes from the per-mutant ``mutmut
+results`` listing, with ``mutants/mutmut-cicd-stats.json`` as the completeness
+witness; see ``scripts/mutation_results.py``.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
+import json
 import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
-# Documented baseline. ``None`` means "not yet established" — the gate reports
-# the survivor count but does not fail, so the first scheduled run can record a
-# number here. Once set, raise it only deliberately (with justification), the
-# same discipline as MYPY_ERROR_BASELINE.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mutation_results import (  # noqa: E402
+    MODULE_SCOPE,
+    MutantRecord,
+    count_unresolved,
+    functions_covering_lines,
+    load_cicd_stats,
+    parse_mutant_records,
+    parse_survivors,
+    summary_run_is_complete,
+    survivors_by_module,
+)
+
+__all__ = [
+    "SURVIVOR_BASELINE",
+    "count_unresolved",
+    "load_baseline",
+    "main",
+    "parse_survivors",
+    "render_baseline",
+]
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+#: Global-total baseline, kept for continuity with the original gate. ``None``
+#: means "not established" — report-only. The per-module baseline file
+#: (``--baseline-file``) is the preferred gate; see the module docstring.
 SURVIVOR_BASELINE: int | None = None
 
-# mutmut summary lines use emoji status markers (the legend is the same in
-# 2.x/3.x): 🎉 killed, 🙁 survived, ⏰ timeout, 🤔 suspicious, 🫥 no-tests
-# (no covering test), 🔇 skipped (intentionally excluded). We also accept
-# plain-text forms so the parser is resilient to version and locale differences.
-#
-# The gate only ever acts on an *explicit* parsed count — it never infers a
-# result from an exit code or from progress text. That is deliberate: mutmut's
-# run can exit 0 while still having unresolved (timeout/suspicious/no-tests)
-# mutants, and a non-zero exit can mean either survivors or an abort, so neither
-# the exit code nor a "309/464" progress token is trustworthy evidence of a
-# clean zero-survivor measurement.
-_EMOJI_SURVIVED = re.compile(r"🙁\s*(\d+)")
-_WORD_SURVIVED_COUNT = re.compile(r"(\d+)\s+survived\b", re.IGNORECASE)
-_LINE_SURVIVED = re.compile(r":\s*survived\b", re.IGNORECASE)
+#: Default per-module baseline, committed alongside the code.
+DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 
-# Non-killed, non-survived statuses that mean the measurement is *incomplete*:
-# the mutant was neither killed nor confirmed surviving. Accepting these as
-# "zero survivors" would let an under-resolved run pass a zero baseline.
-# Note: 🫥 is "no tests" (an uncovered mutant — a real gap, counted here); 🔇 is
-# "skipped" (intentionally excluded — NOT counted as unresolved).
-_EMOJI_TIMEOUT = re.compile(r"⏰\s*(\d+)")
-_EMOJI_SUSPICIOUS = re.compile(r"🤔\s*(\d+)")
-_EMOJI_NO_TESTS = re.compile(r"🫥\s*(\d+)")
+#: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
-def parse_survivors(text: str) -> int | None:
-    """Extract the number of surviving mutants from ``mutmut`` output.
+def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
+    """Run a mutmut subcommand, returning ``(output, returncode)``.
 
-    Returns ``None`` when the text carries no recognizable survivor signal
-    (e.g. mutmut errored or produced an unexpected format), so callers can tell
-    "zero survivors" apart from "could not measure". A clean run still prints an
-    explicit ``🙁 0`` in its summary, so zero is detected as zero — not inferred.
+    The return code matters for ``mutmut run`` specifically, and only for
+    telling "this run aborted" from "this run completed": verified against
+    mutmut 3.7.0, a completed run exits **0 even when mutants survived**, and a
+    configuration/collection abort exits nonzero. So a nonzero exit here is
+    never "there are survivors" — it is "no measurement happened".
+
+    That distinction is load-bearing once ``mutants/`` is a restored CI cache
+    (see mutation.yml): a run that aborts leaves the *previous* commit's result
+    database in place, which would otherwise satisfy the completeness witness
+    and let the gate pass on stale results (Codex review).
     """
-    if not text or not text.strip():
-        return None
-    m = _EMOJI_SURVIVED.search(text)
-    if m:
-        return int(m.group(1))
-    m = _WORD_SURVIVED_COUNT.search(text)
-    if m:
-        return int(m.group(1))
-    # Fall back to counting per-mutant "<id>: survived" lines.
-    line_hits = _LINE_SURVIVED.findall(text)
-    if line_hits:
-        return len(line_hits)
-    return None
-
-
-def count_unresolved(text: str) -> int:
-    """Number of mutants that are neither killed nor survived (timeout /
-    suspicious / no-tests). A run with these did not fully resolve, so it must
-    not be accepted as a clean zero-survivor measurement."""
-    total = 0
-    for pat in (_EMOJI_TIMEOUT, _EMOJI_SUSPICIOUS, _EMOJI_NO_TESTS):
-        m = pat.search(text)
-        if m:
-            total += int(m.group(1))
-    return total
-
-
-def _run(cmd: list[str]) -> str:
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
         cmd, capture_output=True, text=True, timeout=7200
     )
-    return proc.stdout + proc.stderr
+    return proc.stdout + proc.stderr, proc.returncode
 
 
-def _gather_results(args: argparse.Namespace) -> str | None:
-    """Return mutmut's output text, or ``None`` if none could be obtained.
+# ---------------------------------------------------------------------------
+# Baseline file
+# ---------------------------------------------------------------------------
 
-    Under ``--run`` we combine ``mutmut run``'s summary (which carries the
-    🙁/⏰/🤔 counts, including an explicit ``🙁 0`` on a clean run) with
-    ``mutmut results``. The run's exit code is intentionally not used as a
-    success signal — see the parsing-comment above.
+
+def render_baseline(records: list[MutantRecord]) -> dict[str, object]:
+    """Build the committed baseline document from a measurement.
+
+    Surviving mutant *keys* are recorded for diagnostics only and are
+    deliberately **not** gated on. mutmut numbers mutants per function
+    (``…__mutmut_3``), so editing a function renumbers its keys — gating on key
+    identity would fire on every ordinary refactor while proving nothing. The
+    per-module *count* is the stable signal; the keys are there so a reviewer
+    can see which mutants were accepted.
+    """
+    by_module = survivors_by_module(records)
+    return {
+        "_comment": (
+            "Per-module surviving-mutant baseline. Regenerate with "
+            "`python scripts/check_mutation_score.py --run --write-baseline`. "
+            "'keys' is diagnostic only — the gate compares counts, because "
+            "mutmut renumbers a function's mutants whenever it is edited."
+        ),
+        "total_survivors": sum(len(v) for v in by_module.values()),
+        "modules": {
+            module: {"survivors": len(keys), "keys": keys}
+            for module, keys in by_module.items()
+        },
+    }
+
+
+def load_baseline(path: Path) -> dict[str, int] | None:
+    """Read ``{module_path: survivor_count}``, or ``None`` if absent/invalid."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    modules = doc.get("modules") if isinstance(doc, dict) else None
+    if not isinstance(modules, dict):
+        return None
+    out: dict[str, int] = {}
+    for module, entry in modules.items():
+        if isinstance(entry, dict) and isinstance(entry.get("survivors"), int):
+            out[module] = entry["survivors"]
+        elif isinstance(entry, int):
+            out[module] = entry
+    return out
+
+
+def check_per_module(
+    records: list[MutantRecord], baseline: dict[str, int]
+) -> list[str]:
+    """Modules whose survivor count rose above their own recorded number."""
+    current = {m: len(k) for m, k in survivors_by_module(records).items()}
+    failures = []
+    for module in sorted(set(current) | set(baseline)):
+        now = current.get(module, 0)
+        was = baseline.get(module, 0)
+        if now > was:
+            failures.append(f"  {module}: {was} -> {now} (+{now - was})")
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Diff-scoped gate
+# ---------------------------------------------------------------------------
+
+
+def parse_changed_lines(diff_text: str) -> dict[str, set[int]]:
+    """Map ``path -> changed line numbers`` from ``git diff --unified=0``.
+
+    New-side numbers only. Removed lines have no new-side number at all and
+    are answered separately by `parse_removed_lines`, against the base.
+    """
+    changed: dict[str, set[int]] = {}
+    for _old_path, new_path, _old, new in _hunks(diff_text):
+        start, count = new
+        if count and new_path is not None:
+            changed.setdefault(new_path, set()).update(range(start, start + count))
+    return changed
+
+
+def parse_removed_lines(diff_text: str) -> dict[str, tuple[str, set[int]]]:
+    """Map ``key path -> (base-side path, base-side line numbers removed)``.
+
+    Deleting a guard is one of the most direct ways to weaken a detector, so
+    the removed lines have to reach the gate somehow — but they exist only in
+    the base, and every attempt to express them as new-side numbers is a
+    guess. The previous one (attribute the new-side anchor and its successor)
+    was wrong in both directions: for a deleted *function* the successor is
+    the first line of the next, surviving function, so the gate failed on
+    pre-existing survivors in code the branch never touched (Codex review).
+
+    Base-side numbers are not a guess — they are what the hunk header says —
+    and resolving them against the base file's own AST answers exactly "which
+    function did this line live in".
+
+    Two paths, because a hunk can name two. The *base* path is the one to
+    read the removed lines out of (`--- a/...`, which git still emits for a
+    rename or a whole-file deletion, where the new side is a different name
+    or `/dev/null`). The *key* path is the one to attribute the result to —
+    the new name, because that is what a mutant key carries. Conflating them
+    meant a renamed module's removals were looked up under a name the base
+    does not have, answered `None`, and silently dropped (Codex, CodeRabbit).
+    """
+    removed: dict[str, tuple[str, set[int]]] = {}
+    for old_path, new_path, old, _new in _hunks(diff_text):
+        start, count = old
+        if not count or old_path is None:
+            continue
+        # A deleted file has no new name; key it by its old one. Nothing in
+        # the new tree carries mutants for it, so this normally matches
+        # nothing — but a `--results-file` saved from an earlier revision can
+        # still name it, and a whole deleted module having no entry at all is
+        # the one shape nothing downstream can notice (CodeRabbit).
+        key = new_path or old_path
+        removed.setdefault(key, (old_path, set()))[1].update(
+            range(start, start + count)
+        )
+    return removed
+
+
+def pure_deletion_paths(diff_text: str) -> set[str]:
+    """Key paths with at least one hunk that removes lines and adds none.
+
+    The narrower question behind "can an unresolvable base hide a failure".
+    A *modification* removes and adds in the same hunk, so its new side is
+    already attributed and the removed side adds nothing the gate needs. Only
+    a hunk with no new side at all has its evidence exclusively in the base.
+    """
+    return {
+        (new_path or old_path)
+        for old_path, new_path, old, new in _hunks(diff_text)
+        if old[1] and not new[1] and (new_path or old_path)
+    }
+
+
+def unresolved_removals(
+    removed: dict[str, tuple[str, set[int]]],
+    read_base: Callable[[str], str | None] | None,
+) -> set[str]:
+    """Key paths whose removed lines could not be read out of the base.
+
+    Per path, not "is there a reader at all". A reader can exist and still
+    answer `None` for one path — a file absent from the merge base, an
+    unreadable blob — and keying the risk check on the reader alone let
+    exactly that case through as a silent skip (Codex, CodeRabbit).
+    """
+    return {
+        key
+        for key, (base_path, _lines) in removed.items()
+        if key.endswith(".py") and (read_base is None or read_base(base_path) is None)
+    }
+
+
+def _hunks(
+    diff_text: str,
+) -> Iterator[tuple[str | None, str | None, tuple[int, int], tuple[int, int]]]:
+    """`(old_path, new_path, (old_start, old_count), (new_start, new_count))`.
+
+    Either path is `None` when its side is `/dev/null` — an added file has no
+    old side, a deleted file no new side. Both are tracked because the two
+    sides answer different questions: the new path is what a mutant key
+    carries, the old path is where the removed lines can actually be read.
+
+    A deleted file's `+++ /dev/null` used to leave the *previous* file's name
+    in scope, so its `@@ -1,5 +0,0 @@` hunk was recorded against a file the
+    branch never touched (CodeRabbit review); resetting on `diff --git` and
+    tracking both sides explicitly removes that whole class.
+    """
+    old_path: str | None = None
+    new_path: str | None = None
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            old_path = new_path = None
+            continue
+        if line.startswith("--- "):
+            target = line[4:].strip()
+            old_path = target[2:] if target.startswith("a/") else None
+            continue
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            new_path = target[2:] if target.startswith("b/") else None
+            continue
+        if old_path is None and new_path is None:
+            continue
+        m = _HUNK.match(line)
+        if m:
+            yield (
+                old_path,
+                new_path,
+                (int(m.group(1)), int(m.group(2)) if m.group(2) is not None else 1),
+                (int(m.group(3)), int(m.group(4)) if m.group(4) is not None else 1),
+            )
+
+
+def changed_functions(
+    changed: dict[str, set[int]],
+    repo_root: Path,
+    removed: dict[str, tuple[str, set[int]]] | None = None,
+    read_base: Callable[[str], str | None] | None = None,
+) -> dict[str, set[str]]:
+    """Map ``path -> qualnames of functions this diff touched``.
+
+    Two resolutions, against two different revisions: added and modified lines
+    against the working tree, removed lines against *the base*, since that is
+    the only revision in which they exist. Which path each is read from and
+    which it is filed under can differ — see `parse_removed_lines`. Without
+    *read_base*, or for a path the base cannot answer for, the removed half
+    is simply not resolved — an honest gap the caller reports through
+    `unresolved_removals`, rather than a new-side guess naming the wrong
+    function.
+    """
+    out: dict[str, set[str]] = {}
+    for path, lines in changed.items():
+        if not path.endswith(".py"):
+            continue
+        try:
+            source = (repo_root / path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        funcs = functions_covering_lines(source, lines)
+        if funcs:
+            out[path] = funcs
+    if removed and read_base is not None:
+        for key_path, (base_path, lines) in removed.items():
+            if not key_path.endswith(".py"):
+                continue
+            base_source = read_base(base_path)
+            if base_source is None:
+                continue
+            funcs = functions_covering_lines(base_source, lines)
+            if funcs:
+                # Filed under the *new* name: that is what a mutant key
+                # carries, even though the lines were read from the old one.
+                out.setdefault(key_path, set()).update(funcs)
+    return out
+
+
+def _base_reader(base_ref: str) -> Callable[[str], str | None] | None:
+    """A reader for file contents *as of the merge base*, or None.
+
+    The merge base, not `base_ref` itself: `git diff base...HEAD` is defined
+    against it, so its line numbers are the ones the removed-side hunk headers
+    carry. Reading `base_ref`'s own tip would silently resolve them against a
+    different file.
+    """
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["git", "merge-base", base_ref, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        return None
+    base_sha = proc.stdout.strip()
+
+    @functools.cache
+    def _read(path: str) -> str | None:
+        shown = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            ["git", "show", f"{base_sha}:{path}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        # A path absent from the base is an added file; its lines are all on
+        # the new side, so there is nothing here to resolve.
+        return shown.stdout if shown.returncode == 0 else None
+
+    return _read
+
+
+def check_diff_scoped(
+    records: list[MutantRecord], touched: dict[str, set[str]]
+) -> list[str]:
+    """Survivors living in a function this branch changed.
+
+    Absolute: there is no baseline to be under. If you edited a function and a
+    mutation of it still passes the suite, the edit is not verified.
+    """
+    failures = []
+    for r in sorted(records, key=lambda r: r.key):
+        if not r.is_survivor:
+            continue
+        module_touched = touched.get(r.module_path, set())
+        if MODULE_SCOPE in module_touched:
+            failures.append(
+                f"  {r.module_path}::{r.function}  [{r.key}]  (module-scope change)"
+            )
+        elif r.function in module_touched:
+            failures.append(f"  {r.module_path}::{r.function}  [{r.key}]")
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Measurement
+# ---------------------------------------------------------------------------
+
+
+def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None]:
+    """Return ``(results_text, cicd_stats)``.
+
+    ``mutmut run``'s own stdout is deliberately **not** folded into the text
+    used for counting — see the module docstring. It is still executed (and its
+    output shown) under ``--run``; only the *measurement* comes from ``mutmut
+    results`` plus the exported stats.
     """
     if args.results_file:
         if args.results_file == "-":
-            return sys.stdin.read()
+            return sys.stdin.read(), load_cicd_stats(Path(args.mutants_dir))
         try:
             with open(args.results_file, encoding="utf-8") as fh:
-                return fh.read()
+                return fh.read(), load_cicd_stats(Path(args.mutants_dir))
         except OSError as e:
             print(f"ERROR: cannot read --results-file: {e}")
-            return None
+            return None, None
 
     if shutil.which("mutmut") is None:
         print("mutation-score: mutmut not installed, skipping")
-        return None
+        return None, None
 
-    combined = ""
     if args.run:
         print("mutation-score: running `mutmut run` (this is slow)…")
-        combined += _run(["mutmut", "run"]) + "\n"
-    combined += _run(["mutmut", "results"])
-    return combined
+        run_out, run_rc = _run_mutmut(["mutmut", "run"])
+        tail = "\n".join(run_out.splitlines()[-5:])
+        print(f"mutation-score: mutmut run tail:\n{tail}")
+        if run_rc != 0:
+            # Fail here rather than reading results: with a restored cache the
+            # results on disk may be a previous commit's, and they would look
+            # perfectly complete.
+            print(
+                f"ERROR: `mutmut run` exited {run_rc} — the run aborted, so any "
+                "results on disk are from an earlier run, not this one. Not "
+                "reading them."
+            )
+            return None, None
+        _run_mutmut(["mutmut", "export-cicd-stats"])
+    results_out, results_rc = _run_mutmut(["mutmut", "results"])
+    if results_rc != 0:
+        # Its stderr would otherwise be parsed as "no per-mutant lines", and if
+        # exported stats happen to exist with total > 0 the completeness check
+        # passes and the unparseable output becomes zero survivors — passing
+        # even an explicit zero baseline while the stats report survivors
+        # (Codex review).
+        print(
+            f"ERROR: `mutmut results` exited {results_rc} — cannot read the "
+            "per-mutant statuses, so no survivor count is trustworthy."
+        )
+        return None, None
+    return results_out, load_cicd_stats(Path(args.mutants_dir))
+
+
+def _run_reached_its_end(text: str, stats: dict[str, int] | None) -> bool:
+    """Is there positive evidence the run *finished*, not merely that it ran?
+
+    Two witnesses, both independent of the results text's own length: the
+    exported stats (`total > 0` with a survivor count), and a completed
+    progress render (`N/N`). A per-mutant listing is deliberately not one — it
+    carries no counter, so a truncated capture reads exactly like a whole one.
+    """
+    if (
+        stats is not None
+        and stats.get("total", 0) > 0
+        and isinstance(stats.get("survived"), int)
+    ):
+        return True
+    return summary_run_is_complete(text)
+
+
+def _measurement_is_complete(
+    text: str, stats: dict[str, int] | None
+) -> tuple[bool, str]:
+    """Did we actually measure anything? ``(ok, reason_if_not)``.
+
+    A perfect run prints no per-mutant lines at all, so "empty results" is only
+    trustworthy when the exported stats prove mutants ran (``total > 0``).
+    Without that witness, empty is unmeasurable — never zero.
+
+    The stats witness needs ``survived`` as well as ``total``. The
+    parsed-vs-exported cross-check below is conditional on that key, so a
+    receipt carrying only ``total`` — a corrupt file, or a schema change in a
+    permitted future ``mutmut>=3.7,<4`` — silently skipped the cross-check
+    while still counting as proof the run finished; with an unrecognised
+    results format alongside it, the survivor count then defaulted to zero and
+    passed a zero baseline unvalidated (Codex review).
+    """
+    if (
+        stats is not None
+        and stats.get("total", 0) > 0
+        and isinstance(stats.get("survived"), int)
+    ):
+        return True, ""
+    if parse_mutant_records(text):
+        return True, ""
+    if parse_survivors(text) is not None and summary_run_is_complete(text):
+        return True, ""
+    return False, (
+        "no per-mutant results, no mutants/mutmut-cicd-stats.json carrying "
+        "total > 0 and a survived count, and no completed progress render "
+        "(N/N) — cannot tell 'all mutants killed' from 'mutmut never ran' or "
+        "was interrupted"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run", action="store_true", help="Run `mutmut run` first.")
     parser.add_argument(
-        "--run", action="store_true", help="Run `mutmut run` before reading results."
+        "--results-file", help="Read results from a file ('-' for stdin)."
     )
     parser.add_argument(
-        "--results-file",
-        help="Read mutmut results from a file ('-' for stdin) instead of invoking mutmut.",
+        "--mutants-dir",
+        default="mutants",
+        help="Directory holding mutmut's artifacts (default: mutants).",
     )
     parser.add_argument(
-        "--baseline",
-        type=int,
-        default=None,
-        help="Override the documented survivor baseline (SURVIVOR_BASELINE).",
+        "--baseline", type=int, default=None, help="Global-total baseline override."
     )
+    parser.add_argument(
+        "--baseline-file",
+        default=str(DEFAULT_BASELINE_FILE),
+        help="Per-module baseline JSON (default: mutation-baseline.json).",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="Write the measurement to --baseline-file instead of gating on it.",
+    )
+    parser.add_argument(
+        "--diff-scoped",
+        action="store_true",
+        help="Fail on any survivor in a function changed vs --base-ref.",
+    )
+    parser.add_argument(
+        "--base-ref", default="origin/main", help="Base ref for --diff-scoped."
+    )
+    parser.add_argument("--diff-file", help="Read the diff from a file instead of git.")
+    parser.add_argument(
+        "--require-baseline",
+        action="store_true",
+        help=(
+            "Fail if no baseline is available. The scheduled drift lane uses "
+            "this so it cannot silently degrade to report-only."
+        ),
+    )
+    parser.add_argument("--json", help="Write a machine-readable receipt here.")
     args = parser.parse_args(argv)
 
-    text = _gather_results(args)
+    text, stats = _gather(args)
     if text is None:
-        # No output at all (mutmut missing / file unreadable). When --run was
-        # requested the job's whole purpose is to produce a measurement, so this
-        # is a failure, not a silent no-op. Otherwise (report-only / file modes)
-        # it is a graceful skip, matching the mypy-baseline behaviour.
         if args.run:
             print(
-                "ERROR: --run requested but mutmut produced no output "
-                "(not installed / could not start). Failing so the mutation "
-                "gate is not a silent no-op."
+                "ERROR: --run requested but mutmut produced no output (not "
+                "installed / could not start). Failing so the mutation gate is "
+                "not a silent no-op."
+            )
+            return 1
+        if args.results_file:
+            # An explicitly named input that could not be read is a failed
+            # invocation, not an optional one. Sharing the "no tool, nothing
+            # to do" exit meant a scripted offline check reported success
+            # having processed no results at all (Codex review) — the same
+            # can't-fail shape as the --run branch above, reached from the
+            # other direction.
+            print(
+                f"ERROR: --results-file {args.results_file} could not be read, "
+                "so there are no mutation results to gate on."
             )
             return 1
         return 0
 
-    survivors = parse_survivors(text)
-    if survivors is None:
-        print("mutation-score: could not parse survivor count from mutmut output")
-        # No explicit count means we did not get a usable measurement — an
-        # aborted/interrupted run, never an inferred zero. Fail under --run;
-        # only skip when we were merely reading a file / reporting.
-        return 1 if args.run else 0
+    complete, why = _measurement_is_complete(text, stats)
+    if not complete:
+        print(f"mutation-score: unmeasurable — {why}")
+        # An explicitly named input counts the same as --run: the caller
+        # supplied results and asked for a verdict on them, so "cannot tell"
+        # is a failure, not a skip. Only a bare invocation — no run, no input
+        # — has genuinely nothing to measure (Codex review).
+        return 1 if (args.run or args.results_file) else 0
 
+    records = parse_mutant_records(text)
+    # Per-mutant listings are the strong source; a summary-only text (an older
+    # capture, or a clean run whose only signal is the final render) still has
+    # to yield a count, so fall back to the summary readers -- which take the
+    # LAST render, never the first. `by_module` is necessarily empty in that
+    # case: a summary carries no attribution, and inventing one would be worse
+    # than reporting none.
+    if records:
+        survivors = sum(1 for r in records if r.is_survivor)
+    else:
+        survivors = parse_survivors(text) or 0
     unresolved = count_unresolved(text)
-    baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
-    msg = f"mutation-score: {survivors} surviving mutant(s)"
-    if unresolved:
-        msg += f", {unresolved} unresolved (timeout/suspicious/no-tests)"
-    print(msg)
+    by_module = survivors_by_module(records)
 
-    # Unresolved mutants mean the run did not fully resolve, so even zero
-    # survivors is not a clean pass once we are gating against a baseline.
-    if baseline is not None and unresolved > 0:
+    # Two independent sources must agree. `mutmut results`' per-mutant listing
+    # and `mutmut export-cicd-stats`' counters are produced by the same run, so
+    # a disagreement means this parser no longer understands the output — which
+    # a permitted `mutmut>=3.7,<4` update can cause. Without this check the
+    # unparsed output degrades to zero survivors while the stats report real
+    # ones, and `_measurement_is_complete` accepts the stats as proof the run
+    # happened, so every gate passes (Codex review).
+    # A summary-only text ("🙁 3") yields a survivor *count* with no
+    # attribution: `by_module` is empty, so the per-module gate compares
+    # nothing and reports success, and `--write-baseline` would record
+    # `total_survivors: 0` — silently discarding every survivor and then
+    # gating future runs against that fiction (Codex review). Counting is fine
+    # for the global-total check; anything that needs to know *where* the
+    # survivors are must refuse this input.
+    if survivors and not records:
+        needs_attribution = (
+            args.write_baseline
+            or args.diff_scoped
+            or (load_baseline(Path(args.baseline_file)) is not None)
+        )
+        if needs_attribution:
+            print(
+                f"ERROR: {survivors} surviving mutant(s) reported, but the "
+                "results carry no per-mutant listing to attribute them to a "
+                "module or function. Per-module gating, --diff-scoped and "
+                "--write-baseline all need that attribution; re-run with "
+                "`mutmut results` output rather than a summary."
+            )
+            return 1
+
+    if stats is not None and "survived" in stats and stats["survived"] != survivors:
+        print(
+            f"ERROR: parsed {survivors} surviving mutant(s) but "
+            f"mutants/mutmut-cicd-stats.json reports {stats['survived']}. The "
+            "two disagree, so this build's parser no longer matches mutmut's "
+            "output — refusing to gate on either number. Check whether mutmut "
+            "changed its `results` format."
+        )
+        return 1
+
+    msg = f"mutation-score: {survivors} surviving mutant(s)"
+    if stats:
+        msg += f" of {stats.get('total', '?')} total"
+    if unresolved:
+        msg += f", {unresolved} unresolved (timeout/suspicious/no-tests/segfault)"
+    print(msg)
+    for module, keys in by_module.items():
+        print(f"  {module}: {len(keys)}")
+
+    exit_code = 0
+    baseline_modules = load_baseline(Path(args.baseline_file))
+    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+    #: Is there a *drift* reference — the only thing that can answer "did the
+    #: survivor set grow", for any function, changed or not?
+    baseline_available = baseline_modules is not None or total_baseline is not None
+    #: Did any check in this run actually have something to compare against?
+    #: A run that gated nothing must never be reported as a pass. Derived
+    #: rather than defaulted to True: a plain report-only invocation (no
+    #: --diff-scoped, no baseline of either kind) passes through none of the
+    #: branches below, so a `True` default made its receipt claim a gate that
+    #: never ran — exactly the "green for a run that checked nothing" shape
+    #: this flag exists to expose (Codex review). A baseline is a real gate on
+    #: its own; --diff-scoped only becomes one once it has a changed function
+    #: to scope to, which is decided below.
+    gated = baseline_available
+    # "Report-only" means there is genuinely nothing to be measured against.
+    # Once any gate is active, an unresolved run is a failed measurement.
+    gating_active = args.diff_scoped or baseline_available
+
+    if args.require_baseline and not baseline_available:
+        # Deliberately keyed on the baseline, not on `gating_active`, even
+        # though --diff-scoped is a real gate. It answers a different
+        # question: only whether the functions *this branch changed* have
+        # surviving mutants. A diff that changes one detector function and
+        # weakens a test covering another leaves the second one's new
+        # survivors entirely outside its scope, and counting --diff-scoped as
+        # satisfying --require-baseline let exactly that exit 0 (Codex
+        # review). Without this, a "baseline drift" lane with no baseline
+        # returns 0 no matter how many mutants survive — the can't-fail shape
+        # this whole gate exists to remove.
+        #
+        # This is the *only* --require-baseline check: once a baseline of
+        # either kind exists, its own gate below always runs, so `gated` is
+        # already True and a second, later "nothing was gated" check could
+        # never fire. A trailing copy of it existed and was unreachable.
+        print(
+            "ERROR: --require-baseline was passed but no baseline is available "
+            f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
+            "unset), so nothing in this run can answer whether the survivor set "
+            "grew. --diff-scoped does not substitute: it only looks at the "
+            "functions this branch changed. Establish the baseline once with "
+            "the workflow_dispatch lane (write_baseline: true), then re-enable "
+            "this lane."
+        )
+        return 1
+
+    if unresolved and (gating_active or args.write_baseline):
         print(
             f"ERROR: {unresolved} mutant(s) did not resolve (timeout/suspicious/"
-            "no-tests) — the measurement is incomplete; fix or silence them so "
-            "the survivor count is trustworthy."
+            "no-tests/segfault) — the measurement is incomplete; fix or silence "
+            "them so the survivor count is trustworthy."
+        )
+        exit_code = 1
+        if args.write_baseline:
+            # Never bake an under-resolved run into the committed baseline: the
+            # recorded number would understate the real survivor set and every
+            # later run would gate against a fiction.
+            print(
+                "ERROR: refusing to write a baseline from an unresolved run "
+                f"({args.baseline_file} left untouched)."
+            )
+            return 1
+
+    if args.write_baseline and not _run_reached_its_end(text, stats):
+        # `mutmut results` prints a plain listing with no progress counter, so
+        # a capture truncated after a few lines is indistinguishable from a
+        # complete one by its own content. That is tolerable for gating (a
+        # short capture can only under-report, and the run that produced it is
+        # the caller's own), but not for *recording* — a partial survivor set
+        # written as the baseline becomes the thing every later run is scored
+        # against, and the loss is silent and permanent (Codex review).
+        print(
+            "ERROR: refusing to write a baseline from a capture that cannot "
+            "prove it is complete. Record it from a real run (which exports "
+            "mutants/mutmut-cicd-stats.json), not from a saved `mutmut "
+            "results` listing."
         )
         return 1
 
-    if baseline is None:
-        print(
-            "mutation-score: baseline not yet established — report-only. "
-            "Set SURVIVOR_BASELINE in scripts/check_mutation_score.py to this "
-            "number to start gating on drift."
+    if args.write_baseline:
+        doc = render_baseline(records)
+        Path(args.baseline_file).write_text(
+            json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8"
         )
-        return 0
+        print(f"mutation-score: wrote baseline to {args.baseline_file}")
+        return exit_code
 
-    if survivors > baseline:
-        print(
-            f"ERROR: surviving mutants {survivors} exceed baseline {baseline}. "
-            "A test was weakened or new under-verified code landed — strengthen "
-            "the assertions that should have killed the mutant(s)."
+    if args.diff_scoped:
+        if args.diff_file:
+            diff_text = Path(args.diff_file).read_text(encoding="utf-8")
+        else:
+            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if proc.returncode != 0:
+                # Without this the fatal stderr is parsed as a diff, yielding
+                # zero changed functions — so the diff-scoped gate reports OK
+                # with survivors present. A typo in --base-ref silently
+                # disables the gate (reproduced with `--base-ref
+                # does-not-exist`, Codex review).
+                print(
+                    f"ERROR: `git diff {args.base_ref}...HEAD` failed "
+                    f"(exit {proc.returncode}): {proc.stderr.strip()}\n"
+                    "Cannot determine which functions this branch changed, so "
+                    "the diff-scoped gate would pass vacuously."
+                )
+                return 1
+            diff_text = proc.stdout
+        removed = parse_removed_lines(diff_text)
+        read_base = _base_reader(args.base_ref)
+        touched = changed_functions(
+            parse_changed_lines(diff_text), REPO_ROOT, removed, read_base
         )
-        return 1
-    if survivors < baseline:
+        # Not `unresolved`: that name already holds the count of mutants
+        # that did not resolve, and it is written to the receipt further
+        # down. Shadowing it put a set of paths in that field (caught by the
+        # receipt's own test).
+        unresolved_paths = unresolved_removals(removed, read_base)
+        if unresolved_paths:
+            # Not a warning about a corner case: a branch whose only edit is a
+            # deleted guard has *all* of its evidence in the removed half, so
+            # saying nothing here would let a gate that resolved none of it
+            # print the same "OK" line as one that resolved all of it.
+            #
+            # Whether that is fatal depends on what the unresolved removals
+            # could have hidden. A removal in a module with no surviving
+            # mutant cannot hide a diff-scoped failure — there is no survivor
+            # to attribute — so warning is the honest answer. A removal in a
+            # module that *does* carry a survivor is a failed measurement:
+            # exiting 0 there is a pass the run never earned, whatever the
+            # warning says (Codex review).
+            at_risk = sorted(
+                {r.module_path for r in records if r.is_survivor}
+                & unresolved_paths
+                & pure_deletion_paths(diff_text)
+            )
+            print(
+                "mutation-score: WARNING — could not read "
+                + ", ".join(sorted(unresolved_paths))
+                + f" out of the base revision ({args.base_ref}), so lines "
+                "this branch *removed* from them were not attributed to any "
+                "function. The diff-scoped result below covers added and "
+                "modified lines only for those paths."
+            )
+            if at_risk:
+                print(
+                    "ERROR: those unattributed removals are in module(s) that "
+                    "carry surviving mutants, so a survivor in a function this "
+                    "branch gutted would go unreported: "
+                    + ", ".join(at_risk)
+                    + ". Fetch the base revision (the PR lane checks out with "
+                    "fetch-depth: 0) and re-run."
+                )
+                return 1
+        n_funcs = sum(len(v) for v in touched.values())
+        print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
+        if n_funcs:
+            # --diff-scoped is a real gate exactly when it has a changed
+            # function to scope to, whether or not that function has
+            # survivors — so this is set before the pass/fail split, not
+            # inside the "no survivors" arm.
+            gated = True
+        failures = check_diff_scoped(records, touched)
+        if failures:
+            print(
+                "ERROR: surviving mutants in functions this branch changed — a "
+                "mutation of code you just edited still passes the suite, so "
+                "the edit is executed but not verified:"
+            )
+            print("\n".join(failures))
+            exit_code = 1
+        elif n_funcs == 0 and not baseline_available:
+            # The test-only diff. This gate is attribution-based, so a branch
+            # that weakens assertions without touching a production function
+            # gives it nothing to scope to — and "OK" for a run that examined
+            # zero functions reads as a pass it never made (Codex review). The
+            # survivors such a branch creates are only visible as *drift*,
+            # which needs a baseline.
+            print(
+                "mutation-score: diff-scoped examined 0 changed functions and "
+                f"there is no baseline ({args.baseline_file} is absent and "
+                "SURVIVOR_BASELINE is unset), so this run GATED NOTHING. A "
+                "test-only change can only be checked as drift; record the "
+                "baseline once with the workflow_dispatch lane "
+                "(write_baseline: true)."
+            )
+        else:
+            print("mutation-score: diff-scoped OK (no survivors in changed functions)")
+
+    if baseline_modules is not None:
+        failures = check_per_module(records, baseline_modules)
+        if failures:
+            print(
+                "ERROR: per-module survivor count rose above baseline — a test "
+                "was weakened or new under-verified code landed:"
+            )
+            print("\n".join(failures))
+            exit_code = 1
+        else:
+            print("mutation-score: per-module baseline OK")
+    else:
         print(
-            f"mutation-score: {survivors} < baseline {baseline} — please lower "
-            "SURVIVOR_BASELINE to lock in the improvement."
+            f"mutation-score: no per-module baseline at {args.baseline_file} — "
+            "run with --write-baseline to establish it."
+        )
+
+    if total_baseline is None:
+        print(
+            "mutation-score: global-total baseline not set — report-only. The "
+            "per-module baseline file is the preferred gate."
+        )
+    elif survivors > total_baseline:
+        print(f"ERROR: surviving mutants {survivors} exceed baseline {total_baseline}.")
+        exit_code = 1
+    elif survivors < total_baseline:
+        print(
+            f"mutation-score: {survivors} < baseline {total_baseline} — please "
+            "lower SURVIVOR_BASELINE to lock in the improvement."
         )
     else:
-        print(f"mutation-score: OK ({survivors} == baseline {baseline})")
-    return 0
+        print(f"mutation-score: OK ({survivors} == baseline {total_baseline})")
+
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps(
+                {
+                    "survivors": survivors,
+                    "unresolved": unresolved,
+                    "stats": stats,
+                    "by_module": by_module,
+                    "gated": gated,
+                    "exit_code": exit_code,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return exit_code
 
 
 if __name__ == "__main__":

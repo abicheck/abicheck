@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 from typing import Protocol, runtime_checkable
 
-from ...dumper_clang import _is_cl_style_driver_name
+from ...header_utils import is_msvc_driver_stem
 from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 from ..source_extractors._argv import (
     _XCLANG_WRAPPED_ABI_FLAG_MARKER,
@@ -62,6 +62,43 @@ _LANG_BY_EXT: dict[str, str] = {
 #: ``ABI_RELEVANT_BUILD_FLAG_CHANGED`` (unless the flag is a runtime-mode or
 #: toolchain flag with a dedicated finding). Per ADR-028 D3 these are risk/
 #: source-level signals — the artifact diff proves any concrete break.
+#:
+#: **Forced pre-includes (``-include``/``-imacros``/``/FI``) are deliberately
+#: NOT in this tuple, and the fix an earlier draft of this comment proposed --
+#: "a new spaced-value-flag branch in :func:`extract_abi_relevant_flags`" --
+#: was investigated and found to be actively wrong (PR D / plan PR 3B).** The
+#: L2 gap it described is real: ``header_compile_context``'s derived L2
+#: ``CompileContext`` never saw a matched compile unit's own macro-controlling
+#: forced-include header, so the P0.3 L3->L2 fold could report a real match
+#: (``matched_unit_count > 0``, ``parsed_with_build_context`` stamped) while
+#: still parsing without it. But routing the fix through *this* list would
+#: have broken L4 replay, which already handles forced includes correctly and
+#: by a different route: ``source_extractors._argv.replay_extra_flags``
+#: carries ``abi_relevant_flags`` through
+#: (``_carry_abi_relevant_flags``) **and**, separately and unconditionally,
+#: re-scans the unit's raw ``argv`` for forced-include/include-search tokens
+#: (``_scan_argv_for_extra_flags``, which is not passed the ``seen`` set the
+#: first pass builds). Capturing a forced include here would therefore have
+#: made every L4 replay command carry ``-include config.h`` **twice** -- a
+#: silent double-inclusion that a header without include guards turns into a
+#: hard redefinition error.
+#:
+#: The gap is closed at the layer that actually had it instead:
+#: ``header_utils.forced_include_operands`` is the one shared recognizer (the
+#: same option vocabulary and the same separate/joined spellings ``_argv``'s
+#: own replay matchers use, since those matchers live there now too), and
+#: ``header_compile_context._context_flags`` renders its result into the L2
+#: command directly from ``cu.argv`` -- never through
+#: ``abi_relevant_flags``, so L4 replay is untouched.
+#:
+#: Residual, deliberately-unclosed half: because a forced include is not in
+#: this tuple, it is still not projected into a ``BuildOption`` by
+#: :func:`derive_build_options`, so swapping one build's forced-include header
+#: for another does not raise ``ABI_RELEVANT_BUILD_FLAG_CHANGED`` (ADR-029
+#: D9's build-evidence drift signal). Closing *that* needs a structured
+#: ``CompileUnit`` field every adapter populates plus a
+#: ``BUILD_EVIDENCE_VERSION`` bump and ``build_diff`` wiring -- a schema slice
+#: of its own, not a follow-on to the L2 rendering fix. See ``AGENTS.md``.
 ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-std=",
     "/std:",
@@ -123,7 +160,7 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     # different parse (implicit SYCL builtins/attributes, kernel-lambda
     # codegen), so its presence/absence is exactly the kind of parse-affecting
     # signal this list already tracks for -std=/-fvisibility/etc. Without
-    # this, a resolved --gcc-path override that now actually invokes icpx/
+    # this, a resolved --compiler override that now actually invokes icpx/
     # dpcpp for L4 replay (previously always a bare "clang") would replay a
     # SYCL TU as plain C++, silently missing built-in SYCL state (Codex
     # review). Only the flag's *presence*, carried via replay_extra_flags(),
@@ -520,7 +557,6 @@ def source_from_argv(argv: list[str]) -> str:
 
 #: Driver basenames that mark a command as MSVC-dialect (``/`` introduces an
 #: option, not a path). ``clang-cl`` mimics ``cl`` exactly.
-_MSVC_DRIVERS: frozenset[str] = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
 
 _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
     "/fi",
@@ -547,12 +583,12 @@ def _executable_token_positions(argv: list[str]) -> frozenset[int]:
     driver-name matching to the command's own leading executable/launcher
     position(s), never a later operand (P2 review, fresh evidence): for a
     GNU translation unit whose *source* basename happens to end in ``-cl``
-    (e.g. ``foo-cl.cpp``), ``dumper_clang._is_cl_style_driver_name`` -- a
-    bare, extension-agnostic name-suffix check -- cannot tell that source
-    token apart from a real CL-style driver on name alone. Scanning every
-    argv token (the pre-fix behavior) let such a source file be mistaken
-    for the compiler, wrongly flipping the whole command to MSVC dialect and
-    recording the source path itself as ``gcc_path``.
+    (e.g. ``foo-cl.cpp``), ``header_utils.is_msvc_driver_stem`` -- a
+    bare, name-only check -- cannot tell that source token apart from a real
+    CL-style driver on name alone. Scanning every argv token (the pre-fix
+    behavior) let such a source file be mistaken for the compiler, wrongly
+    flipping the whole command to MSVC dialect and recording the source path
+    itself as ``gcc_path``.
 
     Reuses :func:`~abicheck.buildsource.source_extractors._argv.
     strip_launchers` (and its :data:`~abicheck.buildsource.source_extractors.
@@ -575,6 +611,12 @@ def _executable_token_positions(argv: list[str]) -> frozenset[int]:
     clang-cl", fresh evidence) -- e.g. ``{2}`` for ``env SDKROOT=/sdk
     clang-cl ...`` -- so this function's returned position(s) already reflect
     that too, with no separate handling needed here.
+
+    Driver-name recognition itself is ``header_utils.is_msvc_driver_stem`` --
+    the one vocabulary the L4 replay path (``source_extractors._argv.
+    is_msvc_mode``) uses too, so ``dpcpp-cl`` and a version-suffixed
+    ``clang-cl-20`` are recognized identically on both sides instead of
+    drifting apart (Codex review).
     """
     if not argv:
         return frozenset()
@@ -587,13 +629,13 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
 
     Returns ``(is_msvc, driver_token)``: *is_msvc* is the same True/False
     :func:`_is_msvc_command` has always returned; *driver_token* is the
-    literal argv token whose basename matched :data:`_MSVC_DRIVERS`
-    (``cl``/``cl.exe``/``clang-cl``/``clang-cl.exe``, possibly a full path),
-    or ``None`` when MSVC dialect was detected some other way (a bare ``/c``
-    marker with no such token anywhere in argv, or an explicit
-    ``--driver-mode=cl`` naming no ``cl``/``clang-cl``-basename token) --
-    both of which leave the caller with no more specific token to prefer
-    over ``argv[0]``.
+    literal argv token whose basename matched ``header_utils.
+    is_msvc_driver_stem`` (``cl``/``cl.exe``/``clang-cl``/``clang-cl.exe``/
+    ``dpcpp-cl``/``dpcpp-cl.exe``, any version-suffixed spelling, possibly a
+    full path), or ``None`` when MSVC dialect was detected some other way (a
+    bare ``/c`` marker with no such token anywhere in argv, or an explicit
+    ``--driver-mode=cl`` naming no such basename token) -- both of which leave
+    the caller with no more specific token to prefer over ``argv[0]``.
 
     Split out (P2 review, ``discussion_r3788073756``, fresh evidence) so a
     caller needing the actual driver *token* -- not merely whether the
@@ -604,14 +646,13 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
 
     The driver-token match itself is not exact-name-only (P2 review,
     ``discussion_r3788...`` -- launcher-wrapped-alias follow-up, fresh
-    evidence): besides the four literal :data:`_MSVC_DRIVERS` spellings, any
-    token :func:`~abicheck.dumper_clang._is_cl_style_driver_name` recognizes
-    as CL-style (a versioned ``clang-cl-20``/``clang-cl-20.exe``, or Intel's
-    ``dpcpp-cl``) also marks the command MSVC-dialect and is captured as the
-    driver token. Without this, ``sccache clang-cl-20 /c ...`` or ``sccache
-    dpcpp-cl /c ...`` matched neither the exact-name set nor
-    :func:`_is_cl_style_driver_name`'s own broader recognition, so this scan
-    returned no driver token at all -- :func:`~abicheck.buildsource.
+    evidence, unified with the L4 replay path's own vocabulary via
+    ``header_utils.is_msvc_driver_stem`` -- Codex review): a versioned
+    ``clang-cl-20``/``clang-cl-20.exe``, or Intel's ``dpcpp-cl``, also marks
+    the command MSVC-dialect and is captured as the driver token. Without
+    this, ``sccache clang-cl-20 /c ...`` or ``sccache dpcpp-cl /c ...``
+    matched neither the exact-name set nor the broader recognition, so this
+    scan returned no driver token at all -- :func:`~abicheck.buildsource.
     header_compile_context._derived_gcc_path` then fell back to ``argv[0]``
     (the launcher, ``sccache``), which
     ``dumper_clang._resolve_clang_bin``/``resolve_source_frontend_clang_bin``
@@ -622,17 +663,15 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     **The CL-style-name match itself is restricted to the command's own
     leading executable/launcher position(s), not every argv token (P2
     review, "Limit CL-driver matching to executable tokens" follow-up,
-    fresh evidence).** :func:`_is_cl_style_driver_name` is a bare,
-    extension-agnostic name-suffix check (any stem ending in ``-cl``) —
+    fresh evidence).** ``is_msvc_driver_stem`` is a bare, name-only check --
     applying it to *every* token, including a translation unit's own source
-    argument, misidentifies a GNU source file like ``foo-cl.cpp`` as a
-    CL-style driver (``Path("foo-cl.cpp").stem`` is ``"foo-cl"``, which
-    does end in ``-cl``). That silently flipped the whole command to MSVC
-    dialect and, downstream in
+    argument, could misidentify a GNU source file whose basename happens to
+    match a recognized CL-style stem as a CL-style driver. That would
+    silently flip the whole command to MSVC dialect and, downstream in
     :func:`~abicheck.buildsource.header_compile_context._derived_gcc_path`,
-    recorded the *source path itself* as ``gcc_path`` — corrupting
-    ambiguity grouping (multiple otherwise-identical units spuriously
-    disagree) and losing the recorded compiler for a lone unit. See
+    record the *source path itself* as ``gcc_path`` — corrupting ambiguity
+    grouping (multiple otherwise-identical units spuriously disagree) and
+    losing the recorded compiler for a lone unit. See
     :func:`_executable_token_positions` for exactly which position(s) are
     scanned.
     """
@@ -670,7 +709,7 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
             continue
         if i in executable_positions:
             base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
-            if base in _MSVC_DRIVERS or _is_cl_style_driver_name(base):
+            if is_msvc_driver_stem(base):
                 is_msvc = True
                 if driver_token is None:
                     driver_token = (

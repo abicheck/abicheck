@@ -18,7 +18,7 @@ generated: false
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
-Under `--contract-evaluation`, each finding's contract relevance is classified
+Under `--contract`, each finding's contract relevance is classified
 **before** compatibility policy runs, and policy then scores only the
 `EVALUATED` findings — those whose relevance is `IN_CONTRACT` or
 `NOT_APPLICABLE`. A `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN` or
@@ -39,13 +39,13 @@ independently-orthogonal axis below (missing evidence contributing its own
 exit `1`), not from relevance itself; that's what stops missing evidence
 from being the cheapest way to pass.
 
-**Without `--contract-evaluation` no finding carries a relevance**, so every
+**Without `--contract` no finding carries a relevance**, so every
 finding is scored exactly as before and every exit code below is unchanged.
 
 ## Contract-coverage contribution (ADR-049)
 
 `compare` and `scan --against` carry an **orthogonal contract-coverage axis**
-under `--contract-evaluation`. Complete coverage of the mode-selected evidence
+under `--contract`. Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
 identity-incomplete **required domain evidence** is recorded as a
 `CoverageFailure` in the run-level `contract_coverage_failures` ledger and
@@ -70,7 +70,7 @@ library`'s exit `8` is checked ahead of the coverage-only fallback, so a
 removed library's own signal is never masked by an unrelated coverage gap
 (and a real verdict-based `2`/`4` still wins outright over both, unchanged).
 
-**Without `--contract-evaluation` there is no selected domain, so the
+**Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.
 
 Ordinary change suppressions cannot clear a provider/domain coverage failure —
@@ -96,30 +96,95 @@ behavior is as documented below.
 
 ## Analysis-assurance contribution (P0.4)
 
-`compare` always computes and reports `analysis_assurance` — a third,
-orthogonal axis alongside the compatibility verdict and the policy/severity
-gate, answering "how complete and trustworthy was the evidence behind this
-comparison" independently of whatever the verdict says. Its `status` field is
-one of `complete`, `partial`, `failed`, `not_comparable`, or `not_requested`,
-and it is always present in `--format json` output (`analysis_assurance`
-top-level key), regardless of any flag.
+`compare`, and `scan --against`, always compute and report
+`analysis_assurance` — a third, orthogonal axis alongside the compatibility
+verdict and the policy/severity gate, answering "how complete and
+trustworthy was the evidence behind this comparison" independently of
+whatever the verdict says. Its `status` field is one of `complete`,
+`partial`, `failed`, `not_comparable`, or `not_requested`, and it is always
+present in `--format json` output (`analysis_assurance` — a top-level key on
+`compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
-is purely informational until a caller opts in. Passing `--require-complete-
-analysis` makes `compare` additionally contribute exit `1` whenever
-`analysis_assurance.status` is not `complete`, folded with the same `max`
-discipline the contract-coverage axis above uses: it raises a clean `0` to
-`1` and **never lowers** a `2`/`4` — incomplete assurance cannot demote a real
-ABI break to "warnings only", and it never rewrites the compatibility verdict,
-any finding, or the severity gate's own contribution.
+is purely informational until a caller opts in. Passing
+`--require-complete-analysis` makes `compare`/`scan --against` additionally contribute exit `1`
+whenever `analysis_assurance.status` is not `complete`, folded with the same
+`max` discipline the contract-coverage axis above uses: it raises a clean `0`
+to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
+demote a real ABI break to "warnings only", and it never rewrites the
+compatibility verdict, any finding, or the severity gate's own contribution.
 
-`--require-complete-analysis` is single-pair only; a directory/package
+`--require-complete-analysis` is single-pair only. A directory/package
 (release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out).
+tracked follow-up for extending this axis to the release fan-out); `scan
+--against` rejects it without `--against`, alongside every other
+baseline-only flag — there is no comparison for it to gate on otherwise.
 
 **Without `--require-complete-analysis` every pre-existing invocation's exit
-code is unchanged**, exactly as `--contract-evaluation`'s own coverage axis
+code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
+
+The composite GitHub Action folds this the same way it folds the
+contract-coverage axis: an assurance-gated exit `1` (via the dedicated
+`require-complete-analysis` input, on either command) maps to a dedicated
+`ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
+unconditional (no `fail-on-*` input disables it).
+
+## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
+
+Every real-verdict `compare --format json` report (`full`/`leaf`/`root-cause`
+modes) carries a top-level `exit` object (introduced at report schema 2.41;
+schema 2.42 added its `crosscheck_promotion_contribution` field — see
+`abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` docstring for that
+and later additive fields, e.g. `annotations` at 2.43) stating the
+already-resolved decision behind the axes above as one explainable
+value, rather than requiring a reader to separately combine
+`severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
+`analysis_assurance_exit_contribution` themselves. `scan --against
+--format json` carries the identical object too (scan schema 1.18), nested
+at `diff.exit` rather than the report's top level — matching where its own
+constituent contribution fields already live, since `scan` and `compare`
+keep their own report shapes:
+
+```json
+"exit": {
+  "code": 1,
+  "reasons": ["analysis_assurance"],
+  "compatibility_contribution": 0,
+  "contract_coverage_contribution": 0,
+  "analysis_assurance_contribution": 1,
+  "crosscheck_promotion_contribution": 0
+}
+```
+
+`code` is exactly `max()` over the four contributions — the identical
+number the real process exits with for a single-pair `compare`. `reasons`
+names every axis whose own contribution equals `code` (a lower,
+non-winning contribution is excluded, since it did not determine the
+result); `["clean"]` when `code` is `0`.
+
+`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a native
+`compare` report — it has no meaning outside `scan --against`'s own
+maintainer-promoted `--crosscheck KEY=error` finding
+(`scan_engine._promote_published_gate`), which reconstructs the whole
+`diff.exit` block through the same resolver whenever the crosscheck
+contributes anything positive, so `reasons` can carry `promoted_crosscheck`
+even when the crosscheck only *ties* — rather than exceeds — the baseline
+comparison's own exit code.
+
+Under `--used-by`/`--required-symbol(s)` scoping, `compatibility_contribution`
+and `reasons` describe the **scoped** application/plugin-host gate (the one
+the process actually exits on — see the section below), not the
+informational full-library verdict/severity gate `full_verdict`/
+`full_severity` still report; `reasons` carries `scoped_gate` rather than
+`compatibility_gate` in that case.
+
+This field is additive and does not itself change any exit code — it is a
+persisted view of a resolution every axis above already performs. It does
+not yet cover `not_comparable`, `scan --against`'s own budget-overflow
+floor, or a release's removed-required-library policy, each raised through
+a different code path today; see `abicheck/exit_decision.py`'s own module
+docstring for that scope boundary.
 
 ## Commands removed in the ADR-043 CLI reset
 
@@ -181,8 +246,9 @@ The highest applicable code wins. For example, if both `abi_breaking=error` and
 | `strict` | error | error | error | error |
 | `info-only` | info | info | info | info |
 
-Per-category overrides (`--severity-abi-breaking`, `--severity-potential-breaking`,
-`--severity-quality-issues`, `--severity-addition`) take precedence over the preset.
+Per-category overrides — `.abicheck.yml`'s `severity:` block
+(`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`) — take
+precedence over the preset.
 
 ### CI gate patterns
 
@@ -194,8 +260,9 @@ ret=$?
 [ $ret -eq 2 ] && echo "API_BREAK — source-level break" && exit 1
 echo "OK (NO_CHANGE or COMPATIBLE)"
 
-# Block unexpected API expansion (severity-aware)
-abicheck compare old.json new.json --severity-addition error
+# Block unexpected API expansion (severity-aware; `severity.addition: error`
+# in .abicheck.yml, which compare discovers from the working directory)
+abicheck compare old.json new.json
 ret=$?
 [ $ret -eq 1 ] && echo "ADDITIONS — unexpected API expansion" && exit 1
 [ $ret -eq 4 ] && echo "BREAKING — release blocked" && exit 1
@@ -299,7 +366,7 @@ Under the `severity` scheme the JSON report's `diff` block also carries a
 `blocking`/`blocking_categories` shape `compare`'s own report uses (one
 shared builder, so the two are comparable field by field), added in
 `scan_schema_version` 1.9. It is what makes a non-zero exit on an otherwise
-*compatible* diff self-explanatory: `--severity-addition error` on an
+*compatible* diff self-explanatory: `severity.addition: error` on an
 additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
 the cause, distinguishing it from the orthogonal contract-coverage `1`
 above. The default **text** output states the same fact in its
@@ -326,10 +393,12 @@ never clear one a severity category already raised.
 `aggregate` reads that `diff.severity` block as the target's compatibility
 gate when it is present, exactly as it reads a `compare` report's own
 `severity` block (and with the same fail-closed validation). This is what
-keeps the two orthogonal axes separable for a scan target: a legacy-scheme
-scan has no native exit `1`, so a raw `1` can only be the coverage
-contribution — but a severity-scheme scan *does* (an error-level addition),
-and folding both to `1` would otherwise be indistinguishable. See
+keeps the orthogonal axes separable for a scan target: a legacy-scheme scan
+has no native exit `1`, so a raw `1` can only be the contract-coverage
+and/or analysis-assurance contribution (both orthogonal, both readable from
+their own report fields regardless of scheme) — but a severity-scheme scan
+*also* has a native `1` (an error-level addition), and folding all of these
+to `1` would otherwise be indistinguishable. See
 [`abicheck aggregate`](#abicheck-aggregate).
 
 `scan --dry-run` previews whichever scheme the invocation resolves —
@@ -391,7 +460,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract-evaluation`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -418,26 +487,42 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
   for a `project plan`-driven workflow instead of a separate manifest
   projection step); each check's own `check_id` becomes the expected target
   id, matching what `check-target` writes as every report's `target_id`.
-- `--expect <ids>` (repeatable / comma-separated), with optional `--optional
-  <ids>` — an inline alternative to a manifest file.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
   **no required-target coverage gate** (a missing target is simply not
   counted, never a coverage failure — the `contract_coverage` axis is
   unaffected and still applies to whatever *is* present). Required to run
-  without a manifest/`--expect`: with no declared target set the gate cannot
+  without `--manifest`/`--run-plan`: with no declared target set the gate cannot
   tell a missing required target from an intentionally absent one, so a bare
   `aggregate reports/` is a usage error (exit `64`), not a silent pass.
 
-`--on-missing-required warn` downgrades a coverage gap to advisory (the
-per-target gate decisions alone then decide the exit code). `--on-unexpected-target`
-(`include`/`warn`/`fail`/`ignore`, default `include`) controls a report whose
-target is not in the expected set: `include` counts its real findings in the
-gate but not in required coverage. The `--format json` output is versioned
+The gate policy for these two situations is no longer a pair of CLI flags
+(CLI cleanup phase two, PR 2) — it's the manifest's (or run-plan-projected
+manifest's) own versioned `gate` block:
+
+```json
+{"aggregate_manifest_version": "2.0",
+ "targets": [{"id": "linux-x86_64", "required": true}],
+ "gate": {"missing_required": "warn", "unexpected_target": "fail"}}
+```
+
+`missing_required: warn` downgrades a coverage gap to advisory — it stops
+contributing to exit `1` on its own, but the per-target gate decisions,
+contract-coverage evidence, and per-report failures above remain independent
+axes that can each still produce `1` for an unrelated reason.
+`unexpected_target` (`include`/`warn`/`fail`/`ignore`, default `include`)
+controls a report whose target is not in the expected set: `include` counts
+its real findings in the gate but not in required coverage. Omitting `gate`
+entirely keeps the same defaults this command always had (`missing_required:
+fail`, `unexpected_target: include`). The resolved policy is reported back in
+the JSON output's `effective_policy` block, including which source
+(`manifest`/`run-plan`/`explicit`/`default`) it came from — `explicit` only
+appears for a direct Python-API caller of `aggregate()` forcing a value
+(there is no CLI spelling for it). The `--format json` output is versioned
 (`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
 for the current value) and carries the four axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
 — the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
-present even when no target used `--contract-evaluation` (an empty
+present even when no target used `--contract` (an empty
 `incomplete_targets` list, not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the
@@ -628,11 +713,11 @@ none of these rows — it always exits `0`/`1`/`64`; see
 
 \* Severity exit codes depend on the configuration, and the range covers the
 whole configuration space — **including demotion of a real break**. With
-`--severity-addition error`, additions exit `1`; with `--severity-preset
+`severity.addition: error`, additions exit `1`; with `--severity-preset
 info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
 comparison included. The default preset leaves `potential_breaking` at
 `warning`, so an `API_BREAK` exits `0` unless `--severity-preset strict` (or
-`--severity-potential-breaking error`) raises it to `2`. Read the report's
+`severity.potential_breaking: error`) raises it to `2`. Read the report's
 own `severity` gate block — `exit_code`/`blocking`/`blocking_categories` —
 rather than inferring the cause from the code.
 
@@ -649,7 +734,7 @@ json` if your pipeline needs to distinguish them. Under a resolved
 `severity` scheme (`scan --against` with any `--severity-*`/
 `--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
 the `compare` exit (severity) column on the same `*` terms, in **both**
-directions: `--severity-addition error` exits `1` on an additions-only diff,
+directions: `severity.addition: error` exits `1` on an additions-only diff,
 and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
 ["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 

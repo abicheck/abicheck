@@ -162,6 +162,25 @@ from .project_targets import (
 #: ``BUILD_OUTPUT_SCHEMA``'s naming convention).
 RUN_PLAN_SCHEMA = "abicheck.run-plan/v1"
 
+#: Schema discriminator stamped instead of :data:`RUN_PLAN_SCHEMA` whenever a
+#: plan carries a ``gate`` block (CLI cleanup phase two, PR 2 continuation).
+#: Mirrors ``AGGREGATE_MANIFEST_VERSION``'s MAJOR-bump reasoning exactly: a
+#: plan generated with an explicit gate policy must declare a schema an old,
+#: pre-gate reader is guaranteed to reject, rather than one it silently
+#: accepts and misreads (Codex review, fresh evidence -- an earlier revision
+#: left every plan stamped ``v1`` regardless of whether ``gate`` was
+#: present, so an old ``RunPlan.from_dict()`` would ignore the unknown key
+#: and project a ``1.0`` aggregate manifest applying the hard-coded default
+#: policy instead of what the plan actually asked for, silently). A plan
+#: with no gate policy keeps the unchanged ``v1`` spelling -- this bump is
+#: additive-only, scoped to the one new capability, not a blanket
+#: version-everything policy.
+RUN_PLAN_SCHEMA_GATE = "abicheck.run-plan/v2"
+
+#: Highest ``vN`` suffix this reader understands, parsed from either schema
+#: constant above.
+_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 2
+
 #: ``kind`` discriminator for a :class:`RunPlanCheck` cell.
 RUN_PLAN_KIND_TARGET = "target"
 RUN_PLAN_KIND_BUNDLE = "bundle"
@@ -169,6 +188,91 @@ RUN_PLAN_KIND_BUNDLE = "bundle"
 
 def _opt_str(value: Any, default: str = "") -> str:
     return str(value) if isinstance(value, str) and value else default
+
+
+def _run_plan_schema_version(schema: str) -> int | None:
+    """Parse the trailing ``vN`` off a ``run-plan.json`` ``schema`` string.
+
+    ``None`` for anything not of the ``"abicheck.run-plan/vN"`` shape --
+    callers treat that the same as "no version to check" (an unrecognized
+    schema string is a separate, pre-existing problem this function doesn't
+    try to diagnose).
+    """
+    prefix = "abicheck.run-plan/v"
+    if not schema.startswith(prefix):
+        return None
+    suffix = schema[len(prefix) :]
+    return int(suffix) if suffix.isdigit() else None
+
+
+def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Validate a ``run-plan.json`` top-level ``gate`` block.
+
+    The key absent -> ``(None, None)``, same as everywhere else in this
+    module. Present but malformed -- not an object, an unknown key, or
+    a value outside :class:`~abicheck.aggregate_manifest.OnMissingRequired`/
+    :class:`~abicheck.aggregate_manifest.OnUnexpectedTarget` -- is a loud
+    :class:`~abicheck.aggregate_manifest.AggregateError`, not a silent
+    coercion to "no gate" (Codex review, fresh evidence: an earlier revision
+    treated any non-dict/malformed ``gate`` the same as an absent one, so a
+    corrupted or hand-authored v2 plan's requested policy could be silently
+    discarded and `aggregate` would fall back to the hard-coded defaults --
+    potentially reversing the requested CI outcome instead of failing loud).
+    Mirrors :func:`abicheck.aggregate_manifest._parse_manifest_gate`'s own
+    key/value validation exactly, kept as a separate function here (not a
+    shared call) since that function's own version check is shaped for the
+    manifest's ``MAJOR.MINOR`` scheme, not this module's ``vN`` one -- the
+    two callers already do their own, differently-shaped version checks.
+
+    Takes the whole top-level mapping (not a pre-extracted ``gate`` value)
+    so it can distinguish the key being absent from it being explicitly
+    present with a JSON ``null`` -- a plain ``.get("gate")`` on the caller's
+    side would conflate the two, and an explicit ``"gate": null`` (or a
+    sub-key like ``"missing_required": null``) is rejected outright rather
+    than silently treated the same as "not specified" (Codex review, fresh
+    evidence -- the same conflation the sibling manifest-side fix closes).
+    """
+    if "gate" not in d:
+        return None, None
+    gate_raw = d["gate"]
+    from ..aggregate_manifest import (
+        AggregateError,
+        OnMissingRequired,
+        OnUnexpectedTarget,
+    )
+
+    if gate_raw is None:
+        raise AggregateError("run-plan 'gate' must not be null")
+    if not isinstance(gate_raw, dict):
+        raise AggregateError("run-plan 'gate' must be an object")
+    unknown = sorted(set(gate_raw) - {"missing_required", "unexpected_target"})
+    if unknown:
+        raise AggregateError(f"run-plan 'gate': unknown key(s) {unknown!r}")
+    missing_required: str | None = None
+    if "missing_required" in gate_raw:
+        mr_raw = gate_raw["missing_required"]
+        if mr_raw is None:
+            raise AggregateError("run-plan 'gate.missing_required' must not be null")
+        try:
+            missing_required = OnMissingRequired(mr_raw).value
+        except ValueError as exc:
+            raise AggregateError(
+                f"run-plan 'gate.missing_required' {mr_raw!r} must be one of "
+                f"{[v.value for v in OnMissingRequired]}"
+            ) from exc
+    unexpected_target: str | None = None
+    if "unexpected_target" in gate_raw:
+        ut_raw = gate_raw["unexpected_target"]
+        if ut_raw is None:
+            raise AggregateError("run-plan 'gate.unexpected_target' must not be null")
+        try:
+            unexpected_target = OnUnexpectedTarget(ut_raw).value
+        except ValueError as exc:
+            raise AggregateError(
+                f"run-plan 'gate.unexpected_target' {ut_raw!r} must be one "
+                f"of {[v.value for v in OnUnexpectedTarget]}"
+            ) from exc
+    return missing_required, unexpected_target
 
 
 def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
@@ -421,13 +525,77 @@ class RunPlan:
     project: str = ""
     head_sha: str = ""
     checks: list[RunPlanCheck] = field(default_factory=list)
+    #: The aggregate fan-in's gate policy (CLI cleanup phase two, PR 2),
+    #: carried on the plan so `to_aggregate_manifest()` can project it into
+    #: the manifest's own `gate` block -- the same mechanism a hand-authored
+    #: `--manifest` uses, so `--run-plan`/`--manifest` never diverge in what
+    #: they can express. Raw, unvalidated strings here (validated once, at
+    #: `ExpectedTargets.from_manifest_data()`, the same place a hand-authored
+    #: manifest's `gate` block is validated) -- this module stays free of an
+    #: `..aggregate` import for anything but the manifest version constant.
+    #: `None` (the default) means "the run-plan generator wasn't given an
+    #: explicit gate policy", not "apply a specific value" -- omitted from
+    #: the projected manifest entirely, same as an unset field anywhere else
+    #: in this dataclass.
+    gate_missing_required: str | None = None
+    gate_unexpected_target: str | None = None
+
+    def _validated_gate(self) -> tuple[str | None, str | None]:
+        """Validate :attr:`gate_missing_required`/:attr:`gate_unexpected_target`
+        against the same enum vocabulary :func:`_parse_run_plan_gate`
+        enforces on read, so a direct construction (``RunPlan(...,
+        gate_missing_required="bogus")``) cannot serialize an artifact this
+        tool's own reader would reject (CodeRabbit review, fresh evidence --
+        validation previously only ran on the read path, so a hand-built
+        plan's bad value reached disk unchecked and only failed later, on
+        whatever consumer read it back)."""
+        from ..aggregate_manifest import (
+            AggregateError,
+            OnMissingRequired,
+            OnUnexpectedTarget,
+        )
+
+        if self.gate_missing_required is not None:
+            try:
+                OnMissingRequired(self.gate_missing_required)
+            except ValueError as exc:
+                raise AggregateError(
+                    f"RunPlan.gate_missing_required {self.gate_missing_required!r} "
+                    f"must be one of {[v.value for v in OnMissingRequired]}"
+                ) from exc
+        if self.gate_unexpected_target is not None:
+            try:
+                OnUnexpectedTarget(self.gate_unexpected_target)
+            except ValueError as exc:
+                raise AggregateError(
+                    f"RunPlan.gate_unexpected_target {self.gate_unexpected_target!r} "
+                    f"must be one of {[v.value for v in OnUnexpectedTarget]}"
+                ) from exc
+        return self.gate_missing_required, self.gate_unexpected_target
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"schema": self.schema}
+        gate_missing_required, gate_unexpected_target = self._validated_gate()
+        has_gate = (
+            gate_missing_required is not None or gate_unexpected_target is not None
+        )
+        # The gate-bearing schema is always stamped when a gate policy is
+        # set, regardless of whatever self.schema was constructed with --
+        # this is a discriminator an old reader must see, not a caller-
+        # overridable label (see RUN_PLAN_SCHEMA_GATE's own docstring).
+        d: dict[str, Any] = {
+            "schema": RUN_PLAN_SCHEMA_GATE if has_gate else self.schema
+        }
         if self.project:
             d["project"] = self.project
         if self.head_sha:
             d["head_sha"] = self.head_sha
+        if has_gate:
+            gate: dict[str, Any] = {}
+            if gate_missing_required is not None:
+                gate["missing_required"] = gate_missing_required
+            if gate_unexpected_target is not None:
+                gate["unexpected_target"] = gate_unexpected_target
+            d["gate"] = gate
         d["checks"] = [c.to_dict() for c in self.checks]
         return d
 
@@ -439,11 +607,33 @@ class RunPlan:
             if isinstance(checks_raw, list)
             else []
         )
+        schema = _opt_str(d.get("schema"), RUN_PLAN_SCHEMA)
+        version = _run_plan_schema_version(schema)
+        if version is not None and version > _RUN_PLAN_SCHEMA_MAX_SUPPORTED:
+            from ..aggregate_manifest import AggregateError
+
+            raise AggregateError(
+                f"run-plan 'schema' {schema!r} is newer than this tool "
+                f"supports (max v{_RUN_PLAN_SCHEMA_MAX_SUPPORTED}); upgrade "
+                "abicheck"
+            )
+        gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
+        if "gate" in d and (version is None or version < 2):
+            from ..aggregate_manifest import AggregateError
+
+            raise AggregateError(
+                "run-plan 'gate' requires 'schema' >= 'abicheck.run-plan/v2' "
+                f"(got {schema!r}); a pre-v2 reader would silently ignore "
+                "this block and apply the hard-coded default policy instead "
+                "of what it asked for"
+            )
         return cls(
-            schema=_opt_str(d.get("schema"), RUN_PLAN_SCHEMA),
+            schema=schema,
             project=_opt_str(d.get("project")),
             head_sha=_opt_str(d.get("head_sha")),
             checks=checks,
+            gate_missing_required=gate_missing_required,
+            gate_unexpected_target=gate_unexpected_target,
         )
 
 
@@ -801,9 +991,18 @@ def generate_run_plan(
     project: str = "",
     head_sha: str = "",
     resolved_bindings: Mapping[str, str] | None = None,
+    gate_missing_required: str | None = None,
+    gate_unexpected_target: str | None = None,
 ) -> tuple[RunPlan, RunPlanGenerationReport]:
     """Derive the ordered :class:`RunPlan` from *config* + each contract
     profile's parsed ``build-output.json`` (keyed by profile id).
+
+    *gate_missing_required*/*gate_unexpected_target* (CLI cleanup phase two,
+    PR 2) are stamped onto the returned plan unvalidated -- this module has
+    no dependency on ``..aggregate``'s ``OnMissingRequired``/
+    ``OnUnexpectedTarget`` enums, so an invalid value surfaces once, at
+    ``ExpectedTargets.from_manifest_data()``, the same place a hand-authored
+    manifest's own ``gate`` block is validated.
 
     *resolved_bindings* (P1 toolchain-profile audit) is an optional
     already-loaded ``{binding_id: executable_path}`` mapping -- typically a
@@ -866,7 +1065,13 @@ def generate_run_plan(
             "profile (nothing declared, or every profile is missing from "
             "build_outputs)."
         )
-    plan = RunPlan(project=project, head_sha=head_sha, checks=checks)
+    plan = RunPlan(
+        project=project,
+        head_sha=head_sha,
+        checks=checks,
+        gate_missing_required=gate_missing_required,
+        gate_unexpected_target=gate_unexpected_target,
+    )
     return plan, report
 
 
@@ -895,4 +1100,19 @@ def to_aggregate_manifest(
     resolved_head_sha = head_sha if head_sha is not None else plan.head_sha
     if resolved_head_sha:
         manifest["head_sha"] = resolved_head_sha
+    # CLI cleanup phase two, PR 2: project the plan's own gate policy into
+    # the manifest's `gate` block -- the same field `--manifest` reads,
+    # so `--run-plan`/`--manifest` express identical policy shapes.
+    # _validated_gate() rejects a bogus value the same way to_dict() does
+    # (CodeRabbit review, fresh evidence) -- both persistence paths off one
+    # RunPlan must agree on whether its gate fields are well-formed, not
+    # just the JSON serialization one.
+    gate_missing_required, gate_unexpected_target = plan._validated_gate()
+    if gate_missing_required is not None or gate_unexpected_target is not None:
+        gate: dict[str, Any] = {}
+        if gate_missing_required is not None:
+            gate["missing_required"] = gate_missing_required
+        if gate_unexpected_target is not None:
+            gate["unexpected_target"] = gate_unexpected_target
+        manifest["gate"] = gate
     return manifest

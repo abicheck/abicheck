@@ -44,7 +44,7 @@ Bring these to them, since they are the parts the docs cannot answer:
 4. **Whether the toolchain is pinned.** An unpinned runner image turns every
    image bump into a spurious incident
    ([compiler-and-build-profiles.md](compiler-and-build-profiles.md)).
-5. **Whether contract coverage gates.** Under `--contract-evaluation`,
+5. **Whether contract coverage gates.** Under `--contract`,
    incomplete coverage contributes its own orthogonal exit code — decide
    deliberately whether that should fail the job.
 

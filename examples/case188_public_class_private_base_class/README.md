@@ -6,7 +6,7 @@
 
 `demo::PublicHandle` gains a second base class, `detail::InternalBase` —
 declared only in an internal, non-public header (`detail_private.h`, never
-passed as `--public-header`) — alongside its existing public `Base`. Adding
+named as a public header) — alongside its existing public `Base`. Adding
 a base class shifts every member declared after it: `PublicHandle::x` moves
 from offset +4 to +8, and the object grows from 8 to 12 bytes. Any binary
 that allocates, copies, or accesses fields of `PublicHandle` is broken

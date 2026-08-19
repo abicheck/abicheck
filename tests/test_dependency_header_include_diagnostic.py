@@ -1,0 +1,248 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""End-to-end regression for a real-world class of scan/Action failure found
+during a PVXS Action acceptance run: a library's public header transitively
+``#include``s a *sibling dependency's* header (e.g. PVXS's own
+``pvxs/version.h`` pulling in EPICS Base's ``epicsVersion.h``/
+``epicsTime.h``) whose directory was never passed to abicheck.
+
+Reproduced end-to-end against real EPICS Base 7.0 + PVXS 1.5.2 sources during
+triage: pointing ``-H``/``--header`` only at the library's own public
+``include/`` directory (the natural, and in PVXS's case build-produced,
+choice) makes ``abicheck scan``/``compare``/``dump`` fail to parse the very
+first header that reaches into the dependency, with the parse aborting deep
+inside a transitively-``#include``d file the caller never named directly.
+
+Scoped to the plain ``-H``/``-I`` invocation with no ``--sources``/
+``--build-info``: when either of those is given, ``seed_l2_includes()``
+(``abicheck/buildsource/l2_seed.py``) auto-derives the build's own include
+dirs for exactly this case (an include path can also arrive through
+``--gcc-options``), so a real PVXS invocation that also passes
+``--sources``/``--build-info`` may need no explicit ``-I`` at all. This
+fixture intentionally covers the narrower, still-common case where neither
+is given -- the plain ``-H`` invocation the Action's `header`/`include`
+inputs describe.
+
+This is NOT a code defect in the header-parse pipeline: both header AST
+backends (castxml's ``_validate_castxml_output`` /
+``dumper_castxml_probe.py`` and clang's ``diagnose_header_compile_failure``
+in ``dumper_clang_errors.py``) already turn this into an actionable
+``SnapshotError``/``HeaderToolchainError`` naming the missing include and
+pointing at ``--include-dir``/``-I`` -- verified directly against the real
+PVXS failure. What was missing was end-to-end coverage proving three things
+together: (1) the actionable hint, not an opaque subprocess-exit-code
+message, is what a real CLI invocation surfaces; (2) once the dependency's
+include directory is supplied, the exact same library parses and a
+self-comparison reports no ABI change; (3) the fixture shape matches the
+real-world failure (a multi-header public surface where only the header
+actually reached by ``#include`` first fails, not necessarily the one named
+via ``-H``), not merely a single hand-rolled header the string-only unit
+tests in ``test_header_failure_hints.py`` already cover.
+
+Marked ``integration`` (needs a real compiler) -- the marker itself, not
+just this test's own skipif guards, is what keeps it out of the default
+fast lane (tests/CLAUDE.md: "Mark tests that shell out ... so default runs
+stay fast"), so it must stay on this test even though the test body itself
+only ever shells out to g++/clang. Uses ``--ast-frontend clang`` like its
+``test_pvxs_regression.py`` sibling; both tests' own skip guards ask only
+for g++ and clang, not castxml, but ``tests/conftest.py``'s
+``_integration_skip_reason()`` currently requires castxml too for *any*
+``integration``-marked test on Linux regardless of which backend an
+individual test actually uses -- a pre-existing, repo-wide gate this test
+inherits rather than a defect of its own, and not something a single
+test's marker choice can opt out of without losing the fast-lane exclusion
+the marker is what actually provides (Codex review, fresh evidence: this
+same gate makes ``test_pvxs_regression.py``'s identical claim not hold
+today either). Both tests are candidates to run once castxml IS present.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import warnings
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from abicheck.cli import main
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="builds an ELF .so pair, linux/macos only"
+    ),
+    pytest.mark.skipif(
+        shutil.which("g++") is None, reason="g++ required to build fixtures"
+    ),
+    pytest.mark.skipif(
+        shutil.which("clang") is None, reason="clang required for --ast-frontend clang"
+    ),
+]
+
+#: A minimal stand-in for EPICS Base's ``epicsVersion.h`` -- a dependency
+#: header living under its own, separate include root.
+_DEP_HEADER = """\
+#ifndef DEP_VERSION_H
+#define DEP_VERSION_H
+#define DEP_MAJOR_VERSION 1
+#endif
+"""
+
+#: The exact PVXS ``version.h`` shape: a public umbrella header that
+#: ``#include``s a *sibling dependency's* header via angle brackets (so it
+#: is resolved as a system/library include, not relative to itself), before
+#: declaring any of the library's own public API.
+_MAIN_HEADER = """\
+#include <dep/version.h>
+#ifndef MAIN_API
+#  define MAIN_API
+#endif
+MAIN_API int main_op(int x);
+"""
+
+_SOURCE = """\
+#include "main.h"
+int main_op(int x) { return x; }
+"""
+
+
+def _build_lib(src_dir: Path, dep_include_dir: Path, out_so: Path) -> None:
+    (dep_include_dir / "dep").mkdir(parents=True, exist_ok=True)
+    (dep_include_dir / "dep" / "version.h").write_text(_DEP_HEADER, encoding="utf-8")
+
+    header = src_dir / "main.h"
+    header.write_text(_MAIN_HEADER, encoding="utf-8")
+    source = src_dir / "main.cpp"
+    source.write_text(_SOURCE, encoding="utf-8")
+    subprocess.run(
+        [
+            "g++",
+            "-std=gnu++11",
+            "-fPIC",
+            "-shared",
+            "-I",
+            str(dep_include_dir),
+            "-o",
+            str(out_so),
+            str(source),
+        ],
+        cwd=src_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_missing_dependency_include_dir_gives_actionable_hint(
+    tmp_path: Path,
+) -> None:
+    """Without the dependency's include dir, abicheck must surface the real
+    'missing include' hint (--include-dir / -I) -- not an opaque subprocess
+    exit-code message with no remediation, which is what the PVXS Action
+    acceptance run reported seeing (the actual root cause, traced end-to-end
+    against real EPICS Base + PVXS sources, turned out to be exactly this:
+    the dependency's -I was never passed).
+
+    Where the hint surfaces is platform-dependent, and both are asserted
+    here rather than picked at random: on ELF (Linux; ``g++ -shared`` also
+    produces ELF on the Windows/win32-skipped lane, irrelevant here),
+    header-based scoping for `dump` is authoritative, so the parse failure
+    is a hard CLI error and the hint is in ``result.output``. On Mach-O
+    (macOS; `g++ -shared -o x.so` on macOS links a Mach-O bundle despite
+    the `.so` extension), header-based scoping is best-effort and degrades
+    to a ``UserWarning`` plus an export-table fallback rather than a hard
+    failure -- an existing, documented behavior (see AGENTS.md's Mach-O
+    scoping note), not something this test should paper over by skipping
+    the platform."""
+    src_dir = tmp_path / "lib"
+    src_dir.mkdir()
+    dep_dir = tmp_path / "dep-include"
+    so_path = src_dir / "libmain.so"
+    _build_lib(src_dir, dep_dir, so_path)
+
+    out_json = tmp_path / "report.json"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(src_dir / "main.h"),
+                "--ast-frontend",
+                "clang",
+                "-o",
+                str(out_json),
+            ],
+        )
+
+    def _has_hint(text: str) -> bool:
+        return (
+            "dep/version.h" in text
+            and ("--include-dir" in text or "-I" in text)
+            and "was not found" in text
+        )
+
+    if result.exit_code != 0:
+        # ELF: hard failure, hint on the CLI's own output.
+        assert _has_hint(result.output), result.output
+    else:
+        # Mach-O/PE: soft fallback -- exit 0, hint on the emitted warning.
+        warning_texts = [str(w.message) for w in caught]
+        assert any(_has_hint(text) for text in warning_texts), warning_texts
+
+
+def test_dependency_include_dir_supplied_scan_and_self_compare_succeed(
+    tmp_path: Path,
+) -> None:
+    """With the dependency's include dir passed via -I, the exact same
+    library parses cleanly and a self-comparison (the Action's own
+    self-compare smoke check) reports no ABI change."""
+    src_dir = tmp_path / "lib"
+    src_dir.mkdir()
+    dep_dir = tmp_path / "dep-include"
+    so_path = src_dir / "libmain.so"
+    _build_lib(src_dir, dep_dir, so_path)
+
+    out_json = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(so_path),
+            str(so_path),
+            "-H",
+            str(src_dir / "main.h"),
+            "-I",
+            str(dep_dir),
+            "--ast-frontend",
+            "clang",
+            "--format",
+            "json",
+            "-o",
+            str(out_json),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    report = json.loads(out_json.read_text(encoding="utf-8"))
+    assert report["verdict"] in ("COMPATIBLE", "NO_CHANGE")
+    assert report["summary"]["breaking"] == 0
+    assert report["summary"]["source_breaks"] == 0

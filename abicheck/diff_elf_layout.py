@@ -19,9 +19,25 @@ polymorphic class, and both sizes encode layout facts that are otherwise only
 visible in DWARF debug info:
 
 * **vtable** (``_ZTV<type>``) — laid out as ``[offset-to-top, typeinfo*,
-  slot0, slot1, …]``.  Its ``st_size`` therefore grows or shrinks by one
-  pointer for every virtual function added, removed, or (net) reordered.
-  ``slots ≈ size/pointer_size − 2`` for the primary vtable.
+  slot0, slot1, …]`` in the simple single-inheritance case, so its ``st_size``
+  grows or shrinks by one pointer per vtable *entry* net added or removed;
+  ``slots ≈ size/pointer_size - 2`` for the primary vtable.  Three caveats the
+  kind's name (``vtable_slot_count_changed``) does not carry:
+
+  * An entry is not a source-level virtual function.  A virtual destructor
+    occupies **two** entries (complete-object ``D1`` and deleting ``D0``), so
+    adding one grows ``_ZTV`` by two pointers — verified against GCC on
+    x86-64, 24 B to 40 B.  Read the delta as entries, never as a count of
+    declarations changed.
+  * The symbol covers the whole vtable *group* — vcall/vbase offsets plus a
+    secondary table per polymorphic base beyond the primary — so an
+    inheritance-shape change alone can resize it with no virtual added or
+    removed (``struct D : A`` → ``struct D : virtual A``).  The detected fact
+    is "the emitted group changed size", not "the slot count changed".
+  * A pure reorder of existing virtuals keeps the size identical, so it is
+    invisible here even though it is a hard break.
+
+  Either way L0 never answers *which* slot moved; identity needs L1/L2.
 
 * **typeinfo** (``_ZTI<type>``) — its concrete runtime class encodes the
   inheritance shape:
@@ -36,11 +52,15 @@ visible in DWARF debug info:
                                                         non-public bases
   =====================  =============================  ==================
 
-This means a virtual-method change or a base-class change is observable from
-``.dynsym`` symbol sizes **alone** — no debug info, no headers.  That closes
-the blind spot a pure symbol-name dump has: swapping a member's type or adding
-a virtual method need not rename any mangled symbol, yet it does resize the
-class's ``_ZTV`` / ``_ZTI`` object.
+This means a *size-changing* virtual-method or base-class change is observable
+from ``.dynsym`` symbol sizes **alone** — no debug info, no headers.  That
+narrows the blind spot a pure symbol-name dump has: adding a virtual method
+need not rename any mangled symbol, yet it does resize the class's ``_ZTV``.
+It does not close the blind spot: a base-class change that keeps the same
+``type_info`` runtime class and base count leaves ``_ZTI`` the same size.
+(That says nothing about ``_ZTV`` — a replacement base with a different
+virtual surface keeps ``__si_class_type_info`` while resizing the derived
+class's vtable group.)
 
 Scope: this detector only fires when the *same* ``_ZTV`` / ``_ZTI`` symbol is
 present on **both** sides with a **different** size.  A vtable/typeinfo object
@@ -140,11 +160,31 @@ def _sized_rtti(
     return out
 
 
-def _vtable_slots(size_bytes: int, pointer_size: int) -> int:
-    """Approximate primary-vtable slot count (``size/ptr − 2``), floored at 0."""
+def _pointer_words_delta(
+    old_size: int, new_size: int, pointer_size: int
+) -> int | None:
+    """Signed change in pointer-sized words, or ``None`` if not a clean multiple.
+
+    This is the only count L0 can state without inventing structure.  An
+    *absolute* entry count cannot be derived from the symbol size: the earlier
+    ``size/ptr - 2`` form subtracted exactly one table's ``[offset-to-top,
+    typeinfo]`` header, but a group carrying secondary tables has one such
+    header per table (plus any vcall/vbase offsets), so the subtraction is
+    right only for the single-table case and silently wrong elsewhere.  An
+    80-byte LP64 group holds 10 pointer-sized components, not 8, and how many
+    of those are dispatch slots depends on structure the symbol size does not
+    carry.
+
+    The *difference* between two sizes needs none of that: it is exact
+    whenever both sides share a pointer width, which is what makes it safe to
+    report.  Identity — which slot or base moved — still needs L1/L2.
+    """
     if pointer_size <= 0:
         pointer_size = 8
-    return max(0, size_bytes // pointer_size - 2)
+    delta = new_size - old_size
+    if delta % pointer_size:
+        return None
+    return delta // pointer_size
 
 
 def _inheritance_shape(size_bytes: int, pointer_size: int) -> str:
@@ -321,14 +361,18 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         sym = "_ZTV" + key
         cls = _class_name(sym)
-        o_slots = _vtable_slots(o_size, pointer_size)
-        n_slots = _vtable_slots(n_size, pointer_size)
+        words = _pointer_words_delta(o_size, n_size, pointer_size)
+        detail = (
+            f"{words:+d} pointer-sized word{'' if abs(words) == 1 else 's'}"
+            if words is not None
+            else f"{n_size - o_size:+d} bytes"
+        )
         changes.append(
             make_change(
                 ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
                 symbol=sym,
                 name=cls,
-                detail=f"~{o_slots} → ~{n_slots} virtual slots",
+                detail=detail,
                 old=str(o_size),
                 new=str(n_size),
                 # Derived from symbol size alone (no DWARF/headers): the slot

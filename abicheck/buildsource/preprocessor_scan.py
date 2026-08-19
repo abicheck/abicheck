@@ -842,7 +842,7 @@ def run_preprocessor_scan(
     result = PreprocessorScanResult()
     if build is None or not build.compile_units:
         result.skipped_reason = (
-            "no L3 build evidence (pass --sources/--compile-db so the "
+            "no L3 build evidence (pass --sources/--build-info so the "
             "preprocessor has compile context)"
         )
         return result

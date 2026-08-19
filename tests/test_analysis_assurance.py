@@ -399,6 +399,10 @@ class TestComputeAnalysisAssurance:
                     "forced_public": [],
                 },
                 unmatched={
+                    # "_Z5pub_av" is classified (internal, below) so it no
+                    # longer belongs here too -- the old fixture named an
+                    # unrelated "_Z6privXv" not even in exported_symbols,
+                    # a shape link_source_abi can't actually produce.
                     "symbols_without_decl": ["_Z5pub_bv"],
                     "decls_without_symbol": [],
                 },
@@ -409,7 +413,7 @@ class TestComputeAnalysisAssurance:
                     "synthesized_symbol_to_owner": {},
                     "template_instantiation_symbol_to_decl": {},
                     "allocator_interposer_symbol_to_owner": {},
-                    "non_public_symbol_to_reason": {"_Z6privXv": "internal"},
+                    "non_public_symbol_to_reason": {"_Z5pub_av": "internal"},
                 },
             ),
         )
@@ -421,8 +425,10 @@ class TestComputeAnalysisAssurance:
         assert aa.translation_units.failed == 1
         assert aa.export_accounting.total == 2
         assert aa.export_accounting.unaccounted == 1
-        assert aa.export_accounting.source_linked == 1
         assert aa.export_accounting.internal == 1
+        # Both exports accounted for (one internal, one unaccounted), so
+        # nothing is left as genuinely source-linked (Codex review, #788).
+        assert aa.export_accounting.source_linked == 0
         # A failed TU is exactly the kind of shortfall that keeps this run
         # from reading as unconditionally "complete".
         assert aa.status == "partial"
@@ -1308,6 +1314,26 @@ class TestAnalysisAssuranceCliIntegration:
         # assertion (flag raises it to 1) is actually testing something.
         assert payload["analysis_assurance"]["status"] != "complete"
 
+    def test_json_report_persists_the_exit_contribution_for_aggregate(
+        self, tmp_path: Path
+    ) -> None:
+        """`abicheck aggregate` reads `analysis_assurance_exit_contribution`
+        directly rather than recomputing it (Codex review, PR #780) -- a
+        real `compare` invocation must actually write it, end to end."""
+        res = _compare(
+            tmp_path,
+            _elf_only_pair(),
+            "--require-complete-analysis",
+            "--format", "json",
+        )
+        assert res.exit_code == 1, res.output
+        # The floor diagnostic is echoed to stderr (see
+        # test_the_floor_diagnostic_is_echoed_to_stderr's sibling in
+        # test_scan_analysis_assurance.py) -- parse stdout alone so it
+        # doesn't corrupt the JSON payload.
+        payload = json.loads(res.stdout[res.stdout.index("{") :])
+        assert payload["analysis_assurance_exit_contribution"] == 1
+
     def test_flag_raises_a_clean_exit_to_one_on_incomplete_status(
         self, tmp_path: Path
     ) -> None:
@@ -1336,6 +1362,12 @@ class TestAnalysisAssuranceCliIntegration:
         )
         assert res.exit_code != 0
         assert "--require-complete-analysis" in res.output
+
+
+# ``scan --against --require-complete-analysis``'s own CLI-integration
+# tests moved to tests/test_scan_analysis_assurance.py (this file is at the
+# AGENTS.md 2000-line hard cap; a sibling module is the established split
+# pattern, not a second copy of the fixtures below).
 
 
 class TestAnalysisAssuranceOutOfBandPack:

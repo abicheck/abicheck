@@ -23,7 +23,7 @@ See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-gi
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .checker import (
     Change,
@@ -36,6 +36,7 @@ from .checker_policy import (
 from .contract_gating import is_evaluated
 
 if TYPE_CHECKING:
+    from .finding_identity import MissingContractFinding
     from .severity import IssueCategory, KindSets, SeverityConfig
 
 # GitHub caps visible annotations at ~50 per step.
@@ -50,6 +51,12 @@ _SEVERITY_ORDER = {
     "warning": 1,
     "notice": 2,
 }
+
+#: The inverse of :data:`_SEVERITY_ORDER` -- recovers the level string from
+#: the sort key :func:`collect_annotations` already computes, so
+#: :func:`annotation_report_entries` doesn't need a second classification
+#: pass just to re-derive what level a tuple's ``line`` was rendered at.
+_LEVEL_BY_SORT_KEY = {v: k for k, v in _SEVERITY_ORDER.items()}
 
 
 def _escape_annotation_value(value: str) -> str:
@@ -301,11 +308,16 @@ def _title_for_change(
 
 def _format_annotation(
     level: str,
-    change: Change,
+    change: Change | MissingContractFinding,
     title: str,
     message: str,
 ) -> str:
-    """Format a single GitHub workflow command annotation line."""
+    """Format a single GitHub workflow command annotation line.
+
+    Accepts a ``MissingContractFinding`` too (a missing ``--used-by``/
+    ``--required-symbol`` label has no backing ``Change``) -- only
+    ``source_location`` is read, which both share.
+    """
     file, line = _parse_source_location(change.source_location)
 
     props: list[str] = []
@@ -318,6 +330,189 @@ def _format_annotation(
     props_str = ",".join(props)
     escaped_message = _escape_annotation_data(_truncate_message(message))
     return f"::{level} {props_str}::{escaped_message}"
+
+
+def _collect_annotations_detailed(
+    diff_result: DiffResult,
+    *,
+    annotate_additions: bool = False,
+    severity_config: SeverityConfig | None = None,
+) -> list[tuple[int, str, bool]]:
+    """Collect (sort_key, line, always_visible) triples for a DiffResult.
+
+    *always_visible* is True for an entry ``--annotate`` alone (without
+    ``--annotate-additions``) would already show — every ``error``/
+    ``warning`` level, plus the one unconditional ``notice`` this function
+    emits regardless of *annotate_additions* (the not-evaluated-under-
+    contract demotion below). It is False for a ``notice`` that exists only
+    because *annotate_additions* was truthy (an addition/quality-issue, or
+    an ``info``-level severity-config category) — the caller had to opt in
+    for this entry to appear at all. :func:`collect_annotations` is the
+    public two-tuple projection of this; :func:`annotation_report_entries`
+    is the one consumer of the third element, since a persisted report has
+    no live ``annotate_additions`` flag to fall back on the way stderr
+    rendering does (Codex review on PR E: without this, a renderer that
+    drops every ``"notice"`` unless ``annotate-additions`` was requested
+    would also hide a contract audit finding the CLI itself always shows).
+
+    See :func:`collect_annotations` for the rest of this function's
+    contract (severity-config vs. legacy level mapping, effective-category
+    classification) — unchanged, just carrying the extra bit through.
+
+    Also walks ``diff_result.scoped_only_changes`` (Codex review on PR E),
+    the dynamically-attached findings ``--used-by``/``--required-symbol``
+    scoping synthesizes (e.g. ``PE_ORDINAL_RETARGETED``) that never make it
+    into ``diff_result.changes`` itself — the same
+    ``list(result.changes) + list(getattr(result, "scoped_only_changes",
+    ()) or ())`` convention every other consumer of the full finding set
+    already applies (``_fold_scoped_compat_into_text``,
+    ``_attach_suppression_audit``, ``junit_report.py``). Without this, a
+    comparison whose *sole* gating finding is scope-synthesized could exit
+    non-zero with that finding present in the rendered report's
+    ``changes`` but silently absent from both the stderr annotation and
+    the persisted ``annotations`` array.
+
+    ``diff_result.scoped_missing_labels`` — the sibling synthesized-finding
+    list for a label ``--used-by``/``--required-symbol`` required but the
+    new library lacks entirely — is folded in too (Codex review follow-up,
+    fresh evidence), through a separate branch after the main loop rather
+    than as an extension of the fold above: a missing-label entry has no
+    backing ``Change``/``ChangeKind`` at all
+    (``finding_identity.missing_contract_finding`` converts it to a
+    ``MissingContractFinding``, a different shape this loop's
+    ``ChangeKind``-based classification — ``_effective_kind_sets``,
+    ``_category_for_change_severity``, ``is_evaluated`` — cannot consume
+    directly), so it is classified the same way every other consumer of
+    ``scoped_missing_labels`` already does
+    (``sarif._missing_contract_result``, ``junit_report.py``,
+    ``reporter_markdown.py``): unconditionally a hard block under the
+    legacy scheme, or gated on ``severity.missing_contract_exit_code``
+    under a severity scheme.
+    """
+    from .severity import effective_verdict_for_change
+
+    kind_sets = diff_result._effective_kind_sets()
+    breaking_set, api_break_set, compatible_set, risk_set = kind_sets
+
+    annotations: list[tuple[int, str, bool]] = []
+
+    all_changes = list(diff_result.changes) + list(
+        getattr(diff_result, "scoped_only_changes", ()) or ()
+    )
+    for change in all_changes:
+        # ADR-049 D1: an annotation states how a finding gated, and a
+        # NOT_EVALUATED finding did not -- compatibility policy never scored
+        # it. Emitting `::error` for one put a red GitHub annotation on a
+        # comparison whose verdict is NO_CHANGE and whose compatibility gate
+        # is clean (Codex review, reproduced with a proven-out-of-contract
+        # type-size change). Demoted to `::notice` rather than dropped: the
+        # fact stays surfaced in the workflow log, it just stops claiming to
+        # be a break. Only reachable under `--contract`. Always visible --
+        # unlike every other notice below, this one does not need
+        # *annotate_additions*.
+        if not is_evaluated(change):
+            annotations.append(
+                (
+                    _SEVERITY_ORDER.get("notice", 99),
+                    _format_annotation(
+                        "notice",
+                        change,
+                        f"Not evaluated (contract): {change.kind.value}",
+                        change.description,
+                    ),
+                    True,
+                )
+            )
+            continue
+        category = _category_for_change_severity(
+            change, kind_sets,
+            policy=diff_result.policy, policy_file=diff_result.policy_file,
+        )
+        if severity_config is not None:
+            level = _annotation_level_for_category(
+                category, severity_config, annotate_additions,
+            )
+        else:
+            level = _legacy_level_for_category(category, annotate_additions)
+        if level is None:
+            continue
+
+        title = _title_for_change(
+            change.kind, breaking_set, api_break_set, risk_set, compatible_set,
+            category=category,
+            effective_verdict=effective_verdict_for_change(
+                change, policy=diff_result.policy, kind_sets=kind_sets,
+                policy_file=diff_result.policy_file,
+            ),
+        )
+        line = _format_annotation(level, change, title, change.description)
+        sort_key = _SEVERITY_ORDER.get(level, 99)
+        # Every non-notice level (error/warning) is always visible; the only
+        # way this loop reaches "notice" here (as opposed to the always-
+        # visible not-evaluated branch above) is that annotate_additions
+        # opted it in.
+        annotations.append((sort_key, line, level != "notice"))
+
+    # A missing --used-by/--required-symbol contract member (a label the new
+    # library lacks *entirely* -- not a Change, since there is nothing to
+    # diff against) has no backing ChangeKind at all, so it cannot go
+    # through the ordinary per-change loop above -- it needs the same
+    # dedicated branch every other consumer of `scoped_missing_labels`
+    # already has (`sarif._missing_contract_result`, `junit_report.py`,
+    # `reporter_markdown.py`). Without this, a comparison whose *sole*
+    # gating finding is a missing label could exit non-zero with nothing in
+    # either the stderr annotation stream or the persisted `annotations`
+    # array to explain why (Codex review, fresh evidence -- this closes the
+    # sibling gap the `scoped_only_changes` fold above already closed for a
+    # *present* scope-synthesized finding).
+    gate_scope = getattr(diff_result, "gate_scope", None)
+    if gate_scope is not None:
+        from .finding_identity import missing_contract_finding, missing_contract_kind
+        from .severity import SeverityLevel
+
+        # A missing contract member is the same failure class as
+        # `abi_breaking` (see `severity.missing_contract_exit_code`'s own
+        # docstring), so it is classified by that category's *configured
+        # level* directly -- not collapsed to a bare blocks/doesn't-block
+        # binary. A first revision of this did exactly that collapse,
+        # which silently demoted a `severity.abi_breaking: warning`
+        # configuration's ::warning (always visible, matching how every
+        # ordinary warning-level finding is treated elsewhere in this same
+        # function) down to an opt-in ::notice a plain `annotate: true`
+        # Action run would never show at all (Codex review, fresh
+        # evidence). Under the legacy scheme (no severity_config) it's
+        # unconditionally a hard block, matching
+        # sarif._missing_contract_result's identical "unconditionally
+        # BREAKING" legacy-scheme behaviour.
+        if severity_config is None:
+            missing_level: str | None = "error"
+        elif severity_config.abi_breaking == SeverityLevel.ERROR:
+            missing_level = "error"
+        elif severity_config.abi_breaking == SeverityLevel.WARNING:
+            missing_level = "warning"
+        else:
+            missing_level = "notice" if annotate_additions else None
+        if missing_level is not None:
+            kind = missing_contract_kind(gate_scope)
+            title = (
+                f"ABI Break: {kind}"
+                if missing_level == "error"
+                else f"ABI {missing_level.capitalize()}: {kind}"
+            )
+            for label in getattr(diff_result, "scoped_missing_labels", ()) or ():
+                finding = missing_contract_finding(kind, label)
+                line = _format_annotation(
+                    missing_level, finding, title, finding.description,
+                )
+                annotations.append(
+                    (
+                        _SEVERITY_ORDER.get(missing_level, 99),
+                        line,
+                        missing_level != "notice",
+                    )
+                )
+
+    return annotations
 
 
 def collect_annotations(
@@ -345,61 +540,68 @@ def collect_annotations(
     kind-set membership, so a per-finding override is never misreported —
     see :func:`_legacy_level_for_category`.
     """
-    from .severity import effective_verdict_for_change
-
-    kind_sets = diff_result._effective_kind_sets()
-    breaking_set, api_break_set, compatible_set, risk_set = kind_sets
-
-    annotations: list[tuple[int, str]] = []
-
-    for change in diff_result.changes:
-        # ADR-049 D1: an annotation states how a finding gated, and a
-        # NOT_EVALUATED finding did not -- compatibility policy never scored
-        # it. Emitting `::error` for one put a red GitHub annotation on a
-        # comparison whose verdict is NO_CHANGE and whose compatibility gate
-        # is clean (Codex review, reproduced with a proven-out-of-contract
-        # type-size change). Demoted to `::notice` rather than dropped: the
-        # fact stays surfaced in the workflow log, it just stops claiming to
-        # be a break. Only reachable under `--contract-evaluation`.
-        if not is_evaluated(change):
-            annotations.append(
-                (
-                    _SEVERITY_ORDER.get("notice", 99),
-                    _format_annotation(
-                        "notice",
-                        change,
-                        f"Not evaluated (contract): {change.kind.value}",
-                        change.description,
-                    ),
-                )
-            )
-            continue
-        category = _category_for_change_severity(
-            change, kind_sets,
-            policy=diff_result.policy, policy_file=diff_result.policy_file,
+    return [
+        (sort_key, line)
+        for sort_key, line, _always_visible in _collect_annotations_detailed(
+            diff_result,
+            annotate_additions=annotate_additions,
+            severity_config=severity_config,
         )
-        if severity_config is not None:
-            level = _annotation_level_for_category(
-                category, severity_config, annotate_additions,
-            )
-        else:
-            level = _legacy_level_for_category(category, annotate_additions)
-        if level is None:
-            continue
+    ]
 
-        title = _title_for_change(
-            change.kind, breaking_set, api_break_set, risk_set, compatible_set,
-            category=category,
-            effective_verdict=effective_verdict_for_change(
-                change, policy=diff_result.policy, kind_sets=kind_sets,
-                policy_file=diff_result.policy_file,
-            ),
+
+def annotation_report_entries(
+    diff_result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> list[dict[str, object]]:
+    """Structured, persistable annotation entries for a JSON report.
+
+    CLI cleanup phase two, PR E (persistence prerequisite): the plan's own
+    "New invariant" is that a rendering front end (the composite Action)
+    must never infer a finding's annotation from stderr or a re-run
+    comparison -- it has to read a persisted, already-classified answer the
+    way it already does for ``exit``/``analysis_assurance``. This is that
+    answer for annotations specifically.
+
+    Unlike :func:`collect_annotations` (the stderr-rendering path, gated by
+    a caller-supplied ``annotate``/``annotate_additions`` at call time),
+    this always computes the *superset* -- ``annotate_additions=True`` --
+    reusing the exact same classification and formatting (escaping,
+    truncation, title selection) `collect_annotations`/`_format_annotation`
+    already implement and are already tested, rather than a second,
+    independently-maintained rendering path. A consumer decides at *read*
+    time whether to include a ``"notice"``-level entry (the
+    ``annotate-additions`` question), the same way it already decides
+    whether to render at all (the ``annotate`` question) -- this function
+    answers a different, prior question: what a full annotation pass over
+    this comparison found, not what any one caller asked to see.
+
+    Each entry is ``{"level": "error"|"warning"|"notice", "annotation": ...,
+    "always_visible": bool}``. ``annotation`` is the exact, already-escaped/
+    truncated GitHub workflow-command line :func:`_format_annotation`
+    produces, so a renderer can echo it verbatim rather than reassembling
+    ``file``/``line``/``title``/``message`` itself. ``always_visible`` is
+    what a renderer must actually gate a ``"notice"`` entry on instead of
+    the level alone (Codex review on PR E): one class of notice -- a
+    ``--contract`` finding compatibility policy never evaluated -- is
+    surfaced by plain ``--annotate`` with no ``--annotate-additions`` at
+    all, so filtering every ``"notice"`` out by default would silently hide
+    it. ``always_visible`` is always True for ``error``/``warning``.
+    """
+    detailed = _collect_annotations_detailed(
+        diff_result, annotate_additions=True, severity_config=severity_config,
+    )
+    return [
+        {
+            "level": _LEVEL_BY_SORT_KEY.get(sort_key, "notice"),
+            "annotation": line,
+            "always_visible": always_visible,
+        }
+        for sort_key, line, always_visible in sorted(
+            detailed, key=lambda item: item[0]
         )
-        line = _format_annotation(level, change, title, change.description)
-        sort_key = _SEVERITY_ORDER.get(level, 99)
-        annotations.append((sort_key, line))
-
-    return annotations
+    ]
 
 
 def format_annotations(
@@ -454,30 +656,29 @@ def is_github_actions() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-def emit_github_step_summary(
-    diff_result: DiffResult,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> str | None:
-    """Write a Markdown job summary to $GITHUB_STEP_SUMMARY if available.
+# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# `emit_github_step_summary` historically lived here. It moved to
+# :mod:`abicheck.annotations_step_summary` (CLI cleanup phase two, PR E) --
+# see that module's own docstring for why: it was the only import from this
+# module back to ``reporter``, which would have closed an import cycle once
+# ``reporter_contract_blocks.add_annotations`` started importing this
+# module's ``annotation_report_entries``. A *static*
+# `from .annotations_step_summary import emit_github_step_summary` re-export
+# here would reopen that same cycle, so this module-level `__getattr__`
+# (PEP 562) resolves it lazily via `importlib.import_module` -- a runtime
+# call, not a static import edge (Codex review: preserves the historical
+# `from abicheck.annotations import emit_github_step_summary` path for any
+# existing caller instead of a bare `ImportError`). New code should import
+# from `annotations_step_summary` directly, matching
+# `cli_buildsource.py`'s identical `_GRAPH_REEXPORTS` shim.
+_STEP_SUMMARY_REEXPORTS = frozenset({"emit_github_step_summary"})
 
-    *severity_config*, when given, is forwarded to :func:`abicheck.reporter.to_markdown`
-    so the step summary carries the same "Severity Configuration" section the
-    inline annotations are already gated on — without it, `--severity-addition
-    error` (for example) could fail the annotations/exit code while the step
-    summary still rendered the legacy compatible report with no severity gate
-    section, contradicting the actual gate on the same PR.
 
-    Returns the summary path if written, None otherwise.
-    """
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
-        return None
+def __getattr__(name: str) -> Any:
+    if name in _STEP_SUMMARY_REEXPORTS:
+        import importlib
 
-    from .reporter import to_markdown
-
-    md = to_markdown(diff_result, severity_config=severity_config)
-    with open(summary_path, "a", encoding="utf-8") as f:
-        f.write(md)
-        f.write("\n")
-    return summary_path
+        return getattr(
+            importlib.import_module("abicheck.annotations_step_summary"), name
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

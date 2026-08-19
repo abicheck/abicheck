@@ -1783,7 +1783,7 @@ def test_emit_keeps_default_clang_bin_for_non_clang_family_compiler(
 # proves the cases someone thought to write down. This matrix is the
 # generalization — every clang-family alias, crossed with every launcher
 # wrapping shape (bare / ccache / ccache+overrides / chained launchers),
-# checked against the exact same resolver `dump --sources`'s own `--gcc-path`
+# checked against the exact same resolver `dump --sources`'s own `--compiler`
 # handling uses (`dumper_clang.resolve_source_frontend_clang_bin`), so this
 # stays a same-answer check rather than a second, independently-guessable one.
 

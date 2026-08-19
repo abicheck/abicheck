@@ -1,4 +1,4 @@
-# Part 8 — Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough
+# Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
 > [1. Foundations](01-foundations.md) ·
@@ -8,10 +8,19 @@
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
 > [7. Designing for Stability](07-designing-for-stability.md) ·
-> **8. Detecting Breaks**
+> **Detecting Breaks**
+
+> **This page is the Verification & Assurance capstone, not "Part 8."** Parts
+> 0–7 are a sequential mechanism education — each one teaches what a class of
+> change actually does to a binary or a consumer, building on the previous
+> part. This page asks a categorically different question: given everything
+> Parts 0–7 taught you to look for, **how do you actually catch it before you
+> ship?** That shift — from "what breaks" to "how do I verify nothing broke"
+> — is why it's grouped on its own in the navigation instead of sitting as
+> one more numbered step in the Learning Series list.
 
 Parts 0–7 explained the *mechanisms*: what the compiler bakes into a binary, and
-which changes corrupt that contract. This part turns the telescope around and asks
+which changes corrupt that contract. This page turns the telescope around and asks
 the engineering question: **how do you actually catch each of those breaks before
 you ship?**
 
@@ -137,12 +146,18 @@ Two lessons hide in this table:
 - **Evidence runs in both directions.** More input doesn't just find more breaks —
   it *dismisses* false alarms. Header scoping is what lets a checker say
   "that struct changed, but it was never part of the public surface."
-- **The staircase is real and measurable.** Over the example catalog, a stripped
-  binary alone reaches the correct verdict for about a third of cases; adding
-  debug info takes it to ~75%; headers to ~90%; build data to ~95%; source and
-  source-graph data close the rest
-  (current numbers in the
-  [evidence-tier table](../../reference/tool-comparison.md#which-source-discovers-what)).
+- **The staircase is real and measurable.** Over the example catalog,
+  correct-verdict coverage improves substantially from a stripped binary up to
+  full source evidence, and the false-negative count falls with it. The climb is
+  **non-decreasing, not strictly rising at every rung** — in the current
+  measurement `headers` and `build` score identically, because that step adds
+  context a verdict does not always need. This page deliberately
+  quotes **no percentages**: there is exactly one measured table, it carries its
+  own freshness caveat and denominator definition, and a second hand-copied set
+  of numbers here would go stale silently. Read it at
+  [Evidence & Detectability § What each layer buys](../evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives),
+  with the per-source breakdown in the
+  [evidence-tier table](../../reference/tool-comparison.md#which-source-discovers-what).
 
 ---
 

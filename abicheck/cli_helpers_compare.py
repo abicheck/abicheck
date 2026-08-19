@@ -583,27 +583,25 @@ def resolve_compare_config(
     cfg: BuildConfig | None,
     *,
     cli_severity_preset: str | None,
-    cli_severity_abi_breaking: str | None,
-    cli_severity_potential_breaking: str | None,
-    cli_severity_quality_issues: str | None,
-    cli_severity_addition: str | None,
     cli_scope_public: bool | None,
-    cli_collapse_versioned_symbols: bool | None,
-    cli_public_symbols: tuple[str, ...] = (),
-    cli_strict_suppressions: bool | None = None,
-    cli_require_justification: bool | None = None,
     cli_exit_code_scheme: str | None = None,
     cli_debug_format: str | None = None,
     cli_dwarf_only: bool | None = None,
     cli_debuginfod: bool | None = None,
     cli_debuginfod_url: str | None = None,
-    cli_show_redundant: bool | None = None,
 ) -> ResolvedCompareConfig:
     """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
 
     Pure (no Click/IO) so the precedence contract is unit-testable per key
     (``test_config_precedence``). Each ``cli_*`` argument is ``None`` when the
     user did not pass the corresponding flag.
+
+    Only the keys that still have a CLI flag take a ``cli_*`` argument. The
+    per-category severity levels, the suppression strict/justification pair,
+    the public-symbol overlay, ``collapse_versioned_symbols`` and
+    ``show_redundant`` were hidden CLI duplicates of a config key and have
+    been removed from the CLI, so ``.abicheck.yml`` is now their only source
+    and they are read straight off *cfg*.
     """
     from .severity import resolve_severity_config
 
@@ -614,7 +612,7 @@ def resolve_compare_config(
             return conf
         return default
 
-    # Severity: merge preset + per-category from CLI → config → preset/default.
+    # Severity: preset from CLI → config; per-category from config only.
     c_preset = cfg.severity_preset if cfg else None
     c_abi = cfg.severity_abi_breaking if cfg else None
     c_pot = cfg.severity_potential_breaking if cfg else None
@@ -622,20 +620,7 @@ def resolve_compare_config(
     c_add = cfg.severity_addition if cfg else None
 
     eff_preset = cli_severity_preset if cli_severity_preset is not None else c_preset
-    eff_abi = (
-        cli_severity_abi_breaking if cli_severity_abi_breaking is not None else c_abi
-    )
-    eff_pot = (
-        cli_severity_potential_breaking
-        if cli_severity_potential_breaking is not None
-        else c_pot
-    )
-    eff_qual = (
-        cli_severity_quality_issues
-        if cli_severity_quality_issues is not None
-        else c_qual
-    )
-    eff_add = cli_severity_addition if cli_severity_addition is not None else c_add
+    eff_abi, eff_pot, eff_qual, eff_add = c_abi, c_pot, c_qual, c_add
 
     severity_active = any(
         v is not None for v in (eff_preset, eff_abi, eff_pot, eff_qual, eff_add)
@@ -651,29 +636,11 @@ def resolve_compare_config(
     scope_public = bool(
         _pick(cli_scope_public, cfg.scope_public if cfg else None, True)
     )
-    collapse = bool(
-        _pick(
-            cli_collapse_versioned_symbols,
-            cfg.collapse_versioned_symbols if cfg else None,
-            False,
-        )
-    )
-    # Public-symbol overlay is additive: config list + any CLI additions.
+    collapse = bool(cfg.collapse_versioned_symbols) if cfg else False
     merged_public: list[str] = list(cfg.public_symbols) if cfg else []
-    for s in cli_public_symbols:
-        if s not in merged_public:
-            merged_public.append(s)
 
-    strict = bool(
-        _pick(cli_strict_suppressions, cfg.suppression_strict if cfg else None, False)
-    )
-    require_just = bool(
-        _pick(
-            cli_require_justification,
-            cfg.suppression_require_justification if cfg else None,
-            False,
-        )
-    )
+    strict = bool(cfg.suppression_strict) if cfg else False
+    require_just = bool(cfg.suppression_require_justification) if cfg else False
 
     raw_scheme = str(
         _pick(cli_exit_code_scheme, cfg.exit_code_scheme if cfg else None, "auto")
@@ -685,7 +652,7 @@ def resolve_compare_config(
 
     source_method = cfg.source_method if cfg else None
 
-    # ADR-040 Lever 2: debug-resolution + show-redundant demotion (CLI > config).
+    # ADR-040 Lever 2: debug-resolution demotion (CLI > config).
     debug_format = _pick(cli_debug_format, cfg.debug_format if cfg else None, None)
     dwarf_only = bool(
         _pick(cli_dwarf_only, cfg.debug_dwarf_only if cfg else None, False)
@@ -696,9 +663,7 @@ def resolve_compare_config(
     debuginfod_url = _pick(
         cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
     )
-    show_redundant = bool(
-        _pick(cli_show_redundant, cfg.scope_show_redundant if cfg else None, False)
-    )
+    show_redundant = bool(cfg.scope_show_redundant) if cfg else False
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -955,7 +920,7 @@ def _scoped_exit_code(
 
     ADR-043's --used-by/--required-symbol(s) floor the exit code on the
     *scoped* verdict rather than the full library's -- but that floor must
-    still respect ``--exit-code-scheme severity``/``--severity-*``: without
+    still respect ``--exit-code-scheme severity``/``--severity-preset``: without
     this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
     matter what severity configuration the caller passed, because the scoped
     branch returned straight to ``sys.exit`` before the severity-aware exit
@@ -1074,86 +1039,6 @@ def _require_used_by_binary_evidence(
             )
 
 
-def _apply_runtime_probe(
-    scoped: Any,
-    app: Path,
-    old_lib: Path,
-    new_lib: Path,
-    suppression: Any,
-    policy: str,
-    policy_file: PolicyFile | None,
-) -> None:
-    """Run *app* against both libraries and fold a load regression into *scoped*.
-
-    ADR-044 P2 item 2. Mutates *scoped* in place: appends a
-    ``CONSUMER_RUNTIME_LOAD_FAILED`` finding (unless a suppression rule removes
-    it) and recomputes the app verdict, since ``scope_diff_to_app`` computed it
-    before this RISK-tier finding existed.
-    """
-    from .checker_policy import ChangeKind, ReachabilityState
-    from .diff_helpers import make_change
-    from .runtime_probe import run_runtime_probe
-
-    probe = run_runtime_probe(app, old_lib, new_lib)
-    regressed_symbol = probe.regressed_symbol
-    if not regressed_symbol:
-        return
-    # public_reachable=True (Codex review, fresh evidence, mirrors
-    # appcompat.scope_diff_to_app's identical fix for
-    # CONSUMER_REQUIRED_SYMBOL_REMOVED): this finding only exists
-    # because the dynamic linker itself failed to resolve a
-    # symbol for a real, executed --used-by consumer binary --
-    # left at the dataclass default (False), a broad
-    # namespace/source_location suppression rule's default
-    # "unreachable-only" reachability would read it as
-    # unreachable and silently suppress a runtime regression that
-    # is, by construction, always consumer-proven real.
-    runtime_change = make_change(
-        ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
-        symbol=regressed_symbol,
-        name=app.name,
-        public_reachable=True,
-        reachability_kind="consumer_proven",
-        reachability_state=ReachabilityState.PROVEN_REACHABLE,
-    )
-    add_finding = suppression is None
-    if suppression is not None:
-        outcome = suppression.evaluate(runtime_change)
-        add_finding = not outcome.suppressed
-        # outcome.withheld_unknown_rule is never set here:
-        # runtime_change is always constructed with
-        # reachability_state=PROVEN_REACHABLE above (it is by
-        # construction consumer-proven), and
-        # would_withhold_unknown_reachability only ever fires on
-        # UNKNOWN.
-        if add_finding and outcome.withheld_rule is not None:
-            from .post_processing import _build_suppression_overreach_change
-
-            scoped.breaking_for_app.append(
-                _build_suppression_overreach_change(
-                    runtime_change, outcome.withheld_rule
-                )
-            )
-    if not add_finding:
-        return
-    scoped.breaking_for_app.append(runtime_change)
-    # scope_diff_to_app already computed scoped.verdict before
-    # this RISK-tier finding existed -- recompute so a clean
-    # static scope plus a runtime regression reports
-    # COMPATIBLE_WITH_RISK instead of a stale COMPATIBLE
-    # (Codex review).
-    from .appcompat import _compute_appcompat_verdict
-
-    scoped.verdict = _compute_appcompat_verdict(
-        scoped.missing_symbols,
-        scoped.missing_versions,
-        scoped.breaking_for_app,
-        scoped.required_symbol_count,
-        policy,
-        policy_file,
-    )
-
-
 def _apply_used_by_scoping(
     result: Any,
     used_by_apps: tuple[Path, ...],
@@ -1165,7 +1050,6 @@ def _apply_used_by_scoping(
     policy_file: PolicyFile | None,
     exit_code_scheme: str = "legacy",
     sev_config: Any = None,
-    verify_runtime: bool = False,
     suppression: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
@@ -1179,21 +1063,13 @@ def _apply_used_by_scoping(
     needs. Attaches a JSON-safe summary to ``result.used_by`` for the
     renderer and returns the worst app's exit code, computed under
     *exit_code_scheme* (legacy verdict floor, or severity-aware over each
-    app's relevant changes when the caller passed --severity-*).
-
-    *verify_runtime* (ADR-044 P2 item 2) additionally runs each app once
-    against the old library and once against the new one
-    (:func:`~abicheck.runtime_probe.run_runtime_probe`) when both are real
-    binaries — a JSON-snapshot side has no file to execute against, so the
-    probe is silently skipped for that app, same as the static check's own
-    snapshot fallback degrades gracefully.
+    app's relevant changes when the caller passed a severity setting).
 
     *suppression* (ADR-044 P2, Codex review) is forwarded to
-    :func:`~abicheck.appcompat.scope_diff_to_app` and also consulted here
-    directly for the ``CONSUMER_RUNTIME_LOAD_FAILED`` overlay: both findings
-    are synthesized *after* the pipeline's own suppression pass already ran
-    over ``result.changes``, so without this they would be unsuppressible
-    even by an exact rule.
+    :func:`~abicheck.appcompat.scope_diff_to_app`: its findings are
+    synthesized *after* the pipeline's own suppression pass already ran over
+    ``result.changes``, so without this they would be unsuppressible even by
+    an exact rule.
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
@@ -1253,16 +1129,6 @@ def _apply_used_by_scoping(
             # Graph lookup only; old_lib still owns every export/version read.
             old_snapshot=old_snapshot,
         )
-        if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
-            _apply_runtime_probe(
-                scoped,
-                app,
-                old_lib,
-                new_lib,
-                suppression,
-                policy,
-                policy_file,
-            )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
         relevant_changes_by_id.update(

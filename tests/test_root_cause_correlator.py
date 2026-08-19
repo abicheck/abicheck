@@ -127,25 +127,6 @@ class TestCorrelateRootCauses:
         assert levels_by_kind[ChangeKind.FUNC_REMOVED] == "consumer_proven"
         assert group.strongest_evidence_level == "consumer_proven"
 
-    def test_consumer_proven_reachability_kind_never_demotes_a_stronger_kind(
-        self,
-    ) -> None:
-        # A CONSUMER_RUNTIME_LOAD_FAILED change never carries
-        # reachability_kind="consumer_proven" in practice (it's always
-        # "consumer_proven" too, per cli_helpers_compare.py -- but even if it
-        # did, runtime_proven must not be demoted by the promotion rule).
-        removed = _change(kind=ChangeKind.FUNC_REMOVED, symbol="s")
-        runtime = _change(
-            kind=ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
-            symbol="s",
-            reachability_kind="consumer_proven",
-        )
-        groups = correlate_root_causes([removed, runtime])
-        levels_by_kind = {c.kind: level for c, level in groups[0].members}
-        assert (
-            levels_by_kind[ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED] == "runtime_proven"
-        )
-
     def test_overapprox_call_graph_path_is_downgraded(self) -> None:
         # internal_leak.compute_call_graph_leak_paths prefixes a proof path
         # crossing a virtual/function-pointer dispatch with "overapprox: "
@@ -200,7 +181,7 @@ class TestCorrelateRootCauses:
         groups = correlate_root_causes([removed, leaked, overlay])
         assert groups[0].strongest_evidence_level == "consumer_proven"
 
-    def test_all_four_kinds_rank_runtime_proven_strongest(self) -> None:
+    def test_all_kinds_rank_consumer_proven_strongest(self) -> None:
         pieces = [
             _change(kind=ChangeKind.FUNC_REMOVED, symbol="s"),
             _change(
@@ -209,18 +190,16 @@ class TestCorrelateRootCauses:
                 caused_by_type="s",
             ),
             _change(kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, symbol="s"),
-            _change(kind=ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED, symbol="s"),
         ]
         groups = correlate_root_causes(pieces)
         assert len(groups) == 1
         group = groups[0]
-        assert len(group.members) == 4
-        assert group.strongest_evidence_level == "runtime_proven"
+        assert len(group.members) == 3
+        assert group.strongest_evidence_level == "consumer_proven"
         assert group.evidence_levels == (
             "artifact_proven",
             "call_graph_proven",
             "consumer_proven",
-            "runtime_proven",
         )
 
     def test_distinct_symbols_produce_distinct_groups_in_first_seen_order(self) -> None:
@@ -305,10 +284,9 @@ class TestEvidenceLevelVocabulary:
         levels = list(EVIDENCE_LEVEL_BY_KIND.values())
         assert len(levels) == len(set(levels))
 
-    def test_exactly_the_four_kinds_named_by_the_plan(self) -> None:
+    def test_exactly_the_kinds_named_by_the_plan(self) -> None:
         assert set(EVIDENCE_LEVEL_BY_KIND) == {
             ChangeKind.FUNC_REMOVED,
             ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
-            ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
         }

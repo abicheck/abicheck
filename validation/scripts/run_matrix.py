@@ -219,7 +219,9 @@ def run_matrix(manifest: list[dict], *, ex_root: str = EX, out_dir: str = OUT) -
                 "json",
                 "-o",
                 jpath,
-                "--recommend",
+                # --recommend removed (CLI cleanup phase two, PR 1) --
+                # --format json already carries release_recommendation
+                # unconditionally, which the read below already relies on.
             ]
             rc, _stdout, se, dt = run(cmd)
             data = None

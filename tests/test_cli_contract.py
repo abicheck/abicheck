@@ -24,7 +24,6 @@ a given pair identically (no ``scope_public`` default drift).
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -372,16 +371,30 @@ def test_ast_frontend_is_the_only_frontend_spelling(cmd_name: str) -> None:
     assert "--header-backend" not in param.opts
 
 
-def test_per_side_ast_frontend_has_no_legacy_alias() -> None:
-    """Per-side ``--old/new-ast-frontend`` carry no legacy ``--*-header-backend``."""
+def test_per_side_ast_frontend_is_spelled_on_ast_frontend_itself() -> None:
+    """The per-side frontend override is ``--ast-frontend old=``/``new=``.
+
+    ADR-040 Lever 1's side-prefix convention, not a third and fourth flag:
+    the separate ``--ast-frontend old=``/``--ast-frontend new=`` pair (and the
+    ``--*-header-backend`` aliases before it) are gone, and ``compare``'s
+    ``--ast-frontend`` is repeatable so each side can name its own.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
     cmd = _registered_commands()["compare"]
-    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
-    for dest, new, old in (
-        ("old_header_backend", "--old-ast-frontend", "--old-header-backend"),
-        ("new_header_backend", "--new-ast-frontend", "--new-header-backend"),
-    ):
-        assert new in by_dest[dest].opts
-        assert old not in by_dest[dest].opts
+    dests = {p.name for p in cmd.params}  # type: ignore[attr-defined]
+    assert "old_header_backend" not in dests
+    assert "new_header_backend" not in dests
+
+    param = {p.name: p for p in cmd.params}["header_backend"]  # type: ignore[attr-defined]
+    assert param.multiple
+    assert param.opts == ["--ast-frontend"]
+
+    out = CliRunner().invoke(main, ["compare", "--help-all"]).output
+    assert "--ast-frontend old=" not in out
+    assert "--ast-frontend new=" not in out
 
 
 def test_legacy_header_backend_flag_is_rejected(
@@ -448,8 +461,6 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate",
-        "--annotate-additions",
         "--allow-ast-frontend-fallback",
         "--allow-unsupported-castxml",
         "--ast-frontend",
@@ -457,13 +468,11 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--btf",
         "--bundle-cohort",
         "--bundle-system-providers",
-        "--collapse-versioned-symbols",
         "--compiler",
         "--compiler-option",
         "--compiler-prefix",
         "--config",
         "--contract",
-        "--contract-evaluation",
         "--ctf",
         "--debug-format",
         "--debug-root",
@@ -487,23 +496,19 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--follow-deps",
         "--format",
         "--frontend-context",
-        "--gcc-option",
-        "--gcc-path",
-        "--gcc-prefix",
         "--header",
         "--header-graph",
         "--header-graph-includes",
         "--help",
         "--help-all",
         "--include",
-        "--include-dependencies",
+        "--include-system-declarations",
         "--include-private-dso",
         "--jobs",
         "--keep-extracted",
         "--lang",
         "--ld-library-path",
         "--manifest",
-        "--new-ast-frontend",
         "--no-bundle-analysis",
         "--no-debuginfod",
         "--no-demangle",
@@ -512,50 +517,34 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--no-nostdinc",
         "--no-pattern-verdicts",
         "--no-scope-public-headers",
-        "--no-show-redundant",
         "--nostdinc",
-        "--old-ast-frontend",
         "--output",
         "--output-dir",
         "--pack",
         "--pattern-verdicts",
         "--pdb-path",
         "--policy",
-        "--policy-file",
         "--post-manifest",
         "--probe-matrix",
         "--profile",
-        "--public-symbol",
-        "--public-symbols-list",
-        "--recommend",
         "--reconcile-build-context",
         "--report-mode",
         "--require-complete-analysis",
-        "--require-justification",
         "--required-symbol",
         "--required-symbols",
         "--scope-public-headers",
         "--search-path",
-        "--secondary-format",
-        "--secondary-output",
-        "--severity-abi-breaking",
-        "--severity-addition",
-        "--severity-potential-breaking",
         "--severity-preset",
-        "--severity-quality-issues",
         "--show-filtered",
-        "--show-impact",
         "--show-only",
-        "--show-redundant",
         "--sources",
-        "--stat",
-        "--strict-suppressions",
         "--suppress",
         "--surface-metrics",
         "--sysroot",
+        "--use-cases",
         "--used-by",
         "--verbose",
-        "--verify-runtime",
+        "--write",
         "--version",
         "-H",
         "-I",
@@ -609,44 +598,36 @@ def test_header_graph_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
 
 
 @pytest.mark.parametrize("cmd_name", ["compare", "dump", "scan"])
-def test_gcc_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
-    """CLI audit PR 2/5: --gcc-path/--gcc-prefix/--gcc-option are deprecated,
-    hidden aliases for --compiler/--compiler-prefix/--compiler-option —
-    absent from both --help and --help-all (unlike the curated/full M2 split,
-    this is a straight hide: the legacy spelling is superseded, not merely
-    advanced), but still accepted and still functional (see
-    abicheck.cli_options._merge_compiler_aliases and
-    test_compile_context_parity.py for the merge/precedence/deprecation-note
-    coverage), so an existing script/CI invocation that still passes them
-    doesn't hard-break."""
+def test_removed_gcc_spellings_are_gone_entirely(cmd_name: str) -> None:
+    """--gcc-path/--gcc-prefix/--gcc-option are removed, not hidden.
+
+    They were briefly kept as hidden-but-functional aliases for
+    --compiler/--compiler-prefix/--compiler-option. Carrying two spellings
+    meant a per-invocation conflict resolver whose only correct answer for
+    the repeatable option pair was to reject mixing them, so the legacy
+    names were dropped outright (pre-1.0) rather than deprecated in place.
+    A caller still passing one now gets a hard usage error naming the flag,
+    which is strictly better than a silently-ignored value."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    # Match the option's own rendered row (flag name padded, then its TEXT/
-    # metavar column) rather than a bare substring: --compiler-prefix's own
-    # help text legitimately *mentions* "--gcc-path"/"--gcc-prefix" in prose
-    # ("wins over the deprecated --gcc-path if both are given"), which a
-    # plain substring check would misread as the option itself leaking.
-    option_row = re.compile(r"(--gcc-path|--gcc-prefix|--gcc-option)\s+TEXT")
-    for help_flag in ("--help", "--help-all"):
-        result = CliRunner().invoke(main, [cmd_name, help_flag])
-        assert not option_row.search(result.output), (cmd_name, help_flag)
-    # --compiler is itself an advanced/toolchain-tier flag (same disclosure
-    # tier the old --gcc-path occupied), so it's only guaranteed visible on
-    # --help-all -- curated --help folds it away too, same as before.
-    help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
-    assert "--compiler" in help_all_output, cmd_name
-
     commands = _registered_commands()
     cmd = commands[cmd_name]
-    hidden_flags = {
-        p.opts[0]
-        for p in cmd.params  # type: ignore[attr-defined]
-        if getattr(p, "hidden", False)
-        and p.opts[0] in ("--gcc-path", "--gcc-prefix", "--gcc-option")
-    }
-    assert hidden_flags == {"--gcc-path", "--gcc-prefix", "--gcc-option"}
+    dests = {p.name for p in cmd.params}  # type: ignore[attr-defined]
+    spellings = {opt for p in cmd.params for opt in p.opts}  # type: ignore[attr-defined]
+    assert not spellings & {"--gcc-path", "--gcc-prefix", "--gcc-option"}, cmd_name
+    assert not dests & {"gcc_path", "gcc_prefix", "gcc_option_tokens"}, cmd_name
+
+    for help_flag in ("--help", "--help-all"):
+        result = CliRunner().invoke(main, [cmd_name, help_flag])
+        assert "--gcc-path" not in result.output, (cmd_name, help_flag)
+        assert "--gcc-prefix" not in result.output, (cmd_name, help_flag)
+        assert "--gcc-option" not in result.output, (cmd_name, help_flag)
+    # --compiler is an advanced/toolchain-tier flag (the same disclosure tier
+    # the old --gcc-path occupied), so it's only guaranteed on --help-all.
+    help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
+    assert "--compiler" in help_all_output, cmd_name
 
 
 def _all_leaf_commands() -> list[tuple[str, object]]:
@@ -674,7 +655,7 @@ def test_no_option_has_empty_help() -> None:
     A blank ``--help`` line is a UX defect (the flag shows with no description).
     Hidden options are exempt — they are deliberately off the help surface. This
     guards the cleanup that routed `-v/--verbose` through `@verbose_option` and
-    filled the stray blank `-o`/`--format`/`--policy-file` strings.
+    filled the stray blank `-o`/`--format`/`--policy` strings.
     """
     import click
 
@@ -887,7 +868,7 @@ def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
 
 
 def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
-    """``--contract`` alone now implies ``--contract-evaluation`` (ADR-049
+    """``--contract`` alone now implies ``--contract`` (ADR-049
     Phase 6, CLI audit PR 3/5: abicheck.cli_options.resolve_contract_evaluation).
 
     It selects the domain the shadow evaluator judges against, and naming a
@@ -929,7 +910,6 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
             "compare",
             str(old_path),
             str(new_path),
-            "--contract-evaluation",
             "--contract",
             "exports",
             "--format",
@@ -942,12 +922,12 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
 
 
 def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> None:
-    """``--contract-evaluation``/``--contract`` now DO have per-library
+    """``--contract``/``--contract`` now DO have per-library
     fan-out wiring (CLI-audit P1, release/package contract parity) --
     ``_reject_set_input_flags`` no longer even accepts these two kwargs.
     See ``test_cli_compare_contract_evaluation.py::
     TestReleaseFanOutContractParity`` for the positive CLI-level coverage
-    (directory `compare` with `--contract-evaluation` now applies per
+    (directory `compare` with `--contract` now applies per
     library, same as a single-pair `compare`). ``--pack`` stays rejected
     for directory inputs -- see the same test class's
     ``test_pack_still_rejected_on_directory_inputs``.

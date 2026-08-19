@@ -45,7 +45,7 @@ _SNAP = AbiSnapshot(library="stub", version="0")
 class TestCompareHeaderMarksProvenance:
     """compare's --header is documented as "Public header file or directory"
 
-    (unlike dump's split -H/--public-header) — it must also be threaded
+    (unlike dump's former split -H/--public-header pair) — it must also be threaded
     through as the public-header set for provenance tagging, not just as
     castxml AST input. Regression: this was silently dropped, leaving every
     compare-on-native-binaries run in reduced-confidence "no-provenance" mode
@@ -674,6 +674,133 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     assert called["n"] == 0  # rejected before the inline dump ever runs
 
 
+def test_the_hybrid_rejection_names_only_live_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recovery hint that names a removed flag is worse than none.
+
+    The message told the user to pass ``--old-ast-frontend castxml`` /
+    ``--new-ast-frontend clang`` and described the operand as an
+    ``--old-sources`` tree. All three spellings are gone -- ``--ast-frontend``
+    and ``--sources`` are side-aware now -- so following the instruction
+    produced a second, unrelated unknown-option error (Codex review).
+    """
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("must not run the inline dump")
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    with pytest.raises(climod.click.UsageError) as excinfo:
+        climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="hybrid", compile_context=CompileContext(),
+            frontend_explicit=True, nostdinc_explicit=False, build_info=None,
+            follow_deps=False, search_paths=(),
+            ld_library_path="", dwarf_only=False, debug_format=None,
+            pdb_path=None, collect_mode="source-target", out_dir=tmp_path,
+            label="old", depth="source",
+        )
+    msg = str(excinfo.value)
+    for dead in ("--old-ast-frontend", "--new-ast-frontend", "--old-sources"):
+        assert dead not in msg, msg
+    # ...and it still names a real way out, so the fix is not just deletion.
+    assert "--ast-frontend old=castxml" in msg, msg
+    assert "--sources old=" in msg, msg
+
+
+def _embed_side_capturing_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    fmt: str | None,
+    collect_mode: str,
+    sources_raw: bool = True,
+    build_info_raw: bool = False,
+) -> str:
+    """Drive one ignored-evidence warning path and return what it printed."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    db = tmp_path / "compile_commands.json"
+    db.write_text("[]", encoding="utf-8")
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("must not reach the inline dump")
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), fmt))
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "old.json",
+        sources=tree if sources_raw else None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="castxml", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False,
+        build_info=db if build_info_raw else None,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode=collect_mode, out_dir=tmp_path,
+        label="old", depth=None,
+    )
+    return capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("sources_raw", "build_info_raw", "expected"),
+    [
+        (True, False, "--sources old= source tree"),
+        (False, True, "raw --build-info old="),
+        (True, True, "--sources old= source tree and raw --build-info old="),
+    ],
+)
+def test_a_snapshot_input_names_the_live_spelling_of_what_it_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    sources_raw: bool,
+    build_info_raw: bool,
+    expected: str,
+) -> None:
+    """A snapshot operand ignores raw evidence and says so -- in live flags.
+
+    The warning named an `--old-sources` tree and a `raw --old-build-info`;
+    both spellings are gone (`--sources`/`--build-info` are side-aware now),
+    so a reader following the message to re-run with the evidence attached
+    hit an unknown option (Codex review, alongside the frontend hint).
+    """
+    err = _embed_side_capturing_warning(
+        tmp_path, monkeypatch, capsys,
+        fmt=None, collect_mode="source-target",
+        sources_raw=sources_raw, build_info_raw=build_info_raw,
+    )
+    assert expected in err, err
+    for dead in ("--old-sources", "--old-build-info"):
+        assert dead not in err, err
+
+
+def test_a_depth_that_collects_nothing_names_the_live_spelling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The sibling path, same rewrite: --depth binary/headers resolves
+    # collect_mode to "off", so raw evidence is ignored with a note.
+    err = _embed_side_capturing_warning(
+        tmp_path, monkeypatch, capsys, fmt="elf", collect_mode="off",
+    )
+    assert "--sources old=/--build-info old= was given" in err, err
+    assert "--old-sources" not in err, err
+
+
 def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -884,12 +1011,12 @@ class TestCompareDispatch:
         assert code == 4
         assert "BREAKING" in out
 
-    @pytest.mark.parametrize("flag, expected", [("--include-dependencies", True), (None, False)])
+    @pytest.mark.parametrize("flag, expected", [("--include-system-declarations", True), (None, False)])
     def test_include_dependencies_reaches_set_comparison(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool,
     ) -> None:
         """Codex review: a directory/package ``compare`` used to drop
-        ``--include-dependencies`` entirely on its way through
+        ``--include-system-declarations`` entirely on its way through
         ``_dispatch_release_compare`` -> ``_compare_release_libraries`` ->
         ``_run_compare_pair``, so set comparisons stayed unfiltered
         regardless of the flag. Assert it now reaches the per-library engine
@@ -944,21 +1071,27 @@ class TestCompareDispatch:
         assert code != 0
         assert "--exit-code-scheme is not supported" in (out + err)
 
-    def test_secondary_format_rejected_on_set_inputs(self, tmp_path: Path) -> None:
-        # --secondary-format reuses the single comparison's DiffResult, which
-        # doesn't exist as a single object across the release fan-out.
+    def test_write_now_supported_on_set_inputs(self, tmp_path: Path) -> None:
+        # CLI cleanup phase two, PR E: --write now renders its secondary
+        # format from the same already-computed per-library results the
+        # release fan-out's primary format uses -- no second per-library
+        # DiffResult needed. See test_compare_release.py's
+        # TestReleaseWriteSecondaryOutput for the fuller positive coverage
+        # (including the no-rerun assertion).
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
+        write_path = tmp_path / "sec.json"
         code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--secondary-format", "json", "--secondary-output", str(tmp_path / "sec.json"),
+            "--write", f"json={write_path}",
         )
-        assert code != 0
-        assert "--secondary-format is not supported" in (out + err)
+        assert code == 0
+        assert write_path.is_file()
+        assert "--write is not supported" not in (out + err)
 
     def test_config_legacy_exit_scheme_applies_to_set_inputs(self, tmp_path: Path) -> None:
         # A project config may demote ABI-breaking findings to warnings for

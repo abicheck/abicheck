@@ -458,7 +458,7 @@
         "native-binary-compatibility-review"
       ],
       "category": "A",
-      "digest": "sha256:d87f0889924f9beee4c95039c7332836e3df16538fda41e56a6960f71dcd00f9",
+      "digest": "sha256:e79ee82c5b067e4a1a50aef30ca070fe9ea963c59548b6f9eda8418f34cb53f1",
       "expected": {
         "kinds": [
           "type_vtable_changed"
@@ -490,7 +490,7 @@
         "native-consumer-compatibility",
         "native-release-compatibility"
       ],
-      "digest": "sha256:37681454b57e50fd979443c523798c41741e43a5af67711f065778435d68329a",
+      "digest": "sha256:2d7a111e7515933d09aea5d4737b8881edf3e6a193f52ec1bd304994a2a5ab4a",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -534,7 +534,7 @@
       "roots": [
         ".agents/skills/native-api-evolution"
       ],
-      "tree": "sha256:82bedd4af6c3a479f5daadd57ab7e4b33d292ee0ce046de7c84a30b93bdccee3"
+      "tree": "sha256:e1bab8b37b7fd86a1688910e282e4ae6368143697f70f6d7fb745364dfa5e06c"
     },
     "native-binary-compatibility-review": {
       "affects": [
@@ -543,7 +543,7 @@
       "roots": [
         ".agents/skills/native-binary-compatibility-review"
       ],
-      "tree": "sha256:9a025207d688e150a88619ee5315d900cdf7914b172c4f2e731aa3e5cdea88fe"
+      "tree": "sha256:e3e3191dd4520c10b191b6273abfe903cbcf58ebbf0f8ff0351ef93f141f0341"
     },
     "native-consumer-compatibility": {
       "affects": [
@@ -552,7 +552,7 @@
       "roots": [
         ".agents/skills/native-consumer-compatibility"
       ],
-      "tree": "sha256:d832ef1e382e56ec2579e16c2851c06d46b3af2f71040d614f8ca23e639134f2"
+      "tree": "sha256:112ac1d17ebd839e23d629f07eaf0d555eaa5f619f2fd0f589918848341dba43"
     },
     "native-release-compatibility": {
       "affects": [
@@ -561,7 +561,7 @@
       "roots": [
         ".agents/skills/native-release-compatibility"
       ],
-      "tree": "sha256:863d6bb5cf1a786afeda9407f204f26c5e362778d0735c38c2078a49ba4a88e1"
+      "tree": "sha256:ebaf028c69626dd45c73681f619eb84622c6d5ddaabeeda2f00417ae0c222fc0"
     }
   }
 }

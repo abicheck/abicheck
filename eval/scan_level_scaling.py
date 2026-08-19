@@ -16,7 +16,7 @@
 
 ``eval/scaling.py`` times one knob (``ABICHECK_L4_JOBS``) on *one* real tree.
 This harness sweeps the **other** axis the field eval never automated: how each
-``scan`` *level* (``--depth binary|headers|build|source|full`` plus the
+``scan`` *level* (``--depth binary|headers|build|source`` plus the
 ``--source-method s4`` graph rung) scales as a project's **complexity** grows —
 TU count, per-TU symbol count, and C++ template/STL instantiation depth (the
 documented L4 cliff driver, see ``docs/contribute/performance.md`` §"Scan level
@@ -45,7 +45,7 @@ Reproduce::
 
     python eval/scan_level_scaling.py                       # default sweep
     python eval/scan_level_scaling.py --sizes 4,8,16 --depth 6
-    python eval/scan_level_scaling.py --levels binary,build,source,full
+    python eval/scan_level_scaling.py --levels binary,build,source_seeded,source
     python eval/scan_level_scaling.py --json-out reports/perf/scan_levels.json
 """
 
@@ -276,15 +276,25 @@ def _maxrss_to_mb(maxrss: int) -> float:
 #: The user-facing levels, in cost order. ``source`` (seedless s5) and
 #: ``source_seeded`` (s5 + a one-file ``--changed-path``) are split so the
 #: seed's effect — and the unscoped call-graph cost of the seedless run — is
-#: visible side by side.
-LEVELS = ("binary", "headers", "build", "graph", "source_seeded", "source", "full")
+#: visible side by side. There is no separate ``full`` level: the old
+#: ``--depth full`` rung was retired from the public CLI (ADR-043 D2) — it
+#: collapsed into ``source``, since replay *scope* (seeded/changed vs. the
+#: whole compile DB), not evidence depth, was the only thing distinguishing
+#: them, and `scan` itself resolves that scope from whether a change seed
+#: (``--since``/``--changed-path``) is present. This sweep's own seedless
+#: ``"source"`` entry *is* that old full-tree-replay shape today — adding a
+#: separate ``"full"`` entry back would just re-measure it under a second
+#: name, with the identical ``--depth`` argv (and, before this fix, with a
+#: literal ``click.BadParameter`` — ``full`` is not a valid ``--depth`` value
+#: anymore).
+LEVELS = ("binary", "headers", "build", "graph", "source_seeded", "source")
 
 #: Levels that need ``clang++`` (skipped when it is absent). Only ``binary`` is
 #: clang-free: ``--depth binary`` suppresses the L2 header AST, so it runs on the
 #: C++ compiler alone. Every other tier — including ``build``, since the harness
 #: always passes ``-H``/``--ast-frontend clang`` and the cumulative depth ladder
 #: puts L2 below L3 — parses headers with clang and fails without it.
-_NEEDS_CLANG = {"headers", "build", "graph", "source_seeded", "source", "full"}
+_NEEDS_CLANG = {"headers", "build", "graph", "source_seeded", "source"}
 
 
 def _level_args(level: str, seed: str) -> list[str]:
@@ -296,7 +306,6 @@ def _level_args(level: str, seed: str) -> list[str]:
         "graph": ["--source-method", "s4"],
         "source": ["--depth", "source"],
         "source_seeded": ["--depth", "source", "--changed-path", seed],
-        "full": ["--depth", "full"],
     }[level]
 
 

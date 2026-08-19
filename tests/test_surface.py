@@ -220,7 +220,7 @@ class TestComputePublicSurface:
 
     def test_unreferenced_private_header_enum_stays_out_of_surface(self):
         # Codex review: a source_header alone must not bypass provenance-based
-        # demotion. An enum from a header outside the --public-header boundary
+        # demotion. An enum from a header outside the -H/--header boundary
         # (origin=PRIVATE_HEADER) stays out of public_types even though it was
         # parsed from *some* header, so a private-header-only enum's value
         # change is still confidently demoted, not wrongly kept BREAKING.
@@ -383,7 +383,7 @@ class TestChangeClassification:
         # Codex review: source_header alone (case20's public-surface seed) must
         # not short-circuit provenance-based demotion. Even though this enum
         # was parsed from *a* header, its origin is PRIVATE_HEADER (outside the
-        # --public-header boundary), so its member-value change is still a
+        # -H/--header boundary), so its member-value change is still a
         # confident private-header demotion, not a false BREAKING.
         snap = AbiSnapshot(
             library="l",
@@ -1586,7 +1586,7 @@ class TestHiddenFriendSurface:
         exact qualified entry (private/system) but the *other* side's
         bare-name entry for the same owner exists with an ``UNKNOWN``
         origin (present, just unclassified — e.g. an older/non-qualified
-        producer that never ran with a --public-header set), that side
+        producer that never ran with a public-header set), that side
         neither confirms nor refutes private/system, and must not be
         silently ignored the way a genuinely *absent* owner is. The
         finding must stay retained rather than demote on the strength of
@@ -1695,7 +1695,7 @@ class TestHiddenFriendSurface:
 
 
 class TestWideningOverlay:
-    """--public-symbol / force_public_symbols promote a symbol into the
+    """scope.public_symbols / force_public_symbols promote a symbol into the
     public surface even when header provenance/export would demote it."""
 
     def _run(self, changes, old, new, force_public):
@@ -1760,7 +1760,11 @@ def test_collect_force_public_symbols_no_file():
 
 
 class TestWideningCLI:
-    """End-to-end: --public-symbol re-promotes a demoted finding via the CLI."""
+    """End-to-end: `scope.public_symbols` re-promotes a demoted finding.
+
+    Config-only: the `--public-symbol`/`--public-symbols-list` pair were
+    hidden CLI duplicates of this key and were removed.
+    """
 
     def _write(self, path, snap):
         from abicheck.serialization import snapshot_to_json
@@ -1788,7 +1792,7 @@ class TestWideningCLI:
         self._write(np_, new)
         return op, np_
 
-    def test_public_symbol_flag_repromotes_finding(self, tmp_path):
+    def test_config_public_symbols_repromotes_finding(self, tmp_path):
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -1801,6 +1805,10 @@ class TestWideningCLI:
         )
         assert "InternalCache" not in scoped.stdout
         # Scoped + widened: the change is back in the report.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "scope:\n  public_symbols: [InternalCache]\n", encoding="utf-8"
+        )
         widened = runner.invoke(
             main,
             [
@@ -1808,30 +1816,8 @@ class TestWideningCLI:
                 str(op),
                 str(np_),
                 "--scope-public-headers",
-                "--public-symbol",
-                "InternalCache",
+                "--config",
+                str(cfg),
             ],
         )
         assert "InternalCache" in widened.stdout
-
-    def test_public_symbols_list_file(self, tmp_path):
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        op, np_ = self._pair(tmp_path)
-        syms = tmp_path / "public.syms"
-        syms.write_text("# guaranteed exports\nInternalCache\n")
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            [
-                "compare",
-                str(op),
-                str(np_),
-                "--scope-public-headers",
-                "--public-symbols-list",
-                str(syms),
-            ],
-        )
-        assert "InternalCache" in result.stdout

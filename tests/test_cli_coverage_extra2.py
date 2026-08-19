@@ -365,7 +365,7 @@ class TestWriteSnapshotOutput:
         assert "basic_string" not in text
 
     def test_include_dependencies_keeps_full_dump(self, tmp_path: Path) -> None:
-        """dump --include-dependencies opts out of the default exclusion."""
+        """dump --include-system-declarations opts out of the default exclusion."""
         from abicheck.model import RecordType
 
         snap = AbiSnapshot(

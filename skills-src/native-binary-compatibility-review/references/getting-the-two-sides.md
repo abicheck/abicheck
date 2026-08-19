@@ -89,7 +89,7 @@ The same applies when one side is a snapshot: it already carries its own
 header evidence, so scope the live side only — `abicheck compare
 baseline.abi.json build/libfoo.so --header new=include/foo/api.h`.
 
-`--include`/`-I`, `--sysroot`, and `--gcc-option` shape the parse the same way
+`--include`/`-I`, `--sysroot`, and `--compiler-option` shape the parse the same way
 they shape the real build. They must match the real build, or the extracted
 surface is not the shipped one.
 
@@ -111,7 +111,7 @@ inputs resolve first.
 - [ ] Same compiler family, version, `-std=`, target, and ABI-relevant flags.
 - [ ] Same public headers in view on both sides.
 - [ ] Same dependency-scoping choice on both sides (both default, or both
-      `--include-dependencies`).
+      `--include-system-declarations`).
 - [ ] The old side is the baseline the user's question actually implies.
 
 Failing any of these, fix it before reading findings. Findings produced from

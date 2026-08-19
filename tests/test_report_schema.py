@@ -181,6 +181,23 @@ class TestReportValidatesAgainstSchema:
         with pytest.raises(jsonschema.ValidationError):
             self._validate(payload)
 
+    def test_nonzero_crosscheck_promotion_contribution_is_rejected(self):
+        """CodeRabbit review: crosscheck_promotion_contribution has no
+        meaning outside scan --against's own maintainer-promoted
+        --crosscheck KEY=error finding, and this schema validates only
+        native compare reports (scan's own report shape is never validated
+        against this file). A malformed compare report claiming a nonzero
+        contribution must fail schema validation, not silently pass under
+        a mere non-negativity floor."""
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        assert payload["exit"]["crosscheck_promotion_contribution"] == 0
+        self._validate(payload)
+        payload["exit"]["crosscheck_promotion_contribution"] = 1
+        with pytest.raises(jsonschema.ValidationError):
+            self._validate(payload)
+
     def test_breaking_report_validates(self):
         old, new = _breaking_pair()
         payload = json.loads(reporter.to_json(compare(old, new)))
@@ -305,7 +322,7 @@ class TestReportValidatesAgainstSchema:
         # evaluation's own help text promises every finding is stamped, but
         # only the JSON report (reporter._add_contract_evaluation_fields)
         # ever rendered the decision -- an ordinary `compare
-        # --contract-evaluation` run (default markdown format) was
+        # --contract` run (default markdown format) was
         # byte-for-byte identical to one without the flag.
         old, new = _breaking_pair()
         md_with = reporter.to_markdown(compare(old, new, contract_evaluation=True))

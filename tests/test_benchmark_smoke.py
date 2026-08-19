@@ -269,7 +269,7 @@ def test_case115_dump_pins_the_discovered_clang_binary(tmp_path):
     resolve which clang binary to run, and that resolution falls back to a
     bare "clang" on PATH, absent on hosts that ship only a versioned
     clang-18. The case115 override must pin the binary --first_available_tool
-    already discovered via --gcc-path, not rely on the bare-name fallback."""
+    already discovered via --compiler, not rely on the bare-name fallback."""
     mod = _load_benchmark()
     so = tmp_path / "lib.so"
     header = tmp_path / "api.h"
@@ -299,8 +299,8 @@ def test_case115_dump_pins_the_discovered_clang_binary(tmp_path):
     assert dumps
     for dump in dumps:
         assert "--ast-frontend" in dump and "clang" in dump
-        assert "--gcc-path" in dump
-        assert dump[dump.index("--gcc-path") + 1] == "/usr/bin/clang-18"
+        assert "--compiler" in dump
+        assert dump[dump.index("--compiler") + 1] == "/usr/bin/clang-18"
 
 
 def _write_plugin_pack(pack, version, source, *, with_facts=True):
@@ -379,7 +379,7 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
 
 
 def test_abicheck_full_case115_dump_pins_the_discovered_clang_binary(tmp_path):
-    """Same --gcc-path requirement as the L2 lane (see
+    """Same --compiler requirement as the L2 lane (see
     test_case115_dump_pins_the_discovered_clang_binary): the L3-L5 lane's own
     case115 override must not rely on a bare "clang" being on PATH."""
     mod = _load_benchmark()
@@ -435,8 +435,8 @@ def test_abicheck_full_case115_dump_pins_the_discovered_clang_binary(tmp_path):
     assert dumps
     for dump in dumps:
         assert "--ast-frontend" in dump and "clang" in dump
-        assert "--gcc-path" in dump
-        assert dump[dump.index("--gcc-path") + 1] == "/usr/bin/clang-18"
+        assert "--compiler" in dump
+        assert dump[dump.index("--compiler") + 1] == "/usr/bin/clang-18"
 
 
 def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):

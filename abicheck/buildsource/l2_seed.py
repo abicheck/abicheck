@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from .._compiler_options import split_gcc_options
 from ..compile_context import CompileContext
 from .inline import (
     BuildConfig,
@@ -54,6 +55,7 @@ def _l2_seed_config(
     sources: Path | None,
     build_query: str | None,
     build_compile_db: str | None,
+    build_targets: tuple[str, ...] = (),
 ) -> BuildConfig | None:
     """The effective ``BuildConfig`` for L2 seeding, or ``None`` to degrade.
 
@@ -64,6 +66,14 @@ def _l2_seed_config(
     but never run), then folds the CLI build-DB overrides in exactly as embed
     does, so L2 seeding resolves the *same* DB L3 will.
 
+    ``build_targets`` (P0.2, Codex review): folded in the same way, so an
+    explicit ``--build-target`` scopes the L2 include/compile-context seed's
+    own ``collect_inline_pack`` call identically to ``embed_build_source``'s
+    L3/L4/L5 collection -- without this, a multi-target Bazel workspace could
+    seed L2 from an unrelated target's include dirs/dialect flags even though
+    the caller explicitly scoped L3 evidence to one root, producing a snapshot
+    parsed under the wrong compile context despite target-scoped L3 evidence.
+
     A malformed/invalid config surfaces loudly elsewhere (``embed_build_source``,
     the compile-context resolver); this is a best-effort include-dir hint, so it
     degrades to "no seeded dirs" rather than raising through.
@@ -73,7 +83,7 @@ def _l2_seed_config(
         cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
     except ValueError:
         return None
-    if build_query is None and build_compile_db is None:
+    if build_query is None and build_compile_db is None and not build_targets:
         return cfg
     return dataclasses.replace(
         cfg,
@@ -81,6 +91,7 @@ def _l2_seed_config(
         compile_db=(
             build_compile_db if build_compile_db is not None else cfg.compile_db
         ),
+        targets=list(build_targets) if build_targets else cfg.targets,
     )
 
 
@@ -142,12 +153,15 @@ def _resolve_l2_seed_pack_args(
     build_info: Path | None,
     build_query: str | None,
     build_compile_db: str | None,
+    build_targets: tuple[str, ...] = (),
 ) -> _L2SeedPackArgs | None:
     """Resolve *build_config*/*sources*/*build_info* into ``collect_inline_pack``
     call arguments, or ``None`` when there is no config to seed from (the
     caller's existing "nothing to apply" degrade).
     """
-    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
+    cfg = _l2_seed_config(
+        build_config, sources, build_query, build_compile_db, build_targets
+    )
     if cfg is None:
         return None
     base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(build_info, sources)
@@ -203,6 +217,23 @@ def _existing_include_dirs(units: Iterable[Any]) -> list[str]:
     on the same host as the build, so ``~`` is expanded back before the
     existence check — otherwise every home-rooted include dir (the common CI
     case this fallback targets) would be silently dropped.
+
+    Scans exactly the *units* it is handed, and it is the caller's job to hand
+    it the narrowest honest set. :func:`seed_includes_and_fold_compile_context`
+    passes ``HeaderCompileContextResolution.matched_units`` whenever the fold
+    matched any (plan PR 3B / PR D), closing the gap where an unrelated TU's
+    own generated-header directory could ride along in this seed and shadow
+    the matched TU's own colliding header — on a run that then stamped
+    ``parsed_with_build_context`` from the (separate) successful fold, so it
+    read as *more* authoritative than the seed actually was. It falls back to
+    every compile unit only when nothing matched, which is the case this seed
+    was built for in the first place (a public header the compile DB does not
+    cover, reaching into a dependency SDK) and where there is no narrower set
+    to prefer.
+
+    :func:`derive_l2_include_dirs` still passes every unit, and correctly so:
+    it takes no ``headers`` argument at all, so it has nothing to match
+    against.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -224,6 +255,7 @@ def derive_l2_include_dirs(
     *,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     allow_inferred_build_query: bool = True,
 ) -> tuple[list[str], list[Callable[[], None]]]:
     """Best-effort ``-I``/``-isystem`` dirs from the build's compile DB, + cleanups.
@@ -259,7 +291,12 @@ def derive_l2_include_dirs(
         # (Codex review — this call used to live inside this try before the
         # shared-helper extraction, and moved ahead of it by mistake).
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db
+            build_config,
+            sources,
+            build_info,
+            build_query,
+            build_compile_db,
+            build_targets,
         )
         if args is None:
             return [], []
@@ -305,6 +342,7 @@ def derive_l2_compile_context(
     *,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     allow_inferred_build_query: bool = True,
     explicit: CompileContext | None = None,
     lang: str | None = None,
@@ -375,7 +413,12 @@ def derive_l2_compile_context(
         # corrupt/unreadable pack must degrade best-effort, not raise
         # (Codex review).
         args = _resolve_l2_seed_pack_args(
-            build_config, sources, build_info, build_query, build_compile_db
+            build_config,
+            sources,
+            build_info,
+            build_query,
+            build_compile_db,
+            build_targets,
         )
         if args is None:
             return None, []
@@ -412,6 +455,399 @@ def derive_l2_compile_context(
         return None, []
 
 
+def _merge_l3_compile_context(
+    explicit: CompileContext | None, derived: CompileContext | None
+) -> CompileContext | None:
+    """Fold *derived* (L3-derived, P0.3) ahead of *explicit* (user-supplied).
+
+    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``
+    (``cli_helpers_compare._merge_gcc_options``): the build-derived flags lead
+    and the caller's own explicit representation is appended after — so an
+    explicit, later token still wins any literal redefinition (e.g. a
+    caller's own ``-DFOO=2`` after a derived ``-DFOO=1`` — the compiler uses
+    the last ``-D`` for a given macro) without this function needing to know
+    which tokens actually conflict. ``derived`` with no tokens at all (a
+    matched compile unit with nothing ABI-relevant to forward — still real
+    evidence, see ``header_compile_context``'s own docstring) is a no-op here;
+    the caller still stamps ``parsed_with_build_context`` in that case since
+    context genuinely *was* resolved and applied (as the empty flag list).
+
+    Finding 2: "derived leads, explicit wins" only holds if *every*
+    representation of the explicit value actually lands after every derived
+    token in the rendered command — not just ``gcc_option_tokens`` entries.
+    Both header command builders (``dumper_ast_config._build_castxml_command``/
+    ``_build_clang_header_command``) render the structured ``sysroot`` field
+    and the free-form ``gcc_options`` string *before* ``gcc_option_tokens``,
+    so merely prepending ``derived.gcc_option_tokens`` to
+    ``explicit.gcc_option_tokens`` (as before) left ``explicit.sysroot``/
+    ``explicit.gcc_options`` — rendered earlier in the command — silently
+    overridden by a later, conflicting derived token instead of winning.
+    Folding both structured representations into trailing tokens (and
+    clearing the structured fields, so the command builders no longer also
+    emit them in their old, too-early position) puts every explicit
+    representation strictly after every derived one, regardless of which of
+    the three explicit channels (``sysroot``, ``gcc_options``,
+    ``gcc_option_tokens``) it came through.
+
+    Moved here from ``service_input_resolution.py`` (P0.3 dump-path fold):
+    that module already imports :func:`derive_l2_compile_context` from this
+    one, so this function living there too would have closed a
+    ``l2_seed -> service_input_resolution -> cli_dump_helpers -> l2_seed``
+    import cycle once ``cli_dump_helpers`` needed it directly (AGENTS.md
+    "What NOT to do" -- prefer a leaf module both sides can depend on over
+    extending ``IMPORT_CYCLE_ALLOWLIST``). ``service_input_resolution``'s
+    own ``_seeded_includes_and_compile_context`` (PR C, typed dump/scan
+    convergence) reaches it indirectly through
+    :func:`seed_includes_and_fold_compile_context` below instead.
+
+    "Derived leads, explicit wins" is *not* the right rule for an include
+    search path (Codex review): unlike a macro/std/sysroot switch, which a
+    real compiler resolves last-flag-wins, ``-I``/``-isystem`` entries are
+    first-match-wins, so putting a derived ``CompileUnit.include_paths``/
+    ``system_include_paths`` entry (:func:`header_compile_context.
+    _context_flags` renders both) ahead of an explicit one silently prefers
+    the build's own header over a caller's explicit override for a
+    colliding basename. :func:`_split_include_tokens` carves derived's own
+    include-search entries out of the leading (last-flag-wins) group and
+    appends them *after* explicit instead, so explicit's own ``-I``/
+    ``-isystem`` (wherever it came from) always searches first, while every
+    other derived token keeps its original leading, overridable position.
+
+    Finding 3 (P1 review, ``discussion_r3787772668``, P0.3 follow-up round
+    2): ``derived.gcc_path`` (``header_compile_context._derived_gcc_path`` —
+    the matched compile unit's own compiler, set when it is genuinely
+    MSVC/clang-cl-dialect) was never read here at all, only ``derived``'s
+    option-token fields — so even once ``resolve_header_compile_context``
+    started returning a real ``gcc_path``, this merge silently discarded it,
+    and the L2 header parse still defaulted to a plain ``clang++`` that
+    cannot parse the retained ``/std:`` survivor. Unlike ``sysroot``/
+    ``gcc_options`` (foldable, "derived leads, explicit wins" via
+    trailing-token order), ``gcc_path``/``gcc_prefix`` each select a single
+    compiler and cannot be folded the same way — the natural per-field rule
+    mirrors this module's other explicit-pin precedents instead:
+    ``explicit.gcc_path`` (or ``gcc_prefix``) wins outright when the caller
+    already set one, and ``derived``'s value is used only when the caller
+    left it unset (the default). A caller's own explicit ``--gcc-path`` was
+    always going to be the correct choice regardless of what the matched
+    compile unit used, so this can only ever fill in a gap, never override
+    an explicit choice.
+
+    **``gcc_path``/``gcc_prefix`` are one logical compiler-selector, not two
+    independent fields (P2 review, ``discussion_r3788073754``, fresh
+    evidence).** ``dumper_clang._resolve_clang_bin`` always checks
+    ``gcc_path`` before ``gcc_prefix`` (a resolvable ``gcc_path`` wins
+    outright; ``gcc_prefix`` is only ever consulted when ``gcc_path`` is
+    absent or not clang-family) — so treating the two fields as
+    independently "derived fills an unset explicit field" broke a caller who
+    explicitly set *only* ``gcc_prefix`` (meaning "use this prefix, no
+    literal-path override"): a *different* ``derived.gcc_path`` from the
+    matched compile unit would still get merged in for the unset
+    ``explicit.gcc_path`` slot, and since ``_resolve_clang_bin`` checks
+    ``gcc_path`` first, the caller's actual intent (the explicit prefix) was
+    silently overridden by the derived path instead of winning. Fixed by
+    resolving both fields together as a single unit: if the caller
+    explicitly set *either* one, neither is inherited from ``derived`` (even
+    when the caller's own other field is unset) — only when the caller set
+    *neither* is ``derived``'s own ``(gcc_path, gcc_prefix)`` pair adopted,
+    together, from the same source.
+    """
+    if derived is None:
+        return explicit
+    if explicit is None:
+        return derived
+    explicit_tail: list[str] = []
+    if explicit.sysroot is not None:
+        explicit_tail.append(f"--sysroot={explicit.sysroot.as_posix()}")
+    if explicit.gcc_options:
+        try:
+            explicit_tail.extend(split_gcc_options(explicit.gcc_options))
+        except ValueError:
+            # Malformed --gcc-options must not abort the merge (mirrors
+            # _compiler_options.explicit_language_standard's own handling of
+            # the identical failure mode) -- fall back to forwarding it
+            # verbatim as one token so it is at least still present, rather
+            # than silently dropped.
+            explicit_tail.append(explicit.gcc_options)
+    derived_rest, derived_includes = _split_include_tokens(derived.gcc_option_tokens)
+    explicit_selector_set = (
+        explicit.gcc_path is not None or explicit.gcc_prefix is not None
+    )
+    if explicit_selector_set:
+        gcc_path = explicit.gcc_path
+        gcc_prefix = explicit.gcc_prefix
+    else:
+        gcc_path = derived.gcc_path
+        gcc_prefix = derived.gcc_prefix
+    return dataclasses.replace(
+        explicit,
+        sysroot=None,
+        gcc_options=None,
+        gcc_option_tokens=(
+            *derived_rest,
+            *explicit_tail,
+            *explicit.gcc_option_tokens,
+            *derived_includes,
+        ),
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+    )
+
+
+def _split_include_tokens(
+    tokens: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split *tokens* into ``(non_include, include)``, preserving order.
+
+    An include-search flag given as a separate operand (``-I dir`` /
+    ``/imsvc dir`` — the token equals the *bare* prefix exactly) consumes the
+    next token as its directory operand, so both travel together into
+    *include*; an attached form (``-Idir``) is self-contained. Mirrors
+    ``header_utils._flag_tokens``'s identical spaced-vs-attached distinction.
+
+    Known gap (Codex review, not fixed): this preserves the relative order
+    *within* the derived include tokens, but does not distinguish GCC/Clang's
+    distinct include-search *buckets* (``-iquote`` > ``-I`` > ``-isystem`` >
+    ``-idirafter``, each a separate search class regardless of argv
+    position) from a plain flat list. An explicit ``-isystem`` therefore
+    still searches ahead of a derived ``-iquote``/``-I`` after this split,
+    even though a real compiler would consult the quote/regular buckets
+    first regardless of flag order. Closing this needs the merge to track
+    bucket membership, not just include-vs-non-include -- a real, if narrow,
+    redesign of this function's output shape, not a follow-up to the
+    explicit-vs-derived ordering fix this function exists for.
+    """
+    from ..header_utils import _INCLUDE_FLAG_PREFIXES
+
+    non_include: list[str] = []
+    include: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        t = tokens[i]
+        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
+            include.append(t)
+            include.append(tokens[i + 1])
+            i += 2
+        elif any(t.startswith(p) for p in _INCLUDE_FLAG_PREFIXES):
+            include.append(t)
+            i += 1
+        else:
+            non_include.append(t)
+            i += 1
+    return tuple(non_include), tuple(include)
+
+
+def _include_operand_dirs(tokens: tuple[str, ...]) -> tuple[Path, ...]:
+    """Every directory in *tokens* an AST cache key must cover for staleness.
+
+    Thin alias for :func:`~abicheck.header_utils.cache_relevant_operand_paths`
+    -- the extraction moved to ``header_utils`` (a leaf module ``service.py``
+    already imports from too) once ``service._attach_header_graph``'s own
+    independent second header parse needed the identical extraction for its
+    own ``gcc_option_tokens`` (Codex review), and widened from include-search
+    dirs alone to their union with the dirs holding forced pre-included
+    headers once the L3->L2 fold started deriving those too (plan PR 3B /
+    PR D). Kept here under its original private name so this module's own
+    callers/tests don't need updating.
+    """
+    from ..header_utils import cache_relevant_operand_paths
+
+    return cache_relevant_operand_paths(tokens)
+
+
+def seed_includes_and_fold_compile_context(
+    *,
+    headers: list[Path] | tuple[Path, ...],
+    includes: list[Path] | tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    build_config: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+    build_targets: tuple[str, ...] = (),
+    collect_mode: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    frontend: str,
+    frontend_context: str,
+    lang: str,
+    lang_explicit: bool,
+    pending_cleanups: list[Callable[[], None]],
+) -> tuple[list[Path], bool, CompileContext, tuple[Path, ...]]:
+    """The L2 include-dir seed and the P0.3 L3->L2 compile-context fold,
+    combined into one L3 collection (Codex review, PR #782).
+
+    The two were originally two independent calls -- an inline
+    ``seed_l2_includes()`` call followed immediately by a since-removed
+    ``fold_l3_compile_context()`` helper -- each running its own
+    :func:`~abicheck.buildsource.inline.collect_inline_pack` -- harmless when
+    at most one can trigger the zero-config *inferred* build-system query
+    (cmake/make/bazel), but a caller passing the same ``--sources`` tree
+    through both, with an inferred query genuinely needed (no existing
+    compile database), hit a real deadlock-shaped bug: the first call's
+    claim on the deterministic build-dir lock (``build_query.
+    _claim_inferred_build_dir``) is a real ``flock`` held until its own
+    *cleanup* runs -- which is deliberately deferred until after the L2
+    header parse has consumed the seeded dirs, i.e. long after this
+    function returns -- so the second call's own inferred-query attempt
+    would contend on the identical lock and wait up to the 600s timeout
+    before falling back to a throwaway sibling dir. This function collects
+    the L3 evidence exactly once and derives both results from it, so only
+    one inferred query -- if any -- ever runs. All three ``dump``/``scan``
+    call sites that previously chained the two separate helpers now call
+    this one instead, which is why the older ``fold_l3_compile_context``
+    wrapper (once the shared primitive behind all three) was removed
+    entirely rather than left as dead code alongside it.
+
+    Returns ``(includes, l3_context_applied, l3_effective_context,
+    derived_include_dirs)`` -- ``includes`` is *includes* augmented with any
+    build-derived seed dirs (mirrors ``seed_l2_includes``'s own return);
+    ``l3_context_applied`` is ``True`` only when a real L3 context was found
+    and folded in (the caller's signal for stamping
+    ``AbiSnapshot.parsed_with_build_context``); ``l3_effective_context`` is
+    always real -- the explicit one unchanged when nothing was found, or the
+    merged result otherwise; ``derived_include_dirs`` is every directory a
+    derived ``-I``/``-isystem``/etc. token names (empty when nothing was
+    found), for a caller to fold into its own AST cache key's
+    ``extra_hash_dirs`` -- these dirs reach the header parse only as opaque
+    ``gcc_option_tokens`` strings, not as ``extra_includes``, so the cache
+    key's directory-mtime hashing would otherwise never cover them (Codex
+    review): editing a header under a derived include dir would otherwise
+    reuse a stale cached AST. Any temp-build-dir cleanups are appended to
+    *pending_cleanups* in place, to be drained only after the L2 parse has
+    consumed both the seeded include dirs and the derived compile context's
+    own directories.
+
+    May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
+    when the matched compile units genuinely disagree on an unpinned
+    ABI-relevant dimension -- callers should run this inside the same
+    ``try`` block that converts the main header-AST parse's own errors to a
+    ``click.ClickException``.
+    """
+    from ..errors import HeaderCompileContextAmbiguousError
+    from ..header_utils import _context_tokens, _has_include_build_context
+    from .header_compile_context import resolve_header_compile_context
+
+    explicit_ctx = CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=frontend,
+        frontend_context=frontend_context,
+    )
+    incs = list(includes)
+    # Mirrors seed_l2_includes' own gating exactly: an explicit -I list OR
+    # include dirs supplied through --compiler-option both suppress the
+    # include-dir fallback so the user's own search precedence is kept.
+    user_gave_includes = bool(incs) or _has_include_build_context(
+        _context_tokens(gcc_options, gcc_option_tokens)
+    )
+    want_seed = bool(headers) and not user_gave_includes
+    # The second clause reduces to `not headers`: want_seed is False whenever
+    # headers is empty (bool(headers) is its first operand), so "not want_seed
+    # and not headers" can only ever equal "not headers" -- confirmed via
+    # CodeRabbit review, which also flagged the now-removed `if not headers:`
+    # guard a few lines below as unreachable for the identical reason.
+    if (sources is None and build_info is None) or not headers:
+        return incs, False, explicit_ctx, ()
+
+    cleanups: list[Callable[[], None]] = []
+    try:
+        # Pack resolution stays inside this protected section, mirroring
+        # derive_l2_include_dirs's/derive_l2_compile_context's own identical
+        # comment: a corrupt/unreadable pack must degrade best-effort, not
+        # raise (Codex review) -- an earlier revision of this function had it
+        # outside the try, which reintroduced exactly that regression.
+        args = _resolve_l2_seed_pack_args(
+            build_config,
+            sources,
+            build_info,
+            build_query,
+            build_compile_db,
+            build_targets,
+        )
+        if args is None:
+            return incs, False, explicit_ctx, ()
+        pack = collect_inline_pack(
+            sources=args.sources,
+            build_info=args.build_info,
+            build_config=args.build_config,
+            build_config_trusted_for_query=args.build_config_trusted_for_query,
+            compile_db_explicit=args.compile_db_explicit,
+            allow_inferred_build_query=collect_mode != "off",
+            base_build=args.base_build,
+            layers=("L3",),
+            defer_cleanup=cleanups,
+        )
+        build_evidence = pack.build_evidence if pack is not None else None
+        units = build_evidence.compile_units if build_evidence is not None else []
+
+        # Resolve *before* seeding, so the seed can be restricted to the
+        # compile unit(s) that actually compile these headers (plan PR 3B /
+        # PR D). Ordering is otherwise unobservable: the one path that does
+        # not fall through to the seed below is the fail-closed ambiguity
+        # raise, which aborts the whole call either way.
+        resolution = resolve_header_compile_context(
+            build_evidence,
+            list(headers),
+            explicit=explicit_ctx,
+            lang=lang,
+            lang_explicit=lang_explicit,
+        )
+
+        if want_seed:
+            seed_units = list(resolution.matched_units) or units
+            seeded_dirs = _existing_include_dirs(seed_units)
+            if seeded_dirs:
+                logger.info(
+                    "L2 header parse: seeded %d include dir(s) from %s (no -I given).",
+                    len(seeded_dirs),
+                    (
+                        f"the {len(resolution.matched_units)} compile unit(s) "
+                        "matching these headers"
+                        if resolution.matched_units
+                        else "the build's compile database"
+                    ),
+                )
+                incs = incs + [Path(d) for d in seeded_dirs]
+
+        if resolution.context is None:
+            if cleanups:
+                pending_cleanups.extend(cleanups)
+            return incs, False, explicit_ctx, ()
+        # Hand *cleanups* over to the caller's own list only after every
+        # remaining fallible step has succeeded -- extending earlier (an
+        # earlier revision did it right after resolve_header_compile_context)
+        # left the same thunks in both pending_cleanups and this function's
+        # own `cleanups`, so a _merge_l3_compile_context/_include_operand_dirs
+        # failure below would have the except branch's _run_cleanups(cleanups)
+        # remove them a second time -- not fatal (_run_cleanups logs rather
+        # than raises on an already-closed handle), but still a real, visible
+        # double-removal a caller's own debug log would show (Codex/
+        # CodeRabbit review).
+        merged = _merge_l3_compile_context(explicit_ctx, resolution.context)
+        assert merged is not None  # both args non-None -> always merges
+        dirs = _include_operand_dirs(resolution.context.gcc_option_tokens)
+        if cleanups:
+            pending_cleanups.extend(cleanups)
+        return incs, True, merged, dirs
+    except HeaderCompileContextAmbiguousError:
+        # P0.3's fail-closed case: release any temp build dir this attempt
+        # created, then propagate -- never resolved by silently guessing.
+        _run_cleanups(cleanups)
+        raise
+    except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
+        _run_cleanups(cleanups)
+        return list(includes), False, explicit_ctx, ()
+
+
 def seed_l2_includes(
     *,
     headers: list[Path] | tuple[Path, ...],
@@ -422,6 +858,7 @@ def seed_l2_includes(
     defer_cleanup: list[Callable[[], None]] | None,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    build_targets: tuple[str, ...] = (),
     gcc_options: str | None = None,
     gcc_option_tokens: Sequence[str] = (),
     allow_inferred_build_query: bool = True,
@@ -435,7 +872,7 @@ def seed_l2_includes(
     those headers without a manual ``-I``.
 
     ``gcc_options``/``gcc_option_tokens`` are the pass-through compile flags
-    (``--gcc-options``/``--gcc-option``). Include dirs given through them (e.g.
+    (``--compiler-option``). Include dirs given through them (e.g.
     ``--gcc-options '-I /sdk/include'``) are as explicit as ``-I``, so the fallback
     treats them the same and stays a no-op — seeding compile-DB dirs as
     ``extra_includes`` on top would front-run the user's SDK in the dumper's search
@@ -457,7 +894,7 @@ def seed_l2_includes(
     from ..header_utils import _context_tokens, _has_include_build_context
 
     incs = list(includes)
-    # An explicit -I list OR include dirs supplied through --gcc-options/--gcc-option
+    # An explicit -I list OR include dirs supplied through --compiler-option
     # both count as "the user gave includes" — either suppresses the fallback so the
     # user's search precedence is preserved.
     user_gave_includes = bool(incs) or _has_include_build_context(
@@ -475,6 +912,7 @@ def seed_l2_includes(
         build_config,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        build_targets=build_targets,
         allow_inferred_build_query=allow_inferred_build_query,
     )
     if not derived:

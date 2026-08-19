@@ -344,7 +344,7 @@ def _add_severity_blocking_compatible_findings(
     ``_baseline_summary`` omits ``diff.compatible`` from ``findings`` because
     under the legacy scheme those findings never gate -- so naming them would
     be noise. Severity inverts that for two categories: with
-    ``--severity-addition error`` a compatible diff exits 1, and the report
+    ``severity.addition: error`` a compatible diff exits 1, and the report
     then named the blocking *category* and count while giving no symbol, kind,
     or description for the finding that actually failed the scan (Codex
     review).
@@ -417,8 +417,7 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
     """The compatible findings whose own category is one severity blamed.
 
     Slicing all of ``diff.compatible`` spent the report's budget on the
-    *non-blocking* compatible category too -- with ``--severity-addition
-    error`` a quality finding is as compatible as an addition, but only the
+    *non-blocking* compatible category too -- with ``severity.addition: error`` a quality finding is as compatible as an addition, but only the
     addition failed the run (Codex review). Classified through
     ``classify_change_object`` -- the same ``classify_effective_change`` the
     gate itself routed through -- so the two cannot disagree about which
@@ -543,7 +542,7 @@ def _baseline_finding_dicts(
     canonical identity ``reporter._change_to_dict`` emits, so the two are
     joinable rather than merely both present) and the four contract fields
     close the rest. The contract keys appear only when a finding actually
-    carries a decision -- i.e. under ``scan --against --contract-evaluation``
+    carries a decision -- i.e. under ``scan --against --contract``
     -- exactly as ``reporter._add_contract_evaluation_fields`` gates them,
     so an ordinary scan's summary is byte-identical to before.
 
@@ -619,7 +618,7 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
 
     Includes ADR-049 D1's ``compatibility_evaluation_status`` /
     ``compatibility_decision`` pair, and for the same reason as everything
-    else here: a `scan --against --contract-evaluation` row that carried
+    else here: a `scan --against --contract` row that carried
     relevance but not the decision could not be compared field-by-field with
     the `compare` finding for the same fact, which is exactly the
     cross-command divergence this projection exists to prevent (Codex
@@ -730,7 +729,12 @@ def _resolve_baseline_header_scope(
     return bl_headers, bl_includes, bl_public_headers, bl_public_dirs
 
 
-def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, Any]:
+def _baseline_summary(
+    diff: Any,
+    max_findings: int | None = None,
+    *,
+    require_complete_analysis: bool = False,
+) -> dict[str, Any]:
     """Build the always-on ``scan --against`` summary block from *diff*.
 
     Counts, detector provenance, the capped gating findings and the
@@ -745,6 +749,15 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
     accumulated into ``findings_truncated_kinds``/``suppressed_truncated_kinds``
     (kind -> count cut) so the shape of what was dropped is visible without
     rerunning at a higher cap.
+
+    *require_complete_analysis* mirrors the identically-named CLI flag: it
+    is stamped into the summary's own ``analysis_assurance_exit_contribution``
+    (schema 1.17) so a downstream reader -- chiefly ``abicheck aggregate``
+    (``aggregate.GateInfo.from_scan_report``, which reads only the nested
+    compatibility gate) -- can see whether this axis contributed to the
+    exit code without recomputing it, the same way
+    ``contract_coverage_exit_contribution`` already lets it read the
+    orthogonal coverage axis (Codex review).
     """
     cap = _resolve_max_baseline_findings(max_findings)
     summary: dict[str, Any] = {
@@ -918,6 +931,37 @@ def _baseline_summary(diff: Any, max_findings: int | None = None) -> dict[str, A
                 "suppressed_truncated_kinds",
                 (_change_kind_str(c) for c in suppressed_changes[cap:]),
             )
+    # P0.4: `compare`'s own JSON report always carries `analysis_assurance`
+    # (`reporter._add_analysis_assurance`, via the same narrowing helper),
+    # regardless of whether `--require-complete-analysis` was passed --
+    # `scan --against`'s summary carried nothing equivalent, so a caller
+    # could not tell how complete/trustworthy a scan's own evidence was
+    # (depth, TU/export accounting, header-context drift, ...) without a
+    # separate `compare` invocation. `checker.compare` (reached through
+    # `compare_snapshots` above) always attaches the result to *diff*, so
+    # this is unconditional here too, exactly like `compare`'s report.
+    from .analysis_assurance import (
+        analysis_assurance_exit_contribution,
+        analysis_assurance_report_dict,
+    )
+
+    if (aa_block := analysis_assurance_report_dict(diff)) is not None:
+        summary["analysis_assurance"] = aa_block
+        # Persisted alongside the block itself, not unconditionally: a
+        # `diff` carrying no real `AnalysisAssurance` (a hand-built object,
+        # e.g. in a test, or an older in-memory result) has nothing to
+        # report a contribution *for* either, and several existing callers
+        # assert this summary's exact key set for the "nothing to report"
+        # shape (back-compat with a consumer reading only the four
+        # top-level counts) -- an unconditional key here would silently
+        # break that contract the same way an unconditional
+        # `analysis_assurance` block would. `0` covers both "the flag was
+        # never given" and "given but already complete" (Codex review).
+        summary["analysis_assurance_exit_contribution"] = (
+            analysis_assurance_exit_contribution(
+                diff, require_complete=require_complete_analysis
+            )
+        )
     return summary
 
 
@@ -926,7 +970,7 @@ def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
 
     Installs this front end's own resolved configuration over the narrower
     object ``checker.compare`` reconstructs from its arguments, then emits the
-    whole persisted context -- which ``scan --against --contract-evaluation``
+    whole persisted context -- which ``scan --against --contract``
     computed and then dropped, so the receipt its per-finding decisions rest on
     was unobservable. Same encoder ``reporter._add_contract_context`` uses, so
     the block is byte-for-byte the one ``compare`` writes and
@@ -985,6 +1029,8 @@ def _run_baseline_compare(
     sev_config: Any = None,
     exit_code_scheme: str = "legacy",
     max_findings: int | None = None,
+    require_complete_analysis: bool = False,
+    requested_depth: str | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -1025,6 +1071,34 @@ def _run_baseline_compare(
     uses — so source-only / graph findings the collected evidence reveals are
     folded into the verdict too (``checker.compare`` itself does not read
     ``build_source``).
+
+    *require_complete_analysis* mirrors ``compare``'s own P0.4
+    ``--require-complete-analysis``: ``checker.compare`` (reached through
+    :func:`~abicheck.service.compare_snapshots` above) always attaches an
+    ``analysis_assurance`` result to *diff* regardless of this flag, and
+    :func:`_baseline_summary` always reports it in ``--format json`` --
+    this parameter only controls whether an incomplete status additionally
+    floors the returned exit code (folded with the same ``max`` discipline
+    :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` already
+    uses for its own orthogonal axis, immediately below).
+
+    *requested_depth* (Codex review, fresh evidence): the caller's own
+    explicitly-pinned ``--depth``/non-``auto`` ``--source-method`` (``None``
+    when the depth was only inferred, mirroring the exact "explicit
+    override, never inferred" discipline ``cli_compare_helpers.
+    _report_compare_result`` already applies for ``compare --depth``).
+    ``checker.compare()``'s own internal ``compute_analysis_assurance`` call
+    runs *before* this function ever sees *diff*, so it always reads
+    ``DiffResult.requested_depth`` as ``None`` regardless of what the scan
+    was actually pinned to -- without this, an explicit ``scan --against
+    --depth source --sources <tree>`` that never reached source evidence
+    (no compile database found, so the effective depth silently stayed
+    ``headers``) reported ``analysis_assurance.status="complete"`` (nothing
+    to compare the unset ``requested_depth`` against) even though the
+    evidence contract was demonstrably not satisfied, silently defeating
+    ``--require-complete-analysis``. When given, *diff* is stamped and
+    ``analysis_assurance`` is recomputed before the summary/exit-code fold
+    below so the requested-vs-effective gate has something real to check.
     """
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
@@ -1119,16 +1193,69 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
-    summary = _baseline_summary(diff, max_findings=max_findings)
+    # P0.4 (Codex review, fresh evidence): checker.compare()'s own internal
+    # compute_analysis_assurance call (inside compare_snapshots above) runs
+    # before this function ever sees *diff*, so it always reads
+    # DiffResult.requested_depth as None regardless of what this scan was
+    # actually pinned to -- mirroring the exact gap
+    # cli_compare_helpers._report_compare_result already closes for
+    # `compare --depth`. Stamp and recompute here so an explicit `scan
+    # --against --depth source` that never reached source evidence reports
+    # a genuinely incomplete status instead of silently reading "complete"
+    # (nothing to compare the unset requested_depth against) and defeating
+    # --require-complete-analysis.
+    if requested_depth is not None:
+        diff.requested_depth = requested_depth
+        from .analysis_assurance import compute_analysis_assurance
+
+        diff.analysis_assurance = compute_analysis_assurance(
+            diff,
+            old_snap,
+            new_snap,
+            old_pack=getattr(old_snap, "build_source", None),
+            new_pack=getattr(new_snap, "build_source", None),
+        )
+    summary = _baseline_summary(
+        diff,
+        max_findings=max_findings,
+        require_complete_analysis=require_complete_analysis,
+    )
     # ADR-049 Phase 5: install this front end's own resolved configuration
     # over the narrower object `checker.compare` reconstructs from its
     # arguments, then emit the whole persisted context -- which `scan
-    # --against --contract-evaluation` computed and then dropped, so the
+    # --against --contract` computed and then dropped, so the
     # receipt its per-finding decisions rest on was unobservable. Same
     # encoder `reporter._add_contract_context` uses, so the block is
     # byte-for-byte the one `compare` writes and `replay_original_decisions`
     # reads back.
     summary.update(_baseline_contract_block(diff, resolved_config))
+
+    # CLI cleanup phase two, PR E: the same canonical `ExitDecision`
+    # `reporter_contract_blocks.add_contract_context` persists for `compare`
+    # (PR G1, #789), now also persisted here so a `scan --against` report
+    # reader doesn't have to re-derive "why is this exit N" from the
+    # separately-emitted `severity`/`analysis_assurance_exit_contribution`/
+    # `contract_coverage_exit_contribution` fields. Nested under this
+    # baseline-compare summary (`diff.exit`), matching where those same
+    # constituent fields already live -- not at `ScanOutcome`'s own
+    # top-level `verdict`/`exit_code`, which additionally folds the
+    # scan-only budget/not-comparable/crosscheck-promotion axes
+    # `exit_decision.py`'s own module docstring explicitly defers to PR
+    # G2. `exit_scheme` mirrors the exact condition `base_exit` below is
+    # already computed under (not bare `exit_code_scheme`), so a caller
+    # that configured `exit_code_scheme="severity"` without ever resolving
+    # a `sev_config` gets the identical legacy-scheme answer both places
+    # agree on, rather than the resolver's severity branch's own assertion.
+    from .exit_decision import resolve_compare_exit_decision
+
+    exit_scheme = (
+        "severity" if exit_code_scheme == "severity" and sev_config is not None
+        else "legacy"
+    )
+    summary["exit"] = resolve_compare_exit_decision(
+        diff, sev_config, exit_scheme,
+        require_complete_analysis=require_complete_analysis,
+    ).to_dict()
 
     from .cli_compare_helpers import _verdict_exit_code
     from .contract_coverage_exit import fold_coverage_exit
@@ -1145,7 +1272,7 @@ def _run_baseline_compare(
 
         # §6.4 cross-command parity, and the reason this block is not
         # optional: under the severity scheme a *compatible* diff can exit
-        # non-zero (`--severity-addition error` on an additions-only diff
+        # non-zero (`severity.addition: error` on an additions-only diff
         # exits 1), and without the gate block the report said `COMPATIBLE`
         # with exit 1 and no stated cause -- indistinguishable from ADR-049's
         # orthogonal contract-coverage 1 (Codex review). Built by
@@ -1186,4 +1313,28 @@ def _run_baseline_compare(
     # the point -- a ledger that gated one command and not the other would be
     # exactly the cross-command divergence §6.4's Gate exists to catch.
     exit_code = fold_coverage_exit(base_exit, diff)
+    # P0.4: the analysis-assurance axis, folded the same `max` way and for
+    # the same reason -- `compare`'s own `_exit_with_severity_or_verdict`
+    # folds both immediately in sequence so a caller cannot pick up one
+    # orthogonal axis and forget the other. `0` contribution, and this is a
+    # pure no-op, whenever the flag was not passed (default False).
+    from .analysis_assurance import (
+        assurance_floor_diagnostic,
+        fold_analysis_assurance_exit,
+    )
+
+    # `compare`'s own `_exit_with_severity_or_verdict` echoes this same
+    # diagnostic to stderr unconditionally (Codex review, PR #780: without
+    # it, `action/run.sh`'s `_assurance_gated()` has nothing to grep for on
+    # the `scan` path -- it only reads stderr, since unlike the coverage
+    # ledger the JSON `analysis_assurance` block is not self-describing
+    # about whether `--require-complete-analysis` was even passed this run).
+    diagnostic = assurance_floor_diagnostic(
+        diff, require_complete=require_complete_analysis, base_exit=exit_code
+    )
+    if diagnostic is not None:
+        click.echo(diagnostic, err=True)
+    exit_code = fold_analysis_assurance_exit(
+        exit_code, diff, require_complete=require_complete_analysis
+    )
     return verdict, exit_code, summary

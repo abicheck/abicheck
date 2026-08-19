@@ -107,7 +107,8 @@ class TestDumpDryRun:
     def test_depth_build_with_matching_compile_db_does_not_block(
         self, tmp_path: Path
     ) -> None:
-        # External review: loading a -p/--compile-db and checking whether it
+        # External review: loading the compilation database --build-info
+        # resolves to and checking whether it
         # matches the resolved headers is cheap, deterministic, read-only
         # resolution -- not "real work out of scope for a dry run". A
         # genuinely matching compile database is a definite pass, with no
@@ -129,7 +130,7 @@ class TestDumpDryRun:
             main,
             [
                 "dump", str(snap), "--dry-run", "--depth", "build",
-                "-H", str(header), "-p", str(db),
+                "-H", str(header), "--build-info", str(db),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -139,11 +140,11 @@ class TestDumpDryRun:
         # is not what this test targets).
         assert "would carry only L0-L2 data." not in result.output
 
-    def test_depth_build_dry_run_reports_compile_db_reused_as_l3(
+    def test_depth_build_dry_run_reports_compile_db_as_the_l3_source(
         self, tmp_path: Path
     ) -> None:
-        # AC-007 (Codex): the real run reuses a matched -p/--compile-db as the L3
-        # build source when no --build-info is given, so the dry-run report must
+        # AC-007 (Codex): --build-info *is* the L3 build source, and the real
+        # run reads a compilation database off it, so the dry-run report must
         # describe that (its L3 source), not claim "no --build-info given".
         snap = tmp_path / "lib.abi.json"
         _write_snapshot(snap)
@@ -162,11 +163,11 @@ class TestDumpDryRun:
             main,
             [
                 "dump", str(snap), "--dry-run", "--depth", "build",
-                "-H", str(header), "-p", str(db),
+                "-H", str(header), "--build-info", str(db),
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "reused from -p/--compile-db" in result.output
+        assert "--build-info resolved to a compilation database" in result.output
         assert "no --sources/--build-info given -- L0-L2 only" not in result.output
 
     def test_depth_build_with_unmatched_compile_db_blocks(self, tmp_path: Path) -> None:
@@ -184,31 +185,130 @@ class TestDumpDryRun:
             main,
             [
                 "dump", str(snap), "--dry-run", "--depth", "build",
-                "-H", str(header), "-p", str(db),
+                "-H", str(header), "--build-info", str(db),
             ],
         )
         assert result.exit_code == 1, result.output
         assert "no entry matching the resolved headers" in result.output
 
-    def test_compile_db_without_headers_is_usage_error(self, tmp_path: Path) -> None:
-        # resolve_dump_compile_db raises a UsageError (exit 64) for -p
-        # without -H in the real run; dry-run previously never checked this
-        # at all (the check only existed in the real path, after the
-        # dry-run branch had already returned), so it used to report
-        # success here. CodeRabbit review: an earlier fix encoded this as a
-        # DryRunResult blocker (exit 1) instead of matching the real run's
-        # actual exit code -- it must raise the identical UsageError, not a
-        # softer evidence-blocker.
+    def test_build_info_without_headers_is_not_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        # The removed -p/--compile-db flag was header-only input: it existed
+        # solely to give the header parse a compile context, so using it
+        # without -H was a UsageError (exit 64). --build-info is not that
+        # flag -- it is the general build/source input, legitimate on its own
+        # -- so the same combination must now be accepted, and the compile
+        # database simply never gets derived from it (compile_db_from_build_info
+        # answers None with no headers to match against). The dry run and the
+        # real run agree on that, which is what this pins.
         so = tmp_path / "libfoo.so"
         so.write_bytes(b"\x7fELF" + b"\x00" * 60)
         db = tmp_path / "compile_commands.json"
         db.write_text("[]", encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["dump", str(so), "--dry-run", "-p", str(db)]
+            main, ["dump", str(so), "--dry-run", "--build-info", str(db)]
         )
-        assert result.exit_code == 64, result.output
-        assert "Usage:" in result.output
-        assert "requires -H/--header" in result.output
+        assert result.exit_code == 0, result.output
+        assert "requires -H/--header" not in result.output
+        assert f"--build-info: {db}" in result.output
+        # No headers -> no compile database is read off --build-info, so the
+        # L2 compile-context line must not claim one.
+        assert "resolved to a compilation database" not in result.output
+
+    def test_compile_db_from_build_info_needs_headers(self, tmp_path: Path) -> None:
+        # The primitive behind the test above, stated directly: the same
+        # --build-info answers a real database once headers are present and
+        # None when they are not, so the dry run cannot report a compile
+        # context the real run would not build.
+        from abicheck.cli_dump_helpers import compile_db_from_build_info
+
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        assert compile_db_from_build_info(db, ()) is None
+        assert compile_db_from_build_info(db, (header,)) == db
+        assert compile_db_from_build_info(None, (header,)) is None
+        # A directory operand resolves through its own compile_commands.json.
+        assert compile_db_from_build_info(tmp_path, (header,)) == db
+
+    def test_a_filter_that_would_scope_only_l2_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """--compile-db-filter parameterizes the header parse only, and L3
+        collection reads the same database through an adapter with no filter
+        of its own -- so a monorepo database would embed build facts for
+        translation units the filter excludes.
+
+        The removed -p/--compile-db spelling refused this outright
+        (`resolve_compile_db_l3_reuse` declined to promote a filtered header
+        database to L3). Folding the operand into --build-info removed that
+        decision point, turning a loud refusal into a silent unfiltered
+        collection (Codex review); this pins the refusal.
+        """
+        from abicheck.cli_dump_helpers import compile_db_filter_scope_error
+
+        db = tmp_path / "compile_commands.json"
+        assert compile_db_filter_scope_error("src/**", db, "source-target")
+        # Every way the combination cannot arise answers None.
+        assert compile_db_filter_scope_error(None, db, "source-target") is None
+        assert compile_db_filter_scope_error("src/**", None, "source-target") is None
+        assert compile_db_filter_scope_error("src/**", db, "off") is None
+
+    def test_the_filter_refusal_reaches_the_cli(self, tmp_path: Path) -> None:
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps([{
+                "directory": str(tmp_path),
+                "command": f"cc -c {header} -o f.o",
+                "file": str(header),
+            }]),
+            encoding="utf-8",
+        )
+        args = [
+            "dump", str(so), "--dry-run", "-H", str(header),
+            "--build-info", str(db), "--depth", "build",
+        ]
+        refused = CliRunner().invoke(main, [*args, "--compile-db-filter", "src/**"])
+        assert refused.exit_code == 64, refused.output
+        assert "--compile-db-filter scopes the L2 header parse only" in refused.output
+        # Without the filter the identical invocation is accepted, so the
+        # refusal is scoped to the combination and not to --build-info.
+        allowed = CliRunner().invoke(main, args)
+        assert allowed.exit_code == 0, allowed.output
+
+    def test_compile_db_from_build_info_rejects_a_bazel_jsonproto(
+        self, tmp_path: Path
+    ) -> None:
+        """--build-info also takes a Bazel aquery/cquery jsonproto, which the
+        Bazel adapter routes -- but only if this does not first claim it as a
+        compile database. Treating any file as one handed such a run to
+        `load_compile_db()`, which rejects a JSON object outright, so
+        `--build-info aquery.json -H api.h` failed before the adapter ran
+        (Codex review)."""
+        from abicheck.cli_dump_helpers import compile_db_from_build_info
+
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        aquery = tmp_path / "aquery.json"
+        aquery.write_text('{"actions": [], "targets": []}', encoding="utf-8")
+        assert compile_db_from_build_info(aquery, (header,)) is None
+
+        cquery = tmp_path / "cquery.json"
+        cquery.write_text('{"results": []}', encoding="utf-8")
+        assert compile_db_from_build_info(cquery, (header,)) is None
+
+        # And the same one level down, for a build directory whose
+        # compile_commands.json is not the array the loader requires.
+        nested = tmp_path / "build"
+        nested.mkdir()
+        (nested / "compile_commands.json").write_text("{}", encoding="utf-8")
+        assert compile_db_from_build_info(nested, (header,)) is None
 
     def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
         # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only

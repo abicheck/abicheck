@@ -714,7 +714,9 @@ class TestRedundancyNote:
         )
         text = to_markdown(result)
         assert "1 redundant change(s) hidden" in text
-        assert "--show-redundant" in text
+        # The --show-redundant flag was removed; the recovery instruction has
+        # to name the config key that replaced it, or following it errors out.
+        assert "scope.show_redundant" in text
 
     def test_no_redundancy_note_when_zero(self):
         result = _make_result(
@@ -854,7 +856,7 @@ class TestHtmlRedundancy:
         )
         html = generate_html_report(result, lib_name="lib.so")
         assert "1 redundant change(s)" in html
-        assert "--show-redundant" in html
+        assert "scope.show_redundant" in html
 
     def test_html_caused_count_displayed(self):
         from abicheck.html_report import generate_html_report

@@ -915,7 +915,7 @@ class TestCommittedRootsScoping:
         self,
     ) -> None:
         """Codex review, fresh evidence, follow-up to the forced-public
-        widening fix: `--public-symbol`/`force_public_symbols` explicitly
+        widening fix: `scope.public_symbols`/`force_public_symbols` explicitly
         accepts a "mangled or demangled name", so a namespaced value like
         `ns::api` must seed a root even though it matches neither the
         function's bare, unqualified `name` (castxml/direct-clang's own

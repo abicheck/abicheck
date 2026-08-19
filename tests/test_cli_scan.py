@@ -188,13 +188,26 @@ def test_scan_breaking_with_severity_default_still_exits_four(
     assert res.exit_code == 4, res.output
 
 
+@pytest.fixture
+def addition_error_config(tmp_path):
+    """A project config promoting additions to error.
+
+    The per-category severity levels are config-only -- the hidden
+    ``--severity-addition`` flag that duplicated this key was removed -- so
+    the tests that need one name a file.
+    """
+    cfg = tmp_path / "addition-error.abicheck.yml"
+    cfg.write_text("severity:\n  addition: error\n", encoding="utf-8")
+    return cfg
+
+
 def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
-    runner, baseline_snap, new_snap_compatible
+    runner, baseline_snap, new_snap_compatible, addition_error_config
 ):
     # Codex review: under the severity scheme a *compatible* diff can exit
-    # non-zero (`--severity-addition error` on an additions-only diff exits
-    # 1). Without a gate block in the report that reads as "COMPATIBLE, exit
-    # 1, no stated cause" -- indistinguishable from ADR-049 Phase 7's
+    # non-zero (a `severity.addition: error` config on an additions-only diff
+    # exits 1). Without a gate block in the report that reads as "COMPATIBLE,
+    # exit 1, no stated cause" -- indistinguishable from ADR-049 Phase 7's
     # orthogonal contract-coverage 1. The block names the culprit category.
     res = runner.invoke(
         main,
@@ -203,8 +216,8 @@ def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
             str(new_snap_compatible),
             "--against",
             str(baseline_snap),
-            "--severity-addition",
-            "error",
+            "--config",
+            str(addition_error_config),
             "--format",
             "json",
         ],
@@ -219,7 +232,7 @@ def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
 
 
 def test_scan_severity_blocking_addition_is_named_in_findings(
-    runner, baseline_snap, new_snap_compatible
+    runner, baseline_snap, new_snap_compatible, addition_error_config
 ):
     # Codex review: the gate named the blocking *category* and count while
     # `_baseline_summary` omitted compatible findings, so the report gave no
@@ -227,7 +240,7 @@ def test_scan_severity_blocking_addition_is_named_in_findings(
     res = runner.invoke(
         main,
         ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
-         "--severity-addition", "error", "--format", "json"],
+         "--config", str(addition_error_config), "--format", "json"],
     )
     assert res.exit_code == 1, res.output
     findings = _payload(res)["diff"].get("findings") or []
@@ -276,7 +289,7 @@ def test_scan_legacy_scheme_emits_no_severity_gate_block(
 
 
 def test_scan_severity_gate_is_rendered_in_default_text_output(
-    runner, baseline_snap, new_snap_compatible
+    runner, baseline_snap, new_snap_compatible, addition_error_config
 ):
     # Codex review: text is the *default* format, so the JSON gate block
     # alone left the common case unexplained -- `Verdict: COMPATIBLE` and
@@ -289,8 +302,8 @@ def test_scan_severity_gate_is_rendered_in_default_text_output(
             str(new_snap_compatible),
             "--against",
             str(baseline_snap),
-            "--severity-addition",
-            "error",
+            "--config",
+            str(addition_error_config),
         ],
     )
     assert res.exit_code == 1, res.output
@@ -390,7 +403,7 @@ class TestScanEmitReportCoverageDiagnostic:
     ``text``.
 
     Codex review: the guard checked only the primary ``fmt``, so a ``scan
-    --format json --secondary-format text`` run wrote a secondary text report
+    --format json --write text=...`` run wrote a secondary text report
     with no ledger of its own (unlike JSON) and no stderr notice either --
     the coverage-gated exit had no explanation anywhere reachable from the
     text side.
@@ -573,10 +586,8 @@ def test_scan_secondary_format_writes_json_alongside_primary_text(
             str(baseline_snap),
             "-o",
             str(primary),
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(secondary),
+            "--write",
+            f"json={secondary}",
         ],
     )
     assert res.exit_code == 0, res.output
@@ -586,28 +597,26 @@ def test_scan_secondary_format_writes_json_alongside_primary_text(
     assert payload["scan_schema_version"]
 
 
-def test_scan_secondary_format_requires_secondary_output(runner, new_snap_compatible):
-    res = runner.invoke(
-        main, ["scan", str(new_snap_compatible), "--secondary-format", "json"]
-    )
-    assert res.exit_code != 0
-    assert "--secondary-format requires --secondary-output" in res.output
+def test_scan_write_rejects_a_half_given_operand(runner, new_snap_compatible):
+    """``--write``'s FORMAT=PATH operand cannot be half-given.
+
+    The pair it replaced needed a check in each direction; one operand makes
+    both a parse error instead.
+    """
+    for operand in ("json", "=out.json", "json="):
+        res = runner.invoke(
+            main, ["scan", str(new_snap_compatible), "--write", operand]
+        )
+        assert res.exit_code != 0, operand
+        assert "FORMAT=PATH" in res.output, operand
 
 
-def test_scan_secondary_output_requires_secondary_format(
-    runner, new_snap_compatible, tmp_path
-):
+def test_scan_write_rejects_an_unrenderable_format(runner, new_snap_compatible):
     res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--secondary-output",
-            str(tmp_path / "x.json"),
-        ],
+        main, ["scan", str(new_snap_compatible), "--write", "sarif=x.sarif"]
     )
     assert res.exit_code != 0
-    assert "--secondary-output requires --secondary-format" in res.output
+    assert "not a renderable format here" in res.output
 
 
 def test_scan_secondary_output_must_differ_from_primary(
@@ -621,14 +630,12 @@ def test_scan_secondary_output_must_differ_from_primary(
             str(new_snap_compatible),
             "-o",
             str(same),
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(same),
+            "--write",
+            f"json={same}",
         ],
     )
     assert res.exit_code != 0
-    assert "--secondary-output must differ from --output" in res.output
+    assert "--write's PATH must differ from --output" in res.output
 
 
 def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible, tmp_path):
@@ -638,14 +645,12 @@ def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible
             "scan",
             str(new_snap_compatible),
             "--dry-run",
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(tmp_path / "x.json"),
+            "--write",
+            f"json={tmp_path / 'x.json'}",
         ],
     )
     assert res.exit_code != 0
-    assert "--dry-run cannot be combined with --secondary-output" in res.output
+    assert "--dry-run cannot be combined with --write" in res.output
 
 
 def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
@@ -655,10 +660,8 @@ def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
             "scan",
             "--artifact-set",
             str(tmp_path),
-            "--secondary-format",
-            "json",
-            "--secondary-output",
-            str(tmp_path / "x.json"),
+            "--write",
+            f"json={tmp_path / 'x.json'}",
         ],
     )
     assert res.exit_code != 0
@@ -910,6 +913,222 @@ def test_budget_checked_during_baseline_compare_not_only_at_end(
         "the deadline is live during baseline comparison too"
     )
     assert elapsed < 2.0
+
+
+def test_baseline_compare_receives_l3_folded_compile_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap
+):
+    """Codex review, PR #782: `_build_new_snapshot`'s P0.3 L3->L2 fold only
+    updated its own *local* `compile_context` -- `run_scan_core` still held
+    the caller's original, un-folded one and forwarded THAT to
+    `_run_baseline_compare`, so the candidate could fold real L3 build
+    context (`-std=`/`-D`/target/sysroot) while the native `--against`
+    baseline's own header parse never received it, silently recreating the
+    NOT_COMPARABLE/false-ABI-difference risk this whole fold exists to
+    close. `run_scan_core` must forward the *effective* (possibly-folded)
+    compile_context `_build_new_snapshot` returns, not its own original."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        # Mirrors the real function's 3-tuple return -- the third element is
+        # the effective (fold-applied) compile_context.
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is sentinel_folded_ctx
+
+
+def test_baseline_compare_with_side_aware_headers_keeps_unfolded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782: the P0.3 fold above is derived by matching the
+    CANDIDATE's own headers against the NEW build's compile units, so its
+    -D/-U/-std/include flags describe the new side specifically. A
+    side-aware `-H old=PATH` baseline is parsed through its own, different
+    old headers -- forwarding the new side's folded context there risks a
+    bad parse or a false ABI diff, not a more accurate one, since there is
+    no old-side build evidence to derive a matching fold from. When
+    baseline_headers is given, run_scan_core must fall back to the caller's
+    plain, un-folded compile_context for the baseline parse, not the
+    candidate's folded one."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    old_hdr = tmp_path / "old.h"
+    old_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            f"old={old_hdr}",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is not sentinel_folded_ctx
+
+
+def test_baseline_compare_with_shared_bare_header_still_gets_folded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782 (fresh evidence): the previous fix's own
+    `not baseline_headers` guard was too broad in the other direction --
+    cli_scan.py's `baseline_header = header_both + header_old` means a
+    bare, *shared* `-H api.h` (no `old=` scoping at all, the ordinary,
+    most common case) already makes `baseline_headers` truthy and
+    identical in content to `headers`, so gating on mere truthiness
+    silently reintroduced the whole PR's own NOT_COMPARABLE/false-ABI-diff
+    bug for the common case. When the resolved old-side headers are
+    identical to the candidate's (no real `old=` override), the fold must
+    still reach the baseline parse."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    shared_hdr = tmp_path / "api.h"
+    shared_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            str(shared_hdr),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is sentinel_folded_ctx
+
+
+def test_baseline_compare_with_side_aware_includes_keeps_unfolded_context(
+    monkeypatch, runner, new_snap_compatible, baseline_snap, tmp_path
+):
+    """Codex review, PR #782 (fresh evidence): the previous fix only compared
+    resolved *header* lists, but `cli_scan.py` builds `baseline_include`
+    independently of `baseline_header` -- a shared, bare `-H api.h` combined
+    with side-specific `-I old=.../-I new=...` shares one header list across
+    both sides while still routing each through a genuinely different
+    include tree. Forwarding the new side's folded -D/-std/sysroot/include
+    context there would parse the old binary under the new build's
+    configuration, so the fold must also require the old side's resolved
+    include scope to match the candidate's own effective includes."""
+    import abicheck.scan_engine as cs
+
+    sentinel_folded_ctx = object()
+    captured: dict = {}
+
+    def _fake_build_new_snapshot(*_a, **_kw):
+        from abicheck.model import AbiSnapshot
+
+        # eff_includes intentionally differs from the old-side -I below, so
+        # the candidate's and baseline's resolved include scopes diverge
+        # even though both sides share the same -H.
+        return (
+            AbiSnapshot(library="l", version="2.0"),
+            [tmp_path / "new_inc"],
+            sentinel_folded_ctx,
+        )
+
+    def _fake_baseline_compare(*_a, **kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return (
+            "compatible",
+            0,
+            {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+        )
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+    monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+    shared_hdr = tmp_path / "api.h"
+    shared_hdr.write_text("int f(void);\n", encoding="utf-8")
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "-H",
+            str(shared_hdr),
+            "-I",
+            f"old={tmp_path / 'old_inc'}",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert captured["compile_context"] is not sentinel_folded_ctx
 
 
 def test_against_not_comparable_exits_6(
@@ -1205,6 +1424,208 @@ def test_a_promoted_crosscheck_never_lowers_an_already_blocking_gate(
     assert gate["exit_code"] == 4, gate
     assert "abi_breaking" in gate["blocking_categories"], gate
     assert "promoted_crosscheck" not in gate["blocking_categories"], gate
+
+
+def test_json_report_carries_exit_decision_for_clean_baseline(
+    runner, baseline_snap, new_snap_compatible
+):
+    # CLI cleanup phase two, PR E: `diff.exit` mirrors `compare`'s own
+    # top-level `exit` block (PR G1, #789) -- built once by
+    # `exit_decision.resolve_compare_exit_decision` so a reader doesn't
+    # have to re-derive "why is this exit N" from the separately-emitted
+    # `analysis_assurance_exit_contribution`/`contract_coverage_exit_
+    # contribution` fields.
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_compatible), "--against", str(baseline_snap),
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 0
+    assert exit_block["reasons"] == ["clean"]
+    assert exit_block["compatibility_contribution"] == 0
+    assert exit_block["contract_coverage_contribution"] == 0
+    assert exit_block["analysis_assurance_contribution"] == 0
+
+
+def test_json_report_carries_exit_decision_for_breaking_baseline(
+    runner, baseline_snap, new_snap_breaking
+):
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_breaking), "--against", str(baseline_snap), "--format", "json"],
+    )
+    assert res.exit_code == 4, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 4
+    assert exit_block["reasons"] == ["compatibility_gate"]
+    assert exit_block["compatibility_contribution"] == 4
+
+
+def test_exit_decision_matches_severity_gate_exit_code(
+    runner, baseline_snap, new_snap_breaking
+):
+    # The two blocks are derived independently (`_build_severity_json` via
+    # `compute_gate_decision`, `resolve_compare_exit_decision` via
+    # `compute_exit_code` directly) -- they must never read two different
+    # numbers for the same comparison.
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_breaking), "--against", str(baseline_snap),
+            "--exit-code-scheme", "severity", "--format", "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    payload = _payload(res)["diff"]
+    assert payload["exit"]["code"] == payload["severity"]["exit_code"]
+
+
+def test_a_promoted_crosscheck_updates_the_persisted_exit_block(runner, tmp_path):
+    # Sibling of test_published_gate_reflects_a_promoted_crosscheck, for the
+    # new `diff.exit` block: it is built by `_run_baseline_compare` from the
+    # baseline diff alone, before `run_scan_core`'s crosscheck promotion
+    # runs -- so without `_promote_published_gate` also patching this block
+    # (the way it already patches `diff.severity`), a clean baseline would
+    # publish `exit.code: 0` while the process exited 2.
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 2, exit_block
+    assert exit_block["reasons"] == ["promoted_crosscheck"], exit_block
+    # The invariant Codex flagged on an earlier revision: `code` must equal
+    # `max()` over every contribution field, not just the two this function
+    # used to hand-patch.
+    assert exit_block["code"] == max(
+        exit_block["compatibility_contribution"],
+        exit_block["contract_coverage_contribution"],
+        exit_block["analysis_assurance_contribution"],
+        exit_block["crosscheck_promotion_contribution"],
+    ), exit_block
+
+
+def _api_break_with_build_context_mismatch_snap(tmp_path: Path, name: str, constant: str | None) -> Path:
+    # Combines two independent axes in one pair: a real, non-promoted
+    # API_BREAK (constant_removed, legacy exit 2) from the baseline compare
+    # itself, and the same "header_build_context_mismatch" crosscheck
+    # evidence-hygiene finding `_header_context_mismatch_snap` uses
+    # (`--crosscheck header_build_context_mismatch=error` also contributes
+    # exit 2) -- so promoting the crosscheck TIES the baseline's own exit
+    # code instead of exceeding it.
+    from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        parsed_with_build_context=False,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+        constants={"MAX_SIZE": constant} if constant is not None else {},
+    )
+    snap.build_source = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(
+            build_options=[BuildOption(key="glibcxx_use_cxx11_abi", value="1", abi_relevant=True)]
+        ),
+    )
+    return _write_snapshot(tmp_path / name, snap)
+
+
+def test_a_tying_promoted_crosscheck_still_names_itself_in_the_exit_block(
+    runner, tmp_path
+):
+    # Codex review (P2), fresh evidence: `run_scan_core` only called
+    # `_promote_published_gate` from inside `if sev_exit > exit_code:` --
+    # so a crosscheck that only *ties* an already-2 baseline exit (rather
+    # than exceeding it) never reached the refold at all, leaving
+    # `crosscheck_promotion_contribution` at 0 and `promoted_crosscheck`
+    # missing from `reasons` even though the tie is real. `old`'s
+    # constant_removed vs `new`'s baseline shape means the baseline compare
+    # alone already exits 2 (API_BREAK); the shared build-context-mismatch
+    # evidence gap makes `--crosscheck header_build_context_mismatch=error`
+    # contribute exit 2 too -- a genuine tie, not a promotion.
+    old = _api_break_with_build_context_mismatch_snap(tmp_path, "old.abi.json", "100")
+    new = _api_break_with_build_context_mismatch_snap(tmp_path, "new.abi.json", None)
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    assert payload["verdict"] == "API_BREAK"
+    exit_block = payload["diff"]["exit"]
+    assert exit_block["code"] == 2, exit_block
+    assert set(exit_block["reasons"]) == {
+        "compatibility_gate", "promoted_crosscheck",
+    }, exit_block
+    assert exit_block["crosscheck_promotion_contribution"] == 2, exit_block
+
+
+def test_a_tying_promoted_crosscheck_still_names_itself_in_the_severity_gate(
+    runner, tmp_path
+):
+    # Sibling of the previous test for the *other* persisted block --
+    # `diff.severity` -- under the severity exit-code scheme. Codex review,
+    # fresh evidence: the `diff.exit` tie fix above made a tie reach
+    # `_promote_published_gate` at all, but the severity-gate half of that
+    # function still used a strict `>` guard, so the two published gate
+    # explanations disagreed about the same tied crosscheck.
+    old = _api_break_with_build_context_mismatch_snap(tmp_path, "old.abi.json", "100")
+    new = _api_break_with_build_context_mismatch_snap(tmp_path, "new.abi.json", None)
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    gate = payload["diff"]["severity"]
+    assert gate["exit_code"] == 2, gate
+    assert gate["blocking"] is True, gate
+    assert "promoted_crosscheck" in gate["blocking_categories"], gate
+    # And the two blocks must agree, not just each be internally sensible.
+    exit_block = payload["diff"]["exit"]
+    assert exit_block["code"] == gate["exit_code"]
+    assert "promoted_crosscheck" in exit_block["reasons"]
+
+
+def test_a_promoted_crosscheck_never_lowers_an_already_blocking_exit_block(
+    runner, baseline_snap, new_snap_breaking
+):
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_breaking), "--against", str(baseline_snap),
+            "--crosscheck", "exported_not_public=error",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    exit_block = _payload(res)["diff"]["exit"]
+    assert exit_block["code"] == 4, exit_block
+    assert exit_block["reasons"] == ["compatibility_gate"], exit_block
 
 
 def test_severity_demoted_breaking_verdict_survives_crosscheck_promotion(
@@ -1832,7 +2253,7 @@ def test_out_of_tree_compile_db_is_accepted(runner, tmp_path, new_snap_compatibl
         [
             "scan",
             str(new_snap_compatible),
-            "--compile-db",
+            "--build-info",
             str(cc),
             "--depth",
             "build",
@@ -2641,7 +3062,7 @@ def test_depth_binary_clears_source_inputs(
             str(new_snap_compatible),
             "--sources",
             str(src),
-            "--compile-db",
+            "--build-info",
             str(cdb),
             "--depth",
             "binary",
@@ -2757,7 +3178,6 @@ def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
     baseline_header = tmp_path / "old-include"
     sources = tmp_path / "src"
     build_info = tmp_path / "build"
-    compile_db = tmp_path / "compile_commands.json"
 
     assert cs._normalize_depth_inputs(
         EvidenceDepth.BINARY,
@@ -2765,16 +3185,14 @@ def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
         (baseline_header,),
         sources,
         build_info,
-        compile_db,
-    ) == ((), (), None, None, None)
+    ) == ((), (), None, None)
     assert cs._normalize_depth_inputs(
         EvidenceDepth.HEADERS,
         (header,),
         (baseline_header,),
         sources,
         build_info,
-        compile_db,
-    ) == ((header,), (baseline_header,), sources, build_info, compile_db)
+    ) == ((header,), (baseline_header,), sources, build_info)
 
 
 # NOTE: test_estimate_uses_resolved_level_not_raw_flags (--estimate) is deleted

@@ -83,21 +83,9 @@ def to_stat(
     the verdict label alone could misreport whether the run actually blocks
     CI once severity configuration is in play.
     """
+    from .stat_line import format_stat_line
+
     summary = build_summary(result)
-    label = _VERDICT_LABEL[result.verdict]
-    parts = []
-    if summary.breaking:
-        parts.append(f"{summary.breaking} breaking")
-    if summary.source_breaks:
-        parts.append(f"{summary.source_breaks} source-level breaks")
-    if summary.risk_count:
-        parts.append(f"{summary.risk_count} risk")
-    if summary.compatible_additions:
-        parts.append(f"{summary.compatible_additions} compatible")
-    detail = ", ".join(parts) if parts else "no changes"
-    redundant_note = ""
-    if result.redundant_count > 0:
-        redundant_note = f" [{result.redundant_count} redundant hidden]"
     gate_note = ""
     if severity_config is not None:
         from .severity import compute_exit_code
@@ -112,8 +100,15 @@ def to_stat(
         gate_note = (
             f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
         )
-    return (
-        f"{label}: {detail} ({summary.total_changes} total){redundant_note}{gate_note}"
+    return format_stat_line(
+        _VERDICT_LABEL[result.verdict],
+        breaking=summary.breaking,
+        source_breaks=summary.source_breaks,
+        risk_count=summary.risk_count,
+        compatible_additions=summary.compatible_additions,
+        total_changes=summary.total_changes,
+        redundant_count=result.redundant_count,
+        gate_note=gate_note,
     )
 
 
@@ -536,7 +531,7 @@ def _format_leaf_type_change(c: Change) -> list[str]:
     # routes root TYPE_* changes through this function, never through
     # _format_change_md -- unlike the full/root-cause views, a leaf-mode
     # type finding's own contract decision (already stamped when
-    # --contract-evaluation was requested) was silently dropped. Mirrors
+    # --contract was requested) was silently dropped. Mirrors
     # _format_change_md's own "no-op unless already stamped" idiom.
     if c.contract_relevance is not None:
         text = _contract_decision_text(
@@ -815,9 +810,9 @@ def root_cause_evidence_lookup_for_changes(
     that function's ``root_cause_id``/``root_cause_display`` grouping covers
     *any* two findings sharing a ``caused_by_type``/``symbol``, for every
     ``ChangeKind``; :func:`~abicheck.impact.correlation.correlate_root_causes`
-    covers only the four load-failure kinds its own module docstring names
+    covers only the load-failure kinds its own module docstring names
     (``FUNC_REMOVED``/``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API``/
-    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``/``CONSUMER_RUNTIME_LOAD_FAILED``),
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``),
     ranked by evidence strength, and drops a symbol with only one correlated
     piece. Built directly from the actual ``Change`` objects the correlator
     grouped — not by matching root-cause ids after the fact — so this stays
@@ -1002,7 +997,7 @@ def _to_markdown_root_cause(
                 # already-stamped decision off of (unlike scoped_only,
                 # rendered via _format_change_md above), so unlike every
                 # other contract-rendering site in this fix, this one
-                # genuinely needs the caller's own --contract-evaluation
+                # genuinely needs the caller's own --contract
                 # intent threaded through explicitly.
                 if contract_evaluation:
                     from .contract_scoped_promotion import (
@@ -1074,7 +1069,8 @@ def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
         lines.append("")
         lines.append(
             f"> ℹ️ {result.redundant_count} redundant change(s) hidden "
-            "(derived from root type changes). Use `--show-redundant` to show all."
+            "(derived from root type changes). Set `scope.show_redundant: true` in\n"
+            "> `.abicheck.yml` to show all."
         )
 
 
@@ -1361,7 +1357,7 @@ def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
     relevance and reason code that explain *why* they did not gate.
 
     Empty (and so entirely absent) unless the run opted into
-    ``--contract-evaluation``.
+    ``--contract``.
     """
     if not not_evaluated:
         return []
@@ -1969,11 +1965,11 @@ def _format_change_md(c: object) -> str:
         suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
 
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract-evaluation's
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract's
     # own help text promises every finding is stamped with a contract
     # decision, but only the JSON report (reporter.py's
     # _add_contract_evaluation_fields) ever rendered it -- an ordinary
-    # `compare --contract-evaluation` run (default markdown format) was
+    # `compare --contract` run (default markdown format) was
     # byte-for-byte identical to one without the flag. A no-op when *c* was
     # never stamped (contract_evaluation not requested), mirroring that
     # helper's own documented default.

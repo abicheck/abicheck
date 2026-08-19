@@ -38,7 +38,7 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
   decision (``severity.{exit_code,blocking,blocking_categories}``, computed by
   ``reporter._build_severity_json`` → ``severity.compute_gate_decision``);
   ``aggregate`` combines those, it never recomputes a gate from the verdict.
-  Reports produced without a ``--severity-*`` policy carry no gate block, so
+  Reports produced without a severity policy carry no gate block, so
   they fall back to the legacy verdict→exit mapping.
 * **coverage** — did every *required* target actually report? A required gap is
   a *coverage* failure (exit ``1``), never masqueraded as an ABI break.
@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -73,6 +73,14 @@ from .aggregate_findings import (
     build_finding_matrix,
     parse_report_findings,
     render_finding_matrix_lines,
+)
+from .aggregate_manifest import (
+    AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
+    AggregateError as AggregateError,
+    ExpectedTargets as ExpectedTargets,
+    OnMissingRequired as OnMissingRequired,
+    OnUnexpectedTarget as OnUnexpectedTarget,
+    resolve_gate_policy as resolve_gate_policy,
 )
 from .change_registry_types import Verdict
 
@@ -97,10 +105,29 @@ from .change_registry_types import Verdict
 #: "Clang: UNKNOWN_UNRESOLVED and not gating" no longer collapse into the
 #: same ``affected_profiles`` membership fact for one logical finding.
 #: Purely additive and inert: present only when at least one profile ran
-#: ``--contract-evaluation`` for that target, never changes ``scope`` or
+#: ``--contract`` for that target, never changes ``scope`` or
 #: any existing key, and a ``1.3``-shaped consumer that ignores unknown
 #: keys keeps reading a ``1.4`` document correctly.
-AGGREGATE_SCHEMA_VERSION = "1.4"
+#:
+#: ``1.5`` adds an ``analysis_assurance_exit`` field on every target entry
+#: (P0.4's orthogonal analysis-assurance axis, the exact sibling of
+#: ``1.3``'s ``contract_coverage_exit`` -- Codex review: without it, a
+#: target whose severity gate read 0 but whose analysis-assurance axis
+#: independently floored the *real* exit to 1 fed the aggregate a green
+#: result for that target). Additive in shape, but not inert the same way
+#: ``1.3`` was not: the contribution folds into ``gate.exit_code``, so a
+#: matrix whose targets exited 1 for incomplete analysis assurance no
+#: longer aggregates to 0.
+#:
+#: ``1.6`` (CLI cleanup phase two, PR 2) adds ``effective_policy`` -- which of
+#: ``missing_required``/``unexpected_target`` this run actually applied, and
+#: where each came from (``manifest``/``run-plan``/``default``). Additive and
+#: inert the same way: a ``1.5``-shaped consumer ignoring unknown keys still
+#: reads a ``1.6`` document correctly. Landed after ``1.5`` merged to
+#: ``main`` under the same version number for a different field -- bumped to
+#: ``1.6`` on rebase rather than reusing ``1.5`` for two distinct additive
+#: shapes, per this codebase's own schema-versioning discipline.
+AGGREGATE_SCHEMA_VERSION = "1.6"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -151,15 +178,8 @@ def parse_check_id(target_id: str) -> CheckIdParts | None:
     )
 
 
-#: SemVer-style (MAJOR.MINOR) version of the expected-target *manifest* input
-#: (``--manifest``). Independent of the report-output schema above. A manifest
-#: may carry ``"aggregate_manifest_version"``; a MAJOR component newer than this
-#: is rejected (the reader cannot know the newer structure), a matching or older
-#: one is accepted (additive-only within a MAJOR).
-AGGREGATE_MANIFEST_VERSION = "1.0"
-
 #: Legacy verdict → gate exit code, used only for reports that carry no
-#: ``severity`` gate block (i.e. produced without a ``--severity-*`` policy).
+#: ``severity`` gate block (i.e. produced without a severity policy).
 #: Mirrors ``compare``'s legacy scheme: NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK
 #: are non-blocking (0), API_BREAK is a source break (2), BREAKING an ABI break
 #: (4). A report *with* a gate block uses that block's own ``exit_code`` — the
@@ -218,60 +238,12 @@ _BOOTSTRAP_VERDICT = "NO_BASELINE"
 _NEW_TARGET_VERDICT = "NEW_TARGET"
 
 
-def _check_manifest_version(raw: Any) -> None:
-    """Validate an optional manifest ``aggregate_manifest_version`` field.
-
-    Absent → accepted (an unversioned manifest is treated as the current
-    MAJOR). Present → must be a ``"MAJOR.MINOR"`` string whose MAJOR component
-    does not exceed :data:`AGGREGATE_MANIFEST_VERSION`'s (a newer MAJOR carries
-    structure this reader cannot interpret; fail loud rather than silently
-    mis-read it).
-    """
-    if raw is None:
-        return
-    if not isinstance(raw, str) or not raw:
-        raise AggregateError("manifest 'aggregate_manifest_version' must be a string")
-    try:
-        major = int(raw.split(".", 1)[0])
-        supported = int(AGGREGATE_MANIFEST_VERSION.split(".", 1)[0])
-    except ValueError as exc:
-        raise AggregateError(
-            f"manifest 'aggregate_manifest_version' is not a MAJOR.MINOR "
-            f"version: {raw!r}"
-        ) from exc
-    if major > supported:
-        raise AggregateError(
-            f"manifest 'aggregate_manifest_version' {raw!r} is newer than this "
-            f"tool supports (max major {supported}); upgrade abicheck"
-        )
-
-
 class CoverageStatus(str, Enum):
     """Was every *required* expected target actually analyzed?"""
 
     COMPLETE = "complete"  # every required target reported
     PARTIAL = "partial"  # at least one required target is unavailable
     EMPTY = "empty"  # no target could be analyzed at all
-
-
-class OnMissingRequired(str, Enum):
-    """Gate policy for a required target that never reported."""
-
-    FAIL = "fail"  # incomplete required coverage fails the gate (default)
-    WARN = "warn"  # report the gap but do not fail on coverage alone
-
-
-class OnUnexpectedTarget(str, Enum):
-    """Gate policy for a report whose target is not in the expected set."""
-
-    INCLUDE = "include"  # count its real findings in the gate, not in coverage
-    WARN = "warn"  # surface it and warn, but never fail the gate on it
-    FAIL = "fail"  # any unexpected target fails the gate
-    IGNORE = "ignore"  # drop it entirely
-
-
-class AggregateError(ValueError):
-    """A malformed input the caller must fix (usage error / exit 64)."""
 
 
 class _MalformedGate(ValueError):
@@ -487,6 +459,11 @@ class TargetReport:
     #: ``contract.unresolved=warn`` acceptance from a silent or malformed
     #: one, so prose about the run cannot claim a policy it never set.
     contract_coverage_declared: bool = False
+    #: P0.4's orthogonal analysis-assurance contribution (``0``/``1``), the
+    #: exact sibling of :attr:`contract_coverage_exit` above for the other
+    #: orthogonal exit-floor axis. Declared last for the same
+    #: positional-construction-safety reason as that field.
+    analysis_assurance_exit: int = 0
 
     @property
     def analyzed(self) -> bool:
@@ -523,6 +500,7 @@ class TargetReport:
             ),
             "gate": self.gate.to_dict() if self.gate is not None else None,
             "contract_coverage_exit": self.contract_coverage_exit,
+            "analysis_assurance_exit": self.analysis_assurance_exit,
         }
         if self.unexpected:
             d["unexpected"] = True
@@ -614,6 +592,10 @@ class ProfileMatrixEntry:
     #: Declared last, with a default, so adding it cannot break a positional
     #: construction of this public dataclass (CodeRabbit review).
     contract_incomplete_profiles: tuple[str, ...] = ()
+    #: Sibling of ``contract_incomplete_profiles`` for P0.4's own
+    #: analysis-assurance axis; same predicate, same positional-safety
+    #: reason for being declared last.
+    analysis_incomplete_profiles: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -623,6 +605,7 @@ class ProfileMatrixEntry:
             "incomplete_profiles": list(self.incomplete_profiles),
             "unanalyzed_profiles": list(self.unanalyzed_profiles),
             "contract_incomplete_profiles": list(self.contract_incomplete_profiles),
+            "analysis_incomplete_profiles": list(self.analysis_incomplete_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 
@@ -646,6 +629,14 @@ class AggregateResult:
     #: True when the caller ran in explicit discovered-only mode (no declared
     #: expected set), so coverage is not gated.
     discovered_only: bool = False
+    #: Where `on_missing_required`/`on_unexpected_target` (above) actually came
+    #: from (CLI cleanup phase two, PR 2) -- ``"manifest"``/``"run-plan"`` when
+    #: the expected-target source's own ``gate`` block set at least one of
+    #: them, ``"default"`` otherwise (including discovered-only mode, where
+    #: neither field is applicable). Purely descriptive, reported in
+    #: `to_dict()`'s `effective_policy` block so a reader can tell *why* this
+    #: run applied the policy it did, not just what the policy was.
+    policy_source: str = "default"
 
     # --- membership helpers -------------------------------------------------
     @property
@@ -773,18 +764,39 @@ class AggregateResult:
             )
         )
 
+    @property
+    def analysis_assurance_exit(self) -> int:
+        """P0.4's analysis-assurance contribution -- sibling of
+        :attr:`contract_coverage_exit`. Without this a target whose
+        ``--require-complete-analysis`` gate raised its own exit to ``1``
+        fed this aggregate a green ``0`` (Codex review)."""
+        gated = list(self.analyzed) + list(self._gated_unexpected)
+        return max((t.analysis_assurance_exit for t in gated), default=0)
+
+    @property
+    def analysis_assurance_targets(self) -> tuple[str, ...]:
+        """Targets short of analysis assurance -- the *why* behind
+        :attr:`analysis_assurance_exit`."""
+        gated = list(self.analyzed) + list(self._gated_unexpected)
+        return tuple(
+            sorted(t.target_id for t in gated if t.analysis_assurance_exit > 0)
+        )
+
     def exit_code(self) -> int:
         """The single CI gate exit code.
 
         The max of every gated target's own ``severity.exit_code`` (so a
         target's policy-blocked addition contributes ``1``, an API break ``2``,
         an ABI break ``4`` — never recomputed from the verdict), a coverage
-        contribution of ``1`` when a required target is missing, and ADR-049's
+        contribution of ``1`` when a required target is missing, ADR-049's
         orthogonal contract-coverage contribution of ``1`` when any target's
         selected contract domain was short of evidence
-        (:attr:`contract_coverage_exit`). All three fold with ``max``, so the
-        two ``1``-valued axes can raise a clean ``0`` and neither can lower a
-        real break's ``2``/``4``. ``64`` / malformed-input errors are raised as
+        (:attr:`contract_coverage_exit`), and P0.4's orthogonal
+        analysis-assurance contribution of ``1`` when any target's evidence
+        was incomplete under ``--require-complete-analysis``
+        (:attr:`analysis_assurance_exit`). All fold with ``max``, so every
+        ``1``-valued axis can raise a clean ``0`` and none can lower a real
+        break's ``2``/``4``. ``64`` / malformed-input errors are raised as
         :class:`AggregateError`, never returned here.
         """
         gated = list(self.analyzed) + list(self._gated_unexpected)
@@ -792,6 +804,7 @@ class AggregateResult:
         if self.coverage_blocking:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
         code = max(code, self.contract_coverage_exit)
+        code = max(code, self.analysis_assurance_exit)
         # ``fail`` fails the gate on *any* unexpected report — including one that
         # is unreadable/verdictless (so has no gate to contribute above) — since
         # the policy is "no target outside the expected set is tolerated".
@@ -855,6 +868,7 @@ class AggregateResult:
             incomplete = []
             unanalyzed = []
             contract_incomplete = []
+            analysis_incomplete = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
@@ -869,6 +883,11 @@ class AggregateResult:
                     for r in reports
                 ):
                     contract_incomplete.append(pid)
+                # Sibling check for P0.4's own orthogonal axis (Codex
+                # review): a COMPATIBLE profile short on analysis-assurance
+                # evidence still needs profile-level attribution here.
+                if any(r.analysis_assurance_exit > 0 for r in reports):
+                    analysis_incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
                     for r in reports
@@ -893,6 +912,7 @@ class AggregateResult:
                     incomplete_profiles=tuple(incomplete),
                     unanalyzed_profiles=tuple(unanalyzed),
                     contract_incomplete_profiles=tuple(contract_incomplete),
+                    analysis_incomplete_profiles=tuple(analysis_incomplete),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -991,6 +1011,7 @@ class AggregateResult:
         lines.append("  " + self._render_compatibility_line())
 
         lines.extend(self._render_contract_coverage_lines())
+        lines.extend(self._render_analysis_assurance_lines())
         lines.extend(self._render_profile_matrix_lines())
         lines.extend(render_finding_matrix_lines(self.finding_matrix))
 
@@ -1041,6 +1062,27 @@ class AggregateResult:
             out.append(
                 f"  contributes {self.contract_coverage_exit} to the exit code "
                 "(ADR-049 contract-coverage axis)"
+            )
+
+        return out
+
+    def _render_analysis_assurance_lines(self) -> list[str]:
+        """P0.4's analysis-assurance block, the exact sibling of
+        :meth:`_render_contract_coverage_lines` for the other orthogonal
+        exit-floor axis. Simpler than that one: there is no
+        ``contract.unresolved=warn``-shaped "accepted, listed but not
+        gated" state for this axis -- a target's contribution is a plain
+        satisfied/not floor, so only the incomplete-target list and the
+        contribution itself are worth stating."""
+        out: list[str] = []
+        incomplete = self.analysis_assurance_targets
+        if incomplete:
+            out.append("")
+            out.append("Analysis assurance:")
+            out.append(f"  incomplete on {', '.join(incomplete)}")
+            out.append(
+                f"  contributes {self.analysis_assurance_exit} to the exit code "
+                "(P0.4 analysis-assurance axis)"
             )
 
         return out
@@ -1111,6 +1153,14 @@ class AggregateResult:
             line += (
                 f" [contract evidence incomplete on "
                 f"{', '.join(entry.contract_incomplete_profiles)}]"
+            )
+        if entry.analysis_incomplete_profiles:
+            # The exact sibling suffix, for the exact sibling reason (Codex
+            # review): a profile that raised the exit to 1 purely on the
+            # analysis-assurance axis must not read as flatly clean either.
+            line += (
+                f" [analysis assurance incomplete on "
+                f"{', '.join(entry.analysis_incomplete_profiles)}]"
             )
         return line
 
@@ -1233,6 +1283,27 @@ class AggregateResult:
                 "exit_contribution": self.contract_coverage_exit,
                 "incomplete_targets": list(self.contract_coverage_targets),
             },
+            # P0.4's own orthogonal axis, the exact sibling of
+            # "contract_coverage" above for the same reason: a different
+            # question ("was this target's own evidence complete under
+            # --require-complete-analysis?"), also contributing 1, so a
+            # consumer must be able to tell which axis raised the exit.
+            "analysis_assurance": {
+                "exit_contribution": self.analysis_assurance_exit,
+                "incomplete_targets": list(self.analysis_assurance_targets),
+            },
+            # CLI cleanup phase two, PR 2: the resolved gate policy this run
+            # actually applied, and where it came from -- expectation and the
+            # consequence of breaking it are now one versioned contract
+            # (the manifest's/run-plan's own `gate` block) rather than two
+            # separately-typed CLI flags, so the report states which policy
+            # value was live for this run instead of leaving a reader to
+            # infer it from `blocking`/`exit_code` alone.
+            "effective_policy": {
+                "missing_required": self.on_missing_required.value,
+                "unexpected_target": self.on_unexpected_target.value,
+                "source": self.policy_source,
+            },
             "targets": [t.to_dict() for t in self.targets],
             "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
             "profile_matrix": [e.to_dict() for e in self.profile_matrix],
@@ -1274,7 +1345,7 @@ class _LoadedReport:
     #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
     #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26).
     #: ``0`` for every report that carries none -- a run without
-    #: ``--contract-evaluation`` selected no contract domain, so it cannot be
+    #: ``--contract`` selected no contract domain, so it cannot be
     #: short of evidence for one.
     contract_coverage_exit: int = 0
     #: Whether the report listed any coverage failure at all -- true even
@@ -1291,6 +1362,12 @@ class _LoadedReport:
     #: the comparison did or did not find. Otherwise the report's own
     #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
     findings: ReportFindings | None = None
+    #: P0.4's orthogonal analysis-assurance contribution, read off the
+    #: report's own ``analysis_assurance_exit_contribution``. The exact
+    #: sibling of :attr:`contract_coverage_exit` above, for the same reason:
+    #: a run without ``--require-complete-analysis`` never floors its exit
+    #: on this axis, so ``0`` is the honest default rather than a fallback.
+    analysis_assurance_exit: int = 0
 
 
 def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
@@ -1351,7 +1428,7 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     Fails *open*, unlike the ``severity`` gate's ``_MalformedGate``: an absent
     or unusable value means "this report says nothing about a contract
     domain", which is the honest reading for every pre-2.26 report and every
-    run without ``--contract-evaluation``. Treating it as a failure would make
+    run without ``--contract``. Treating it as a failure would make
     the aggregate block on reports that never asked the question.
 
     A ``scan --against`` report carries the field one level down, inside its
@@ -1370,6 +1447,21 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     """
     for block in contract_coverage_blocks(data):
         raw = block.get("contract_coverage_exit_contribution")
+        if _is_valid_contribution(raw):
+            return raw
+    return 0
+
+
+def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
+    """The report's own P0.4 analysis-assurance contribution (``0``/``1``).
+
+    Sibling of :func:`_contract_coverage_exit`: read, not recomputed, since
+    ``GateInfo.from_scan_report`` reads only the nested compatibility gate,
+    never this orthogonal axis (Codex review). Fails open like its sibling,
+    reusing :func:`contract_coverage_blocks`' document-shape traversal.
+    """
+    for block in contract_coverage_blocks(data):
+        raw = block.get("analysis_assurance_exit_contribution")
         if _is_valid_contribution(raw):
             return raw
     return 0
@@ -1496,7 +1588,7 @@ def _contract_coverage_incomplete(data: Mapping[str, Any]) -> bool:
     does not is a guaranteed divergence. A non-list, or an empty list, is
     "nothing to report" -- the same fail-open reading as the contribution, and
     correct for every pre-2.26 report and every run without
-    ``--contract-evaluation``.
+    ``--contract``.
     """
     for block in contract_coverage_blocks(data):
         failures = block.get("contract_coverage_failures")
@@ -1573,6 +1665,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=_contract_coverage_declared(data),
+            analysis_assurance_exit=_analysis_assurance_exit(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: `_format_release_json` emits `bundle_findings`/
             # `matrix_findings` from whatever did complete, regardless of the
@@ -1619,6 +1712,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 path=path,
                 contract_coverage_exit=_contract_coverage_exit(data),
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
+                analysis_assurance_exit=_analysis_assurance_exit(data),
             )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
@@ -1664,6 +1758,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         contract_coverage_exit=_contract_coverage_exit(data),
         contract_coverage_incomplete=_contract_coverage_incomplete(data),
         contract_coverage_declared=_contract_coverage_declared(data),
+        analysis_assurance_exit=_analysis_assurance_exit(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
@@ -1696,84 +1791,39 @@ def collect_reports(
     return found
 
 
-# --- expected-set specification --------------------------------------------
-
-
-@dataclass(frozen=True)
-class ExpectedTargets:
-    """The declared expected-target set (from a manifest or CLI flags)."""
-
-    #: target_id → required
-    targets: Mapping[str, bool]
-    head_sha: str | None = None
-
-    @classmethod
-    def from_manifest_file(cls, path: Path) -> ExpectedTargets:
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, ValueError) as exc:
-            raise AggregateError(f"cannot read manifest {path}: {exc}") from exc
-        return cls.from_manifest_data(data)
-
-    @classmethod
-    def from_manifest_data(cls, data: Any) -> ExpectedTargets:
-        if not isinstance(data, dict):
-            raise AggregateError("manifest must be a JSON object")
-        _check_manifest_version(data.get("aggregate_manifest_version"))
-        raw = data.get("targets")
-        if not isinstance(raw, list) or not raw:
-            raise AggregateError("manifest 'targets' must be a non-empty list")
-        targets: dict[str, bool] = {}
-        for entry in raw:
-            if not isinstance(entry, dict):
-                raise AggregateError(f"manifest target must be an object: {entry!r}")
-            tid = entry.get("id")
-            if not isinstance(tid, str) or not tid:
-                raise AggregateError(f"manifest target needs a string 'id': {entry!r}")
-            if tid in targets:
-                raise AggregateError(f"duplicate manifest target id: {tid!r}")
-            required = entry.get("required", True)
-            if not isinstance(required, bool):
-                raise AggregateError(
-                    f"manifest target 'required' must be a boolean: {entry!r}"
-                )
-            targets[tid] = required
-        head_sha = data.get("head_sha")
-        if "head_sha" in data and (not isinstance(head_sha, str) or not head_sha):
-            # A present-but-malformed head_sha must not silently become None —
-            # that would disable the commit-identity guard the manifest asked
-            # for. Fail loud instead.
-            raise AggregateError("manifest 'head_sha' must be a non-empty string")
-        return cls(targets=targets, head_sha=head_sha)
-
-    @classmethod
-    def from_lists(
-        cls, required: Iterable[str], optional: Iterable[str] = ()
-    ) -> ExpectedTargets:
-        targets: dict[str, bool] = {tid: False for tid in optional}
-        for tid in required:
-            targets[tid] = True
-        if not targets:
-            raise AggregateError("no expected targets given")
-        return cls(targets=targets)
-
-
 # --- the aggregation itself -------------------------------------------------
+#
+# ExpectedTargets (the manifest input) and resolve_gate_policy live in
+# aggregate_manifest.py -- imported above, re-exported from this module's own
+# namespace for every existing importer.
 
 
 def aggregate(
     expected: ExpectedTargets | None,
     found: Mapping[str, _LoadedReport],
     *,
-    on_missing_required: OnMissingRequired = OnMissingRequired.FAIL,
-    on_unexpected_target: OnUnexpectedTarget = OnUnexpectedTarget.INCLUDE,
+    on_missing_required: OnMissingRequired | None = None,
+    on_unexpected_target: OnUnexpectedTarget | None = None,
+    policy_source_hint: str = "manifest",
 ) -> AggregateResult:
     """Reconcile an expected-target set against the reports found.
 
     *expected* is ``None`` only in discovered-only mode, where the reports
     present *are* the expected set and coverage is not gated.
+
+    *on_missing_required*/*on_unexpected_target* default to ``None``, meaning
+    "resolve via :func:`resolve_gate_policy`" (the manifest's own ``gate``
+    block, falling back to the hard-coded default) rather than to a fixed
+    enum value -- a caller that passes an explicit value here still forces
+    it, same as before this function grew manifest-awareness.
     """
     discovered_only = expected is None
+    on_missing_required, on_unexpected_target, policy_source = resolve_gate_policy(
+        expected,
+        explicit_missing_required=on_missing_required,
+        explicit_unexpected_target=on_unexpected_target,
+        source_hint=policy_source_hint,
+    )
     if expected is None:
         expected = ExpectedTargets(targets={tid: True for tid in found}, head_sha=None)
 
@@ -1821,6 +1871,7 @@ def aggregate(
             contract_coverage_exit=report.contract_coverage_exit,
             contract_coverage_incomplete=report.contract_coverage_incomplete,
             contract_coverage_declared=report.contract_coverage_declared,
+            analysis_assurance_exit=report.analysis_assurance_exit,
             findings=report.findings,
         )
 
@@ -1842,6 +1893,11 @@ def aggregate(
         on_missing_required=on_missing_required,
         on_unexpected_target=on_unexpected_target,
         discovered_only=discovered_only,
+        # `resolve_gate_policy` was called above against the ORIGINAL
+        # `expected` (before the discovered-only substitution just below its
+        # call), so it already reads "default" here -- discovered-only mode
+        # has no expected-target source to carry a `gate` block at all.
+        policy_source=policy_source,
     )
 
 
@@ -1850,8 +1906,9 @@ def aggregate_reports_dir(
     *,
     expected: ExpectedTargets | None = None,
     discovered_only: bool = False,
-    on_missing_required: OnMissingRequired = OnMissingRequired.FAIL,
-    on_unexpected_target: OnUnexpectedTarget = OnUnexpectedTarget.INCLUDE,
+    on_missing_required: OnMissingRequired | None = None,
+    on_unexpected_target: OnUnexpectedTarget | None = None,
+    policy_source_hint: str = "manifest",
     prefix: str = DEFAULT_REPORT_PREFIX,
 ) -> AggregateResult:
     """Load a reports dir and aggregate against an expected set.
@@ -1861,6 +1918,14 @@ def aggregate_reports_dir(
     coverage is not gated — the caller must opt into that explicitly, since it
     cannot detect a missing target. Raises :class:`AggregateError` for
     malformed input (a usage error, exit 64).
+
+    *on_missing_required*/*on_unexpected_target* default to ``None`` (resolve
+    via *expected*'s own manifest ``gate`` block, falling back to the
+    hard-coded default -- see :func:`resolve_gate_policy`); an explicit value
+    here still forces it. *policy_source_hint* names which expected-target
+    source *expected* came from (``"manifest"``/``"run-plan"``), reported
+    back in the result's ``effective_policy.source`` when that source's
+    ``gate`` block actually supplied a value.
     """
     if discovered_only and expected is not None:
         # Exactly one mode — never silently drop the expected set (which would
@@ -1879,4 +1944,5 @@ def aggregate_reports_dir(
         found,
         on_missing_required=on_missing_required,
         on_unexpected_target=on_unexpected_target,
+        policy_source_hint=policy_source_hint,
     )

@@ -11,12 +11,13 @@ from abicheck.annotations import (
     _escape_annotation_value,
     _parse_source_location,
     _title_for_change,
+    annotation_report_entries,
     collect_annotations,
     emit_github_annotations,
-    emit_github_step_summary,
     format_annotations,
     is_github_actions,
 )
+from abicheck.annotations_step_summary import emit_github_step_summary
 from abicheck.checker import Change, DiffResult, Verdict
 from abicheck.checker_policy import ChangeKind
 
@@ -524,7 +525,7 @@ class TestEmitGitHubStepSummary:
         """Codex review on #549: `_maybe_emit_annotations` (cli.py) makes the
         inline GitHub annotations severity-aware, but still called
         `emit_github_step_summary(result)` without `severity_config` — so
-        e.g. `--severity-addition error` could fail the annotations/exit code
+        e.g. a `severity.addition: error` config could fail the annotations/exit code
         while the step summary rendered the legacy compatible report with no
         severity gate section, contradicting the actual gate on the same
         PR."""
@@ -586,6 +587,176 @@ class TestCollectAndFormatAnnotations:
         # All 20 errors survive; 30 of 40 warnings fit.
         assert len(error_lines) == 20
         assert len(warning_lines) == 30
+
+
+# ---------------------------------------------------------------------------
+# annotation_report_entries — the JSON-persistence path (CLI cleanup phase
+# two, PR E's persistence prerequisite; report_schema_version 2.43)
+# ---------------------------------------------------------------------------
+
+class TestAnnotationReportEntries:
+    def test_error_entry_shape(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result(Verdict.BREAKING, [c])
+        entries = annotation_report_entries(result)
+        assert entries == [
+            {
+                "level": "error",
+                "annotation": collect_annotations(result)[0][1],
+                "always_visible": True,
+            }
+        ]
+
+    def test_addition_notice_is_not_always_visible(self):
+        """An addition/quality-issue notice only exists because this
+        function computes the `annotate_additions=True` superset -- a
+        renderer honouring the CLI's plain `--annotate` (no
+        `--annotate-additions`) default must be able to tell it apart from
+        the one notice kind `--annotate` alone already shows (see the next
+        test)."""
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.COMPATIBLE, [c])
+        [entry] = annotation_report_entries(result)
+        assert entry["level"] == "notice"
+        assert entry["always_visible"] is False
+
+    def test_not_evaluated_contract_notice_is_always_visible(self):
+        """The contract not-evaluated demotion is a `"notice"` too, but
+        unlike an addition it is surfaced by plain `--annotate` with no
+        `--annotate-additions` -- `always_visible` must say so."""
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Foo", "size changed")
+        c.contract_relevance = ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        result = _result(Verdict.NO_CHANGE, [c])
+        entries = annotation_report_entries(result)
+        assert entries
+        [entry] = entries
+        assert entry["level"] == "notice"
+        assert entry["always_visible"] is True
+
+    def test_matches_collect_annotations_when_additions_requested(self):
+        """The persisted array is always the superset -- the identical set
+        `collect_annotations(..., annotate_additions=True)` would render --
+        regardless of whether this test's own call requests it.
+        """
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.COMPATIBLE, [c])
+        entries = annotation_report_entries(result)
+        expected = sorted(
+            collect_annotations(result, annotate_additions=True),
+            key=lambda item: item[0],
+        )
+        assert [e["annotation"] for e in entries] == [line for _, line in expected]
+
+    def test_notice_level_present_even_without_annotate_additions_arg(self):
+        """A consumer reading the persisted array decides at *read* time
+        whether to keep `"notice"` entries -- this function itself never
+        drops them, unlike the stderr-rendering path's own opt-in flag.
+        """
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.COMPATIBLE, [c])
+        entries = annotation_report_entries(result)
+        assert entries
+        assert entries[0]["level"] == "notice"
+
+    def test_clean_comparison_is_an_empty_list(self):
+        result = _result(Verdict.NO_CHANGE, [])
+        assert annotation_report_entries(result) == []
+
+    def test_sorted_by_severity(self):
+        error = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        result = _result(Verdict.BREAKING, [addition, error])
+        entries = annotation_report_entries(result)
+        assert [e["level"] for e in entries] == ["error", "notice"]
+
+    def test_scoped_only_change_is_included(self):
+        """`--used-by`/`--required-symbol` scoping synthesizes fresh
+        findings onto `result.scoped_only_changes` -- a dynamically
+        attached attribute, never `result.changes` itself -- so a
+        comparison whose *sole* gating finding is scope-synthesized must
+        not silently produce zero annotations (Codex review: the same
+        `list(changes) + list(scoped_only_changes)` fold every other
+        finding-set consumer already applies)."""
+        scoped = Change(ChangeKind.PE_ORDINAL_RETARGETED, "Foo::bar", "retargeted")
+        result = _result(Verdict.BREAKING, [])
+        result.scoped_only_changes = (scoped,)  # type: ignore[attr-defined]
+        entries = annotation_report_entries(result)
+        assert entries
+        assert any("PE_ORDINAL_RETARGETED".lower() in e["annotation"].lower() for e in entries)
+        # collect_annotations (the stderr path) must agree -- both read
+        # through the same _collect_annotations_detailed.
+        assert collect_annotations(result)
+
+    def test_missing_contract_label_is_included_and_blocking_by_default(self):
+        """`--used-by`/`--required-symbol` scoping synthesizes
+        `scoped_missing_labels` for a label the new library lacks
+        *entirely* -- no backing `Change` at all, so it needs its own
+        classification branch (Codex review, fresh evidence). Under the
+        legacy scheme (no severity_config) it's always a hard block, so it
+        must be `error`, always_visible, regardless of annotate_additions.
+        """
+        result = _result(Verdict.BREAKING, [])
+        result.gate_scope = "used_by"  # type: ignore[attr-defined]
+        result.scoped_missing_labels = ("libfoo.so@GLIBC_2.30",)  # type: ignore[attr-defined]
+        entries = annotation_report_entries(result)
+        assert entries
+        [entry] = entries
+        assert entry["level"] == "error"
+        assert entry["always_visible"] is True
+        assert "libfoo.so@GLIBC_2.30" in entry["annotation"]
+        # collect_annotations (the stderr path) must agree.
+        [line] = collect_annotations(result)
+        assert line[1] == entry["annotation"]
+
+    def test_missing_contract_label_stays_a_visible_warning_under_a_warning_severity_config(
+        self,
+    ):
+        """A `severity.abi_breaking: warning` configuration must not
+        collapse this down to an opt-in notice -- it's classified by the
+        configured level directly, the same as any other warning-level
+        finding elsewhere in this function, so it stays `::warning` and
+        always visible (Codex review, fresh evidence: an earlier revision
+        used a bare blocks/doesn't-block binary that silently demoted this
+        case to a notice a plain `annotate: true` run would never show)."""
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        cfg = SeverityConfig(
+            abi_breaking=SeverityLevel.WARNING,
+            potential_breaking=SeverityLevel.WARNING,
+            quality_issues=SeverityLevel.INFO,
+            addition=SeverityLevel.INFO,
+        )
+        result = _result(Verdict.BREAKING, [])
+        result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+        result.scoped_missing_labels = ("some_entrypoint",)  # type: ignore[attr-defined]
+        [entry] = annotation_report_entries(result, severity_config=cfg)
+        assert entry["level"] == "warning"
+        assert entry["always_visible"] is True
+
+    def test_missing_contract_label_is_an_opt_in_notice_under_an_info_severity_config(
+        self,
+    ):
+        """Mirrors sarif._missing_contract_result's identical severity
+        decision: a severity scheme that doesn't even warn on abi_breaking
+        must not paint this red -- it becomes an opt-in notice, gated on
+        annotate_additions like any other info-level finding."""
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        cfg = SeverityConfig(
+            abi_breaking=SeverityLevel.INFO,
+            potential_breaking=SeverityLevel.INFO,
+            quality_issues=SeverityLevel.INFO,
+            addition=SeverityLevel.INFO,
+        )
+        result = _result(Verdict.BREAKING, [])
+        result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+        result.scoped_missing_labels = ("some_entrypoint",)  # type: ignore[attr-defined]
+        [entry] = annotation_report_entries(result, severity_config=cfg)
+        assert entry["level"] == "notice"
+        assert entry["always_visible"] is False
+        assert collect_annotations(result, severity_config=cfg) == []
 
 
 # ---------------------------------------------------------------------------

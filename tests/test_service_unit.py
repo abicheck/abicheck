@@ -261,7 +261,7 @@ class TestResolveInput:
     def test_include_dependencies_reaches_target_through_linker_script(self, tmp_path):
         """Codex review: the recursive resolve_input() call following a GNU
         ld linker script to its real target used to drop include_dependencies
-        back to its default (True), so `compare --include-dependencies`
+        back to its default (True), so `compare --include-system-declarations`
         (filtered by default) silently stopped filtering for any operand
         that happened to be a linker script instead of the DSO directly."""
         target = tmp_path / "libfoo.so.1"
@@ -373,7 +373,7 @@ class TestResolveInput:
         # public_headers / public_header_dirs into dumper.dump, which runs
         # apply_provenance. Without this the ELF origins stay UNKNOWN and the
         # provenance-gated cross-checks silently skip — even with
-        # --public-header-dir given. The `dump` CLI always forwarded them; this
+        # public-header set given. The `dump` CLI always forwarded them; this
         # path did not.
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1043,6 +1043,33 @@ class TestDumpElf:
             _dump_elf(p, [umb], [], "1.0", "c++")
         passed = mock.call_args.kwargs["extra_includes"]
         assert root in passed  # the include root was auto-added (plain -I)
+
+    def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path):
+        """Codex review, PR #782: this primary ELF dump pass's own
+        deferred_dirs (extra_hash_dirs) computation only covered
+        resolve_inferred_header_roots's own deferred roots -- never any
+        include-search directory riding in compile.gcc_option_tokens itself
+        (an explicit --gcc-options/--compiler-option -I, or -- since the
+        P0.3 L3->L2 fold -- a compile-DB-derived one). service._attach_
+        header_graph's own independent second parse already hashes this
+        identical set into its own cache key, so leaving it out of THIS
+        primary parse's cache key let the two passes disagree on staleness
+        -- reusing a stale cached AST here while the header-graph pass
+        correctly reparsed."""
+        from abicheck.service import _dump_elf
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        build_inc = tmp_path / "buildinc"
+        build_inc.mkdir()
+        snap = AbiSnapshot(library="t", version="1.0")
+        cc = CompileContext(gcc_option_tokens=("-I", str(build_inc)))
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [header], [], "1.0", "c++", compile=cc)
+        assert build_inc in mock.call_args.kwargs["extra_hash_dirs"]
 
     def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
         # Codex: when the caller's CompileContext supplies includes via -isystem,
@@ -2239,6 +2266,35 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
+    def test_uppercase_auto_compile_frontend_is_not_treated_as_explicit(
+        self, monkeypatch
+    ):
+        """Codex review, fresh evidence: `compile.frontend="AUTO"` is an
+        accepted spelling (validated case-insensitively,
+        `api_types.frontend_value_errors`), but `effective_frontend`'s own
+        "is this an explicit override" check used to be case-sensitive
+        (`compile.frontend != "auto"`) -- so "AUTO" read as an explicit
+        override instead of the no-op it means, and its own `_resolve_header_
+        backend` re-resolution then re-read `ABICHECK_AST_FRONTEND` live
+        instead of honoring the already-resolved `header_backend` argument
+        (the exact mechanism `service_dump_pipeline.ResolvedDumpRequest.
+        effective_header_backend`'s pin relies on not happening)."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.service_compare_evidence import effective_frontend
+
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        assert (
+            effective_frontend(CompileContext(frontend="AUTO"), "clang") == "clang"
+        )
+        assert (
+            effective_frontend(CompileContext(frontend="Auto"), "clang") == "clang"
+        )
+        # An explicit non-auto override still wins, case as given.
+        assert (
+            effective_frontend(CompileContext(frontend="castxml"), "clang")
+            == "castxml"
+        )
+
     def test_public_headers_forwarded_to_embed_build_source(
         self, tmp_path, monkeypatch
     ):
@@ -3050,12 +3106,29 @@ class TestContractEvaluationThreading:
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        # contract_mode (ADR-049 Phase 6's --contract) was appended after
-        # include_dependencies in turn, following the same rule.
-        assert params[-1] == "contract_mode"
-        assert params[-2] == "include_dependencies"
-        assert params[-3] == "contract_evaluation"
-        assert params[-4] == "diagnostic_comparison"
+        # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
+        # two, "PR B" slice 1) were appended after contract_mode in turn,
+        # following the same rule.
+        assert params[-1] == "pack_internal_namespaces"
+        assert params[-2] == "pack_policy_overrides"
+        assert params[-3] == "contract_mode"
+        assert params[-4] == "include_dependencies"
+        assert params[-5] == "contract_evaluation"
+        assert params[-6] == "diagnostic_comparison"
+
+    def test_get_type_hints_resolves_without_nameerror(self):
+        """Codex review: `run_compare` moved from `service.py` into
+        `service_compare_pipeline.py` in this same PR, and `Path` was only
+        imported there under `TYPE_CHECKING` -- with `from __future__ import
+        annotations` (PEP 563), `typing.get_type_hints(run_compare)` (a
+        schema generator or docs tool introspecting this public function)
+        raised `NameError: name 'Path' is not defined`. Fixed by importing
+        `pathlib.Path` unconditionally in `service_compare_pipeline.py`."""
+        import typing
+
+        hints = typing.get_type_hints(run_compare)
+        assert hints["old_input"] is Path
+        assert hints["new_input"] is Path
 
 
 class TestParallelOldNewExtraction:
@@ -3181,14 +3254,131 @@ class TestRenderOutput:
         with pytest.raises(ValidationError, match="Unsupported output format"):
             render_output("xml", diff_result, snap)
 
-    def test_stat_json(self, diff_result, snap):
-        out = render_output("json", diff_result, snap, stat=True)
-        d = json.loads(out)
-        assert isinstance(d, dict)
+    def test_oneline_format(self, diff_result, snap):
+        # CLI cleanup phase two, PR 1: --stat's boolean parameter is gone --
+        # the one-line summary is now its own fmt value
+        # (service_render.ONELINE_FORMAT), reached only via the built-in
+        # `quick` --profile at the CLI layer, but directly callable here as
+        # a plain fmt string like any other format.
+        from abicheck.service_render import ONELINE_FORMAT
 
-    def test_stat_text(self, diff_result, snap):
-        out = render_output("markdown", diff_result, snap, stat=True)
+        out = render_output(ONELINE_FORMAT, diff_result, snap)
         assert isinstance(out, str)
+        assert "\n" not in out.strip()
+
+    def test_stat_kwarg_is_a_compatibility_shim_for_oneline(self, diff_result, snap):
+        """CodeRabbit review: `render_output` is exported via
+        `abicheck.service.__all__` (Tier-2 typed API), so an existing
+        caller spelling the pre-PR-1 `render_output(..., stat=True)` must
+        not get a bare `TypeError` -- only the CLI's own `--stat` flag was
+        announced as removed, not this function's signature. For a
+        non-``json`` *fmt*, `stat=True` is equivalent to
+        `fmt=ONELINE_FORMAT` (the human one-line renderer)."""
+        from abicheck.service_render import ONELINE_FORMAT
+
+        assert render_output(
+            "markdown", diff_result, snap, stat=True
+        ) == render_output(ONELINE_FORMAT, diff_result, snap)
+
+    def test_stat_kwarg_with_json_fmt_preserves_the_old_stat_json_shape(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: an earlier revision of this shim
+        collapsed `render_output("json", ..., stat=True)` onto the human
+        one-line renderer too, silently breaking a Tier-2 caller that fed
+        the pre-PR-1 `--stat --format json` shape to `json.loads()`. The
+        JSON case must keep returning `to_stat_json`'s summary-only JSON
+        object (no `changes` array), not human text."""
+        from abicheck.reporter import to_stat_json
+
+        out = render_output("json", diff_result, snap, stat=True)
+        assert json.loads(out) == json.loads(to_stat_json(diff_result))
+        d = json.loads(out)
+        assert "changes" not in d
+        assert d["verdict"] == diff_result.verdict.value
+
+    def test_stat_kwarg_with_junit_fmt_is_never_short_circuited(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: the pre-PR-1 `--stat` boolean's own
+        guard was `if stat and fmt != "junit": ...` -- JUnit was *never*
+        replaced by the one-line summary, since an XML consumer needs the
+        real `<testsuite>` document regardless of `--stat`. A revision of
+        this shim that routed every non-JSON `fmt` (JUnit included) to the
+        human one-line renderer silently broke that XML consumer."""
+        assert render_output(
+            "junit", diff_result, snap, stat=True
+        ) == render_output("junit", diff_result, snap, stat=False)
+
+    def test_show_recommendation_false_still_suppresses_the_section(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence: `show_recommendation` is a real,
+        effective toggle, not an inert compatibility shim -- an earlier
+        revision hard-coded `True` into the `to_markdown` call regardless
+        of what the caller passed, silently reintroducing the
+        recommendation section for a direct Tier-2 caller that explicitly
+        asked it be suppressed (only the CLI's own `--recommend` flag was
+        announced removed, not this keyword's effect)."""
+        with_rec = render_output(
+            "markdown", diff_result, snap, show_recommendation=True
+        )
+        without_rec = render_output(
+            "markdown", diff_result, snap, show_recommendation=False
+        )
+        assert with_rec != without_rec
+
+    def test_show_recommendation_default_matches_pre_removal_api(
+        self, diff_result, snap
+    ):
+        """Codex review, fresh evidence, second round: the default must stay
+        `False` -- the exact pre-removal Tier-2 Python API default -- not
+        `True`. An earlier revision changed the default to match the CLI's
+        own unconditional-inclusion behaviour, which silently changed what
+        an existing direct caller gets when it omits this keyword entirely
+        (a public-API default change this PR's docs never announced). The
+        CLI achieves its own unconditional inclusion by having its wrapper
+        (`cli._render_output`) pass `show_recommendation=True` explicitly,
+        not by changing this function's default -- see
+        `test_cli_recommendation_is_unconditional_despite_the_false_default`
+        below for that half of the contract."""
+        assert render_output(
+            "markdown", diff_result, snap
+        ) == render_output("markdown", diff_result, snap, show_recommendation=False)
+
+    def test_cli_recommendation_is_unconditional_despite_the_false_default(
+        self, diff_result, snap
+    ):
+        """The CLI's own `cli._render_output` wrapper explicitly passes
+        `show_recommendation=True` to `render_output` (it never relies on
+        the library default), so its own markdown output stays
+        unconditional even though `render_output`'s own default flipped
+        back to `False` in this round's fix."""
+        from abicheck.cli import _render_output
+
+        cli_markdown = _render_output("markdown", diff_result, snap)
+        default_markdown = render_output("markdown", diff_result, snap)
+        explicit_true_markdown = render_output(
+            "markdown", diff_result, snap, show_recommendation=True
+        )
+        assert cli_markdown == explicit_true_markdown
+        assert cli_markdown != default_markdown
+
+    def test_stat_json_forwards_require_complete_analysis(self, diff_result, snap):
+        """Codex/CodeRabbit review: `render_output`'s own `stat`
+        short-circuit (before format dispatch) bypassed
+        `require_complete_analysis` entirely, independent of the identical
+        `to_json`-level gap already covered in test_reporter.py -- this is
+        the service-level entry point `compare --stat --format json
+        --require-complete-analysis` actually goes through."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        diff_result.analysis_assurance = AnalysisAssurance(status="partial")
+        out = render_output(
+            "json", diff_result, snap, stat=True, require_complete_analysis=True
+        )
+        d = json.loads(out)
+        assert d["analysis_assurance_exit_contribution"] == 1
 
     def test_json_follow_deps(self, snap):
         snap.dependency_info = DependencyInfo(
@@ -4242,6 +4432,70 @@ class TestAttachHeaderGraphCompilerSelection:
         assert mock_resolve.call_args.args[0] == "cc"
         mock_extractor.assert_called_once_with(clang_bin="/opt/llvm/clang")
         assert mock_extractor.return_value.extract.call_args.kwargs["language"] == "C"
+
+
+class TestAttachHeaderGraphHashesIncludeSearchTokens:
+    """Codex review, PR #782: _attach_header_graph's own independent second
+    _clang_header_dump call has its own AST cache key, but its extra_hash_dirs
+    computation only covered resolve_inferred_header_roots's own deferred
+    roots -- never any include-search directory riding in
+    compile.gcc_option_tokens itself (an explicit --gcc-options/
+    --compiler-option -I, or -- since the P0.3 L3->L2 fold -- a compile-DB-
+    derived one). A directory the primary snapshot pass already hashes into
+    its own cache key must be hashed here too, or an edit under it would
+    silently reuse a stale cached graph even though the primary snapshot
+    re-parsed correctly."""
+
+    def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path: Path):
+        from abicheck.service import _attach_header_graph
+        from abicheck.service_scan import CompileContext
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        build_inc = tmp_path / "buildinc"
+        build_inc.mkdir()
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with patch(
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+        ) as mock_ast:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=False,
+                headers=[header],
+                includes=[],
+                lang="c++",
+                compile=CompileContext(
+                    gcc_option_tokens=("-I", str(build_inc))
+                ),
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert build_inc in mock_ast.call_args.kwargs["extra_hash_dirs"]
+
+    def test_no_include_tokens_hashes_nothing_extra(self, tmp_path: Path):
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with patch(
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+        ) as mock_ast:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=False,
+                headers=[header],
+                includes=[],
+                lang="c++",
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert mock_ast.call_args.kwargs["extra_hash_dirs"] == ()
 
 
 class TestCliNativeBinaryHeaderWiring:

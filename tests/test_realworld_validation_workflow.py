@@ -96,7 +96,7 @@ class TestPullRequestPathsCoverTheSubsystemsThisLaneExercises:
 
 
 class TestContractEvaluationStepAgainstARealPackage:
-    """The lane must actually exercise --contract-evaluation against a real
+    """The lane must actually exercise contract evaluation against a real
     package, not merely be triggered by a change to it (CLI-audit P1) --
     the whole reason a paths-filter fix alone is not enough."""
 
@@ -107,15 +107,14 @@ class TestContractEvaluationStepAgainstARealPackage:
             s
             for s in steps
             if s.get("name")
-            == "Compare a real Debian package against itself, with --contract-evaluation"
+            == "Compare a real Debian package against itself, with --contract"
         )
 
     def test_the_step_exists(self) -> None:
         assert self._step() is not None
 
-    def test_the_step_passes_contract_evaluation_and_a_domain(self) -> None:
+    def test_the_step_passes_a_contract_domain(self) -> None:
         run = self._step()["run"]
-        assert "--contract-evaluation" in run
         assert "--contract public" in run
 
     def test_the_step_asserts_a_compatible_verdict(self) -> None:
@@ -137,5 +136,5 @@ class TestContractEvaluationStepAgainstARealPackage:
         assert names.index(
             "Compare a real Debian package against itself"
         ) < names.index(
-            "Compare a real Debian package against itself, with --contract-evaluation"
+            "Compare a real Debian package against itself, with --contract"
         )

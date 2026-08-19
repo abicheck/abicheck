@@ -131,7 +131,6 @@ problem in CI.
 |--------|-------------|
 | `OLD_INPUT` / `NEW_INPUT` | Old and new library (`.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC dump) — same as plain `compare`. With `--used-by`, a JSON snapshot works only if it carries binary evidence (a `dump` of a real library, not headers-only) — its `elf`/`pe`/`macho` field is what the app's imports resolve against. |
 | `--used-by FILE` | Application binary whose imports/required symbol versions scope the comparison (repeatable). Mutually exclusive with `--required-symbol`/`--required-symbols`. |
-| `--verify-runtime` | **Deprecated, safety no-op** — see [Runtime verification](#runtime-verification-verify-runtime) below. |
 | `-H` / `--header` | Public header file or directory (repeatable, side-aware with `old=`/`new=`) |
 | `-I` / `--include` | Extra include directory for castxml (repeatable, side-aware) |
 | `--lang` | Language mode: `c++` (default) or `c` |
@@ -139,10 +138,9 @@ problem in CI.
 | `-o` / `--output` | Write report to file |
 | `--scope-public-headers` / `--no-scope-public-headers` | Restrict findings to the public-header ABI surface (on by default) |
 | `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
-| `--severity-abi-breaking` / `--severity-potential-breaking` / `--severity-quality-issues` / `--severity-addition` | Per-category severity overrides (`error`/`warning`/`info`) |
+| `.abicheck.yml`'s `severity:` block | Per-category overrides (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`, each `error`/`warning`/`info`) — config-only; `--severity-preset` is the per-run CLI knob |
 | `--suppress` | Suppression file (YAML) |
-| `--policy` | Verdict policy: `strict_abi` (default), `sdk_vendor`, `plugin_abi` |
-| `--policy-file` | Custom YAML policy overrides |
+| `--policy` | `NAME\|PATH` — a built-in profile (`strict_abi` (default), `sdk_vendor`, `plugin_abi`) or a policy document (a path, or a packaged built-in like `security`) |
 | `-v` / `--verbose` | Debug output |
 
 See `abicheck compare --help` for the complete flag set — `--used-by` is one
@@ -150,28 +148,6 @@ option among the full `compare` surface, not a separate command with its own
 flags.
 
 ---
-
-## Runtime verification (`--verify-runtime`)
-
-**Disabled (security hardening).** `--verify-runtime` used to add a
-**dynamic**, opt-in corroborating check on top of the static one described
-above: for each `--used-by` app, it actually ran the consumer binary twice
-— once with `LD_LIBRARY_PATH` pointed at the old library, once at the new
-one — so the dynamic linker's own eager-binding failure could catch a
-missing symbol the static import/export comparison alone might miss.
-
-That meant executing an *analyzed* artifact — the very shared library being
-compared — which lets its ELF constructors and other load-time
-initializers run with whatever privileges, environment, and credentials
-the `abicheck` process has. abicheck's central trust boundary is that
-analyzed inputs are treated as data, never executed, so this flag is now a
-**non-executing no-op**: passing `--verify-runtime` is accepted for
-backward compatibility, but it never spawns a process, never stages a
-library onto `LD_LIBRARY_PATH`, and never emits a
-`consumer_runtime_load_failed` finding. Use the static `--used-by` scanner
-above for undefined-symbol corroboration instead — it answers the same
-question from the binaries' own import/export tables, without running
-anything.
 
 ## Exit codes
 
@@ -210,7 +186,7 @@ required symbol/version/entrypoint has no matching diff `Change` for the
 severity machinery to see on its own, so it is floored in separately —
 under the severity scheme it counts toward, and can trip, the
 `abi_breaking` category exactly as a real `FUNC_REMOVED` finding would,
-including respecting a demoted `--severity-abi-breaking info` (i.e. a
+including respecting a demoted `severity.abi_breaking: info` (i.e. a
 missing-contract symbol is not a hidden, unconfigurable floor to `4`
 anymore).
 

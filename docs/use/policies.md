@@ -15,13 +15,13 @@ generated: false
 `abicheck compare` supports policy-based verdict classification.
 
 > Policy classification is one stage of the CI gating pipeline — it runs
-> after contract relevance (under `--contract-evaluation`) has decided which
+> after contract relevance (under `--contract`) has decided which
 > findings are even in scope, and before suppression and severity/exit-code
 > scoring. See [CI Gating](ci-gating.md) for the full order and how policy
 > combines with contract relevance, suppressions, severity, and baselines.
 
 - Built-in profiles: `--policy strict_abi|sdk_vendor|plugin_abi`
-- Custom profile file: `--policy-file <yaml>`
+- Custom profile file: `--policy <yaml>`
 
 `abicheck compat` intentionally does **not** expose `--policy`; it stays aligned
 with ABICC-compatible behavior (`strict_abi` semantics) plus its own legacy flags
@@ -33,7 +33,7 @@ like `-strict`/`--strict-mode`.
 abicheck compare old.json new.json --policy strict_abi   # default
 abicheck compare old.json new.json --policy sdk_vendor
 abicheck compare old.json new.json --policy plugin_abi
-abicheck compare old.json new.json --policy-file policy.yaml
+abicheck compare old.json new.json --policy policy.yaml
 ```
 
 ## Available Profiles
@@ -121,7 +121,7 @@ profiles** as YAML files under `abicheck/policies/`. A bare name resolves to the
 file, so they need no path:
 
 ```bash
-abicheck compare libfoo.so.1 libfoo.so.2 --policy-file qt_kde_cpp
+abicheck compare libfoo.so.1 libfoo.so.2 --policy qt_kde_cpp
 ```
 
 Each profile builds on `strict_abi` and adjusts only where the ecosystem's documented
@@ -146,7 +146,7 @@ guidance, not invented heuristics.
 > format frontends rather than a policy file — see
 > [ADR-034](../contribute/adr/034-managed-runtime-and-non-c-abi-frontends.md).
 
-## Custom Policy Files (`--policy-file`)
+## Custom Policy Files (`--policy`)
 
 Custom policy files let you keep all detectors enabled and only override
 how specific change kinds are classified.
@@ -168,7 +168,7 @@ Semantics:
 - `ignore` → `COMPATIBLE` (exit code 0)
 - kinds not listed in `overrides` use `base_policy`
 
-If both `--policy` and `--policy-file` are provided, `--policy-file` wins.
+If both `--policy` and `--policy` are provided, `--policy` wins.
 
 ### Selector-scoped reclassification (`reclassify`)
 
@@ -302,7 +302,7 @@ modify the final process exit status. Treat the table above as `compare` semanti
 
 ## Reusable packs (`--pack`)
 
-A `--policy-file` is one project's own overrides. When the *same* overrides
+A `--policy` is one project's own overrides. When the *same* overrides
 should be shared across projects, put them in a **pack** — a small versioned
 YAML document (`id`/`version`/`kind`/`assignments`) selected with
 `compare --pack` or `scan --against ... --pack` (repeatable):
@@ -316,27 +316,33 @@ assignments:
 ```
 
 A pack really configures the run: it changes the verdict and the exit code
-exactly as the equivalent `--policy-file` overrides would. It just never wins
-against one — an explicitly stated value (a `--policy-file` override, an
+exactly as the equivalent `--policy` overrides would. It just never wins
+against one — an explicitly stated value (a `--policy` override, an
 `--exit-code-scheme`, a `--severity-*` flag, a `--profile`, or `.abicheck.yml`)
 always outranks a pack, and two selected packs disagreeing about the same
 field are a usage error rather than a silent last-one-wins.
 
 `kind: contract` and `kind: gate` packs carry the other two namespaces
 (internal namespaces and `contract.unresolved`; and the exit-code scheme /
-severity levels). `contract.unresolved` needs `--contract-evaluation` to have
+severity levels). `contract.unresolved` needs `--contract` to have
 any effect — it configures the contract-coverage exit, which is only computed
 when a domain is selected to measure coverage of — so assigning it without
 that flag is a usage error rather than a silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
-a `kind: gate` pack is **compare-only**, because a `scan`'s exit code follows
-its compatibility verdict directly and so has no gate to move; `scan --pack`
-requires `--against`, since a pack's only application there is the baseline
-comparison; and `--pack` is rejected on a directory/package (release)
-`compare`, whose per-library fan-out dispatches before the effective
-configuration is resolved. Each of those is a usage error rather than a
-silently ignored flag.
+a `kind: gate` pack is rejected on `scan` (`scan --against` honours
+`--severity-preset`/`--exit-code-scheme` given directly, but does not yet
+fold a gate pack's `gate.*` assignments — it has no gate of its own to move).
+A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
+`surface.internal_namespaces`/`gate.*`, by contrast, all apply uniformly to
+every library on a directory/package (release) `compare` — the gate half
+folds into the release fan-out's own raw severity/exit-code-scheme inputs,
+since it has no resolved `GateOptions` object of its own yet.
+`contract.unresolved` is still rejected there, since the per-library
+fan-out has no per-comparison contract context to fold it into.
+`scan --pack` also requires `--against`, since a pack's only application
+there is the baseline comparison. Each rejection above is a usage error
+rather than a silently ignored flag.
 
 For the full field vocabulary, the precedence rules, and what a resolution
 receipt records, see

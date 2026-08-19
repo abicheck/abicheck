@@ -31,7 +31,7 @@ straight from an ordinary L2 header scan:
   function/variable in the already-parsed :class:`~abicheck.model.AbiSnapshot`
   (visibility from ``Function.origin``/``Variable.origin`` — the same
   ``ScopeOrigin`` classification :func:`abicheck.provenance.apply_provenance`
-  already computes when ``--public-header``/``--public-header-dir`` is given),
+  already computes when a public-header set is given),
   then folds ``type_graph.parse_clang_ast_types()``/
   ``call_graph.parse_clang_ast_calls()`` over the *same* header-aggregate
   ``clang -ast-dump=json`` tree the L2 clang frontend (``dumper_clang.py``)
@@ -87,7 +87,6 @@ localize, or add a RISK/API_BREAK finding — never a shipped-ABI verdict.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -166,7 +165,7 @@ def _seed_flat_type_node(
     Unlike the AST path above, ``RecordType``/``EnumType`` already carry their
     own ``origin``/``source_header`` (ADR-015 provenance, populated by
     :func:`abicheck.provenance.apply_provenance` from the same
-    ``--public-header``/``--public-header-dir`` inputs) — no
+    public-header inputs) — no
     ``classify_origin`` re-derivation needed here.
     """
     node_id = _type_node_id(name)
@@ -534,8 +533,8 @@ def build_header_only_graph(
     still carries ``source_decl``/``header`` nodes (declaration-level
     visibility from the snapshot alone) but no type/call edges.
 
-    *public_header_paths*/*public_dir_paths* are the same ``--public-header``/
-    ``--public-header-dir`` inputs already threaded through
+    *public_header_paths*/*public_dir_paths* are the same public-header
+    inputs already threaded through
     :func:`abicheck.provenance.apply_provenance` — required for anything to
     classify as ``public_header``/``private_header`` rather than ``unknown``
     (provenance stays opt-in, matching the rest of the L2 pipeline).
@@ -712,16 +711,13 @@ class ClangHeaderIncludeExtractor:
         ``COMPILE_UNIT_INCLUDES_FILE`` edges for the same headers the AST
         pass parsed correctly (Codex review).
         """
-        import shlex
-
+        from .._compiler_options import split_gcc_options
         from .build_evidence import BuildEvidence, CompileUnit
         from .include_graph import ClangIncludeExtractor
 
         if not self.available():
             return {}, [f"{self.clang_bin} not found in PATH"]
-        extra_tokens = (
-            shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
-        )
+        extra_tokens = split_gcc_options(gcc_options) if gcc_options else []
         toolchain_tokens: list[str] = []
         if sysroot:
             toolchain_tokens.append(f"--sysroot={sysroot}")

@@ -279,7 +279,6 @@ class TestReportIntegration:
                 str(new_p),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "--contract",
                 mode,
                 "-o",

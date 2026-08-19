@@ -50,6 +50,7 @@ import os
 from pathlib import Path
 
 import pytest
+from _strict_process import StrictProcessRunner, proc
 
 from abicheck.buildsource.adapters.bazel import BazelAdapter, bazel_deps_expression
 from abicheck.buildsource.build_evidence import BuildEvidence, TargetScope
@@ -247,17 +248,28 @@ def test_run_inferred_build_query_scopes_both_aquery_and_cquery(
     tmp_path: Path, monkeypatch
 ):
     (tmp_path / "MODULE.bazel").write_text("module(name='x')\n", encoding="utf-8")
-    seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kw):
-        seen_cmds.append(cmd)
-        if "aquery" in cmd:
-            return _FakeProc(0, stdout=json.dumps({"actions": []}))
-        return _FakeProc(0, stdout=_CQUERY)
-
+    # Scripted rather than answered-on-demand: the previous mock branched on
+    # `if "aquery" in cmd` and fell through to the cquery fixture for anything
+    # else, so it could not have noticed a third query, a missing cquery, the
+    # two running in the wrong order, or a dropped `--output=jsonproto`.
     from abicheck.buildsource import build_query as _bq
 
-    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    runner = StrictProcessRunner()
+    runner.expect(
+        argv_prefix=["bazel", "aquery", "--output=jsonproto", "--include_param_files"],
+        cwd=tmp_path,
+        returns=proc(stdout=json.dumps({"actions": []})),
+        label="bazel aquery (scoped to deps(//foo:foo))",
+    )
+    runner.expect(
+        argv=["bazel", "cquery", "--output=jsonproto", "deps(//foo:foo)"],
+        cwd=tmp_path,
+        returns=proc(stdout=_CQUERY),
+        label="bazel cquery (scoped to deps(//foo:foo))",
+    )
+    runner.install(monkeypatch, _bq.deadline, "run_bounded")
+
     merged, ext = BuildEvidence(), []
     out = run_inferred_build_query(
         tmp_path,
@@ -267,10 +279,10 @@ def test_run_inferred_build_query_scopes_both_aquery_and_cquery(
         bazel_targets=("//foo:foo",),
     )
     assert out is None
-    aquery_cmd = next(c for c in seen_cmds if "aquery" in c)
-    cquery_cmd = next(c for c in seen_cmds if "cquery" in c)
+    runner.assert_exhausted()
+
+    aquery_cmd = runner.calls[0].argv
     assert "deps(//foo:foo)" in aquery_cmd[-1]
-    assert cquery_cmd[-1] == "deps(//foo:foo)"
     # The scoped run's requested/resolved accounting reaches the merged
     # evidence, not just the query text.
     assert merged.target_scope is not None
@@ -283,18 +295,31 @@ def test_run_inferred_build_query_unscoped_leaves_target_scope_none(
 ):
     (tmp_path / "MODULE.bazel").write_text("module(name='x')\n", encoding="utf-8")
 
-    def fake_run(cmd, **kw):
-        if "aquery" in cmd:
-            return _FakeProc(0, stdout=json.dumps({"actions": []}))
-        return _FakeProc(0, stdout=_CQUERY)
-
     from abicheck.buildsource import build_query as _bq
 
-    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    # An unscoped run must query the whole workspace — `deps(//...)`, exactly
+    # once each. Pinning the query text here is what makes this test able to
+    # fail if scoping ever leaks into the unscoped path.
+    runner = StrictProcessRunner()
+    runner.expect(
+        argv_matches=lambda argv: (
+            argv[:2] == ("bazel", "aquery") and "deps(//...)" in argv[-1]
+        ),
+        returns=proc(stdout=json.dumps({"actions": []})),
+        label="bazel aquery (unscoped, deps(//...))",
+    )
+    runner.expect(
+        argv=["bazel", "cquery", "--output=jsonproto", "deps(//...)"],
+        returns=proc(stdout=_CQUERY),
+        label="bazel cquery (unscoped, deps(//...))",
+    )
+    runner.install(monkeypatch, _bq.deadline, "run_bounded")
+
     merged, ext = BuildEvidence(), []
     run_inferred_build_query(
         tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
     )
+    runner.assert_exhausted()
     assert merged.target_scope is None
 
 

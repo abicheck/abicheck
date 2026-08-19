@@ -657,7 +657,7 @@ def _both(
 ) -> tuple[dict, dict]:
     """Run both commands on the same inputs/flags; return their JSON payloads.
 
-    Always passes ``--contract-evaluation`` so the contract fields are
+    Always passes ``--contract`` so the contract fields are
     actually populated -- an all-``None`` comparison of those four keys
     would pass vacuously.
     """
@@ -673,7 +673,8 @@ def _both(
             str(new),
             "--format",
             "json",
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "-o",
             str(report_path),
             *extra,
@@ -689,7 +690,8 @@ def _both(
             str(old),
             "--format",
             "json",
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "-o",
             str(scan_path),
             *extra,
@@ -801,7 +803,6 @@ class TestFieldForFieldParity:
             ("policy", ["--policy", "sdk_vendor"]),
             ("scope-off", ["--no-scope-public-headers"]),
             ("explicit-scope", ["--scope-public-headers"]),
-            ("forced-public-symbol", ["--public-symbol", "_Z3barv"]),
             ("contract-public", ["--contract", "public"]),
             ("contract-exports", ["--contract", "exports"]),
             ("contract-all", ["--contract", "all"]),
@@ -835,6 +836,30 @@ class TestFieldForFieldParity:
         # ChangeKind, contract relevance/reason/assurance/evidence side, and
         # the compatibility decision, per finding.
         assert rows_c == rows_s, label
+
+    def test_a_forced_public_symbol_is_identical_from_config(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The forced-public-symbol matrix cell, moved off its removed flag.
+
+        ``--public-symbol`` duplicated ``scope.public_symbols`` and was
+        removed with the rest of the hidden config duplicates, so the overlay
+        now reaches both commands through ``--config`` alone -- which is
+        exactly the parity §6.4 is about: one config surface, two commands,
+        identical records. A separate test rather than a matrix row because
+        the config file needs ``tmp_path``, which a parametrize list has no
+        access to.
+        """
+        old, new = mixed_pair
+        cfg = tmp_path / "public-symbol.abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [_Z3barv]\n", encoding="utf-8")
+        report, scan = _both(runner, old, new, ["--config", str(cfg)], tmp_path)
+
+        rows_c = _compare_rows(report)
+        rows_s = _scan_rows(scan["diff"])
+        assert not scan["diff"].get("findings_truncated")
+        assert rows_c, "no gating findings to compare"
+        assert rows_c == rows_s
 
     @pytest.mark.parametrize(
         "extra",
@@ -960,11 +985,11 @@ class TestFieldForFieldParity:
         tmp_path: Path,
     ) -> None:
         # CLI audit PR 3/5: `--contract` alone now *implies*
-        # `--contract-evaluation` in both commands (the one place they must
+        # `--contract` in both commands (the one place they must
         # still agree -- abicheck.cli_options.resolve_contract_evaluation is
         # the single shared resolver both route through), rather than the two
         # rejecting it identically as a UsageError. Each now behaves exactly
-        # as if `--contract-evaluation` had also been passed explicitly.
+        # as if `--contract` had also been passed explicitly.
         #
         # Exit-code parity alone doesn't prove the evaluator actually ran --
         # a pre-existing ABI break can produce the same exit code whether or
@@ -977,7 +1002,7 @@ class TestFieldForFieldParity:
         import json
 
         implicit_args = ["--contract", "exports"]
-        explicit_args = ["--contract-evaluation", "--contract", "exports"]
+        explicit_args = ["--contract", "exports"]
 
         def _compare_json(args: list[str], name: str) -> dict:
             out = tmp_path / f"{name}.json"
@@ -1023,10 +1048,10 @@ class TestFieldForFieldParity:
         # a baseline there is no comparison for them to configure, so
         # accepting them would silently discard the request.
         res = runner.invoke(
-            main, ["scan", str(new_snap_breaking), "--contract-evaluation"]
+            main, ["scan", str(new_snap_breaking), "--contract", "public"]
         )
         assert res.exit_code == 64, res.output
-        assert "--contract-evaluation" in res.output
+        assert "--contract" in res.output
 
 
 _LIB_V1 = """
@@ -1212,6 +1237,9 @@ class TestScanResolvesTheSameTypedConfig:
         import json
 
         out = tmp_path / "scan-ctx.json"
+        # --contract is what turns the evaluator on, so a case that does not
+        # override the domain still has to name one for a context to exist.
+        domain = [] if "--contract" in extra else ["--contract", "public"]
         res = runner.invoke(
             main,
             [
@@ -1221,9 +1249,9 @@ class TestScanResolvesTheSameTypedConfig:
                 str(old),
                 "--format",
                 "json",
-                "--contract-evaluation",
                 "-o",
                 str(out),
+                *domain,
                 *extra,
             ],
         )
@@ -1246,7 +1274,6 @@ class TestScanResolvesTheSameTypedConfig:
         [
             (["--contract", "exports"], "contract.mode", "explicit_cli"),
             (["--policy", "sdk_vendor"], "policy.base", "legacy_alias"),
-            (["--public-symbol", "_Z3barv"], "surface.explicit_scope", "explicit_cli"),
         ],
     )
     def test_a_typed_flag_gets_its_real_d7_layer(
@@ -1265,6 +1292,66 @@ class TestScanResolvesTheSameTypedConfig:
         ctx = self._scan_context(runner, old, new, flag, tmp_path)
         prov = ctx["evaluation_context"]["field_provenance"][field]
         assert prov["layer"] == layer, prov
+
+    def test_a_config_only_field_gets_its_real_d7_layer(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """``surface.explicit_scope``'s own D7 layer, after its flag was removed.
+
+        The receipt's whole job is naming *which* layer chose a value. With
+        ``--public-symbol`` gone the honest answer for this field is
+        ``project_config``, not ``explicit_cli`` -- and a receipt that still
+        claimed the CLI layer would be exactly the useless-to-an-auditor
+        answer the sibling test above exists to prevent.
+        """
+        old, new = mixed_pair
+        cfg = tmp_path / "public-symbol.abicheck.yml"
+        cfg.write_text("scope:\n  public_symbols: [_Z3barv]\n", encoding="utf-8")
+        ctx = self._scan_context(runner, old, new, ["--config", str(cfg)], tmp_path)
+        prov = ctx["evaluation_context"]["field_provenance"]["surface.explicit_scope"]
+        assert prov["layer"] == "project_config", prov
+
+    @pytest.mark.parametrize("command", ["compare", "scan"])
+    def test_contract_auto_evaluates_without_claiming_an_explicit_domain(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+        command: str,
+    ) -> None:
+        """``--contract auto`` asks for a decision without naming a domain.
+
+        Regression (Codex review): normalizing ``auto`` -> ``None`` in a local
+        variable was enough for `compare`, which hands `resolve_and_apply`
+        explicit values, but not for `scan`, which rebuilds its resolver
+        inputs from ``ctx.params`` and its typed set from
+        ``ctx.get_parameter_source``. There ``auto`` survived as a literal and
+        reached ``coerce_contract_mode``, which raised `ValueError` -- the
+        documented flag crashed instead of evaluating. Both front ends must
+        also record the field as *not* explicitly stated, since deferring is
+        the whole point of the value.
+        """
+        import json
+
+        old, new = mixed_pair
+        out = tmp_path / f"{command}-auto.json"
+        argv = (
+            ["compare", str(old), str(new)]
+            if command == "compare"
+            else ["scan", str(new), "--against", str(old)]
+        )
+        res = runner.invoke(
+            main, [*argv, "--contract", "auto", "--format", "json", "-o", str(out)]
+        )
+        assert res.exit_code in (0, 1, 2, 4), res.output
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        report = payload["diff"] if command == "scan" else payload
+        ctx = report["contract_context"]
+        # It really evaluated ...
+        assert set(ctx) >= {"contract_evidence", "evaluation_context"}
+        # ... and did not claim the CLI chose the domain.
+        prov = ctx["evaluation_context"]["field_provenance"]["contract.mode"]
+        assert prov["layer"] != "explicit_cli", prov
 
     def test_an_unstated_field_is_a_default_not_a_claim(
         self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
@@ -1297,7 +1384,8 @@ class TestScanResolvesTheSameTypedConfig:
                 str(new),
                 "--format",
                 "json",
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "-o",
                 str(report_path),
             ],
@@ -1325,7 +1413,8 @@ class TestScanResolvesTheSameTypedConfig:
                 str(old),
                 "--format",
                 "json",
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "-o",
                 str(out),
             ],

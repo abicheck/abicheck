@@ -74,7 +74,7 @@ See [Architecture](../learn/architecture.md) for the full per-layer breakdown.
 | Requirement | Mandatory? | Notes |
 |-------------|-----------|-------|
 | Two inputs (`.so`/`.dll`/`.dylib`, JSON snapshot, package, or directory) | ✅ | Core input; mix freely |
-| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--header old=`/`--header new=`. The default **`--ast-frontend auto`** resolves to **castxml** (or the `ABICHECK_AST_FRONTEND` pin) and is fail-closed: it never silently changes producer. Select clang explicitly with `--ast-frontend clang`, or opt into the two recognized runtime fallbacks with `--allow-ast-frontend-fallback` / `ABICHECK_ALLOW_AST_FALLBACK=1`; fallback snapshots record the reason and effective toolchain. Pin **one side only** with `--old-ast-frontend`/`--new-ast-frontend` when needed. The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). `hybrid` needs **both** tools installed and runs both, merging them — never auto-selected. |
+| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--header old=`/`--header new=`. The default **`--ast-frontend auto`** resolves to **castxml** (or the `ABICHECK_AST_FRONTEND` pin) and is fail-closed: it never silently changes producer. Select clang explicitly with `--ast-frontend clang`, or opt into the two recognized runtime fallbacks with `--allow-ast-frontend-fallback` / `ABICHECK_ALLOW_AST_FALLBACK=1`; fallback snapshots record the reason and effective toolchain. Pin **one side only** with `--ast-frontend old=`/`--ast-frontend new=` when needed. The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). `hybrid` needs **both** tools installed and runs both, merging them — never auto-selected. |
 | Debug info (`-g`) | ❌ optional | DWARF/PDB enrich layout, calling-convention, and packing checks |
 | Headers | strongly recommended | Without them abicheck uses DWARF/BTF/CTF (ELF) or PDB (PE) if present, falling back further to L0 binary-metadata analysis when neither headers nor debug info are present — exported symbols plus platform-specific facts (SONAME/dependencies/rpaths on ELF; machine type, imports, delay-load, hardening flags, version/OS floor on PE; install name, dependencies, rpaths, and other load-command facts on Mach-O), never a bare symbol list on any platform (ELF prints an explicit warning either way; PE/Mach-O don't yet); type/signature breaks may be missed |
 
@@ -82,7 +82,7 @@ See [Architecture](../learn/architecture.md) for the full per-layer breakdown.
 
 abicheck is a superset of the external modes for most categories — see the
 [quick-reference table](#tool-comparison-quick-reference) below and the
-[396-kind Change Kind Reference](../reference/change-kinds.md). Below
+[395-kind Change Kind Reference](../reference/change-kinds.md). Below
 highlights what a single external tool misses:
 
 - ✅ `noexcept`, `const`/`static` qualifier, and access-level changes (header AST)

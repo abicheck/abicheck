@@ -865,7 +865,7 @@ def test_collect_build_context_forced_include_marks_fields_ambiguous(tmp_path):
     guarded field is flagged ``ambiguous`` (Codex review #498, P1)."""
     h = tmp_path / "config.h"
     h.write_text("struct Config {\n#ifdef KEEP\n int legacy;\n#endif\n};")
-    # forced include via user --gcc-option pass-through
+    # forced include via user --compiler-option pass-through
     _, reg = collect_build_context(
         [h], None, extra_flags=["-DKEEP", "-include", "prelude.h"]
     )
@@ -916,21 +916,38 @@ def test_collect_build_context_skips_unreadable_header(tmp_path):
 def test_user_define_flags_combines_tokens_and_gcc_options():
     """The dump collects the user's global flags in the **same order the real dump
     applies them**: the ``--gcc-options`` string first, then the repeatable
-    ``--gcc-option`` tokens (``dumper._castxml_cmd`` order), so ``-D``/``-U`` of the
+    ``--compiler-option`` tokens (``dumper._castxml_cmd`` order), so ``-D``/``-U`` of the
     same macro resolve identically on both sides (Codex review #498)."""
     from abicheck.cli_dump_helpers import _user_define_flags
 
     assert _user_define_flags((), None) == []
     assert _user_define_flags(("-DA",), None) == ["-DA"]
-    # --gcc-options (-UKEEP -DB) is applied before the --gcc-option token (-DA).
+    # --gcc-options (-UKEEP -DB) is applied before the --compiler-option token (-DA).
     assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-UKEEP", "-DB", "-DA"]
-    # Order-sensitivity: --gcc-options=-DKEEP then --gcc-option=-UKEEP must leave
+    # Order-sensitivity: --gcc-options=-DKEEP then --compiler-option=-UKEEP must leave
     # KEEP inactive (token last wins), matching dumper.py.
     from abicheck.header_conditionals import defines_from_flags
 
     assert defines_from_flags(_user_define_flags(("-UKEEP",), "-DKEEP")) == set()
     # a malformed --gcc-options (unbalanced quote) is skipped, not fatal
     assert _user_define_flags(("-DA",), '"oops') == ["-DA"]
+
+
+def test_user_define_flags_uses_the_shared_platform_tokenizer(monkeypatch):
+    """Codex review, PR #774 follow-up: this collector must tokenize
+    ``user_gcc_options`` identically to the real header-AST parse on every
+    platform. A bare ``shlex.split`` (POSIX-only) would silently disagree
+    with the Windows tokenizer on an unquoted Windows path -- e.g. combining
+    ``-IC:\\sdk\\ -UKEEP`` into one corrupted token instead of two -- letting
+    the harvested define set diverge from what the real parse actually saw."""
+    from abicheck import _compiler_options
+    from abicheck.cli_dump_helpers import _user_define_flags
+
+    monkeypatch.setattr(_compiler_options.os, "name", "nt")
+    assert _user_define_flags((), r"-IC:\sdk\ -UKEEP") == [
+        "-IC:\\sdk\\",
+        "-UKEEP",
+    ]
 
 
 def test_user_gcc_options_override_db_define_end_to_end(tmp_path):

@@ -585,7 +585,7 @@ def _resolve_compare_snapshots(
     from .errors import SnapshotError, ValidationError
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
-        # The per-side --old/new-ast-frontend rides on that side's own
+        # The per-side --ast-frontend old=/new= rides on that side's own
         # CompileContext.frontend, which `_run_dump_uncached` documents as
         # outranking the bare both-sides `header_backend`. The caller has
         # already neutralised `compile_context.frontend` to "auto" for exactly
@@ -657,21 +657,14 @@ def _resolve_compare_snapshots(
 
 #: Compile-context flag dest → spelling, for the set-input rejection guard.
 _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
-    "gcc_path": "--gcc-path",
-    "gcc_prefix": "--gcc-prefix",
-    "gcc_option_tokens": "--gcc-option",
-    # --compiler/--compiler-prefix/--compiler-option (CLI audit PR 2/5): the
-    # same guard as their legacy gcc_* counterparts above -- without this a
-    # set-input compare would silently accept and then ignore --compiler,
-    # unlike --gcc-path, which correctly raises (Codex review, PR #757).
     "compiler_path": "--compiler",
     "compiler_prefix": "--compiler-prefix",
     "compiler_option_tokens": "--compiler-option",
     "sysroot": "--sysroot",
     "nostdinc": "--nostdinc",
     "header_backend": "--ast-frontend",
-    "old_header_backend": "--old-ast-frontend",
-    "new_header_backend": "--new-ast-frontend",
+    "old_header_backend": "--ast-frontend old=",
+    "new_header_backend": "--ast-frontend new=",
     "frontend_context": "--frontend-context",
 }
 

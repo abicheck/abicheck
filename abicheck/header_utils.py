@@ -13,20 +13,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pure path helpers for header (``-H``) inputs.
+"""Pure path and compiler-flag helpers for header (``-H``) inputs.
 
 A leaf module (stdlib-only) so both the service layer (``service._dump_elf``)
 and the ``dump`` CLI helper (``cli_dump_helpers.perform_elf_dump``) can share the
 include-root derivation without an import cycle (``cli`` → ``cli_dump_helpers`` →
 ``service`` → … → ``cli``).
+
+Being that leaf is also why this module, rather than ``buildsource``, owns the
+compiler-dialect and include-flag vocabulary the whole codebase reads
+(:func:`is_msvc_driver_stem`, :data:`_INCLUDE_FLAG_PREFIXES`, and the
+forced-include recognizer below): every
+consumer — the L2 header parse (``buildsource.header_compile_context``), the L4
+replay command builder (``buildsource.source_extractors._argv``), the L2 seed
+and the AST cache keys — already sits above it, so one shared implementation
+costs no new import edge in any direction. Keep it stdlib-only: an upward
+import from here would invert that.
 """
 
 from __future__ import annotations
 
 import os
-import shlex
+import re
 from collections.abc import Sequence
 from pathlib import Path
+
+from ._compiler_options import split_gcc_options
 
 #: Conventional include-root directory names. A ``-H`` umbrella that lives
 #: *under* such a directory (e.g. ``include/oneapi/tbb.h``) writes its own
@@ -57,10 +69,46 @@ CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 #: in the pass-through compile context means a real build supplied its own
 #: include tree, which an inferred ``-H`` root must defer to. Both GNU/clang
 #: (``-I``/``-isystem``/…) and MSVC/clang-cl (``/I``/``/external:I``/``/imsvc``)
-#: spellings are recognised so an MSVC build context (``--gcc-path cl.exe`` with
+#: spellings are recognised so an MSVC build context (``--compiler cl.exe`` with
 #: ``/I`` options) is not mistaken for "no build context" (Codex review).
 #: Distinct, case-sensitive prefixes (``-I`` ≠ ``-isystem``/``-iquote``);
 #: ``startswith`` covers both spaced (``-I dir``) and attached (``-Idir``) forms.
+#:
+#: Known gap (CodeRabbit review, PR #782): every match against this tuple
+#: (here and in every consumer below -- :func:`_has_include_build_context`,
+#: :func:`_build_context_include_dirs`, :func:`_flag_tokens`,
+#: :func:`_msvc_deferred_flag`, :func:`include_operand_dirs`, and
+#: ``buildsource.l2_seed._split_include_tokens``) is exactly case-sensitive.
+#: That is correct for the GNU/clang spellings (a real compiler only ever
+#: accepts the documented lowercase ``-I``/``-isystem``/…), but wrong for the
+#: two clang-cl-only entries: unlike native ``cl.exe`` (case-sensitive, and
+#: does not recognise ``/imsvc`` at all -- that spelling is clang-cl's own),
+#: clang-cl's own driver option parsing is documented case-insensitive, so
+#: ``/IMsvc``/``/EXTERNAL:I`` are legal, real spellings this tuple's exact-case
+#: ``startswith`` silently fails to recognise as include-search flags at all.
+#: Concretely: a real clang-cl build record using ``/IMsvc`` would have that
+#: directory (a) not suppress the L2 include-dir seed
+#: (:func:`_has_include_build_context`), (b) not be resolved by
+#: :func:`_build_context_include_dirs`'s existing-dir dedup, and (c) --
+#: this PR's own new consumers -- not be hashed into the AST cache key's
+#: ``extra_hash_dirs`` (:func:`include_operand_dirs`) and not be carved out
+#: of the leading last-flag-wins token group by ``_split_include_tokens``,
+#: so an explicit ``/IMsvc`` override could still lose to a derived ``-I``
+#: for a colliding header. Not fixed here: a correct fix needs case-
+#: insensitive matching applied *consistently* to every consumer above --
+#: several of which (all but :func:`include_operand_dirs`) predate this PR
+#: entirely (present at commit ``dc09aec``, this PR's own base) -- plus a
+#: longest-prefix-first tie-break, since case-folding introduces a genuine
+#: new ambiguity a case-sensitive scan never had: ``/imsvc`` case-
+#: insensitively also matches the shorter ``/I`` prefix, and picking the
+#: wrong one changes which include bucket the directory is treated as
+#: (see :func:`_msvc_deferred_flag`'s own bucket-priority docstring). Fixing
+#: only the two consumers this PR added (:func:`include_operand_dirs` /
+#: ``_split_include_tokens``) while leaving the pre-existing consumers
+#: case-sensitive would be strictly worse than today's uniform gap -- it
+#: would make the seed-suppression and cache-hashing/ordering logic
+#: silently *disagree* about whether a given ``/IMsvc`` token is an
+#: include-search flag at all. Left as a known gap (see ``AGENTS.md``).
 _INCLUDE_FLAG_PREFIXES = (
     "-I",
     "-isystem",
@@ -179,7 +227,7 @@ def _context_tokens(
     toks: list[str] = list(gcc_option_tokens)
     if gcc_options:
         try:
-            toks += shlex.split(gcc_options, posix=os.name != "nt")
+            toks += split_gcc_options(gcc_options)
         except ValueError:
             toks += gcc_options.split()
     return toks
@@ -200,14 +248,29 @@ def _has_include_build_context(toks: list[str]) -> bool:
     return any(t.startswith(p) for t in toks for p in _INCLUDE_FLAG_PREFIXES)
 
 
-def _build_context_include_dirs(
+def build_context_include_dirs_ordered(
     toks: list[str],
     *,
     base_dir: str | None = None,
     expand_user: bool = False,
     prefixes: tuple[str, ...] | None = None,
-) -> set[str]:
-    """Resolved include directories the compile-flag *tokens* already search.
+) -> list[str]:
+    """:func:`_build_context_include_dirs`, in **argv order** and de-duplicated.
+
+    The set-returning function below is this one, collapsed — it is the older
+    of the two and every pre-existing caller only ever asks "does the build
+    context already cover this directory", for which order is irrelevant.
+
+    Order is not irrelevant to a caller *resolving a file* through the chain,
+    which is why this variant exists (Codex review, PR D, sixth round): a
+    compiler searches a bucket's directories in the order they appear on the
+    command line and takes the first match, so ``-iquote z -iquote a`` finds
+    ``z/config.h``. Sorting the set — what
+    ``header_compile_context._forced_include_search_dirs`` originally did to
+    get a deterministic chain — is deterministic *and wrong*: it would pin the
+    derived parse to ``a/config.h``, a different file with potentially
+    different macros. First occurrence wins on duplicates, matching the same
+    first-match rule.
 
     Parses every include-search flag (spaced ``-I dir`` / ``-isystem dir`` and
     attached ``-Idir`` forms, GNU and MSVC) out of *toks* and returns their
@@ -239,7 +302,15 @@ def _build_context_include_dirs(
             pp = Path(base) / pp
         return str(pp.resolve())
 
-    dirs: set[str] = set()
+    dirs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(operand: str) -> None:
+        resolved = _resolve(operand)
+        if resolved not in seen:
+            seen.add(resolved)
+            dirs.append(resolved)
+
     i = 0
     while i < len(toks):
         t = toks[i]
@@ -249,15 +320,35 @@ def _build_context_include_dirs(
             continue
         if t == prefix:  # spaced form: the directory is the next token
             if i + 1 < len(toks):
-                dirs.add(_resolve(toks[i + 1]))
+                _add(toks[i + 1])
             i += 2
             continue
         # Attached form ("-Idir" / "/Idir"): t is strictly longer than the prefix
         # here (the exact-match spaced form was handled above), so the operand is
         # always non-empty.
-        dirs.add(_resolve(t[len(prefix) :]))
+        _add(t[len(prefix) :])
         i += 1
     return dirs
+
+
+def _build_context_include_dirs(
+    toks: list[str],
+    *,
+    base_dir: str | None = None,
+    expand_user: bool = False,
+    prefixes: tuple[str, ...] | None = None,
+) -> set[str]:
+    """Resolved include directories the compile-flag *tokens* already search.
+
+    Order-free view of :func:`build_context_include_dirs_ordered` above, which
+    carries the full contract; every caller of this one is asking only whether
+    a directory is covered at all.
+    """
+    return set(
+        build_context_include_dirs_ordered(
+            toks, base_dir=base_dir, expand_user=expand_user, prefixes=prefixes
+        )
+    )
 
 
 def resolve_inferred_header_roots(
@@ -433,6 +524,297 @@ def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:
     ``/imsvc`` for MSVC ones — every pair is two tokens regardless).
     """
     return [Path(d) for _flag, d in zip(deferred_tokens[::2], deferred_tokens[1::2])]
+
+
+def include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """The directory operand of every include-search token in *tokens*.
+
+    Unlike :func:`deferred_token_dirs` above (a flat ``[flag, dir, …]`` list
+    the caller already knows is all include-search pairs), this scans an
+    arbitrary ``gcc_option_tokens`` sequence for *any* include-search entry
+    -- spaced (``-I dir``) or attached (``-Idir``) -- and returns real
+    directory :class:`Path` objects for each, for a caller's AST cache key's
+    ``extra_hash_dirs`` channel to stat (Codex review): an include-search
+    directory that reaches the header parse only as an opaque
+    ``gcc_option_tokens`` string is otherwise invisible to the cache key's
+    own directory-mtime hashing (which only inspects ``extra_includes``/
+    ``extra_hash_dirs``), so editing a header under it would reuse a stale
+    cached AST. Originally ``buildsource.l2_seed._include_operand_dirs``
+    (for the P0.3 L3->L2 fold's own derived dirs specifically); moved here,
+    a leaf module both ``l2_seed.py`` and ``service.py`` already import
+    from, once ``service._attach_header_graph``'s own independent second
+    ``_clang_header_dump`` pass needed the identical extraction for the
+    *same* ``gcc_option_tokens`` the fold merges into (Codex review) --
+    this closes the gap generically for any include-search token the merged
+    context carries, not just an L3-derived one.
+    """
+    dirs: list[Path] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        t = tokens[i]
+        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
+            dirs.append(Path(tokens[i + 1]))
+            i += 2
+            continue
+        matched_prefix = next(
+            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p) and t != p), None
+        )
+        if matched_prefix is not None:
+            dirs.append(Path(t[len(matched_prefix) :]))
+        i += 1
+    return tuple(dirs)
+
+
+#: Compiler basenames that mean a command line is in MSVC/clang-cl (``/opt``)
+#: mode. ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI CL-compatible driver —
+#: the same convention as ``clang-cl``, just Intel-branded.
+MSVC_DRIVER_BINARIES: frozenset[str] = frozenset(
+    {"cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "dpcpp-cl.exe"}
+)
+#: The same names with any ``.exe`` suffix stripped, for matching after a
+#: version suffix has also been removed.
+_MSVC_DRIVER_STEMS: frozenset[str] = frozenset(
+    name.removesuffix(".exe") for name in MSVC_DRIVER_BINARIES
+)
+#: Matches a trailing numeric version suffix LLVM/Debian packaging commonly
+#: appends to an unversioned driver name (``clang-cl-20``, ``clang-20.1``).
+#: Without stripping it, a real CL-mode driver is missed just because it
+#: carries its LLVM major-version suffix.
+_DRIVER_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
+
+
+def is_msvc_driver_stem(stem: str) -> bool:
+    """True when *stem* — an already-lowercased driver **basename** — is CL-mode.
+
+    The single vocabulary behind both dialect decisions this codebase makes,
+    which had drifted apart: ``source_extractors._argv.is_msvc_mode`` (the L4
+    replay path) recognized ``dpcpp-cl`` and version-suffixed drivers, while
+    ``buildsource.adapters.base._is_msvc_command`` (which decides the dialect
+    for source detection, forced-language detection, structured-field masking
+    and — since PR D — the L2 forced-include render) listed only ``cl`` and
+    unversioned ``clang-cl``. A ``dpcpp-cl``/``clang-cl-20`` command spelled
+    with GNU ``-c`` rather than ``/c`` therefore read as GNU dialect on the
+    build-evidence side, silently dropping its ``/FI`` forced include from the
+    derived L2 context while L4 replayed it correctly (Codex review).
+
+    Takes the basename rather than computing one, because the two callers
+    disagree — deliberately — about how to derive it: the adapter is
+    backslash-aware (a Windows driver path recorded in a compile database read
+    on POSIX), ``_argv`` uses ``os.path.basename``. Sharing only the name test
+    fixes the vocabulary drift without changing either caller's path handling.
+    """
+    if stem in MSVC_DRIVER_BINARIES:
+        return True
+    return _DRIVER_VERSION_SUFFIX_RE.sub("", stem.removesuffix(".exe")) in (
+        _MSVC_DRIVER_STEMS
+    )
+
+
+#: GNU/clang forced-include options in their **separate**-operand spelling
+#: (``-include foo.h``): the following argv token is the operand.
+#: ``-include-pch`` is here but deliberately absent from
+#: :data:`GNU_JOINED_FORCED_INCLUDE_OPTS` below — clang accepts no joined
+#: ``-include-pchfile`` spelling.
+GNU_SEPARATE_FORCED_INCLUDE_OPTS: frozenset[str] = frozenset(
+    {"-include", "-imacros", "-include-pch"}
+)
+#: The subset that additionally accepts a **joined** operand
+#: (``-includefoo.h``/``-imacrosfoo.h``).
+GNU_JOINED_FORCED_INCLUDE_OPTS: frozenset[str] = frozenset({"-include", "-imacros"})
+#: MSVC/clang-cl forced-include options in their separate-operand spelling
+#: (``/FI file`` or ``-FI file``); the joined ``/FIfile``/``-FIfile`` form is
+#: matched by prefix instead. ``/FU`` (forced ``#using`` of a managed
+#: assembly, C++/CLI) is **not** here: it names no C/C++ header, so it has no
+#: meaning for either an L4 replay or an L2 header parse.
+MSVC_SEPARATE_FORCED_INCLUDE_OPTS: frozenset[str] = frozenset({"/FI", "-FI"})
+
+#: Longest-first, so a joined-spelling scan never truncates one option at a
+#: shorter sibling's boundary.
+_GNU_JOINED_FORCED_INCLUDE_ORDER: tuple[str, ...] = tuple(
+    sorted(GNU_JOINED_FORCED_INCLUDE_OPTS, key=len, reverse=True)
+)
+
+
+def match_gnu_forced_include(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> tuple[int, str, str]:
+    """Try to match a GNU forced-include token (``-include``/``-imacros``/``-include-pch``).
+
+    Appends the matched token(s) to *out* **verbatim** (a joined spelling stays
+    joined — an L4 replay hands them straight back to the real compiler) and
+    returns ``(new_i, option, operand)``: the index past what was consumed plus
+    the *normalized* option spelling and its operand, for a caller that needs
+    to re-render rather than replay. Returns ``(i, "", "")`` when *tok* matches
+    neither the separate- nor the joined-operand form.
+    """
+    if tok in GNU_SEPARATE_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
+        return i + 2, tok, argv[i + 1]
+    if tok not in GNU_SEPARATE_FORCED_INCLUDE_OPTS:
+        for opt in _GNU_JOINED_FORCED_INCLUDE_ORDER:
+            if tok.startswith(opt) and len(tok) > len(opt):
+                out.append(tok)  # -includefile / -imacrosfile (joined)
+                return i + 1, opt, tok[len(opt) :]
+    return i, "", ""
+
+
+def match_msvc_forced_include(
+    tok: str, argv: list[str], i: int, out: list[str]
+) -> tuple[int, str, str]:
+    """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
+
+    Same contract as :func:`match_gnu_forced_include`; both the separate
+    (``/FI file``) and joined (``/FIfile``, ``-FIfile``) spellings are handled,
+    and the returned option is normalized to ``/FI`` for either.
+    """
+    if tok in MSVC_SEPARATE_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # /FI file (separate operand)
+        return i + 2, "/FI", argv[i + 1]
+    if len(tok) > 3 and (tok.startswith("/FI") or tok.startswith("-FI")):
+        out.append(tok)  # /FIfile (joined)
+        return i + 1, "/FI", tok[3:]
+    return i, "", ""
+
+
+def forced_include_operands(
+    argv: Sequence[str], *, msvc: bool
+) -> list[tuple[str, str]]:
+    """Every forced pre-include in *argv* as ``(option, operand)``, in order.
+
+    The normalized read view of :func:`match_gnu_forced_include`/
+    :func:`match_msvc_forced_include` — same recognizer, same option
+    vocabulary, same separate/joined spellings, but reporting *what was asked
+    for* rather than the verbatim tokens an L4 replay hands back to the real
+    compiler. ``option`` is one of ``-include``/``-imacros``/``-include-pch``/
+    ``/FI``; ``operand`` is the header the build forces in, exactly as the
+    build spelled it (still relative to the compile unit's own ``directory``
+    when relative, and still subject to the include search when bare).
+
+    *msvc* enables the ``/FI``/``-FI`` family, gated the same way
+    ``source_extractors._argv._scan_argv_for_extra_flags`` gates it (on the
+    resolved compiler dialect) so a GNU ``-F``-family flag is never read as one.
+
+    Lives here, in the leaf that already owns this codebase's include-flag
+    vocabulary (:data:`_INCLUDE_FLAG_PREFIXES` and friends), rather than in
+    ``buildsource``: both consumers are above it — the L4 replay path reaches
+    the matchers through ``source_extractors._argv``, and the L2 header parse
+    reaches this view through ``buildsource.header_compile_context.
+    _context_flags`` — so one shared implementation costs no new import edge in
+    either direction. See ``adapters.base.ABI_RELEVANT_FLAG_PREFIXES``'s own
+    comment for why these deliberately never travel via
+    ``CompileUnit.abi_relevant_flags``.
+    """
+    tokens = list(argv)
+    scratch: list[str] = []
+    out: list[tuple[str, str]] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        new_i, option, operand = match_gnu_forced_include(tok, tokens, i, scratch)
+        if new_i == i and msvc:
+            new_i, option, operand = match_msvc_forced_include(tok, tokens, i, scratch)
+        if new_i == i:
+            i += 1
+            continue
+        # A joined spelling whose "operand" is itself option-shaped is not a
+        # real file operand (``-include-pchfoo`` reaches the joined ``-include``
+        # branch with ``-pchfoo``); replaying it verbatim is harmless, but
+        # re-rendering it as a forced include would not be.
+        if operand and not operand.startswith("-"):
+            out.append((option, operand))
+        i = new_i
+    return out
+
+
+def forced_include_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """Every forced pre-include in *tokens*, as the file **and** its directory.
+
+    Sibling of :func:`include_operand_dirs`, for the same AST-cache-key
+    channel and the same reason — a forced-include header
+    (``-include config.h``) reaches the parse only as an opaque
+    ``gcc_option_tokens`` string, so editing that header would otherwise reuse
+    a stale cached AST even though it is exactly the macro-controlling input
+    the parse depends on most.
+
+    **The file itself, not only its parent directory (Codex review, PR D).**
+    An earlier revision returned the parent alone, on the assumption that the
+    cache key's directory walk would then cover it. It does not in general:
+    that walk (:func:`iter_cache_header_files`, via
+    ``dumper_ast_config._cache_key``) is suffix-filtered by
+    :data:`CACHE_HEADER_SUFFIXES` — correct for "catch transitive includes
+    under a search root", wrong for a file named explicitly because it is
+    *itself* part of the parse. A forced include routinely carries a suffix
+    that list does not name (``-imacros settings.def``) or none at all
+    (``-include generated/config``), so hashing only the parent left an edit
+    to it invisible while the unchanged option token kept the key identical.
+    ``_cache_key`` hashes a non-directory entry's own mtime directly, the same
+    way it already hashes ``headers``.
+
+    The parent is returned alongside it, so a *neighbouring* header the forced
+    one pulls in relatively is covered too — that directory need not be on the
+    include search path, so nothing else would cover it.
+
+    **A relative operand also contributes one candidate per include-search
+    directory in the same token list (Codex review, PR D, third round).** A
+    forced include is resolved through the ``-I`` chain when it is not found
+    relative to the working directory, so ``-I /build/gen -include config``
+    names ``/build/gen/config`` — and *nothing else* hashes that file: the
+    operand alone stats relative to abicheck's own working directory (the
+    build's, it is not), and ``/build/gen`` is walked only through the
+    suffix-filtered :func:`iter_cache_header_files`, which skips an
+    extensionless or ``.def`` name outright. The candidates are emitted
+    whether or not they exist, which is both harmless and deliberate:
+    ``_cache_key`` contributes a non-existent path's string and moves on, and
+    a candidate that *starts* existing is a real change to what the compiler
+    would resolve. Since the search order is first-match-wins, a candidate
+    under a directory the compiler would never reach can only ever over-
+    invalidate — a spurious cache miss, never a stale hit, which is the
+    correct direction for this channel to err in.
+
+    Recognition is :func:`forced_include_operands` above, run over both
+    dialects — the same tokens ``header_compile_context._context_flags``
+    renders — so the set hashed here cannot drift from the set actually passed
+    to the compiler.
+    """
+    toks = list(tokens)
+    search_dirs = include_operand_dirs(toks)
+    paths: list[Path] = []
+    for _option, operand in {
+        *forced_include_operands(toks, msvc=False),
+        *forced_include_operands(toks, msvc=True),
+    }:
+        operand_path = Path(operand)
+        paths.append(operand_path)
+        parent = operand_path.parent
+        if str(parent) not in (".", ""):
+            paths.append(parent)
+        if not operand_path.is_absolute():
+            paths.extend(d / operand_path for d in search_dirs)
+    return tuple(sorted(set(paths), key=str))
+
+
+def cache_relevant_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
+    """Every path in *tokens* an AST cache key must cover for staleness.
+
+    The union of :func:`include_operand_dirs` (include-*search* dirs) and
+    :func:`forced_include_operand_paths` (each forced pre-included header and
+    its directory). One function so the four header-parse cache keys that
+    consume it — the primary ``service._dump_elf`` parse, ``service.
+    _attach_header_graph``'s independent second parse, the PE/Mach-O
+    ``service_header_scoped._try_header_scoped_dump`` parse, and the L2 seed's
+    own ``derived_include_dirs`` return — cannot disagree about what staleness
+    means for the same ``gcc_option_tokens``; three of those four have already
+    each needed their own individual fix for exactly that divergence
+    (``AGENTS.md``'s tenth and seventeenth L3->L2-fold findings, plus PR D's
+    own PE/Mach-O round).
+
+    Mixed files and directories: the consuming ``extra_hash_dirs`` channel
+    accepts both (see ``dumper_ast_config._cache_key``), since a forced
+    pre-include is a file whose content is part of the parse rather than a
+    directory to search.
+    """
+    return include_operand_dirs(tokens) + forced_include_operand_paths(tokens)
 
 
 def iter_cache_header_files(directory: Path) -> list[Path]:

@@ -611,6 +611,15 @@ class TestLiveMeasurement:
         # Regression guard for the cross-repeat/cross-backend disk-cache
         # contamination finding: every _build_fixture call during one
         # _measure_one run must see a distinct temp directory.
+        #
+        # _measure_one calls _one_pair() repeat + 1 times, not repeat times:
+        # one untimed warmup pair first (its own fresh temp dir, same as
+        # every timed repeat -- see _measure_one's own docstring), then the
+        # `repeat` timed pairs. This was `== repeat` before the warmup pair
+        # was added (PR history: 8ba5852), left stale until this regression
+        # surfaced it as a real CI failure -- fix the count, not the
+        # implementation, since the warmup itself is the deliberate,
+        # documented behavior this test's own docstring already assumes.
         seen_dirs = []
         real_build_fixture = hg_gate._build_fixture
 
@@ -619,9 +628,10 @@ class TestLiveMeasurement:
             return real_build_fixture(tmp_dir, n)
 
         monkeypatch.setattr(hg_gate, "_build_fixture", _spy)
-        hg_gate._measure_one(3, "clang", repeat=3)
-        assert len(seen_dirs) == 3
-        assert len(set(seen_dirs)) == 3
+        repeat = 3
+        hg_gate._measure_one(3, "clang", repeat=repeat)
+        assert len(seen_dirs) == repeat + 1
+        assert len(set(seen_dirs)) == repeat + 1
 
     def test_main_report_only_run_exits_zero(self, capsys):
         rc = hg_gate.main(["--sizes", "5", "--repeat", "1"])

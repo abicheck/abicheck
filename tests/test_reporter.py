@@ -121,6 +121,69 @@ class TestJsonReporter:
         assert d["summary"]["breaking"] == 1
         assert d["changes"][0]["kind"] == "func_removed"
 
+
+class TestAnalysisAssuranceExitContributionPersistence:
+    """P0.4: ``compare``'s JSON report persists
+    ``analysis_assurance_exit_contribution`` alongside ``analysis_assurance``
+    -- read (not recomputed) by ``aggregate.py``'s ``_analysis_assurance_exit``
+    the same way ``contract_coverage_exit_contribution`` already is. Before
+    this, only ``scan --against``'s summary persisted it (`_baseline_summary`),
+    so a compare report whose severity/compatibility gate read a clean 0
+    while this axis independently floored the *real* exit to 1 fed
+    `abicheck aggregate` a green result for it (Codex review, PR #780)."""
+
+    def test_absent_without_a_real_analysis_assurance_object(self):
+        # No AnalysisAssurance attached (a hand-built DiffResult, same as
+        # every other test in this file) -- nothing to report a
+        # contribution for, mirroring `analysis_assurance` itself being
+        # absent. Preserves back-compat for any consumer reading this
+        # report's exact key set.
+        r = _result(Verdict.COMPATIBLE)
+        d = json.loads(to_json(r))
+        assert "analysis_assurance" not in d
+        assert "analysis_assurance_exit_contribution" not in d
+
+    def test_present_and_zero_without_the_flag(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_json(r))
+        assert d["analysis_assurance"]["status"] == "partial"
+        # The flag was never requested (require_complete_analysis defaults
+        # False) -- 0 regardless of the underlying status, purely additive.
+        assert d["analysis_assurance_exit_contribution"] == 0
+
+    def test_one_when_the_flag_is_set_and_status_is_partial(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_json(r, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 1
+
+    def test_zero_when_the_flag_is_set_and_status_is_complete(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="complete")
+        d = json.loads(to_json(r, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 0
+
+    def test_persisted_in_leaf_and_root_cause_modes_too(self):
+        # All three JSON paths call the shared add_contract_context -- a
+        # regression pinned to only one mode would miss the other two.
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        for mode in ("leaf", "root-cause"):
+            d = json.loads(
+                to_json(r, report_mode=mode, require_complete_analysis=True)
+            )
+            assert d["analysis_assurance_exit_contribution"] == 1, mode
+
     def test_stat_forwards_severity_config(self):
         """Codex review: to_json(stat=True, severity_config=...) returned
         before forwarding severity_config to to_stat_json, so a caller going
@@ -132,6 +195,72 @@ class TestJsonReporter:
         r = _result(Verdict.COMPATIBLE, changes=[c])
         d = json.loads(to_json(r, stat=True, severity_config=PRESET_DEFAULT))
         assert "severity" in d
+
+    def test_stat_forwards_require_complete_analysis(self):
+        """Codex/CodeRabbit review: `to_json(stat=True)`'s early return
+        dropped `require_complete_analysis` entirely, so `compare --stat
+        --format json --require-complete-analysis` exited 1 for incomplete
+        analysis while the stat report itself carried no
+        `analysis_assurance_exit_contribution` (or a stale `0`) --
+        `abicheck aggregate` read the missing/wrong value as a pass."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        r = _result(Verdict.COMPATIBLE)
+        r.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 1
+
+    def test_stat_omits_the_contribution_without_a_real_assurance_object(self):
+        r = _result(Verdict.COMPATIBLE)
+        d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
+        assert "analysis_assurance_exit_contribution" not in d
+
+
+class TestAnnotationsPersistence:
+    """CLI cleanup phase two, PR E's persistence prerequisite (schema
+    2.43): ``compare``'s JSON report always carries ``annotations`` --
+    the same classified, already-formatted answer ``--annotate`` renders to
+    stderr, so a rendering front end (the composite Action) can read it
+    instead of inferring one from stderr or re-running the comparison.
+    """
+
+    def test_present_and_empty_on_a_clean_comparison(self):
+        r = _result(Verdict.NO_CHANGE)
+        d = json.loads(to_json(r))
+        assert d["annotations"] == []
+
+    def test_breaking_change_produces_an_error_entry(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r))
+        assert len(d["annotations"]) == 1
+        entry = d["annotations"][0]
+        assert entry["level"] == "error"
+        assert entry["annotation"].startswith("::error ")
+
+    def test_is_the_superset_regardless_of_this_reports_own_show_only(self):
+        """Always the full, additions-included set -- unlike ``--annotate``
+        on the CLI, this key isn't gated by any flag the report itself was
+        rendered with."""
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["annotations"] == [
+            {
+                "level": "notice",
+                "annotation": d["annotations"][0]["annotation"],
+                "always_visible": False,
+            }
+        ]
+        assert "::notice " in d["annotations"][0]["annotation"]
+
+    def test_present_across_leaf_and_root_cause_modes(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        for mode in ("leaf", "root-cause"):
+            d = json.loads(to_json(r, report_mode=mode))
+            assert len(d["annotations"]) == 1
+            assert d["annotations"][0]["level"] == "error"
 
 
 class TestEvidenceStatusInJson:
@@ -865,8 +994,8 @@ class TestImpactAssessmentRootCause:
         assert group["strongest_evidence_level"] == "consumer_proven"
 
     def test_root_cause_mode_group_evidence_for_bare_symbol_pair(self):
-        """Codex review: --used-by --verify-runtime's real shape -- a
-        FUNC_REMOVED and a CONSUMER_RUNTIME_LOAD_FAILED sharing a bare
+        """Codex review: --used-by's real shape -- a
+        FUNC_REMOVED and a CONSUMER_REQUIRED_SYMBOL_REMOVED sharing a bare
         symbol, neither carrying caused_by_type. RootCauseCorrelator merges
         them (its own key is `caused_by_type or symbol`), but
         _root_cause_key_and_display's "only caused_by_type correlates
@@ -881,13 +1010,13 @@ class TestImpactAssessmentRootCause:
             "regressed_symbol",
             "symbol removed",
         )
-        runtime_failed = Change(
-            ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+        consumer_required = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
             "regressed_symbol",
-            "runtime load failed",
+            "consumer requires a removed symbol",
         )
         r = _result(Verdict.BREAKING, changes=[removed])
-        r.scoped_only_changes = (runtime_failed,)  # type: ignore[attr-defined]
+        r.scoped_only_changes = (consumer_required,)  # type: ignore[attr-defined]
         d = json.loads(to_json(r, report_mode="root-cause"))
         # Two singleton report groups (no caused_by_type link) -- the
         # deliberate "first-slice" report-grouping contract, unaffected by
@@ -895,15 +1024,15 @@ class TestImpactAssessmentRootCause:
         assert d["root_cause_count"] == 1
         assert len(d["root_causes"][0]["findings"]) == 1
         group = d["root_causes"][0]
-        assert group["strongest_evidence_level"] == "runtime_proven"
-        assert group["evidence_levels"] == ["artifact_proven", "runtime_proven"]
+        assert group["strongest_evidence_level"] == "consumer_proven"
+        assert group["evidence_levels"] == ["artifact_proven", "consumer_proven"]
         # The finding's own nested evidence already showed this (unaffected
         # by the bug -- built directly from correlator membership).
         assert (
             d["changes"][0]["impact_assessment"]["root_cause_evidence"][
                 "strongest_evidence_level"
             ]
-            == "runtime_proven"
+            == "consumer_proven"
         )
 
     def test_matches_root_cause_mode_id(self):
@@ -1013,8 +1142,8 @@ class TestRootCauseMarkdown:
         assert "## Severity Configuration" in md
 
     def test_show_impact_appends_impact_table(self):
-        """Codex review: --show-impact silently dropped the Impact Summary
-        table under --report-mode root-cause, unlike full/leaf markdown."""
+        """Codex review: the impact table was silently dropped under
+        --report-mode root-cause, unlike full/leaf markdown."""
         c = Change(
             ChangeKind.TYPE_SIZE_CHANGED,
             "X",

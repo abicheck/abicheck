@@ -126,14 +126,13 @@ on:
         description: 'Python version for setup-python, every job.'
         type: string
         default: '3.13'
-      on-missing-required:
-        description: "Forwarded to `abicheck aggregate --on-missing-required`: 'fail' (default) or 'warn'."
-        type: string
-        default: 'fail'
-      on-unexpected-target:
-        description: "Forwarded to `abicheck aggregate --on-unexpected-target`: 'include' (default), 'warn', 'fail', or 'ignore'."
-        type: string
-        default: 'include'
+      # `abicheck aggregate`'s missing-required/unexpected-target gate policy
+      # (CLI cleanup phase two, PR 2's original manifest-carried policy, and
+      # its PR 2 follow-up) is no longer a workflow input here: `project
+      # plan`'s own --gate-missing-required/--gate-unexpected-target flags
+      # were removed (no CLI alias), so the only way to set it is CONFIG's
+      # own `aggregate: gate:` block, read directly by the "Generate
+      # run-plan.json" step below. Set it there instead of here.
 
       # ── Shared analysis options, forwarded to every check-target cell ────
       # (a per-cell override of any of these is out of scope for this first
@@ -196,9 +195,6 @@ on:
       build-config:
         type: string
         default: ''
-      verify-runtime:
-        type: boolean
-        default: false
       policy:
         type: string
         default: 'strict_abi'
@@ -211,9 +207,6 @@ on:
       severity-preset:
         type: string
         default: 'default'
-      severity-addition:
-        type: string
-        default: ''
       extra-args:
         type: string
         default: ''
@@ -402,6 +395,18 @@ jobs:
           # right below (the `no-checks` job, with a much more actionable
           # error message than a bare CLI exit), so --allow-empty defers to
           # that guard instead of stopping mid-script with a less helpful one.
+          #
+          # run-plan.json's own gate policy (stamped from CONFIG's optional
+          # `aggregate: gate:` block, CLI cleanup phase two, PR 2 follow-up)
+          # is what `to_aggregate_manifest()` projects into the aggregate
+          # manifest's `gate` block -- the equivalent of the removed
+          # `aggregate --on-missing-required`/`--on-unexpected-target` CLI
+          # flags, now riding inside the plan artifact instead of a second
+          # pair of CLI arguments at the aggregate step (see "Run aggregate"
+          # below). There is no per-workflow-call override any more (the
+          # underlying `project plan --gate-missing-required`/
+          # `--gate-unexpected-target` flags were removed too, no CLI
+          # alias) -- set the policy in CONFIG directly.
           abicheck project plan "$CONFIG_PATH" \
             --project "$PROJECT" --head-sha "$HEAD_SHA" \
             --allow-empty "${args[@]}" -o run-plan.json
@@ -925,7 +930,7 @@ jobs:
           # ast-frontend above is: a bundle cell's operand is the
           # bundle-staging *directory*, and cli_resolve.py's
           # `_reject_compile_context_for_set_inputs` hard-rejects
-          # --gcc-path/--gcc-options for a directory/package compare (the
+          # gcc-path/gcc-options for a directory/package compare (the
           # per-library release fan-out never threads a single-pair L2
           # compile context to each pair). Before this line, a profile that
           # set compile.binding for its target cells would have that same
@@ -962,12 +967,10 @@ jobs:
           build-info: ${{ inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
-          verify-runtime: ${{ inputs.verify-runtime }}
           policy: ${{ inputs.policy }}
           policy-file: ${{ inputs.policy-file }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
-          severity-addition: ${{ inputs.severity-addition }}
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
@@ -1128,22 +1131,18 @@ jobs:
       - name: Run aggregate
         id: aggregate
         shell: bash
-        env:
-          ON_MISSING_REQUIRED: ${{ inputs.on-missing-required }}
-          ON_UNEXPECTED_TARGET: ${{ inputs.on-unexpected-target }}
         run: |
           # --run-plan projects run-plan.json to the expected-target set
           # internally (ADR-054) -- no separate `run-plan to-aggregate-
-          # manifest` step needed.
+          # manifest` step needed. The gate policy (CONFIG's own
+          # `aggregate: gate:` block) rides inside run-plan.json itself
+          # (CLI cleanup phase two, PR 2 -- see the "Generate run-plan.json"
+          # step above), not as CLI flags here.
           set +e
           abicheck aggregate reports --run-plan run-plan.json \
-            --on-missing-required "$ON_MISSING_REQUIRED" \
-            --on-unexpected-target "$ON_UNEXPECTED_TARGET" \
             --format json -o aggregate-result.json
           code=$?
           abicheck aggregate reports --run-plan run-plan.json \
-            --on-missing-required "$ON_MISSING_REQUIRED" \
-            --on-unexpected-target "$ON_UNEXPECTED_TARGET" \
             --format text
           echo "exit-code=$code" >> "$GITHUB_OUTPUT"
           exit $code

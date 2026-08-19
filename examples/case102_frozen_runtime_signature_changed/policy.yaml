@@ -2,7 +2,7 @@
 # namespace `**::detail::r1::*` (as used by e.g. oneTBB) as contractually frozen.
 #
 # Run abicheck with:
-#   abicheck compare libv1.so libv2.so --policy-file policy.yaml
+#   abicheck compare libv1.so libv2.so --policy policy.yaml
 #
 # Any finding whose symbol (or caused_by_type) lies in a matching
 # namespace is tagged frozen_namespace_violation, and `overrides:`

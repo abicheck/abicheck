@@ -52,6 +52,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
 | `lang_explicit` | `bool` | `False` |
+| `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
+| `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 
 ## `CompareResult`
 
@@ -242,6 +244,7 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `bundle_system_providers` | `tuple[str, ...]` | `()` |
 | `changed_src` | `str` | `'run_scan_set'` |
 | `max_findings` | `int \| None` | `None` |
+| `build_targets` | `tuple[str, ...]` | `()` |
 
 ## `ScanResult`
 
@@ -381,11 +384,12 @@ Render comparison result in the requested output format.
 | `show_only` | `str \| None` | `None` |
 | `report_mode` | `str` | `'full'` |
 | `show_impact` | `bool` | `False` |
-| `stat` | `bool` | `False` |
 | `severity_config` | `SeverityConfig \| None` | `None` |
-| `show_recommendation` | `bool` | `False` |
 | `demangle` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
+| `stat` | `bool` | `False` |
+| `show_recommendation` | `bool` | `False` |
+| `require_complete_analysis` | `bool` | `False` |
 
 **Returns:** `str`
 
@@ -479,6 +483,8 @@ Compare two ABI inputs and return the classified diff result.
 | `contract_evaluation` | `bool` | `False` |
 | `include_dependencies` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
+| `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |
+| `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 
 **Returns:** `CompareResult`
 

@@ -104,10 +104,10 @@ jobs:
           assert "bundle_findings" not in data
           PY
 
-      - name: Compare a real Debian package against itself, with --contract-evaluation
+      - name: Compare a real Debian package against itself, with --contract
         # CLI-audit P1: this is the one lane exercising the release/package
         # contract-evaluation parity fix against a real package binary
-        # (rather than a synthetic snapshot) -- --contract-evaluation used
+        # (rather than a synthetic snapshot) -- contract evaluation used
         # to be a hard UsageError on a directory/package compare at all.
         # Real package export-table/header evidence, not a hand-built
         # fixture, is what actually catches a regression here.
@@ -123,7 +123,7 @@ jobs:
             --devel-pkg "old=inputs/debs/${devel_deb}" \
             --devel-pkg "new=inputs/debs/${devel_deb}" \
             --no-bundle-analysis \
-            --contract-evaluation --contract public \
+            --contract public \
             --format json \
             -o reports/realworld/zlib-deb-self-contract.json
           python - <<'PY'

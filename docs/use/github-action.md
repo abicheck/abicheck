@@ -228,10 +228,15 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 | `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`) |
 | `verbose` | `false` | Enable debug output |
 
-To enable suppression lifecycle enforcement, pass the flags via `extra-args`:
+To enable suppression lifecycle enforcement, set it in the repository's own
+`.abicheck.yml` — these are config keys, not flags, so they do not go through
+`extra-args`:
 
 ```yaml
-extra-args: '--strict-suppressions --require-justification'
+# .abicheck.yml, committed alongside the workflow
+suppression:
+  strict: true
+  require_justification: true
 ```
 
 ### Action behavior

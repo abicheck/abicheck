@@ -271,7 +271,7 @@ class TestExportsMode:
     def test_declared_public_overlays_cannot_widen_the_export_domain(
         self, overlay: str
     ) -> None:
-        # `--public-symbol` and `--post-manifest` both assert something about
+        # `scope.public_symbols` and `--post-manifest` both assert something about
         # the *declared-public* surface; neither observes an export, and a
         # user assertion cannot make an unexported declaration exported. This
         # domain is defined as "only exported roots and their closure", so an

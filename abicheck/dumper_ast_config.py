@@ -18,11 +18,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
-from ._compiler_options import has_explicit_std
+from ._compiler_options import has_explicit_std, split_gcc_options
 from .dumper_clang import _needs_sycl_host_only
 from .header_utils import iter_cache_header_files
 
@@ -67,6 +66,18 @@ def _cache_key(
     # (the inferred -H roots when a build context is present) rather than -I, so
     # their contents must be folded in here too — otherwise an edit to a header
     # transitively included from such a root would reuse a stale AST (Codex).
+    #
+    # An entry naming a *file* rather than a directory is hashed directly, the
+    # same way ``headers`` are above (Codex review, PR D). The directory walk
+    # below is deliberately suffix-filtered (#454), which is right for "catch
+    # transitive includes under a search root" but wrong for a file the caller
+    # named explicitly because it is *itself* part of the parse: a forced
+    # pre-include (``-include generated/config``, ``-imacros settings.def``)
+    # routinely carries a suffix ``CACHE_HEADER_SUFFIXES`` does not list, so
+    # hashing only its parent directory would let an edit to it reuse a stale
+    # AST while the unchanged option token kept the key identical. Before this
+    # branch a non-directory entry contributed only its path string, so this is
+    # a strict widening — no previously-hashed input stops being hashed.
     for inc_dir in sorted(str(x) for x in (*extra_includes, *extra_hash_dirs)):
         inc_path = Path(inc_dir)
         h.update(inc_dir.encode())
@@ -79,6 +90,11 @@ def _cache_key(
                     h.update(str(f.stat().st_mtime).encode())
                 except OSError:
                     pass
+        else:
+            try:
+                h.update(str(inc_path.stat().st_mtime).encode())
+            except OSError:
+                pass
     h.update(compiler.encode())
     # Include toolchain parameters so different cross-compilation configs
     # produce distinct cache entries
@@ -251,8 +267,8 @@ def _build_castxml_command(
     if nostdinc:
         cmd += ["-nostdinc"]
     if gcc_options:
-        cmd += shlex.split(gcc_options, posix=os.name != "nt")
-    # Repeatable --gcc-option: each value is one literal compiler argument,
+        cmd += split_gcc_options(gcc_options)
+    # Repeatable --compiler-option: each value is one literal compiler argument,
     # appended verbatim (no shlex split) so a flag whose value contains
     # whitespace survives intact and identically on POSIX and Windows.
     cmd += list(gcc_option_tokens)
@@ -260,7 +276,7 @@ def _build_castxml_command(
     explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
     # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
     # which is rejected when parsing a .h file in C mode. Force C mode, but only
-    # impose gnu11 when the user did not request a C standard via --gcc-option(s)
+    # impose gnu11 when the user did not request a C standard via --compiler-option
     # — otherwise their -std=gnu17/c99 would be overridden by a later flag.
     if not force_cpp and cc_id == "gnu":
         cmd += ["-x", "c"]
@@ -308,7 +324,7 @@ def _build_clang_header_command(
     :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang
     finds the same libstdc++/libc headers castxml gets via
     ``--castxml-cc-gnu``. Emitted **last** (after the user's ``-I`` and
-    pass-through ``--gcc-options``/``--gcc-option``) so a user-supplied
+    pass-through ``--compiler-option``) so a user-supplied
     ``-isystem`` for a cross/hermetic SDK wins. Skipped under ``-nostdinc``.
 
     On an Intel oneAPI driver, ``-fsycl-host-only`` is appended per
@@ -330,8 +346,8 @@ def _build_clang_header_command(
     if nostdinc:
         cmd += ["-nostdinc"]
     if gcc_options:
-        cmd += shlex.split(gcc_options, posix=os.name != "nt")
-    # Repeatable --gcc-option: one literal argument each (no shlex split).
+        cmd += split_gcc_options(gcc_options)
+    # Repeatable --compiler-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
     if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")

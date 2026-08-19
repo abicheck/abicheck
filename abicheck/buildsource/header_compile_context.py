@@ -69,18 +69,16 @@ pick one" heuristic.
 
 from __future__ import annotations
 
-import os
 import re
-import shlex
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .._compiler_options import explicit_language_standard
+from .._compiler_options import explicit_language_standard, split_gcc_options
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
-from ..header_utils import iter_directory_headers
+from ..header_utils import forced_include_operands, iter_directory_headers
 from .adapters.base import (
     _is_msvc_command,
     msvc_driver_token,
@@ -234,7 +232,7 @@ def _explicit_pin_tokens(explicit: CompileContext | None) -> list[str]:
     tokens: list[str] = []
     if explicit.gcc_options:
         try:
-            tokens.extend(shlex.split(explicit.gcc_options, posix=os.name != "nt"))
+            tokens.extend(split_gcc_options(explicit.gcc_options))
         except ValueError:
             pass
     tokens.extend(explicit.gcc_option_tokens)
@@ -247,7 +245,7 @@ class _ExplicitPin:
     already resolves (Finding 3).
 
     A caller who already pinned a field via ``--gcc-options``/
-    ``--gcc-option`` (or the structured ``sysroot`` field) does not need the
+    ``--compiler-option`` (or the structured ``sysroot`` field) does not need the
     L3 evidence to agree on that field too -- ``resolve_header_compile_
     context`` masks a pinned field out of the multi-unit ambiguity
     comparison below, so a genuine disagreement on a *different*,
@@ -259,7 +257,7 @@ class _ExplicitPin:
     to compute what the *effective* value of a pinned field ends up being
     (that's ``dataclasses.replace``/last-flag-wins compiler semantics once
     the derived and explicit contexts are actually merged and rendered,
-    handled by ``service_input_resolution._merge_l3_compile_context``) --
+    handled by ``buildsource.l2_seed._merge_l3_compile_context``) --
     only whether the caller stated an opinion on it at all.
     """
 
@@ -591,6 +589,16 @@ class _EffectiveContextSignature:
     two visually different strings for the same value, which made this
     signature spuriously disagree between two otherwise-identical compile
     units — see that function's own docstring for the full history.
+
+    ``forced_includes`` (plan PR 3B / PR D) compares exactly the tokens
+    :func:`_forced_include_flags` would *render*, not the raw argv spellings —
+    so two units forcing the same header in through a different-but-equivalent
+    spelling (``-include cfg.h`` vs. ``/FIcfg.h``, or a relative vs. absolute
+    operand resolving to the same real file) agree, while two units forcing in
+    genuinely *different* macro-controlling headers now disagree and fail
+    closed. Before this field existed a forced include was invisible to the
+    whole comparison, so that second case silently applied whichever unit
+    happened to group first.
     """
 
     language: str
@@ -603,6 +611,7 @@ class _EffectiveContextSignature:
     system_include_paths: tuple[str, ...]
     abi_relevant_flags: tuple[str, ...]
     gcc_path: str
+    forced_includes: tuple[str, ...] = ()
 
     @classmethod
     def of(
@@ -629,6 +638,7 @@ class _EffectiveContextSignature:
                 )
             ),
             gcc_path="" if pin.gcc_path else (_derived_gcc_path(cu) or ""),
+            forced_includes=tuple(_forced_include_flags(cu)),
         )
 
 
@@ -800,7 +810,253 @@ def _standard_conflicts_with_forced_language(
     return derived_family is not None and derived_family != forced_language
 
 
-def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> list[str]:
+#: Forced-include options :func:`_forced_include_flags` deliberately does NOT
+#: render into the L2 header-parse command, mapped to the reason:
+#:
+#: ``-include-pch`` — a precompiled header is locked to the exact compiler
+#: build that produced it. L2 parses with castxml's own bundled Clang or the
+#: host ``clang``, never necessarily the build's compiler, so replaying a
+#: ``.pch`` is a hard parse failure far more often than it is a fidelity win.
+#: L4 replay, which *does* use the real compiler, still carries it
+#: (``_argv.replay_extra_flags``).
+#:
+#: ``/FU`` — MSVC's forced ``#using`` of a managed (C++/CLI) assembly. It
+#: names no C/C++ header and has no GNU-driver equivalent to render as, so
+#: there is nothing to forward. It is not in ``adapters.base``'s recognizer
+#: vocabulary at all for the same reason.
+_UNRENDERABLE_FORCED_INCLUDE_OPTS = frozenset({"-include-pch"})
+
+#: The compile unit's own include-search chain, in the order a real
+#: preprocessor consults it, expressed as the argv prefixes each bucket is
+#: spelled with. Only used to *locate* a forced pre-include (see
+#: :func:`_forced_include_search_dirs`); the structured ``include_paths``/
+#: ``system_include_paths`` fields are folded into the matching buckets by
+#: that function, since the compile-DB adapter parses ``-I``/``-isystem`` into
+#: them while leaving every other spelling in argv only.
+_FORCED_INCLUDE_SEARCH_BUCKETS: tuple[tuple[str, ...], ...] = (
+    ("-iquote",),
+    ("-I", "/I"),
+    ("-isystem", "-cxx-isystem", "/imsvc", "/external:I"),
+    ("-idirafter",),
+)
+
+
+def _forced_include_search_dirs(cu: CompileUnit) -> list[Path]:
+    """Where *cu*'s own compile command would look for a forced pre-include.
+
+    GCC and Clang both resolve ``-include foo`` against the preprocessor's
+    working directory first and the include-search chain after, so this is
+    that chain: the unit's ``directory``, then quote-bucket dirs, then the
+    normal ``-I`` bucket, then system dirs, then after-system dirs.
+
+    Both halves of each bucket are needed, and that is the point (Codex
+    review, PR D, fourth round): the compile-DB adapter parses only
+    ``-I``/``-isystem`` into the structured ``include_paths``/
+    ``system_include_paths`` fields, leaving ``-iquote``/``/I``/``-idirafter``
+    in argv alone — so a unit that resolves its forced include through
+    ``-iquote gen`` has that directory in *neither* structured field.
+    Consulting argv here is what lets :func:`_forced_include_flags` emit an
+    absolute, always-resolvable path instead of a bare operand the rendered
+    command could not find.
+
+    Order within a bucket is the command line's own, not sorted (Codex review,
+    PR D, sixth round). A compiler takes the *first* match in a bucket, so
+    ``-iquote z -iquote a -include config.h`` resolves ``z/config.h``; sorting
+    would pin the derived parse to ``a/config.h`` — deterministic, and a
+    different file with potentially different macros.
+    :func:`~abicheck.header_utils.build_context_include_dirs_ordered` exists
+    for exactly this, and is deterministic by preserving argv order rather
+    than by discarding it.
+
+    **Residual:** within one bucket, structured entries are emitted before
+    argv-derived ones rather than interleaved by their true argv positions —
+    the structured fields record no position. This can only matter for a
+    command mixing spellings in the same bucket (a GNU ``-I``, captured
+    structurally, alongside an MSVC ``/I``, which is not), which no single
+    real driver accepts.
+    """
+    from ..header_utils import build_context_include_dirs_ordered
+
+    argv = list(cu.argv)
+    structured: dict[str, list[str]] = {
+        "-I": list(cu.include_paths),
+        "-isystem": list(cu.system_include_paths),
+    }
+    dirs: list[Path] = []
+    if cu.directory:
+        dirs.append(Path(cu.directory).expanduser())
+    for bucket in _FORCED_INCLUDE_SEARCH_BUCKETS:
+        for prefix in bucket:
+            dirs.extend(
+                _resolve_cu_relative_path(d, cu.directory)
+                for d in structured.get(prefix, ())
+            )
+        if argv:
+            dirs.extend(
+                Path(d)
+                for d in build_context_include_dirs_ordered(
+                    argv,
+                    base_dir=cu.directory or None,
+                    expand_user=True,
+                    prefixes=bucket,
+                )
+            )
+    return dirs
+
+
+def explicit_forced_include_keys(explicit: CompileContext | None) -> frozenset[str]:
+    """Every forced pre-include the *caller* already supplies, as match keys.
+
+    Both spellings a caller can use reach here: ``gcc_option_tokens`` and the
+    free-form ``gcc_options`` string (split the same way the header command
+    builders split it). Each operand contributes two keys — the operand
+    exactly as written, and its resolved absolute path — so a derived
+    occurrence matches whether the two sides spell it identically or the
+    derived one has been pinned to an absolute path by
+    :func:`_forced_include_flags`'s own search-chain resolution.
+
+    Flattening goes through :func:`_explicit_pin_tokens`, the one place this
+    module combines a caller's two option spellings, rather than a second copy
+    of it: an unbalanced quote in the free-form ``gcc_options`` string makes
+    ``shlex`` raise, and a duplicated flattening here raised it straight out of
+    a resolution path documented as best-effort — aborting the whole L2
+    compile-context resolution over a malformed *caller* string instead of
+    degrading to "the caller supplies no forced include", which only ever
+    widens what the derived side may contribute.
+    """
+    if explicit is None:
+        return frozenset()
+    tokens = _explicit_pin_tokens(explicit)
+    keys: set[str] = set()
+    for _option, operand in {
+        *forced_include_operands(tokens, msvc=False),
+        *forced_include_operands(tokens, msvc=True),
+    }:
+        keys.add(operand)
+        try:
+            keys.add(str(Path(operand).expanduser().resolve()))
+        except OSError:  # pragma: no cover - defensive, resolve() is strict=False
+            pass
+    return frozenset(keys)
+
+
+def _forced_include_flags(
+    cu: CompileUnit, *, explicit_forced_includes: frozenset[str] = frozenset()
+) -> list[str]:
+    """Render *cu*'s own forced pre-includes as literal clang argv tokens.
+
+    A build that forces a macro-controlling header in (``-include config.h``,
+    ``/FIconfig.h``) parses its own headers with that header's macros already
+    defined; an L2 header parse that omits it sees a materially different
+    translation unit — different ``#if`` branches taken, different struct
+    layouts — while still reporting a real compile-unit match and stamping
+    ``AbiSnapshot.parsed_with_build_context``. That is the gap this closes
+    (plan PR 3B / PR D, "build-context completeness").
+
+    Read straight from ``cu.argv`` via the shared recognizer in
+    :func:`~abicheck.header_utils.forced_include_operands`, **not**
+    from ``cu.abi_relevant_flags``: routing forced includes through that list
+    instead would double-emit them on every L4 replay command, since
+    ``_argv.replay_extra_flags`` both carries ``abi_relevant_flags`` and
+    independently re-scans raw argv for the same tokens. See
+    ``ABI_RELEVANT_FLAG_PREFIXES``'s own comment for the full accounting.
+
+    MSVC's ``/FI`` renders as GNU ``-include``, matching what this module
+    already does for every other field — ``-D``/``-I``/``--sysroot=`` are all
+    rendered GNU-style regardless of the recorded command's dialect, because
+    the consumer is always a GNU-driver castxml/clang invocation
+    (``dumper_ast_config``). See :data:`_UNRENDERABLE_FORCED_INCLUDE_OPTS` for
+    the two spellings that are deliberately dropped instead.
+
+    The operand is resolved against the compile unit's **own search chain**
+    (:func:`_forced_include_search_dirs`) — its ``directory`` first, then the
+    include buckets in the order a real preprocessor consults them, exactly
+    the two-stage lookup GCC documents for ``-include`` ("first searched in
+    the preprocessor's working directory", then the ``-iquote``/``-I``
+    chain) — and emitted as the absolute path of the first existing match.
+
+    Resolving through the *whole* chain rather than ``directory`` alone is
+    load-bearing, not a refinement (Codex review, PR D, fourth round). This
+    function renders a forced include into a command whose include-search
+    flags are **not** the unit's own: ``_context_flags`` emits only the
+    structured ``include_paths``/``system_include_paths``, so an argv-only
+    ``-iquote gen`` or MSVC ``/Igen`` is absent from the rendered command
+    entirely. Emitting a bare ``-include config`` that only that missing
+    directory could resolve would turn a working parse into a hard "file not
+    found", or silently select a different same-named file — strictly worse
+    than the pre-existing behaviour of not forwarding the forced include at
+    all. Pinning the absolute path removes the dependency on the rendered
+    search order instead of betting on it.
+
+    An operand that matches nowhere in the chain is emitted as written: it may
+    still be found through a search path the caller supplies, and a bare
+    relative token is the only honest thing to say about a file this side
+    cannot locate.
+
+    *explicit_forced_includes* are the keys of every forced pre-include the
+    caller already supplies (:func:`explicit_forced_include_keys`), and a
+    derived occurrence matching one is **dropped** (Codex review, PR D, fifth
+    round). ``_merge_l3_compile_context`` concatenates derived and explicit
+    tokens without deduplication, so without this a caller passing
+    ``--compiler-option -include config.h`` for a build whose compile database
+    records the same forced header gets ``-include config.h`` **twice** — and
+    a header without include guards is then processed twice and fails to
+    compile. This is the identical double-inclusion hazard that rules out
+    routing forced includes through ``CompileUnit.abi_relevant_flags`` (see
+    ``ABI_RELEVANT_FLAG_PREFIXES``'s comment), reached from the other side.
+    It matters more than the arithmetic suggests: the caller passing the
+    option by hand is precisely the one who was *working around* the absence
+    of this feature, so the duplicate would break exactly the users this
+    change is meant to help. Dropping the derived copy rather than the
+    explicit one keeps the established "explicit wins" precedence, and loses
+    nothing — both name the same file.
+
+    **Residual, pre-existing and deliberately not fixed here:**
+    ``_context_flags`` still does not render argv-only include-search
+    directories at all, so a *transitively* included header that the real
+    build reaches through ``-iquote``/``/I`` remains unreachable to the L2
+    parse. That is a fidelity gap in the derived context predating forced
+    includes — closing it changes include search order for every matched
+    unit, which is a materially wider behaviour change than this function's
+    own correctness needs. See ``AGENTS.md``.
+    """
+    search_dirs = _forced_include_search_dirs(cu)
+    flags: list[str] = []
+    for option, operand in forced_include_operands(
+        cu.argv, msvc=_is_msvc_command(cu.argv)
+    ):
+        if option in _UNRENDERABLE_FORCED_INCLUDE_OPTS:
+            continue
+        rendered_option = "-include" if option == "/FI" else option
+        operand_path = Path(operand).expanduser()
+        resolved: Path | None = None
+        if operand_path.is_absolute():
+            resolved = operand_path if operand_path.is_file() else None
+        else:
+            resolved = next(
+                (d / operand_path for d in search_dirs if (d / operand_path).is_file()),
+                None,
+            )
+        rendered_operand = resolved.as_posix() if resolved is not None else operand
+        if explicit_forced_includes and (
+            operand in explicit_forced_includes
+            or rendered_operand in explicit_forced_includes
+            or (
+                resolved is not None
+                and str(resolved.resolve()) in explicit_forced_includes
+            )
+        ):
+            continue
+        flags.extend([rendered_option, rendered_operand])
+    return flags
+
+
+def _context_flags(
+    cu: CompileUnit,
+    *,
+    forced_language: str | None = None,
+    explicit_forced_includes: frozenset[str] = frozenset(),
+) -> list[str]:
     """Render one ``CompileUnit``'s context as literal castxml/clang argv tokens.
 
     Mirrors ``BuildContext.to_castxml_flags()`` (ADR-020a's ``-p``/
@@ -930,6 +1186,13 @@ def _context_flags(cu: CompileUnit, *, forced_language: str | None = None) -> li
         if _is_structured_field_flag(f, cu_standard=cu.standard, msvc=msvc):
             continue
         flags.extend(_split_operand_survivor(f))
+    # Last, so a forced header resolves through the include search this
+    # function just rendered above it. Order within the group is the build's
+    # own: forced includes are cumulative, never last-one-wins, so none of
+    # the override reasoning that governs the tokens above applies here.
+    flags.extend(
+        _forced_include_flags(cu, explicit_forced_includes=explicit_forced_includes)
+    )
     return flags
 
 
@@ -951,14 +1214,28 @@ class HeaderCompileContextResolution:
     ``context`` is ``None`` whenever there was nothing to apply (no L3
     evidence, or no ``CompileUnit`` references any of the requested headers)
     — a plain, silent degrade to the pre-P0.3 behavior, never an error.
-    ``matched_unit_count`` is the number of distinct ``CompileUnit``s found to
-    reference the requested headers, always > 0 when ``context`` is not
-    ``None`` (used by callers to decide whether to stamp
-    ``AbiSnapshot.parsed_with_build_context``).
+
+    ``matched_units`` are the distinct ``CompileUnit``s found to reference the
+    requested headers (after any explicit-language narrowing), always
+    non-empty when ``context`` is not ``None``. Exposing the units themselves
+    — not just how many there were — is what lets a caller restrict *other*
+    build-derived L2 inputs to the same set: ``l2_seed``'s include-dir seed
+    used to gather dirs from every compile unit in the build, so in a
+    multi-TU project an unrelated TU's own generated-header directory could
+    ride along and shadow the matched TU's own colliding header, on a run
+    that then stamped ``parsed_with_build_context`` from this (separate)
+    successful resolution (plan PR 3B / PR D).
+
+    ``matched_unit_count`` stays as the derived read view callers already use
+    to decide whether to stamp ``AbiSnapshot.parsed_with_build_context``.
     """
 
     context: CompileContext | None = None
-    matched_unit_count: int = 0
+    matched_units: tuple[CompileUnit, ...] = ()
+
+    @property
+    def matched_unit_count(self) -> int:
+        return len(self.matched_units)
 
     @property
     def matched(self) -> bool:
@@ -1109,14 +1386,16 @@ def resolve_header_compile_context(
 
     ((_sig, units),) = by_signature.items()
     sample = units[0]
-    flags = _context_flags(sample, forced_language=forced_language)
+    flags = _context_flags(
+        sample,
+        forced_language=forced_language,
+        explicit_forced_includes=explicit_forced_include_keys(explicit),
+    )
     context = CompileContext(
         gcc_option_tokens=tuple(flags),
         gcc_path=_derived_gcc_path(sample),
     )
-    return HeaderCompileContextResolution(
-        context=context, matched_unit_count=len(matched)
-    )
+    return HeaderCompileContextResolution(context=context, matched_units=tuple(matched))
 
 
 def _derived_gcc_path(cu: CompileUnit) -> str | None:
@@ -1164,9 +1443,11 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     explicit value wins" to the merge step. ``resolve_header_compile_
     context`` returns only the *derived* half of the context (``derive_l2_
     compile_context``'s own docstring); its one caller,
-    ``service_input_resolution._seeded_compile_context``, folds it against
-    the caller's own explicit context via ``_merge_l3_compile_context``,
-    which now performs the identical "derived leads, explicit wins"
+    ``service_input_resolution._seeded_includes_and_compile_context`` (via
+    ``buildsource.l2_seed.seed_includes_and_fold_compile_context``), folds
+    it against the caller's own explicit context via
+    ``l2_seed._merge_l3_compile_context``, which now performs the identical
+    "derived leads, explicit wins"
     arbitration for ``gcc_path``/``gcc_prefix`` that it already performs for
     ``sysroot``/``gcc_options`` -- so an explicit ``--gcc-path`` a caller
     already set is never overridden, without this function needing to know
@@ -1282,18 +1563,25 @@ def _ambiguity_message(
         f"{len(by_signature)} materially different, ABI-relevant compile "
         "contexts across the available L3 build evidence (differing "
         "-std=/target/defines/include-search-order/sysroot/compiler-driver/"
-        "ABI-relevant flags); abicheck cannot pick one context over another "
-        "without guessing. Narrow the input (--compile-db-filter / a "
-        "project compile: block / --gcc-options/--gcc-path pinning the "
-        "ambiguous field(s)) or compare a header per contract at a time. "
-        "Conflicting translation units:",
+        "forced-includes/ABI-relevant flags); abicheck cannot pick one "
+        "context over another without guessing. Narrow the input "
+        "(--compile-db-filter / a project compile: block / "
+        "--gcc-options/--gcc-path/--compiler-option pinning the ambiguous "
+        "field(s)) or compare a header per contract at a time. Conflicting "
+        "translation units:",
     ]
+    # Only shown when some signature actually has one, so the common
+    # (forced-include-free) message is unchanged -- but shown for *every*
+    # signature once any does, since "this one forces nothing" is exactly
+    # half of that disagreement and an omitted field reads as agreement.
+    show_forced = any(sig.forced_includes for sig in by_signature)
     for sig, units in sorted(by_signature.items(), key=lambda kv: kv[0].standard):
         sample = units[0]
+        forced = f" forced_includes={list(sig.forced_includes)}" if show_forced else ""
         lines.append(
             f"  - {sample.source or sample.id!r}: std={sig.standard or '(default)'} "
             f"target={sig.target_triple or '(default)'} "
             f"gcc_path={sig.gcc_path or '(default)'} "
-            f"abi_flags={list(sig.abi_relevant_flags)}"
+            f"abi_flags={list(sig.abi_relevant_flags)}{forced}"
         )
     return "\n".join(lines)

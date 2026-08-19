@@ -255,7 +255,7 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(ignore_removals),
-            "--policy-file",
+            "--policy",
             str(policy_file),
         )
         assert result.exit_code == 4, result.output
@@ -263,7 +263,7 @@ class TestD8Precedence:
     def test_a_pack_folds_into_a_policy_file_that_states_other_kinds(
         self, two_kind_pair: tuple[Path, Path], ignore_removals: Path, tmp_path: Path
     ) -> None:
-        """Outranking is per *kind*, not per file: a `--policy-file` shadows
+        """Outranking is per *kind*, not per file: a `--policy` shadows
         only the kinds it actually states, and the pack still supplies the
         rest by merging into that same file rather than replacing it.
 
@@ -282,7 +282,7 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(ignore_removals),
-            "--policy-file",
+            "--policy",
             str(policy_file),
         )
         assert result.exit_code == 0, result.output
@@ -290,6 +290,9 @@ class TestD8Precedence:
     def test_an_explicit_severity_flag_outranks_a_gate_pack(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        # --severity-preset is the explicit severity flag that survived the
+        # per-category removals; D8's rule is about an explicitly *stated*
+        # value outranking a pack, not about which spelling states it.
         gate = _pack(
             tmp_path,
             "lenient.yml",
@@ -303,8 +306,8 @@ class TestD8Precedence:
             "json",
             "--pack",
             str(gate),
-            "--severity-abi-breaking",
-            "error",
+            "--severity-preset",
+            "strict",
         )
         assert result.exit_code == 4, result.output
 
@@ -390,7 +393,7 @@ class TestD8Precedence:
         assert result.exit_code == 0, result.output
 
     def test_a_pack_never_resets_an_explicitly_chosen_base_policy(self) -> None:
-        """With no `--policy-file` there is nothing to fold into, so one is
+        """With no `--policy` there is nothing to fold into, so one is
         synthesized -- and `checker` reads a present file's `base_policy`
         *instead of* the `policy` argument. Defaulting it would silently move
         a `--policy plugin_abi` run back to `strict_abi` for every kind the
@@ -444,11 +447,11 @@ class TestOnlyAppliedFieldsAreAccepted:
         back to the default namespaces, so the pack would be recorded as
         active configuration having changed nothing (Codex review).
 
-        The runtime collapse is pre-existing and shared with a `--policy-file`
+        The runtime collapse is pre-existing and shared with a `--policy`
         writing the same empty list, so honoring stated-empty is its own
         change; rejecting the inert value keeps this module's rule true.
 
-        Whether a `--policy-file` shadows the field is read off the file
+        Whether a `--policy` shadows the field is read off the file
         itself via the resolver's own predicate, so a file that states
         something else entirely does not suppress the rejection -- the
         `base_policy`-only case below is the one a coarser "was any policy
@@ -471,7 +474,7 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_a_policy_file_stating_something_else_does_not_shadow(
         self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
     ) -> None:
-        """A `--policy-file` only shadows the field it actually states.
+        """A `--policy` only shadows the field it actually states.
 
         Passing "a policy file exists" as the shadow signal treated a file
         setting only `base_policy` as pinning `surface.internal_namespaces`,
@@ -491,7 +494,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             pair,
             "--pack",
             str(pack),
-            "--policy-file",
+            "--policy",
             str(policy),
             *extra,
         )
@@ -500,7 +503,7 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_a_shadowed_inert_value_is_not_rejected(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """D8: an explicit `--policy-file` stating the field wins, so the
+        """D8: an explicit `--policy` stating the field wins, so the
         pack's value never reaches runtime and there is nothing inert to
         reject.
 
@@ -519,7 +522,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "assignments:\n  surface.internal_namespaces: []\n",
         )
         result = _compare(
-            CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
+            CliRunner(), pair, "--pack", str(pack), "--policy", str(policy)
         )
         assert result.exit_code == 4, result.output
         # ...and the dry run agrees rather than rejecting it early.
@@ -529,7 +532,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "--dry-run",
             "--pack",
             str(pack),
-            "--policy-file",
+            "--policy",
             str(policy),
         )
         assert dry.exit_code == 0, dry.output
@@ -668,14 +671,14 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_an_unreadable_policy_file_does_not_decide_the_shadow_question(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """The early shadow probe reads the `--policy-file` itself, so it has
+        """The early shadow probe reads the `--policy` itself, so it has
         to answer "unreadable" somehow. It answers "shadows nothing", which is
         the conservative half: the pack stays subject to the inert-value rule
         rather than being waved through by a file that states nothing.
 
         The probe swallows the failure instead of reporting it, since the real
         run loads the same file a moment later and reports it with its own
-        `--policy-file` framing -- this path exists only to keep `--dry-run`
+        `--policy` framing -- this path exists only to keep `--dry-run`
         honest, not to validate policy files. It swallows exactly the three
         exceptions `PolicyFile.load` documents, which is also the set
         `cli_params` catches, so an undocumented failure surfaces identically
@@ -690,7 +693,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "assignments:\n  surface.internal_namespaces: []\n",
         )
         result = _compare(
-            CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
+            CliRunner(), pair, "--pack", str(pack), "--policy", str(policy)
         )
         assert result.exit_code == 64, result.output
         assert "surface.internal_namespaces" in result.output
@@ -736,7 +739,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         the files (Codex review).
 
         It cannot move to the resolved check either: a pack an explicit
-        `--policy-file` outranks *also* supplies no provenance, so at the
+        `--policy` outranks *also* supplies no provenance, so at the
         resolution "assigns nothing" is indistinguishable from D8 precedence
         working correctly. It lives in `load_selected_packs` instead — every
         path that resolves or validates packs loads through there, so neither
@@ -895,7 +898,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
         """A gate pack's scheme cannot be resolved this early — the
-        configuration needs the `--policy-file` loaded much later, and a
+        configuration needs the `--policy` loaded much later, and a
         *partial* resolution would run D8 conflict detection against
         different pins than the real one, which can reject a pack pair the
         real run accepts. Saying so is honest; asserting a scheme computed
@@ -918,22 +921,351 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert result.exit_code == 0, result.output
 
-    def test_pack_is_rejected_on_a_release_comparison(
+    def test_policy_pack_is_applied_to_a_release_comparison(
         self, tmp_path: Path, ignore_removals: Path
     ) -> None:
-        """The directory/package fan-out dispatches before the effective
-        configuration is resolved, so a pack there would be accepted and score
-        nothing -- the same reason `--contract-evaluation` is rejected."""
+        """CLI cleanup phase two, "PR B" slice 1: a `kind: policy` pack now
+        configures the directory/package fan-out instead of being rejected
+        outright -- the first-assertion rule this whole module states in its
+        own docstring: an exit code that differs with and without the pack,
+        not just "the flag was accepted"."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
-        result = CliRunner().invoke(
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        without_pack = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+        assert without_pack.exit_code == 4, without_pack.output
+        with_pack = CliRunner().invoke(
             main,
             ["compare", str(old_dir), str(new_dir), "--pack", str(ignore_removals)],
         )
+        assert with_pack.exit_code == 0, with_pack.output
+
+    def test_gate_pack_is_applied_to_a_release_comparison(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, "PR B" slice 2: a `kind: gate` pack now
+        configures the directory/package fan-out instead of being rejected
+        outright -- the same first-assertion rule
+        `test_policy_pack_is_applied_to_a_release_comparison` states for the
+        policy half: an exit code that differs with and without the pack.
+
+        Exercises both fields a gate pack can assign at once
+        (`gate.exit_code_scheme` *and* `gate.severity.<category>`), on a
+        release whose only change is a compatible addition -- normally exit
+        0 regardless of scheme, since neither the legacy verdict mapping nor
+        the severity default (`addition: info`) makes an addition-only
+        release non-zero. The pack moves it to exit 1 by forcing both the
+        scheme and the addition category to error.
+        """
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        gate = _pack(
+            tmp_path,
+            "strict-additions.yml",
+            "id: strict_additions\nversion: 1\nkind: gate\n"
+            "assignments:\n"
+            "  gate.exit_code_scheme: severity\n"
+            "  gate.severity.addition: error\n",
+        )
+        without_pack = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+        )
+        assert without_pack.exit_code == 0, without_pack.output
+        with_pack = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--pack",
+                str(gate),
+            ],
+        )
+        assert with_pack.exit_code == 1, with_pack.output
+        summary = json.loads(with_pack.output)
+        assert summary["severity"]["config"]["addition"] == "error"
+        assert summary["severity"]["exit_code"] == 1
+
+    def test_gate_pack_severity_moves_a_release_onto_the_severity_scheme(
+        self, tmp_path: Path
+    ) -> None:
+        """The release-side mirror of
+        `test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme`
+        (the single-pair version, above): a bare `gate.severity.<category>`
+        assignment -- no explicit `gate.exit_code_scheme` -- still moves the
+        release onto the severity scheme, via
+        `cli_compare_release_helpers.apply_release_gate_pack`'s fallback to
+        the canonical resolver's own already-decided `resolved_exit_code_
+        scheme`, exactly as `pack_application.apply_to_compare_config` does
+        for a single-pair `compare`."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        gate = _pack(
+            tmp_path,
+            "lenient-abi.yml",
+            "id: lenient_abi\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        without_pack = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+        assert without_pack.exit_code == 4, without_pack.output
+
+        with_pack = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--pack",
+                str(gate),
+            ],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+        # The finding is still reported -- only the gate moved (same
+        # assertion the single-pair sibling test makes).
+        summary = json.loads(with_pack.output)
+        assert summary["libraries"][0]["verdict"] == "BREAKING"
+
+    @pytest.mark.parametrize("with_contract", [True, False])
+    def test_contract_unresolved_pack_still_rejected_on_a_release_comparison(
+        self, tmp_path: Path, with_contract: bool
+    ) -> None:
+        """Codex review, fresh evidence: `contract.unresolved`'s consumer
+        (`contract_coverage_exit._accepts_unresolved`) reads a per-comparison
+        `PersistedContractContext` only `checker.compare`'s own
+        `record_resolved_config` installs -- which the release fan-out never
+        builds per library. Accepting the pack here would score nothing: an
+        incomplete coverage floor would still contribute 1 to every
+        library's exit code regardless of `contract.unresolved=warn`, the
+        exact decorative-``--pack`` failure this module exists to prevent.
+        Rejected unconditionally -- with or without --contract, since even
+        --contract does not make the release fan-out apply this field."""
+        pack = _pack(
+            tmp_path,
+            "unresolved.yml",
+            "id: unresolved\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.unresolved: warn\n",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        args = ["compare", str(old_dir), str(new_dir), "--pack", str(pack)]
+        if with_contract:
+            args += ["--contract", "public"]
+        result = CliRunner().invoke(main, args)
         assert result.exit_code == 64, result.output
-        assert "--pack" in result.output
+        assert "contract.unresolved" in result.output
+        assert "cannot be applied to a directory/package" in result.output
+
+    def test_release_pack_resolution_direct_call_with_no_packs_is_a_no_op(
+        self,
+    ) -> None:
+        """Direct-call contract for the two release-pack resolvers: no
+        `--pack` means no Click/file access at all, and a bare `None` back --
+        the same "inert without a pack" property `TestNoPackChangesNothing`
+        asserts for the single-pair resolver."""
+        from abicheck.cli_compare_receipt import (
+            resolve_release_pack_application,
+            resolve_release_pack_application_from_ctx,
+        )
+
+        assert resolve_release_pack_application({"pack_paths": ()}) is None
+        assert (
+            resolve_release_pack_application_from_ctx(
+                ctx=None,
+                contract_mode=None,
+                scope_public_headers=True,
+                policy="strict_abi",
+                policy_file_path=None,
+                suppress=None,
+                require_justification=False,
+                exit_code_scheme=None,
+                severity_preset=None,
+                pack_paths=(),
+                contract_evaluation=False,
+                project_cfg=None,
+                project_path=None,
+                project_sha256=None,
+                policy_option=None,
+                policy_path=None,
+                policy_sha256=None,
+            )
+            is None
+        )
+
+    def test_broken_policy_document_is_a_clean_usage_error_on_release(
+        self, tmp_path: Path, ignore_removals: Path
+    ) -> None:
+        """Codex review, found while adding direct test coverage: unlike the
+        single-pair path (whose own `_load_suppression_and_policy` call
+        already converts a malformed `--policy` document to a clean error
+        *before* ever reaching the canonical resolver), the release fan-out
+        had no earlier guard -- `resolve_release_pack_application`'s own
+        `resolve_cli_config` call re-loads the document a second time (for
+        D7 provenance) and, unguarded, let a genuine `PolicyError` propagate
+        as a raw, uncaught exception instead of a clean `exit 64`. Fixed by
+        widening `resolve_release_pack_application_from_ctx`'s own except
+        clause. Reached only through `--pack` (the release fan-out never
+        called `resolve_cli_config` at all before PR B slice 1), so this is
+        a real regression relative to the pre-`--pack` release baseline, not
+        a pre-existing bug: without `--pack`, the identical broken `--policy`
+        document already degrades cleanly (verified separately)."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        # Syntactically valid YAML, semantically invalid as a policy (an
+        # unknown ChangeKind slug) -- PolicyFile.load raises PolicyError (a
+        # ValueError subclass), which is now caught here. A genuine YAML
+        # *syntax* error (yaml.YAMLError, not a ValueError) is a distinct
+        # failure mode, covered separately below by
+        # `test_yaml_syntax_error_is_a_clean_usage_error_on_release`.
+        broken_policy_file = tmp_path / "broken-policy.yml"
+        broken_policy_file.write_text(
+            "base_policy: strict_abi\noverrides:\n  not_a_real_kind: ignore\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                # ADR-037 D4: `--policy` takes both a built-in profile name
+                # and a document path -- there is no separate `--policy-file`.
+                "--policy",
+                str(broken_policy_file),
+                "--pack",
+                str(ignore_removals),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            "must be a clean click.UsageError exit, not an uncaught exception"
+        )
+        assert "not_a_real_kind" in result.output
+
+    def test_yaml_syntax_error_is_a_clean_usage_error_on_release(
+        self, tmp_path: Path, ignore_removals: Path
+    ) -> None:
+        """Codex review, P2 follow-up on the finding above: a genuinely
+        malformed YAML *document* (unbalanced flow-mapping brackets, not a
+        semantically-invalid-but-well-formed one) raises PyYAML's own
+        `yaml.YAMLError` from `resolve_release_pack_application`'s second,
+        provenance-only `--policy` reload -- not a `ValueError`, so the
+        earlier fix's `except (..., ValueError, OSError, ImportError)` still
+        let this specific shape through as a raw traceback. Fixed by adding
+        `yaml.YAMLError` to both `resolve_release_pack_application_from_ctx`'s
+        except clause and its own earlier best-effort `PolicyFile.load`
+        pre-read, which would otherwise raise the identical uncaught error
+        one step earlier, before ever reaching the later, wider guard."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        # Genuinely malformed YAML -- an unclosed flow mapping -- so
+        # `yaml.safe_load` itself raises `yaml.YAMLError` (a `ParserError`),
+        # never reaching `PolicyFile.load`'s own semantic validation.
+        syntax_error_file = tmp_path / "syntax-error-policy.yml"
+        syntax_error_file.write_text(
+            "base_policy: strict_abi\noverrides: {not_closed\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--policy",
+                str(syntax_error_file),
+                "--pack",
+                str(ignore_removals),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            "must be a clean click.UsageError exit, not an uncaught exception"
+        )
 
 
 class TestNoPackChangesNothing:
@@ -984,12 +1316,7 @@ class TestNoPackChangesNothing:
         resolved = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_severity_abi_breaking=None,
-            cli_severity_potential_breaking=None,
-            cli_severity_quality_issues=None,
-            cli_severity_addition=None,
             cli_scope_public=None,
-            cli_collapse_versioned_symbols=None,
         )
         assert resolved.exit_code_scheme == "legacy"
         application = PackApplication(
@@ -1017,7 +1344,6 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            "--contract-evaluation",
             # See the parity test below: `all` keeps ADR-049 Phase 7's
             # contract-coverage axis quiet so this stays a test about packs.
             "--contract",
@@ -1053,7 +1379,6 @@ class TestReceiptAgreesWithWhatScored:
         compare_out = tmp_path / "compare.json"
         scan_out = tmp_path / "scan.json"
         common = [
-            "--contract-evaluation",
             # Pin the rollback domain so this stays a test about `packs`.
             # ADR-049 Phase 7 made the contract-coverage axis real, and this
             # fixture's symbols carry no header provenance, so `public` would
@@ -1110,7 +1435,8 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            "--contract-evaluation",
+            "--contract",
+            "public",
             "--format",
             "json",
             "--pack",

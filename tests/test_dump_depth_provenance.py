@@ -718,3 +718,100 @@ def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> No
     ]
 
     assert _l4_source_abi_was_attempted(pack) is True
+
+
+def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
+    """A coercible-but-non-int ``compile_units_parsed`` (e.g. ``"1"``, as a
+    forward-compatible or hand-edited snapshot might carry it) must still
+    count as "attempted" -- only genuinely non-numeric junk (e.g.
+    ``"unknown"``) should degrade to False (Codex review, fresh evidence:
+    an isinstance-only check, tried as an earlier fix, regressed this)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_parsed"] = "1"  # type: ignore[assignment]
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+
+    assert _l4_source_abi_was_attempted(pack) is True
+
+
+def test_l4_source_abi_was_attempted_false_for_infinite_count() -> None:
+    """``int(float("inf"))`` raises ``OverflowError``, not ``ValueError``/
+    ``TypeError`` -- a distinct exception type the earlier malformed-coverage
+    fix didn't catch. A non-finite ``compile_units_parsed`` survives this
+    repo's own JSON snapshot round trip (Python's ``json`` module accepts
+    ``Infinity``/``-Infinity`` by default), so this isn't a hypothetical
+    input (Codex review, fresh evidence)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_parsed"] = float("inf")
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+
+    assert _l4_source_abi_was_attempted(pack) is False
+
+
+def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth(
+    tmp_path,
+) -> None:
+    """``execute_dump_request`` must not raise on a snapshot whose embedded
+    build-source pack carries a malformed ``compile_units_parsed`` when no
+    ``--depth`` was requested at all (Codex review, fresh evidence).
+
+    ``_l4_source_abi_was_attempted`` (``cli_dump_helpers.py``) now degrades a
+    non-numeric ``compile_units_parsed`` to "not attempted" instead of
+    raising, so ``_gated_source_label`` still falls through to its own real
+    L3-build-evidence check rather than the whole depth-label computation
+    aborting and downgrading to the conservative "headers"/"binary" fallback
+    (a second, later Codex round: the first fix only prevented the crash,
+    it didn't preserve the lower-tier evidence a completed
+    ``_gated_source_label`` call would have found). This pack carries real
+    L3 ``compile_units`` evidence, so the correct label is "build"."""
+    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.model import Function
+    from abicheck.serialization import snapshot_to_json
+    from abicheck.service_dump_pipeline import (
+        execute_dump_request,
+        resolve_dump_request,
+    )
+
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_parsed"] = "unknown"  # type: ignore[assignment]
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        functions=[Function(name="foo", mangled="foo", return_type="void", params=[])],
+        build_source=pack,
+    )
+    snap_path = tmp_path / "lib.abi.json"
+    snap_path.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+    request = DumpRequest(input=InputSpec(path=snap_path))
+    result = execute_dump_request(resolve_dump_request(request))  # must not raise
+    assert result.snapshot.library == "libfoo.so.1"
+    # Real L3 evidence (compile_units) must not be lost behind the
+    # malformed L4 field -- the label must be "build", not the
+    # last-resort "headers"/"binary" fallback (Codex review).
+    assert result.effective_depth == "build"

@@ -184,7 +184,7 @@ class TestAddSidedFlagSplitting:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestIsReleaseStyleOperand:
-    """``compare`` mode now skips its --secondary-format optimization for
+    """``compare`` mode now skips its --write optimization for
     directory/package operands, since the release fan-out engine rejects
     that flag — verified defect: it previously hard-failed a working
     directory/package compare under MODE=compare (Codex review, PR #557)."""
@@ -228,7 +228,7 @@ class TestIsReleaseStyleOperand:
         # abicheck/package.py:is_package() classifies an extensionless RPM by
         # its lead magic (0xedabeedb) regardless of filename — the Action's
         # name-suffix-only precheck missed this, so it would still add
-        # --secondary-format for an operand the CLI goes on to reject
+        # --write for an operand the CLI goes on to reject
         # (Codex review, PR #557).
         f = tmp_path / "libfoo-release"
         f.write_bytes(b"\xed\xab\xee\xdb\x00\x00\x03\x00" + b"\x00" * 90)
@@ -250,21 +250,20 @@ class TestIsReleaseStyleOperand:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestExtraArgsHasSecondaryOutput:
-    """Codex review: injecting the Action's own internal
-    ``--secondary-format``/``--secondary-output`` pair ahead of the user's
-    ``extra-args`` passthrough is unsafe when the user's own ``extra-args``
-    already requests one -- Click applies both and the *last* wins, so the
-    real run would silently honor the user's pair instead of the Action's,
-    leaving the internal sidecar file empty and triggering an unnecessary
-    (and, for ``scan --depth build/source``, potentially expensive) rerun
-    anyway. ``_extra_args_has_secondary_output`` detects that case so the
-    caller can skip its own injection instead.
+class TestExtraArgsHasWriteFlag:
+    """Codex review: injecting the Action's own internal ``--write`` ahead of
+    the user's ``extra-args`` passthrough is unsafe when the user's own
+    ``extra-args`` already requests one -- Click applies both and the *last*
+    wins, so the real run would silently honor the user's value instead of
+    the Action's, leaving the internal sidecar file empty and triggering an
+    unnecessary (and, for ``scan --depth build/source``, potentially
+    expensive) rerun anyway. ``_extra_args_has_write_flag`` detects that case
+    so the caller can skip its own injection instead.
     """
 
     def _predicate(self, extra_args: str) -> bool:
         return _run_predicate(
-            f'INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_secondary_output'
+            f'INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_write_flag'
         )
 
     def test_absent_extra_args(self) -> None:
@@ -273,22 +272,48 @@ class TestExtraArgsHasSecondaryOutput:
     def test_unrelated_extra_args(self) -> None:
         assert not self._predicate("--verbose --gate-api-break")
 
-    def test_secondary_format_space_separated(self) -> None:
-        assert self._predicate("--secondary-format text")
+    def test_write_space_separated(self) -> None:
+        assert self._predicate("--write text=out.txt")
 
-    def test_secondary_format_equals_form(self) -> None:
-        assert self._predicate("--secondary-format=text")
+    def test_write_equals_form(self) -> None:
+        assert self._predicate("--write=text=out.txt")
 
-    def test_secondary_output_space_separated(self) -> None:
-        assert self._predicate("--secondary-output out.json")
+    def test_write_flag_at_the_end_of_extra_args(self) -> None:
+        assert self._predicate("--verbose --write text=out.txt")
 
-    def test_secondary_output_equals_form(self) -> None:
-        assert self._predicate("--secondary-output=out.json")
+    def _predicate_ansi_c(self, escaped: str) -> bool:
+        """Like :meth:`_predicate`, but *escaped* is passed through bash's
+        ``$'...'`` quoting so ``\\n``/``\\t`` become real whitespace.
 
-    def test_secondary_flag_at_the_end_of_extra_args(self) -> None:
-        assert self._predicate("--verbose --secondary-format text")
+        Python's ``!r`` renders a newline as the two characters backslash-n,
+        and inside bash single quotes that stays two characters -- so the
+        plain helper cannot express the very input these cases are about.
+        """
+        return _run_predicate(
+            f"INPUT_EXTRA_ARGS=$'{escaped}' _extra_args_has_write_flag"
+        )
+
+    def test_write_after_a_newline(self) -> None:
+        # `extra-args: |` (a YAML literal block) is ordinary Action usage and
+        # puts a newline between arguments. `CMD+=($INPUT_EXTRA_ARGS)` splits
+        # on IFS -- space, tab AND newline -- so this really is a `--write`
+        # token on the command line; a literal-space substring check did not
+        # see it, injected ours anyway, and lost to the user's (Codex review).
+        assert self._predicate_ansi_c(r"--verbose\n--write text=out.txt")
+
+    def test_write_after_a_tab(self) -> None:
+        assert self._predicate_ansi_c(r"--verbose\t--write text=out.txt")
+
+    def test_write_as_the_only_arg_with_surrounding_newlines(self) -> None:
+        # A literal block usually ends with a trailing newline too.
+        assert self._predicate_ansi_c(r"\n--write text=out.txt\n")
+
+    def test_newline_separated_without_a_write_is_still_false(self) -> None:
+        # The negative control for the same splitting: newlines must not make
+        # the guard fire on their own.
+        assert not self._predicate_ansi_c(r"--verbose\n--gate-api-break")
 
     def test_does_not_false_positive_on_a_substring(self) -> None:
-        # A flag merely containing "secondary-format" as a substring (not a
-        # real standalone token) must not trip the detector.
-        assert not self._predicate("--not-a-secondary-format-flag")
+        # A flag merely containing "write" as a substring (not a real
+        # standalone token) must not trip the detector.
+        assert not self._predicate("--not-a-write-flag")

@@ -109,7 +109,7 @@ class TestSymbolicAndTextrel:
     def test_textrel_introduced_is_risk(self):
         # Matches the codebase's hardening-regression convention (relro_weakened,
         # writable_executable_segment, stack_canary_removed): COMPATIBLE_WITH_RISK
-        # by default, gated to BREAKING only via --policy-file security.
+        # by default, gated to BREAKING only via --policy security.
         from abicheck.checker_policy import RISK_KINDS
 
         old = _elf(has_textrel=False)

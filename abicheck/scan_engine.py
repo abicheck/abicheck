@@ -62,7 +62,12 @@ from .buildsource.poi import (
 )
 from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskScore
-from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
+from .buildsource.scan_levels import (
+    EvidenceDepth,
+    ScanMode,
+    SourceMethod,
+    public_depth_value,
+)
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
@@ -94,7 +99,7 @@ def _preprocessor_scan_clang_bin(compile_context: CompileContext | None) -> str:
     (the shared resolver also used for L4 source-ABI replay's ``clang_bin``,
     see ``embed_build_source``'s callers) — see that function's docstring for
     the override rules and rationale. ``compile_context is None`` (no
-    ``--gcc-path``/``--gcc-prefix`` given at all) short-circuits to the
+    ``--compiler``/``--compiler-prefix`` given at all) short-circuits to the
     ``clang++`` fallback directly, same as passing two ``None``s would.
     """
     from .dumper_clang import resolve_source_frontend_clang_bin
@@ -210,11 +215,19 @@ def _build_new_snapshot(
     symbols_only: bool = False,
     debug_presence_only: bool = False,
     include_dependencies: bool = False,
-) -> tuple[Any, list[Path]]:
+    build_targets: tuple[str, ...] = (),
+) -> tuple[Any, list[Path], CompileContext | None]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
-    Returns ``(snapshot, effective_includes)`` — the effective includes carry any
-    build-derived L2 seed so a ``--baseline`` compare can reuse the same context.
+    Returns ``(snapshot, effective_includes, effective_compile_context)`` — the
+    effective includes carry any build-derived L2 seed, and the effective
+    compile context carries the P0.3 L3->L2 fold's own merged result (when
+    applied), so a ``--baseline`` compare can reuse the same extraction
+    recipe for the native old library, not just the candidate's own header
+    parse (Codex review: without this, the candidate folded real L3 context
+    while the baseline side parsed with the caller's original,
+    un-folded context, silently reintroducing the very
+    ``NOT_COMPARABLE``/false-ABI-difference risk this fold exists to close).
 
     The resolved ``changed_paths`` (from ``--changed-path``/``--since``) are
     threaded into the inline source replay so a ``source-changed`` collection
@@ -226,47 +239,90 @@ def _build_new_snapshot(
     threaded through so a pinned s5/s6 scan can collect L3/L4 even when the build
     context lives outside ``--sources`` — otherwise it silently degrades to
     partial coverage (Codex review).
+
+    ``build_targets`` (P0.2, lab report follow-up): forwarded to
+    ``embed_build_source`` unchanged, scoping L3 collection to the given
+    root target(s) the same way `dump --build-target` already does — see
+    ``run_scan_core``'s own docstring for the full rationale.
     """
-    from .buildsource.l2_seed import seed_l2_includes
+    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
     from .errors import AbicheckError
     from .service import resolve_input
 
-    # L2 include fallback: when headers are given but the user passed no explicit
-    # -I, seed the build's include dirs so the aggregate public-header parse can
-    # resolve dependency headers (e.g. pvxs headers include EPICS Base's
-    # <epicsTime.h>). Shared with the dump path via seed_l2_includes.
+    # L2 include fallback + P0.3 L3->L2 fold, combined into one L3 collection
+    # (Codex review, PR #782 -- see seed_includes_and_fold_compile_context's own
+    # docstring for why the two were merged: two independent
+    # collect_inline_pack() calls each capable of triggering the zero-config
+    # inferred build-system query would contend on the same exclusive
+    # flock, one waiting up to the 600s timeout on the other's still-held
+    # lock). This also closes scan's own candidate-resolution side of the
+    # AGENTS.md "The native ELF `abicheck dump` path never applies L3 build
+    # context..." known gap: this function calls service.resolve_input
+    # directly, not resolve_side_snapshot, so compare's/dump's own fold never
+    # ran here either -- folding the real L3 CompileUnit-derived context into
+    # the already-resolved compile_context so a scan candidate and a
+    # dump-produced baseline of the same project agree on
+    # language_standard/include_sequence instead of NOT_COMPARABLE for
+    # reasons neither diagnostics named.
     #
-    # Keep the seed's temp-build-dir cleanups LOCAL (defer_cleanup=None), not on the
-    # outer scan list: the seed may run the inferred-CMake query, whose build dir is
-    # held under an exclusive flock until its cleanup runs. embed_build_source()
-    # below runs its *own* inferred query in the same function, so if we deferred the
-    # release to the outer drain (which happens after embed) that second query would
-    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s) before
-    # falling back to a fresh dir. The finally below drains _l2_local_cleanups right
-    # after resolve_input() has consumed the seeded dirs, releasing the lock before
-    # L3/L4 collection replays the query (Codex review).
-    includes, _l2_local_cleanups = seed_l2_includes(
-        headers=headers,
-        includes=includes,
-        sources=sources,
-        build_info=build_info,
-        build_config=build_config,
-        defer_cleanup=None,
-        # -I dirs the user gave through --gcc-options/--gcc-option (carried on the
-        # CompileContext) are explicit too — pass them so the seed stays a no-op
-        # and the user's include search precedence is preserved (Codex review).
-        gcc_options=compile_context.gcc_options if compile_context else None,
-        gcc_option_tokens=(
-            compile_context.gcc_option_tokens if compile_context else ()
-        ),
-        # L2-only pins (--depth headers → collect_mode "off") requested no build/
-        # source evidence, so the include-dir seed must not run a build system just
-        # to hint headers. Passive DB discovery still applies; only the zero-config
-        # inferred cmake/make/bazel query is gated (Codex review).
-        allow_inferred_build_query=collect_mode != "off",
-    )
-
+    # Keep the seed's temp-build-dir cleanups LOCAL (pending_cleanups=
+    # _l2_local_cleanups), not on the outer scan list: the seed may run the
+    # inferred-CMake query, whose build dir is held under an exclusive flock
+    # until its cleanup runs. embed_build_source() below runs its *own*
+    # inferred query in the same function, so if we deferred the release to
+    # the outer drain (which happens after embed) that second query would
+    # block on our still-held lock until INFERRED_QUERY_TIMEOUT_S (600s)
+    # before falling back to a fresh dir. The finally below drains
+    # _l2_local_cleanups right after resolve_input() has consumed the seeded
+    # dirs, releasing the lock before L3/L4 collection replays the query
+    # (Codex review).
+    _l2_local_cleanups: list[Callable[[], None]] = []
     try:
+        (
+            includes,
+            l3_context_applied,
+            compile_context,
+            _l3_include_dirs,
+        ) = seed_includes_and_fold_compile_context(
+            headers=headers,
+            includes=includes,
+            sources=sources,
+            build_info=build_info,
+            build_config=build_config,
+            build_query=None,
+            build_compile_db=None,
+            build_targets=build_targets,
+            collect_mode=collect_mode,
+            gcc_path=compile_context.gcc_path if compile_context else None,
+            gcc_prefix=compile_context.gcc_prefix if compile_context else None,
+            gcc_options=compile_context.gcc_options if compile_context else None,
+            gcc_option_tokens=(
+                compile_context.gcc_option_tokens if compile_context else ()
+            ),
+            sysroot=compile_context.sysroot if compile_context else None,
+            nostdinc=compile_context.nostdinc if compile_context else False,
+            frontend=compile_context.frontend if compile_context else "auto",
+            frontend_context=(
+                compile_context.frontend_context if compile_context else "host"
+            ),
+            lang=lang,
+            # `lang` defaults to "c++" (scan's own Click default), so it
+            # can't distinguish a genuinely explicit request from the
+            # default the way DumpRequest.lang_explicit does -- but "c" is
+            # never a default, only ever a real request (mirrors perform_elf_
+            # dump's identical `lang_explicit or lang == "c"` squash-guard
+            # rule). Without this, an explicit `scan --lang c` against a
+            # matched C++ compile unit's own `-std=c++20` would let the
+            # derived standard reach a parse scan is explicitly forcing into
+            # C mode, which a real compiler rejects outright (Codex review).
+            lang_explicit=lang.lower() == "c",
+            pending_cleanups=_l2_local_cleanups,
+        )
+        # _l3_include_dirs: not yet threaded into an extra_hash_dirs hook
+        # here -- resolve_input has no such public parameter, unlike
+        # perform_elf_dump's own direct dump() call (see that fix's own
+        # comment for why this is a narrower, pre-existing, not-yet-closed
+        # residual gap rather than something new to this path).
         snap = resolve_input(
             binary,
             headers,
@@ -286,7 +342,7 @@ def _build_new_snapshot(
             # *include_dependencies* itself is derived from the baseline's
             # own explicit tag when one is given (see run_scan_core's
             # _scan_candidate_include_dependencies) so the inverse, explicit
-            # `dump --include-dependencies` baseline workflow isn't
+            # `dump --include-system-declarations` baseline workflow isn't
             # hard-broken the other way (Codex review, fresh evidence).
             include_dependencies=include_dependencies,
         )
@@ -301,6 +357,11 @@ def _build_new_snapshot(
             from .buildsource.inline import _run_cleanups
 
             _run_cleanups(_l2_local_cleanups)
+    # P0.3: mirrors resolve_side_snapshot's identical stamp -- gated on
+    # snap.from_headers so a snapshot that never actually parsed the headers
+    # doesn't claim their parse used real build context.
+    if l3_context_applied and snap.from_headers:
+        snap.parsed_with_build_context = True
     # Collect evidence when there is something to collect from — a source tree OR
     # an out-of-tree build-info input — at a non-"off" level.
     if (sources is not None or build_info is not None) and collect_mode != "off":
@@ -314,12 +375,13 @@ def _build_new_snapshot(
             build_config=build_config,
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
+            build_targets=build_targets,
             # L4 source-ABI replay must invoke the same compiler the scan's own
-            # L2 header AST was pointed at (--gcc-path/--gcc-prefix), not the
+            # L2 header AST was pointed at (--compiler/--compiler-prefix), not the
             # embed_build_source default of a bare "clang" — mirrors
             # _preprocessor_scan_clang_bin's identical S2 fix above; without
             # this a scan compiled with a non-default toolchain (e.g.
-            # --gcc-path icpx) silently replayed L4 through a plain "clang"
+            # --compiler icpx) silently replayed L4 through a plain "clang"
             # that may not even understand the real build's flags.
             clang_bin=resolve_source_frontend_clang_bin(
                 compile_context.gcc_path if compile_context else None,
@@ -339,8 +401,9 @@ def _build_new_snapshot(
     # Return the *effective* includes (the seed above may have added build-derived
     # dirs) so a --baseline compare header-parses the old native library with the
     # same include context — else the baseline side fails on dependency headers the
-    # candidate resolved via the seed (Codex review).
-    return snap, includes
+    # candidate resolved via the seed (Codex review). Also return the effective
+    # (possibly L3-folded) compile_context itself, for the identical reason.
+    return snap, includes, compile_context
 
 
 def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
@@ -351,10 +414,10 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     -- correct for the single most common case: no baseline, a native-binary
     baseline (which now resolves filtered too), or a JSON baseline that is
     itself filtered/untagged. Only a JSON baseline explicitly dumped with
-    ``dump --include-dependencies`` (tagged ``"full"``) needs the candidate
+    ``dump --include-system-declarations`` (tagged ``"full"``) needs the candidate
     to go unfiltered too, else the comparability gate hard-fails that
     legitimate, if less common, inverse workflow (Codex review, fresh
-    evidence) -- and ``scan`` has no ``--include-dependencies`` flag of its
+    evidence) -- and ``scan`` has no ``--include-system-declarations`` flag of its
     own to let a caller request it directly. A cheap, best-effort JSON peek
     (not a full ``resolve_input``/dump) so this never triggers expensive
     work merely to decide a default; any failure to read/parse falls back to
@@ -394,7 +457,7 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     # not JSON text, so both the tail-byte-scan trick below and a plain-text
     # `json.load` would silently fail to find `dependency_scope` regardless
     # of its real value, always falling through to the `False` (filtered)
-    # default even for a baseline explicitly dumped `--include-dependencies`
+    # default even for a baseline explicitly dumped `--include-system-declarations`
     # (tagged `"full"`). Decode through the canonical snapshot I/O path
     # first for a compressed file -- skipping the tail-scan heuristic
     # entirely (it has no equivalent for compressed content: the *decoded*
@@ -565,6 +628,18 @@ CROSSCHECK_BLOCKING_CATEGORY = "promoted_crosscheck"
 def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) -> None:
     """Raise the published ``diff.severity`` gate to a promoted cross-check's exit.
 
+    Called by ``run_scan_core`` whenever *sev_exit* is positive at all --
+    not only when it strictly exceeds the baseline compare's own exit code
+    (Codex review, fresh evidence: an earlier revision called this only
+    from inside that stricter guard, so a crosscheck that merely *tied* an
+    already-blocking exit never reached this function at all, and the tie
+    case the ``exit``-block reconstruction below was written to handle was
+    unreachable in practice). The actual process exit code/verdict
+    promotion stays a strict floor at the call site; this function's own
+    job -- keeping the two persisted blocks honest about which axes tied
+    for the published code -- is a separate concern from whether the
+    crosscheck raised the number.
+
     A no-op unless this run published a gate at all (severity scheme only).
 
     Without this the block was written by ``_run_baseline_compare`` from the
@@ -577,25 +652,88 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
     the same un-blocking failure the nested-block preference was introduced to
     fix, reached by the other route.
 
-    Raises only, and only to ``max``: a cross-check promotion is a floor
-    (:func:`_crosscheck_severity_exit`), so it can add a blocking reason to a
-    gate but never clear one a severity category already raised.
+    Raises ``exit_code`` only, and only to ``max``: a cross-check promotion
+    is a floor (:func:`_crosscheck_severity_exit`), so it can add a blocking
+    reason to a gate but never clear one a severity category already
+    raised. ``blocking_categories`` gains ``promoted_crosscheck`` on a
+    strict raise *or* an exact tie against the gate's existing exit code
+    (Codex review, fresh evidence: a tie genuinely co-determined the
+    published code and must be named the same way ``diff.exit.reasons``
+    already names a tied axis -- an earlier revision's strict ``>`` here
+    left the two persisted blocks disagreeing about a real tie once the
+    call-site restructuring above made a tie actually reach this
+    function). A *strictly higher* existing gate still adds nothing: the
+    crosscheck didn't determine that code either.
+
+    Also keeps the persisted ``exit`` block (CLI cleanup phase two, PR E)
+    consistent the same way: that block is built from the baseline compare
+    alone, before this promotion runs, so a promoted cross-check left it
+    naming ``compatibility_gate``/etc. for a code lower than the one
+    actually published -- the exact "explains nothing about why the exit
+    is N" trap :class:`~abicheck.exit_decision.ExitReason` exists to avoid.
+
+    **Reconstructs the whole block through
+    :func:`~abicheck.exit_decision.resolve_exit_decision` rather than
+    hand-patching ``code``/``reasons`` in place (Codex review, fresh
+    evidence).** An earlier revision only overwrote those two fields,
+    which broke :class:`~abicheck.exit_decision.ExitDecision`'s own
+    documented invariant that ``code`` equals the max of its contribution
+    fields (the three pre-existing ones stayed at their pre-promotion
+    values, now summing to less than the new ``code``) and silently
+    skipped a promotion that only *ties* the block's existing code (a
+    strict ``>`` check, unlike :func:`resolve_exit_decision`'s own
+    tie-inclusive fold). Reading the three existing contributions back off
+    the persisted dict and re-folding them alongside
+    ``crosscheck_promotion_contribution=sev_exit`` reproduces this
+    function's "raise, never clear" discipline for free -- ``max`` cannot
+    lower ``code``, and any prior crosscheck contribution already in the
+    block (in case this function is ever called more than once for the
+    same run) is folded in rather than dropped.
     """
     if not isinstance(diff_summary, dict):
         return
     gate = diff_summary.get("severity")
-    if not isinstance(gate, dict):
-        return
-    current = gate.get("exit_code")
-    if not isinstance(current, int) or sev_exit <= current:
-        return
-    gate["exit_code"] = sev_exit
-    gate["blocking"] = True
-    cats = gate.get("blocking_categories")
-    cats = list(cats) if isinstance(cats, list) else []
-    if CROSSCHECK_BLOCKING_CATEGORY not in cats:
-        cats.append(CROSSCHECK_BLOCKING_CATEGORY)
-    gate["blocking_categories"] = cats
+    if isinstance(gate, dict):
+        current = gate.get("exit_code")
+        # `>=`, not `>` (Codex review, fresh evidence): a crosscheck that
+        # only *ties* the gate's existing exit code still genuinely
+        # co-determined it and must be named in `blocking_categories` --
+        # the same tie-inclusive rule `diff.exit`'s own reasons now follow
+        # below. Only raise `exit_code`/`blocking` on a strict `>`, so a
+        # tie never re-derives a value that was already correct; a
+        # strictly higher existing gate (`current > sev_exit`) still adds
+        # nothing, since the crosscheck didn't determine that code either.
+        if isinstance(current, int) and sev_exit >= current:
+            if sev_exit > current:
+                gate["exit_code"] = sev_exit
+            gate["blocking"] = True
+            cats = gate.get("blocking_categories")
+            cats = list(cats) if isinstance(cats, list) else []
+            if CROSSCHECK_BLOCKING_CATEGORY not in cats:
+                cats.append(CROSSCHECK_BLOCKING_CATEGORY)
+            gate["blocking_categories"] = cats
+    exit_block = diff_summary.get("exit")
+    if isinstance(exit_block, dict):
+        compat = exit_block.get("compatibility_contribution")
+        coverage = exit_block.get("contract_coverage_contribution")
+        assurance = exit_block.get("analysis_assurance_contribution")
+        prior_crosscheck = exit_block.get("crosscheck_promotion_contribution")
+        if (
+            isinstance(compat, int)
+            and isinstance(coverage, int)
+            and isinstance(assurance, int)
+        ):
+            from .exit_decision import resolve_exit_decision
+
+            crosscheck_contribution = max(
+                sev_exit, prior_crosscheck if isinstance(prior_crosscheck, int) else 0
+            )
+            diff_summary["exit"] = resolve_exit_decision(
+                compatibility_contribution=compat,
+                contract_coverage_contribution=coverage,
+                analysis_assurance_contribution=assurance,
+                crosscheck_promotion_contribution=crosscheck_contribution,
+            ).to_dict()
 
 
 def _audit_exit_code(
@@ -802,7 +940,7 @@ def _check_scan_evidence_contract(
         advisories.append(
             f"requested depth '{eff_depth_enum.value}' (source-method "
             f"{resolved.value}) needs an L3 compile database, but none was found — "
-            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
+            "L3/L4/L5 were skipped. Provide one with --build-info (a "
             "compile_commands.json or build dir), or a trusted --config whose "
             "build.query this pinned depth auto-enables."
         )
@@ -884,6 +1022,8 @@ def run_scan_core(
     exit_code_scheme: str = "legacy",
     sibling_exported_symbols: frozenset[str] | None = None,
     max_findings: int | None = None,
+    require_complete_analysis: bool = False,
+    build_targets: tuple[str, ...] = (),
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -908,13 +1048,24 @@ def run_scan_core(
     ``_run_baseline_compare`` when a ``baseline`` is given — closing the
     asymmetry documented in AGENTS.md's "Known gaps": `scan --against` used
     to compute its exit code from the verdict alone (``legacy_exit_code``)
-    regardless of any ``--severity-*``/``.abicheck.yml`` ``severity:``
+    regardless of any ``--severity-preset``/``.abicheck.yml`` ``severity:``
     setting, unlike `compare`. ``exit_code_scheme == "severity"`` there now
     uses ``severity.compute_exit_code`` the same way `compare` does; the
     default ``"legacy"`` reproduces the prior, unchanged behavior exactly.
     Orthogonal to the budget/evidence-contract/NOT_COMPARABLE exit codes
     this function already special-cases (5/1/6) — those are returned before
     ever reaching the baseline comparison.
+
+    ``build_targets`` (P0.2, lab report follow-up): the CLI equivalent of
+    `dump`'s own ``--build-target`` (``BuildEvidence.target_scope``), scoping
+    L3 evidence collection to the given root target(s) and their transitive
+    deps instead of a workspace-wide query. `dump`'s own ``embed_build_source``
+    call already threaded this through (see ``cli_buildsource.py``); `scan`'s
+    identical call below did not, so a `scan --against` a `dump`-produced
+    baseline of the same scoped root target(s) previously always ran
+    unscoped, capturing unrelated fixture/test targets alongside the real
+    library and diverging from the baseline's own scoped evidence. Empty by
+    default (the pre-existing, unscoped behavior).
     """
     stage_timings: dict[str, float] = {}
 
@@ -949,8 +1100,10 @@ def run_scan_core(
     _record_stage("poi", _stage)
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
-    # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
-    # L3 source; both feed embed_build_source's build_info input. The POI path set
+    # --build-info is the one build-context operand now (the separate
+    # --compile-db flag it subsumed is gone): a build dir, a
+    # compile_commands.json, or a pack, all feeding embed_build_source's
+    # build_info input. The POI path set
     # focuses the replay — but ONLY when a real diff seed was supplied
     # (``seeded``). Without --since/--changed-path the scan is broad by contract
     # (the report says so), so passing pattern-trigger POIs as the changed set
@@ -997,7 +1150,7 @@ def run_scan_core(
     # completion (or hanging) regardless of --budget.
     try:
         with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
-            new_snap, eff_includes = _build_new_snapshot(
+            new_snap, eff_includes, eff_compile_context = _build_new_snapshot(
                 binary,
                 list(headers),
                 list(includes),
@@ -1015,6 +1168,7 @@ def run_scan_core(
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
                 debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
                 include_dependencies=_scan_candidate_include_dependencies(baseline),
+                build_targets=build_targets,
             )
     except deadline.DeadlineExceeded as exc:
         elapsed = time.monotonic() - start
@@ -1119,7 +1273,53 @@ def run_scan_core(
                     list(eff_includes),
                     list(public_headers),
                     list(public_header_dirs),
-                    compile_context=compile_context,
+                    # The *effective* compile_context (the P0.3 L3->L2 fold's
+                    # own merged result, when applied) -- but ONLY when the
+                    # baseline actually reuses the candidate's own headers.
+                    # `baseline_headers` alone is the wrong signal here (Codex
+                    # review, fresh evidence): cli_scan.py's own
+                    # `baseline_header = header_both + header_old` means a
+                    # bare, *shared* `-H api.h` (no `old=` scoping at all --
+                    # the ordinary, most common case) already makes
+                    # `baseline_headers` truthy and identical in content to
+                    # `headers`, so gating on mere truthiness wrongly treated
+                    # every scan with any headers at all as "old-side-scoped"
+                    # and silently reintroduced this whole fix's own
+                    # NOT_COMPARABLE/false-ABI-diff bug for the common case.
+                    # The real signal is whether the resolved old-side header
+                    # set genuinely *differs* from the candidate's (a real
+                    # `-H old=PATH` override) -- only then does the fold's
+                    # new-side-specific -D/-U/-std/include flags risk not
+                    # fitting the old side's own, different headers, whose
+                    # macros/standard/generated-header paths may genuinely
+                    # differ; there is no old-side build evidence to derive a
+                    # matching fold for that case, so the caller's plain,
+                    # unfolded compile_context is the correct fallback there.
+                    #
+                    # Header equality alone is not sufficient (Codex review,
+                    # fresh evidence): `-H api.h -I old=old-build -I
+                    # new=new-build` shares one header list across both sides
+                    # while still routing each side through a genuinely
+                    # different include tree via `baseline_includes` --
+                    # `cli_scan.py` builds that list independently of
+                    # `baseline_headers`. Forwarding the new side's folded
+                    # `-D`/`-std`/sysroot/include flags there would parse the
+                    # old binary under the new build's configuration, so the
+                    # fold is only reused when the old side's *resolved
+                    # include scope* also matches the candidate's own (no
+                    # side-specific include override at all).
+                    compile_context=(
+                        eff_compile_context
+                        if (
+                            not baseline_headers
+                            or list(baseline_headers) == list(headers)
+                        )
+                        and (
+                            not baseline_includes
+                            or list(baseline_includes) == list(eff_includes)
+                        )
+                        else compile_context
+                    ),
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
@@ -1138,6 +1338,30 @@ def run_scan_core(
                     sev_config=sev_config,
                     exit_code_scheme=exit_code_scheme,
                     max_findings=max_findings,
+                    require_complete_analysis=require_complete_analysis,
+                    # P0.4 (Codex review): only when the caller genuinely
+                    # pinned this depth (an explicit --depth or a non-auto
+                    # --source-method), mirroring compare's own "explicit
+                    # override, never inferred" discipline for
+                    # DiffResult.requested_depth -- an auto-resolved depth
+                    # is not this scan's stated request the same way an
+                    # explicit pin is.
+                    #
+                    # `public_depth_value()` (Codex review, fresh evidence):
+                    # a typed caller can pin the internal-only FULL/GRAPH
+                    # rungs (ScanRequest.depth, or source_method s6/s4),
+                    # which `analysis_assurance.py`'s public four-rung
+                    # ladder does not recognize -- its `_DEPTH_RANK.get(...,
+                    # 0)` would read either as rank 0, the *shallowest*
+                    # rung, letting `depth_satisfied`/`status` read as
+                    # satisfied/complete for a request the ladder never
+                    # actually evaluated. Both normalize to `source`, the
+                    # rung this class's own docstring already says they are.
+                    requested_depth=(
+                        public_depth_value(eff_depth_enum)
+                        if pinned_explicit
+                        else None
+                    ),
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start
@@ -1161,6 +1385,19 @@ def run_scan_core(
             # A cross-check the maintainer promoted to `error` (D6) gates the exit
             # even when the baseline diff itself is clean.
             sev_exit = _crosscheck_severity_exit(cc.findings, severities)
+            # Refold the persisted `exit` block whenever the crosscheck
+            # contributes *anything* positive -- not only when it strictly
+            # exceeds the current exit code (Codex review, fresh evidence).
+            # A crosscheck that only *ties* the baseline compare's own exit
+            # (e.g. both are 2) never reaches the `sev_exit > exit_code`
+            # branch below, but `resolve_exit_decision`'s own tie-inclusive
+            # fold (inside `_promote_published_gate`) still needs to run for
+            # `reasons` to correctly name `promoted_crosscheck` alongside
+            # whichever axis already held that code -- decoupled here from
+            # the actual exit-code/verdict promotion, which stays a strict
+            # floor.
+            if sev_exit > 0:
+                _promote_published_gate(diff_summary, sev_exit)
             if sev_exit > exit_code:
                 exit_code = sev_exit
                 # Keep the reported verdict in sync with the promoted exit code so a
@@ -1184,7 +1421,6 @@ def run_scan_core(
                 # the cross-check's.
                 if verdict not in ("BREAKING", "API_BREAK"):
                     verdict = "API_BREAK"
-                _promote_published_gate(diff_summary, sev_exit)
         _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:

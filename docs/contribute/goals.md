@@ -15,7 +15,7 @@ Support everything ABICC currently does so existing users and pipelines can migr
 - JSON/HTML/Markdown reports with equivalent verdict semantics
 - Support for suppression files
 
-**Done:** 396 ChangeKinds implemented; YAML suppression files fully supported; ABICC compat CLI supports `-symbols-list` and `-types-list` whitelist flags (plain-text, one name per line); XML report generation for ABICC-compatible output; ABICC compat CLI with all major flags; auto-forwarding `abicheck compat <flags>` to `compat check`; test parity for ABICC 2.3.
+**Done:** 395 ChangeKinds implemented; YAML suppression files fully supported; ABICC compat CLI supports `-symbols-list` and `-types-list` whitelist flags (plain-text, one name per line); XML report generation for ABICC-compatible output; ABICC compat CLI with all major flags; auto-forwarding `abicheck compat <flags>` to `compat check`; test parity for ABICC 2.3.
 
 ---
 
@@ -71,7 +71,7 @@ Make the tool convenient for AI agents and automation pipelines:
 - `--format json/markdown` output modes
 - Snapshot files for offline/async workflows (`abicheck dump` → `.abi.json`)
 
-**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--stat`, `--show-impact`, `--report-mode leaf`) for CI gate pipelines. (An MCP server for AI-agent integration shipped and was later removed; agent integrations now use the CLI's structured JSON/SARIF output or the typed Python API directly.)
+**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--report-mode leaf|impact`) for CI gate pipelines, plus a built-in `--profile quick` one-line summary. (An MCP server for AI-agent integration shipped and was later removed; agent integrations now use the CLI's structured JSON/SARIF output or the typed Python API directly.)
 
 ---
 
@@ -116,7 +116,7 @@ Public documentation at <https://abicheck.github.io/abicheck/>:
 
 | Goal | Status |
 |------|--------|
-| G1: ABICC drop-in | Done — 396 ChangeKinds, compat CLI, suppression files, XML reports |
+| G1: ABICC drop-in | Done — 395 ChangeKinds, compat CLI, suppression files, XML reports |
 | G2: Known gaps | DWARF layout, toolchain flags, AST-DWARF dedup, confidence tracking, canonical evidence tier (ELF_ONLY/DWARF_AWARE/HEADER_AWARE) done |
 | G3: libabigail tests | Done — ~54 parity test functions + 143 example cases |
 | G4: Agent-friendly | Done — JSON, SARIF, exit codes, snapshots, typed Python API, GitHub Action (an MCP server shipped and was later removed) |

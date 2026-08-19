@@ -342,9 +342,9 @@ jobs:
             exit 1
           fi
 
-  # ── Test: severity-addition error ─────────────────────────────────────────
+  # ── Test: severity.addition: error (config) ───────────────────────────────
   test-severity-addition-error:
-    name: 'severity-addition error: detect unexpected API expansion'
+    name: 'severity.addition error: detect unexpected API expansion'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -359,7 +359,7 @@ jobs:
           new-library: tests/fixtures/action/action_test_v1_with_addition.json
           install-deps: false
           fail-on-breaking: false
-          extra-args: '--severity-addition error'
+          extra-args: '--config tests/fixtures/action/severity_addition_error.abicheck.yml'
 
       - name: Verify severity-driven failure
         shell: bash
@@ -452,7 +452,7 @@ jobs:
           fi
 
   test-additions-pass-by-default:
-    name: 'additions pass through without severity-addition error'
+    name: 'additions pass through without a severity.addition error'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -677,3 +677,44 @@ jobs:
             echo "::error::Expected verdict BREAKING, got ${{ steps.abi-legacy-false.outputs.verdict }}"
             exit 1
           fi
+
+  # One stable, always-added-when-triggered required check representing this
+  # whole workflow's pass/fail state (CLI cleanup phase two, PR A/PR 0B) --
+  # requiring every job above individually goes stale on every matrix/job
+  # edit, which is the usual reason a repo's required-check list rots. `if:
+  # always()` so a cancelled/skipped dependency is visible here too, not
+  # silently treated as "didn't run, so nothing to report."
+  test-action-summary:
+    name: test-action summary
+    if: always()
+    needs:
+      - test-compare-breaking
+      - test-compare-compatible
+      - test-compare-sarif
+      - test-compare-json
+      - test-fail-on-breaking
+      - test-action-infrastructure
+      - test-check-target
+      - test-multiplatform
+      - test-severity-addition-error
+      - test-appcompat-full
+      - test-appcompat-weak
+      - test-additions-pass-by-default
+      - test-scan-baseline-breaking
+      - test-scan-audit
+      - test-scan-estimate
+      - test-dependency-source-conda-forge
+      - test-dependency-source-none-and-legacy-alias
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Fail if any test-action.yml job did not succeed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" == "true" ]]; then
+            echo "::error::One or more test-action.yml jobs did not succeed:"
+            echo '${{ toJSON(needs) }}'
+            exit 1
+          fi
+          echo "All test-action.yml jobs succeeded."

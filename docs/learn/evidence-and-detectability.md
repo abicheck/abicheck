@@ -35,7 +35,8 @@ This page is the conceptual companion to the practical
 [Limitations](limitations.md) and [Tool Comparison](../reference/tool-comparison.md)
 pages; for the teaching-track version — which break families need which evidence,
 with worked example cases — see
-[Part 8 of the learning series](abi-series/08-detection.md). It answers the
+[Detecting Breaks](abi-series/08-detection.md) (the series' Verification &
+Assurance capstone). It answers the
 question users ask most often:
 
 > "Why did tool A catch this and tool B didn't?"

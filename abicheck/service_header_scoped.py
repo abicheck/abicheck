@@ -43,7 +43,11 @@ from typing import TYPE_CHECKING
 
 from . import deadline
 from .errors import AstContextAmbiguousError, AstContextMissingError
-from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+from .header_utils import (
+    cache_relevant_operand_paths,
+    deferred_token_dirs,
+    resolve_inferred_header_roots,
+)
 from .model import AbiSnapshot, Visibility
 
 if TYPE_CHECKING:
@@ -127,7 +131,21 @@ def _try_header_scoped_dump(
         )
         eff_includes += inc_extra
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
-        deferred_dirs = tuple(deferred_token_dirs(deferred))
+        # Plus every include-search dir and forced pre-include the *caller's
+        # own* context tokens name — the identical fold ``service._dump_elf``
+        # and ``service._attach_header_graph`` already apply to their own
+        # cache keys (AGENTS.md's tenth and seventeenth L3->L2-fold findings),
+        # applied here so PE/Mach-O cannot disagree with ELF about staleness
+        # for the same tokens (Codex review, PR D). ``cc`` is the *merged* L3
+        # context on the ``dump`` path (``cli_dump_helpers.handle_non_elf_dump``
+        # passes ``compile=l3_effective_ctx``), so a build-derived
+        # ``-I``/``-include`` is covered without threading a separate
+        # ``extra_hash_dirs`` channel down through ``run_dump``/``resolve_input``
+        # — the caller's own derived-dirs return stays unused precisely because
+        # the tokens it was derived from already arrive here.
+        deferred_dirs = tuple(
+            deferred_token_dirs(deferred)
+        ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
     try:
         if fmt == "pe":
             snap = _dumper_pe(

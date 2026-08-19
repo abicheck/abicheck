@@ -12,6 +12,41 @@
 
 - 
 
+## Bug-fix test contract
+
+<!-- bugfix-test-contract -->
+<!--
+Required for `fix:` / `perf:` / `security:` PRs; delete this section otherwise.
+Enforced by scripts/check_bugfix_test_contract.py. Answer on one line each,
+after the colon. The conditional rows only apply if the diff touches that area
+— the checker will tell you which ones it wants.
+
+Each question exists because a merged fix in this repo missed exactly that:
+#699 -> #721 (tested its own wrong formula, at a toy scale), #753 -> #759 (a
+missing list entry fails nothing), #705 -> #758 (asserted YAML text instead of
+executing the attack).
+-->
+
+- Bug class:
+- Publicly observable failure:
+- Regression test fails on base:
+- Negative control:
+- Public-surface test:
+- Axes covered:
+- General invariant:
+
+<!-- Conditional — a menu, not a place to answer. GitHub hides comment
+regions from the rendered description, and the checker ignores them for
+exactly that reason: an answer nobody can see is not evidence. Copy the
+rows the checker asks for OUT of this comment, above it:
+- Real-dependency test:
+- Malicious fixture + side-effect absence:
+- Must-merge / must-not-merge pair:
+- False-positive removed / real break preserved:
+- Verdict, gate and exit code checked independently:
+- Known unsupported cases:
+-->
+
 ## Checklist
 
 - [ ] Tests added / updated for new behaviour

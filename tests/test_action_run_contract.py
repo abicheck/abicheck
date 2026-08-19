@@ -38,6 +38,7 @@ import yaml
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 ACTION_YML = Path(__file__).resolve().parents[1] / "action.yml"
+VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.sh"
 
 # add_flag "--x" / add_single_flag "--x"  and  CMD+=(--x ...)
 _ADD_FLAG_RE = re.compile(r'add(?:_single)?_flag\s+"(--[a-z0-9-]+)"')
@@ -219,4 +220,55 @@ def test_every_run_sh_input_var_is_set_by_action_yml() -> None:
         f"action/run.sh reads {sorted(unset)}, which action.yml's \"Run "
         f'abicheck" step never sets — these always read as unset/empty '
         f"(likely a typo against the declared env var name)."
+    )
+
+
+def _step_env_mapping(step_name: str) -> dict[str, str]:
+    """{ENV_VAR_NAME: dashed-input-name-or-literal} from *one named step's*
+    own ``env:`` block -- unlike ``_action_yml_env_mapping()`` above (which
+    deliberately scans the whole file, since run.sh only ever runs as the
+    single "Run abicheck" step), a composite-action step's env is isolated
+    to that step alone. A var wired into a *different* step's env block is
+    invisible here, the same as it would be to the real runner."""
+    with ACTION_YML.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    for step in data["runs"]["steps"]:
+        if step.get("name") == step_name:
+            env = step.get("env") or {}
+            out = {}
+            for var, value in env.items():
+                m = re.match(r"^\$\{\{\s*inputs\.([a-zA-Z0-9_-]+)\s*\}\}$", str(value))
+                out[var] = m.group(1) if m else str(value)
+            return out
+    raise AssertionError(f"no step named {step_name!r} found in action.yml")
+
+
+def test_every_validate_inputs_var_is_set_by_its_own_step() -> None:
+    """``validate-inputs.sh`` runs as its own, earlier composite-action step
+    with its own isolated ``env:`` block -- an ``INPUT_*`` it reads must be
+    wired *there* specifically, not merely somewhere else in action.yml
+    (e.g. the "Run abicheck" step's env is invisible to this earlier step,
+    which is exactly why ``test_every_run_sh_input_var_is_set_by_action_yml``
+    above cannot stand in for this check).
+
+    Two real bugs shipped from this exact gap going unchecked (Codex
+    review): the pre-existing ast-frontend/gcc-path/gcc-prefix/gcc-options/
+    sysroot/nostdinc compile-context guard, and the new
+    require-complete-analysis release-operand guard, were both reading
+    unset env vars in this step even though the identical check, correctly
+    wired, already existed in ``run.sh`` -- so the fail-fast validator
+    silently never fired for either guard, and a workflow hitting one of
+    them paid for a full multi-minute dependency install before the *same*
+    rejection finally fired later in ``run.sh``, defeating this whole
+    step's reason to exist."""
+    env_vars = set(_step_env_mapping("Validate mode/input combination").keys())
+    text = VALIDATE_SH.read_text(encoding="utf-8")
+    used = set(re.findall(r"INPUT_[A-Z0-9_]+", text))
+    unset = used - env_vars
+    assert not unset, (
+        f"action/validate-inputs.sh reads {sorted(unset)}, which action.yml's "
+        f'"Validate mode/input combination" step never sets in its own env '
+        f"block -- these always read as unset/empty there, so any check "
+        f"built on them never actually fires until the identical check "
+        f"re-runs later in run.sh (if one exists)."
     )

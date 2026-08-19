@@ -61,7 +61,7 @@ major-version breaks are detected with correct SONAME recommendations.
 **Harness:** `validation/scripts/run_matrix.py` reads `validation/data/manifest.json`,
 extracts every real (non-symlink) ELF `.so` from each package, matches old↔new by
 logical name (e.g. `libtbb`, `libcrypto`), and runs
-`abicheck compare … --format json --recommend`, capturing verdict, counts, exit
+`abicheck compare … --format json`, capturing verdict, counts, exit
 code, wall time, and stderr into `validation/data/results.json`.
 
 **Debug-info reality (drives everything below):** conda-forge ships oneTBB **2021.x
@@ -321,7 +321,7 @@ universal cases (FP-1, FP-2).*
 **P1 — Honest verdict under low coverage.**
 - When the public surface can't be resolved (no headers, fell-back scoping), cap
   the verdict at `UNCONFIRMED`/manual-review rather than a hard `BREAKING`, and say
-  so in `--stat`/`review`. (Usability #1)
+  so in the one-line summary (`--profile quick`)/`review`. (Usability #1)
 
 **P2 — Reporting & ergonomics.**
 - In `review`/`markdown`, rank "Top impacted symbols" by *public* findings, push
@@ -350,7 +350,7 @@ pip install -e ".[dev]" zstandard
 python validation/scripts/run_matrix.py     # -> validation/data/results.json
 # 4. reproduce the FP-1 recovery
 abicheck compare <tbb-2021.5>/libtbb.so.12.5 <tbb-2021.9>/libtbb.so.12.9 \
-  --suppress validation/suppress_internal.yaml --stat   # 216 -> 2 breaking
+  --suppress validation/suppress_internal.yaml --format review   # 216 -> 2 breaking
 ```
 
 **Committed artifacts:**

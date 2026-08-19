@@ -17,24 +17,31 @@ not make it public, is owned by
 |---|---|
 | `--scope-public-headers` / `--no-scope-public-headers` | restrict the surface to declarations reachable from the public headers |
 | `--header` / `-H` | name the public headers explicitly |
-| `--public-symbol` (repeatable), `--public-symbols-list FILE` | pin an explicit public symbol set when headers cannot express it |
-| `--contract public\|exports\|all` | choose the evidence domain a contract-relevance decision is judged against |
-| `--include-dependencies` | opt **out** of the default dependency-header scoping and keep the full transitive surface |
+| a `.abicheck.yml` `scope:` map's public-symbols key | pin an explicit public symbol set when headers cannot express it (config-only; no CLI flag) |
+| `--contract public\|exports\|all\|auto` | ask for contract-relevance decisions, and choose the evidence domain they are judged against |
+| `--include-system-declarations` | opt **out** of the default dependency-header scoping and keep the declarations system/toolchain headers contributed |
 
 `dump` and `compare` scope out declarations whose own defining header is a
 toolchain or system header by default. That is a header-*origin* filter, not
 an ABI-visibility one: the library's own private declarations are still kept.
 
-## `--contract` and `--contract-evaluation`
+## `--contract`
 
-`--contract-evaluation` turns on per-finding contract-relevance classification,
-and `--contract` selects the evidence domain it judges against:
+`--contract` does both jobs at once: naming a domain is what turns per-finding
+contract-relevance classification on, and which value you name is the evidence
+domain each finding is judged against.
 
 - `public` — the public-header surface.
 - `exports` — the binary's observed export table.
 - `all` — no domain restriction.
+- `auto` — evaluate, but leave the domain to the precedence chain below an
+  explicit CLI value: `--scope-public-headers`/`--no-scope-public-headers`,
+  then the project's `.abicheck.yml`. Use it when the domain is a project
+  decision already recorded elsewhere.
 
-This is **not** cosmetic. Under `--contract-evaluation` the relevance decision
+Omit the flag entirely and nothing about the run changes.
+
+This is **not** cosmetic. Under `--contract` the relevance decision
 runs before compatibility policy, so the selected domain can change the finding
 set, the verdict, and the exit code. Each finding gains
 `contract_relevance`, `contract_reason_code`, `contract_assurance`, and

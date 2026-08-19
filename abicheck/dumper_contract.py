@@ -28,11 +28,10 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ._compiler_options import language_standard_field
+from ._compiler_options import language_standard_field, split_gcc_options
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
@@ -176,9 +175,7 @@ def _attach_extraction_contract(
     _flag_tokens = list(gcc_option_tokens)
     if gcc_options:
         try:
-            _flag_tokens = (
-                shlex.split(gcc_options, posix=os.name != "nt") + _flag_tokens
-            )
+            _flag_tokens = split_gcc_options(gcc_options) + _flag_tokens
         except ValueError:
             pass  # malformed --gcc-options must not abort the dump
 

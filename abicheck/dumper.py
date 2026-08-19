@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache
-from ._compiler_options import has_explicit_cpp_std
+from ._compiler_options import has_explicit_cpp_std, split_gcc_options
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -602,7 +602,7 @@ def _castxml_fallback_reason(
         return None
 
     # Probe the driver _run_clang() would actually invoke (honors
-    # --gcc-path/--gcc-prefix), not just a bare "clang" on PATH (Codex
+    # --compiler/--compiler-prefix), not just a bare "clang" on PATH (Codex
     # review).
     def _clang_fallback_ready() -> bool:
         try:
@@ -633,6 +633,25 @@ def _castxml_fallback_reason(
     if _is_toolchain_version_failure(str(exc)):
         return "castxml-toolchain-version-mismatch"
     return "castxml-direct-include-guard"
+
+
+def _configured_target_triple(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+) -> str | None:
+    """Return the target reported by configured Clang and its pass-through flags."""
+    cmd = [clang_bin, *split_gcc_options(gcc_options or ""), *gcc_option_tokens, "-print-target-triple"]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Could not probe effective Clang target: %s", exc)
+        return None
+    if result.returncode:
+        log.warning("Could not probe effective Clang target: %s", result.stderr.strip())
+        return None
+    target = result.stdout.strip()
+    return target or None
 
 
 def _header_ast_parser(
@@ -706,6 +725,9 @@ def _header_ast_parser(
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
+            target_triple=_configured_target_triple(
+                gcc_options, gcc_option_tokens, clang_bin
+            ),
         )
         stamped = cast(
             _ClangAstParser,
@@ -1231,7 +1253,7 @@ def dump(
             live side's scope contract this way (``cli_resolve.
             _resolve_compare_snapshots``); without an equivalent here, a
             snapshot `dump`-produced from a bare ``-H <dir>`` (with no
-            ``--public-header-dir``) always carries an empty
+            the public-header set) always carries an empty
             ``public_header_dirs`` scope field, so comparing it against a
             live `compare`-side extraction of the identical header set
             spuriously raises ``ScopeMismatchError`` (found during the G30
@@ -1377,7 +1399,7 @@ def dump(
     # gains the same scope-comparability identity `compare`'s own `--header
     # <dir>` already has, without silently opting a `dump`-only invocation
     # into declaration-provenance tagging (ADR-015 stays opt-in via the
-    # separate --public-header/--public-header-dir flags, unchanged).
+    # separate public-header inputs, unchanged).
     _attach_extraction_contract(
         snapshot,
         headers=list(dump_manifest.roots) if dump_manifest is not None else headers,

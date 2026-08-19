@@ -43,7 +43,9 @@
           "confidence",
           "evidence_tier",
           "evidence_tiers",
-          "analysis_assurance"
+          "analysis_assurance",
+          "analysis_assurance_exit_contribution",
+          "annotations"
         ]
       }
     },
@@ -125,7 +127,7 @@
         "string",
         "null"
       ],
-      "description": "Schema 2.17 (ADR-050 D2). Set to \"partial\" when exactly one side of an otherwise-successful comparison carried a given ExtractionContract fingerprint (profile or scope) and the other didn't -- e.g. a freshly-produced snapshot compared against a pre-ADR-050 stored baseline. Report-level metadata, never a Change/ChangeKind finding, so it cannot be reached by --severity-* promotion. Omitted (or null) when both sides had equal fingerprint coverage.",
+      "description": "Schema 2.17 (ADR-050 D2). Set to \"partial\" when exactly one side of an otherwise-successful comparison carried a given ExtractionContract fingerprint (profile or scope) and the other didn't -- e.g. a freshly-produced snapshot compared against a pre-ADR-050 stored baseline. Report-level metadata, never a Change/ChangeKind finding, so it cannot be reached by severity promotion. Omitted (or null) when both sides had equal fingerprint coverage.",
       "enum": [
         "partial",
         null
@@ -540,7 +542,7 @@
     },
     "contract_context": {
       "type": "object",
-      "description": "ADR-049 Phase 4 (schema 2.25): present only when the caller opts into `compare --contract-evaluation`. The three sibling blocks ADR-049 plan Section 5.1 persists together, so a decision can be replayed (from the receipt alone) or re-evaluated under a different contract mode (from the observations alone) without re-reading any binary or header. Advisory only; never affects verdict, severity, or any exit code.",
+      "description": "ADR-049 Phase 4 (schema 2.25): present only when the caller opts into `compare --contract`. The three sibling blocks ADR-049 plan Section 5.1 persists together, so a decision can be replayed (from the receipt alone) or re-evaluated under a different contract mode (from the observations alone) without re-reading any binary or header. Advisory only; never affects verdict, severity, or any exit code.",
       "required": [
         "contract_evidence",
         "evaluation_context",
@@ -1015,7 +1017,7 @@
     },
     "contract_coverage_failures": {
       "type": "array",
-      "description": "ADR-049 Phase 5 (schema 2.26): present only when the caller opts into `compare --contract-evaluation`. The sibling contract-coverage ledger of ADR-049 plan Section 6.1 \u2014 one entry per provider/domain coverage failure for the contract domain this run selected. Deliberately not change rows: a coverage failure carries no ChangeKind and never enters `changes`, which is what makes it unsuppressible ('ordinary change suppressions ... cannot suppress a provider/domain coverage failure', Section 6.2). Derived from `contract_context`, so the same provider record is a failure under one domain and advisory under another. An empty array is a real value meaning the selected domain closed. Never affects verdict or severity. It does affect the process exit status: ADR-049 Phase 7 applies the sibling `contract_coverage_exit_contribution` as an orthogonal floor (folded with max, so it never lowers a 2/4).",
+      "description": "ADR-049 Phase 5 (schema 2.26): present only when the caller opts into `compare --contract`. The sibling contract-coverage ledger of ADR-049 plan Section 6.1 \u2014 one entry per provider/domain coverage failure for the contract domain this run selected. Deliberately not change rows: a coverage failure carries no ChangeKind and never enters `changes`, which is what makes it unsuppressible ('ordinary change suppressions ... cannot suppress a provider/domain coverage failure', Section 6.2). Derived from `contract_context`, so the same provider record is a failure under one domain and advisory under another. An empty array is a real value meaning the selected domain closed. Never affects verdict or severity. It does affect the process exit status: ADR-049 Phase 7 applies the sibling `contract_coverage_exit_contribution` as an orthogonal floor (folded with max, so it never lowers a 2/4).",
       "items": {
         "type": "object",
         "properties": {
@@ -1071,6 +1073,138 @@
         1
       ],
       "description": "ADR-049 (schema 2.26): what `contract_coverage_failures` contributes to the exit code \u2014 1 when non-empty, 0 otherwise, and 0 when `contract.unresolved=warn` accepted the failures. **Applied** since ADR-049 Phase 7: the process exit status is floored to this value (folded with max, so it never lowers a 2/4 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses. Present only alongside `contract_coverage_failures`."
+    },
+    "use_case_impact": {
+      "type": "object",
+      "description": "Schema 2.39. Present only under `compare --use-cases MANIFEST`: the declared use cases, each one's resolved/unresolved entrypoints, and this comparison's findings attributed to the use cases whose entrypoints can be shown to reach them. Read-only evidence -- never an input to a verdict, gate, or exit code; unattributed_changes counts the findings no declared entrypoint could be shown to reach, which is an absence of proof rather than proof they are harmless.",
+      "properties": {
+        "manifest": {"type": "string"},
+        "use_case_count": {"type": "integer"},
+        "total_changes": {"type": "integer"},
+        "unattributed_changes": {"type": "integer"},
+        "use_cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "use_case": {"type": "string"},
+              "resolved_entrypoints": {"type": "array", "items": {"type": "string"}},
+              "unresolved_entrypoints": {"type": "array", "items": {"type": "string"}},
+              "tests": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "by_use_case": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {"type": "string"},
+                "kind": {"type": "string"},
+                "finding_id": {"type": "string", "description": "The report's own finding_id for this change, so a row joins back to the findings/changes array \u2014 (symbol, kind) alone does not identify a finding (one symbol can emit the same kind twice)."}
+              }
+            }
+          }
+        }
+      }
+    },
+    "analysis_assurance_exit_contribution": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ],
+      "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under --require-complete-analysis \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when the flag was given and analysis_assurance.status is not \"complete\", 0 otherwise (including when the flag was never given). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
+      "$comment": "aggregate.py's _analysis_assurance_exit reads this field directly rather than recomputing it."
+    },
+    "annotations": {
+      "type": "array",
+      "description": "CLI cleanup phase two, PR E (schema 2.43, always_visible added at 2.44): reporter_contract_blocks.add_annotations / annotations.annotation_report_entries. One entry per finding a full annotation pass over this comparison found -- always the superset (as if --annotate-additions had also been given), regardless of whether this run itself was given --annotate. Exists so a rendering front end (the composite Action) reads an already-classified, already-formatted answer instead of inferring one from stderr or re-running the comparison. Unconditionally present, including as [] on a clean comparison.",
+      "items": {
+        "type": "object",
+        "required": [
+          "level",
+          "annotation",
+          "always_visible"
+        ],
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "notice"
+            ],
+            "description": "GitHub workflow-command level this finding was classified at."
+          },
+          "annotation": {
+            "type": "string",
+            "description": "The exact, already-escaped/truncated GitHub workflow-command line (::error/::warning/::notice file=...,line=...,title=...::message) -- echo verbatim rather than reassembling it."
+          },
+          "always_visible": {
+            "type": "boolean",
+            "description": "Whether plain --annotate (no --annotate-additions) already shows this entry. Always true for error/warning. For a \"notice\" it is false for an opt-in addition/quality-issue/info-severity finding, but true for the one unconditional notice kind (a --contract finding compatibility policy never evaluated) -- a consumer must gate a \"notice\" entry on this field, not on level alone, or it silently hides that always-shown finding."
+          }
+        }
+      },
+      "$comment": "annotations.annotation_report_entries is the one function that builds this array; cli._maybe_emit_annotations's stderr rendering (collect_annotations/format_annotations) shares the identical classification and formatting, so the two cannot disagree."
+    },
+    "exit": {
+      "type": "object",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (crosscheck_promotion_contribution is always 0 for a native compare report — it has no meaning outside scan --against's own maintainer-promoted --crosscheck KEY=error finding). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
+      "required": [
+        "code",
+        "reasons",
+        "compatibility_contribution",
+        "contract_coverage_contribution",
+        "analysis_assurance_contribution",
+        "crosscheck_promotion_contribution"
+      ],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The process exit code this decision resolves to, before any release/scan-specific axis (removed-library, budget, not_comparable) that this module does not yet cover."
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "compatibility_gate",
+              "scoped_gate",
+              "contract_coverage",
+              "analysis_assurance",
+              "promoted_crosscheck",
+              "clean"
+            ]
+          },
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
+        },
+        "compatibility_contribution": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict) -- UNLESS --used-by/--required-symbol(s) scoping is in effect, in which case this is the PRE-FOLD scoped application/plugin-host contract's own exit code (cli_compare_helpers._apply_scoped_gating's result.scoped_compatibility_contribution, captured before the coverage/assurance floors below are applied to it), not the informational full-library gate and not the already-folded result.scoped_exit_code -- so a genuine tie between the scoped gate and contract_coverage_contribution/analysis_assurance_contribution is visible here rather than hidden behind an already-maxed value; reasons carries scoped_gate rather than compatibility_gate in that case."
+        },
+        "contract_coverage_contribution": {
+          "type": "integer",
+          "enum": [0, 1],
+          "description": "Duplicated from the top-level contract_coverage_exit_contribution (present only under --contract) for a single self-contained decision object; 0 when no contract domain was selected."
+        },
+        "analysis_assurance_contribution": {
+          "type": "integer",
+          "enum": [0, 1],
+          "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when --require-complete-analysis was not given."
+        },
+        "crosscheck_promotion_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes. This schema validates only native compare reports (scan's own report shape -- ScanOutcome.to_dict() -- is not validated against this file, see test_report_schema.py), where this axis has no meaning outside scan --against's own scan_engine._promote_published_gate and is therefore always 0 -- const, not just a floor, so a malformed compare report claiming a nonzero contribution fails validation instead of silently passing."
+        }
+      },
+      "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
     },
     "analysis_assurance": {
       "type": "object",
@@ -1186,7 +1320,7 @@
     },
     "severity": {
       "type": "object",
-      "description": "Present only when --severity-* configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
+      "description": "Present only when a severity configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
       "required": [
         "config",
         "categories",
@@ -1356,7 +1490,7 @@
         },
         "reclassified_by": {
           "type": "string",
-          "description": "Schema 2.31: present only when a selector-scoped `--policy-file` `reclassify:` rule (not a kind-global `overrides:` entry) actually decided this finding's effective verdict \u2014 the deciding rule's own `label`, or `reason`, or the applied verdict value (first one set). See `policy_reclassify` for the full active rule set this attributes back to."
+          "description": "Schema 2.31: present only when a selector-scoped `--policy` `reclassify:` rule (not a kind-global `overrides:` entry) actually decided this finding's effective verdict \u2014 the deciding rule's own `label`, or `reason`, or the applied verdict value (first one set). See `policy_reclassify` for the full active rule set this attributes back to."
         },
         "symbol_binding": {
           "type": "string",

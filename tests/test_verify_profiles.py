@@ -438,14 +438,101 @@ _PR_STEPS_NOT_IN_A_CI_ONLY_LIST = {
 }
 
 
+def test_the_bugfix_contract_step_reports_a_partial_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one gate CI can run more of than a local shell can.
+
+    Its declared half reads the PR body, so a local run that simply passed let
+    `--profile pr` claim CI parity having checked half the gate. The first fix
+    used a precondition, which skipped the step entirely and threw away the
+    structural half's local coverage as well (Codex review). It now runs, and
+    its distinct exit code maps to a skip.
+    """
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    assert step.partial is not None
+    assert step.precondition is None, (
+        "a precondition would skip the step before its structural half ran"
+    )
+    assert "BUGFIX_CONTRACT_BODY_FILE" in step.partial[2]
+    # A second code for a second reason: the two need different remediation
+    # and checked different amounts (Codex review).
+    assert "base ref" in step.partial[3]
+    assert step.partial[2] != step.partial[3]
+
+
+def test_a_partial_returncode_becomes_a_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mapping itself: a partial exit is not a pass, because the
+    profile-level completeness contract only counts skips."""
+
+    class _Proc:
+        returncode = 2
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    result = verify.run_step(step)
+    assert result["status"] == "skipped"
+    assert result["returncode"] == 2
+    assert "BUGFIX_CONTRACT_BODY_FILE" in str(result["reason"])
+
+
+def test_each_partial_code_reports_its_own_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The receipt is the remediation, so it has to name the right one."""
+
+    class _Proc:
+        returncode = 3
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    result = verify.run_step(step)
+    assert result["status"] == "skipped"
+    assert "base ref" in str(result["reason"])
+    assert "BUGFIX_CONTRACT_BODY_FILE" not in str(result["reason"])
+
+
+def test_an_ordinary_failure_is_still_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control: only the one distinguished code maps to a skip, so a
+    real finding cannot be laundered into an incomplete run."""
+
+    class _Proc:
+        returncode = 1
+        # `run_step` (round 20 Part B / round 21) always reads `.stdout`/
+        # `.stderr` off the child result to re-print it, mirroring the real
+        # `subprocess.run(..., capture_output=True, text=True)` contract —
+        # empty strings, not a missing attribute, when a step produced no
+        # output. A bare `_Proc()` without these two would raise
+        # `AttributeError` here before ever reaching the assertion this test
+        # exists to make (P0.3 follow-up round 2 merge, fresh evidence).
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    assert verify.run_step(step)["status"] == "failed"
+
+
 def _ci_only_step_names() -> set[str]:
-    """Every step name CI passes to `verify.py --only`, across all jobs."""
+    """Every step name CI passes to `verify.py --only`, across all workflows.
+
+    Scans every workflow file, not just ci.yml: a gate can legitimately live in
+    its own workflow (bugfix-test-contract.yml does), and reading only ci.yml
+    would report such a step as unreachable and push it into the exemption
+    list — which is meant for steps CI genuinely does not run.
+    """
     import re
 
-    ci = _read(".github/workflows/ci.yml")
     names: set[str] = set()
-    for match in re.finditer(r"verify\.py\s+--profile\s+\w+\s+--only\s+([\w,-]+)", ci):
-        names.update(match.group(1).split(","))
+    workflow_dir = ROOT / ".github" / "workflows"
+    for path in sorted([*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")]):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(
+            r"verify\.py\s+--profile\s+\w+\s+--only\s+([\w,-]+)", text
+        ):
+            names.update(match.group(1).split(","))
     return names
 
 

@@ -14,6 +14,7 @@
 
 """Tests for the optional source/build BuildSourcePack (ADR-028) and the
 build-evidence adapters/diff (ADR-029)."""
+
 from __future__ import annotations
 
 import json
@@ -46,7 +47,6 @@ from abicheck.buildsource.build_evidence import (
     Toolchain,
 )
 from abicheck.buildsource.model import CoverageStatus, DataLayer
-from abicheck.buildsource.redaction import RedactionPolicy
 from abicheck.checker_policy import (
     BREAKING_KINDS,
     COMPATIBLE_KINDS,
@@ -60,7 +60,9 @@ from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_
 
 
 def test_empty_pack_write_load_roundtrip(tmp_path):
-    pack = BuildSourcePack.empty(tmp_path / "p.evidence", abicheck_version="9.9", created_at="t0")
+    pack = BuildSourcePack.empty(
+        tmp_path / "p.evidence", abicheck_version="9.9", created_at="t0"
+    )
     pack.write()
     loaded = BuildSourcePack.load(tmp_path / "p.evidence")
     assert loaded.manifest.abicheck_version == "9.9"
@@ -89,7 +91,9 @@ def test_content_hash_changes_with_build_evidence(tmp_path):
     p1 = BuildSourcePack.empty(tmp_path / "a")
     p1.write()
     p2 = BuildSourcePack.empty(tmp_path / "b")
-    p2.build_evidence = BuildEvidence(build_options=[BuildOption(key="std:CXX", value="c++20")])
+    p2.build_evidence = BuildEvidence(
+        build_options=[BuildOption(key="std:CXX", value="c++20")]
+    )
     p2.write()
     assert p1.content_hash() != p2.content_hash()
 
@@ -205,7 +209,8 @@ def test_unknown_manifest_keys_are_ignored():
 
 def test_snapshot_v7_evidence_ref_roundtrip():
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0",
+        library="libfoo.so",
+        version="1.0",
         build_source_pack=BuildSourceRef(content_hash="sha256:abc", path_hint="e/"),
     )
     d = snapshot_to_dict(snap)
@@ -250,10 +255,13 @@ def test_legacy_evidence_pack_key_still_loads():
 
 def test_new_key_wins_over_legacy_evidence_pack_key():
     """If both keys are present the new ``build_source_pack`` takes precedence."""
-    d = snapshot_to_dict(AbiSnapshot(
-        library="l", version="1",
-        build_source_pack=BuildSourceRef(content_hash="sha256:new", path_hint="n/"),
-    ))
+    d = snapshot_to_dict(
+        AbiSnapshot(
+            library="l",
+            version="1",
+            build_source_pack=BuildSourceRef(content_hash="sha256:new", path_hint="n/"),
+        )
+    )
     d["evidence_pack"] = {"content_hash": "sha256:legacy", "path_hint": "old/"}
     assert snapshot_from_dict(d).build_source_pack.content_hash == "sha256:new"
 
@@ -307,11 +315,15 @@ def test_embed_filters_coverage_to_layers_actually_embedded(tmp_path):
     from abicheck.cli_buildsource import embed_build_source
 
     pack = BuildSourcePack.empty(tmp_path / "p")
-    pack.build_evidence = BuildEvidence(build_options=[BuildOption(key="std:CXX", value="c++20")])
+    pack.build_evidence = BuildEvidence(
+        build_options=[BuildOption(key="std:CXX", value="c++20")]
+    )
     # The pack's manifest claims L3 *and* L4 coverage, but we only attach L3.
     pack.manifest.coverage = [
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT
+        ),
     ]
     pack.write()
 
@@ -335,7 +347,9 @@ def test_embed_merges_coverage_from_both_packs(tmp_path):
     from abicheck.cli_buildsource import embed_build_source
 
     bi = BuildSourcePack.empty(tmp_path / "bi")
-    bi.build_evidence = BuildEvidence(build_options=[BuildOption(key="std:CXX", value="c++20")])
+    bi.build_evidence = BuildEvidence(
+        build_options=[BuildOption(key="std:CXX", value="c++20")]
+    )
     bi.manifest.coverage = [
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
     ]
@@ -345,7 +359,9 @@ def test_embed_merges_coverage_from_both_packs(tmp_path):
     src = BuildSourcePack.empty(tmp_path / "src")
     src.source_abi = SourceAbiSurface(library="libfoo.so")
     src.manifest.coverage = [
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT
+        ),
     ]
     src.manifest.extractors = [ExtractorRecord(name="clang-source", version="2")]
     src.write()
@@ -370,8 +386,14 @@ def test_embed_merges_coverage_from_both_packs(tmp_path):
 def test_legacy_changekind_value_still_parses():
     """A report/policy written before the evidence→buildsource rename used
     'evidence_coverage_asymmetric'; it must still deserialize."""
-    assert ChangeKind("evidence_coverage_asymmetric") is ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC
-    assert ChangeKind("layer_coverage_asymmetric") is ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC
+    assert (
+        ChangeKind("evidence_coverage_asymmetric")
+        is ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC
+    )
+    assert (
+        ChangeKind("layer_coverage_asymmetric")
+        is ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC
+    )
 
 
 def test_legacy_manifest_version_key_still_loads():
@@ -389,12 +411,28 @@ def _write_cdb(tmp_path, entries):
 
 
 def test_compile_db_adapter_normalizes_units(tmp_path):
-    cdb = _write_cdb(tmp_path, [
-        {"directory": str(tmp_path), "file": "src/foo.cpp",
-         "arguments": ["c++", "-std=c++20", "-DFOO=1", "-Iinclude", "-c", "src/foo.cpp"]},
-        {"directory": str(tmp_path), "file": "src/bar.c",
-         "command": "cc -std=c11 -Iinclude -c src/bar.c"},
-    ])
+    cdb = _write_cdb(
+        tmp_path,
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": [
+                    "c++",
+                    "-std=c++20",
+                    "-DFOO=1",
+                    "-Iinclude",
+                    "-c",
+                    "src/foo.cpp",
+                ],
+            },
+            {
+                "directory": str(tmp_path),
+                "file": "src/bar.c",
+                "command": "cc -std=c11 -Iinclude -c src/bar.c",
+            },
+        ],
+    )
     ev = CompileDbAdapter(cdb, build_system="cmake").collect()
     assert len(ev.compile_units) == 2
     cxx = next(c for c in ev.compile_units if c.language == "CXX")
@@ -407,18 +445,31 @@ def test_compile_db_adapter_normalizes_units(tmp_path):
 
 
 def test_compile_db_supports_command_string_form(tmp_path):
-    cdb = _write_cdb(tmp_path, [
-        {"directory": str(tmp_path), "file": "a.cpp", "command": "c++ -std=c++17 -c a.cpp"},
-    ])
+    cdb = _write_cdb(
+        tmp_path,
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "command": "c++ -std=c++17 -c a.cpp",
+            },
+        ],
+    )
     ev = CompileDbAdapter(cdb).collect()
     assert ev.compile_units[0].standard == "c++17"
 
 
 def test_glibcxx_abi_define_is_abi_relevant(tmp_path):
-    cdb = _write_cdb(tmp_path, [
-        {"directory": str(tmp_path), "file": "a.cpp",
-         "arguments": ["c++", "-D_GLIBCXX_USE_CXX11_ABI=0", "-c", "a.cpp"]},
-    ])
+    cdb = _write_cdb(
+        tmp_path,
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "arguments": ["c++", "-D_GLIBCXX_USE_CXX11_ABI=0", "-c", "a.cpp"],
+            },
+        ],
+    )
     ev = CompileDbAdapter(cdb).collect()
     keys = {o.key for o in ev.build_options}
     assert "define:_GLIBCXX_USE_CXX11_ABI" in keys
@@ -428,12 +479,22 @@ def test_glibcxx_abi_define_is_abi_relevant(tmp_path):
 
 
 def test_ninja_adapter_from_precaptured_compdb(tmp_path):
-    compdb = json.dumps([
-        {"directory": str(tmp_path), "file": "a.cpp", "output": "a.o",
-         "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]},
-        # A non-compiler statement (no recognized source ext) is filtered out.
-        {"directory": str(tmp_path), "file": "link.stamp", "arguments": ["touch", "link.stamp"]},
-    ])
+    compdb = json.dumps(
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "output": "a.o",
+                "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+            },
+            # A non-compiler statement (no recognized source ext) is filtered out.
+            {
+                "directory": str(tmp_path),
+                "file": "link.stamp",
+                "arguments": ["touch", "link.stamp"],
+            },
+        ]
+    )
     ev = NinjaAdapter(compdb=compdb).collect()
     assert len(ev.compile_units) == 1
     assert ev.compile_units[0].standard == "c++20"
@@ -452,36 +513,62 @@ def test_ninja_adapter_no_input_emits_diagnostic():
 def _make_cmake_reply(build_dir):
     reply = build_dir / ".cmake" / "api" / "v1" / "reply"
     reply.mkdir(parents=True)
-    (reply / "codemodel-v2-x.json").write_text(json.dumps({
-        "configurations": [{"targets": [{"jsonFile": "target-foo.json"}]}],
-    }))
-    (reply / "target-foo.json").write_text(json.dumps({
-        "name": "foo",
-        "type": "SHARED_LIBRARY",
-        "artifacts": [{"path": "libfoo.so"}],
-        "dependencies": [{"id": "bar::@abc"}],
-        "fileSets": [
-            {"type": "HEADERS", "visibility": "PUBLIC"},
-            {"type": "HEADERS", "visibility": "PRIVATE"},
-        ],
-        "sources": [
-            {"path": "src/foo.cpp"},
-            {"path": "include/foo.h", "fileSetIndex": 0},
-            {"path": "src/foo_impl.h", "fileSetIndex": 1},
-        ],
-    }))
-    (reply / "toolchains-v1-x.json").write_text(json.dumps({
-        "toolchains": [
-            {"language": "CXX", "compiler": {"id": "GNU", "version": "14.1", "path": "/usr/bin/c++"}},
-        ],
-    }))
-    (reply / "index-2026.json").write_text(json.dumps({
-        "cmake": {"version": {"string": "3.28"}, "generator": {"name": "Ninja"}},
-        "objects": [
-            {"kind": "codemodel", "jsonFile": "codemodel-v2-x.json"},
-            {"kind": "toolchains", "jsonFile": "toolchains-v1-x.json"},
-        ],
-    }))
+    (reply / "codemodel-v2-x.json").write_text(
+        json.dumps(
+            {
+                "configurations": [{"targets": [{"jsonFile": "target-foo.json"}]}],
+            }
+        )
+    )
+    (reply / "target-foo.json").write_text(
+        json.dumps(
+            {
+                "name": "foo",
+                "type": "SHARED_LIBRARY",
+                "artifacts": [{"path": "libfoo.so"}],
+                "dependencies": [{"id": "bar::@abc"}],
+                "fileSets": [
+                    {"type": "HEADERS", "visibility": "PUBLIC"},
+                    {"type": "HEADERS", "visibility": "PRIVATE"},
+                ],
+                "sources": [
+                    {"path": "src/foo.cpp"},
+                    {"path": "include/foo.h", "fileSetIndex": 0},
+                    {"path": "src/foo_impl.h", "fileSetIndex": 1},
+                ],
+            }
+        )
+    )
+    (reply / "toolchains-v1-x.json").write_text(
+        json.dumps(
+            {
+                "toolchains": [
+                    {
+                        "language": "CXX",
+                        "compiler": {
+                            "id": "GNU",
+                            "version": "14.1",
+                            "path": "/usr/bin/c++",
+                        },
+                    },
+                ],
+            }
+        )
+    )
+    (reply / "index-2026.json").write_text(
+        json.dumps(
+            {
+                "cmake": {
+                    "version": {"string": "3.28"},
+                    "generator": {"name": "Ninja"},
+                },
+                "objects": [
+                    {"kind": "codemodel", "jsonFile": "codemodel-v2-x.json"},
+                    {"kind": "toolchains", "jsonFile": "toolchains-v1-x.json"},
+                ],
+            }
+        )
+    )
     return build_dir
 
 
@@ -511,22 +598,34 @@ def test_cmake_file_api_missing_reply_is_graceful(tmp_path):
 
 
 def test_diff_emits_abi_relevant_build_flag_changed():
-    old = BuildEvidence(build_options=[BuildOption("std:CXX", "c++17", abi_relevant=True)])
-    new = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
+    old = BuildEvidence(
+        build_options=[BuildOption("std:CXX", "c++17", abi_relevant=True)]
+    )
+    new = BuildEvidence(
+        build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)]
+    )
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED for c in changes)
 
 
 def test_diff_emits_build_context_changed_for_non_abi_flag():
-    old = BuildEvidence(build_options=[BuildOption("warnings", "on", abi_relevant=False)])
-    new = BuildEvidence(build_options=[BuildOption("warnings", "off", abi_relevant=False)])
+    old = BuildEvidence(
+        build_options=[BuildOption("warnings", "on", abi_relevant=False)]
+    )
+    new = BuildEvidence(
+        build_options=[BuildOption("warnings", "off", abi_relevant=False)]
+    )
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.BUILD_CONTEXT_CHANGED for c in changes)
 
 
 def test_diff_emits_toolchain_version_changed():
-    old = BuildEvidence(toolchains=[Toolchain(id="t", compiler_id="GNU", version="13", language="CXX")])
-    new = BuildEvidence(toolchains=[Toolchain(id="t", compiler_id="GNU", version="14", language="CXX")])
+    old = BuildEvidence(
+        toolchains=[Toolchain(id="t", compiler_id="GNU", version="13", language="CXX")]
+    )
+    new = BuildEvidence(
+        toolchains=[Toolchain(id="t", compiler_id="GNU", version="14", language="CXX")]
+    )
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
@@ -537,10 +636,26 @@ def test_diff_surfaces_toolchain_swap_with_asymmetric_language_keys():
     # ("GNU C17 13.3.0") keys by "C". The language keys never intersect, but the
     # compiler identity clearly changed — drift must still surface so a
     # gcc↔clang rebuild isn't silently dropped (field-eval E3 / P07).
-    old = BuildEvidence(toolchains=[
-        Toolchain(id="toolchain://gnu-13.3.0-dwarf", compiler_id="GNU", version="13.3.0", language="C")])
-    new = BuildEvidence(toolchains=[
-        Toolchain(id="toolchain://clang-18.1.3-dwarf", compiler_id="Clang", version="18.1.3", language="")])
+    old = BuildEvidence(
+        toolchains=[
+            Toolchain(
+                id="toolchain://gnu-13.3.0-dwarf",
+                compiler_id="GNU",
+                version="13.3.0",
+                language="C",
+            )
+        ]
+    )
+    new = BuildEvidence(
+        toolchains=[
+            Toolchain(
+                id="toolchain://clang-18.1.3-dwarf",
+                compiler_id="Clang",
+                version="18.1.3",
+                language="",
+            )
+        ]
+    )
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
@@ -548,8 +663,15 @@ def test_diff_surfaces_toolchain_swap_with_asymmetric_language_keys():
 def test_diff_no_toolchain_drift_when_identity_matches_despite_missing_language():
     # Same compiler/version on both sides (both language-less) must not false-fire
     # through the asymmetric-key fallback.
-    tc = Toolchain(id="toolchain://clang-18.1.3-dwarf", compiler_id="Clang", version="18.1.3", language="")
-    changes = diff_build_evidence(BuildEvidence(toolchains=[tc]), BuildEvidence(toolchains=[tc]))
+    tc = Toolchain(
+        id="toolchain://clang-18.1.3-dwarf",
+        compiler_id="Clang",
+        version="18.1.3",
+        language="",
+    )
+    changes = diff_build_evidence(
+        BuildEvidence(toolchains=[tc]), BuildEvidence(toolchains=[tc])
+    )
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
 
@@ -557,11 +679,22 @@ def test_diff_no_toolchain_drift_for_target_asymmetry_same_compiler():
     # Mixed evidence: CMake File API records a target_triple, DWARF producer
     # leaves it empty. Same compiler+version must NOT report drift just because
     # one side lacks target metadata (Codex P2: target asymmetry false positive).
-    old = BuildEvidence(toolchains=[
-        Toolchain(id="t-cmake", compiler_id="Clang", version="18.1.3",
-                  language="", target_triple="x86_64-linux-gnu")])
-    new = BuildEvidence(toolchains=[
-        Toolchain(id="t-dwarf", compiler_id="Clang", version="18.1.3", language="")])
+    old = BuildEvidence(
+        toolchains=[
+            Toolchain(
+                id="t-cmake",
+                compiler_id="Clang",
+                version="18.1.3",
+                language="",
+                target_triple="x86_64-linux-gnu",
+            )
+        ]
+    )
+    new = BuildEvidence(
+        toolchains=[
+            Toolchain(id="t-dwarf", compiler_id="Clang", version="18.1.3", language="")
+        ]
+    )
     changes = diff_build_evidence(old, new)
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
@@ -570,10 +703,14 @@ def test_diff_no_toolchain_drift_for_version_asymmetry_same_compiler():
     # One side identifies the compiler but exposes no parseable version (valid:
     # Toolchain.version may be ""), the other has it. Same compiler must NOT
     # report drift purely because version metadata is missing (Codex P2).
-    old = BuildEvidence(toolchains=[
-        Toolchain(id="t-cmake", compiler_id="GNU", version="", language="")])
-    new = BuildEvidence(toolchains=[
-        Toolchain(id="t-dwarf", compiler_id="GNU", version="13.3.0", language="")])
+    old = BuildEvidence(
+        toolchains=[Toolchain(id="t-cmake", compiler_id="GNU", version="", language="")]
+    )
+    new = BuildEvidence(
+        toolchains=[
+            Toolchain(id="t-dwarf", compiler_id="GNU", version="13.3.0", language="")
+        ]
+    )
     changes = diff_build_evidence(old, new)
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
@@ -582,10 +719,12 @@ def test_diff_no_toolchain_drift_for_unknown_compiler_id():
     # A toolchain may omit compiler_id (schema requires only id; adapters default
     # it to ""). An unknown compiler on one side must not read as a swap against a
     # known compiler on the other (Codex P2).
-    old = BuildEvidence(toolchains=[
-        Toolchain(id="t-unknown", compiler_id="", version="", language="")])
-    new = BuildEvidence(toolchains=[
-        Toolchain(id="t-gnu", compiler_id="GNU", version="13", language="")])
+    old = BuildEvidence(
+        toolchains=[Toolchain(id="t-unknown", compiler_id="", version="", language="")]
+    )
+    new = BuildEvidence(
+        toolchains=[Toolchain(id="t-gnu", compiler_id="GNU", version="13", language="")]
+    )
     changes = diff_build_evidence(old, new)
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
@@ -594,11 +733,15 @@ def test_diff_no_toolchain_drift_for_partial_evidence_with_shared_key():
     # old has C=GNU + CXX=Clang; new has only C=GNU. The shared C toolchain is
     # identical and the missing CXX record is absent evidence, not a swap — the
     # no-shared-key fallback must not fire (Codex P2).
-    old = BuildEvidence(toolchains=[
-        Toolchain(id="c", compiler_id="GNU", version="13", language="C"),
-        Toolchain(id="cxx", compiler_id="Clang", version="18", language="CXX")])
-    new = BuildEvidence(toolchains=[
-        Toolchain(id="c", compiler_id="GNU", version="13", language="C")])
+    old = BuildEvidence(
+        toolchains=[
+            Toolchain(id="c", compiler_id="GNU", version="13", language="C"),
+            Toolchain(id="cxx", compiler_id="Clang", version="18", language="CXX"),
+        ]
+    )
+    new = BuildEvidence(
+        toolchains=[Toolchain(id="c", compiler_id="GNU", version="13", language="C")]
+    )
     changes = diff_build_evidence(old, new)
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
@@ -611,8 +754,12 @@ def test_diff_emits_toolchain_change_for_sysroot_option():
 
 
 def test_diff_emits_link_export_policy_changed():
-    old = BuildEvidence(link_units=[LinkUnit(id="l", target_id="t", version_script="v1.map")])
-    new = BuildEvidence(link_units=[LinkUnit(id="l", target_id="t", version_script="v2.map")])
+    old = BuildEvidence(
+        link_units=[LinkUnit(id="l", target_id="t", version_script="v1.map")]
+    )
+    new = BuildEvidence(
+        link_units=[LinkUnit(id="l", target_id="t", version_script="v2.map")]
+    )
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.LINK_EXPORT_POLICY_CHANGED for c in changes)
 
@@ -625,14 +772,18 @@ def test_diff_emits_generated_file_dependency_unstable():
 
 
 def test_header_parse_drift_flagged_without_context():
-    ev = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
+    ev = BuildEvidence(
+        build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)]
+    )
     changes = check_header_parse_drift(ev, headers_parsed_with_context=False)
     assert len(changes) == 1
     assert changes[0].kind is ChangeKind.HEADER_PARSE_CONTEXT_DRIFT
 
 
 def test_header_parse_drift_silent_with_context():
-    ev = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
+    ev = BuildEvidence(
+        build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)]
+    )
     assert check_header_parse_drift(ev, headers_parsed_with_context=True) == []
 
 
@@ -648,8 +799,10 @@ def test_runtime_mode_flags_normalize_to_canonical_keys():
         id="cu://x",
         language="CXX",
         abi_relevant_flags=[
-            "-fno-exceptions", "-fno-rtti",
-            "-ftls-model=initial-exec", "-fno-threadsafe-statics",
+            "-fno-exceptions",
+            "-fno-rtti",
+            "-ftls-model=initial-exec",
+            "-fno-threadsafe-statics",
         ],
     )
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
@@ -660,18 +813,28 @@ def test_runtime_mode_flags_normalize_to_canonical_keys():
     assert ("threadsafe_statics:CXX", "off") in opts
 
 
-@pytest.mark.parametrize("flag", [
-    "-stdlib=libc++",
-    "-march=x86-64-v3",
-    "-mtune=native",
-    "-mfloat-abi=hard",
-    "-mfpmath=sse",
-    "-fsanitize=address",
-    "-fno-sanitize=undefined",
-    "-fPIC", "-fpic", "-fPIE", "-fpie",
-    "-fno-pic", "-fno-pie", "-fno-PIC", "-fno-PIE",
-    "-fomit-frame-pointer", "-fno-omit-frame-pointer",
-])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "-stdlib=libc++",
+        "-march=x86-64-v3",
+        "-mtune=native",
+        "-mfloat-abi=hard",
+        "-mfpmath=sse",
+        "-fsanitize=address",
+        "-fno-sanitize=undefined",
+        "-fPIC",
+        "-fpic",
+        "-fPIE",
+        "-fpie",
+        "-fno-pic",
+        "-fno-pie",
+        "-fno-PIC",
+        "-fno-PIE",
+        "-fomit-frame-pointer",
+        "-fno-omit-frame-pointer",
+    ],
+)
 def test_broadened_abi_flag_vocabulary_is_captured(flag):
     # B2: the ABI-relevant flag vocabulary was thin (std/exceptions/rtti/
     # visibility only), so stdlib/march/sanitizer/PIC/frame-pointer flips were
@@ -696,9 +859,7 @@ def test_split_target_abi_flag_survivor_produces_build_option():
         ["clang", "-cc1", "-target-abi", "aapcs", "-c", "t.c"]
     )
     assert abi_relevant_flags == ["-target-abi=aapcs"]
-    cu = CompileUnit(
-        id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags
-    )
+    cu = CompileUnit(id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags)
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
     assert ("-target-abi", "-target-abi=aapcs") in opts
 
@@ -719,9 +880,7 @@ def test_split_target_abi_flag_xclang_wrapped_survivor_produces_build_option():
         ["clang", "-Xclang", "-target-abi", "-Xclang", "aapcs", "-c", "t.c"]
     )
     assert abi_relevant_flags == ["-target-abi=aapcs"]
-    cu = CompileUnit(
-        id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags
-    )
+    cu = CompileUnit(id="cu://x", language="CXX", abi_relevant_flags=abi_relevant_flags)
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
     assert ("-target-abi", "-target-abi=aapcs") in opts
 
@@ -870,14 +1029,17 @@ def test_split_target_abi_flag_disagreement_still_diffable_across_units():
     assert values == {"-target-abi=aapcs", "-target-abi=aapcs16"}
 
 
-@pytest.mark.parametrize("flag", [
-    "-fsycl",
-    "-fsycl-host-only",
-    "-fsycl-device-only",
-    "-fsycl-targets=nvptx64-nvidia-cuda",
-])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "-fsycl",
+        "-fsycl-host-only",
+        "-fsycl-device-only",
+        "-fsycl-targets=nvptx64-nvidia-cuda",
+    ],
+)
 def test_sycl_language_mode_flag_is_captured(flag):
-    """A resolved --gcc-path override can now actually invoke icpx/dpcpp for
+    """A resolved --compiler override can now actually invoke icpx/dpcpp for
     L4 replay (previously always a bare "clang"), so -fsycl and its variants
     must be captured as ABI-relevant -- otherwise a SYCL TU replays as plain
     C++, silently missing built-in SYCL state (Codex review)."""
@@ -885,7 +1047,7 @@ def test_sycl_language_mode_flag_is_captured(flag):
 
 
 def test_sycl_disable_flag_preserves_last_flag_wins_ordering():
-    """"-fno-sycl" does not start with "-fsycl", so it needs its own entry --
+    """ "-fno-sycl" does not start with "-fsycl", so it needs its own entry --
     without it, "icpx -fsycl -fno-sycl" (last-flag-wins) only captured
     "-fsycl" and replay reconstructed the wrong SYCL-enabled AST for what
     the real build actually compiled as plain C++ (Codex review, second
@@ -903,17 +1065,24 @@ def test_stdlib_flip_surfaces_as_abi_build_flag_drift(tmp_path):
 
     def _db(stdlib):
         p = tmp_path / f"cc_{stdlib}.json"
-        p.write_text(json.dumps([{
-            "directory": str(tmp_path),
-            "file": "foo.cpp",
-            "arguments": ["clang++", f"-stdlib={stdlib}", "-c", "foo.cpp"],
-        }]))
+        p.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": "foo.cpp",
+                        "arguments": ["clang++", f"-stdlib={stdlib}", "-c", "foo.cpp"],
+                    }
+                ]
+            )
+        )
         return CompileDbAdapter(p).collect()
 
     old = _db("libstdc++")
     new = _db("libc++")
     drift = [
-        c for c in diff_build_evidence(old, new)
+        c
+        for c in diff_build_evidence(old, new)
         if c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
         and c.symbol == "build-option:-stdlib"
     ]
@@ -928,9 +1097,17 @@ def test_march_added_surfaces_as_abi_build_flag_drift(tmp_path):
 
     def _db(args):
         p = tmp_path / f"cc_{abs(hash(tuple(args)))}.json"
-        p.write_text(json.dumps([{
-            "directory": str(tmp_path), "file": "foo.cpp", "arguments": args,
-        }]))
+        p.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": "foo.cpp",
+                        "arguments": args,
+                    }
+                ]
+            )
+        )
         return CompileDbAdapter(p).collect()
 
     old = _db(["clang++", "-c", "foo.cpp"])
@@ -942,79 +1119,125 @@ def test_march_added_surfaces_as_abi_build_flag_drift(tmp_path):
     )
 
 
-@pytest.mark.parametrize("argv, source, expected", [
-    # No forcing: extension wins.
-    (["g++", "-c", "foo.cpp"], "foo.cpp", "CXX"),
-    (["gcc", "-c", "foo.c"], "foo.c", "C"),
-    # GNU -x forces the language over the extension (split and combined forms).
-    (["g++", "-x", "c++", "-c", "foo.c"], "foo.c", "CXX"),
-    (["gcc", "-xc", "-c", "foo.cpp"], "foo.cpp", "C"),
-    # -x none reverts to extension-based detection.
-    (["g++", "-x", "c++", "-x", "none", "-c", "foo.c"], "foo.c", "C"),
-    # Last -x wins for a single-source TU.
-    (["g++", "-x", "c", "-x", "c++", "-c", "foo.c"], "foo.c", "CXX"),
-    # MSVC /TP and /Tp<file> force C++, /TC and /Tc<file> force C.
-    (["cl", "/c", "/TP", "foo.c"], "foo.c", "CXX"),
-    (["cl", "/c", "/Tpfoo.c"], "foo.c", "CXX"),
-    (["cl", "/c", "/TC", "foo.cpp"], "foo.cpp", "C"),
-    (["cl", "/c", "/Tcfoo.cpp"], "foo.cpp", "C"),
-    # clang in CL-driver mode honors the same /TP and /TC language forcing.
-    (["clang", "--driver-mode=cl", "-c", "/TP", "foo.c"], "foo.c", "CXX"),
-    (["clang", "--driver-mode", "cl", "-c", "/TC", "foo.cpp"], "foo.cpp", "C"),
-    # Unknown -x language leaves the extension-derived language intact.
-    (["clang", "-x", "assembler", "-c", "foo.cpp"], "foo.cpp", "CXX"),
-    # Forced Objective-C/Objective-C++ keep their own tokens (match .m/.mm
-    # extension detection), so a redundant -x on a .mm file is a no-op.
-    (["clang++", "-x", "objective-c++", "-c", "foo.mm"], "foo.mm", "OBJCXX"),
-    (["clang", "-x", "objective-c", "-c", "foo.m"], "foo.m", "OBJC"),
-])
+@pytest.mark.parametrize(
+    "argv, source, expected",
+    [
+        # No forcing: extension wins.
+        (["g++", "-c", "foo.cpp"], "foo.cpp", "CXX"),
+        (["gcc", "-c", "foo.c"], "foo.c", "C"),
+        # GNU -x forces the language over the extension (split and combined forms).
+        (["g++", "-x", "c++", "-c", "foo.c"], "foo.c", "CXX"),
+        (["gcc", "-xc", "-c", "foo.cpp"], "foo.cpp", "C"),
+        # -x none reverts to extension-based detection.
+        (["g++", "-x", "c++", "-x", "none", "-c", "foo.c"], "foo.c", "C"),
+        # Last -x wins for a single-source TU.
+        (["g++", "-x", "c", "-x", "c++", "-c", "foo.c"], "foo.c", "CXX"),
+        # MSVC /TP and /Tp<file> force C++, /TC and /Tc<file> force C.
+        (["cl", "/c", "/TP", "foo.c"], "foo.c", "CXX"),
+        (["cl", "/c", "/Tpfoo.c"], "foo.c", "CXX"),
+        (["cl", "/c", "/TC", "foo.cpp"], "foo.cpp", "C"),
+        (["cl", "/c", "/Tcfoo.cpp"], "foo.cpp", "C"),
+        # clang in CL-driver mode honors the same /TP and /TC language forcing.
+        (["clang", "--driver-mode=cl", "-c", "/TP", "foo.c"], "foo.c", "CXX"),
+        (["clang", "--driver-mode", "cl", "-c", "/TC", "foo.cpp"], "foo.cpp", "C"),
+        # Unknown -x language leaves the extension-derived language intact.
+        (["clang", "-x", "assembler", "-c", "foo.cpp"], "foo.cpp", "CXX"),
+        # Forced Objective-C/Objective-C++ keep their own tokens (match .m/.mm
+        # extension detection), so a redundant -x on a .mm file is a no-op.
+        (["clang++", "-x", "objective-c++", "-c", "foo.mm"], "foo.mm", "OBJCXX"),
+        (["clang", "-x", "objective-c", "-c", "foo.m"], "foo.m", "OBJC"),
+    ],
+)
 def test_effective_language_honors_forced_language(argv, source, expected):
     from abicheck.buildsource.adapters.base import effective_language
+
     assert effective_language(argv, source) == expected
 
 
-@pytest.mark.parametrize("argv, source, expected", [
-    # The token after a value-taking option is data, even when it looks like a
-    # combined GNU -x language option.
-    (["g++", "-c", "foo.cpp", "-MF", "-xc", "-fno-exceptions"], "foo.cpp", "CXX"),
-    (["g++", "-o", "-xc", "-xc++", "-c", "foo.c"], "foo.c", "CXX"),
-    (["g++", "-D", "-xc", "-c", "foo.cpp"], "foo.cpp", "CXX"),
-    # Slash /Tp and /Tc only force language for MSVC/clang-cl commands, not GNU
-    # commands or operands consumed by another MSVC option.
-    (["gcc", "-c", "foo.cpp", "/Tcnot_source.c"], "foo.cpp", "CXX"),
-    (["cl", "/c", "/FI", "/Tcconfig.hpp", "foo.cpp"], "foo.cpp", "CXX"),
-])
+@pytest.mark.parametrize(
+    "argv, source, expected",
+    [
+        # The token after a value-taking option is data, even when it looks like a
+        # combined GNU -x language option.
+        (["g++", "-c", "foo.cpp", "-MF", "-xc", "-fno-exceptions"], "foo.cpp", "CXX"),
+        (["g++", "-o", "-xc", "-xc++", "-c", "foo.c"], "foo.c", "CXX"),
+        (["g++", "-D", "-xc", "-c", "foo.cpp"], "foo.cpp", "CXX"),
+        # Slash /Tp and /Tc only force language for MSVC/clang-cl commands, not GNU
+        # commands or operands consumed by another MSVC option.
+        (["gcc", "-c", "foo.cpp", "/Tcnot_source.c"], "foo.cpp", "CXX"),
+        (["cl", "/c", "/FI", "/Tcconfig.hpp", "foo.cpp"], "foo.cpp", "CXX"),
+    ],
+)
 def test_effective_language_ignores_option_operands(argv, source, expected):
     from abicheck.buildsource.adapters.base import effective_language
+
     assert effective_language(argv, source) == expected
 
 
 def test_driver_mode_operand_does_not_make_unix_paths_msvc() -> None:
     from abicheck.buildsource.adapters.base import source_from_argv
 
-    assert source_from_argv([
-        "gcc", "-MMD", "-MF", "--driver-mode=cl", "-c", "/src/foo.c",
-    ]) == "/src/foo.c"
+    assert (
+        source_from_argv(
+            [
+                "gcc",
+                "-MMD",
+                "-MF",
+                "--driver-mode=cl",
+                "-c",
+                "/src/foo.c",
+            ]
+        )
+        == "/src/foo.c"
+    )
 
 
 def test_clang_driver_mode_keeps_absolute_posix_source() -> None:
     from abicheck.buildsource.adapters.base import source_from_argv
 
     for source in ("/work/src/foo.cc", "/data/foo.cc", "/include/foo.cc"):
-        assert source_from_argv([
-            "clang", "--driver-mode=cl", "-c", source, "/Fofoo.obj",
-        ]) == source
+        assert (
+            source_from_argv(
+                [
+                    "clang",
+                    "--driver-mode=cl",
+                    "-c",
+                    source,
+                    "/Fofoo.obj",
+                ]
+            )
+            == source
+        )
 
 
 def test_clang_driver_mode_skips_combined_msvc_source_like_options() -> None:
     from abicheck.buildsource.adapters.base import source_from_argv
 
-    assert source_from_argv([
-        "clang", "--driver-mode=cl", "-c", "/FI/work/src/config.hpp", "foo.cc",
-    ]) == "foo.cc"
-    assert source_from_argv([
-        "clang", "--driver-mode=cl", "-c", "/Iinclude", "/DNAME=foo.cc", "foo.cc",
-    ]) == "foo.cc"
+    assert (
+        source_from_argv(
+            [
+                "clang",
+                "--driver-mode=cl",
+                "-c",
+                "/FI/work/src/config.hpp",
+                "foo.cc",
+            ]
+        )
+        == "foo.cc"
+    )
+    assert (
+        source_from_argv(
+            [
+                "clang",
+                "--driver-mode=cl",
+                "-c",
+                "/Iinclude",
+                "/DNAME=foo.cc",
+                "foo.cc",
+            ]
+        )
+        == "foo.cc"
+    )
 
 
 def test_redundant_objcxx_forced_language_is_no_op_drift(tmp_path):
@@ -1024,9 +1247,17 @@ def test_redundant_objcxx_forced_language_is_no_op_drift(tmp_path):
 
     def _db(args):
         p = tmp_path / f"cc_{abs(hash(tuple(args)))}.json"
-        p.write_text(json.dumps([{
-            "directory": str(tmp_path), "file": "foo.mm", "arguments": args,
-        }]))
+        p.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": "foo.mm",
+                        "arguments": args,
+                    }
+                ]
+            )
+        )
         return CompileDbAdapter(p).collect()
 
     old = _db(["clang++", "-std=c++17", "-c", "foo.mm"])
@@ -1034,8 +1265,10 @@ def test_redundant_objcxx_forced_language_is_no_op_drift(tmp_path):
     assert old.compile_units[0].language == "OBJCXX"
     assert new.compile_units[0].language == "OBJCXX"
     # No std:CXX/std:OBJCXX add+remove churn — the only std option is std:OBJCXX.
-    assert not any(c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
-                   for c in diff_build_evidence(old, new))
+    assert not any(
+        c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
+        for c in diff_build_evidence(old, new)
+    )
 
 
 def test_compile_db_forced_language_drives_runtime_mode_key(tmp_path):
@@ -1046,15 +1279,17 @@ def test_compile_db_forced_language_drives_runtime_mode_key(tmp_path):
 
     def _db(extra_flags):
         p = tmp_path / f"cc_{abs(hash(tuple(extra_flags)))}.json"
-        entries = [{
-            "directory": str(tmp_path),
-            "file": "foo.c",
-            "arguments": ["g++", "-x", "c++", *extra_flags, "-c", "foo.c"],
-        }]
+        entries = [
+            {
+                "directory": str(tmp_path),
+                "file": "foo.c",
+                "arguments": ["g++", "-x", "c++", *extra_flags, "-c", "foo.c"],
+            }
+        ]
         p.write_text(json.dumps(entries))
         return CompileDbAdapter(p).collect()
 
-    old = _db([])                 # omitted exceptions -> C++ default on
+    old = _db([])  # omitted exceptions -> C++ default on
     new = _db(["-fno-exceptions"])  # explicit off
     # The forced language must record exceptions:CXX (not exceptions:C).
     assert old.compile_units[0].language == "CXX"
@@ -1067,11 +1302,21 @@ def test_compile_db_depfile_operand_cannot_hide_cxx_exceptions_flip(tmp_path):
     # as `-x c` and downgrade a C++ TU to C.
     def _db(extra_flags):
         p = tmp_path / f"cc_{abs(hash(tuple(extra_flags)))}.json"
-        entries = [{
-            "directory": str(tmp_path),
-            "file": "foo.cpp",
-            "arguments": ["g++", "-MMD", "-MF", "-xc", *extra_flags, "-c", "foo.cpp"],
-        }]
+        entries = [
+            {
+                "directory": str(tmp_path),
+                "file": "foo.cpp",
+                "arguments": [
+                    "g++",
+                    "-MMD",
+                    "-MF",
+                    "-xc",
+                    *extra_flags,
+                    "-c",
+                    "foo.cpp",
+                ],
+            }
+        ]
         p.write_text(json.dumps(entries))
         return CompileDbAdapter(p).collect()
 
@@ -1092,7 +1337,8 @@ def test_runtime_mode_flags_last_one_wins_per_tu():
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(
-        id="cu://x", language="CXX",
+        id="cu://x",
+        language="CXX",
         abi_relevant_flags=["-fno-exceptions", "-fexceptions"],
     )
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
@@ -1100,7 +1346,8 @@ def test_runtime_mode_flags_last_one_wins_per_tu():
     assert ("exceptions:CXX", "off") not in opts
 
     cu2 = CompileUnit(
-        id="cu://y", language="CXX",
+        id="cu://y",
+        language="CXX",
         abi_relevant_flags=["-frtti", "-fno-rtti"],
     )
     opts2 = {(o.key, o.value) for o in derive_build_options([cu2])}
@@ -1116,9 +1363,12 @@ def test_exceptions_default_is_language_aware():
     from abicheck.buildsource.build_evidence import CompileUnit
 
     def ev(lang, *flags, src="s.cpp"):
-        cu = CompileUnit(id=f"cu://{lang}", language=lang, source=src,
-                         abi_relevant_flags=list(flags))
-        return BuildEvidence(compile_units=[cu], build_options=derive_build_options([cu]))
+        cu = CompileUnit(
+            id=f"cu://{lang}", language=lang, source=src, abi_relevant_flags=list(flags)
+        )
+        return BuildEvidence(
+            compile_units=[cu], build_options=derive_build_options([cu])
+        )
 
     # C: omitted (default off) vs explicit -fno-exceptions (off) → no change.
     c_old = ev("C", src="s.c")
@@ -1148,7 +1398,9 @@ def test_diff_emits_exceptions_mode_changed():
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
     # The specific mode finding replaces the generic ABI-flag finding for this key.
-    assert not any(c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED for c in changes)
+    assert not any(
+        c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED for c in changes
+    )
 
 
 def test_diff_emits_rtti_mode_changed():
@@ -1228,10 +1480,12 @@ def test_tls_model_omitted_vs_mixed_with_never_default_is_reported():
     # global-dynamic and one at local-exec (never the auto-default). The omitted
     # side must not suppress the whole change — the local-exec TU is a real flip.
     old = BuildEvidence(build_options=[])
-    new = BuildEvidence(build_options=[
-        _opt("tls_model", "global-dynamic"),
-        _opt("tls_model", "local-exec"),
-    ])
+    new = BuildEvidence(
+        build_options=[
+            _opt("tls_model", "global-dynamic"),
+            _opt("tls_model", "local-exec"),
+        ]
+    )
     assert any(
         c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
     )
@@ -1244,20 +1498,25 @@ def test_tls_model_omitted_vs_mixed_all_maybe_default_is_suppressed():
     # A mix of only maybe-default models (global-dynamic / initial-exec) against
     # an omitted side stays suppressed — none is guaranteed non-default.
     old = BuildEvidence(build_options=[])
-    new = BuildEvidence(build_options=[
-        _opt("tls_model", "global-dynamic"),
-        _opt("tls_model", "initial-exec"),
-    ])
+    new = BuildEvidence(
+        build_options=[
+            _opt("tls_model", "global-dynamic"),
+            _opt("tls_model", "initial-exec"),
+        ]
+    )
     assert not any(
         c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
     )
 
 
-@pytest.mark.parametrize("key, kind", [
-    ("exceptions:OBJCXX", ChangeKind.EXCEPTIONS_MODE_CHANGED),
-    ("rtti:OBJCXX", ChangeKind.RTTI_MODE_CHANGED),
-    ("threadsafe_statics:OBJCXX", ChangeKind.THREADSAFE_STATICS_MODE_CHANGED),
-])
+@pytest.mark.parametrize(
+    "key, kind",
+    [
+        ("exceptions:OBJCXX", ChangeKind.EXCEPTIONS_MODE_CHANGED),
+        ("rtti:OBJCXX", ChangeKind.RTTI_MODE_CHANGED),
+        ("threadsafe_statics:OBJCXX", ChangeKind.THREADSAFE_STATICS_MODE_CHANGED),
+    ],
+)
 def test_objcxx_mode_omitted_vs_off_is_a_change(key, kind):
     # Native .mm TUs record OBJCXX; Objective-C++ is a C++ superset, so the
     # runtime defaults are on. An omitted->explicit-off flip must be reported.
@@ -1272,7 +1531,8 @@ def test_objcxx_exceptions_omitted_vs_on_is_no_change():
     old = BuildEvidence(build_options=[])
     new = BuildEvidence(build_options=[_opt("exceptions:OBJCXX", "on")])
     assert not any(
-        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(old, new)
     )
 
 
@@ -1282,7 +1542,8 @@ def test_objc_exceptions_omitted_vs_off_is_no_change():
     old = BuildEvidence(build_options=[])
     new = BuildEvidence(build_options=[_opt("exceptions:OBJC", "off")])
     assert not any(
-        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(old, new)
     )
 
 
@@ -1309,7 +1570,8 @@ def test_exceptions_mode_unknown_language_requires_both_explicit():
     old = BuildEvidence(build_options=[])
     new = BuildEvidence(build_options=[_opt("exceptions", "off")])
     assert not any(
-        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(old, new)
     )
     # Both sides explicit still diffs.
     both = diff_build_evidence(
@@ -1385,9 +1647,9 @@ def test_returns_in_registers_helper():
 
     assert _returns_in_registers("trivial", 8) is True
     assert _returns_in_registers("trivial", 16) is True
-    assert _returns_in_registers("trivial", 24) is False   # large trivial → memory
+    assert _returns_in_registers("trivial", 24) is False  # large trivial → memory
     assert _returns_in_registers("nontrivial", 8) is False  # nontrivial → memory
-    assert _returns_in_registers("trivial", None) is True   # unknown → conservative
+    assert _returns_in_registers("trivial", None) is True  # unknown → conservative
     assert _returns_in_registers(None, 8) is False
     # An unaligned member (packed) forces memory even for a small trivial type.
     assert _returns_in_registers("trivial", 8, memory_forced=True) is False
@@ -1460,6 +1722,7 @@ def test_diff_identical_evidence_is_empty():
         toolchains=[Toolchain(id="t", compiler_id="GNU", version="14", language="CXX")],
     )
     import copy
+
     assert diff_build_evidence(ev, copy.deepcopy(ev)) == []
 
 
@@ -1482,116 +1745,6 @@ def test_build_context_kinds_never_breaking():
     assert ChangeKind.BUILD_CONTEXT_CHANGED not in BREAKING_KINDS
 
 
-# ── Redaction (ADR-032 D7) ───────────────────────────────────────────────────
-
-
-def test_redaction_strips_secret_define():
-    pol = RedactionPolicy(redact_home=False)
-    assert pol.arg("-DAPI_TOKEN=hunter2") == "-DAPI_TOKEN=<redacted>"
-    assert pol.arg("-DFOO=1") == "-DFOO=1"
-
-
-def test_redaction_rewrites_home_prefix():
-    pol = RedactionPolicy(home_replacements={"/home/alice": "~"})
-    assert pol.path("/home/alice/proj/foo.cpp") == "~/proj/foo.cpp"
-
-
-def test_redaction_rewrites_embedded_home_paths_in_argv():
-    """Combined flags that embed a home path are redacted in argv (Codex)."""
-    pol = RedactionPolicy(home_replacements={"/home/alice": "~"})
-    assert pol.path("-I/home/alice/proj/include") == "-I~/proj/include"
-    assert pol.path("-DMYROOT=/home/alice/sdk") == "-DMYROOT=~/sdk"
-    red = pol.argv(["c++", "-I/home/alice/inc", "-DMYROOT=/home/alice/sdk", "-c", "a.cpp"])
-    assert not any("/home/alice" in tok for tok in red)
-
-
-def test_compile_db_redacts_embedded_home_paths_in_argv(tmp_path):
-    """End-to-end: embedded home paths never reach CompileUnit.argv."""
-    from abicheck.buildsource.adapters import CompileDbAdapter
-
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": "a.cpp",
-        "arguments": ["c++", "-I/home/alice/proj/include", "-c", "a.cpp"],
-    }]))
-    ev = CompileDbAdapter(
-        cdb, redaction=RedactionPolicy(home_replacements={"/home/alice": "~"}),
-    ).collect()
-    assert not any("/home/alice" in tok for tok in ev.compile_units[0].argv)
-
-
-def test_redaction_define_value_redacts_secret_macro():
-    pol = RedactionPolicy(home_replacements={"/home/bob": "~"})
-    assert pol.define_value("API_TOKEN", "hunter2") == "<redacted>"
-    assert pol.define_value("SECRET_KEY", "abc") == "<redacted>"
-    # Non-secret macros keep their value but still get home-path normalization.
-    assert pol.define_value("FOO", "1") == "1"
-    assert pol.define_value("PREFIX", "/home/bob/install") == "~/install"
-
-
-def test_compile_db_redacts_secret_define(tmp_path):
-    from abicheck.buildsource.adapters import CompileDbAdapter
-
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": "a.cpp",
-        "arguments": ["c++", "-DAPI_TOKEN=hunter2", "-DFOO=1", "-c", "a.cpp"],
-    }]))
-    ev = CompileDbAdapter(cdb).collect()
-    defines = ev.compile_units[0].defines
-    assert defines["API_TOKEN"] == "<redacted>"
-    assert defines["FOO"] == "1"
-
-
-def test_redaction_argv_redacts_split_define_secret():
-    """Split -D form ['-D', 'KEY=secret'] must redact the value token."""
-    pol = RedactionPolicy(redact_home=False)
-    out = pol.argv(["c++", "-D", "API_TOKEN=hunter2", "-D", "FOO=1", "-c", "a.cpp"])
-    assert "API_TOKEN=<redacted>" in out
-    assert "hunter2" not in " ".join(out)
-    assert "FOO=1" in out
-
-
-def test_redaction_redacts_secret_option_flags():
-    """Credential-style CLI flags (not just -D macros) must be redacted (D7)."""
-    pol = RedactionPolicy(redact_home=False)
-    # Combined --flag=value form.
-    assert pol.arg("--token=hunter2") == "--token=<redacted>"
-    assert pol.arg("--api-key=abc123") == "--api-key=<redacted>"
-    assert pol.arg("--password=p@ss") == "--password=<redacted>"
-    # Non-secret options are left untouched.
-    assert pol.arg("--output=build/x.json") == "--output=build/x.json"
-
-
-def test_redaction_argv_redacts_split_secret_option():
-    """Split '--token secret' form must redact the value token, not later flags."""
-    pol = RedactionPolicy(redact_home=False)
-    out = pol.argv(["tool", "--token", "hunter2", "--auth-token", "abc", "--verbose", "-c", "a.cpp"])
-    joined = " ".join(out)
-    assert "hunter2" not in joined
-    assert "abc" not in joined.split()  # value after --auth-token redacted
-    assert out == ["tool", "--token", "<redacted>", "--auth-token", "<redacted>", "--verbose", "-c", "a.cpp"]
-    # A secret flag immediately followed by another flag has no value to redact.
-    assert pol.argv(["tool", "--token", "--verbose"]) == ["tool", "--token", "--verbose"]
-
-
-def test_compile_db_split_define_secret_not_leaked_in_argv(tmp_path):
-    """End-to-end: split-form secret never reaches CompileUnit.argv."""
-    from abicheck.buildsource.adapters import CompileDbAdapter
-
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": "a.cpp",
-        "arguments": ["c++", "-D", "API_TOKEN=hunter2", "-D", "_GLIBCXX_USE_CXX11_ABI=0", "-c", "a.cpp"],
-    }]))
-    ev = CompileDbAdapter(cdb).collect()
-    cu = ev.compile_units[0]
-    assert "hunter2" not in " ".join(cu.argv)
-    assert cu.defines["API_TOKEN"] == "<redacted>"
-    # The split-form ABI macro is still captured as a diffable option.
-    assert any(o.key == "define:_GLIBCXX_USE_CXX11_ABI" for o in ev.build_options)
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -1609,7 +1762,9 @@ def test_compile_unit_id_is_config_sensitive():
 
 
 def test_extract_abi_relevant_flags():
-    flags = extract_abi_relevant_flags(["-std=c++20", "-O2", "-fvisibility=hidden", "-DFOO=1"])
+    flags = extract_abi_relevant_flags(
+        ["-std=c++20", "-O2", "-fvisibility=hidden", "-DFOO=1"]
+    )
     assert "-std=c++20" in flags
     assert "-fvisibility=hidden" in flags
     assert "-O2" not in flags

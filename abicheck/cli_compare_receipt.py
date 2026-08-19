@@ -67,16 +67,10 @@ COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "scope_public_headers",
     "policy",
     "policy_file_path",
-    "public_symbols",
-    "public_symbols_list",
     "suppress",
     "require_justification",
     "exit_code_scheme",
     "severity_preset",
-    "severity_abi_breaking",
-    "severity_potential_breaking",
-    "severity_quality_issues",
-    "severity_addition",
     "pack_paths",
 )
 
@@ -404,6 +398,232 @@ def resolve_and_apply(
     )
 
 
+def resolve_release_pack_application(
+    params: Mapping[str, Any],
+    *,
+    contract_evaluation: bool = False,
+    **kwargs: Any,
+) -> Any:
+    """Resolve ``--pack`` contributions for the directory/package release fan-out.
+
+    Returns a :class:`~abicheck.pack_application.PackApplication` (``None``
+    when no ``--pack`` was given), whose ``policy_overrides``/
+    ``internal_namespaces`` the caller threads into every library's own
+    ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces`` --
+    :func:`~abicheck.service_compare_pipeline.classify_compare_pair` folds
+    them against each library's freshly-loaded ``PolicyFile``.
+
+    Distinct from :func:`resolve_and_apply`, which also merges the packs into
+    *one* ``PolicyFile`` object and *one* ``ResolvedCompareConfig``. That fits
+    a single-pair ``compare``'s single ambient policy file, but the release
+    fan-out reloads its own ``PolicyFile`` fresh per library (``policy_file_
+    path`` is a filesystem path, not an object shared across the run) -- so
+    this returns the pack's *contribution* for the caller to fold in later,
+    once per library, rather than one merged object upfront.
+
+    **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
+    The release fan-out still has no ``GateOptions``-shaped object of its
+    own -- ``compare-release``'s severity/exit-code-scheme resolution
+    (``_resolve_release_severity_config`` and friends, in
+    ``cli_compare_release_helpers.py``) is a set of raw CLI-or-config
+    strings, re-derived at several call sites, not one resolved object the
+    way ``ResolvedCompareConfig`` is for a single-pair ``compare``. So the
+    returned ``PackApplication``'s ``exit_code_scheme``/``severity_levels``
+    (already populated by :func:`~abicheck.pack_application.pack_application`
+    regardless of ``gate_supported``) are folded into those raw strings by
+    ``cli_compare_release_helpers.apply_release_gate_pack`` -- the same
+    "smallest additive fold point" discipline slice 1 used for
+    ``policy.overrides``/``surface.internal_namespaces``, not the full
+    ``GateOptions`` unification PR B's own plan section still lists as open.
+    ``scan --against`` is unaffected: it still rejects a ``kind: gate`` pack
+    (``cli_scan.py``, unchanged by this slice).
+
+    Also rejects ``contract.unresolved`` unconditionally -- not merely when
+    ``contract_evaluation`` is false, the way :func:`~abicheck.
+    pack_application.check_resolved_config_applies_packs`'s own
+    ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair path.
+    That field's consumer (``contract_coverage_exit._accepts_unresolved``)
+    reads it off a per-comparison ``PersistedContractContext`` that only
+    ``checker.compare``'s own ``record_resolved_config`` installs -- which the
+    release fan-out never builds per library (only ``contract_evaluation``/
+    ``contract_mode`` booleans reach ``service.run_compare``, never a full
+    resolved contract configuration). A pack asserting
+    ``contract.unresolved=warn`` under ``--contract`` on a release comparison
+    would therefore be accepted and silently score nothing -- an incomplete
+    coverage floor would still contribute 1 to every library's exit code
+    regardless of the pack -- exactly the decorative-``--pack`` failure this
+    whole module exists to prevent (Codex review, fresh evidence).
+
+    Raises what the canonical resolver and the pack loader raise (a D7
+    same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
+    unresolved-only pack); mapping those onto exit 64 is the caller's job.
+    """
+    pack_paths = tuple(params.get("pack_paths") or ())
+    if not pack_paths:
+        return None
+    config = resolve_cli_config(params, **kwargs)
+    from .errors import PackManifestError
+    from .pack_application import (
+        PACK_SOURCE_KIND,
+        _supplying_pack,
+        check_resolved_config_applies_packs,
+        pack_application,
+    )
+
+    check_resolved_config_applies_packs(
+        config,
+        # `gate_supported` defaults to True: since CLI cleanup phase two "PR
+        # B" slice 2, the release fan-out folds a `kind: gate` pack's
+        # `exit_code_scheme`/`severity.*` into its own raw severity/exit-
+        # code-scheme inputs (`cli_compare_release_helpers.
+        # apply_release_gate_pack`) the same way `compare --pack` folds them
+        # into `ResolvedCompareConfig` -- see this function's own docstring.
+        # `contract_evaluation=True` here is deliberate, not a copy-paste of
+        # the release-wide value: it only widens what the *shared* resolver
+        # accepts (so `--contract` genuinely unlocks `contract.unresolved`
+        # there), and the unconditional check just below closes the release-
+        # specific gap that widening reopens.
+        contract_evaluation=True,
+    )
+    unresolved_provenance = getattr(config, "provenance", {}).get("contract.unresolved")
+    if getattr(unresolved_provenance, "source_kind", None) == PACK_SOURCE_KIND:
+        raise PackManifestError(
+            f"{_supplying_pack(config, 'contract.unresolved')}: "
+            "'contract.unresolved' cannot be applied to a directory/package "
+            "(release) comparison yet: the per-library fan-out has no "
+            "persisted contract-coverage context to fold it into (unlike "
+            "policy.overrides/surface.internal_namespaces, which do apply "
+            "uniformly). Compare the specific library individually with "
+            "--pack to use it."
+        )
+    return pack_application(config, policy_file=kwargs.get("policy_file"))
+
+
+def resolve_release_pack_application_from_ctx(
+    ctx: Any,
+    *,
+    contract_mode: str | None,
+    scope_public_headers: bool,
+    policy: str,
+    policy_file_path: Path | None,
+    suppress: Path | None,
+    require_justification: bool,
+    exit_code_scheme: str | None,
+    severity_preset: str | None,
+    pack_paths: tuple[Path, ...],
+    contract_evaluation: bool,
+    project_cfg: Any,
+    project_path: Path | None,
+    project_sha256: str | None,
+    policy_option: str | None,
+    policy_path: Path | None,
+    policy_sha256: str | None,
+    run_profile: Mapping[str, Any] | None = None,
+) -> Any:
+    """``resolve_release_pack_application``, but reading "was this typed?"
+    (and a best-effort ``--policy-file`` pre-read) off the real Click
+    *ctx* itself, the way ``_resolve_evaluation_config`` does for the
+    single-pair path -- split out so the caller (``cli_compare_helpers.
+    run_compare``, already at the AI-readiness file-size cap) stays a single
+    call rather than this whole resolution inlined at the call site.
+
+    *run_profile* is ``ctx.meta.get(cli_options.RUN_PROFILE_META_KEY)`` --
+    read by the caller, not here: importing ``cli_options`` from this module
+    would close a real cycle back to this file (``cli_options ->
+    service_scan -> scan_engine -> cli_scan_baseline ->
+    cli_compare_helpers -> cli_compare_receipt``), the exact ``import-cycle-
+    growth`` regression this module's own "leaf" design avoids elsewhere.
+
+    ``None`` when *pack_paths* is empty -- no Click/file access at all in
+    that case, matching ``resolve_release_pack_application``'s own contract.
+    Raises ``click.UsageError`` directly (mapping a D7 same-tier conflict, a
+    D8 pack conflict, or an inapplicable/gate-only pack) rather than the raw
+    resolver exceptions, so the caller does not need its own except clause.
+    """
+    if not pack_paths:
+        return None
+    import click
+    import yaml
+
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
+    )
+    from .errors import PackManifestError
+    from .policy_file import PolicyFile
+
+    # A best-effort read purely to answer "does the real --policy-file
+    # already state this ChangeKind override" (D8 precedence, mirroring
+    # `_shadowed_inert_fields`'s identical reasoning): a broken file is not
+    # reported here -- the real per-library load a moment later (inside
+    # `compare_release_cmd`) reports it with its own framing.
+    loaded_policy_file = None
+    if policy_file_path is not None:
+        try:
+            loaded_policy_file = PolicyFile.load(policy_file_path)
+        except (ValueError, OSError, ImportError, yaml.YAMLError):
+            loaded_policy_file = None
+    typed = {
+        name
+        for name in typed_parameter_names()
+        if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+    }
+    try:
+        return resolve_release_pack_application(
+            {
+                "contract_mode": contract_mode,
+                "scope_public_headers": scope_public_headers,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "exit_code_scheme": exit_code_scheme,
+                "severity_preset": severity_preset,
+                "pack_paths": pack_paths,
+            },
+            contract_evaluation=contract_evaluation,
+            typed=typed,
+            project_cfg=project_cfg,
+            project_path=project_path,
+            policy_file=loaded_policy_file,
+            suppress_path=suppress,
+            run_profile=run_profile,
+            policy_option=policy_option,
+            policy_path=policy_path,
+            policy_sha256=policy_sha256,
+            project_sha256=project_sha256,
+            symbols_list=None,
+        )
+    except (
+        FieldResolutionError,
+        PackConflictError,
+        PackManifestError,
+        # `resolve_release_pack_application`'s own `resolve_cli_config` call
+        # loads `--policy`'s document a *second* time (for D7 provenance,
+        # via `compatibility_evaluation_frontend`), independently of the
+        # already-guarded pre-read a few lines up -- a genuinely malformed
+        # policy document (an unknown ChangeKind slug, a non-mapping
+        # `overrides:`, an unreadable file, or a plain YAML syntax error)
+        # raises `PolicyError`/`OSError`/`ImportError`/`yaml.YAMLError` there,
+        # uncaught, unlike the single-pair path (whose own
+        # `_load_suppression_and_policy` call already converts the identical
+        # failure to a clean error *before* ever reaching this resolver, so
+        # it never hits this second load at all). Caught here instead of left
+        # to propagate as a raw traceback (Codex review, found while adding
+        # direct test coverage for this function; `yaml.YAMLError` added in a
+        # second round once real syntax-error input was tried, not just a
+        # semantically-invalid-but-well-formed document). `yaml` is safe to
+        # import unconditionally here: if PyYAML itself were missing,
+        # `PolicyFile.load`'s own `ImportError` would already have fired at
+        # the guarded pre-read above, before this call ever runs.
+        ValueError,
+        OSError,
+        ImportError,
+        yaml.YAMLError,
+    ) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+
 def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
@@ -411,9 +631,9 @@ def record_resolved_config(
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    A no-op unless ``--contract-evaluation`` produced a context (and unless
+    A no-op unless ``--contract`` produced a context (and unless
     the caller resolved a *config* at all -- a run with neither
-    ``--contract-evaluation`` nor ``--pack`` resolves nothing, since nothing
+    ``--contract`` nor ``--pack`` resolves nothing, since nothing
     would read the result). Runs before any report is rendered, so every
     output path sees one configuration resolved by the canonical resolver
     rather than the core verb's argument-shaped reconstruction, and sees the

@@ -110,7 +110,7 @@ def _is_failure(
     report or the severity-aware exit code.
 
     When *severity_config* is given (from ``--severity-preset`` or
-    ``--severity-*`` overrides), it is the sole source of truth — a finding
+    ``severity:`` config overrides), it is the sole source of truth — a finding
     fails only when its effective category's configured level is
     ``"error"`` — mirroring :func:`abicheck.severity.compute_exit_code`
     exactly, so the JUnit file can never disagree with the severity-aware
@@ -131,7 +131,7 @@ def _is_failure(
     verdict).
 
     A finding compatibility policy never scored (ADR-049 D1's
-    ``NOT_EVALUATED``, only reachable under ``--contract-evaluation``) can
+    ``NOT_EVALUATED``, only reachable under ``--contract``) can
     never fail here either, for the same reason and by the same rule: it
     contributed nothing to the verdict or the exit code, so reporting one
     ``<failure>`` beside a ``NO_CHANGE`` verdict and a clean exit was the bug
@@ -441,7 +441,7 @@ def _append_extra_failures(
     contract decision (relevance/reason_code/assurance/gate_contribution)
     into flat, unprefixed property names. Two changes on the same symbol can
     each carry an independently-stamped, genuinely different decision under
-    ``--contract-evaluation``; naively adding a second call here would either
+    ``--contract``; naively adding a second call here would either
     duplicate the ``<properties>`` block (the exact bug just fixed for
     correlation) or, if merged into one block, silently overwrite the
     primary change's contract properties with the secondary's -- a data-loss
@@ -771,7 +771,7 @@ def _add_contract_properties(
     compatibility_decision/gate_contribution/contract_evidence_refs).
 
     A finding whose ``contract_relevance`` was never stamped (every run
-    without ``--contract-evaluation``, the default) gets nothing appended --
+    without ``--contract``, the default) gets nothing appended --
     this keeps every pre-existing JUnit report byte-for-byte unchanged.
     """
     from .contract_gating import contract_relevance_of, evaluation_status_of
@@ -825,7 +825,7 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     ``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged`` as
     sharing its evidence gap with a co-reported ``TYPE_VTABLE_CHANGED``).
 
-    Deliberately independent of ``--contract-evaluation``, unlike
+    Deliberately independent of ``--contract``, unlike
     ``_add_contract_properties`` above -- this correlation is stamped on
     every run, not only under contract evaluation, so gating it the same way
     would silently drop it on the default path. Before this, only JSON
@@ -854,7 +854,7 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     if not change.correlated_change_kind:
         return
     # Reuse the <properties> block _add_contract_properties may have already
-    # appended (under --contract-evaluation) rather than creating a second
+    # appended (under --contract) rather than creating a second
     # sibling element -- JUnit consumers, including this repo's own tests,
     # look up a testcase's properties via `tc.find("properties")`, which
     # only ever sees the first such element (Codex review).
@@ -961,7 +961,7 @@ def to_junit_xml(
         Optional ``--show-only`` filter string.
     severity_config:
         Optional severity configuration (from ``--severity-preset`` or
-        ``--severity-*`` overrides).  When provided, the JUnit failure
+        ``severity:`` config overrides).  When provided, the JUnit failure
         classification honours user-configured severity escalations.
     report_mode:
         ``"full"`` (default) or ``"root-cause"`` (G29 Phase 3, ADR-052

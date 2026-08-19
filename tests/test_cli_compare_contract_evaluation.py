@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049 Phase 3 — the native ``abicheck compare`` CLI's own ``--contract-
-evaluation`` flag.
+"""ADR-049 Phase 3 — the native ``abicheck compare`` CLI's own ``--contract``
+flag.
 
 ``service.compare_snapshots``/``run_compare_request``/``service.run_compare``
 already forward a ``contract_evaluation`` keyword (``tests/test_service_unit.
@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -82,7 +83,7 @@ class TestFlagForwarded:
     def test_contract_evaluation_flag_forwarded_to_compare_snapshots(
         self, tmp_path, monkeypatch
     ):
-        """--contract-evaluation must reach compare_snapshots as a real
+        """--contract must reach compare_snapshots as a real
         keyword, not be silently dropped at the Click/run_compare boundary
         (the same class of regression test_cli_comparability_gate.py already
         guards for --diagnostic-comparison)."""
@@ -105,7 +106,7 @@ class TestFlagForwarded:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--contract-evaluation"],
+            ["compare", str(old_p), str(new_p), "--contract", "public"],
         )
         assert result.exit_code == 0
         assert captured["contract_evaluation"] is True
@@ -142,7 +143,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -180,7 +182,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -310,7 +313,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -318,7 +322,7 @@ class TestEndToEndJsonReport:
         assert legacy.exit_code == 4, legacy.output
         ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
-        # No --severity-* flag and no config: `auto` resolved to `legacy`.
+        # No severity setting anywhere: `auto` resolved to `legacy`.
         assert gate["exit_code_scheme"] == "legacy"
         assert gate["severity"]["abi_breaking"] == "error"
         assert (
@@ -331,32 +335,37 @@ class TestEndToEndJsonReport:
                 == "built_in_default"
             )
 
+        # The per-category levels are config-only now (the hidden
+        # `--severity-<category>` flags were removed), so the tier that can
+        # state one is the project config.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("severity:\n  abi_breaking: warning\n", encoding="utf-8")
         scored = CliRunner().invoke(
             main,
             [
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
-                "--severity-abi-breaking",
-                "warning",
+                "--config",
+                str(cfg),
             ],
         )
         ctx = json.loads(scored.output)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
         # A severity setting flips `auto` to the severity-aware scheme, and the
-        # typed flag is what selected the level.
+        # config is what selected the level.
         assert gate["exit_code_scheme"] == "severity"
         assert gate["severity"]["abi_breaking"] == "warning"
         prov = ctx["field_provenance"]
-        assert prov["gate.severity.abi_breaking"]["layer"] == "explicit_cli"
-        # ...and only that category. The other three were not typed *and* no
-        # project config supplied them, so they are the built-in defaults --
-        # `severity_active` is run-wide ("set anywhere"), and using it per
-        # category named a `.abicheck.yml` that does not exist here (Codex
-        # review).
+        assert prov["gate.severity.abi_breaking"]["layer"] == "project_config"
+        # ...and only that category. The config supplied no other level, so
+        # the rest are the built-in defaults -- `severity_active` is run-wide
+        # ("set anywhere"), and using it per category named the config for a
+        # value it never stated (Codex review).
         assert prov["gate.severity.addition"]["layer"] == "built_in_default"
 
     def test_explicit_exit_code_scheme_records_its_own_provenance(self, tmp_path):
@@ -369,7 +378,8 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
                 "--exit-code-scheme",
@@ -397,7 +407,6 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
                 "--contract",
                 "exports",
                 "--format",
@@ -425,7 +434,10 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--contract-evaluation",
+                # --contract auto asks for a decision without naming a domain,
+                # so the legacy alias below is what actually selects one.
+                "--contract",
+                "auto",
                 "--scope-public-headers",
                 "--format",
                 "json",
@@ -437,7 +449,10 @@ class TestEndToEndJsonReport:
     def test_help_all_mentions_flag(self):
         result = CliRunner().invoke(main, ["compare", "--help-all"])
         assert result.exit_code == 0
-        assert "--contract-evaluation" in result.output
+        assert "--contract" in result.output
+        # The standalone --contract flag is gone: naming a domain
+        # is the request, so there is no second way to ask for the same thing.
+        assert "--contract-evaluation" not in result.output
 
 
 class TestShowFilteredAuditLedger:
@@ -481,7 +496,8 @@ class TestShowFilteredAuditLedger:
                 str(new_p),
                 "--scope-public-headers",
                 "--show-filtered",
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -534,7 +550,7 @@ class TestShowFilteredAuditLedger:
 
 class TestReleaseFanOutContractParity:
     """CLI-audit P1 (release/package contract parity): the per-library
-    directory/package fan-out now threads --contract-evaluation/--contract
+    directory/package fan-out now threads --contract
     straight into each pair's own service.run_compare() call, the exact
     same Tier-2 chokepoint a single-pair `compare` uses -- so a library
     compared through the fan-out gets the identical contract decision it
@@ -558,7 +574,8 @@ class TestReleaseFanOutContractParity:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
                 "--output-dir",
@@ -578,7 +595,7 @@ class TestReleaseFanOutContractParity:
         assert stamped, "per-library report must carry ADR-049 contract fields"
 
     def test_contract_evaluation_off_by_default(self, tmp_path):
-        # No --contract-evaluation: every pre-existing directory/package
+        # No --contract: every pre-existing directory/package
         # report is unaffected -- library JSON carries no contract fields.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
@@ -610,7 +627,7 @@ class TestReleaseFanOutContractParity:
     def test_contract_alone_implies_contract_evaluation_on_directory_inputs(
         self, tmp_path
     ):
-        # CLI audit PR 3/5: --contract alone now implies --contract-evaluation
+        # CLI audit PR 3/5: --contract alone is the whole request
         # (abicheck.cli_options.resolve_contract_evaluation), resolved
         # unconditionally in run_compare ahead of the directory/package
         # dispatch -- so this now behaves identically to explicitly passing
@@ -643,14 +660,22 @@ class TestReleaseFanOutContractParity:
         assert result.exit_code == 4, result.output
         lib_report = json.loads((out_dir / "libfoo.json").read_text())
         assert any("contract_relevance" in c for c in lib_report["changes"]), (
-            "--contract public alone must stamp contract_relevance, same as "
-            "--contract-evaluation --contract public would"
+            "--contract public must stamp contract_relevance on a directory/"
+            "package compare, same as on a single pair"
         )
 
-    def test_pack_still_rejected_on_directory_inputs(self, tmp_path):
-        # --pack is deliberately NOT part of this parity slice: applying a
-        # pack's policy/contract/gate overrides per library still needs its
-        # own resolve-once-apply-per-pair design.
+    def test_gate_pack_applied_on_directory_inputs(self, tmp_path):
+        # CLI cleanup phase two, "PR B": --pack now applies both a
+        # `policy.overrides`/`surface.internal_namespaces` contribution
+        # (slice 1) and a `kind: gate` pack's `gate.exit_code_scheme`/
+        # `gate.severity.*` contribution (slice 2) to the release fan-out
+        # uniformly -- see test_pack_application.py's
+        # TestOnlyAppliedFieldsAreAccepted for the exit-code-differs
+        # assertions this test doesn't repeat. A bare `gate.exit_code_
+        # scheme: severity` (no severity level) still resolves and applies
+        # cleanly here -- it's just not on its own enough to move this
+        # particular pair's exit code, since abi_breaking defaults to
+        # `error` under both the legacy and severity schemes.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -662,7 +687,46 @@ class TestReleaseFanOutContractParity:
         pack_dir.mkdir()
         pack_path = pack_dir / "pack.yml"
         pack_path.write_text(
-            "kind: contract\nversion: 1\nassignments:\n  contract.mode: public\n",
+            "id: gate_scheme\nkind: gate\nversion: 1\n"
+            "assignments:\n  gate.exit_code_scheme: severity\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--pack",
+                str(pack_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert (
+            json.loads(result.output)["severity"]["config"]["abi_breaking"] == "error"
+        )
+
+    def test_pack_field_this_kind_may_not_assign_still_rejected(self, tmp_path):
+        # A `kind: contract` pack assigning `contract.mode` (deliberately not
+        # a routable field for any pack kind -- ADR-049 D8 keeps contract/
+        # policy/gate distinct) fails the same way it always has: resolving
+        # the pack for the release fan-out does not loosen field routing.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        pack_path = pack_dir / "pack.yml"
+        pack_path.write_text(
+            "id: bad_route\nkind: contract\nversion: 1\n"
+            "assignments:\n  contract.mode: public\n",
             encoding="utf-8",
         )
 
@@ -671,8 +735,7 @@ class TestReleaseFanOutContractParity:
             ["compare", str(old_dir), str(new_dir), "--pack", str(pack_path)],
         )
         assert result.exit_code == 64, result.output
-        assert "not supported for directory/package" in result.output
-        assert "--pack" in result.output
+        assert "may not assign" in result.output
 
 
 class TestUsedByScopingStampsExplicitEvidence:
@@ -737,7 +800,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -828,7 +892,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -897,7 +962,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--format",
                 "json",
             ],
@@ -948,7 +1014,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -987,7 +1054,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         # root-cause builds its own missing-label lines independently of
         # cli_compare_fold._fold_scoped_compat_into_text (the latter is
         # explicitly skipped for root-cause markdown), so the same
-        # --contract-evaluation tag was silently dropped for this one
+        # --contract tag was silently dropped for this one
         # report mode even after the fold-in path was fixed.
         from abicheck.appcompat import AppCompatResult
 
@@ -1011,7 +1078,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--contract-evaluation",
+                "--contract",
+                "public",
                 "--report-mode",
                 "root-cause",
             ],
@@ -1053,3 +1121,76 @@ class TestUsedByScopingStampsExplicitEvidence:
         assert result.exit_code == 4, result.output
         assert "Root Causes" in result.output
         assert "[contract:" not in result.output
+
+
+class TestContractFlagResolvers:
+    """``resolve_contract_evaluation``/``resolve_contract_domain`` directly.
+
+    Both are exercised end to end by the CLI tests above and by
+    ``test_scan_compare_parity``'s compare/scan ``--contract auto`` pair, but
+    only ever on the branches a real command takes. The mapping is the whole
+    reason ``auto`` is safe to offer -- it is what keeps "the caller declined
+    to name a domain" spelled the way every D7 tier below ``explicit_cli``
+    reads it -- so it is pinned here as its own contract rather than left as
+    a by-product of two callers (AGENTS.md's primitive-level guidance).
+    """
+
+    def test_any_domain_asks_for_evaluation_and_absence_does_not(self) -> None:
+        from abicheck.cli_options import resolve_contract_evaluation
+
+        for mode in ("public", "exports", "all", "auto"):
+            assert resolve_contract_evaluation(mode) is True, mode
+        assert resolve_contract_evaluation(None) is False
+
+    def test_only_auto_is_mapped_away(self) -> None:
+        from abicheck.cli_options import resolve_contract_domain
+
+        for mode in ("public", "exports", "all", None):
+            assert resolve_contract_domain(mode) is mode, mode
+        assert resolve_contract_domain("auto") is None
+
+    @staticmethod
+    def _ctx(**params: object) -> click.Context:
+        ctx = click.Context(click.Command("probe"))
+        ctx.params = dict(params)
+        for name in params:
+            ctx.set_parameter_source(name, click.core.ParameterSource.COMMANDLINE)
+        return ctx
+
+    def test_auto_is_normalized_on_the_context_too(self) -> None:
+        """`scan` rebuilds its resolver inputs from ``ctx.params`` and its
+        typed set from ``ctx.get_parameter_source``, so normalizing only the
+        returned value left ``auto`` reaching ``coerce_contract_mode`` and
+        raising (Codex review). Both must be corrected together."""
+        from abicheck.cli_options import resolve_contract_domain
+
+        ctx = self._ctx(contract_mode="auto")
+        assert resolve_contract_domain("auto", ctx) is None
+        assert ctx.params["contract_mode"] is None
+        assert (
+            ctx.get_parameter_source("contract_mode")
+            is click.core.ParameterSource.DEFAULT
+        )
+
+    def test_a_named_domain_leaves_the_context_alone(self) -> None:
+        """The demotion is specific to ``auto``. A real domain *was* typed, so
+        its ``explicit_cli`` provenance must survive -- rewriting it here would
+        silently drop the top D7 tier for every ordinary invocation."""
+        from abicheck.cli_options import resolve_contract_domain
+
+        ctx = self._ctx(contract_mode="exports")
+        assert resolve_contract_domain("exports", ctx) == "exports"
+        assert ctx.params["contract_mode"] == "exports"
+        assert (
+            ctx.get_parameter_source("contract_mode")
+            is click.core.ParameterSource.COMMANDLINE
+        )
+
+    def test_a_context_without_the_parameter_is_not_an_error(self) -> None:
+        """Only `compare`/`scan` declare ``--contract``; the helper must not
+        assume its caller's context carries the parameter at all."""
+        from abicheck.cli_options import resolve_contract_domain
+
+        ctx = self._ctx()
+        assert resolve_contract_domain("auto", ctx) is None
+        assert "contract_mode" not in ctx.params

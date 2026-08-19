@@ -80,12 +80,11 @@ def _reject_set_input_flags(
     exit_code_scheme: str | None,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
-    secondary_fmt: str | None = None,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
+    use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
     audit_suppressions: bool = False,
-    pack_paths: tuple[Path, ...] = (),
     include_labels: dict[Path, str] | None = None,
     require_complete_analysis: bool = False,
 ) -> None:
@@ -93,6 +92,14 @@ def _reject_set_input_flags(
 
     The per-library fan-out has no public CLI support for these, so reject them
     loudly rather than silently ignore them (ADR-037 D12).
+
+    ``--pack`` is not one of these -- its own, separate resolution (CLI
+    cleanup phase two, "PR B" slice 1) decides what to accept or reject.
+    ``--write`` (``secondary_fmt``/``secondary_output``) is not one of these
+    either, as of CLI cleanup phase two, PR E: the release engine now
+    supports it directly (``compare_release_cmd``'s own
+    ``secondary_output_options``/``reject_incoherent_secondary_output``
+    call), so there is nothing left for this function to reject.
     """
     if exit_code_scheme is not None:
         raise click.UsageError(
@@ -114,12 +121,6 @@ def _reject_set_input_flags(
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
         )
-    if secondary_fmt is not None:
-        raise click.UsageError(
-            "--secondary-format is not supported for directory/package "
-            "(release) comparisons yet; it applies to single-file / snapshot "
-            "inputs. Compare the libraries individually to use it."
-        )
     if used_by_apps:
         raise click.UsageError(
             "--used-by is not supported for directory/package (release) "
@@ -133,6 +134,14 @@ def _reject_set_input_flags(
             "fan-out has no plugin-host-contract scoping. Compare the "
             "specific library individually with --required-symbol."
         )
+    if use_cases_manifest is not None:
+        raise click.UsageError(
+            "--use-cases is not supported for directory/package (release) "
+            "comparisons: attribution walks one pair's own call graphs, and "
+            "the per-library fan-out never builds them, so the manifest "
+            "would be accepted and attribute nothing. Compare the specific "
+            "library individually with --use-cases."
+        )
     if diagnostic_comparison:
         raise click.UsageError(
             "--diagnostic-comparison is not supported for directory/package "
@@ -141,31 +150,29 @@ def _reject_set_input_flags(
             "hatch (a mismatch there still raises unhandled). Compare the "
             "specific library individually to use it."
         )
-    # --contract-evaluation/--contract are deliberately NOT rejected here
+    # --contract is deliberately NOT rejected here
     # (CLI-audit P1, release/package contract parity): the per-library
-    # fan-out now threads both straight into each pair's own
+    # fan-out now threads it straight into each pair's own
     # service.run_compare(contract_evaluation=..., contract_mode=...) call
     # (compare_release_cmd), the exact same Tier-2 chokepoint a single-pair
     # `compare` uses -- so a library compared through the fan-out gets the
     # identical contract decision it would from comparing it individually.
-    # --pack stays rejected below: applying a pack's policy/contract/gate
-    # overrides per library still needs its own resolve-once-apply-per-pair
-    # design (ADR-049 D8 pack-vs-pack conflict detection resolves against a
-    # single library pair today), which this change does not attempt.
+    # --pack is the same story since CLI cleanup phase two "PR B" slice 1:
+    # its own resolution (resolve_release_pack_application, called by the
+    # caller right after this function) applies a pack's policy/contract-
+    # surface contributions to every library uniformly, through
+    # CompareRequest.pack_policy_overrides/pack_internal_namespaces -- the
+    # same Tier-2 chokepoint (service_compare_pipeline.classify_compare_pair)
+    # a single-pair `compare` folds its own packs through. Only a `kind:
+    # gate` pack (gate.exit_code_scheme/gate.severity.*) is still rejected,
+    # by that resolution itself, since the release fan-out has no resolved
+    # gate-options wiring to apply one to yet.
     if audit_suppressions:
         raise click.UsageError(
             "--audit-suppressions is not supported for directory/package "
             "(release) comparisons yet: the per-library fan-out has no "
             "single suppression-audit result to attach. Compare the "
             "specific library individually to use it."
-        )
-    if pack_paths:
-        raise click.UsageError(
-            "--pack is not supported for directory/package (release) "
-            "comparisons yet: the fan-out dispatches before the effective "
-            "configuration is resolved, so a pack would be accepted and then "
-            "score nothing. Compare the specific library individually to "
-            "use it."
         )
     if include_labels:
         raise click.UsageError(
@@ -206,7 +213,7 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     flag always wins over the per-format default.
 
     Shared by the primary render (:func:`_normalize_compare_options`) and
-    the ``--secondary-format`` render in :func:`run_compare`, each resolved
+    the ``--write`` render in :func:`run_compare`, each resolved
     against its own format — a machine primary format paired with a text
     secondary format (or vice versa) must not inherit the other's default.
     """
@@ -245,10 +252,16 @@ def _resolve_debug_roots(
 def _warn_force_public_ignored(
     force_public: object, scope_public_headers: bool,
 ) -> None:
-    """Warn that --public-symbol overlays need --scope-public-headers to apply."""
+    """Warn a ``scope.public_symbols`` overlay needs ``--scope-public-headers``.
+
+    Names the config key rather than the removed ``--public-symbol``/
+    ``--public-symbols-list`` flags it used to: they were hidden duplicates of
+    that key and are gone, so the overlay this warns about can only have come
+    from ``.abicheck.yml`` (Codex review).
+    """
     if force_public and not scope_public_headers:
         click.echo(
-            "Warning: --public-symbol/--public-symbols-list only take effect with "
-            "--scope-public-headers; ignoring the widening overlay.",
+            "Warning: .abicheck.yml's scope.public_symbols overlay only takes "
+            "effect with --scope-public-headers; ignoring the widening overlay.",
             err=True,
         )
