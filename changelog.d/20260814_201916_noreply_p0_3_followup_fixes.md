@@ -890,3 +890,68 @@
   matching this module's own pre-existing pinning discipline (see
   `test_strip_launchers_env_chdir_multiple_dotdot_segments_normalized`)
   instead of silently reintroducing host-dependence into the test itself.
+- **Round 25 (Codex, three findings on `2dde42aef9`, same `env`-prefix /
+  chdir-fold area).**
+  (13) `_fold_chdir_into_operands()`'s SEPARATE-form flag-context tracking
+  (round 24 Finding 11/12) exempted only the macro-flag family
+  (`-D`/`-U`/`/D`/`/U`) from being misread as a positional path operand --
+  every OTHER separate-form value-taking flag was still classified purely
+  by textual shape, so `-x c++` (a language selector, not a path) was
+  corrupted into `-x build/c++`, and the identical corruption applied to
+  `-target <triple>`, `-arch <name>`, and `-Xclang <value>`. Fixed the same
+  way the macro exemption was: a new
+  `_CHDIR_FOLD_NON_PATH_VALUE_FLAGS` set (`-x`/`-target`/`-arch`/`-Xclang`)
+  consumes its flag and value token verbatim, checked ahead of the generic
+  positional fallback -- an unrecognized flag's own possible operand is
+  still left to the pre-existing, documented conservative fallback
+  (unchanged from before this fix), matching the same "extend only for a
+  positively-confirmed-non-path flag, not an attempt to enumerate every
+  flag" principle the macro fix already established.
+  (14) `_skip_env_prefix()`'s recognized no-operand ``env`` flag vocabulary
+  was still missing four flags a real installed `env --help` documents:
+  `--block-signal[=SIG]`, `--default-signal[=SIG]`, `--ignore-signal[=SIG]`
+  (each valid both bare and with an `=SIG` suffix), and
+  `--list-signal-handling` (bare only). A real recorded command like `env
+  --ignore-signal=PIPE clang-cl /c x.cc` fell through every recognized
+  branch and mistook the literal `--ignore-signal=PIPE` token itself for
+  the driver, losing `clang-cl` and everything after it -- the identical
+  failure shape round 23 Finding 4 (`--debug`) and Finding 6 (bare
+  `-`/`--`) already fixed for this same function. All four bare forms
+  added to `_ENV_NO_OPERAND_FLAGS`; the three optional-`=SIG` forms
+  additionally matched via a new `_ENV_OPTIONAL_SIG_FLAG_PREFIXES` prefix
+  check (GNU documents no separate-token form for any of these three, so
+  no additional operand-flag entry is needed).
+  (15, **known gap, not fixed**) `_expand_env_split_string()`'s
+  `shlex.split()`-based approximation of GNU `env -S`/`--split-string`
+  gives WRONG results for that flag's own, ENV-SPECIFIC backslash-escape
+  grammar -- verified directly against a real installed GNU coreutils 9.4
+  `env` (`env -v -S '...'`, which prints its own parse trace): `\_`
+  (backslash-underscore) means "split an argument here" (a token
+  boundary), NOT a literal underscore (`env -S 'a\_b'` splits into `a`
+  and `b`; `shlex.split` produces one token `a_b`), and `env` separately
+  documents/exhibits a `\t`-family literal-character-preserving escape and
+  a `\c` comment-terminator escape (`env -S 'a\cREST'` yields only `a`,
+  silently discarding `REST`), none of which is POSIX-shell-word-splitting
+  and none of which `shlex.split()` implements. Deliberately left as a
+  documented known gap rather than implemented as a full custom parser,
+  per this repo's own established "known gaps over risky reactive
+  patches" convention (`AGENTS.md`): `-S`/`--split-string` exists
+  specifically for shebang-line use, a context with no relationship to how
+  a build system's compile database records an already-fully-expanded
+  `argv` -- a captured build action essentially never contains a literal,
+  unexpanded `env -S` invocation carrying one of these exotic escapes, and
+  building/maintaining a byte-for-byte reimplementation of GNU coreutils'
+  own `-S` grammar is a genuinely large, narrowly-scoped subsystem for a
+  case with no known real-world reproduction in captured build evidence.
+  The common, realistic case -- plain space-separated arguments, and
+  single/double-quoted arguments containing a space -- is handled
+  correctly today; see `_expand_env_split_string()`'s own docstring for
+  the full detail. Replied to the review thread explaining this choice
+  rather than silently leaving the finding unaddressed.
+  New regression tests (`tests/test_source_extractors_env.py`): positive
+  coverage for each of the four non-path-value flags plus a negative
+  control confirming a genuine path-taking flag (`-I`) and an unrecognized
+  flag's pre-existing conservative fallback are both unaffected (13); one
+  test per signal-handling flag (bare and `=SIG` forms) plus a negative
+  control confirming an unrelated, genuinely unrecognized flag still isn't
+  swallowed (14).

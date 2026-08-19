@@ -96,7 +96,41 @@ _ENV_BASENAMES = frozenset({"env", "env.exe"})
 #: token itself as if it were the compiler driver and losing the real
 #: driver (``clang-cl``) and everything after it.
 _ENV_NO_OPERAND_FLAGS = frozenset(
-    {"-i", "--ignore-environment", "-0", "--null", "-v", "--debug"}
+    {
+        "-i",
+        "--ignore-environment",
+        "-0",
+        "--null",
+        "-v",
+        "--debug",
+        "--block-signal",
+        "--default-signal",
+        "--ignore-signal",
+        "--list-signal-handling",
+    }
+)
+#: The subset of the signal-handling flags above whose ``SIG`` argument is
+#: OPTIONAL, spelled with an ``=`` when given (Codex review round 25,
+#: Finding 3, fresh evidence, confirmed against a real installed ``env
+#: --help``: ``--block-signal[=SIG]``, ``--default-signal[=SIG]``,
+#: ``--ignore-signal[=SIG]`` are all documented with the bare form already
+#: covered by :data:`_ENV_NO_OPERAND_FLAGS` above, plus this ``=SIG`` form
+#: -- unlike ``--chdir``, which is only ever a SEPARATE-token operand, GNU
+#: ``env`` documents no bare-flag-plus-separate-token spelling for any of
+#: these three (``env --ignore-signal PIPE ...`` would misparse ``PIPE`` as
+#: the command). ``--list-signal-handling`` takes no argument at all, in
+#: either form, and needs no entry here.
+#:
+#: Without this, a real recorded command like ``env --ignore-signal=PIPE
+#: clang-cl /c x.cc`` fell through every recognized branch in
+#: :func:`_skip_env_prefix` and hit its terminal ``break``, misreading the
+#: literal ``--ignore-signal=PIPE`` token itself as the compiler driver --
+#: the identical failure shape the ``--debug``/``-v`` fix above and the
+#: bare-``-``/``--`` fix both already document for this same function.
+_ENV_OPTIONAL_SIG_FLAG_PREFIXES = (
+    "--block-signal=",
+    "--default-signal=",
+    "--ignore-signal=",
 )
 #: ``env`` flags that take a following, separate-token operand: POSIX
 #: ``-u NAME`` (unset one variable) and GNU's ``-C``/``--chdir DIR``
@@ -455,19 +489,56 @@ def basename(path: str) -> str:
 
 
 def _expand_env_split_string(value: str) -> list[str]:
-    """Split *value* the way GNU ``env -S``/``--split-string`` does.
+    """Split *value* the way GNU ``env -S``/``--split-string`` does --
+    approximately: see the **Known gap** paragraph below for exactly what
+    is and is not covered (Codex review round 25, Finding 1, fresh
+    evidence).
 
     The installed ``env --help`` documents ``-S, --split-string=S`` as
     "process and split S into separate arguments; used to pass multiple
-    arguments on shebang lines". GNU coreutils' own implementation performs
-    shell-word-splitting -- quoting and backslash-escaping compatible with a
-    POSIX shell -- rather than a naive whitespace split (which would corrupt
-    any argument containing a quoted space, e.g. a ``-D'FOO=a b'`` define).
-    :func:`shlex.split` (POSIX mode, the default) implements the same
-    quote/backslash-escape family of rules and is used here as a
-    close-enough approximation rather than a byte-for-byte reimplementation
-    of GNU coreutils' own parser (Codex review, ``_argv.py:102``, fresh
-    evidence) -- exactly the approach this finding's own guidance names.
+    arguments on shebang lines". :func:`shlex.split` (POSIX mode, the
+    default) is used here rather than a byte-for-byte reimplementation of
+    GNU coreutils' own parser, and correctly handles the common,
+    realistic case this flag exists for: plain space-separated arguments,
+    and single/double-quoted arguments that contain a space
+    (``-S "clang-cl /c 'a file with spaces.cc'"``).
+
+    **Known gap: GNU ``env -S`` has its own, ENV-SPECIFIC escape grammar
+    that is not POSIX-shell-word-splitting, and this function does not
+    implement it.** Verified directly against a real installed GNU
+    coreutils 9.4 ``env`` (``env -v -S '...'``, which prints its own
+    parse trace): ``\\_`` (backslash-underscore) means "split an argument
+    here", i.e. it becomes a token boundary, NOT a literal underscore --
+    ``env -S 'a\\_b'`` splits into two arguments ``a`` and ``b``, while
+    :func:`shlex.split` (ordinary POSIX word-splitting, which has no
+    concept of ``\\_`` at all) produces one token ``a_b``. GNU ``env`` also
+    documents/exhibits several further escapes with no POSIX-shell
+    equivalent: ``\\t``/``\\n``-family escapes are preserved as literal
+    control characters rather than word-split; ``\\c`` truncates the rest
+    of the string as a comment terminator (``env -S 'a\\cREST'`` yields
+    only ``a``, dropping ``REST`` entirely); and its quote handling,
+    while superficially POSIX-shell-shaped for the simple cases, is its
+    own parser, not actually POSIX ``sh``.
+
+    This is deliberately NOT implemented as a full custom parser here,
+    per this repo's own established "known gaps over risky reactive
+    patches" convention (``AGENTS.md``): ``-S``/``--split-string`` exists
+    specifically for shebang-line use (``#!/usr/bin/env -S clang-cl
+    /c``), a context with no relationship to how a real build system's
+    compile database records an already-fully-expanded ``argv`` -- a
+    captured build action essentially never contains a *literal,
+    unexpanded* ``env -S`` invocation with one of these exotic escapes in
+    its own recorded command line (the shebang is what the shell/exec
+    layer already expanded away long before any build tool recorded
+    ``argv``). Building and maintaining a byte-for-byte reimplementation
+    of GNU coreutils' own ``-S`` grammar (quote handling, ``\\_``
+    mid-argument splitting, the ``\\c`` comment terminator, and every
+    other escape GNU documents) is a genuinely large, narrowly-scoped
+    subsystem for a case with no known real-world reproduction in
+    captured build evidence. The plain space/quote-separated common case
+    -- what a hand-written or generated ``env -S '...'`` invocation
+    realistically looks like -- is handled correctly today; only the
+    backslash-escape grammar specifically is the gap.
     """
     return shlex.split(value)
 
@@ -695,6 +766,9 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
             i += 1
             break
         if arg in _ENV_NO_OPERAND_FLAGS:
+            i += 1
+            continue
+        if arg.startswith(_ENV_OPTIONAL_SIG_FLAG_PREFIXES):
             i += 1
             continue
         if arg in _ENV_CHDIR_FLAGS and i + 1 < len(argv):
@@ -1180,6 +1254,39 @@ _CHDIR_FOLD_SEPARATE_PATH_FLAGS = frozenset(
         "/FI",
     }
 )
+#: SEPARATE-form value-taking flags whose value is confirmed NOT a path --
+#: the general form of the macro-flag exemption Finding 11 established,
+#: extended to every other such flag this module can positively confirm
+#: (Codex review round 25, Finding 2, fresh evidence). The old scan treated
+#: ANY non-flag-shaped token as a positional path operand, which corrupts a
+#: value like ``-x c++`` into ``-x build/c++`` -- ``c++`` is a language
+#: name, not a path, exactly the same failure shape Finding 11 already
+#: fixed for ``-D``/``-U`` macro values, just for a different flag family
+#: that scan never accounted for.
+#:
+#: * ``-x`` -- GCC/Clang's ``-x <language>`` (``c``, ``c++``, ``assembler``,
+#:   ``none``, …), never a filesystem path.
+#: * ``-target`` -- Clang's bare (non-``=``, non-``--target``) driver-level
+#:   target-triple spelling (``-target x86_64-linux-gnu``); the triple
+#:   string, not a path. Deliberately narrower than
+#:   :data:`STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`'s own ``-target`` handling
+#:   (a *different* concern, in a different function, dropping an
+#:   already-structured survivor from ``abi_relevant_flags`` entirely) --
+#:   this set only stops the VALUE from being misread as a path here.
+#: * ``-arch`` -- Apple's universal-build architecture selector
+#:   (``-arch x86_64``/``-arch arm64``), an architecture name, not a path.
+#: * ``-Xclang`` -- forwards its own following token verbatim to ``-cc1``;
+#:   the forwarded token is itself an arbitrary cc1 flag/value, not
+#:   generally a path (and folding it here would be independently wrong for
+#:   the ``-Xclang -target-abi -Xclang aapcs`` shape :data:`SPLIT_OPERAND_
+#:   ABI_FLAGS` already handles through a completely different mechanism).
+#:
+#: Every other, unrecognized value-taking flag is left exactly as before --
+#: the same conservative, no-worse-than-before default this module already
+#: documents for item 7 below; this set only grows for a flag positively
+#: confirmed non-path, mirroring the macro-flag precedent rather than
+#: attempting to enumerate every possible flag.
+_CHDIR_FOLD_NON_PATH_VALUE_FLAGS = frozenset({"-x", "-target", "-arch", "-Xclang"})
 
 
 def _fold_chdir_path_value(value: str, chdir: str) -> str:
@@ -1244,6 +1351,20 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
       :func:`_fold_chdir_path_value`, the shared leaf every recognized
       shape below funnels through, which folds unconditionally once
       context has established a value is a path.
+    * **Round 25 Finding 2 (false positive, the general form of Finding
+      11):** Finding 11 only exempted the macro-flag family
+      (``-D``/``-U``); every OTHER separate-form value-taking flag's
+      operand was still classified purely by textual shape (item 6
+      below), so ``-x c++`` -- a language name, not a path -- was folded
+      into ``-x build/c++``, and the identical corruption applied to
+      ``-target <triple>``, ``-arch <name>``, and ``-Xclang <value>``.
+      Fixed the same way Finding 11 was: a positively-confirmed-non-path
+      flag (:data:`_CHDIR_FOLD_NON_PATH_VALUE_FLAGS`) consumes its flag
+      and value token verbatim, checked ahead of the generic positional
+      fallback -- not by trying to recognize every possible flag (an
+      unrecognized flag's own operand still falls through to item 6,
+      unchanged from before, the same conservative default this module
+      has always used for a flag it cannot positively classify).
 
     Recognizes, in order, at each position:
 
@@ -1251,19 +1372,25 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
        consumes the flag AND its value token verbatim, never resolved.
     2. A macro flag's COMBINED form (``-DFOO=...``, longer than the bare
        prefix) -- passed through verbatim, same as (1).
-    3. An ``=``-joined path flag (:data:`_CHDIR_FOLD_EQUALS_PATH_PREFIXES`)
+    3. A confirmed-non-path SEPARATE-form value flag
+       (:data:`_CHDIR_FOLD_NON_PATH_VALUE_FLAGS`) -- consumes the flag AND
+       its value token verbatim, never resolved, same treatment as (1).
+    4. An ``=``-joined path flag (:data:`_CHDIR_FOLD_EQUALS_PATH_PREFIXES`)
        -- the portion after ``=`` is resolved.
-    4. A COMBINED-form path flag (:data:`_CHDIR_FOLD_COMBINED_PATH_PREFIXES`)
+    5. A COMBINED-form path flag (:data:`_CHDIR_FOLD_COMBINED_PATH_PREFIXES`)
        -- the portion after the flag prefix is resolved.
-    5. A SEPARATE-form path flag (:data:`_CHDIR_FOLD_SEPARATE_PATH_FLAGS`)
+    6. A SEPARATE-form path flag (:data:`_CHDIR_FOLD_SEPARATE_PATH_FLAGS`)
        -- the flag itself is passed through, and the FOLLOWING token
        (its value) is resolved regardless of its own shape.
-    6. A bare, non-flag (no leading ``-``/``/``) positional token not
+    7. A bare, non-flag (no leading ``-``/``/``) positional token not
        already consumed as a flag's value above (a source-file operand)
        -- resolved unconditionally.
-    7. Anything else (an unrecognized flag) -- passed through unchanged,
-       the same conservative, no-worse-than-before default this module
-       already uses throughout.
+    8. Anything else (an unrecognized flag, or a flag this module cannot
+       positively confirm is path- or non-path-valued) -- passed through
+       unchanged, the same conservative, no-worse-than-before default this
+       module already uses throughout; its own possible operand (if any)
+       is not specially tracked either and falls through to whichever of
+       (7)/(8) it itself matches on the next iteration.
     """
     if not chdir:
         return tokens
@@ -1280,6 +1407,11 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
         if tok.startswith(MACRO_DEFINITION_PREFIXES) and len(tok) > 2:
             out.append(tok)
             i += 1
+            continue
+        if tok in _CHDIR_FOLD_NON_PATH_VALUE_FLAGS and i + 1 < n:
+            out.append(tok)
+            out.append(tokens[i + 1])
+            i += 2
             continue
         matched = False
         for prefix in _CHDIR_FOLD_EQUALS_PATH_PREFIXES:

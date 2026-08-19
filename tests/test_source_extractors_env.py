@@ -1088,3 +1088,184 @@ def test_strip_launchers_chdir_macro_negative_control_combined_form_unaffected()
     tracking."""
     result = strip_launchers(["env", "-C", "build", "clang-cl", "-DFOO=a/b"])
     assert result == ["clang-cl", "-DFOO=a/b"]
+
+
+# -- Round 25, Finding 2 (Codex): chdir-folding must not treat every
+# non-flag-shaped token as a path -- confirmed non-path value-taking flags
+# (``-x``/``-target``/``-arch``/``-Xclang``) keep their own operand intact --
+
+
+def test_strip_launchers_chdir_does_not_fold_language_flag_value() -> None:
+    """``-x c++`` -- a language name, not a path -- must not be corrupted
+    into ``-x build/c++``. The trailing bare source-file operand still
+    folds (Finding 8/12)."""
+    result = strip_launchers(["env", "-C", "build", "clang", "-x", "c++", "x.cc"])
+    assert result == [
+        "clang",
+        "-x",
+        "c++",
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_does_not_fold_target_triple_value() -> None:
+    """``-target <triple>`` (bare, separate-form) -- the triple string is
+    not a path."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang", "-target", "x86_64-linux-gnu", "x.cc"]
+    )
+    assert result == [
+        "clang",
+        "-target",
+        "x86_64-linux-gnu",
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_does_not_fold_arch_value() -> None:
+    """``-arch <name>`` (Apple universal-build architecture selector) --
+    the architecture name is not a path."""
+    result = strip_launchers(["env", "-C", "build", "clang", "-arch", "arm64", "x.cc"])
+    assert result == [
+        "clang",
+        "-arch",
+        "arm64",
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_does_not_fold_xclang_forwarded_value() -> None:
+    """``-Xclang <value>`` forwards its own following token verbatim to
+    ``-cc1`` -- an arbitrary cc1 flag/value, not generally a path."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang", "-Xclang", "-fsome-cc1-flag", "x.cc"]
+    )
+    assert result == [
+        "clang",
+        "-Xclang",
+        "-fsome-cc1-flag",
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_xclang_wrapped_split_operand_abi_flag_unaffected() -> (
+    None
+):
+    """Negative control: the ``-Xclang -target-abi -Xclang aapcs``
+    four-token cc1 spelling (:data:`SPLIT_OPERAND_ABI_FLAGS`) is completely
+    unaffected by the new ``-Xclang`` non-path-value tracking -- every
+    token here is either a flag or a confirmed-non-path value, so nothing
+    is folded regardless."""
+    result = strip_launchers(
+        [
+            "env",
+            "-C",
+            "build",
+            "clang",
+            "-Xclang",
+            "-target-abi",
+            "-Xclang",
+            "aapcs",
+            "x.cc",
+        ]
+    )
+    assert result == [
+        "clang",
+        "-Xclang",
+        "-target-abi",
+        "-Xclang",
+        "aapcs",
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_still_folds_genuine_path_operand_of_include_flag() -> (
+    None
+):
+    """Positive control: an actual known path-taking flag
+    (:data:`_CHDIR_FOLD_SEPARATE_PATH_FLAGS`) is unaffected by the new
+    non-path-value flag set -- its operand still folds, exactly as
+    before."""
+    result = strip_launchers(["env", "-C", "build", "clang", "-I", "include", "x.cc"])
+    assert result == [
+        "clang",
+        "-I",
+        os.path.normpath(os.path.join("build", "include")),
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_unrecognized_flag_operand_still_folds_as_before() -> (
+    None
+):
+    """Negative control confirming the documented, pre-existing
+    conservative fallback: a flag this module cannot positively classify
+    still leaves its own possible operand to be classified purely by
+    positional shape (unchanged from before this fix) -- this is a known,
+    documented limitation (item 8 of :func:`_fold_chdir_into_operands`'s
+    own docstring), not a new regression."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang", "-some-unknown-flag", "value.txt", "x.cc"]
+    )
+    assert result == [
+        "clang",
+        "-some-unknown-flag",
+        os.path.normpath(os.path.join("build", "value.txt")),
+        os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+# -- Round 25, Finding 3 (Codex): ``env``'s signal-handling long flags -----
+
+
+def test_skip_env_prefix_ignore_signal_with_sig_value_recognized() -> None:
+    """``env --ignore-signal=PIPE clang-cl ...`` -- confirmed against a
+    real installed ``env --help``: ``--ignore-signal[=SIG]`` is a
+    documented, valid prefix option. Before this fix, none of the four
+    signal-handling long flags were recognized, so this misread the whole
+    ``--ignore-signal=PIPE`` token as the driver itself."""
+    result = strip_launchers(["env", "--ignore-signal=PIPE", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_ignore_signal_bare_form_recognized() -> None:
+    """The bare form (no ``=SIG``) is also documented as valid --
+    ``--ignore-signal`` alone (no argument at all) is accepted."""
+    result = strip_launchers(["env", "--ignore-signal", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_block_signal_with_sig_value_recognized() -> None:
+    """``--block-signal=SIG`` -- sibling of ``--ignore-signal``."""
+    result = strip_launchers(["env", "--block-signal=HUP", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_block_signal_bare_form_recognized() -> None:
+    result = strip_launchers(["env", "--block-signal", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_default_signal_with_sig_value_recognized() -> None:
+    """``--default-signal=SIG`` -- sibling of ``--ignore-signal``."""
+    result = strip_launchers(["env", "--default-signal=TERM", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_list_signal_handling_recognized() -> None:
+    """``--list-signal-handling`` takes no argument at all, in either
+    form."""
+    result = strip_launchers(
+        ["env", "--list-signal-handling", "clang-cl", "-c", "x.cc"]
+    )
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_signal_flags_negative_control_unrelated_flag_not_swallowed() -> (
+    None
+):
+    """Negative control: an unrelated, genuinely unrecognized flag must
+    still stop the scan and be treated as the driver, exactly as before --
+    the new signal-flag vocabulary does not over-match anything else."""
+    result = strip_launchers(["env", "--unrecognized-flag", "clang-cl", "-c", "x.cc"])
+    assert result == ["--unrecognized-flag", "clang-cl", "-c", "x.cc"]
