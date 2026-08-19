@@ -224,7 +224,14 @@ def add_build_query_dry_run_section(
             _normalized_path, _binary_fmt = normalize_binary_input(so_path)
             if _binary_fmt is None:
                 _binary_fmt = detect_binary_format(_normalized_path)
-        except Exception:
+        except (OSError, ValueError):
+            # CodeRabbit nitpick: `normalize_binary_input`/`detect_binary_
+            # format` already swallow `OSError` internally and never raise
+            # `ValueError` -- this catch is therefore defensive rather than
+            # reachable today -- but narrowing it still keeps an unexpected
+            # programming error visible instead of silently degrading to
+            # "unknown format", matching this repo's general convention
+            # against bare `except Exception`.
             _binary_fmt = None
         if _binary_fmt in ("pe", "macho"):
             # `dump_cmd`'s own real (non-dry) rejection is a
