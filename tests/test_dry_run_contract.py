@@ -445,6 +445,101 @@ class TestDumpDryRun:
         assert "does not load the pack to verify" in result.output
 
 
+class TestDumpDryRunBuildQueryTrust:
+    """CLI cleanup phase two, PR 3C prerequisite 3: ``dump --dry-run`` shows
+    the exact argv, cwd, resulting compile-DB path, and why ``build.query``
+    will or will not run -- without ever running it (ADR-032 D5 trust
+    already enforced by the real path; this only adds dry-run visibility).
+    """
+
+    def _write_config(self, sources: Path, *, compile_db: str | None = None) -> Path:
+        cfg = sources / ".abicheck.yml"
+        body = "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n"
+        if compile_db:
+            body += f"  compile_db: {compile_db}\n"
+        cfg.write_text(body, encoding="utf-8")
+        return cfg
+
+    def test_auto_discovered_config_will_not_run(self, tmp_path: Path) -> None:
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        self._write_config(tmp_path, compile_db="build/compile_commands.json")
+        result = CliRunner().invoke(
+            main,
+            ["dump", "--sources", str(tmp_path), "-H", str(header), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Build query (trust):" in result.output
+        assert "will NOT run" in result.output
+        assert "auto-discovered .abicheck.yml" in result.output
+        # Never actually executed -- no build/ directory was created.
+        assert not (tmp_path / "build").exists()
+
+    def test_explicit_config_will_run_with_argv_and_cwd(self, tmp_path: Path) -> None:
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path, compile_db="build/compile_commands.json")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Build query (trust):" in result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+        assert "argv: ['cmake', '-S', '.', '-B', 'build'," in result.output
+        assert f"cwd: {tmp_path}" in result.output
+        assert "resulting compile-DB path: build/compile_commands.json" in result.output
+        # A dry run never actually executes the query.
+        assert not (tmp_path / "build").exists()
+
+    def test_explicit_cli_build_query_overrides_config_and_will_run(
+        self, tmp_path: Path
+    ) -> None:
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--build-query", "make -n -k", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --build-query)" in result.output
+        assert "argv: ['make', '-n', '-k']" in result.output
+        assert (
+            "resulting compile-DB path: (build.compile_db not configured"
+            in result.output
+        )
+
+    def test_no_query_configured_reports_none(self, tmp_path: Path) -> None:
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            ["dump", "--sources", str(tmp_path), "-H", str(header), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "build.query: (none configured)" in result.output
+
+    def test_deterministic_across_repeated_invocations(self, tmp_path: Path) -> None:
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        args = [
+            "dump", "--sources", str(tmp_path), "-H", str(header),
+            "--config", str(cfg), "--dry-run",
+        ]
+        runner = CliRunner()
+        first = runner.invoke(main, args)
+        second = runner.invoke(main, args)
+        assert first.exit_code == 0
+        assert first.output == second.output
+
+
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
         old = tmp_path / "old.abi.json"

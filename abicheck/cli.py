@@ -678,36 +678,42 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     if dry_run:
         from .buildsource.inline import is_pack_dir
         from .cli_buildsource_helpers import _is_inputs_pack_dir
+        from .cli_dump_dry_run_build_query import add_build_query_dry_run_section
         from .cli_dump_helpers import render_dump_dry_run
         from .cli_helpers_compare import dry_run_compile_db_matched
 
         _dry_matched = dry_run_compile_db_matched(
             compile_db_path, None, headers, compile_db_filter,
         )
-        emit_dry_run(
-            render_dump_dry_run(
-                so_path=so_path, headers=headers, sources=sources,
-                build_info=build_info, build_config=build_config,
-                depth=depth, collect_mode=collect_mode,
-                header_backend=header_backend, output=output,
-                snapshot_compression=snapshot_compression,
-                has_compile_db=compile_db_path is not None,
-                # External review: dry-run previously only checked bare -p/
-                # --compile-db presence; loading it and matching against the
-                # resolved headers is cheap, deterministic, read-only
-                # resolution, not "real work out of scope for a dry run".
-                compile_db_matched=_dry_matched,
-                # embed_build_source's own classification: a source-capable
-                # --build-info is either a BuildSourcePack (is_pack_dir) or a
-                # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
-                # both can carry L4 source_abi facts, unlike a raw compile
-                # DB/build dir (Codex review, second finding on this signal).
-                build_info_is_pack=(
-                    is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
-                ),
-                dump_manifest=parsed_dump_manifest,
-            )
+        _dry_result = render_dump_dry_run(
+            so_path=so_path, headers=headers, sources=sources,
+            build_info=build_info, build_config=build_config,
+            depth=depth, collect_mode=collect_mode,
+            header_backend=header_backend, output=output,
+            snapshot_compression=snapshot_compression,
+            has_compile_db=compile_db_path is not None,
+            # External review: dry-run previously only checked bare -p/
+            # --compile-db presence; loading it and matching against the
+            # resolved headers is cheap, deterministic, read-only
+            # resolution, not "real work out of scope for a dry run".
+            compile_db_matched=_dry_matched,
+            # embed_build_source's own classification: a source-capable
+            # --build-info is either a BuildSourcePack (is_pack_dir) or a
+            # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
+            # both can carry L4 source_abi facts, unlike a raw compile
+            # DB/build dir (Codex review, second finding on this signal).
+            build_info_is_pack=(
+                is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
+            ),
+            dump_manifest=parsed_dump_manifest,
         )
+        # CLI cleanup phase two, PR 3C prerequisite 3: show whether/why
+        # build.query would execute, without ever running it.
+        add_build_query_dry_run_section(
+            _dry_result, sources=sources, build_config=build_config,
+            build_query=build_query, build_compile_db=build_compile_db,
+        )
+        emit_dry_run(_dry_result)
 
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
