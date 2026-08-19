@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through fifteen review
+patches" convention -- this module has now been through sixteen review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -978,7 +978,20 @@ def add_build_query_dry_run_section(
     both_sites_reachable = l2_seed_reachable and collect_active and embed_dispatch_possible
     count_suffix: str
     count_note: tuple[str, ...]
-    if both_sites_reachable and build_info is None:
+    if both_sites_reachable and raw_build_info_for_embed is None:
+        # Includes BOTH `build_info is None` (no --build-info at all) and a
+        # --build-info that IS given but normalizes away (it is itself a
+        # pack, per `raw_build_info_for_embed`'s own definition above) --
+        # `embed_build_source`'s own `_resolve_compile_db` call receives
+        # `build_info=None` in that second case too (pack-normalized,
+        # matching `_l2_seed_pack_inputs`'s identical nulling), so its `if
+        # build_info is not None:` short-circuit branch can never fire for
+        # the second invocation either way, regardless of what the ORIGINAL
+        # --build-info operand was (Codex review, fresh evidence -- an
+        # earlier revision checked the raw `build_info is None` here
+        # instead, wrongly routing a pack --build-info into the
+        # short-circuit-possible branch below even though a pack can never
+        # actually provide that short-circuit for the second invocation).
         count_suffix = (
             " -- RUNS AT LEAST ONCE, AND AGAIN IF THE DUMP REACHES "
             "BUILD-SOURCE EMBEDDING -- see note below"
@@ -991,12 +1004,13 @@ def add_build_query_dry_run_section(
             "afterward, from _write_snapshot_output, ONLY if the "
             "intervening header-AST parse and dump succeed that far -- e.g. "
             "it never runs if the AST frontend is missing or the parse "
-            "errors). No raw --build-info was given, so nothing can "
-            "short-circuit the second invocation's own query once that "
-            "point is reached -- a non-idempotent query (e.g. one that "
-            "appends rather than overwrites) therefore executes twice if "
-            "the dump reaches build-source embedding, or once if it does "
-            "not",
+            "errors). No raw --build-info directory/file reaches the second "
+            "invocation's own compile-DB resolution (either none was given, "
+            "or it was itself a pack, which normalizes away identically), "
+            "so nothing can short-circuit that invocation's own query once "
+            "reached -- a non-idempotent query (e.g. one that appends "
+            "rather than overwrites) therefore executes twice if the dump "
+            "reaches build-source embedding, or once if it does not",
         )
     elif both_sites_reachable:
         count_suffix = (

@@ -764,6 +764,44 @@ class TestDumpDryRunBuildQueryTrust:
         assert "POSSIBLY TWICE" not in result.output
         assert "AND AGAIN IF THE DUMP REACHES" not in result.output
 
+    def test_empty_build_info_pack_with_raw_sources_reports_deterministic_double(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: with an empty --build-info
+        # BuildSourcePack (no L3 compile units) combined with raw --sources
+        # (a real, non-pack tree), the second call site IS reachable (raw
+        # --sources satisfies embed_build_source's own dispatch guard) --
+        # but the ORIGINAL --build-info is not None, so an earlier revision
+        # routed this into the "POSSIBLY TWICE" (short-circuit-possible)
+        # branch. That's wrong: embed_build_source's own _resolve_compile_db
+        # call receives build_info=None for a pack --build-info (identical
+        # pack-normalization to _l2_seed_pack_inputs), so nothing can ever
+        # short-circuit the second invocation via --build-info's own path --
+        # this is the SAME deterministic shape as no --build-info at all,
+        # not a genuine once-or-twice ambiguity.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        BuildSourcePack(root=pack_dir).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--build-info", str(pack_dir),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "RUNS AT LEAST ONCE, AND AGAIN IF THE DUMP REACHES" in result.output
+        assert "POSSIBLY TWICE" not in result.output
+
     def test_malformed_sources_pack_with_raw_build_info_reports_execution_and_blocks(
         self, tmp_path: Path
     ) -> None:
