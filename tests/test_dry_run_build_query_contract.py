@@ -431,6 +431,43 @@ class TestDumpDryRunBuildQueryTrust:
         # A dry run never actually executes the query.
         assert not (build_dir / "compile_commands.json").exists()
 
+    def test_malformed_sources_pack_with_raw_build_info_but_no_headers_reports_will_not_run(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence (commit f1cb9c4): the sibling of the
+        # test above, but with NO headers -- so l2_seed_reachable is False
+        # and the L2 seed's own invocation never runs at all. The prior
+        # revision's "the L2 seed's own query invocation is unaffected by
+        # it" reasoning does not apply here: embed_build_source is the ONLY
+        # remaining real call site, and it also loads --sources
+        # unconditionally (the same malformed pack), so it fails before
+        # ever reaching build.query. Confirmed empirically against a real
+        # gcc-compiled library and a marker-writing query: the real run
+        # fails outright ("Invalid evidence pack"), and the marker is never
+        # created -- so this dry run must not claim "will run".
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        cfg = self._write_config(tmp_path)
+        malformed_src_pack = tmp_path / "srcpack"
+        malformed_src_pack.mkdir()
+        (malformed_src_pack / "manifest.json").write_text("not json{{{", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(malformed_src_pack),
+                "--build-info", str(build_dir),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "could not load --sources pack" in result.output
+        assert "will run" not in result.output
+        assert "blocker:" in result.output
+        assert "only remaining real call site" in result.output
+
     def test_no_sources_or_build_info_reports_no_collection_attempted(
         self, tmp_path: Path
     ) -> None:
@@ -1373,8 +1410,14 @@ class TestDumpDryRunBuildQueryTrust:
         # for a non-relative pattern (confirmed: Path("/tmp").glob("/tmp/x")
         # raises "Non-relative patterns are unsupported") -- the real
         # _run_build_query's own identical sources.glob(cfg.compile_db) call
-        # has the same, uncaught gap. This module must not crash on a
-        # read-only preview even though the real run itself would.
+        # (reached AFTER the query itself exits 0) has the same, uncaught
+        # gap. This module must not crash on a read-only preview even though
+        # the real run itself would -- but it must also not claim exit 0
+        # ("valid") for an invocation that is genuinely going to crash, not
+        # merely produce an unexpected answer (Codex review, fresh evidence,
+        # second round: an earlier revision of this fix reported the
+        # diagnostic but still exited 0, silently claiming the invocation
+        # was valid).
         header = tmp_path / "api.h"
         header.write_text("int foo(int x);\n", encoding="utf-8")
         absolute_hint = str((tmp_path / "compile_commands.json").resolve())
@@ -1386,9 +1429,10 @@ class TestDumpDryRunBuildQueryTrust:
                 "--config", str(cfg), "--dry-run",
             ],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
         assert "NotImplementedError" in result.output
         assert "an absolute path" in result.output
+        assert "blocker: build.compile_db is configured as an absolute path" in result.output
 
     def test_malformed_config_inside_sources_pack_degrades_silently_despite_raw_build_info(
         self, tmp_path: Path

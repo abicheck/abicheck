@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through twenty review
+patches" convention -- this module has now been through twenty-two review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -488,25 +488,55 @@ def add_build_query_dry_run_section(
                 # so this malformed pack is genuinely irrelevant to whether
                 # the L2 seed's own query resolution proceeds: it resolves
                 # via `build_info`'s own path unaffected, and may still run
-                # `cfg.query` once. This holds regardless of
-                # `collect_active` (Codex review, fresh evidence -- an
-                # earlier revision returned early on `collect_active` alone,
-                # before ever checking `build_info`, hiding that the L2
-                # seed's own invocation genuinely runs before
-                # `embed_build_source`'s own *unconditional*, later
-                # re-attempt at loading this same malformed pack -- see the
-                # module docstring's note on that unconditional load --
-                # fails and aborts the overall command).
+                # `cfg.query` once -- BUT ONLY when the L2 seed is actually
+                # *reachable* at all (`l2_seed_reachable`, computed above:
+                # headers present AND a real artifact). When it is not
+                # (a source-only dump, or an artifact dump with no `-H`),
+                # the L2 seed never runs regardless of this pack, and
+                # `embed_build_source` is then the ONLY call site left --
+                # but it also loads `sources` unconditionally (see the
+                # module docstring's note) and will hit this identical
+                # failure itself, raising before ever reaching
+                # `collect_inline_pack`/`cfg.query`. Falling through to a
+                # "will run" claim in that shape is doubly wrong: not just
+                # inconsistent with the `result.block()` call just below,
+                # but describing an invocation whose one remaining real call
+                # site provably never reaches the query at all (Codex
+                # review, fresh evidence -- confirmed empirically with a
+                # real gcc-compiled library, no headers, a malformed
+                # --sources pack, and a raw --build-info: the real run
+                # fails outright with "Invalid evidence pack", the
+                # marker-writing query's marker is never created). This
+                # holds regardless of `collect_active` otherwise (Codex
+                # review, fresh evidence -- an earlier revision returned
+                # early on `collect_active` alone, before ever checking
+                # `build_info`, hiding that the L2 seed's own invocation
+                # genuinely runs before `embed_build_source`'s own
+                # *unconditional*, later re-attempt at loading this same
+                # malformed pack -- see the module docstring's note on that
+                # unconditional load -- fails and aborts the overall
+                # command).
                 result.add(
                     _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
                 )
                 if collect_active:
-                    result.block(
-                        f"--sources names an unloadable pack ({sources}): {exc} -- "
-                        "build-source embedding re-attempts this same load later "
-                        "and fails there, even though the L2 seed's own query "
-                        "invocation below is unaffected by it"
-                    )
+                    if l2_seed_reachable:
+                        result.block(
+                            f"--sources names an unloadable pack ({sources}): {exc} -- "
+                            "build-source embedding re-attempts this same load later "
+                            "and fails there, even though the L2 seed's own query "
+                            "invocation below is unaffected by it"
+                        )
+                    else:
+                        result.block(
+                            f"--sources names an unloadable pack ({sources}): {exc} -- "
+                            "the L2 seed's own query invocation is not reachable "
+                            "either (no headers/no artifact), so build-source "
+                            "embedding's own unconditional re-load of this same "
+                            "pack is the only remaining real call site, and it "
+                            "fails before ever reaching build.query"
+                        )
+                        return
                 # Fall through with no L3 evidence from this pack, same as a
                 # valid-but-empty one -- the rest of this function resolves
                 # the L2 seed's own query via build_info.
@@ -918,6 +948,33 @@ def add_build_query_dry_run_section(
 
     trust_source = "explicit --config" if build_config is not None else "explicit --build-query"
     cwd = effective_sources if effective_sources is not None and effective_sources.is_dir() else Path.cwd()
+    if compile_db_hint and Path(compile_db_hint).is_absolute():
+        # `_run_build_query`'s own resolution -- reached here, since we are
+        # already inside the "trusted, will run" branch -- calls
+        # `sources.glob(cfg.compile_db)` unconditionally once the query
+        # exits 0 (`inline.py`'s own `if cfg.compile_db and sources is not
+        # None: for match in sorted(sources.glob(cfg.compile_db)):`), with
+        # no guard against an absolute pattern. `Path.glob()` raises
+        # `NotImplementedError` outright for one, uncaught anywhere in that
+        # call chain -- a genuine unhandled crash in the real run, not a
+        # hypothetical (Codex review, fresh evidence: confirmed by reading
+        # `_run_build_query`'s own body directly, the same code path
+        # `_resolve_compile_db_hint_line`'s own `NotImplementedError`
+        # handler below already documents for the *pre-query* glob check,
+        # just reached this time from the *post-query* one). A dry run
+        # claiming this invocation is "valid" (exit 0) would be actively
+        # wrong -- it is going to crash, not merely produce an unexpected
+        # compile-DB answer -- so this blocks before any "will run" claim
+        # is made, the same way every other genuinely-broken-invocation
+        # case in this module does.
+        result.block(
+            f"build.compile_db is configured as an absolute path "
+            f"({compile_db_hint!r}) -- build.compile_db is documented as "
+            "relative to --sources, and the real run's own "
+            "sources.glob(cfg.compile_db) call raises NotImplementedError "
+            "outright for an absolute pattern, once the query itself exits "
+            "0 -- this invocation will crash, not merely run"
+        )
     if compile_db_hint:
         # `_run_build_query`'s own resolution isn't a literal-string label --
         # `cfg.compile_db`, glob-metacharacter-bearing or not, is resolved
