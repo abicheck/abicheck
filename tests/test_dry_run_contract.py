@@ -1098,6 +1098,107 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 64, result.output
         assert "cannot parse build config" in result.output
 
+    def test_both_operands_empty_packs_no_headers_reports_will_not_run(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: with --build-info an empty pack (no
+        # compile units) and --sources ALSO an empty pack, no headers given,
+        # the old `sources is None` check (literally testing for absence,
+        # not for pack-normalized-to-None) missed that --sources being a
+        # pack also nulls raw_sources -- both operands normalize to None in
+        # the real run, so embed_build_source's dispatch guard fails and
+        # the headerless L2 seed returns immediately; the query can never
+        # run.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        bi_pack = tmp_path / "bipack"
+        bi_pack.mkdir()
+        BuildSourcePack(root=bi_pack).write()
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(bi_pack),
+                "--sources", str(src_pack),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+
+    def test_compile_db_hint_suppressed_without_raw_source_tree(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: _run_build_query only resolves
+        # cfg.compile_db (or --build-compile-db) against a real `sources`
+        # tree -- with an empty --sources pack (normalizes to None), it
+        # never globs or auto-discovers a compile DB regardless of what's
+        # configured, so this module must not promise a specific path.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--build-query", "cmake -S . -B build",
+                "--build-compile-db", "out/compile_commands.json",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run" in result.output
+        assert "resulting compile-DB path: out/compile_commands.json" not in result.output
+        assert "no --sources tree to resolve it against" in result.output
+
+    def test_explicit_config_query_reachable_via_headers_only_pack_input(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: l2_seed._l2_seed_config loads
+        # cfg_path (an explicit --config always short-circuits to it)
+        # whenever seed_includes_and_fold_compile_context runs at all --
+        # gated only on headers being non-empty, independent of whether
+        # --build-info/--sources are packs. A --build-info that is an
+        # empty pack (embed_build_source's own dispatch guard fails) must
+        # not suppress reading a real, explicit --config's own query.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        bi_pack = tmp_path / "bipack"
+        bi_pack.mkdir()
+        BuildSourcePack(root=bi_pack).write()
+        cfg = tmp_path / "config.yml"
+        cfg.write_text(
+            "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(bi_pack),
+                "-H", str(header), "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+        assert "build.query: (none configured)" not in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:

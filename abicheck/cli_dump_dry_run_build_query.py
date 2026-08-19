@@ -376,21 +376,48 @@ def add_build_query_dry_run_section(
     # evidence).
     effective_sources = None if (sources is not None and is_pack_dir(sources)) else sources
 
-    # `embed_build_source`'s own `raw_build_info`/`raw_sources` -- non-None
-    # only for a *non-pack* operand -- gate whether it loads and validates
-    # `cfg_path` **at all**, and it does so *before* ever calling
-    # `collect_inline_pack`/`_resolve_compile_db` (the precedence questions
-    # the branches below answer) -- so config validation must happen here,
-    # ahead of every "will NOT run because X takes precedence" branch below,
-    # not after them (Codex review, fresh evidence: an earlier revision
-    # validated config only after these precedence checks had already
-    # returned, so a malformed auto-discovered config combined with e.g. an
-    # already-resolved --build-info compile database never got validated at
-    # all -- verified end-to-end that the real run still raises for that
-    # exact combination).
-    config_reachable = (build_info is not None and not is_pack_dir(build_info)) or (
+    # Two independent real call sites can load `cfg_path`, with two different
+    # reachability conditions and two different failure behaviors:
+    #
+    # 1. `embed_build_source`'s own `raw_build_info`/`raw_sources` -- non-None
+    #    only for a *non-pack* operand -- gate whether IT loads/validates
+    #    `cfg_path`, and only once `collect_active` (its own collect-mode
+    #    gate) already let it get that far. A load failure there is a real
+    #    `click.UsageError` (exit 64).
+    # 2. `l2_seed._l2_seed_config` (reached via `seed_includes_and_fold_
+    #    compile_context`, gated only on `headers` being non-empty --
+    #    independent of `collect_active`/pack status) *also* loads `cfg_path`
+    #    whenever it runs, unconditionally -- but its own load is
+    #    best-effort: a `ValueError` degrades to "no seeded dirs, no fold"
+    #    rather than raising (its own docstring: "surfaces loudly elsewhere
+    #    ... this is a best-effort include-dir hint, so it degrades ...
+    #    rather than raising through"). Missing this path (Codex review,
+    #    fresh evidence) meant a valid explicit --config's own query/
+    #    compile_db went unread whenever the only reachable path was an
+    #    empty pack + headers (`raw_operand_present` False, `collect_active`
+    #    irrelevant since embed_build_source never even gets called for a
+    #    fully-pack-absorbed pair) -- reported as "(none configured)" even
+    #    though the real run genuinely resolves and runs a trusted query
+    #    through this exact path.
+    #
+    # So *reading* cfg_path is gated on either path being reachable
+    # (`config_readable`); *raising* on a load failure is gated on
+    # `raise_on_bad_config`, requiring embed_build_source's own stricter
+    # path specifically -- config validation must happen here, ahead of
+    # every "will NOT run because X takes precedence" branch below (which
+    # answer a materially different question: whether `_resolve_compile_db`
+    # would use `cfg.query` once collect_inline_pack does run), not after
+    # them (Codex review, fresh evidence: an earlier revision validated
+    # config only after those precedence checks had already returned, so a
+    # malformed auto-discovered config combined with e.g. an already-
+    # resolved --build-info compile database never got validated at all --
+    # verified end-to-end that the real run still raises for that exact
+    # combination).
+    raw_operand_present = (build_info is not None and not is_pack_dir(build_info)) or (
         effective_sources is not None
     )
+    config_readable = bool(headers) or raw_operand_present
+    raise_on_bad_config = collect_active and raw_operand_present
 
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
     # itself resolves from for this purpose -- distinct from `discover_project_
@@ -407,7 +434,7 @@ def add_build_query_dry_run_section(
     # dropping the config's own build.compile_db hint).
     cfg = None
     cfg_compile_db: str | None = None
-    if cfg_path is not None and config_reachable:
+    if cfg_path is not None and config_readable:
         try:
             cfg = load_build_config(cfg_path)
         except ValueError as exc:
@@ -416,15 +443,15 @@ def add_build_query_dry_run_section(
             # function. This is therefore always an *auto-discovered*
             # config, which `embed_build_source` validates strictly (a
             # `click.UsageError`, exit 64) only past its own collect-mode
-            # gate -- the identical `collect_active` reachability this
-            # precedence chain's pack-load checks above already gate on
-            # (CodeRabbit/Codex review, fresh evidence; verified end-to-end:
-            # a malformed auto-discovered config exits 0, warn-only, under
-            # `--depth headers`, but exits 64 under the default collect
-            # mode). Raised directly rather than encoded via
+            # AND raw-operand gate -- `raise_on_bad_config` above -- while
+            # `l2_seed`'s own headers-gated load degrades silently
+            # regardless (CodeRabbit/Codex review, fresh evidence; verified
+            # end-to-end: a malformed auto-discovered config exits 0,
+            # warn-only, under `--depth headers`, but exits 64 under the
+            # default collect mode). Raised directly rather than encoded via
             # `result.block()`, matching this module's documented exit-64
             # contract, same as the explicit-config case above.
-            if collect_active:
+            if raise_on_bad_config:
                 import click
 
                 raise click.UsageError(f"cannot parse build config {cfg_path}: {exc}") from exc
@@ -432,10 +459,9 @@ def add_build_query_dry_run_section(
             result.add(
                 _SECTION,
                 "build.query: will NOT run -- the auto-discovered config "
-                f"failed to load, and collect mode {collect_mode!r} means "
-                "only the best-effort L2 seed path (which silently "
-                "degrades on a load failure, rather than raising) could "
-                "otherwise reach it",
+                "failed to load, and only the best-effort L2 seed path "
+                "(which silently degrades on a load failure, rather than "
+                "raising) could otherwise reach it",
             )
             return
         cfg_compile_db = cfg.compile_db or None
@@ -461,14 +487,16 @@ def add_build_query_dry_run_section(
                 "precedence over build.query",
             )
             return
-        if sources is None and not headers:
+        if effective_sources is None and not headers:
             # embed_build_source's own raw_build_info becomes None once
             # --build-info is a pack (regardless of collect mode), and
-            # raw_sources is already None with no --sources given -- its
-            # dispatch condition (`raw_build_info is not None or raw_sources
-            # is not None`) therefore fails unconditionally, leaving only the
-            # L2 seed path, which itself needs headers (Codex review, fresh
-            # evidence).
+            # raw_sources is None whenever --sources is absent *or* is
+            # itself a pack (not just absent -- an empty --sources pack
+            # normalizes the same way, which a literal `sources is None`
+            # check missed: Codex review, fresh evidence) -- its dispatch
+            # condition (`raw_build_info is not None or raw_sources is not
+            # None`) therefore fails unconditionally, leaving only the L2
+            # seed path, which itself needs headers.
             result.add(
                 _SECTION,
                 "build.query: will NOT run -- --build-info is a pack with no "
@@ -539,7 +567,18 @@ def add_build_query_dry_run_section(
             return
 
     effective_query = build_query if build_query is not None else (cfg.query if cfg else None)
-    compile_db_hint = build_compile_db if build_compile_db is not None else cfg_compile_db
+    # `_run_build_query`'s own resolution of the compile-DB path it expects
+    # the query to have (re)written is gated on `sources is not None`: with
+    # no source tree (an absent --sources, or one that normalized to None
+    # because it's itself a pack), it neither globs `cfg.compile_db` against
+    # it nor auto-discovers a `compile_commands.json` -- `db` stays `None`
+    # regardless of whether a compile-DB hint is configured (Codex review,
+    # fresh evidence). This module must not promise a specific path the real
+    # run can never resolve to.
+    _configured_compile_db_hint = (
+        build_compile_db if build_compile_db is not None else cfg_compile_db
+    )
+    compile_db_hint = _configured_compile_db_hint if effective_sources is not None else None
 
     if not effective_query:
         result.add(_SECTION, "build.query: (none configured)")
@@ -576,13 +615,23 @@ def add_build_query_dry_run_section(
 
     trust_source = "explicit --config" if build_config is not None else "explicit --build-query"
     cwd = effective_sources if effective_sources is not None and effective_sources.is_dir() else Path.cwd()
+    if compile_db_hint:
+        compile_db_line = f"resulting compile-DB path: {compile_db_hint}"
+    elif _configured_compile_db_hint and effective_sources is None:
+        compile_db_line = (
+            f"resulting compile-DB path: (build.compile_db is configured, "
+            f"{_configured_compile_db_hint!r}, but there is no --sources tree "
+            "to resolve it against -- the query's own default output location)"
+        )
+    else:
+        compile_db_line = (
+            "resulting compile-DB path: (build.compile_db not configured -- "
+            "the query's own default output location)"
+        )
     result.add(
         _SECTION,
         f"build.query: will run (trusted -- {trust_source})",
         f"argv: {argv}",
         f"cwd: {cwd}",
-        f"resulting compile-DB path: {compile_db_hint}"
-        if compile_db_hint
-        else "resulting compile-DB path: (build.compile_db not configured -- "
-        "the query's own default output location)",
+        compile_db_line,
     )
