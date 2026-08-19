@@ -1029,3 +1029,79 @@
   `NAME=VALUE` assignment still correctly *inherits* the outer PATH=,
   proving the fix is scoped to the two explicit-clearing shapes and not a
   regression in ordinary nested-`env` PATH inheritance.
+- **Round 27 (Codex review, 3 findings).** (1) Continuing round 26 Finding
+  3: `_traverse_env_and_launcher_prefix()` correctly tracked "PATH was
+  explicitly cleared" (`env -i`/`env -u PATH`) *within* its own loop, but
+  discarded that fact the moment it returned -- every caller saw only
+  `env_path is None`, indistinguishable from "no `env` prefix ever
+  mentioned PATH, inherit abicheck's own inherited process PATH."
+  Concretely, `strip_launchers(["env", "-i", "cc", ...])` correctly
+  returned the bare, unresolved token `"cc"`, but nothing stopped
+  `pick_compiler_binary()`/`header_compile_context._derived_gcc_path()`
+  from later treating that bare name as trusted toolchain identity, which
+  a downstream `shutil.which`-style lookup could then resolve against
+  abicheck's OWN inherited `PATH` -- silently substituting a different,
+  unrelated compiler than the one the real, genuinely PATH-less `env -i`
+  invocation could ever have found (real `execvp` cannot search PATH at
+  all with none set; only an absolute/relative path resolves). Fixed with
+  a new `path_cleared: bool` returned from `_traverse_env_and_launcher_prefix()`
+  and a new `env_path_cleared_for_bare_token(argv, token)` predicate both
+  `pick_compiler_binary()` and `_derived_gcc_path()` now consult before
+  trusting a still-bare driver token, degrading to the pre-existing
+  "no compiler binary derivable" fallback instead
+  (`tests/test_source_extractors_env_round27.py`, a new sibling split: 17
+  cases covering the predicate directly, `pick_compiler_binary`, and
+  `_derived_gcc_path`, each with negative controls for a real `PATH=`
+  override un-clearing PATH, a path-shaped token, no `env` prefix at all,
+  and an explicit caller override). (2) `header_compile_context.
+  _resolve_driver_token()`'s already-fixed foreign-ABSOLUTE-driver-path
+  handling did not extend to a foreign-RELATIVE token: a Windows compile-
+  unit `directory` (`C:\work\build`) joined with a Windows-style relative
+  driver (`..\llvm\bin\clang-cl.exe`) on a POSIX analysis host used
+  host-native `pathlib.Path`/`os.path.normpath`, which recognizes neither
+  string's backslashes as separators at all -- both were treated as ONE
+  opaque path component, producing the corrupted, unnormalized
+  `C:\work\build/..\llvm\bin\clang-cl.exe` instead of the correct
+  `C:\work\llvm\bin\clang-cl.exe`. Fixed by delegating to the existing
+  `join_path_token()` helper (already used for the absolute case), which
+  chooses the join grammar from `directory`'s own unambiguous grammar
+  (`PureWindowsPath`/`PurePosixPath`, host-independent) rather than the
+  host's (new tests in `tests/test_header_compile_context_gcc_path.py`:
+  the exact Windows-directory/Windows-relative-token repro, a deeper `..`
+  chain confirming real normalization, the symmetric POSIX case, and two
+  negative controls for an ordinary host-native relative join and an
+  empty `directory`). (3) `adapters.base.derive_build_options()` captured
+  each `-target-feature=<sign><name>` survivor as an independent (key,
+  value) pair deduplicated by exact value -- but Clang applies repeated
+  `-target-feature` occurrences SEQUENTIALLY per feature name (confirmed
+  empirically against a real `clang -cc1`: `+sse2 -sse2` leaves `__SSE2__`
+  undefined, while `+sse2 -sse2 +sse2` leaves it defined), so
+  `[+sse2, -sse2]` (net disabled) and `[+sse2, -sse2, +sse2]` (net
+  enabled) reduced to the identical two-entry set, silently losing which
+  state was actually in effect and risking a missed real ABI-relevant
+  difference between two compile units. Fixed by resolving repeated
+  `-target-feature` occurrences to their final per-feature-name state
+  (last occurrence wins, keyed by feature name so two *different* features
+  stay independent) via the existing last-one-wins `mode_values`
+  resolution `derive_build_options()` already runs every flag through --
+  scoped to `-target-feature` only; the sibling `-target-abi`/`-target-cpu`/
+  `-target-linker-version` split-operand flags are single-scalar settings
+  with an already-pinned `-target-abi`-shaped key/value test contract and
+  were left untouched (new tests in `tests/test_build_source_pack.py`:
+  the net-disabled and net-enabled repro pair, a different-feature-names
+  independence control, a single-non-repeated-occurrence negative control,
+  and a cross-unit disagreement-still-diffable end-to-end case). Also
+  fixed two live Windows-CI-only test bugs surfaced while verifying this
+  round's own `_resolve_driver_token` changes, both in round 26's own new
+  test file (`tests/test_source_extractors_env_round26.py`), neither a
+  production-code bug: `test_pick_compiler_binary_resolves_env_chdir_relative_driver_path`
+  compared against a filesystem-resolved, PATHEXT-`.exe`-suffixed fixture
+  name for a token that is never filesystem-resolved at all (a
+  path-shaped, not bare, driver token is composed purely lexically, by
+  design); `test_pick_compiler_binary_resolves_plain_relative_driver_without_env_too`
+  asserted a host-native `os.path.normpath` expectation for a `directory`
+  (`/work`) that is unambiguously POSIX-absolute regardless of host --
+  the intentional, already-established host-independent grammar this same
+  PR series' own `join_path_token()` implements, matching the literal-
+  expected-value pattern `test_header_compile_context_gcc_path.py`'s own
+  foreign-absolute-path tests already use.

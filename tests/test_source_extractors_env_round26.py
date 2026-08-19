@@ -109,8 +109,26 @@ def test_pick_compiler_binary_resolves_env_chdir_relative_driver_path(
         argv=["env", "-C", "build", "../tool/clang++", "-c", "x.cc"],
     )
     result = pick_compiler_binary(cu, override=None)
+    # Compared against the literal RECORDED token's own basename
+    # (``"clang++"``, no extension) -- NOT ``driver.name`` (round 27 live
+    # Windows CI signal, fresh evidence): unlike a BARE driver name (which
+    # ``_apply_env_context`` resolves via a real ``shutil.which``/PATHEXT
+    # lookup when an ``env``-supplied ``PATH=`` override exists -- see
+    # ``_assert_resolved_driver`` in ``test_source_extractors_env.py`` for
+    # that case), a still PATH-SEPARATOR-bearing token like
+    # ``"../tool/clang++"`` is folded and joined PURELY lexically
+    # (``_apply_env_context``'s own docstring: "a relative, path-shaped
+    # token... DIR is folded onto it via a plain lexical join+normalize";
+    # ``_resolve_relative_driver`` mirrors the identical, deliberately
+    # symlink-/PATHEXT-blind treatment). No filesystem lookup ever runs for
+    # this shape, so the resolved path never gains the ``.exe`` suffix
+    # ``_make_executable`` adds to the ON-DISK fixture on Windows (needed
+    # only so the fixture file is genuinely executable, not because this
+    # test invokes or resolves it that way) -- asserting against
+    # ``driver.name`` compared the wrong two things (a filesystem-resolved
+    # `.exe`-suffixed name against a purely lexical, extension-less join).
     assert os.path.normcase(result) == os.path.normcase(
-        os.path.normpath(str(tool_dir / driver.name))
+        os.path.normpath(str(tool_dir / "clang++"))
     )
 
 
@@ -136,9 +154,25 @@ def test_pick_compiler_binary_resolves_plain_relative_driver_without_env_too() -
         output="x.o",
         argv=["../llvm/bin/clang-cl", "-c", "x.cc"],
     )
-    assert pick_compiler_binary(cu, override=None) == os.path.normpath(
-        "/work/../llvm/bin/clang-cl"
-    )
+    # A LITERAL, host-independent expected value (round 27 live Windows CI
+    # signal, fresh evidence) -- NOT host-native ``os.path.normpath``, which
+    # was the actual bug here: ``directory="/work"`` is unambiguously
+    # POSIX-absolute (``PurePosixPath("/work").is_absolute()`` is ``True``
+    # on ANY host, ``PureWindowsPath("/work").is_absolute()`` is ``False``
+    # -- no drive letter/UNC root), so ``_resolve_relative_driver``'s
+    # ``join_path_token`` -- deliberately choosing the join grammar from
+    # the DIRECTORY's own unambiguous grammar, not the analyzing host's,
+    # exactly like ``header_compile_context._resolve_driver_token``'s own
+    # already-established absolute-path handling (see
+    # ``test_resolve_derives_gcc_path_posix_absolute_driver_not_windows_
+    # mangled`` in ``test_header_compile_context_gcc_path.py`` for the
+    # identical host-independent-literal assertion pattern) -- correctly
+    # composes with ``posixpath`` regardless of which OS abicheck itself
+    # runs on. The previous ``os.path.normpath(...)`` expectation baked in
+    # HOST-native grammar instead, so it only coincidentally matched on a
+    # POSIX CI runner and diverged (to a backslash-flavored ``ntpath``
+    # result) the moment the identical test ran on a real Windows runner.
+    assert pick_compiler_binary(cu, override=None) == "/llvm/bin/clang-cl"
 
 
 def test_pick_compiler_binary_relative_driver_empty_directory_left_unjoined() -> None:

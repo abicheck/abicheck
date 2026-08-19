@@ -908,7 +908,7 @@ def _skip_env_prefix(
 
 def _traverse_env_and_launcher_prefix(
     argv: list[str],
-) -> tuple[int, str | None, str | None]:
+) -> tuple[int, str | None, str | None, bool]:
     """Walk *argv* from the start, unwrapping every interleaved ``env``
     prefix (splicing any ``-S``/``--split-string`` value in place via
     :func:`_skip_env_prefix`) and compiler-launcher prefix -- the ONE
@@ -925,23 +925,44 @@ def _traverse_env_and_launcher_prefix(
     mutate the caller's own list (every one of this function's current
     callers) pass an already-copied ``argv``.
 
-    Returns ``(i, chdir, env_path)``: *i* is the index of the first token
-    that is neither an ``env`` invocation nor a recognized compiler
-    launcher (the real driver position, or ``len(argv)`` if the whole list
-    was prefix); *chdir* is the fully COMPOSED effective ``-C``/``--chdir``
-    value across every ``env`` layer seen -- two RELATIVE values compose
-    (``env -C a env -C b ...`` -> ``a/b``), a later ABSOLUTE value fully
-    replaces whatever was accumulated (P2 review round 19 + Codex review
-    Finding 7); *env_path* is the most recently seen ``PATH=`` override --
-    or ``None`` again once a later, nested ``env`` layer explicitly clears
-    it (``-i``/``-u PATH``, round 26 Finding 3 -- see
-    :class:`_EnvPathCleared`'s own docstring). Only a real ``str`` or
-    ``None`` is ever returned here; the sentinel itself is resolved away
-    inside this function's own loop, never handed to a caller.
+    Returns ``(i, chdir, env_path, path_cleared)``: *i* is the index of the
+    first token that is neither an ``env`` invocation nor a recognized
+    compiler launcher (the real driver position, or ``len(argv)`` if the
+    whole list was prefix); *chdir* is the fully COMPOSED effective
+    ``-C``/``--chdir`` value across every ``env`` layer seen -- two
+    RELATIVE values compose (``env -C a env -C b ...`` -> ``a/b``), a later
+    ABSOLUTE value fully replaces whatever was accumulated (P2 review round
+    19 + Codex review Finding 7); *env_path* is the most recently seen
+    ``PATH=`` override -- or ``None`` again once a later, nested ``env``
+    layer explicitly clears it (``-i``/``-u PATH``, round 26 Finding 3 --
+    see :class:`_EnvPathCleared`'s own docstring). Only a real ``str`` or
+    ``None`` is ever returned for *env_path*; the sentinel itself is
+    resolved away inside this function's own loop, never handed to a
+    caller.
+
+    **``path_cleared`` (round 27 Finding 1, Codex review, fresh evidence,
+    continuing round 26 Finding 3).** Round 26 correctly told apart "PATH
+    was explicitly cleared" from "no opinion" WITHIN this function's own
+    loop (:data:`_ENV_PATH_CLEARED`), but the distinction was then
+    discarded the moment this function returned: every caller only ever
+    saw ``env_path is None`` for both states, indistinguishable from "no
+    ``env`` prefix ever mentioned PATH at all, inherit whatever abicheck's
+    own process PATH already is" -- a state a real ``execvp()`` of the
+    identical recorded command could never reach. This flag survives that
+    boundary: ``True`` when the LAST env layer's PATH state was "cleared"
+    (an ``-i``/``-u PATH`` seen with no later, real ``PATH=`` override to
+    un-clear it), ``False`` otherwise -- including the ordinary
+    no-``env``-prefix-at-all case. A caller resolving a still-bare driver
+    token (no path separator) against a PATH search must treat
+    ``path_cleared and not env_path`` as "this token is UNRESOLVABLE by any
+    real PATH search, do not consult abicheck's own inherited ``PATH`` for
+    it" -- see :func:`env_path_cleared_for_bare_token`, the one predicate
+    every such caller should use rather than re-deriving this logic.
     """
     i = 0
     chdir: str | None = None
     env_path: str | None = None
+    path_cleared = False
     progressed = True
     while progressed:
         progressed = False
@@ -967,8 +988,14 @@ def _traverse_env_and_launcher_prefix(
                 # narrow a `str | _EnvPathCleared | None` union the same
                 # way).
                 env_path = None
+                path_cleared = True
             elif new_path is not None:
                 env_path = new_path
+                # A real, later PATH= override un-clears PATH (round 27
+                # Finding 1) -- there is now a genuine directory list to
+                # search again, so a bare token is no longer provably
+                # unresolvable.
+                path_cleared = False
         while (
             i < len(argv)
             and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
@@ -977,7 +1004,58 @@ def _traverse_env_and_launcher_prefix(
             while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
                 i += 1
             progressed = True
-    return i, chdir, env_path
+    return i, chdir, env_path, path_cleared
+
+
+def env_path_cleared_for_bare_token(argv: list[str], token: str) -> bool:
+    """Whether *token* -- a driver name resolved (by any means) from
+    *argv* -- could never be found by a real PATH search, because the
+    ``env`` prefix wrapping *argv* explicitly cleared PATH (round 27
+    Finding 1, Codex review, fresh evidence; continues round 26 Finding
+    3's ``_EnvPathCleared`` sentinel work).
+
+    :func:`_traverse_env_and_launcher_prefix` tracks "PATH was cleared"
+    correctly while walking an ``env``/launcher prefix, but every caller
+    of :func:`strip_launchers` previously saw only a plain ``str | None``
+    ``env_path`` -- collapsing "PATH explicitly cleared" and "no ``env``
+    prefix ever mentioned PATH, inherit abicheck's own process PATH" into
+    the same ``None``. Concretely: ``strip_launchers(["env", "-i", "cc",
+    ...])`` returns the bare, unresolved token ``"cc"`` -- correct, since
+    :func:`_apply_env_context` only resolves a bare token when a real
+    ``env_path`` override exists -- but nothing stopped a DOWNSTREAM
+    consumer (``pick_compiler_binary``, ``header_compile_context.
+    _derived_gcc_path``) from later handing that same bare ``"cc"`` to a
+    ``shutil.which``-style lookup against abicheck's OWN inherited
+    ``PATH`` -- which a real ``env -i cc ...`` invocation could never do:
+    with no ``PATH`` at all, ``execvp`` cannot find a bare command name by
+    search, only an absolute/relative path (a token containing a
+    separator) resolves. Doing so anyway risks silently substituting a
+    completely different, unrelated compiler that merely happens to share
+    the recorded name, corrupting the L2/L4 replay's toolchain identity
+    without any visible error.
+
+    A path-shaped *token* (containing ``/``/``\\``) is unaffected --
+    always ``False`` -- since it is resolved directly, never via a PATH
+    search, regardless of what any ``env`` layer did to PATH. For a
+    genuinely bare *token*, ``True`` exactly when the traversal's own
+    ``path_cleared`` state survived to the very end of *argv*'s ``env``
+    prefix with no later real ``PATH=`` override to un-clear it -- the
+    same ``path_cleared and not env_path`` condition
+    :func:`_traverse_env_and_launcher_prefix`'s own docstring states.
+
+    Deliberately re-derives the traversal from *argv* rather than
+    threading a new return value through :func:`strip_launchers` itself
+    (whose stripped-argv-only return shape several other callers already
+    depend on unchanged) -- callers pass the SAME ``argv`` they already
+    called :func:`strip_launchers`/:func:`msvc_driver_token` with, so this
+    is one extra, cheap traversal of an already-short prefix, not a
+    second, independently-drifting implementation of the traversal logic
+    itself (both call into the identical :func:`_traverse_env_and_launcher_prefix`).
+    """
+    if "/" in token or "\\" in token:
+        return False
+    _i, _chdir, env_path, path_cleared = _traverse_env_and_launcher_prefix(list(argv))
+    return path_cleared and not env_path
 
 
 def effective_directory(argv: list[str], directory: str | None) -> str | None:
@@ -1012,7 +1090,7 @@ def effective_directory(argv: list[str], directory: str | None) -> str | None:
     """
     if not directory:
         return directory
-    _i, chdir, _env_path = _traverse_env_and_launcher_prefix(list(argv))
+    _i, chdir, _env_path, _path_cleared = _traverse_env_and_launcher_prefix(list(argv))
     if not chdir:
         return directory
     # `chdir` is read straight from possibly-redacted evidence (ADR-032
@@ -1624,7 +1702,7 @@ def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[st
     corrected.
     """
     argv = list(argv)
-    i, chdir, env_path = _traverse_env_and_launcher_prefix(argv)
+    i, chdir, env_path, _path_cleared = _traverse_env_and_launcher_prefix(argv)
     result = argv[i:]
     if not result or (chdir is None and env_path is None):
         return result
@@ -1668,11 +1746,30 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
     and `tests/test_source_extractors_clang.py`'s
     ``TestSyclHostOnlyGatedOnInvokedBinary`` for the regression matrix any
     future binary-capability-gated flag addition here should extend.
+
+    **Never trusts a bare driver name PATH could not have resolved (round
+    27 Finding 1, Codex review, fresh evidence).** ``strip_launchers``
+    correctly leaves a bare token (e.g. ``"cc"`` from ``env -i cc ...``)
+    unresolved rather than guessing -- but returning it here unchanged
+    would let a downstream ``shutil.which``-style lookup (``dumper_clang.
+    _resolve_clang_bin``, or the eventual subprocess spawn itself) resolve
+    it against ABICHECK'S OWN inherited ``PATH``, which the real recorded
+    command -- genuinely PATH-less under ``env -i`` -- could never have
+    done. See :func:`env_path_cleared_for_bare_token`'s own docstring for
+    the full reasoning. Degrading to the same language-based ``g++``/``gcc``
+    fallback used for a missing/flag-only command is the correct response:
+    a name this provably unresolvable carries no more real toolchain
+    identity than no recorded command at all.
     """
     if override:
         return override
     argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
-    if argv and argv[0] and not argv[0].startswith("-"):
+    if (
+        argv
+        and argv[0]
+        and not argv[0].startswith("-")
+        and not env_path_cleared_for_bare_token(compile_unit.argv, argv[0])
+    ):
         return _resolve_relative_driver(argv[0], compile_unit.directory)
     return "g++" if compile_unit.language.lower() in CXX_LANGS else "gcc"
 

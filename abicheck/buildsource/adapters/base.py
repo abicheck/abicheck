@@ -1067,6 +1067,35 @@ def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
         # ARM. Its default is target-dependent, so build_diff requires
         # both sides explicit before reporting a flip.
         return "float_abi", flag.split("=", 1)[1]
+    if flag.startswith("-target-feature="):
+        # -target-feature +NAME / -target-feature -NAME (round 27 Finding
+        # 3, Codex review, fresh evidence): Clang applies repeated
+        # -target-feature occurrences SEQUENTIALLY, each one enabling or
+        # disabling ONE named feature -- confirmed empirically against a
+        # real clang -cc1 (`-target-feature +sse2 -target-feature -sse2`
+        # leaves `__SSE2__` undefined; the identical pair followed by a
+        # third `-target-feature +sse2` leaves it defined). Before this,
+        # `extract_abi_relevant_flags` canonicalized each occurrence into
+        # its own `-target-feature=<sign><name>` survivor token, and the
+        # generic option path (`_add_generic_flag_option`) recorded each
+        # DISTINCT (key, value) pair independently via `_add_build_option`
+        # -- so `[+sse2, -sse2]` (net: disabled) and `[+sse2, -sse2,
+        # +sse2]` (net: enabled) both reduced to the SAME two-entry SET
+        # (`{"-target-feature=+sse2", "-target-feature=-sse2"}`), silently
+        # losing which one was actually in effect and risking a missed
+        # real ABI-relevant feature-state difference between two compile
+        # units. Keyed per FEATURE NAME (not per whole flag, and not
+        # merely "-target-feature") so this composes correctly with the
+        # existing `mode_values` last-one-wins collapsing this function's
+        # caller (`derive_build_options`) already runs every flag through:
+        # two DIFFERENT features (`+sse2`, `+avx2`) are independent and
+        # must BOTH survive as their own options -- only a later
+        # occurrence of the SAME name overrides an earlier one for that
+        # name, mirroring the real compiler's own per-feature-name
+        # sequential-apply semantics exactly.
+        value = flag[len("-target-feature=") :]
+        name = value[1:] if value[:1] in ("+", "-") else value
+        return f"target_feature:{name}", value
     return None
 
 

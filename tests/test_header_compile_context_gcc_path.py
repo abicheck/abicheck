@@ -1107,3 +1107,83 @@ def test_resolve_derives_gcc_path_posix_absolute_driver_not_windows_mangled() ->
 
     token = "/opt/llvm/bin/clang-cl"
     assert _resolve_driver_token(token, "/some/directory") == token
+
+
+# -- Round 27 Finding 2 (Codex): foreign RELATIVE driver paths --------------
+
+
+def test_resolve_driver_token_windows_relative_driver_joined_with_windows_directory() -> (
+    None
+):
+    """The repro named in the finding: a Windows-style compile-unit
+    ``directory`` (``C:\\work\\build``) plus a Windows-style RELATIVE
+    driver token (``..\\llvm\\bin\\clang-cl.exe``) must compose with
+    ``ntpath`` grammar -- and only ``ntpath`` -- regardless of which host
+    OS is doing the analysis. Before this fix, the host-native
+    ``pathlib.Path``/``os.path.normpath`` join on a POSIX host recognized
+    neither string's backslashes as separators at all, treating each as
+    ONE opaque path component and producing the corrupted, unnormalized
+    ``C:\\work\\build/..\\llvm\\bin\\clang-cl.exe`` instead of the correct
+    ``C:\\work\\llvm\\bin\\clang-cl.exe``."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    token = r"..\llvm\bin\clang-cl.exe"
+    directory = r"C:\work\build"
+    assert _resolve_driver_token(token, directory) == r"C:\work\llvm\bin\clang-cl.exe"
+
+
+def test_resolve_driver_token_windows_relative_driver_dotdot_collapses_correctly() -> (
+    None
+):
+    """A companion shape with a DEEPER ``..`` chain, confirming the
+    ``ntpath`` normalization genuinely collapses parent segments (not just
+    string-concatenates), the same way the already-established absolute
+    case is normalized."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    token = r"..\..\tools\llvm\bin\clang-cl.exe"
+    directory = r"C:\work\build\debug"
+    assert (
+        _resolve_driver_token(token, directory)
+        == r"C:\work\tools\llvm\bin\clang-cl.exe"
+    )
+
+
+def test_resolve_driver_token_posix_relative_driver_joined_with_posix_directory() -> (
+    None
+):
+    """The symmetric POSIX-relative case (a POSIX ``directory`` + a
+    POSIX-relative driver token) must compose with ``posixpath`` grammar
+    regardless of host -- confirming this fix did not accidentally force
+    EVERY relative join through ``ntpath``."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    token = "../llvm/bin/clang-cl"
+    directory = "/work/build"
+    assert _resolve_driver_token(token, directory) == "/work/llvm/bin/clang-cl"
+
+
+def test_resolve_driver_token_host_native_relative_join_unaffected() -> None:
+    """Negative control: an ORDINARY host-native relative join (no foreign
+    grammar involved at all -- a bare, separator-free directory segment,
+    exactly the shape ``_resolve_driver_token``'s own docstring example
+    uses) is unaffected by this fix, matching its pre-existing, documented
+    behavior."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    token = "../tool/clang-cl"
+    directory = "build"
+    assert _resolve_driver_token(token, directory) == os.path.normpath(
+        "build/../tool/clang-cl"
+    )
+
+
+def test_resolve_driver_token_relative_driver_empty_directory_left_normalized() -> None:
+    """Negative control: no ``directory`` at all (falsy) -- there is
+    nothing to join against, so the token is merely host-normalized on its
+    own, exactly as before this fix."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    assert _resolve_driver_token("../tool/clang-cl", "") == os.path.normpath(
+        "../tool/clang-cl"
+    )

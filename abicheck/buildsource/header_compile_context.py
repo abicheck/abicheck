@@ -1512,6 +1512,22 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
         stripped = strip_launchers(cu.argv, directory=cu.directory)
         driver = stripped[0] if stripped and not stripped[0].startswith("-") else None
     token = driver if driver is not None else cu.argv[0]
+    # round 27 Finding 1 (Codex review, fresh evidence): a bare driver name
+    # (no path separator) found under a recorded `env -i`/`env -u PATH`
+    # prefix could never have been resolved via a real PATH search by the
+    # actual build -- `execvp` has nothing to search with no PATH at all.
+    # Trusting it here would let a downstream `shutil.which`-style lookup
+    # (`dumper_clang._resolve_clang_bin`, or the eventual subprocess spawn)
+    # resolve it against abicheck's OWN inherited PATH instead, silently
+    # substituting an unrelated compiler that merely shares the recorded
+    # name. See `env_path_cleared_for_bare_token`'s own docstring. `None`
+    # here degrades exactly like "no CL-style token found anywhere and no
+    # generic fallback either" -- this function's own pre-existing
+    # not-derivable outcome.
+    from .source_extractors._argv import env_path_cleared_for_bare_token
+
+    if env_path_cleared_for_bare_token(cu.argv, token):
+        return None
     return _resolve_driver_token(token, cu.directory)
 
 
@@ -1598,10 +1614,36 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     silently produce nonsense -- a purely lexical normalization is safe
     either way and is exactly what this signature comparison needs (collapse
     equivalent *spellings*, not resolve real symlink targets).
+    **Foreign RELATIVE driver paths (round 27 Finding 2, Codex review,
+    fresh evidence).** The absolute-path fix above closes the cross-OS
+    mismatch for an already-absolute foreign token, but a *relative*
+    foreign-grammar token joined onto ``directory`` still used host-native
+    ``pathlib.Path``/``os.path.normpath``, unchanged. That is wrong the
+    identical way: for a Windows compile-unit ``directory``
+    (``C:\\work\\build``) and a Windows-style relative driver token
+    (``..\\llvm\\bin\\clang-cl.exe``), analyzed on a POSIX host,
+    host-native ``PosixPath`` recognizes neither string's backslashes as
+    separators at all -- both are treated as ONE opaque path component, so
+    joining them produced the corrupted, unnormalized
+    ``C:\\work\\build/..\\llvm\\bin\\clang-cl.exe`` instead of the correct
+    ``C:\\work\\llvm\\bin\\clang-cl.exe``. Delegates to
+    :func:`~abicheck.buildsource.source_extractors._argv.join_path_token`
+    instead -- the SAME helper the ``env -C``/``PATH=`` composition already
+    uses (see that module's own docstring): it chooses the join grammar
+    from *directory* itself when unambiguous (``PureWindowsPath``/
+    ``PurePosixPath`` are host-INDEPENDENT, unlike host-native
+    ``pathlib.Path``), so a Windows ``directory`` always composes with
+    ``ntpath`` and a POSIX one with ``posixpath``, regardless of which
+    host is doing the analysis -- closing this the same general way the
+    absolute case was closed, not with a second, narrower one-off check.
     """
     import os as _os
 
-    from .source_extractors._argv import is_absolute_path_token, normalize_path_token
+    from .source_extractors._argv import (
+        is_absolute_path_token,
+        join_path_token,
+        normalize_path_token,
+    )
 
     expanded = _os.path.expanduser(token)
     if "/" not in expanded and "\\" not in expanded:
@@ -1614,18 +1656,12 @@ def _resolve_driver_token(token: str, directory: str) -> str:
         # docstrings (Codex review, "Recognize foreign absolute driver
         # paths", fresh evidence).
         return normalize_path_token(expanded)
-    # A genuinely *relative* token composed against `directory` -- which is
-    # always a real, host-resolvable filesystem path for this function's
-    # actual callers (a `CompileUnit.directory`, not raw evidence text) --
-    # uses host-native `pathlib`/`os.path.normpath`, unchanged from before
-    # this fix: `pathlib.Path` on Windows already accepts a forward-slash
-    # token like `../llvm/bin/clang-cl` as a valid relative path, so this
-    # branch was never the source of the cross-OS mismatch the absolute
-    # check above fixes.
-    path = Path(expanded)
-    if not path.is_absolute() and directory:
-        path = Path(directory).expanduser() / path
-    return _os.path.normpath(str(path))
+    # A genuinely *relative* token: join it onto `directory` (when present)
+    # using THAT PAIR's own grammar, not the host's -- see this function's
+    # own "Foreign RELATIVE driver paths" note above (round 27 Finding 2).
+    if not directory:
+        return _os.path.normpath(expanded)
+    return join_path_token(_os.path.expanduser(directory), expanded)
 
 
 def _ambiguity_message(
