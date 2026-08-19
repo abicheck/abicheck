@@ -117,9 +117,35 @@ return None`` before ever invoking anything, so this module now reports the
 same "will NOT run" rather than an execution claim with an empty ``argv:
 []``.
 
-This closes the full set of paths into ``collect_inline_pack`` this module
-is aware of; a new bypass mechanism added to that function in the future
-would need a matching addition here, the same way each of these did.
+A seventh refinement (Codex review, fresh evidence): (7) once resolution
+falls through the pack-precedence checks above with ``--sources`` itself a
+pack (no compile units, headers present -- the case (5) above leaves
+reachable), the query's own ``cwd`` must be derived from the same
+normalized value ``collect_inline_pack`` actually receives
+(``raw_sources``, nulled by ``_l2_seed_pack_inputs`` whenever ``--sources``
+is a pack, unconditionally) -- not the original ``--sources`` pack
+directory itself, which the real query never runs in.
+
+**Known, deliberately unclosed gap** (documented rather than chased
+further, per this repository's own "known gaps over risky reactive
+patches" convention -- this module has now been through nine review
+rounds): Flow-2 ``abicheck_inputs/`` packs (recognized by
+``cli_buildsource_helpers._is_inputs_pack_dir``, a *different* recognizer
+from ``BuildSourcePack``'s own ``is_pack_dir``) fold into
+``raw_build_info``/``raw_sources`` the identical way a ``BuildSourcePack``
+does in ``cli_buildsource.embed_build_source``, but this module does not
+detect that input shape at all -- a Flow-2 pack as the sole
+``--build-info``/``--sources`` input, with no discoverable compile DB or
+headers, is still reported as "will run" when it would not. Closing this
+needs importing a second pack-format recognizer and a second, differently-
+shaped facts model (``InputsManifest``/``load_inputs_manifest``) rather
+than reusing anything ``BuildSourcePack``-shaped already handled above --
+a genuinely separate input format, not a follow-up to the same mechanism.
+
+This closes the full set of ``BuildSourcePack``-shaped paths into
+``collect_inline_pack`` this module is aware of (Flow-2 packs excepted, see
+above); a new bypass mechanism added to that function in the future would
+need a matching addition here, the same way each of these did.
 """
 
 from __future__ import annotations
@@ -288,11 +314,18 @@ def add_build_query_dry_run_section(
             )
             return
 
+    # `_l2_seed_pack_inputs` nulls `raw_sources` whenever --sources is itself
+    # a pack directory, unconditionally (independent of --build-info) -- both
+    # config auto-discovery and the query's own cwd must use that same
+    # normalized value, not the pack directory itself (Codex review, fresh
+    # evidence).
+    effective_sources = None if (sources is not None and is_pack_dir(sources)) else sources
+
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
     # itself resolves from for this purpose -- distinct from `discover_project_
     # config`'s upward walk, which the rest of this dry-run report already uses
     # for the generic ".abicheck.yml:" info line.
-    cfg_path = build_config or discover_build_config(sources)
+    cfg_path = build_config or discover_build_config(effective_sources)
     trusted = build_config is not None or build_query is not None
 
     # The real path (`cli_buildsource.py`) always loads *cfg_path* when one is
@@ -348,7 +381,7 @@ def add_build_query_dry_run_section(
         return
 
     trust_source = "explicit --config" if build_config is not None else "explicit --build-query"
-    cwd = sources if sources is not None and sources.is_dir() else Path.cwd()
+    cwd = effective_sources if effective_sources is not None and effective_sources.is_dir() else Path.cwd()
     result.add(
         _SECTION,
         f"build.query: will run (trusted -- {trust_source})",

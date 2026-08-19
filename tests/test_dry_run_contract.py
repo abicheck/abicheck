@@ -782,6 +782,36 @@ class TestDumpDryRunBuildQueryTrust:
         assert "--sources" in result.output
         assert "already carries L3 compile units" in result.output
 
+    def test_empty_sources_pack_reports_process_cwd_not_pack_dir(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: _l2_seed_pack_inputs nulls raw_sources whenever
+        # --sources is itself a pack, unconditionally -- the real query
+        # therefore runs with the process's own cwd, not the pack directory,
+        # once resolution falls through the pack-compile-units check (no
+        # compile units, headers present).
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "-H", str(header), "--build-query", "cmake -S . -B build",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run" in result.output
+        assert f"cwd: {src_pack}" not in result.output
+
     def test_empty_build_query_reports_will_not_run(self, tmp_path: Path) -> None:
         # Codex review: shlex.split() on a whitespace-only build.query
         # returns []; _run_build_query itself checks `if not argv: return
