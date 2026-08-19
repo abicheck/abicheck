@@ -1486,9 +1486,9 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     entry on this finding for the full reasoning and what a complete fix
     needs.
     """
-    if not cu.argv or not _is_msvc_command(cu.argv):
+    if not cu.argv or not _is_msvc_command(cu.argv, directory=cu.directory):
         return None
-    driver = msvc_driver_token(cu.argv)
+    driver = msvc_driver_token(cu.argv, directory=cu.directory)
     if driver is None:
         # No CL-style-basename token was found anywhere in the leading
         # executable/launcher position(s) -- MSVC dialect was detected some

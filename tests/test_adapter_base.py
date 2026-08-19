@@ -207,6 +207,54 @@ def test_msvc_driver_token_resolves_bare_driver_via_env_path(tmp_path):
     assert os.path.normcase(msvc_driver_token(argv)) == os.path.normcase(str(driver))
 
 
+# -- Round 26, Finding 2 (Codex): `directory` must reach `_msvc_driver_scan` --
+
+
+def test_msvc_driver_token_resolves_relative_env_path_when_directory_given(tmp_path):
+    # `env -C build PATH=../tool clang-cl /c x.cc` recorded for a compile
+    # unit whose own directory is `tmp_path`: GNU env chdirs into
+    # `tmp_path/build` before searching the RELATIVE `../tool` PATH entry,
+    # landing on `tmp_path/tool/clang-cl` -- not resolvable from abicheck's
+    # own process CWD. Before this fix, `msvc_driver_token` had no
+    # `directory` parameter at all, so this relative PATH entry could never
+    # be composed correctly regardless of what the caller knew.
+    import stat
+    import sys
+
+    (tmp_path / "build").mkdir()
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    driver = tool_dir / "clang-cl"
+    if sys.platform == "win32":
+        driver = driver.with_suffix(".exe")
+    driver.write_text("", encoding="utf-8")
+    driver.chmod(driver.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    argv = ["env", "-C", "build", "PATH=../tool", "clang-cl", "/c", "x.cc"]
+    resolved = msvc_driver_token(argv, directory=str(tmp_path))
+    assert os.path.normcase(resolved) == os.path.normcase(str(driver))
+
+
+def test_msvc_driver_token_relative_env_path_left_bare_without_directory(tmp_path):
+    # Negative control: the identical argv as above, but with no `directory`
+    # supplied (the pre-fix call shape, and every caller with no compile-unit
+    # context) -- a relative PATH entry cannot be safely resolved without a
+    # base directory, so the bare driver name is left unchanged, exactly the
+    # existing `strip_launchers`-level behavior this function delegates to.
+    import stat
+    import sys
+
+    (tmp_path / "build").mkdir()
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    driver = tool_dir / "clang-cl"
+    if sys.platform == "win32":
+        driver = driver.with_suffix(".exe")
+    driver.write_text("", encoding="utf-8")
+    driver.chmod(driver.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    argv = ["env", "-C", "build", "PATH=../tool", "clang-cl", "/c", "x.cc"]
+    assert msvc_driver_token(argv) == "clang-cl"
+
+
 def test_msvc_driver_token_behind_chained_launchers():
     # source_extractors._argv.strip_launchers unwraps a chain of launcher
     # tokens (and any per-launcher `KEY=VALUE` config override) in one pass;

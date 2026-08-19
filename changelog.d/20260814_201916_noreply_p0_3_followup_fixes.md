@@ -955,3 +955,77 @@
   test per signal-handling flag (bare and `=SIG` forms) plus a negative
   control confirming an unrelated, genuinely unrecognized flag still isn't
   swallowed (14).
+- **Round 26 (Codex, three findings on `71151d3735`, same `env`-prefix /
+  compiler-driver-resolution area).**
+  (16) `pick_compiler_binary()` returned `strip_launchers()`'s driver token
+  verbatim, without joining it onto the compile unit's own `directory` --
+  for `env -C build ../tool/clang++ ...` recorded in directory `/work`,
+  `strip_launchers()`/`_apply_env_context()` correctly fold the `-C build`
+  value into the token (`join_path_token("build", "../tool/clang++")` ==
+  `"tool/clang++"`), but that result is still *relative* to `/work`, not to
+  whatever cwd a caller happens to run a subprocess from.
+  `CastxmlSourceExtractor` runs from the effective `-C` cwd (`/work/build`,
+  per round 23/24's chdir-cwd fixes), so the unjoined token resolved a
+  second, wrong time to `/work/build/tool/clang++` instead of the real
+  `/work/tool/clang++`. Fixed with a new `_resolve_relative_driver()`
+  helper mirroring `header_compile_context._resolve_driver_token()`'s own
+  treatment of this exact shape (host-independent absolute check/join via
+  the already-local `is_absolute_path_token()`/`join_path_token()`/
+  `normalize_path_token()`, rather than importing that private helper back
+  from `header_compile_context` -- which imports `adapters.base`, which
+  imports from this module at module scope, so the reverse import would be
+  a genuine cycle). Generalized (per this repo's "fix the cause, not the
+  instance" convention) to join *any* relative driver token this function
+  returns onto `directory`, not only an `env -C`-composed one --
+  `pick_compiler_binary()` was the one caller inconsistent with
+  `_derived_gcc_path()`'s already-established identical behavior for a
+  plain relative driver path with no `env` prefix at all.
+  (17) `header_compile_context._derived_gcc_path()` called
+  `adapters.base._is_msvc_command()`/`msvc_driver_token()` with no
+  `directory` argument -- the parameter didn't exist on either function --
+  so for `env -C build PATH=../tool clang-cl /c x.cc`, the internal
+  `strip_launchers()` call inside `_msvc_driver_scan()` resolved the
+  relative `PATH=../tool` entry against abicheck's own process CWD instead
+  of the compile unit's real base directory + effective `-C` chdir, the
+  identical wrong-CWD failure (16) fixes for `pick_compiler_binary()`'s own
+  env-unwrapping. Added an optional `directory: str | None = None` keyword
+  to `_executable_token_positions()`, `_msvc_driver_scan()`,
+  `_is_msvc_command()`, and `msvc_driver_token()` (all defaulting to the
+  pre-fix behavior, so every other, directory-agnostic caller is
+  unaffected), threaded through to `strip_launchers()`; `_derived_gcc_path()`
+  now passes `directory=cu.directory` to both calls it makes.
+  (18) Nested `env` wrappers had no way to represent "PATH was just reset
+  to empty" as distinct from "no PATH opinion stated, inherit whatever an
+  outer layer already established" -- both were folded into plain `None`.
+  For `env PATH=/tmp/tool /usr/bin/env -i clang-cl ...`, real GNU `env -i`
+  starts the wrapped command with a genuinely empty environment (confirmed
+  via `env --help`: "start with an empty environment"), so the outer
+  `PATH=/tmp/tool` must not survive through the inner `-i` -- but
+  `_traverse_env_and_launcher_prefix()` only ever *overwrote* its tracked
+  `env_path` on a new `PATH=` assignment, so `-i`'s `None` looked
+  identical to "this layer said nothing," and the outer PATH incorrectly
+  carried through. The same applies to `env -u PATH ...`/`env --unset=PATH
+  ...` (explicitly unsetting just `PATH`) and the deprecated bare `-`
+  alias for `-i`. Fixed with a new `_EnvPathCleared` sentinel (one module-
+  level instance, `_ENV_PATH_CLEARED`) `_skip_env_prefix()` returns instead
+  of `None` for exactly these four shapes; `_traverse_env_and_launcher_prefix()`
+  resets its accumulated `env_path` to `None` on seeing it (never letting
+  the sentinel itself escape to any other consumer -- `_apply_env_context()`
+  and every other reader still only ever sees a real `str` or `None`,
+  unchanged). New regression tests
+  (`tests/test_source_extractors_env_round26.py`, a sibling split of
+  `tests/test_source_extractors_env.py` to stay under its 1500-line
+  AI-readiness soft cap, plus additions to `tests/test_adapter_base.py`
+  and `tests/test_header_compile_context_gcc_path.py`): positive coverage
+  for the `env -C`-relative-driver-token join (16) with negative controls
+  for a bare PATH-searched name, an already-absolute token, and an empty
+  `directory`; positive coverage for the `directory`-threaded MSVC-driver
+  PATH resolution (17) with a negative control confirming an ordinary
+  non-`env`-wrapped command is unaffected; and positive coverage for each
+  of the four PATH-clearing shapes (18) -- bare `-i`, `-u PATH`,
+  `--unset=PATH`, bare `-` -- with negative controls confirming unsetting
+  an unrelated variable does *not* clear PATH, and (Codex's own explicitly
+  requested case) a plain nested `env` carrying only an unrelated
+  `NAME=VALUE` assignment still correctly *inherits* the outer PATH=,
+  proving the fix is scoped to the two explicit-clearing shapes and not a
+  regression in ordinary nested-`env` PATH inheritance.

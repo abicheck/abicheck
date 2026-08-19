@@ -573,7 +573,9 @@ _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
 )
 
 
-def _executable_token_positions(argv: list[str]) -> frozenset[int]:
+def _executable_token_positions(
+    argv: list[str], *, directory: str | None = None
+) -> frozenset[int]:
     """The argv index/indices that can legitimately name the compiler itself.
 
     ``{0}``, plus the index the real driver sits at once every leading
@@ -640,12 +642,23 @@ def _executable_token_positions(argv: list[str]) -> frozenset[int]:
     """
     if not argv:
         return frozenset()
-    driver_index = len(argv) - len(strip_launchers(argv))
+    driver_index = len(argv) - len(strip_launchers(argv, directory=directory))
     return frozenset({0, driver_index})
 
 
-def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
+def _msvc_driver_scan(
+    argv: list[str], *, directory: str | None = None
+) -> tuple[bool, str | None]:
     """Shared scan behind :func:`_is_msvc_command` and :func:`msvc_driver_token`.
+
+    *directory* (round 26 Finding 2, Codex review, fresh evidence): the
+    compile unit's own ``directory``, threaded through to
+    :func:`_executable_token_positions`/:func:`~abicheck.buildsource.
+    source_extractors._argv.strip_launchers` so a relative ``env``-supplied
+    ``PATH=`` entry resolves against the compile unit's real base directory
+    (composed with any effective ``-C``/``--chdir``) rather than abicheck's
+    own process CWD. ``None`` (the default) for a caller with no compile-unit
+    context to supply, unchanged from the pre-fix behavior for those callers.
 
     Returns ``(is_msvc, driver_token)``: *is_msvc* is the same True/False
     :func:`_is_msvc_command` has always returned; *driver_token* is the
@@ -716,7 +729,7 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     argv = expand_env_split_prefixes(argv)
     is_msvc = "/c" in argv
     driver_token: str | None = None
-    executable_positions = _executable_token_positions(argv)
+    executable_positions = _executable_token_positions(argv, directory=directory)
     # The token at the *stripped* driver position is taken from
     # `strip_launchers`'s own return value, not `argv[driver_index]`
     # directly (P2 review round 19, "Apply env chdir before resolving
@@ -727,7 +740,7 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     # here instead would silently discard that correction for every caller
     # of `msvc_driver_token`/`_derived_gcc_path`, the exact regression this
     # fix exists to prevent.
-    stripped = strip_launchers(argv) if argv else []
+    stripped = strip_launchers(argv, directory=directory) if argv else []
     driver_index = len(argv) - len(stripped)
     i = 0
     while i < len(argv):
@@ -758,18 +771,27 @@ def _msvc_driver_scan(argv: list[str]) -> tuple[bool, str | None]:
     return is_msvc, driver_token
 
 
-def _is_msvc_command(argv: list[str]) -> bool:
+def _is_msvc_command(argv: list[str], *, directory: str | None = None) -> bool:
     """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
 
     Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
     ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
     driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's
     explicit ``--driver-mode=cl`` spelling.
+
+    *directory* has no effect on the returned bool (dialect is decided by
+    driver-name/marker matching alone, never by how a relative ``PATH=``
+    entry resolves) -- accepted, and threaded through to
+    :func:`_msvc_driver_scan`, purely so a caller with a
+    :class:`~abicheck.buildsource.build_evidence.CompileUnit` in scope can
+    pass its ``directory`` once and get both this bool and (via
+    :func:`msvc_driver_token`) a correctly-resolved driver token from the
+    same scan, rather than needing two differently-parameterized calls.
     """
-    return _msvc_driver_scan(argv)[0]
+    return _msvc_driver_scan(argv, directory=directory)[0]
 
 
-def msvc_driver_token(argv: list[str]) -> str | None:
+def msvc_driver_token(argv: list[str], *, directory: str | None = None) -> str | None:
     """The literal argv token identified as the MSVC/clang-cl driver, if any.
 
     ``None`` when *argv* is not MSVC-dialect at all, or when it is (a bare
@@ -781,8 +803,21 @@ def msvc_driver_token(argv: list[str]) -> str | None:
     specific was found" should check :func:`_is_msvc_command` separately,
     the same pattern :func:`~abicheck.buildsource.header_compile_context.
     _derived_gcc_path` uses.
+
+    **Pass *directory* (the compile unit's own ``directory``) whenever the
+    caller has one (round 26 Finding 2, Codex review, fresh evidence).**
+    Without it, an ``env -C DIR PATH=... clang-cl ...``-shaped command's
+    relative ``PATH=`` entry is resolved by :func:`_msvc_driver_scan` (via
+    :func:`~abicheck.buildsource.source_extractors._argv.strip_launchers`)
+    against abicheck's own process CWD instead of the compile unit's real
+    base directory + effective ``-C`` chdir -- the identical wrong-CWD
+    failure :func:`~abicheck.buildsource.source_extractors._argv.
+    pick_compiler_binary` already avoids for its own ``env``-unwrapping by
+    passing ``directory`` through. A driver named only via a relative
+    ``env``-supplied ``PATH=`` entry then resolves to nothing (falls back to
+    the bare, unresolved driver basename) instead of the real absolute path.
     """
-    return _msvc_driver_scan(argv)[1]
+    return _msvc_driver_scan(argv, directory=directory)[1]
 
 
 def _is_source_token(arg: str, msvc: bool) -> bool:

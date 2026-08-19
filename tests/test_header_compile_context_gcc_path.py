@@ -327,6 +327,87 @@ def test_resolve_derives_gcc_path_bare_driver_unresolvable_env_path_left_bare(
     assert result.context.gcc_path == "clang-cl"
 
 
+# -- Round 26, Finding 2 (Codex): `directory` threaded into the CL-driver --
+# -- detection scan, not just `pick_compiler_binary`'s own env-unwrapping --
+
+
+def test_resolve_derives_gcc_path_resolves_relative_env_path_via_chdir(
+    tmp_path: Path,
+) -> None:
+    """``env -C build PATH=../tool clang-cl /c x.cc`` -- the exact repro
+    from round 26 Finding 2 (Codex review, fresh evidence). GNU ``env -C
+    build`` chdirs to ``<tmp_path>/build`` before searching the RELATIVE
+    ``PATH=../tool`` entry, so the real driver is at
+    ``<tmp_path>/tool/clang-cl`` -- not resolvable from abicheck's own
+    process CWD at all.
+
+    Before this fix, ``header_compile_context._derived_gcc_path`` called
+    ``adapters.base.msvc_driver_token(cu.argv)`` with no ``directory``
+    argument at all (the kwarg didn't exist), so
+    ``adapters.base._msvc_driver_scan``'s own internal
+    ``strip_launchers(argv)`` call -- unlike ``pick_compiler_binary``'s,
+    which already threaded ``directory`` through for this identical
+    ``env -C``/``PATH=`` composition -- resolved the relative ``../tool``
+    entry against abicheck's own CWD instead of ``<tmp_path>/build``,
+    leaving the driver token bare/unresolved (``"clang-cl"``, the literal
+    driver name) rather than a real absolute path.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    (tmp_path / "build").mkdir()
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    driver = tool_dir / "clang-cl"
+    if sys.platform == "win32":
+        driver = driver.with_suffix(".exe")
+    driver.write_text("", encoding="utf-8")
+    driver.chmod(0o755)
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[
+            "env",
+            "-C",
+            "build",
+            "PATH=../tool",
+            "clang-cl",
+            "/std:c++20",
+            "-c",
+            str(src),
+        ],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert os.path.normcase(result.context.gcc_path) == os.path.normcase(str(driver))
+
+
+def test_resolve_derives_gcc_path_negative_control_no_env_prefix_unaffected(
+    tmp_path: Path,
+) -> None:
+    """Negative control for round 26 Finding 2: an ordinary, non-``env``-
+    wrapped clang-cl command (no ``directory``-dependent resolution
+    involved at all) is completely unaffected by threading ``directory``
+    through -- same result as before the fix."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=["clang-cl", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == "clang-cl"
+
+
 def test_resolve_derives_gcc_path_expands_home_redacted_driver_token(
     tmp_path: Path,
 ) -> None:

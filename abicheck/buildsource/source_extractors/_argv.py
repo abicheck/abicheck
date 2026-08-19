@@ -77,6 +77,42 @@ _LAUNCHER_CONFIG_OVERRIDE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: same ``.exe``-suffix-tolerant convention :data:`COMPILER_LAUNCHERS`
 #: matching already uses.
 _ENV_BASENAMES = frozenset({"env", "env.exe"})
+
+
+class _EnvPathCleared:
+    """Sentinel: this ``env`` layer explicitly reset ``PATH`` to empty
+    (round 26 Finding 3, Codex review, fresh evidence).
+
+    ``-i``/``--ignore-environment`` (also its deprecated bare ``-`` alias)
+    and ``-u PATH``/``--unset PATH`` both mean "the command that follows
+    sees NO inherited ``PATH`` at all" -- confirmed against a real
+    installed ``env --help`` (``-i, --ignore-environment``: "start with an
+    empty environment"). :func:`_traverse_env_and_launcher_prefix` must be
+    able to tell that apart from "this ``env`` layer stated no opinion on
+    ``PATH``, inherit whatever an outer layer already established" -- a
+    plain ``str | None`` return can't: ``None`` was already used for the
+    latter. Without a distinct third state, a nested
+    ``env PATH=/tmp/tool /usr/bin/env -i clang-cl ...`` incorrectly let the
+    OUTER ``PATH=/tmp/tool`` survive through the inner ``-i``, even though
+    real GNU ``env -i`` starts the wrapped command with a genuinely empty
+    environment -- no ``PATH`` at all, inherited or otherwise.
+
+    Confined to this module's internal traversal: :func:`_skip_env_prefix`
+    produces it, :func:`_traverse_env_and_launcher_prefix` consumes it and
+    resets its own accumulated ``env_path`` to ``None``, and it never
+    escapes that function -- every other consumer of ``env_path``
+    (:func:`_apply_env_context`, :func:`_resolve_env_path_entries`) still
+    only ever sees a real ``str`` or ``None``, unchanged.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "_ENV_PATH_CLEARED"
+
+
+#: The one instance of :class:`_EnvPathCleared` -- see its own docstring.
+_ENV_PATH_CLEARED = _EnvPathCleared()
 #: ``env`` flags that stand alone -- no operand of their own follows.
 #: ``-i``/``--ignore-environment`` clears the inherited environment before
 #: applying any ``NAME=VALUE`` assignments; the others are cosmetic/output
@@ -146,6 +182,21 @@ _ENV_OPERAND_FLAGS = frozenset({"-u", "--unset", "-C", "--chdir"})
 #: :func:`_apply_env_context`'s chdir-folding below (P2 review, "Apply env
 #: chdir before resolving relative compiler paths", fresh evidence).
 _ENV_CHDIR_FLAGS = frozenset({"-C", "--chdir"})
+#: The subset of :data:`_ENV_OPERAND_FLAGS` that UNSETS a variable (POSIX
+#: ``-u NAME``/``--unset NAME``) -- when *NAME* is exactly ``PATH``, this
+#: env layer explicitly clears any inherited ``PATH``, the same as
+#: ``-i``/``--ignore-environment`` (round 26 Finding 3, Codex review, fresh
+#: evidence) -- see :class:`_EnvPathCleared`'s own docstring for why this
+#: must be tracked as a distinct third state, not merely skipped like
+#: unsetting any other variable.
+_ENV_UNSET_FLAGS = frozenset({"-u", "--unset"})
+#: ``env`` flags that clear the ENTIRE inherited environment, ``PATH``
+#: included -- POSIX ``-i``/``--ignore-environment`` and its deprecated
+#: bare ``-`` alias (matched separately, in :func:`_skip_env_prefix`'s own
+#: ``arg == "-"`` branch) both mean "start with an empty environment" per a
+#: real installed ``env --help`` (round 26 Finding 3, Codex review, fresh
+#: evidence).
+_ENV_IGNORE_ENV_FLAGS = frozenset({"-i", "--ignore-environment"})
 #: The env-assignment name whose value is captured (not just skipped) by
 #: :func:`_skip_env_prefix`, feeding :func:`_apply_env_context`'s
 #: PATH-resolution below (P2 review, "Resolve drivers using the
@@ -662,7 +713,9 @@ def join_path_token(base: str, token: str) -> str:
     return os.path.normpath(os.path.join(base, token))
 
 
-def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | None]:
+def _skip_env_prefix(
+    argv: list[str], i: int
+) -> tuple[int, str | None, str | _EnvPathCleared | None]:
     """Skip a leading POSIX ``env`` invocation and its flags/assignments.
 
     A real build recipe recorded via an environment-scoped invocation or
@@ -722,6 +775,20 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
     caller) applies them to the actual driver token once it is known, via
     :func:`_apply_env_context`.
 
+    **``env_path``'s third state (round 26 Finding 3, Codex review, fresh
+    evidence).** ``-i``/``--ignore-environment`` (and its deprecated bare
+    ``-`` alias) or ``-u PATH``/``--unset PATH`` mean this ``env`` layer
+    explicitly starts the wrapped command with NO ``PATH`` at all, which is
+    a different thing from "this layer said nothing about ``PATH``,
+    inherit whatever an outer layer already established" -- plain ``None``
+    already means the latter, so a third value,
+    :data:`_ENV_PATH_CLEARED` (an instance of :class:`_EnvPathCleared`), is
+    returned for the former. See that class's own docstring for the full
+    reasoning and the nested-``env -i`` case it exists to fix. This
+    function itself does nothing with the distinction beyond returning it
+    -- :func:`_traverse_env_and_launcher_prefix` (the one caller) is where
+    it actually resets any already-accumulated ``env_path``.
+
     **Mutates** *argv* **in place for** ``-S``/``--split-string``
     (Codex review, ``_argv.py:102``, fresh evidence): unlike every other
     flag this function recognizes, ``-S``/``--split-string``'s value is
@@ -740,7 +807,7 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
         return i, None, None
     i += 1
     chdir: str | None = None
-    env_path: str | None = None
+    env_path: str | _EnvPathCleared | None = None
     while i < len(argv):
         arg = argv[i]
         if arg == "-":
@@ -753,7 +820,11 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
             # treated the literal `-`/`--` token itself as the command --
             # losing the real driver and everything after it, the same
             # failure shape the incorrect `--verbose` spelling produced.
-            # No operand of its own -- like `-i`, only skipped.
+            # No operand of its own -- like `-i`, only skipped. Also clears
+            # PATH the same as `-i` itself (round 26 Finding 3) -- it is
+            # documented as exactly that flag's equivalent, not a lesser
+            # form of it.
+            env_path = _ENV_PATH_CLEARED
             i += 1
             continue
         if arg == "--":
@@ -766,6 +837,12 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
             i += 1
             break
         if arg in _ENV_NO_OPERAND_FLAGS:
+            if arg in _ENV_IGNORE_ENV_FLAGS:
+                # `-i`/`--ignore-environment` starts the wrapped command
+                # with a genuinely empty environment -- PATH included --
+                # not merely "no opinion" (round 26 Finding 3; see
+                # `_EnvPathCleared`'s own docstring).
+                env_path = _ENV_PATH_CLEARED
             i += 1
             continue
         if arg.startswith(_ENV_OPTIONAL_SIG_FLAG_PREFIXES):
@@ -800,9 +877,22 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
             )
             continue
         if arg in _ENV_OPERAND_FLAGS and i + 1 < len(argv):
+            if arg in _ENV_UNSET_FLAGS and argv[i + 1] == "PATH":
+                # `-u PATH`/`--unset PATH` explicitly unsets PATH for the
+                # wrapped command -- the same "no PATH at all" state `-i`
+                # produces, not "no opinion" (round 26 Finding 3; see
+                # `_EnvPathCleared`'s own docstring). Any OTHER `-u NAME`
+                # unsets an unrelated variable this module doesn't track.
+                env_path = _ENV_PATH_CLEARED
             i += 2
             continue
         if arg.startswith("--unset="):
+            if arg.removeprefix("--unset=") == "PATH":
+                # The joined `--unset=PATH` spelling of the same `-u PATH`
+                # case handled above -- must clear PATH identically (round
+                # 26 Finding 3 follow-through: the separate-token form was
+                # fixed but this equally-real joined form was not).
+                env_path = _ENV_PATH_CLEARED
             i += 1
             continue
         if arg.startswith(_ENV_PATH_ASSIGNMENT_PREFIX):
@@ -842,7 +932,12 @@ def _traverse_env_and_launcher_prefix(
     value across every ``env`` layer seen -- two RELATIVE values compose
     (``env -C a env -C b ...`` -> ``a/b``), a later ABSOLUTE value fully
     replaces whatever was accumulated (P2 review round 19 + Codex review
-    Finding 7); *env_path* is the most recently seen ``PATH=`` override.
+    Finding 7); *env_path* is the most recently seen ``PATH=`` override --
+    or ``None`` again once a later, nested ``env`` layer explicitly clears
+    it (``-i``/``-u PATH``, round 26 Finding 3 -- see
+    :class:`_EnvPathCleared`'s own docstring). Only a real ``str`` or
+    ``None`` is ever returned here; the sentinel itself is resolved away
+    inside this function's own loop, never handed to a caller.
     """
     i = 0
     chdir: str | None = None
@@ -859,7 +954,20 @@ def _traverse_env_and_launcher_prefix(
                     chdir = join_path_token(chdir, new_chdir)
                 else:
                     chdir = new_chdir
-            if new_path is not None:
+            if isinstance(new_path, _EnvPathCleared):
+                # This `env` layer explicitly reset PATH (`-i`/`-u PATH`)
+                # -- any PATH= accumulated from an OUTER layer must not
+                # survive through it (round 26 Finding 3). A later,
+                # further-nested layer can still set its own real PATH=
+                # afterward -- that arrives as an ordinary `str` on a
+                # subsequent iteration and overwrites this `None` normally,
+                # via the branch below. `isinstance`, not `is`, so mypy can
+                # narrow `new_path` to plain `str` in the `elif` below
+                # (identity comparison against a singleton value doesn't
+                # narrow a `str | _EnvPathCleared | None` union the same
+                # way).
+                env_path = None
+            elif new_path is not None:
                 env_path = new_path
         while (
             i < len(argv)
@@ -1565,8 +1673,60 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
         return override
     argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
     if argv and argv[0] and not argv[0].startswith("-"):
-        return argv[0]
+        return _resolve_relative_driver(argv[0], compile_unit.directory)
     return "g++" if compile_unit.language.lower() in CXX_LANGS else "gcc"
+
+
+def _resolve_relative_driver(token: str, directory: str) -> str:
+    """Compose *token* onto *directory* when it is still relative (round 26
+    Finding 1, Codex review, fresh evidence).
+
+    :func:`strip_launchers`'s ``env -C``/chdir handling
+    (:func:`_apply_env_context`) deliberately returns a still-*relative*
+    driver token for a relative path-shaped token -- its own docstring
+    states this explicitly: "the result is still a relative path (DIR is
+    not itself resolved against anything here), so the existing downstream
+    join against ``cu.directory`` in ``header_compile_context.
+    _resolve_driver_token`` composes correctly". That downstream join is
+    real for the one caller that goes through
+    ``header_compile_context._derived_gcc_path``, but :func:`pick_compiler_binary`
+    -- the OTHER caller with a full ``CompileUnit`` (and therefore
+    ``directory``) in scope -- returned ``strip_launchers``'s token
+    completely unjoined, silently skipping that composition.
+
+    Concretely wrong for a compile unit recorded in directory ``/work``
+    with ``argv == ["env", "-C", "build", "../tool/clang++", ...]``: GNU
+    ``env -C build`` chdirs to ``/work/build`` first, and THEN resolves the
+    now-relative ``../tool/clang++`` from there -- landing back at
+    ``/work/tool/clang++``. ``_apply_env_context`` already folds the ``-C``
+    value into the token (``join_path_token("build", "../tool/clang++")``
+    == ``"tool/clang++"``), but that result is still relative to the
+    compile unit's OWN ``directory`` (``/work``), not to whatever cwd a
+    caller happens to run a subprocess from -- returning it unjoined let
+    ``CastxmlSourceExtractor`` (which runs from the effective ``-C`` cwd,
+    ``/work/build``) resolve it a second, wrong time, landing on
+    ``/work/build/tool/clang++`` instead.
+
+    Mirrors ``header_compile_context._resolve_driver_token``'s own
+    resolution (same host-independent absolute check/join grammar via
+    :func:`is_absolute_path_token`/:func:`join_path_token`, both already
+    defined in this module) rather than importing that private helper back
+    from ``header_compile_context`` -- which imports ``adapters.base``,
+    which in turn imports from this module at module scope, so a top-level
+    import in the other direction here would be a real import cycle; only
+    a function-local import would work, and duplicating the (already
+    tiny, already-local) composition logic here avoids that indirection
+    entirely. A bare token (no path separator -- a plain ``PATH``-searched
+    name like ``clang-cl``) and an already-absolute token are both left
+    unchanged, exactly as ``_resolve_driver_token`` treats them.
+    """
+    if "/" not in token and "\\" not in token:
+        return token
+    if is_absolute_path_token(token):
+        return normalize_path_token(token)
+    if not directory:
+        return token
+    return join_path_token(directory, token)
 
 
 def is_msvc_mode(cc_bin: str) -> bool:
