@@ -639,6 +639,92 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will run (trusted -- explicit --config)" in result.output
 
+    def test_no_sources_or_build_info_reports_no_collection_attempted(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: neither real call site (l2_seed, embed_build_source)
+        # is even reachable without --sources/--build-info -- a bare
+        # --build-query with neither given can never run, regardless of
+        # collect mode or headers.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path),
+                "--build-query", "touch marker", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (
+            "will NOT run -- neither --sources nor --build-info was given"
+            in result.output
+        )
+
+    def test_build_info_pack_with_compile_units_takes_precedence(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a --build-info pack already carrying L3 compile
+        # units is folded into collect_inline_pack's base_build BEFORE
+        # _resolve_compile_db is even considered -- the query never runs,
+        # and this is a case the plain-file/dir _compile_db_at check cannot
+        # catch (a pack directory has no top-level compile_commands.json).
+        from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        be = BuildEvidence()
+        be.compile_units.append(
+            CompileUnit(id="cu://api.c", source="api.c", directory=str(tmp_path))
+        )
+        BuildSourcePack(root=pack_dir, build_evidence=be).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--build-info", str(pack_dir),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+        assert "already carries L3 compile units" in result.output
+
+    def test_build_info_pack_without_compile_units_still_reports_will_run(
+        self, tmp_path: Path
+    ) -> None:
+        # The counterpart: an empty (e.g. source_abi-only) pack does not
+        # short-circuit resolution -- --build-info becomes effectively
+        # absent and the trusted query still resolves to "will run".
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        BuildSourcePack(root=pack_dir).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--build-info", str(pack_dir),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
