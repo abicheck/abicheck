@@ -638,3 +638,33 @@
   `header_compile_context.py`'s flag-rendering function into one variable
   reused by both call sites, instead of recomputing it a second time in the
   per-flag loop (CodeRabbit nitpick).
+- 21st round: closed the CI-only-reproducible failure that had been
+  breaking every check on this branch since round 17 — `mypy` (both the
+  `lint-and-types` and `ai-readiness` CI jobs) reported `Name "os" is not
+  defined` twice inside `header_compile_context._resolve_driver_token()`,
+  and the same function's use at runtime produced `NameError: name 'os' is
+  not defined` in ~19-25 tests exercising it, but only under CI's exact
+  invocation — the module's own top-level `import os` (present and
+  correctly placed) resolved cleanly in every one of five independent
+  local-reproduction attempts (fresh clones, fresh `pip install -e
+  ".[dev]"`, matching CI's pinned mypy/Python versions, matching CI's
+  `pytest -n auto --dist worksteal` flags), and a byte-level diff against
+  the file fetched directly through the GitHub API (bypassing git
+  entirely) showed no encoding anomaly either. Root cause not identified
+  despite five independent attempts (a diagnostic pass added to
+  `scripts/verify.py`'s `run_step`/`scripts/check_ai_readiness.py`'s
+  `check_mypy_baseline` to always print subprocess output, rather than
+  swallowing it on failure, is what surfaced the actual error text after
+  three prior rounds of these checks failing with zero visible
+  diagnostic output). Fixed defensively rather than diagnostically:
+  `_resolve_driver_token()` now shadows the module-level `os` import with
+  its own local `import os as _os` and refers to `_os` throughout its
+  body — semantically a no-op (Python allows a local import identical to
+  an outer one with zero behavioral difference at runtime) but it
+  guarantees the name resolves within this function's own scope
+  regardless of whatever caused the module-level binding to be invisible
+  to mypy/the interpreter under CI's specific environment. Documented as
+  a known, unresolved environmental anomaly rather than a fully
+  root-caused fix — a future contributor hitting the same shape of
+  CI-only, unreproducible `NameError`/mypy `name-defined` failure should
+  not assume this file's `import os` is the only place it could recur.

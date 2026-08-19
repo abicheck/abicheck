@@ -1261,13 +1261,15 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     either way and is exactly what this signature comparison needs (collapse
     equivalent *spellings*, not resolve real symlink targets).
     """
-    expanded = os.path.expanduser(token)
+    import os as _os
+
+    expanded = _os.path.expanduser(token)
     if "/" not in expanded and "\\" not in expanded:
         return expanded
     path = Path(expanded)
     if not path.is_absolute() and directory:
         path = Path(directory).expanduser() / path
-    return os.path.normpath(str(path))
+    return _os.path.normpath(str(path))
 
 
 def _ambiguity_message(
