@@ -1140,8 +1140,35 @@
   directly with a literal `C:\work\build`/`..\llvm\bin\clang-cl.exe` pair
   (and the symmetric POSIX pair) so this class of grammar bug -- in either
   the production helper or a future test's own expectations -- is caught
-  on ANY CI runner, not only a Windows one. No production code changed; a
-  fresh full local verification pass (`ruff check`, `ruff format --check`,
-  `mypy abicheck/`, the fast test suite, `check_ai_readiness.py`) and a
-  live Windows CI re-run on this PR's current head both confirm the two
-  originally-reported tests already pass.
+  on ANY CI runner, not only a Windows one. No production code changed for
+  this part; a fresh full local verification pass (`ruff check`,
+  `ruff format --check`, `mypy abicheck/`, the fast test suite,
+  `check_ai_readiness.py`) and a live Windows CI re-run on this PR's
+  current head both confirm the two originally-reported tests already
+  pass.
+- **The live Windows CI re-run triggered by the investigation above
+  surfaced one more, genuinely NEW instance of the identical test-bug
+  class, in a third sibling test.** `test_header_compile_context_gcc_path.
+  py::test_resolve_driver_token_host_native_relative_join_unaffected` -- a
+  round 27 negative control asserting that an "ordinary host-native
+  relative join" (a bare, separator-free `directory="build"` plus a
+  POSIX-spelled relative token, `"../tool/clang-cl"`) is "unaffected by
+  this fix" -- failed on the real Windows runner with
+  `assert 'tool/clang-cl' == 'tool\\clang-cl'`. The premise was wrong, not
+  the production code: `_join_grammar()` (round 27's own fix, described
+  above) resolves an ambiguous `directory` like `"build"` by falling back
+  to the *token*'s own separator style, and `"../tool/clang-cl"` is
+  unambiguously POSIX-spelled -- so `_resolve_driver_token()` correctly,
+  deliberately composes it with `posixpath` regardless of host, exactly
+  like every other case this same round's fix targets. The test's
+  `os.path.normpath(...)` expectation baked in host-native grammar for a
+  case that was never actually host-native, the identical mistake round 26
+  made for the two tests documented above -- confirmed by re-deriving the
+  expected value directly from `_join_grammar()`'s own documented fallback
+  rule rather than from a live Windows run. Fixed by replacing the
+  host-native expectation with the literal, host-independent
+  `"tool/clang-cl"` and correcting the docstring to explain why this
+  negative control's assumption was wrong (this IS host-independent
+  behavior, not "unaffected by the fix"). A second live Windows CI re-run
+  on this PR's current head, after this fix, confirms all three tests pass
+  together with no other failures.

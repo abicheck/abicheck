@@ -1164,18 +1164,30 @@ def test_resolve_driver_token_posix_relative_driver_joined_with_posix_directory(
 
 
 def test_resolve_driver_token_host_native_relative_join_unaffected() -> None:
-    """Negative control: an ORDINARY host-native relative join (no foreign
-    grammar involved at all -- a bare, separator-free directory segment,
-    exactly the shape ``_resolve_driver_token``'s own docstring example
-    uses) is unaffected by this fix, matching its pre-existing, documented
-    behavior."""
+    """Negative control -- corrected against a live Windows CI signal
+    (round 27 follow-up, fresh evidence): a bare, separator-free
+    ``directory`` (``"build"``, no ``/``/``\\`` at all) is ambiguous in
+    BOTH grammars, so :func:`~abicheck.buildsource.source_extractors._argv.
+    _join_grammar` falls back to the *token*'s own separator style --
+    ``"../tool/clang-cl"`` is unambiguously POSIX-spelled (forward slashes
+    only), so the join composes with ``posixpath`` regardless of which host
+    OS is doing the analysis. This is genuinely, correctly HOST-INDEPENDENT
+    behavior, not "unaffected by this fix" as an earlier revision of this
+    test claimed and asserted via host-native ``os.path.normpath(...)`` --
+    that literal-string assertion only coincidentally matched on a POSIX CI
+    runner (where ``os.path`` *is* ``posixpath``) and diverged to a
+    backslash-flavored result the moment this same test ran on a real
+    Windows runner, the identical class of test bug round 27's own
+    changelog entry already documents for two sibling tests in
+    ``tests/test_source_extractors_env_round26.py``. A literal,
+    host-independent expected value is correct here for the same reason
+    those two fixes are: this function's contract is "grammar follows the
+    token/directory's own spelling," never the analyzing host's."""
     from abicheck.buildsource.header_compile_context import _resolve_driver_token
 
     token = "../tool/clang-cl"
     directory = "build"
-    assert _resolve_driver_token(token, directory) == os.path.normpath(
-        "build/../tool/clang-cl"
-    )
+    assert _resolve_driver_token(token, directory) == "tool/clang-cl"
 
 
 def test_resolve_driver_token_relative_driver_empty_directory_left_normalized() -> None:
