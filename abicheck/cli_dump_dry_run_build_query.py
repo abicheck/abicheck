@@ -432,7 +432,24 @@ def add_build_query_dry_run_section(
         effective_sources is not None
     )
     config_readable = l2_seed_reachable or raw_operand_present
-    raise_on_bad_config = collect_active and raw_operand_present
+    # `embed_build_source`'s own auto-discovery is `discover_build_config
+    # (raw_sources)` -- keyed on `effective_sources` alone, never
+    # `build_info` -- so a raw (non-pack) `--build-info` can make
+    # `raw_operand_present` True while `effective_sources` is still `None`
+    # (--sources absent, or itself a pack): in that shape `embed_build_
+    # source` never discovers *any* file (`discover_build_config(None)` is
+    # always `None`), so it can never be the reason a load fails, no matter
+    # how `collect_active`/`raw_operand_present` resolve (Codex review,
+    # fresh evidence -- a malformed `.abicheck.yml` inside a `--sources`
+    # pack, combined with a raw `--build-info`, previously raised here even
+    # though `embed_build_source` never reads that file at all: only
+    # `l2_seed`'s own pack-rooted discovery does, and that path always
+    # degrades silently). When `effective_sources` *is* set, `sources ==
+    # effective_sources` unconditionally (it is only ever nulled when
+    # `--sources` is itself a pack), so `discover_from` above always agrees
+    # with what `embed_build_source` would independently discover -- no
+    # divergence to guard against in that case.
+    raise_on_bad_config = collect_active and raw_operand_present and effective_sources is not None
 
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
     # itself resolves from for this purpose -- distinct from `discover_project_

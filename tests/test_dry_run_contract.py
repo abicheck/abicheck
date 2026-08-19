@@ -1322,6 +1322,44 @@ class TestDumpDryRunBuildQueryTrust:
             not in result.output
         )
 
+    def test_malformed_config_inside_sources_pack_degrades_silently_despite_raw_build_info(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: `embed_build_source`'s own
+        # auto-discovery is `discover_build_config(raw_sources)` -- keyed on
+        # `effective_sources` alone, never `build_info` -- so with --sources
+        # a pack, `raw_sources` is None regardless of a raw --build-info also
+        # being given, and `discover_build_config(None)` always returns None:
+        # embed_build_source never even discovers this pack's own malformed
+        # .abicheck.yml, let alone fails to load it. Only l2_seed's own
+        # pack-rooted discovery (reachable via headers + a real artifact)
+        # finds it, and that path always degrades silently -- so the real
+        # run proceeds (exit 0), even though a raw, non-pack --build-info is
+        # also present. An earlier revision raised click.UsageError (exit 64)
+        # here purely because `raw_operand_present` was true via the
+        # unrelated --build-info clause.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+        (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
+        build_info = tmp_path / "not_a_compile_db.txt"
+        build_info.write_text("not a compile database\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "--build-info", str(build_info), "-H", str(header), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
