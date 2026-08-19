@@ -851,7 +851,7 @@ class TestDedupIncludeDirsAcrossCompositionSites:
     ) -> None:
         d = tmp_path / "inc"
         toks = ("-DFOO=1", "-I", str(d), "-fPIC")
-        out = drop_include_tokens_duplicating_paths(toks, [d])
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
         assert out == ["-DFOO=1", "-fPIC"]
 
     def test_drop_include_tokens_duplicating_paths_drops_attached_duplicate(
@@ -859,17 +859,31 @@ class TestDedupIncludeDirsAcrossCompositionSites:
     ) -> None:
         d = tmp_path / "inc"
         toks = (f"-I{d}", "-fPIC")
-        out = drop_include_tokens_duplicating_paths(toks, [d])
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
         assert out == ["-fPIC"]
 
-    def test_drop_include_tokens_duplicating_paths_keeps_non_matching(
+    def test_drop_include_tokens_duplicating_paths_keeps_non_matching_directory(
         self, tmp_path: Path
     ) -> None:
         d = tmp_path / "inc"
         other = tmp_path / "other"
-        toks = ("-I", str(other), "-isystem", str(d))
-        out = drop_include_tokens_duplicating_paths(toks, [d])
+        toks = ("-I", str(other), "-I", str(d))
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
         assert out == ["-I", str(other)]
+
+    def test_drop_include_tokens_duplicating_paths_is_class_sensitive(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802: an ``-I``-class duplicate must not eat an
+        ``-isystem`` entry for the same directory -- GCC/Clang consult
+        ``-iquote``/``-I``/``-isystem``/``-idirafter`` as distinct search
+        buckets regardless of argv order, so dropping a same-directory
+        entry in a *different* class would change which bucket the
+        directory is searched from."""
+        d = tmp_path / "inc"
+        toks = ("-isystem", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-isystem", str(d), "-fPIC"]
 
 
 class TestMergeL3CompileContextDropsDuplicateExplicitInclude:

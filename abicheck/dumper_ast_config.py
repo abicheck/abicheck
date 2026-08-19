@@ -277,7 +277,7 @@ def _build_castxml_command(
     # Dropped when an entry duplicates a directory already emitted above via
     # `extra_includes` — see `drop_include_tokens_duplicating_paths`'s own
     # docstring for why this can otherwise happen and what it broke.
-    cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens, extra_includes)
+    cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens, cmd)
 
     explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
     # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
@@ -357,7 +357,7 @@ def _build_clang_header_command(
     # Dropped when an entry duplicates a directory already emitted above via
     # `extra_includes` — see `drop_include_tokens_duplicating_paths`'s own
     # docstring for why this can otherwise happen and what it broke.
-    cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens, extra_includes)
+    cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens, cmd)
     if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a

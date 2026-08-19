@@ -1909,11 +1909,31 @@ Once a root command genuinely clears the bar above, pick the right home:
   repeats `-I <dir>`, and a fresh `dump` baseline's `ast_compile_args` now
   matches a `scan --against` candidate's own (both carry exactly one `-I
   <dir>` for the matched project directory) — see
-  `tests/test_header_compile_context.py`'s
-  `test_merge_l3_compile_context_drops_derived_include_duplicating_explicit`/
-  `test_merge_l3_compile_context_keeps_derived_include_when_directories_differ`
-  and `tests/test_build_context_completeness.py`'s
-  `TestDedupIncludeDirsAcrossCompositionSites`.
+  `tests/test_build_context_completeness.py`'s
+  `TestDedupIncludeDirsAcrossCompositionSites`/
+  `TestMergeL3CompileContextDropsDuplicateExplicitInclude`.
+
+  **A Codex review round on the same PR found the first version of this
+  fix class-blind, and it was fixed before merge.** `drop_include_tokens_
+  duplicating_paths()`'s first cut matched purely on resolved directory,
+  ignoring which include-search *class* (`-I`/`-isystem`/`-iquote`/
+  `-idirafter`) each entry belonged to — but a real compiler consults
+  those as distinct search buckets in a fixed order regardless of argv
+  position (the identical class-blindness `_split_include_tokens`'s own
+  docstring already documents as a known gap one function over), so
+  dropping an `-isystem <dir>` merely because an unrelated `-I <dir>`
+  existed elsewhere could change which bucket that directory is searched
+  from for a colliding header basename — concretely, `-I A -I B -isystem
+  A` resolves a colliding name from `B`, while the class-blind rewrite
+  `-I A -I B` resolves it from `A` instead. Fixed by making the dedup key
+  `(flag-class, resolved directory)` rather than the directory alone, via
+  a new `_include_class_path_pairs()` shared by both the "already
+  covered" side and the token walk being filtered — see
+  `TestDedupIncludeDirsAcrossCompositionSites::
+  test_drop_include_tokens_duplicating_paths_is_class_sensitive`. Both
+  call sites' "already covered" argument changed shape accordingly (raw
+  tokens, not bare `Path`s) so the class of an *already-emitted* entry is
+  never lost either.
 
   **Not fully closed — a third, deeper mechanism survives and still
   reproduces `NOT_COMPARABLE` on `include_sequence` for the identical

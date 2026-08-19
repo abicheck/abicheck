@@ -455,11 +455,52 @@ def _flag_tokens(toks: list[str]) -> list[str]:
     return out
 
 
+def _include_class_path_pairs(toks: Sequence[str]) -> set[tuple[str, str]]:
+    """Every ``(flag-class, resolved-directory)`` pair present in *toks*.
+
+    The flag *class* (the matched prefix itself, e.g. ``"-I"`` vs.
+    ``"-isystem"``) is part of the key, not just the directory — GCC/Clang
+    consult ``-iquote``/``-I``/``-isystem``/``-idirafter`` as **distinct
+    search buckets in a fixed order regardless of argv position** (see
+    :func:`_split_include_tokens`'s own documented gap on this exact point),
+    so a directory present via one class is not interchangeable with the
+    same directory present via another — dropping an ``-isystem <dir>``
+    merely because an unrelated ``-I <dir>`` exists elsewhere would change
+    which bucket that directory is searched from for a colliding basename
+    (Codex review, PR #802).
+    """
+    pairs: set[tuple[str, str]] = set()
+    i = 0
+    n = len(toks)
+    while i < n:
+        t = toks[i]
+        matched_prefix = next(
+            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None
+        )
+        if matched_prefix is None:
+            i += 1
+            continue
+        if t == matched_prefix and i + 1 < n:
+            operand = toks[i + 1]
+            consumed = 2
+        else:
+            operand = t[len(matched_prefix) :]
+            consumed = 1
+        try:
+            key = str(Path(operand).resolve())
+        except OSError:
+            key = operand
+        pairs.add((matched_prefix, key))
+        i += consumed
+    return pairs
+
+
 def drop_include_tokens_duplicating_paths(
-    toks: Sequence[str], already_covered: Sequence[Path]
+    toks: Sequence[str], already_covered: Sequence[str]
 ) -> list[str]:
-    """*toks* with an include-search flag+operand pair dropped when its
-    directory already appears in *already_covered*.
+    """*toks* with an include-search flag+operand pair dropped when the
+    identical ``(flag-class, directory)`` pair already appears in
+    *already_covered* (a raw token list, in the same shape as *toks*).
 
     ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.cli_dump_helpers.
     perform_elf_dump`/:func:`abicheck.service_header_scoped._try_header_
@@ -489,19 +530,17 @@ def drop_include_tokens_duplicating_paths(
     Applied to ``gcc_option_tokens`` only, against the already-emitted
     ``extra_includes`` — never the reverse, since ``extra_includes`` is
     :func:`declared_includes`'s one canonical source and must always keep
-    every entry it's given. Dedup key is the resolved absolute path
-    (mirroring :func:`dedup_paths_preserve_order`), so a relative and an
-    absolute spelling of the same directory both drop. Search-priority is
-    unaffected: dropping a *later* duplicate of a directory
-    ``extra_includes`` already searches first changes nothing about which
-    file a compiler resolves.
+    every entry it's given. Dedup key is ``(flag-class, resolved absolute
+    path)`` — see :func:`_include_class_path_pairs`'s own docstring for why
+    the class must be part of the key, not just the directory: a real
+    compiler treats ``-iquote``/``-I``/``-isystem``/``-idirafter`` as
+    distinct search buckets regardless of argv order, so a same-directory
+    entry in a *different* class is never dropped, only an exact class+path
+    duplicate. Search-priority is unaffected for the entries that *are*
+    dropped: it is always the later, redundant duplicate of an identical
+    class+directory pair that goes, never the earlier one.
     """
-    covered: set[str] = set()
-    for p in already_covered:
-        try:
-            covered.add(str(p.resolve()))
-        except OSError:
-            covered.add(str(p))
+    covered = _include_class_path_pairs(already_covered)
     out: list[str] = []
     i = 0
     n = len(toks)
@@ -524,7 +563,7 @@ def drop_include_tokens_duplicating_paths(
             key = str(Path(operand).resolve())
         except OSError:
             key = operand
-        if key in covered:
+        if (matched_prefix, key) in covered:
             i += consumed
             continue
         out.extend(toks[i : i + consumed])

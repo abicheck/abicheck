@@ -548,16 +548,12 @@ def _merge_l3_compile_context(
     # reproduces for the identical project. "Explicit wins, searches
     # first" is unaffected: only the later, redundant `derived` copy is
     # dropped, never the earlier explicit one.
-    from ..header_utils import (
-        drop_include_tokens_duplicating_paths,
-        include_operand_dirs,
-    )
+    from ..header_utils import drop_include_tokens_duplicating_paths
 
-    explicit_include_dirs = include_operand_dirs(
-        tuple(explicit_tail) + explicit.gcc_option_tokens
-    )
     derived_includes = tuple(
-        drop_include_tokens_duplicating_paths(derived_includes, explicit_include_dirs)
+        drop_include_tokens_duplicating_paths(
+            derived_includes, explicit_tail + list(explicit.gcc_option_tokens)
+        )
     )
     return dataclasses.replace(
         explicit,
