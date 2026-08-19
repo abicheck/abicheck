@@ -185,13 +185,39 @@ class DumpResult:
     ``dump`` path's ADR-039 build-context collector and header-graph second
     pass) needs these, rather than re-deriving them via a second, independent
     call to the same underlying fold.
+
+    Defaulted to ``()``/``None`` (Codex review, fresh evidence) —
+    :class:`DumpResult` is exported, documented Tier-2 API surface, so
+    appending *required* fields would break an external caller already
+    constructing the previous three-field shape, not just callers inside
+    this repo (which are already updated). The defaults never surface in
+    practice: :func:`execute_dump_request` — the only real constructor —
+    always supplies both explicitly.
+
+    **Lifetime caveat, not yet relevant to any caller in this repo (Codex
+    review, fresh evidence)**: when the fold ran a trusted, zero-config
+    *inferred* build-system query (no existing compile database), the
+    temporary build directory it seeded ``effective_includes``/
+    ``effective_compile_context`` from is deleted by the time this object is
+    returned — cleanup runs, deliberately, right after the primary parse has
+    consumed it (see
+    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`'s
+    own docstring). These fields are therefore safe to use for *identity or
+    comparison* (exactly how ``scan_engine``'s own, pre-existing pair-aware
+    baseline-context-reuse decision already uses its equivalent locals — see
+    ``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR 3A section), but
+    a caller intending to re-read a file under one of these paths (the
+    post-processing-hook use case named above) cannot yet do so safely — that
+    is exactly the sort of pair-aware/lifetime redesign PR 3A's "Known gaps"
+    entry already scopes as its own follow-up, not settled by exposing these
+    fields alone.
     """
 
     resolved: ResolvedDumpRequest
     snapshot: AbiSnapshot
     effective_depth: str
-    effective_includes: tuple[Path, ...]
-    effective_compile_context: CompileContext | None
+    effective_includes: tuple[Path, ...] = ()
+    effective_compile_context: CompileContext | None = None
 
 
 def _reject_unsupported_frontends(

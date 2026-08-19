@@ -808,24 +808,28 @@ pipelines a fourth time.
   of them are re-resolved at execution time the way the backend is.
 
   `DumpResult` states the executed outcome: the
-  real snapshot and the *achieved* effective depth (only knowable from the
-  completed snapshot) — see the "storage result" note two sentences below
-  for why it carries nothing more yet. **Corrected ownership (CodeRabbit
-  review, fresh evidence — an earlier draft of this sentence called the
-  omitted fields "CLI-presentation-layer concerns `execute_dump_request()`
-  doesn't touch", which overstates the gap):** the resolved compile
-  context and the dependency scope genuinely *are* computed inside
-  `execute_dump_request()`'s own call chain — `resolve_side_snapshot`
-  performs the P0.3 L3→L2 compile-context fold internally (see
-  `service_input_resolution.py`'s `_seeded_includes_and_compile_context`),
+  real snapshot, the *achieved* effective depth (only knowable from the
+  completed snapshot), and — **landed 2026-08-19, updating this paragraph in
+  place per Codex review rather than leaving a contradictory later status
+  note** — the P0.3 L3→L2 fold's own `effective_includes`/
+  `effective_compile_context`, now genuinely surfaced as fields (previously
+  computed internally and discarded; see the "Slice landed (2026-08-19...)"
+  note below this bullet for the exact shape and its own lifetime caveat).
+  **Corrected ownership (CodeRabbit review, fresh evidence — an earlier
+  draft of this sentence called the omitted fields "CLI-presentation-layer
+  concerns `execute_dump_request()` doesn't touch", which overstated the
+  gap):** the resolved compile context and the dependency scope genuinely
+  *are* computed inside `execute_dump_request()`'s own call chain —
+  `resolve_side_snapshot`/`_resolve_side_snapshot_impl` performs the P0.3
+  L3→L2 compile-context fold internally (see `service_input_resolution.py`),
   and `populate_side_dependency_info` runs directly in
-  `execute_dump_request()` when `follow_dependencies` is set. The gap is
-  narrower than "not touched": these values are computed but not
-  *surfaced* as `DumpResult` fields, an output-shape gap, not a
-  processing one. Only the ADR-039 build-context collector's own
-  diagnostics are a genuine CLI-layer concern here — those post-processing
-  passes live in `perform_elf_dump` alone, which `execute_dump_request`
-  does not call (blocker 2 above).
+  `execute_dump_request()` when `follow_dependencies` is set. The compile
+  context is now surfaced (this landed slice); the dependency scope is not
+  yet a `DumpResult` field — still open, distinct from the compile-context
+  gap this paragraph originally described. Only the ADR-039 build-context
+  collector's own diagnostics are a genuine CLI-layer concern here — those
+  post-processing passes live in `perform_elf_dump` alone, which
+  `execute_dump_request` does not call (blocker 2 above).
   Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
   `--dry-run` never reaches that step. **The storage result is not part of
   the `DumpResult` this slice's `execute_dump_request()` produces (Codex
@@ -837,9 +841,8 @@ pipelines a fourth time.
   storage result to report. A storage field is a real, separate addition
   for whichever future slice folds `cli.py`'s `fold_dump_provenance_into_json`
   write step into this pipeline (not attempted here) — until then, treat
-  `DumpResult` as snapshot + achieved depth only, and update this paragraph
-  again when that slice actually adds the field, rather than describing a
-  field that does not exist yet. See the follow-up investigation below this
+  `DumpResult` as snapshot + achieved depth + effective includes/compile
+  context, no storage result. See the follow-up investigation below this
   bullet for the concrete function split
   (`resolve_dump_request`/`execute_dump_request`) and why `run_dump_request`
   itself keeps returning a bare `AbiSnapshot`. The root `AGENTS.md` "Known

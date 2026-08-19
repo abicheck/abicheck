@@ -78,6 +78,22 @@ class SideResolution:
     header-graph second pass; ``scan_engine``'s pair-aware baseline-context
     reuse decision) need these values themselves, not just the snapshot. See
     :func:`_resolve_side_snapshot_impl`.
+
+    **Lifetime caveat (Codex review, fresh evidence)**: when the fold ran a
+    trusted, zero-config *inferred* build-system query (no existing compile
+    database), the temporary build directory ``effective_includes``/
+    ``effective_compile_context`` were seeded from is already deleted by the
+    time this object is returned -- ``_resolve_side_snapshot_impl``'s own
+    ``finally`` drains that cleanup right after the primary parse has
+    consumed it, deliberately, to release its exclusive lock before a
+    sibling collection (e.g. ``embed_build_source``'s own inferred query)
+    can run. Safe for *identity/comparison* (e.g. ``scan_engine``'s own
+    pair-aware baseline-context-reuse decision, which only compares these
+    values against another side's resolved header/include sets, never reads
+    a file under them) -- **not** safe for a caller intending to re-read a
+    file under one of these paths after this call returns. Closing that for
+    real needs the pair-aware/lifetime redesign PR 3A's "Known gaps" entry
+    already scopes as a dedicated follow-up, not merely exposing the values.
     """
 
     snapshot: AbiSnapshot

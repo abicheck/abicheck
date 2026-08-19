@@ -575,6 +575,22 @@ class TestResolveExecuteDumpRequestSplit:
 
         assert "storage" not in {f.name for f in fields(DumpResult)}
 
+    def test_dump_result_still_accepts_three_argument_construction(
+        self, snap_path: Path
+    ):
+        """Codex review, fresh evidence: DumpResult is exported Tier-2 API,
+        so appending effective_includes/effective_compile_context as
+        *required* fields would TypeError on an external caller already
+        constructing the previous three-field shape. Both must default."""
+        from abicheck.service_dump_pipeline import DumpResult, resolve_dump_request
+
+        resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
+        result = DumpResult(
+            resolved=resolved, snapshot=_snapshot(), effective_depth="headers"
+        )
+        assert result.effective_includes == ()
+        assert result.effective_compile_context is None
+
     def test_dump_result_carries_effective_includes_and_compile_context(
         self, snap_path: Path
     ):
