@@ -592,6 +592,53 @@ class TestDumpDryRunBuildQueryTrust:
         assert "argv: ['make', '-n', '-k']" in result.output
         assert "resulting compile-DB path: out/compile_commands.json" in result.output
 
+    def test_depth_binary_reports_no_collection_requested(self, tmp_path: Path) -> None:
+        # Codex review: --depth binary clears the headers
+        # (resolve_dump_collect_context) and resolves collect_mode to "off",
+        # so neither real call site (the L2 seed, gated on headers; embed_
+        # build_source, gated on collect_mode) ever reaches
+        # _resolve_compile_db -- an earlier version of this report still
+        # claimed a trusted query "will run" for this combination.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")  # --dry-run never opens/parses it
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--config", str(cfg), "--depth", "binary",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Build query (trust):" in result.output
+        assert "will NOT run -- no evidence collection requested" in result.output
+
+    def test_depth_headers_still_reports_will_run(self, tmp_path: Path) -> None:
+        # The counterpart to the case above: --depth headers also resolves
+        # collect_mode to "off", but -- unlike --depth binary -- it does NOT
+        # clear the headers, so the L2 seed still runs (it only gates the
+        # zero-config *inferred* query on collect_mode, never the explicit
+        # trusted cfg.query branch) and a trusted build.query genuinely does
+        # execute for this combination.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--config", str(cfg), "--depth", "headers",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:

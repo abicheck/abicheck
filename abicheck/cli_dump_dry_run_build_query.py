@@ -44,6 +44,23 @@ database (Codex review, fresh evidence) -- reusing that module's own
 than re-deriving the same resolution a second, potentially-diverging way;
 other modules already reach into this same private helper across the module
 boundary (e.g. ``service_scan.py``'s ``_find_compile_db_in_dir``).
+
+The no-collection-requested check (Codex review, fresh evidence) mirrors the
+precondition that must hold before *either* real call site can even reach
+``_resolve_compile_db``. There are two independent paths in
+(``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``):
+``l2_seed.seed_includes_and_fold_compile_context`` (gated on ``headers`` being
+non-empty -- it returns immediately otherwise) and
+``cli_buildsource.embed_build_source`` (gated on ``collection_for_ci_mode
+(collect_mode)`` returning a non-empty layer set -- empty only for
+``collect_mode == "off"``, e.g. from ``--depth binary``, which also clears
+``headers`` to ``()`` -- or ``--depth headers``, which resolves to
+``collect_mode == "off"`` too but leaves ``headers`` alone). ``build.query``
+can therefore still run under ``--depth headers`` (headers non-empty reaches
+the L2-seed path, which only gates the *zero-config inferred* query on
+``collect_mode``, never the explicit trusted ``cfg.query`` branch) -- only
+the conjunction of both empty (``--depth binary``, or no headers given at
+all with ``collect_mode == "off"``) rules out both call sites.
 """
 
 from __future__ import annotations
@@ -62,6 +79,8 @@ def add_build_query_dry_run_section(
     result: DryRunResult,
     *,
     sources: Path | None,
+    headers: tuple[Path, ...],
+    collect_mode: str,
     build_info: Path | None,
     build_config: Path | None,
     build_query: str | None,
@@ -73,6 +92,18 @@ def add_build_query_dry_run_section(
         discover_build_config,
         load_build_config,
     )
+
+    # Neither `l2_seed.seed_includes_and_fold_compile_context` (needs headers)
+    # nor `embed_build_source` (needs a non-"off" collect mode) would even
+    # call `collect_inline_pack`/`_resolve_compile_db` -- build.query, trusted
+    # or not, is never reached (Codex review, fresh evidence).
+    if not headers and collect_mode == "off":
+        result.add(
+            _SECTION,
+            "build.query: will NOT run -- no evidence collection requested "
+            f"(collect mode {collect_mode!r} with no headers to parse)",
+        )
+        return
 
     # `_resolve_compile_db`'s own first branch: an explicit --build-info that
     # already resolves to a real compile database is returned immediately --
