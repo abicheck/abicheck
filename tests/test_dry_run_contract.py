@@ -1533,6 +1533,30 @@ class TestDumpDryRunBuildQueryTrust:
             "configured, and no conventional compile DB exists yet"
         ) in result.output
 
+    def test_absolute_compile_db_hint_reports_diagnostic_not_traceback(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: Path.glob() raises NotImplementedError
+        # for a non-relative pattern (confirmed: Path("/tmp").glob("/tmp/x")
+        # raises "Non-relative patterns are unsupported") -- the real
+        # _run_build_query's own identical sources.glob(cfg.compile_db) call
+        # has the same, uncaught gap. This module must not crash on a
+        # read-only preview even though the real run itself would.
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        absolute_hint = str((tmp_path / "compile_commands.json").resolve())
+        cfg = self._write_config(tmp_path, compile_db=absolute_hint)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "NotImplementedError" in result.output
+        assert "an absolute path" in result.output
+
     def test_malformed_config_inside_sources_pack_degrades_silently_despite_raw_build_info(
         self, tmp_path: Path
     ) -> None:
