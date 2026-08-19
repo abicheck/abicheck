@@ -29,10 +29,14 @@ Pure and tool-independent: nothing here shells out.
 
 from __future__ import annotations
 
+import ntpath
 import os
+import posixpath
 import re
+import shlex
 import shutil
 from collections.abc import Sequence
+from pathlib import PurePosixPath, PureWindowsPath
 
 from ...header_utils import (
     is_msvc_driver_stem,
@@ -102,6 +106,19 @@ _ENV_CHDIR_FLAGS = frozenset({"-C", "--chdir"})
 #: separator) is ever looked up against it -- see that function's own
 #: docstring.
 _ENV_PATH_ASSIGNMENT_PREFIX = "PATH="
+#: GNU ``env``'s ``-S``/``--split-string`` flag: "process and split S into
+#: separate arguments" (installed ``env --help``), documented for shebang
+#: lines that can only pass one argument
+#: (e.g. ``#!/usr/bin/env -S clang-cl /c``). Unlike every other ``env``
+#: flag recognized above, this one does not merely stand alone or carry a
+#: single opaque operand -- its value is itself a *further* command line
+#: that must be split and spliced into ``argv`` in place of the flag and
+#: its raw string, or the apparent "compiler" the rest of this module (and
+#: every downstream launcher/driver-detection consumer) sees is the literal
+#: flag token / unsplit string rather than the real driver
+#: (Codex review, ``_argv.py:102``, fresh evidence).
+_ENV_SPLIT_STRING_SHORT = "-S"
+_ENV_SPLIT_STRING_LONG = "--split-string"
 #: Preprocessor macro define/undef option prefixes. Their *values* reach the
 #: compiler verbatim (argv, no shell expansion), so a literal ``~`` in e.g.
 #: ``-DDEFAULT_DIR=~/app`` must NOT be home-expanded during replay — unlike the
@@ -424,6 +441,93 @@ def basename(path: str) -> str:
     return re.split(r"[\\/]", path)[-1]
 
 
+def _expand_env_split_string(value: str) -> list[str]:
+    """Split *value* the way GNU ``env -S``/``--split-string`` does.
+
+    The installed ``env --help`` documents ``-S, --split-string=S`` as
+    "process and split S into separate arguments; used to pass multiple
+    arguments on shebang lines". GNU coreutils' own implementation performs
+    shell-word-splitting -- quoting and backslash-escaping compatible with a
+    POSIX shell -- rather than a naive whitespace split (which would corrupt
+    any argument containing a quoted space, e.g. a ``-D'FOO=a b'`` define).
+    :func:`shlex.split` (POSIX mode, the default) implements the same
+    quote/backslash-escape family of rules and is used here as a
+    close-enough approximation rather than a byte-for-byte reimplementation
+    of GNU coreutils' own parser (Codex review, ``_argv.py:102``, fresh
+    evidence) -- exactly the approach this finding's own guidance names.
+    """
+    return shlex.split(value)
+
+
+def is_absolute_path_token(token: str) -> bool:
+    """Host-*independent* absolute-path check (Codex review, "Recognize
+    foreign absolute driver paths", fresh evidence).
+
+    L3 build evidence is not always collected on the same OS abicheck
+    itself runs on -- a Windows compile database inspected from a Linux CI
+    runner, or the reverse. ``os.path.isabs``/``pathlib.Path.is_absolute``
+    only recognize the HOST's own grammar: a Windows-shaped absolute token
+    (``C:\\LLVM\\bin\\clang-cl.exe``, or a UNC ``\\\\server\\share\\...``)
+    reads as *relative* on a POSIX host (POSIX ``Path`` only recognizes a
+    leading ``/`` as absolute), and the symmetric POSIX-shaped token
+    (``/opt/llvm/bin/clang-cl``) reads as relative on a Windows host
+    (``PureWindowsPath`` requires a drive letter or UNC root). Both
+    grammars are checked here regardless of host, so a caller does not
+    silently join an already-absolute *foreign* token onto a directory a
+    second time -- corrupting it, and letting two otherwise-identical
+    compile units acquire different driver signatures purely from that
+    corruption (see :func:`~abicheck.buildsource.header_compile_context.
+    _resolve_driver_token`, the original site of this finding, for the
+    full ambiguity-grouping consequence).
+    """
+    return PureWindowsPath(token).is_absolute() or PurePosixPath(token).is_absolute()
+
+
+def normalize_path_token(token: str) -> str:
+    """Normalize *token* using ITS OWN grammar, not the host's.
+
+    A Windows-shaped absolute token is normalized with ``ntpath`` (keeping
+    its backslash convention); a POSIX-shaped absolute token is normalized
+    with ``posixpath`` (keeping its forward-slash convention) -- using the
+    host-native ``os.path.normpath`` for either would silently rewrite the
+    *other* OS's separator convention (e.g. collapsing a genuine POSIX
+    absolute path's forward slashes into backslashes when abicheck itself
+    happens to run on Windows). Falls back to ``os.path.normpath`` only for
+    a token matching neither absolute grammar (a bare relative token with
+    no path separator reaching here at all would be a caller bug, since
+    every caller already special-cases the separator-free case first).
+    """
+    if PureWindowsPath(token).is_absolute():
+        return ntpath.normpath(token)
+    if PurePosixPath(token).is_absolute():
+        return posixpath.normpath(token)
+    return os.path.normpath(token)
+
+
+def join_path_token(base: str, token: str) -> str:
+    """Join *token* onto *base*, then normalize -- both using the grammar
+    *token* itself is spelled in (backslash-only -> ``ntpath``,
+    forward-slash-only -> ``posixpath``), not the host's.
+
+    Relative *token*s recorded by a build on one OS (``../llvm/bin/
+    clang-cl``, POSIX-style) must compose the same way regardless of which
+    OS abicheck itself runs on -- joining/normalizing with host-native
+    ``os.path``/``os.path.normpath`` on Windows would rewrite the result's
+    separators to backslash even though *base* (an ``env -C`` chdir value,
+    or a compile unit's own ``directory``) may itself carry no separator at
+    all (e.g. a bare ``"build"``), giving a spurious cross-OS mismatch
+    between two otherwise textually-equivalent joins. A *token* containing
+    both separator styles (or neither -- the caller should not reach this
+    function for a separator-free token) falls back to host-native
+    ``os.path.join``/``os.path.normpath``, the pre-existing behavior.
+    """
+    if "\\" in token and "/" not in token:
+        return ntpath.normpath(ntpath.join(base, token))
+    if "/" in token and "\\" not in token:
+        return posixpath.normpath(posixpath.join(base, token))
+    return os.path.normpath(os.path.join(base, token))
+
+
 def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | None]:
     """Skip a leading POSIX ``env`` invocation and its flags/assignments.
 
@@ -483,6 +587,20 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
     prefix and its two carried values; :func:`strip_launchers` (the one
     caller) applies them to the actual driver token once it is known, via
     :func:`_apply_env_context`.
+
+    **Mutates** *argv* **in place for** ``-S``/``--split-string``
+    (Codex review, ``_argv.py:102``, fresh evidence): unlike every other
+    flag this function recognizes, ``-S``/``--split-string``'s value is
+    itself a further, unexpanded command line (``env -S 'clang-cl /c
+    x.cc'``) that must be split (:func:`_expand_env_split_string`) and
+    spliced into *argv* in place of the flag and its raw string -- there is
+    no scalar "carried value" to return for it the way ``chdir``/
+    ``env_path`` are, since the whole point is that downstream
+    launcher/driver detection must see the *expanded* tokens as if they had
+    been passed directly. :func:`strip_launchers` therefore passes this
+    function a local, already-copied ``argv`` (never the caller's own
+    ``compile_unit.argv``) precisely so this in-place splice cannot corrupt
+    persisted evidence.
     """
     if i >= len(argv) or basename(argv[i]).lower() not in _ENV_BASENAMES:
         return i, None, None
@@ -502,6 +620,26 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
             chdir = arg.removeprefix("--chdir=")
             i += 1
             continue
+        if arg == _ENV_SPLIT_STRING_SHORT and i + 1 < len(argv):
+            argv[i : i + 2] = _expand_env_split_string(argv[i + 1])
+            continue
+        if (
+            arg.startswith(_ENV_SPLIT_STRING_SHORT)
+            and len(arg) > len(_ENV_SPLIT_STRING_SHORT)
+            and not arg.startswith("--")
+        ):
+            argv[i : i + 1] = _expand_env_split_string(
+                arg[len(_ENV_SPLIT_STRING_SHORT) :]
+            )
+            continue
+        if arg == _ENV_SPLIT_STRING_LONG and i + 1 < len(argv):
+            argv[i : i + 2] = _expand_env_split_string(argv[i + 1])
+            continue
+        if arg.startswith(_ENV_SPLIT_STRING_LONG + "="):
+            argv[i : i + 1] = _expand_env_split_string(
+                arg.removeprefix(_ENV_SPLIT_STRING_LONG + "=")
+            )
+            continue
         if arg in _ENV_OPERAND_FLAGS and i + 1 < len(argv):
             i += 2
             continue
@@ -519,7 +657,65 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
     return i, chdir, env_path
 
 
-def _apply_env_context(token: str, chdir: str | None, env_path: str | None) -> str:
+def _resolve_env_path_entries(
+    env_path: str, chdir: str | None, directory: str | None
+) -> str:
+    """Compose each *relative* entry of an ``env``-supplied ``PATH``
+    override against the directory GNU ``env`` actually executes the
+    command from, before it is handed to :func:`shutil.which` (Codex
+    review, ``_argv.py:576``, Finding 3, fresh evidence).
+
+    GNU ``env`` applies ``-C DIR`` (chdir) *before* it ``execvp()``s the
+    command, and ``execvp`` searches a relative ``PATH`` entry relative to
+    the process's *current* (i.e. already-chdir'ed) working directory --
+    not abicheck's own CWD. For ``env -C build PATH=../tool clang-cl ...``
+    recorded for a compile unit whose own ``directory`` is ``/work``, GNU
+    ``env`` searches ``/work/build/../tool`` (== ``/work/tool``), never
+    ``<abicheck's own CWD>/../tool``. Without this composition,
+    :func:`_apply_env_context`'s ``shutil.which(token, path=env_path)`` call
+    resolved a relative entry against abicheck's own process CWD instead --
+    leaving the driver bare (not found) or, worse, silently resolving to a
+    *different* executable that happens to exist at the wrong, un-chdir'ed
+    location.
+
+    *directory* is only available to callers that already have the full
+    :class:`~abicheck.buildsource.build_evidence.CompileUnit` in scope
+    (:func:`pick_compiler_binary` here) -- ``None`` for every other,
+    directory-agnostic caller of :func:`strip_launchers`, which leaves an
+    entry composed against *chdir* alone (relative to an unknown base, the
+    pre-existing best-effort behavior) rather than fabricating a directory
+    that was never supplied.
+
+    An already-absolute entry is passed through unchanged -- unambiguous
+    regardless of *chdir*/*directory*. Uses :func:`join_path_token`, not
+    host-native ``os.path.join``, for the same cross-OS-evidence reasons as
+    every other join in this module.
+    """
+    if not directory:
+        return env_path
+    base = directory
+    if chdir:
+        base = (
+            join_path_token(directory, chdir)
+            if not is_absolute_path_token(chdir)
+            else chdir
+        )
+    entries = env_path.split(os.pathsep)
+    composed = [
+        entry
+        if not entry or is_absolute_path_token(entry)
+        else join_path_token(base, entry)
+        for entry in entries
+    ]
+    return os.pathsep.join(composed)
+
+
+def _apply_env_context(
+    token: str,
+    chdir: str | None,
+    env_path: str | None,
+    directory: str | None = None,
+) -> str:
     """Fold a leading ``env -C DIR``/``env PATH=...`` prefix's effect into
     *token*, the driver argv token :func:`strip_launchers` is about to
     return (P2 review round 19, both findings, fresh evidence).
@@ -565,21 +761,37 @@ def _apply_env_context(token: str, chdir: str | None, env_path: str | None) -> s
     A token that is itself a flag (starts with ``-``) -- meaning
     :func:`strip_launchers` found no real driver token at all -- is left
     completely untouched; neither effect applies to a non-existent driver.
+
+    **Host-independent absolute/join grammar (Codex review, "Recognize
+    foreign absolute driver paths", fresh evidence).** The chdir branch
+    below used to check ``os.path.isabs(token)`` and join with plain
+    ``os.path.join``/``os.path.normpath`` -- both host-native. Evidence
+    collected on one OS and analyzed on another (a POSIX build's compile
+    database inspected from a Windows CI runner, or the reverse) means
+    *token* is not always spelled in the host's own grammar: a POSIX
+    absolute token like ``/opt/llvm/bin/clang-cl`` reads as *relative* to
+    ``os.path.isabs`` on Windows, so it was wrongly re-joined onto *chdir*
+    a second time, and a relative token joined via host-native
+    ``os.path.join`` on Windows produced a backslash-separated result even
+    when *chdir*/*token* were both recorded in POSIX form. Delegates to
+    :func:`is_absolute_path_token`/:func:`join_path_token`, which check and
+    compose using the token's own separator grammar instead of the host's.
     """
     if not token or token.startswith("-"):
         return token
     if "/" in token or "\\" in token:
-        if chdir and not os.path.isabs(token):
-            return os.path.normpath(os.path.join(chdir, token))
+        if chdir and not is_absolute_path_token(token):
+            return join_path_token(chdir, token)
         return token
     if env_path:
-        resolved = shutil.which(token, path=env_path)
+        effective_path = _resolve_env_path_entries(env_path, chdir, directory)
+        resolved = shutil.which(token, path=effective_path)
         if resolved:
             return resolved
     return token
 
 
-def strip_launchers(argv: list[str]) -> list[str]:
+def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[str]:
     """Drop leading ``env``/compiler-launcher tokens (``ccache``/``sccache``/…).
 
     Also skips any ``KEY=VALUE`` per-invocation config-override tokens ccache
@@ -606,7 +818,29 @@ def strip_launchers(argv: list[str]) -> list[str]:
     is resolved to an absolute path via the most recent env-supplied
     ``PATH`` when found there. Every existing caller of this function
     receives the corrected token automatically, with no signature change.
+
+    Operates on a local **copy** of *argv* (Codex review, ``_argv.py:102``,
+    fresh evidence): expanding an ``env -S``/``--split-string`` prefix (see
+    :func:`_skip_env_prefix`) mutates its argv list in place, splicing the
+    split tokens into it. Several callers pass ``compile_unit.argv`` -- a
+    persisted-evidence field -- straight through without copying it first
+    (:func:`pick_compiler_binary` here; ``adapters.base.
+    _executable_token_positions``/``_msvc_driver_scan``), so mutating the
+    caller's own list in place would silently corrupt that stored evidence
+    for every later reader of the same ``CompileUnit``. Copying once here
+    means every one of :func:`_skip_env_prefix`'s in-place splices are
+    confined to this call's own local list.
+
+    *directory*: the compile unit's own directory, when the caller has one
+    (Codex review, ``_argv.py:576``, Finding 3, fresh evidence) -- used
+    only to resolve a *relative* ``env``-supplied ``PATH`` entry (``env -C
+    build PATH=../tool clang-cl ...``) against the directory GNU ``env``
+    actually executes the command from, composed with any ``-C``/
+    ``--chdir`` value seen (see :func:`_resolve_env_path_entries`).
+    ``None`` (the default) for every caller with no compile-unit context to
+    supply -- unchanged from the pre-Finding-3 behavior for those callers.
     """
+    argv = list(argv)
     i = 0
     progressed = True
     chdir: str | None = None
@@ -632,7 +866,7 @@ def strip_launchers(argv: list[str]) -> list[str]:
     result = argv[i:]
     if not result or (chdir is None and env_path is None):
         return result
-    resolved = _apply_env_context(result[0], chdir, env_path)
+    resolved = _apply_env_context(result[0], chdir, env_path, directory)
     if resolved == result[0]:
         return result
     return [resolved, *result[1:]]
@@ -674,7 +908,7 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
     """
     if override:
         return override
-    argv = strip_launchers(compile_unit.argv)
+    argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
     if argv and argv[0] and not argv[0].startswith("-"):
         return argv[0]
     return "g++" if compile_unit.language.lower() in CXX_LANGS else "gcc"

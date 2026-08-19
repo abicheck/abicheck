@@ -1513,6 +1513,41 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     unchanged -- resolving it against *directory* would be wrong, since a
     bare name is looked up on ``PATH``, not relative to any directory.
 
+    **Foreign absolute paths (Codex review, "Recognize foreign absolute
+    driver paths", fresh evidence): a Windows-shaped absolute path parsed
+    on POSIX (or vice versa) is not recognized as absolute by host-native
+    ``Path.is_absolute()``, so it was wrongly treated as relative and
+    joined onto *directory*.** L3 build evidence is not always collected on
+    the same OS it is later analyzed on (a Windows compile database
+    inspected from a Linux CI runner, or the reverse) -- a driver token
+    such as ``C:\\LLVM\\bin\\clang-cl.exe`` contains a path separator, so it
+    is not the bare-name case above, but on a POSIX host
+    ``pathlib.Path(...).is_absolute()`` returns ``False`` for it (POSIX
+    ``Path`` only recognizes a leading ``/`` as absolute), so it was
+    prefixed with the compile unit's own ``directory`` -- corrupting
+    ``gcc_path`` into a nonexistent joined path and, worse, letting two
+    otherwise-identical units whose ``directory`` differs acquire different
+    ``gcc_path`` signatures and spuriously raise
+    ``HeaderCompileContextAmbiguousError``. The symmetric case (a POSIX
+    absolute path such as ``/opt/llvm/bin/clang-cl`` analyzed on a Windows
+    host, where native ``PureWindowsPath.is_absolute()`` requires a drive
+    letter or UNC root and returns ``False`` for it) has the identical
+    failure shape. Both are detected with host-*independent* path grammars
+    -- ``PureWindowsPath(...).is_absolute()`` (drive-letter and UNC forms)
+    checked first, then ``PurePosixPath(...).is_absolute()`` (a leading
+    ``/``) -- ahead of the host-native fallback below, and normalized with
+    the matching grammar's own ``normpath`` (``ntpath``/``posixpath``)
+    rather than the host-native one, which would silently corrupt the
+    other OS's separator convention. Deliberately **not** a blanket
+    ``ntpath.isabs()`` check on every token: ``ntpath.isabs("/opt/llvm/bin/
+    clang-cl")`` is also ``True`` (``ntpath`` accepts a bare ``/`` root as
+    absolute, drive-less), which would take this branch for a genuine POSIX
+    absolute path too and normalize it with backslash-flavored ``ntpath.
+    normpath`` -- corrupting it. Checking the *POSIX* grammar as its own,
+    second, independent branch (not "not Windows-absolute, so must be
+    POSIX-absolute") is what keeps a real POSIX path routed through
+    ``posixpath.normpath`` instead.
+
     **Normalized before returning (P2 review, "Normalize resolved driver
     paths before grouping", fresh evidence).** Two matched units in
     different build subdirectories can spell the *same* executable through
@@ -1544,9 +1579,27 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     """
     import os as _os
 
+    from .source_extractors._argv import is_absolute_path_token, normalize_path_token
+
     expanded = _os.path.expanduser(token)
     if "/" not in expanded and "\\" not in expanded:
         return expanded
+    if is_absolute_path_token(expanded):
+        # A token already absolute in ITS OWN grammar (Windows drive/UNC,
+        # or POSIX-rooted) must never be joined onto `directory` a second
+        # time, and must be normalized with that same grammar rather than
+        # the host's -- see `is_absolute_path_token`/`normalize_path_token`
+        # docstrings (Codex review, "Recognize foreign absolute driver
+        # paths", fresh evidence).
+        return normalize_path_token(expanded)
+    # A genuinely *relative* token composed against `directory` -- which is
+    # always a real, host-resolvable filesystem path for this function's
+    # actual callers (a `CompileUnit.directory`, not raw evidence text) --
+    # uses host-native `pathlib`/`os.path.normpath`, unchanged from before
+    # this fix: `pathlib.Path` on Windows already accepts a forward-slash
+    # token like `../llvm/bin/clang-cl` as a valid relative path, so this
+    # branch was never the source of the cross-OS mismatch the absolute
+    # check above fixes.
     path = Path(expanded)
     if not path.is_absolute() and directory:
         path = Path(directory).expanduser() / path

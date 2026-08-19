@@ -37,6 +37,7 @@ Covers, in order:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,14 @@ def test_resolve_derives_gcc_path_resolves_bare_driver_via_env_path(
     bin_dir = tmp_path / "opt_llvm_bin"
     bin_dir.mkdir()
     driver = bin_dir / "clang-cl"
+    # `shutil.which` consults PATHEXT on Windows rather than an exact
+    # bare-name match, so an extensionless fixture is never found there
+    # (CodeRabbit review, fresh evidence) -- create `clang-cl.exe` on
+    # Windows and assert against *that* path, while the compiler token in
+    # `argv` below stays the bare, extensionless "clang-cl" (Windows'
+    # PATHEXT resolution finds the `.exe` file when searching for it).
+    if sys.platform == "win32":
+        driver = driver.with_suffix(".exe")
     driver.write_text("", encoding="utf-8")
     driver.chmod(0o755)
     cu = _cu(
@@ -274,7 +283,12 @@ def test_resolve_derives_gcc_path_expands_home_redacted_driver_token(
     assert result.context is not None
     assert result.context.gcc_path is not None
     assert "~" not in result.context.gcc_path
-    assert result.context.gcc_path.endswith("llvm/bin/clang-cl")
+    # Host-independent suffix check: `~` expansion substitutes the real,
+    # host-native home directory, so on Windows the normalized result is
+    # backslash-separated (e.g. "C:\\Users\\me\\llvm\\bin\\clang-cl")
+    # rather than the POSIX-style "llvm/bin/clang-cl" this assertion
+    # originally hardcoded (Windows CI, fresh evidence).
+    assert result.context.gcc_path.replace("\\", "/").endswith("llvm/bin/clang-cl")
 
 
 def test_resolve_derives_gcc_path_leaves_bare_path_name_unchanged(
@@ -857,3 +871,93 @@ def test_resolve_gcc_prefix_only_excuses_driver_disagreement(
     explicit = CompileContext(gcc_prefix="/opt/llvm/bin/")
     result = resolve_header_compile_context(ev, [header], explicit=explicit)
     assert result.matched is True
+
+
+# -- Finding 2/4 (Codex + CodeRabbit): foreign absolute driver paths --------
+
+
+def test_resolve_derives_gcc_path_windows_absolute_driver_preserved_on_any_host(
+    tmp_path: Path,
+) -> None:
+    """A Windows drive-letter-absolute driver path (``C:\\LLVM\\bin\\
+    clang-cl.exe``) recorded by build evidence collected on Windows must be
+    recognized as absolute -- and normalized with Windows (``ntpath``)
+    grammar -- regardless of which host OS abicheck itself runs on. Before
+    the fix, host-native ``Path.is_absolute()`` on POSIX returned ``False``
+    for this token (no leading ``/``), so it was wrongly joined onto the
+    compile unit's own ``directory`` -- corrupting ``gcc_path`` into a
+    nonexistent path and letting otherwise-identical units acquire
+    different ``gcc_path`` signatures purely from their differing
+    ``directory``."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src = tmp_path / "widget.cpp"
+    src.write_text('#include "widget.h"\n', encoding="utf-8")
+    cu = _cu(
+        source=str(src),
+        directory=str(tmp_path),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[r"C:\LLVM\bin\clang-cl.exe", "/std:c++20", "-c", str(src)],
+    )
+    ev = BuildEvidence(compile_units=[cu])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == r"C:\LLVM\bin\clang-cl.exe"
+
+
+def test_resolve_derives_gcc_path_windows_unc_absolute_driver_preserved() -> None:
+    """The symmetric UNC form (``\\\\server\\share\\clang-cl.exe``) is also
+    recognized as absolute regardless of host."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    token = r"\\server\share\clang-cl.exe"
+    assert _resolve_driver_token(token, "/some/directory") == token
+
+
+def test_resolve_derives_gcc_path_two_units_with_windows_absolute_driver_not_ambiguous(
+    tmp_path: Path,
+) -> None:
+    """Companion regression for the ambiguity-grouping consequence named in
+    the finding: two otherwise-identical compile units in DIFFERENT
+    directories, both naming the SAME Windows-absolute driver, must not be
+    treated as disagreeing on ``gcc_path`` -- the pre-fix bug corrupted
+    each unit's ``gcc_path`` by joining the (wrongly-judged-relative)
+    Windows token onto each unit's own, different ``directory``, making two
+    genuinely-identical drivers compare unequal."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    build_a = tmp_path / "build_a"
+    build_a.mkdir()
+    build_b = tmp_path / "build_b"
+    build_b.mkdir()
+    cu_a = _cu(
+        source=str(src_a),
+        directory=str(build_a),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[r"C:\LLVM\bin\clang-cl.exe", "/std:c++20", "-c", str(src_a)],
+    )
+    cu_b = _cu(
+        source=str(src_b),
+        directory=str(build_b),
+        abi_relevant_flags=["/std:c++20"],
+        argv=[r"C:\LLVM\bin\clang-cl.exe", "/std:c++20", "-c", str(src_b)],
+    )
+    ev = BuildEvidence(compile_units=[cu_a, cu_b])
+    result = resolve_header_compile_context(ev, [header])
+    assert result.context is not None
+    assert result.context.gcc_path == r"C:\LLVM\bin\clang-cl.exe"
+
+
+def test_resolve_derives_gcc_path_posix_absolute_driver_not_windows_mangled() -> None:
+    """The other direction (CodeRabbit's own research note): a genuine
+    POSIX absolute path must never be routed through ``ntpath.normpath``
+    (which would accept a bare ``/`` root as absolute too and corrupt its
+    separators) -- it must resolve via the POSIX grammar branch instead."""
+    from abicheck.buildsource.header_compile_context import _resolve_driver_token
+
+    token = "/opt/llvm/bin/clang-cl"
+    assert _resolve_driver_token(token, "/some/directory") == token

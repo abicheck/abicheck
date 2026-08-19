@@ -169,18 +169,31 @@ def test_msvc_driver_token_resolves_relative_driver_via_env_chdir():
     # `_msvc_driver_scan`) must return the *stripped* driver token
     # `strip_launchers` computed -- which now folds an `env -C DIR` prefix
     # into a relative driver path -- not the raw, unfolded `argv[i]`.
-    import os
-
+    #
+    # Normalized with the token's own (POSIX, forward-slash) grammar,
+    # not the host's (Codex review, "Recognize foreign absolute driver
+    # paths", fresh evidence) -- a literal forward-slash string, not
+    # `os.path.normpath(...)`, which would self-referentially flip to
+    # backslashes on a Windows host instead of pinning the actually
+    # host-independent result.
     argv = ["env", "-C", "build", "../llvm/bin/clang-cl", "/std:c++20", "/c", "foo.cc"]
-    assert msvc_driver_token(argv) == os.path.normpath("llvm/bin/clang-cl")
+    assert msvc_driver_token(argv) == "llvm/bin/clang-cl"
 
 
 def test_msvc_driver_token_resolves_bare_driver_via_env_path(tmp_path):
     # P2 review round 19 Finding 2: same, for a bare driver name only
     # resolvable through an `env PATH=...` override.
     import stat
+    import sys
 
     driver = tmp_path / "clang-cl"
+    # `shutil.which` consults PATHEXT on Windows rather than an exact
+    # bare-name match, so an extensionless fixture is never found there
+    # (CodeRabbit review, fresh evidence) -- create `clang-cl.exe` on
+    # Windows and assert against *that* path; the compiler token in argv
+    # stays the bare "clang-cl" (PATHEXT resolution finds the .exe file).
+    if sys.platform == "win32":
+        driver = driver.with_suffix(".exe")
     driver.write_text("", encoding="utf-8")
     driver.chmod(driver.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     argv = ["env", f"PATH={tmp_path}", "clang-cl", "/c", "foo.cc"]

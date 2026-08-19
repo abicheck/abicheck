@@ -711,3 +711,51 @@
   (`tests/test_header_compile_context_merge.py`,
   `tests/test_build_source_pack_redaction.py`) following this repo's
   established sibling-split convention.
+- **Round 22 (Codex + CodeRabbit, seven findings on `73d4bb3cb9`).**
+  (1) `_argv.py`'s `strip_launchers()` now recognizes GNU `env`'s
+  `-S`/`--split-string` flag (`env -S 'clang-cl /c x.cc'`) and expands it
+  with shell-word-splitting semantics (`shlex.split`, an env-compatible
+  approximation), splicing the resulting tokens into argv in place of the
+  single flag+string pair so downstream launcher/driver detection sees
+  them as if passed directly — previously left as an opaque, unrecognized
+  token, hiding the real compiler entirely. `strip_launchers` now
+  operates on a local copy of argv so this in-place splice can never
+  corrupt a caller's own `compile_unit.argv`.
+  (2/4) Both header→compile-unit driver-path resolution
+  (`header_compile_context._resolve_driver_token`) and the `env`-prefix
+  driver-token folding (`_argv._apply_env_context`) now detect an
+  absolute driver path using BOTH Windows (`PureWindowsPath`/`ntpath`,
+  drive-letter and UNC forms) and POSIX (`PurePosixPath`/`posixpath`)
+  grammars regardless of which host OS abicheck itself runs on, via two
+  new shared helpers (`is_absolute_path_token`/`normalize_path_token`/
+  `join_path_token` in `_argv.py`) — previously a Windows-shaped absolute
+  path analyzed on POSIX (or the reverse) was misjudged relative and
+  joined onto the compile unit's own `directory` a second time,
+  corrupting `gcc_path` and spuriously raising
+  `HeaderCompileContextAmbiguousError` for otherwise-identical units.
+  (3) `env -C DIR PATH=../tool clang-cl ...`: a relative `PATH=` entry is
+  now composed against the directory GNU `env` actually executes the
+  command from (`cu.directory` + the effective `-C` chdir) before being
+  handed to `shutil.which`, via a new `strip_launchers(..., directory=...)`
+  keyword parameter wired from `pick_compiler_binary` (the one caller with
+  a full `CompileUnit` in scope) — previously resolved from abicheck's own
+  CWD, leaving the driver bare or silently resolving a different,
+  incorrect executable.
+  (5) `scripts/verify.py`'s stdout/stderr line-buffering reconfiguration
+  moved out of module-import scope into a new `_enable_line_buffered_output()`
+  helper called from `main()`, so importing the module (e.g. from a test)
+  no longer has this process-wide side effect.
+  (6) `run_step()` now prints a step's captured stdout/stderr immediately
+  after `subprocess.run()` returns, before the `PARTIAL`-result early
+  return — previously a step returning PARTIAL never had its own
+  diagnostic output printed, defeating half the point of the round-20
+  diagnostic-visibility fix for exactly the steps most likely to need it.
+  (7) Windows-executable test fixtures (`tests/test_source_extractors_env.py`,
+  `tests/test_header_compile_context_gcc_path.py`, `tests/test_adapter_base.py`)
+  now create a `.exe`-suffixed file on `win32` while keeping the
+  extensionless compiler token in argv, since `shutil.which` consults
+  `PATHEXT` on Windows rather than doing an exact bare-name match.
+  Several pre-existing tests asserting POSIX-style forward-slash driver
+  paths via a self-referential `os.path.normpath(...)` expectation were
+  also fixed to pin the actually-correct, host-independent literal value
+  instead (discovered via live Windows CI signal on this same commit).

@@ -42,14 +42,35 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 from abicheck.buildsource.source_extractors._argv import strip_launchers
 
 
-def _make_executable(path: Path) -> None:
+def _make_executable(path: Path) -> Path:
+    """Create an executable fixture at (or near) *path*, returning the
+    actual path created.
+
+    ``shutil.which`` (which every ``env PATH=...`` test below exercises,
+    directly or via :func:`strip_launchers`) consults ``PATHEXT`` on
+    Windows rather than doing an exact bare-name match -- an extensionless
+    fixture like ``clang-cl`` (no ``.exe``) is never found there, so every
+    test using this helper unconditionally failed on Windows CI regardless
+    of the fix under test (CodeRabbit review, fresh evidence). On Windows,
+    create ``<path>.exe`` instead and return *that* path -- the compiler
+    token referenced in a test's own ``argv`` stays the bare, extensionless
+    name (``"clang-cl"``), since Windows' ``PATHEXT`` resolution finds the
+    ``.exe`` file when searching for that bare name; callers must assert
+    against this function's *returned* path, not the bare *path* argument,
+    since only the returned path is guaranteed to be the file that was
+    actually created.
+    """
+    if sys.platform == "win32" and not path.suffix:
+        path = path.with_suffix(".exe")
     path.write_text("", encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return path
 
 
 # -- Finding 1: `env -C DIR` folds into a relative driver token --------------
@@ -104,11 +125,18 @@ def test_strip_launchers_env_chdir_left_alone_for_absolute_driver() -> None:
 
 
 def test_strip_launchers_env_chdir_multiple_dotdot_segments_normalized() -> None:
-    """The joined+normalized result collapses ``..`` segments, matching
-    ``header_compile_context._resolve_driver_token``'s own normalization
-    convention for the same value once it reaches that function."""
+    """The joined+normalized result collapses ``..`` segments.
+
+    Normalized with the token's OWN (POSIX, forward-slash) grammar rather
+    than the host's (Codex review, "Recognize foreign absolute driver
+    paths", fresh evidence) -- ``chdir``/the driver token here are
+    POSIX-style evidence text, not necessarily host-native paths, so the
+    expected value is a literal forward-slash string rather than
+    ``os.path.normpath(...)`` (which would silently flip to backslashes on
+    a Windows host, self-referentially matching whatever the host does
+    rather than pinning the actually-correct, host-independent result)."""
     result = strip_launchers(["env", "-C", "a/b", "../../tool/clang-cl", "-c", "x.cc"])
-    assert result[0] == os.path.normpath("tool/clang-cl")
+    assert result[0] == "tool/clang-cl"
 
 
 def test_strip_launchers_env_chdir_with_compiler_cache_launcher_chained() -> None:
@@ -130,7 +158,7 @@ def test_strip_launchers_env_path_resolves_bare_driver(tmp_path: Path) -> None:
     absolute path immediately, so no downstream consumer needs to know the
     env override existed at all."""
     driver = tmp_path / "clang-cl"
-    _make_executable(driver)
+    driver = _make_executable(driver)
     result = strip_launchers(
         ["env", f"PATH={tmp_path}", "clang-cl", "/std:c++20", "-c", "x.cc"]
     )
@@ -154,7 +182,7 @@ def test_strip_launchers_env_path_ignored_for_path_bearing_driver(
     other = tmp_path / "other"
     other.mkdir()
     decoy = other / "clang-cl"
-    _make_executable(decoy)
+    decoy = _make_executable(decoy)
     result = strip_launchers(["env", f"PATH={other}", "./clang-cl", "-c", "x.cc"])
     assert result == ["./clang-cl", "-c", "x.cc"]
 
@@ -165,7 +193,7 @@ def test_strip_launchers_env_path_with_compiler_cache_launcher_chained(
     """``env PATH=... sccache clang-cl ...`` -- PATH must still resolve the
     driver token found *after* the launcher is unwrapped."""
     driver = tmp_path / "clang-cl"
-    _make_executable(driver)
+    driver = _make_executable(driver)
     result = strip_launchers(
         ["env", f"PATH={tmp_path}", "sccache", "clang-cl", "-c", "x.cc"]
     )
@@ -178,7 +206,7 @@ def test_strip_launchers_env_chdir_and_path_together(tmp_path: Path) -> None:
     token and PATH only to a bare one, so for a single bare driver name
     only the PATH resolution actually changes anything."""
     driver = tmp_path / "clang-cl"
-    _make_executable(driver)
+    driver = _make_executable(driver)
     result = strip_launchers(
         ["env", "-C", "build", f"PATH={tmp_path}", "clang-cl", "-c", "x.cc"]
     )
@@ -230,3 +258,202 @@ def test_strip_launchers_env_path_assignment_named_something_else_ignored() -> N
         ["env", "LD_LIBRARY_PATH=/opt/lib", "clang-cl", "-c", "x.cc"]
     )
     assert result == ["clang-cl", "-c", "x.cc"]
+
+
+# -- Finding 1 (Codex, `_argv.py:102`): `env -S`/`--split-string` expansion --
+
+
+def test_strip_launchers_env_split_string_short_flag_expands_and_splices() -> None:
+    """``env -S 'clang-cl /c x.cc'`` -- GNU env's own documented behavior
+    ("process and split S into separate arguments") must be replicated:
+    downstream launcher/driver detection needs the SPLIT tokens spliced
+    into argv, not the single flag+string pair left as an opaque
+    unrecognized token (which previously left ``-S``/the joined string as
+    the apparent "compiler")."""
+    result = strip_launchers(["env", "-S", "clang-cl /c x.cc"])
+    assert result == ["clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_long_flag_combined_form() -> None:
+    """The documented ``--split-string=S`` combined spelling."""
+    result = strip_launchers(["env", "--split-string=clang-cl /c x.cc"])
+    assert result == ["clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_long_flag_separate_form() -> None:
+    """The GNU-getopt-conventional separate-token spelling,
+    ``--split-string S``."""
+    result = strip_launchers(["env", "--split-string", "clang-cl /c x.cc"])
+    assert result == ["clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_joined_short_form() -> None:
+    """The short-option joined spelling, ``-Sclang-cl /c x.cc``."""
+    result = strip_launchers(["env", "-Sclang-cl /c x.cc"])
+    assert result == ["clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_respects_quoting() -> None:
+    """GNU env's split-string performs shell-word-splitting (quote/escape
+    aware), not a naive whitespace split -- a quoted argument containing a
+    space must survive as one token."""
+    result = strip_launchers(["env", "-S", "clang-cl -DFOO='a b' /c x.cc"])
+    assert result == ["clang-cl", "-DFOO=a b", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_with_launcher_after() -> None:
+    """The expanded tokens are re-scanned for a further compiler-launcher
+    prefix (``sccache``), the same as any other unwrapped argv."""
+    result = strip_launchers(["env", "-S", "sccache clang-cl /c x.cc"])
+    assert result == ["clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_does_not_mutate_caller_argv() -> None:
+    """``strip_launchers`` must never mutate the caller's own argv list in
+    place -- several callers pass ``compile_unit.argv`` (persisted
+    evidence) straight through without copying it first."""
+    original = ["env", "-S", "clang-cl /c x.cc"]
+    snapshot = list(original)
+    strip_launchers(original)
+    assert original == snapshot
+
+
+def test_pick_compiler_binary_resolves_env_split_string_driver(tmp_path) -> None:
+    """End-to-end: :func:`~abicheck.buildsource.source_extractors._argv.
+    pick_compiler_binary` (the real consumer) must also see the expanded,
+    spliced driver token, not the raw ``-S``/joined-string pair."""
+    from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
+
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory=str(tmp_path),
+        output="x.o",
+        argv=["env", "-S", "clang-cl /c x.cc"],
+    )
+    assert pick_compiler_binary(cu, override=None) == "clang-cl"
+
+
+# -- Finding 3 (Codex, `_argv.py:576`): `env -C` + relative `PATH=` compose --
+
+
+def test_pick_compiler_binary_resolves_env_chdir_and_relative_path_together(
+    tmp_path,
+) -> None:
+    """``env -C build PATH=../tool clang-cl /c x.cc`` recorded for a
+    compile unit in ``<tmp_path>`` -- GNU env changes into
+    ``<tmp_path>/build`` before searching ``../tool`` on PATH, so the real
+    driver is found at ``<tmp_path>/tool/clang-cl``, not at a path relative
+    to abicheck's own CWD. ``pick_compiler_binary`` is the one caller with
+    a full ``CompileUnit`` (and therefore ``directory``) in scope to
+    resolve this correctly."""
+    from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
+
+    (tmp_path / "build").mkdir()
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    driver = tool_dir / "clang-cl"
+    _make_executable(driver)
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory=str(tmp_path),
+        output="x.o",
+        argv=["env", "-C", "build", "PATH=../tool", "clang-cl", "/c", "x.cc"],
+    )
+    assert pick_compiler_binary(cu, override=None) == str(driver)
+
+
+def test_strip_launchers_without_directory_leaves_relative_env_path_bare() -> None:
+    """Without a *directory* (every caller besides ``pick_compiler_binary``
+    -- the pre-existing, directory-agnostic behavior for
+    ``strip_launchers``'s other callers), a relative ``PATH=`` entry cannot
+    be safely resolved, so the bare driver name is left unchanged rather
+    than searched against abicheck's own CWD."""
+    result = strip_launchers(
+        ["env", "-C", "build", "PATH=../tool", "clang-cl", "/c", "x.cc"]
+    )
+    assert result == ["clang-cl", "/c", "x.cc"]
+
+
+def test_pick_compiler_binary_resolves_env_relative_path_without_chdir(
+    tmp_path,
+) -> None:
+    """Companion to the chdir+PATH composition test above: a relative
+    ``PATH=`` entry with NO ``-C`` prefix composes directly against the
+    compile unit's own ``directory`` (the ``chdir is None`` branch of
+    ``_resolve_env_path_entries``)."""
+    from abicheck.buildsource.build_evidence import CompileUnit
+    from abicheck.buildsource.source_extractors._argv import pick_compiler_binary
+
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    driver = tool_dir / "clang-cl"
+    _make_executable(driver)
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory=str(tmp_path),
+        output="x.o",
+        argv=["env", "PATH=tool", "clang-cl", "/c", "x.cc"],
+    )
+    assert pick_compiler_binary(cu, override=None) == str(driver)
+
+
+# -- Direct coverage for the new host-independent path helpers ---------------
+
+
+def test_normalize_path_token_posix_absolute_uses_posixpath_grammar() -> None:
+    from abicheck.buildsource.source_extractors._argv import normalize_path_token
+
+    assert (
+        normalize_path_token("/opt/llvm/bin/../bin/clang-cl")
+        == "/opt/llvm/bin/clang-cl"
+    )
+
+
+def test_normalize_path_token_windows_absolute_uses_ntpath_grammar() -> None:
+    from abicheck.buildsource.source_extractors._argv import normalize_path_token
+
+    assert (
+        normalize_path_token(r"C:\LLVM\bin\..\bin\clang-cl") == r"C:\LLVM\bin\clang-cl"
+    )
+
+
+def test_normalize_path_token_falls_back_to_host_native_for_non_absolute() -> None:
+    """A token matching neither absolute grammar (no caller reaches this in
+    practice -- both current callers only invoke this after already
+    confirming :func:`is_absolute_path_token`) falls back to host-native
+    normalization, the pre-existing default."""
+    from abicheck.buildsource.source_extractors._argv import normalize_path_token
+
+    assert normalize_path_token("a/./b") == os.path.normpath("a/./b")
+
+
+def test_join_path_token_windows_only_token_uses_ntpath_grammar() -> None:
+    from abicheck.buildsource.source_extractors._argv import join_path_token
+
+    assert join_path_token("build", r"..\llvm\bin\clang-cl") == r"llvm\bin\clang-cl"
+
+
+def test_join_path_token_posix_only_token_uses_posixpath_grammar() -> None:
+    from abicheck.buildsource.source_extractors._argv import join_path_token
+
+    assert join_path_token("build", "../llvm/bin/clang-cl") == "llvm/bin/clang-cl"
+
+
+def test_join_path_token_mixed_separators_falls_back_to_host_native() -> None:
+    """A token mixing both separator styles (or a bare, separator-free
+    token -- neither of which a real caller reaches here) falls back to
+    host-native ``os.path.join``/``os.path.normpath``, the pre-existing
+    behavior."""
+    from abicheck.buildsource.source_extractors._argv import join_path_token
+
+    assert join_path_token("build", "sub") == os.path.normpath(
+        os.path.join("build", "sub")
+    )
