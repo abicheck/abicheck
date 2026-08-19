@@ -773,7 +773,33 @@ def add_build_query_dry_run_section(
             # branch is unreached in that case since `raise_on_bad_config`
             # (which requires `collect_active` too) would already have
             # raised whenever `embed_build_source` could actually be reached
-            # with a failing config of its own.
+            # with a failing config of its own. `raw_operand_present` alone
+            # is not sufficient, though (Codex review, fresh evidence): it
+            # says a raw --build-info exists to make embed_build_source's
+            # *dispatch guard* satisfiable, but that guard is reached only
+            # when `collect_active` (`collect_mode != "off"`) in the first
+            # place -- `embed_build_source` is called from `cli_dump_
+            # helpers.perform_elf_dump` behind exactly that check. With
+            # `--depth headers` (collect_mode "off"), embed_build_source is
+            # never invoked at all regardless of what operands were given,
+            # so it can't be the fallback call site either -- verified
+            # end-to-end against a real gcc-compiled library, a malformed
+            # pack-local .abicheck.yml, a raw --build-info directory, an
+            # explicit --build-query, and --depth headers: the real run
+            # exits 0 with the marker never created, i.e. build.query never
+            # runs, even though an earlier revision of this branch reported
+            # "will run (trusted -- explicit --build-query)" here.
+            if not collect_active and effective_sources is None and raw_operand_present:
+                result.add(
+                    _SECTION,
+                    "build.query: will NOT run -- the auto-discovered config "
+                    "failed to load for the L2 seed path (which silently "
+                    "degrades on a load failure, rather than raising), and "
+                    f"embed_build_source is unreachable anyway -- collect "
+                    f"mode {collect_mode!r} means only the best-effort L2 "
+                    "seed path could ever run this query",
+                )
+                return
             if effective_sources is not None or not raw_operand_present:
                 result.add(
                     _SECTION,

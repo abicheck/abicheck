@@ -468,6 +468,54 @@ class TestDumpDryRunBuildQueryTrust:
         assert "blocker:" in result.output
         assert "only remaining real call site" in result.output
 
+    def test_malformed_config_inside_pack_with_depth_headers_reports_will_not_run(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence (commit b2e3cf1): a valid --sources
+        # pack carrying its own malformed .abicheck.yml, given alongside a
+        # raw --build-info directory, headers, and an explicit
+        # --build-query -- but under --depth headers, which resolves to
+        # collect_mode "off". The prior revision's `raw_operand_present`
+        # check alone was insufficient: it makes embed_build_source's
+        # *dispatch guard* satisfiable, but that guard is only ever reached
+        # when `collect_active` in the first place (embed_build_source is
+        # called from perform_elf_dump behind exactly that check). With
+        # collect_mode "off", embed_build_source is never invoked
+        # regardless of operands, so the L2 seed (which already failed to
+        # load this same config) is the only real call site, and it's a
+        # silent degrade, not an execution. Confirmed empirically against a
+        # real gcc-compiled library and a marker-writing query: the real
+        # (non-dry) run exits 0 and the marker is never created, even
+        # though the pre-fix dry run reported "will run (trusted --
+        # explicit --build-query)".
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        src_pack = tmp_path / "srcpack"
+        src_pack.mkdir()
+        BuildSourcePack(root=src_pack).write()
+        (src_pack / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(src_pack),
+                "--build-info", str(build_dir), "-H", str(header),
+                "--depth", "headers",
+                "--build-query", "touch marker", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run" not in result.output
+        assert "will NOT run" in result.output
+        assert "embed_build_source is unreachable anyway" in result.output
+        assert "collect mode 'off'" in result.output
+
     def test_no_sources_or_build_info_reports_no_collection_attempted(
         self, tmp_path: Path
     ) -> None:
