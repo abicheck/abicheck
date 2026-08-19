@@ -33,8 +33,17 @@ runs:
         set -u
         attempts=3
         for attempt in $(seq 1 "$attempts"); do
-          if timeout 120 sudo apt-get update -qq \
-              && timeout 240 sudo apt-get install -y ${{ inputs.packages }}; then
+          # `timeout`'s default signal is SIGTERM, which a caught/ignored
+          # signal in apt-get, dpkg, or sudo's own child-signal handling can
+          # survive indefinitely -- `timeout` then just waits forever for the
+          # process to exit, never escalating on its own (Codex review,
+          # confirmed against a real TERM-ignoring subprocess: `timeout N
+          # cmd` alone did not bound it, `timeout -k 10 N cmd` did). Without
+          # `--kill-after` this reintroduces the exact silent-hang failure
+          # mode this action exists to close. `-k 10` sends SIGKILL 10s after
+          # the initial SIGTERM if the process is still alive.
+          if timeout -k 10 120 sudo apt-get update -qq \
+              && timeout -k 10 240 sudo apt-get install -y ${{ inputs.packages }}; then
             exit 0
           fi
           if [ "$attempt" -lt "$attempts" ]; then
