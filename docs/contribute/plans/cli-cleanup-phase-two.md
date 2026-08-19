@@ -1161,13 +1161,25 @@ the parser to lists only — every existing trusted string config would break.
 > unpopulated section renders nothing). Tests:
 > `tests/test_dry_run_contract.py::TestDumpDryRunBuildQueryTrust` (untrusted
 > auto-discovered config, trusted `--config`, trusted CLI `--build-query`
-> overriding config, no query configured, determinism — each asserting the
-> query is never actually executed by checking no `build/` directory
-> appears). **All five prerequisites are now satisfied** — PR 3C's removal
-> itself (`dump --build-query`/`dump --build-compile-db` deletion) still
-> waits on the ordering's own blocker: PR 3A's full convergence (both `dump`
-> and `scan` resolvers), which remains open per that section's own status
-> notes above.
+> overriding config, no query configured, determinism, and 26 review-caught
+> reachability/precedence/pack-normalization/exit-code-class/config-discovery
+> edge cases besides — each asserting the query is never actually executed).
+> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is satisfied for
+> every input shape the module's own docstring doesn't name as an open
+> gap** — `cli_dump_dry_run_build_query.py` documents two deliberately
+> unclosed cases where the report can still claim "will run" when the real
+> input would not: a Flow-2 `abicheck_inputs/` pack as the sole
+> `--sources`/`--build-info` input, and a `-H` directory containing no
+> supported header (this second one predates the module — `render_dump_
+> dry_run` has never expanded `-H` directories for validation). Closing
+> either is a scoped follow-up (a second pack-format recognizer for the
+> first; a design decision about real directory-walk validation for the
+> second), not a blocker for the trust decision this prerequisite exists to
+> make visible — but PR 3C's removal itself (`dump --build-query`/`dump
+> --build-compile-db` deletion) should not proceed until both are closed or
+> explicitly accepted as permanent gaps, on top of still waiting on the
+> ordering's own blocker: PR 3A's full convergence (both `dump` and `scan`
+> resolvers), which remains open per that section's own status notes above.
 
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.
