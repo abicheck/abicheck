@@ -930,3 +930,55 @@ class TestMergeL3CompileContextDropsDuplicateExplicitInclude:
         merged = _merge_l3_compile_context(explicit, derived)
         assert merged is not None
         assert merged.gcc_option_tokens == ("-I", "/user/inc", "-I", "/build/gen")
+
+
+class TestIncludeDedupCoversAttachedFormsAndResolveFailure:
+    """Two branch-coverage gaps flagged by Codecov's patch-coverage gate on
+    PR #802: the attached-flag spelling on the *already_covered* side of
+    `drop_include_tokens_duplicating_paths`, and the defensive
+    `Path.resolve()` `OSError` fallback both dedup helpers share."""
+
+    def test_already_covered_attached_form_is_recognized(
+        self, tmp_path: Path
+    ) -> None:
+        # `already_covered` (here `-I<dir>`, no space) walks through the
+        # identical `_include_class_path_pairs()` parser as `toks` -- the
+        # attached-form branch is only exercised from *this* side, since
+        # every prior test used the spaced form (`-I`, `str(d)`).
+        d = tmp_path / "inc"
+        toks = ("-I", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, [f"-I{d}"])
+        assert out == ["-fPIC"]
+
+    def test_dedup_paths_preserve_order_falls_back_on_resolve_oserror(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_resolve = Path.resolve
+
+        def _flaky_resolve(self: Path, strict: bool = False) -> Path:
+            if self.name == "loops":
+                raise OSError("ELOOP")
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", _flaky_resolve)
+        p = tmp_path / "loops"
+        # A resolve() failure degrades to the raw str(p) as the dedup key --
+        # two references to the same unresolvable path still collapse.
+        out = dedup_paths_preserve_order([p, tmp_path / "loops"])
+        assert out == [p]
+
+    def test_drop_include_tokens_duplicating_paths_falls_back_on_resolve_oserror(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_resolve = Path.resolve
+
+        def _flaky_resolve(self: Path, strict: bool = False) -> Path:
+            if self.name == "loops":
+                raise OSError("ELOOP")
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", _flaky_resolve)
+        d = tmp_path / "loops"
+        toks = ("-I", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-fPIC"]
