@@ -330,16 +330,18 @@ when a domain is selected to measure coverage of — so assigning it without
 that flag is a usage error rather than a silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
-a `kind: gate` pack is rejected on `scan` (`scan --against` honours
-`--severity-preset`/`--exit-code-scheme` given directly, but does not yet
-fold a gate pack's `gate.*` assignments — it has no gate of its own to move).
+a `kind: gate` pack applies to `scan --against` the same way
+`--severity-preset`/`--exit-code-scheme` given directly already do — `scan`'s
+exit code has honoured the resolved severity/exit-code-scheme config since
+the fix that closed the "scan never consults severity" gap, and a gate pack
+is one more source for that same gate.
 A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
-`surface.internal_namespaces`/`gate.*`, by contrast, all apply uniformly to
+`surface.internal_namespaces`/`gate.*`, similarly, all apply uniformly to
 every library on a directory/package (release) `compare` — the gate half
 folds into the release fan-out's own raw severity/exit-code-scheme inputs,
 since it has no resolved `GateOptions` object of its own yet.
-`contract.unresolved` is still rejected there, since the per-library
-fan-out has no per-comparison contract context to fold it into.
+`contract.unresolved` is still rejected on a release comparison, since the
+per-library fan-out has no per-comparison contract context to fold it into.
 `scan --pack` also requires `--against`, since a pack's only application
 there is the baseline comparison. Each rejection above is a usage error
 rather than a silently ignored flag.

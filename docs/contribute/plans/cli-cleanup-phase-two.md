@@ -1016,6 +1016,49 @@ pipelines a fourth time.
   > That migration, blocker (1)'s scan-baseline narrowing, and blockers 2/3
   > (post-processing hooks, pair-aware scan decision) all remain open. See
   > the root `AGENTS.md`'s PR C entry for the verification detail.
+  >
+  > **Re-investigated (2026-08-19): the dry-run migration (blocker 1) is
+  > confirmed larger than "wire the renderer to a new function call" —
+  > `dump_cmd` has no `DumpRequest` to resolve in the first place.** Read
+  > `cli.py`'s `dump_cmd` in full rather than assumed: it never constructs a
+  > `DumpRequest` anywhere, on either the `--dry-run` or the real-run branch
+  > (confirmed by grep — no `DumpRequest(` call site exists in `cli.py` or
+  > `cli_dump_helpers.py`). Its actual resolution path is two CLI-only
+  > helpers, `resolve_dump_collect_context`/`resolve_dump_compile_context`
+  > (`cli_dump_helpers.py`), which compute `collect_mode`/`header_backend`/
+  > `includes`/`gcc_option_tokens` directly from raw Click parameters —
+  > entirely independent of `service_input_resolution`/
+  > `service_dump_pipeline.resolve_dump_request`, and **not only for the
+  > dry-run report**: those same two locals feed the real (non-dry-run)
+  > `dump()` call a few hundred lines later in the same function. So
+  > migrating `render_dump_dry_run` to build from a real
+  > `ResolvedDumpRequest` is not an isolated renderer change — it requires
+  > first constructing a `DumpRequest` from `dump_cmd`'s ~30 CLI parameters
+  > (matching Click's parsing exactly, including the `_resolved_compile_
+  > context`/`_resolved_collect_mode`/`_resolved_include_labels`/
+  > `_resolved_lang_explicit` private hooks `compare`'s own `ctx.invoke`
+  > already threads through this same command for its implicit-dump
+  > operand), and doing so for **both** branches — dry-run and the real
+  > run — so the two cannot silently diverge the moment one of them
+  > migrates and the other doesn't. That is exactly the scope blocker (2)
+  > already named ("`perform_elf_dump` runs three post-processing passes...
+  > `run_dump_request` has no equivalent hook") from the opposite end: the
+  > real run cannot move to `execute_dump_request()` without those hooks,
+  > and the dry-run preview cannot honestly move to `resolve_dump_request()`
+  > alone while the real run it is meant to preview keeps using a
+  > completely different resolver — a preview built from one resolver
+  > describing an execution built from another is worse than today's "two
+  > independent implementations, kept in sync by hand," since it *looks*
+  > authoritative without being connected to what actually runs. Not
+  > attempted here, for the same reason blockers 2/3 were not: this is a
+  > real, cross-cutting redesign of `dump_cmd`'s ~250-line resolution
+  > section (already documented as needing careful, dedicated review —
+  > `cli_dump_helpers.py` sits at its 2000-line AI-readiness hard cap, so
+  > any new shared surface has to be added to a sibling module, not inline),
+  > not a follow-up to the already-landed `resolve_dump_request`/
+  > `execute_dump_request` split. That split remains real, additive
+  > progress in its own right (§2 above) — it is the primitive a future
+  > `dump_cmd` migration would build on, just not yet consumed by one.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
@@ -1315,10 +1358,9 @@ The report keeps stating both halves explicitly, so the number is explainable:
 removed.**
 
 **(1) Pack parity — the review's PR B, and the harder blocker.** `--pack` is
-accepted by a single-pair `compare`, rejected by the release fan-out, and only
-partially honoured by `scan` (`cli_scan.py` rejects a gate pack outright,
-having no gate of its own — see the root `AGENTS.md` on `pack_application.py`).
-A pack can assign `gate.exit_code_scheme` and `gate.severity.*`. Removing
+accepted by a single-pair `compare`; the release fan-out and `scan` used to
+reject or only partially honour parts of it (see the slices below for what
+closed). A pack can assign `gate.exit_code_scheme` and `gate.severity.*`. Removing
 `--exit-code-scheme` while pack resolution still differs per front end leaves
 no answerable question about how a legacy pack migrates: the answer would be
 "depends which command reads it." Land first: packs resolved **once** into one
@@ -1406,21 +1448,47 @@ report.
 > config`, the per-library JSON write inside `_compare_release_libraries`,
 > `_compute_release_severity_exit_code`, `_fold_release_global_severity`)
 > agrees with the pack, the same "one fold point, not several independently
-> re-deriving ones" discipline slice 1 established. **What is still open,
-> deliberately not attempted in this slice** (unchanged from slice 1's own
-> list, restated here since the gate-pack gap it named is now closed): the
-> full `GateOptions` object shared by `compare`/release/`scan`/the Action;
-> the effective-config digest recorded in every report; and `scan
-> --against`'s own `kind: gate` rejection (`cli_scan.py`, unaffected by
-> this slice — a scan's exit code follows its verdict directly and still
-> has no gate of its own to fold a pack into). All three still need the
-> `GateOptions` unification as a prerequisite. Tests:
-> `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
+> re-deriving ones" discipline slice 1 established. **What was still open
+> after this slice** (unchanged from slice 1's own list, restated here since
+> the gate-pack gap it named is now closed): the full `GateOptions` object
+> shared by `compare`/release/`scan`/the Action; the effective-config digest
+> recorded in every report; and `scan --against`'s own `kind: gate`
+> rejection. The first two remain open (below); the third closed in slice 3.
+> Tests: `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
 > (`test_gate_pack_is_applied_to_a_release_comparison`, replacing the
 > now-stale rejection test of the same name minus "is_applied", and
-> `test_gate_pack_severity_moves_a_release_onto_the_severity_scheme`);
-> `scan`'s own `test_a_gate_pack_is_rejected_by_scan_which_has_no_gate` is
-> unchanged and still passes, confirming this slice left `scan` alone.
+> `test_gate_pack_severity_moves_a_release_onto_the_severity_scheme`).
+>
+> **Slice 3 landed (2026-08-19): `scan --against` also accepts a `kind:
+> gate` pack.** Unlike the release fan-out (slice 2, above), `scan` already
+> has a real `ResolvedCompareConfig` object to fold a pack's contribution
+> into — `resolve_compare_config`, the exact function single-pair `compare`
+> uses, already runs inside `scan_cmd` to resolve `--severity-preset`/
+> `--exit-code-scheme` (direct CLI flags and `.abicheck.yml`) into the
+> `sev_config`/`resolved_exit_scheme` `run_scan_core` gates on — the "scan
+> never consults severity" gap this closed in an earlier PR. So this slice
+> reuses `pack_application.apply_to_compare_config` **directly**, unchanged,
+> rather than a raw-string mirror of it the way the release fan-out's
+> `apply_release_gate_pack` needed: `_resolve_scan_evaluation_config` now
+> takes the already-resolved `resolved_cfg` as a parameter, folds the
+> selected packs' `PackApplication` into it with `apply_to_compare_config`
+> (gated on `gate_supported=True`, no longer `False`), and returns the
+> folded object as a third return value; `scan_cmd` re-derives `sev_config`/
+> `resolved_exit_scheme` from it before `run_scan_core` runs, and
+> `dry_run_scheme_label(resolved_cfg, pack_paths)` (the real `pack_paths`,
+> not a hardcoded `()`) gives `scan --dry-run` the same honest "a selected
+> --pack may adjust it" caveat `compare --dry-run` already gives, rather
+> than resolving the pack early against different pins than the real
+> (later) resolution uses — the same reason `compare --dry-run` never
+> resolves one early either (`dry_run_scheme_label`'s own docstring).
+> **Still open after this slice, unchanged**: the full `GateOptions` object
+> shared by `compare`/release/`scan`/the Action (this slice folds directly
+> onto `ResolvedCompareConfig`, same as single-pair `compare` already did —
+> it does not create a new shared object), and the effective-config digest
+> recorded in every report. Tests: `tests/test_pack_application.py`'s
+> `TestOnlyAppliedFieldsAreAccepted::test_a_gate_pack_is_applied_to_scan`,
+> replacing the now-stale `test_a_gate_pack_is_rejected_by_scan_which_has_
+> no_gate`.
 
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.

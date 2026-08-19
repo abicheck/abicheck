@@ -435,8 +435,13 @@ def resolve_release_pack_application(
     "smallest additive fold point" discipline slice 1 used for
     ``policy.overrides``/``surface.internal_namespaces``, not the full
     ``GateOptions`` unification PR B's own plan section still lists as open.
-    ``scan --against`` is unaffected: it still rejects a ``kind: gate`` pack
-    (``cli_scan.py``, unchanged by this slice).
+    ``scan --against`` now accepts a ``kind: gate`` pack too (CLI cleanup
+    phase two, "PR B", a later slice than this one): unlike the release
+    fan-out, ``scan`` already has a real ``ResolvedCompareConfig`` object
+    (via ``resolve_compare_config``, the same function single-pair
+    ``compare`` uses) to fold the pack's contribution into with
+    :func:`~abicheck.pack_application.apply_to_compare_config` directly --
+    see ``cli_scan._resolve_scan_evaluation_config``.
 
     Also rejects ``contract.unresolved`` unconditionally -- not merely when
     ``contract_evaluation`` is false, the way :func:`~abicheck.

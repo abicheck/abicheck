@@ -973,12 +973,17 @@ def _resolve_scan_evaluation_config(
     policy: str, policy_file: Any,
     project_cfg: Any, cfg_path: Path | None, project_sha256: str | None,
     suppression: Any, suppress: Path | None, symbols_list: Any,
-) -> tuple[Any, Any]:
+    resolved_cfg: Any = None,
+) -> tuple[Any, Any, Any]:
     """Resolve this scan's ADR-049 configuration and fold in any ``--pack``.
 
-    Returns ``(resolved_config, policy_file)`` -- ``(None, policy_file)`` when
-    there is nothing to resolve, i.e. no ``--against`` to compare against or
-    neither ``--contract`` nor ``--pack`` given.
+    Returns ``(resolved_config, policy_file, resolved_cfg)`` -- ``(None,
+    policy_file, resolved_cfg)`` when there is nothing to resolve, i.e. no
+    ``--against`` to compare against or neither ``--contract`` nor ``--pack``
+    given. *resolved_cfg* is the caller's own already-resolved
+    ``resolve_compare_config`` severity/exit-code-scheme object (``scan_cmd``'s
+    ``sev_config``/``resolved_exit_scheme`` source) -- passed through
+    unchanged unless a selected gate pack contributes to it (see below).
 
     ADR-049 Phase 5's "same typed config", for the third and last front end.
     ``checker.compare`` can only claim ``API_REQUEST`` for arguments it was
@@ -987,9 +992,20 @@ def _resolve_scan_evaluation_config(
     defect already fixed for ``compare``. Resolved here because this is where
     the Click context is: which flags the user actually typed is a question
     only the front end can answer.
+
+    CLI cleanup phase two, PR B: a ``kind: gate`` pack (``gate.exit_code_
+    scheme``/``gate.severity.*``) is folded into *resolved_cfg* the same way
+    ``compare``'s own ``resolve_and_apply`` folds one into its
+    ``ResolvedCompareConfig`` -- ``gate_supported=True`` below, no longer
+    rejected. A scan's exit code has honored ``--severity-preset``/
+    ``--exit-code-scheme`` (direct CLI flags and ``.abicheck.yml``) since the
+    fix that closed the "scan never consults severity" gap; a gate pack is
+    just one more source for the same already-real gate, mirroring the
+    release fan-out's identical slice 2 fold
+    (``cli_compare_release_helpers.apply_release_gate_pack``).
     """
     if against is None or not (contract_evaluation or pack_paths):
-        return None, policy_file
+        return None, policy_file, resolved_cfg
     resolved_config = None
     from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
     from .compatibility_evaluation_resolver import (
@@ -1020,12 +1036,16 @@ def _resolve_scan_evaluation_config(
         if pack_paths:
             # ADR-049 D8: a pack that reached the receipt and not the
             # engine is exactly what got the flag reverted once before, so
-            # its contributions are folded into the policy file the
-            # baseline comparison runs with. `gate_supported=False`
-            # because a scan's exit code follows its verdict directly --
-            # the same reason `cli_scan_receipt._without_gate_settings`
-            # blanks the gate rather than reporting one it never used.
+            # its contributions are folded into the policy file -- and,
+            # since CLI cleanup phase two "PR B", into the resolved
+            # severity/exit-code-scheme config -- the baseline comparison
+            # runs with. `gate_supported=True`: a scan's exit code already
+            # honors `--severity-preset`/`--exit-code-scheme` (direct CLI
+            # flags and `.abicheck.yml`), so a gate pack is one more source
+            # for that same real gate rather than a field with nowhere to
+            # go.
             from .pack_application import (
+                apply_to_compare_config,
                 check_resolved_config_applies_packs,
                 pack_application,
                 policy_file_with_packs,
@@ -1045,22 +1065,20 @@ def _resolve_scan_evaluation_config(
             # the run (Codex review, raised for compare and then here).
             check_resolved_config_applies_packs(
                 resolved_config,
-                gate_supported=False,
-                gate_reason=(
-                    "a scan's exit code now honors --severity-preset/--exit-code-"
-                    "scheme (direct CLI flags and .abicheck.yml's `severity:`/"
-                    "`exit_code_scheme` config), but does not yet fold a gate "
-                    "pack's `gate.*` assignments the way `compare --pack` "
-                    "does; pass the severity/exit-code-scheme settings "
-                    "directly instead of via --pack"
-                ),
                 contract_evaluation=contract_evaluation,
             )
+            application = pack_application(resolved_config, policy_file=policy_file)
             policy_file = policy_file_with_packs(
-                policy_file,
-                pack_application(resolved_config, policy_file=policy_file),
-                base_policy=policy,
+                policy_file, application, base_policy=policy,
             )
+            # Same fold `compare`'s own `resolve_and_apply` applies to its
+            # `ResolvedCompareConfig` -- a no-op unless a gate pack actually
+            # supplied `gate.exit_code_scheme`/`gate.severity.*`, and only
+            # ever reached for a field `resolve_compare_config` left at its
+            # built-in default (the resolver already exempts anything the
+            # CLI/profile/`.abicheck.yml` stated from pack assignment).
+            if resolved_cfg is not None:
+                resolved_cfg = apply_to_compare_config(resolved_cfg, application)
     except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
         # A D7 same-tier conflict or a D8 pack conflict is a usage error,
         # exactly as it is for `compare` -- not a traceback out of a
@@ -1074,7 +1092,7 @@ def _resolve_scan_evaluation_config(
         # Click rejects an unknown base before this call. If either front
         # end gains a new failure mode, change both.
         raise click.UsageError(str(exc)) from exc
-    return resolved_config, policy_file
+    return resolved_config, policy_file, resolved_cfg
 
 
 def _discover_scan_project_config(
@@ -1667,6 +1685,10 @@ def scan_cmd(
     # audit-only run, which has no baseline comparison and therefore no gate.
     scheme_label = "legacy (0/2/4)"
     sev_config_for_preview = None
+    # None for an audit-only run (no --against): there is no
+    # `resolve_compare_config` result to fold a gate pack into, matching
+    # `_resolve_scan_evaluation_config`'s own early return for that case.
+    resolved_cfg = None
     if against is not None:
         from .cli_helpers_compare import resolve_compare_config
 
@@ -1699,13 +1721,17 @@ def scan_cmd(
         # The same label `compare --dry-run` prints, from the same function
         # and the same *resolved* config -- so a `.abicheck.yml`-only severity
         # setup previews correctly, which is the case that function was
-        # itself fixed for. `pack_paths=()` deliberately: a `kind: gate` pack
-        # is rejected outright on `scan`, so nothing can move this scheme
-        # after resolution and the "a pack may adjust it" caveat would be
-        # false here.
+        # itself fixed for. The real *pack_paths* now, not `()`: a `kind:
+        # gate` pack is no longer rejected outright on `scan` (CLI cleanup
+        # phase two, "PR B"), so `dry_run_scheme_label`'s own "a selected
+        # --pack may adjust it" caveat is exactly the honest answer here too
+        # -- resolving the pack this early would run D8 conflict detection
+        # against different pins than the real (later) resolution does, the
+        # same reason `compare --dry-run` never resolves it early either
+        # (see that function's own docstring).
         from .cli_compare_receipt import dry_run_scheme_label
 
-        scheme_label = dry_run_scheme_label(resolved_cfg, ())
+        scheme_label = dry_run_scheme_label(resolved_cfg, pack_paths)
         # Only a severity-scheme run has a gate to describe; under `legacy`
         # the severity values still resolve but never score anything, so
         # previewing them would imply a gate the run will not run.
@@ -1766,13 +1792,24 @@ def scan_cmd(
     # -- the same defect already fixed for `compare` and the MCP tool.
     # Resolved here because this is where the Click context is: which flags
     # the user actually typed is a question only the front end can answer.
-    resolved_config, policy_file = _resolve_scan_evaluation_config(
+    resolved_config, policy_file, resolved_cfg = _resolve_scan_evaluation_config(
         against=against, contract_evaluation=contract_evaluation,
         pack_paths=pack_paths, policy=policy, policy_file=policy_file,
         project_cfg=project_cfg, cfg_path=cfg_path,
         project_sha256=_project_sha256,
         suppression=suppression, suppress=suppress, symbols_list=_symbols_list,
+        resolved_cfg=resolved_cfg,
     )
+    # A selected gate pack may have just moved `resolved_cfg`'s severity/
+    # exit-code-scheme (CLI cleanup phase two, "PR B") -- re-derive the
+    # values `run_scan_core` below actually gates on from the (possibly
+    # pack-folded) config, the same "read the resolved value, never
+    # re-derive one" rule `pack_application.apply_to_compare_config`'s own
+    # docstring states. A no-op when `resolved_cfg` is `None` (audit-only)
+    # or no pack touched it.
+    if resolved_cfg is not None:
+        sev_config = resolved_cfg.severity
+        resolved_exit_scheme = resolved_cfg.exit_code_scheme
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)

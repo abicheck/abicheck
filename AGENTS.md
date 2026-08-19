@@ -4074,6 +4074,46 @@ Once a root command genuinely clears the bar above, pick the right home:
   suites (unchanged, still green), the full fast unit suite, and
   `mypy`/`ruff` clean on both touched files.
 
+  **Re-investigated (2026-08-19): the dry-run migration (blocker 1) is
+  larger than "wire the renderer to `resolve_dump_request()`" —
+  `dump_cmd` has no `DumpRequest` to resolve in the first place, on
+  either branch.** Read `cli.py`'s `dump_cmd` in full, not assumed: it
+  never constructs a `DumpRequest` object anywhere (confirmed by grep —
+  no `DumpRequest(` call site exists in `cli.py` or `cli_dump_helpers.py`
+  today). Its real resolution path is two CLI-only helpers,
+  `resolve_dump_collect_context`/`resolve_dump_compile_context`
+  (`cli_dump_helpers.py`), computing `collect_mode`/`header_backend`/
+  `includes`/`gcc_option_tokens` directly off raw Click parameters,
+  entirely independent of `service_input_resolution`/
+  `service_dump_pipeline.resolve_dump_request` — and this is not a
+  dry-run-only path: those same locals feed the real `dump()` call a few
+  hundred lines later in the same function, on the non-dry-run branch.
+  So migrating `render_dump_dry_run` to build from a real
+  `ResolvedDumpRequest` is not an isolated renderer change: it requires
+  first constructing a `DumpRequest` from `dump_cmd`'s ~30 CLI
+  parameters (matching Click's own parsing precisely — including the
+  `_resolved_compile_context`/`_resolved_collect_mode`/`_resolved_
+  include_labels`/`_resolved_lang_explicit` private hooks `compare`'s own
+  `ctx.invoke` already threads through this same command for its
+  implicit-dump operand), and doing so for *both* branches at once, so
+  the preview and the real run cannot silently diverge the moment only
+  one of them migrates. That is blocker 2 restated from the other
+  direction: the real run cannot move to `execute_dump_request()`
+  without the post-processing hooks blocker 2 already names, and the
+  dry-run preview cannot honestly move to `resolve_dump_request()` alone
+  while the real run it previews keeps using a wholly different resolver
+  — a preview built from one resolver describing an execution built from
+  another would be strictly worse than today's "two independent
+  implementations, kept in sync by hand," since it would *look*
+  authoritative without being connected to what actually runs. Not
+  attempted here, for the same reason blockers 2/3 were not: a real,
+  cross-cutting redesign of `dump_cmd`'s ~250-line resolution section
+  (`cli_dump_helpers.py` is already at its 2000-line AI-readiness hard
+  cap, so any new shared surface needs a sibling module, not an inline
+  addition), not a follow-up to the already-landed `resolve_dump_request`/
+  `execute_dump_request` split — that split remains real, additive
+  progress in its own right, just not yet consumed by `dump_cmd`.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

@@ -601,21 +601,42 @@ class TestOnlyAppliedFieldsAreAccepted:
         for field_name in UNAPPLIED_PACK_FIELDS:
             assert field_name not in help_text, field_name
 
-    def test_a_gate_pack_is_rejected_by_scan_which_has_no_gate(
+    def test_a_gate_pack_is_applied_to_scan(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """CLI cleanup phase two, "PR B": a `kind: gate` pack now configures
+        `scan --against` instead of being rejected outright -- `scan`'s exit
+        code has honored `--severity-preset`/`--exit-code-scheme` (direct CLI
+        flags and `.abicheck.yml`) since the fix that closed the "scan never
+        consults severity" gap (AGENTS.md "Known gaps"); a gate pack is one
+        more source for that same real gate, mirroring
+        `test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme`
+        (the single-pair `compare` version) and
+        `test_gate_pack_is_applied_to_a_release_comparison` (the release
+        fan-out version)."""
         old, new = pair
         gate = _pack(
             tmp_path,
-            "gate.yml",
-            "id: g\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.exit_code_scheme: severity\n",
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
         )
-        result = CliRunner().invoke(
-            main, ["scan", str(new), "--against", str(old), "--pack", str(gate)]
+        without_pack = CliRunner().invoke(
+            main, ["scan", str(new), "--against", str(old)]
         )
-        assert result.exit_code == 64, result.output
-        assert "gate" in result.output
+        assert without_pack.exit_code == 4, without_pack.output
+
+        with_pack = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+        # The finding is still reported -- only the gate moved.
+        summary = json.loads(with_pack.output)
+        assert summary["verdict"] == "BREAKING"
 
     def test_scan_rejects_an_unapplied_field_from_the_resolution(
         self, pair: tuple[Path, Path], tmp_path: Path
