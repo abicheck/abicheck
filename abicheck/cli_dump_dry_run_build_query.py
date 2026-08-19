@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through sixteen review
+patches" convention -- this module has now been through seventeen review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -303,11 +303,23 @@ def _resolve_compile_db_hint_line(compile_db_hint: str, effective_sources: Path 
             "ever executed)"
         )
     if existing_match is not None:
+        # This is a PROVISIONAL match, not a resolved answer: `_run_build_
+        # query` glob-resolves `cfg.compile_db` AFTER the query has run,
+        # via `sorted(sources.glob(cfg.compile_db))` -- first *lexically
+        # sorted* existing match wins, not "the same file this preview
+        # found." A query that creates a lexicographically-earlier match
+        # (or removes this one) makes the real run resolve to a genuinely
+        # DIFFERENT path than this pre-query snapshot shows (Codex review,
+        # fresh evidence) -- "recreate/refresh this file" undersold that:
+        # it isn't only refreshed, it can be entirely superseded.
         return (
-            f"resulting compile-DB path: {existing_match} (configured as "
-            f"{compile_db_hint!r}; the query may still recreate/refresh "
-            "this file, and the real run always re-resolves the "
-            "configured value after the query exits)"
+            f"resulting compile-DB path (provisional, pre-query snapshot): "
+            f"{existing_match} (configured as {compile_db_hint!r}; the "
+            "query runs BEFORE this glob is actually resolved for real, so "
+            "it may create a lexicographically-earlier match, remove this "
+            "one, or leave it unchanged -- the real run always re-resolves "
+            "the configured glob fresh after the query exits, and can "
+            "select a different file than this one)"
         )
     return (
         f"resulting compile-DB path: (configured as {compile_db_hint!r}, "
