@@ -268,11 +268,25 @@ def add_build_query_dry_run_section(
         )
         return
 
-    # Neither `l2_seed.seed_includes_and_fold_compile_context` (needs headers)
-    # nor `embed_build_source` (needs a non-"off" collect mode) would even
-    # call `collect_inline_pack`/`_resolve_compile_db` -- build.query, trusted
-    # or not, is never reached (Codex review, fresh evidence).
-    if not headers and collect_mode == "off":
+    # `l2_seed.seed_includes_and_fold_compile_context` is only ever called
+    # from the artifact-bearing dispatch (`perform_elf_dump`/
+    # `handle_non_elf_dump`) -- when `SO_PATH` is omitted, `dump_cmd`
+    # dispatches to `dump_source_only()` instead (the parallel-baseline
+    # flow), which never seeds L2 at all: "this path's snapshot starts with
+    # no functions/variables... a source-only dump has no -H headers
+    # either" (its own docstring). So the L2-seed path is reachable only
+    # when BOTH headers are present AND a real artifact was given -- headers
+    # alone, with no `SO_PATH`, give this module no route to `collect_
+    # inline_pack` the real `dump --sources ... -H ...` (no binary) run
+    # doesn't also lack (Codex review, fresh evidence).
+    l2_seed_reachable = bool(headers) and so_path is not None
+
+    # Neither `l2_seed.seed_includes_and_fold_compile_context` (needs headers
+    # AND a real artifact, per `l2_seed_reachable` above) nor `embed_build_
+    # source` (needs a non-"off" collect mode) would even call
+    # `collect_inline_pack`/`_resolve_compile_db` -- build.query, trusted or
+    # not, is never reached (Codex review, fresh evidence).
+    if not l2_seed_reachable and collect_mode == "off":
         result.add(
             _SECTION,
             "build.query: will NOT run -- no evidence collection requested "
@@ -385,9 +399,10 @@ def add_build_query_dry_run_section(
     #    gate) already let it get that far. A load failure there is a real
     #    `click.UsageError` (exit 64).
     # 2. `l2_seed._l2_seed_config` (reached via `seed_includes_and_fold_
-    #    compile_context`, gated only on `headers` being non-empty --
-    #    independent of `collect_active`/pack status) *also* loads `cfg_path`
-    #    whenever it runs, unconditionally -- but its own load is
+    #    compile_context`, gated on `l2_seed_reachable` above -- headers
+    #    non-empty AND a real artifact -- independent of `collect_active`/
+    #    pack status) *also* loads `cfg_path` whenever it runs,
+    #    unconditionally -- but its own load is
     #    best-effort: a `ValueError` degrades to "no seeded dirs, no fold"
     #    rather than raising (its own docstring: "surfaces loudly elsewhere
     #    ... this is a best-effort include-dir hint, so it degrades ...
@@ -416,7 +431,7 @@ def add_build_query_dry_run_section(
     raw_operand_present = (build_info is not None and not is_pack_dir(build_info)) or (
         effective_sources is not None
     )
-    config_readable = bool(headers) or raw_operand_present
+    config_readable = l2_seed_reachable or raw_operand_present
     raise_on_bad_config = collect_active and raw_operand_present
 
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
@@ -487,7 +502,7 @@ def add_build_query_dry_run_section(
                 "precedence over build.query",
             )
             return
-        if effective_sources is None and not headers:
+        if effective_sources is None and not l2_seed_reachable:
             # embed_build_source's own raw_build_info becomes None once
             # --build-info is a pack (regardless of collect mode), and
             # raw_sources is None whenever --sources is absent *or* is
@@ -551,12 +566,13 @@ def add_build_query_dry_run_section(
                 "precedence over build.query",
             )
             return
-        if not headers:
+        if not l2_seed_reachable:
             # build_info is None in this branch (elif chain), so
             # embed_build_source's raw_build_info is already None; raw_sources
             # becomes None too once --sources is a pack, unconditionally --
             # its dispatch condition fails regardless of collect mode, leaving
-            # only the L2 seed path, which itself needs headers (Codex
+            # only the L2 seed path, which itself needs headers AND a real
+            # artifact (Codex
             # review, fresh evidence).
             result.add(
                 _SECTION,

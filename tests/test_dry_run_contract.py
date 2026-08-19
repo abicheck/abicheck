@@ -1199,6 +1199,29 @@ class TestDumpDryRunBuildQueryTrust:
         assert "will run (trusted -- explicit --config)" in result.output
         assert "build.query: (none configured)" not in result.output
 
+    def test_source_only_dump_headers_do_not_reach_l2_seed(self, tmp_path: Path) -> None:
+        # Codex review, fresh evidence, verified end-to-end against the real
+        # CLI: with no SO_PATH, dump_cmd dispatches to dump_source_only()
+        # (the parallel-baseline flow), which never calls
+        # seed_includes_and_fold_compile_context() at all -- a source-only
+        # dump has no -H headers seeding L2 (its own docstring: "this
+        # path's snapshot starts with no functions/variables at all"). The
+        # real `dump --sources ... -H ... --depth headers` (no SO_PATH)
+        # exits 1 (requested depth not satisfiable) with the query never
+        # run, not "will run".
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--build-query", "cmake -S . -B build", "--depth", "headers",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
