@@ -175,6 +175,63 @@ def test_pick_compiler_binary_resolves_plain_relative_driver_without_env_too() -
     assert pick_compiler_binary(cu, override=None) == "/llvm/bin/clang-cl"
 
 
+def test_resolve_relative_driver_windows_relative_driver_joined_with_windows_directory() -> (
+    None
+):
+    """Host-independent companion to the two live-Windows-CI-only tests
+    above (round 27 follow-up, closing the coverage gap that let their own
+    assertion bugs go undetected on Linux CI for a full round).
+
+    Both tests above only ever exercise ONE join grammar each on this
+    sandbox's Linux CI runner: the ``env -C`` test's ``tmp_path``-derived
+    ``directory`` is host-native (POSIX here), and the plain-relative test's
+    ``directory="/work"`` is POSIX-literal -- neither ever drives
+    :func:`_resolve_relative_driver` through its ``ntpath`` branch except on
+    a REAL Windows runner. That is exactly why round 26's wrong,
+    host-native-``os.path.normpath`` assertions (see the round 27 changelog
+    entry: "neither a production-code bug") were never caught until a live
+    Windows CI run surfaced them -- the production code
+    (:func:`_resolve_relative_driver`) was already correct throughout, only
+    the tests' own expectations were wrong, and nothing on Linux could tell.
+
+    Mirrors ``test_header_compile_context_gcc_path.py``'s already-established
+    ``test_resolve_driver_token_windows_relative_driver_joined_with_windows_
+    directory`` for the sibling ``_resolve_driver_token`` function -- a
+    literal Windows-style ``directory`` (``C:\\work\\build``) plus a
+    Windows-style RELATIVE driver token (``..\\llvm\\bin\\clang-cl.exe``)
+    must compose with ``ntpath`` grammar, and only ``ntpath``, regardless of
+    which host OS is doing the analysis. Runs identically -- and already
+    passed, both before and after round 27 -- on Linux, macOS, and Windows,
+    since :func:`_resolve_relative_driver` chooses its join grammar from the
+    token/directory's own spelling via ``PureWindowsPath``/``PurePosixPath``,
+    never from the analyzing host.
+    """
+    from abicheck.buildsource.source_extractors._argv import _resolve_relative_driver
+
+    token = r"..\llvm\bin\clang-cl.exe"
+    directory = r"C:\work\build"
+    assert (
+        _resolve_relative_driver(token, directory) == r"C:\work\llvm\bin\clang-cl.exe"
+    )
+
+
+def test_resolve_relative_driver_posix_relative_driver_joined_with_posix_directory() -> (
+    None
+):
+    """The symmetric POSIX-relative case, run host-independently: a POSIX
+    ``directory`` + a POSIX-relative driver token must compose with
+    ``posixpath`` grammar regardless of host -- confirming the Windows-
+    grammar test above did not accidentally force EVERY relative join
+    through ``ntpath``. Mirrors ``test_header_compile_context_gcc_path.py``'s
+    ``test_resolve_driver_token_posix_relative_driver_joined_with_posix_
+    directory`` for the sibling function."""
+    from abicheck.buildsource.source_extractors._argv import _resolve_relative_driver
+
+    token = "../llvm/bin/clang-cl"
+    directory = "/work/build"
+    assert _resolve_relative_driver(token, directory) == "/work/llvm/bin/clang-cl"
+
+
 def test_pick_compiler_binary_relative_driver_empty_directory_left_unjoined() -> None:
     """Negative control: an empty/falsy ``compile_unit.directory`` (no real
     base to join against) leaves a relative driver token unchanged --

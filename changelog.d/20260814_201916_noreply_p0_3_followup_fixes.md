@@ -1105,3 +1105,43 @@
   PR series' own `join_path_token()` implements, matching the literal-
   expected-value pattern `test_header_compile_context_gcc_path.py`'s own
   foreign-absolute-path tests already use.
+- **Follow-up to round 26/27: closed the test-coverage gap that let those
+  two test bugs go undetected for a full round.** Live Windows CI on this
+  PR (run for commit `04c700b9`, round 26) failed exactly those two tests
+  with the same symptoms round 27's changelog entry above already
+  diagnosed and fixed (a `.exe`-suffixed fixture-name comparison, and a
+  host-native `os.path.normpath` expectation); by the time round 27's own
+  commit (`2bb7e0d2`) landed the corrected, literal, host-independent
+  assertions, `_resolve_relative_driver()` itself needed no change --
+  investigation (re-reading `_resolve_relative_driver()`,
+  `pick_compiler_binary()`, and `_resolve_driver_token()`'s already-fixed
+  sibling treatment side by side, confirmed via `git diff` between the two
+  commits) showed `_resolve_relative_driver()` already delegated to the
+  same host-independent `is_absolute_path_token()`/`join_path_token()`/
+  `normalize_path_token()` grammar `_resolve_driver_token()` uses, in round
+  26's own original commit -- only the *test's* expected values were wrong,
+  never the production code. What was still missing is why that
+  round-26-vintage test bug survived this PR's own Linux-only local
+  verification for a whole round before a live Windows runner caught it:
+  neither existing test ever drove `_resolve_relative_driver()` through its
+  `ntpath` branch on a non-Windows host -- the `env -C` test's `directory`
+  is host-native (POSIX on every CI runner that isn't `windows-latest`),
+  and the plain-relative test's `directory="/work"` is POSIX-literal by
+  construction. `test_header_compile_context_gcc_path.py` already has this
+  exact host-independent shape for the sibling `_resolve_driver_token()`
+  (`test_resolve_driver_token_windows_relative_driver_joined_with_windows_
+  directory`/`test_resolve_driver_token_posix_relative_driver_joined_with_
+  posix_directory`) -- `_resolve_relative_driver()` had no equivalent.
+  Added the missing pair directly to
+  `tests/test_source_extractors_env_round26.py`
+  (`test_resolve_relative_driver_windows_relative_driver_joined_with_
+  windows_directory`/`test_resolve_relative_driver_posix_relative_driver_
+  joined_with_posix_directory`), calling `_resolve_relative_driver()`
+  directly with a literal `C:\work\build`/`..\llvm\bin\clang-cl.exe` pair
+  (and the symmetric POSIX pair) so this class of grammar bug -- in either
+  the production helper or a future test's own expectations -- is caught
+  on ANY CI runner, not only a Windows one. No production code changed; a
+  fresh full local verification pass (`ruff check`, `ruff format --check`,
+  `mypy abicheck/`, the fast test suite, `check_ai_readiness.py`) and a
+  live Windows CI re-run on this PR's current head both confirm the two
+  originally-reported tests already pass.
