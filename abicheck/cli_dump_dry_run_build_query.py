@@ -137,7 +137,7 @@ the real run would reject.
 
 **Known, deliberately unclosed gaps** (documented rather than chased
 further, per this repository's own "known gaps over risky reactive
-patches" convention -- this module has now been through thirteen review
+patches" convention -- this module has now been through fifteen review
 rounds):
 
 - Flow-2 ``abicheck_inputs/`` packs (recognized by
@@ -467,20 +467,52 @@ def add_build_query_dry_run_section(
         try:
             src_pack_evidence = BuildSourcePack.load(sources).build_evidence
         except (OSError, ValueError) as exc:
-            if collect_active:
+            if build_info is not None:
+                # `l2_seed._l2_seed_pack_inputs` only attempts to load
+                # `sources` when `build_info is None` -- with a non-``None``
+                # `build_info`, it is never even reached (nulling
+                # `raw_sources` is unconditional, but the `BuildSourcePack.
+                # load(sources)` call is gated behind that same check) --
+                # so this malformed pack is genuinely irrelevant to whether
+                # the L2 seed's own query resolution proceeds: it resolves
+                # via `build_info`'s own path unaffected, and may still run
+                # `cfg.query` once. This holds regardless of
+                # `collect_active` (Codex review, fresh evidence -- an
+                # earlier revision returned early on `collect_active` alone,
+                # before ever checking `build_info`, hiding that the L2
+                # seed's own invocation genuinely runs before
+                # `embed_build_source`'s own *unconditional*, later
+                # re-attempt at loading this same malformed pack -- see the
+                # module docstring's note on that unconditional load --
+                # fails and aborts the overall command).
+                result.add(
+                    _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
+                )
+                if collect_active:
+                    result.block(
+                        f"--sources names an unloadable pack ({sources}): {exc} -- "
+                        "build-source embedding re-attempts this same load later "
+                        "and fails there, even though the L2 seed's own query "
+                        "invocation below is unaffected by it"
+                    )
+                # Fall through with no L3 evidence from this pack, same as a
+                # valid-but-empty one -- the rest of this function resolves
+                # the L2 seed's own query via build_info.
+                src_pack_evidence = None
+            elif collect_active:
                 result.add(
                     _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
                 )
                 result.block(f"--sources names an unloadable pack ({sources}): {exc}")
                 return
-            if build_info is None:
-                # `l2_seed._l2_seed_pack_inputs` only attempts to load
-                # `sources` when `build_info is None` -- with a non-``None``
-                # `build_info`, it is never even reached (nulling
-                # `raw_sources` is unconditional, but the `BuildSourcePack.
-                # load(sources)` call is gated behind that same check), so
-                # this malformed pack is genuinely the thing standing
-                # between here and the query running.
+            else:
+                # `build_info is None` and `collect_mode == "off"`:
+                # `l2_seed`'s own pack loading attempts the SAME malformed
+                # pack in this shape (it is only skipped when `build_info`
+                # is given) and, per its own best-effort contract, degrades
+                # the whole resolution silently rather than raising -- no
+                # compile_inline_pack call succeeds, so no query attempt
+                # happens from either real call site.
                 result.add(
                     _SECTION,
                     f"build.query: will NOT run -- --sources names an "
@@ -491,18 +523,6 @@ def add_build_query_dry_run_section(
                     "reach it",
                 )
                 return
-            # `build_info is not None` here: `_l2_seed_pack_inputs` never
-            # attempts to load this pack at all in that shape -- it only
-            # nulls `raw_sources` and passes `build_info`'s own value
-            # through unchanged -- so a malformed manifest here is
-            # genuinely irrelevant to whether the real run's query
-            # executes (Codex review, fresh evidence: an earlier revision
-            # unconditionally treated any malformed --sources pack as
-            # blocking resolution once `collect_active` was False,
-            # regardless of `build_info`, hiding that the real command can
-            # still succeed via `build_info`'s own path). Fall through with
-            # no L3 evidence from this pack, same as a valid-but-empty one.
-            src_pack_evidence = None
     else:
         src_pack_evidence = None
 
@@ -936,7 +956,26 @@ def add_build_query_dry_run_section(
     # config-resolution nuances), not a change this read-only preview module
     # can make on its own; see this module's own "Known, deliberately
     # unclosed gaps" section.
-    both_sites_reachable = l2_seed_reachable and collect_active
+    #
+    # A third condition gates whether `embed_build_source` (the second call
+    # site) can EVER dispatch into `collect_inline_pack` at all, independent
+    # of the two above: its own `raw_build_info`/`raw_sources` both
+    # collapse to `None` whenever the corresponding operand is itself a pack
+    # (`bi_is_pack`/`src_is_pack`) or absent -- its dispatch guard
+    # (`raw_build_info is not None or raw_sources is not None`) fails
+    # unconditionally when BOTH normalize away, e.g. `--build-info
+    # <emptypack>` given alone with no raw `--sources` at all (Codex review,
+    # fresh evidence). When that happens, the second invocation is not
+    # merely unreached-yet or short-circuited -- it never runs, regardless
+    # of whether the intervening dump succeeds, so this must gate
+    # `both_sites_reachable` itself rather than only the `build_info is
+    # None` split above (which only distinguishes *why* a reachable second
+    # invocation may or may not still run `cfg.query`).
+    raw_build_info_for_embed = (
+        None if (build_info is None or is_pack_dir(build_info)) else build_info
+    )
+    embed_dispatch_possible = raw_build_info_for_embed is not None or effective_sources is not None
+    both_sites_reachable = l2_seed_reachable and collect_active and embed_dispatch_possible
     count_suffix: str
     count_note: tuple[str, ...]
     if both_sites_reachable and build_info is None:

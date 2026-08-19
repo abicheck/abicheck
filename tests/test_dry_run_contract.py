@@ -725,6 +725,83 @@ class TestDumpDryRunBuildQueryTrust:
         assert "RUNS AT LEAST ONCE, POSSIBLY TWICE" in result.output
         assert "RUNS AT LEAST ONCE, AND AGAIN IF THE DUMP REACHES" not in result.output
         assert "cannot be determined without" in result.output
+
+    def test_empty_build_info_pack_alone_reports_single_execution_only(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: with ONLY an empty --build-info pack
+        # given (no raw --sources at all), embed_build_source's own
+        # raw_build_info/raw_sources both collapse to None (pack
+        # normalization nulls the former; sources was never given at all),
+        # so its dispatch guard (raw_build_info is not None or raw_sources
+        # is not None) fails unconditionally -- the second call site NEVER
+        # runs, regardless of whether the dump succeeds. An earlier revision
+        # reported this as "RUNS AT LEAST ONCE, POSSIBLY TWICE" anyway,
+        # since it only checked build_info's raw (pre-pack-normalization)
+        # value, not whether embed_build_source's own dispatch is reachable
+        # at all.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        cfg = self._write_config(tmp_path)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        BuildSourcePack(root=pack_dir).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "-H", str(header),
+                "--build-info", str(pack_dir),
+                "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+        assert "POSSIBLY TWICE" not in result.output
+        assert "AND AGAIN IF THE DUMP REACHES" not in result.output
+
+    def test_malformed_sources_pack_with_raw_build_info_reports_execution_and_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: with a raw --build-info directory
+        # (not yet resolving to a compile DB) given ALONGSIDE a malformed
+        # --sources pack, l2_seed._l2_seed_pack_inputs never even attempts
+        # to load the --sources pack in this shape -- it resolves via
+        # build_info's own path unaffected, and its own query invocation
+        # genuinely runs, BEFORE embed_build_source's own unconditional,
+        # later re-attempt at loading this same malformed pack fails and
+        # aborts the overall command (exit 1). An earlier revision returned
+        # early on `collect_active` alone here, reporting only the blocker
+        # with no visibility into the fact that build.query already ran.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        cfg = self._write_config(tmp_path)
+        malformed_src_pack = tmp_path / "srcpack"
+        malformed_src_pack.mkdir()
+        (malformed_src_pack / "manifest.json").write_text("not json{{{", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(malformed_src_pack),
+                "--build-info", str(build_dir),
+                "-H", str(header), "--config", str(cfg), "--dry-run",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "could not load --sources pack" in result.output
+        assert "will run (trusted -- explicit --config)" in result.output
+        assert "argv:" in result.output
+        assert "blocker:" in result.output
+        assert "build-source embedding re-attempts this same load later" in result.output
         # A dry run never actually executes the query.
         assert not (build_dir / "compile_commands.json").exists()
 
