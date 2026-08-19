@@ -103,9 +103,23 @@ this module's own "will NOT run" guard above fire either, since the
 original (pre-transform) ``sources``/``build_info`` values it reads stay
 non-``None`` -- resolution still reaches ``cfg.query`` exactly as coded.
 
+Two final refinements (Codex review, fresh evidence): (5) an empty ``--sources``/
+``--build-info`` pack (no L3 compile units) does not by itself rule out
+``embed_build_source`` -- but when it is a **``--build-info``** pack with no
+``--sources`` given, or a **``--sources``** pack (build_info is ``None`` in
+that branch), ``embed_build_source``'s own ``raw_build_info``/``raw_sources``
+both collapse to ``None`` *unconditionally* (independent of collect mode),
+so its dispatch guard (`raw_build_info is not None or raw_sources is not
+None`) always fails -- leaving only the L2-seed path, which itself still
+needs ``headers``. (6) ``shlex.split()`` on a whitespace-only ``build.query``
+returns an empty list; ``_run_build_query`` itself checks ``if not argv:
+return None`` before ever invoking anything, so this module now reports the
+same "will NOT run" rather than an execution claim with an empty ``argv:
+[]``.
+
 This closes the full set of paths into ``collect_inline_pack`` this module
 is aware of; a new bypass mechanism added to that function in the future
-would need a matching addition here, the same way each of these four did.
+would need a matching addition here, the same way each of these did.
 """
 
 from __future__ import annotations
@@ -190,6 +204,21 @@ def add_build_query_dry_run_section(
                 "precedence over build.query",
             )
             return
+        if sources is None and not headers:
+            # embed_build_source's own raw_build_info becomes None once
+            # --build-info is a pack (regardless of collect mode), and
+            # raw_sources is already None with no --sources given -- its
+            # dispatch condition (`raw_build_info is not None or raw_sources
+            # is not None`) therefore fails unconditionally, leaving only the
+            # L2 seed path, which itself needs headers (Codex review, fresh
+            # evidence).
+            result.add(
+                _SECTION,
+                "build.query: will NOT run -- --build-info is a pack with no "
+                "L3 compile units, and neither --sources nor headers give "
+                "another path to collect_inline_pack",
+            )
+            return
     elif build_info is not None:
         # A pre-captured Bazel aquery/cquery jsonproto is routed to the
         # adapter before _resolve_compile_db is ever reached, and always
@@ -244,6 +273,20 @@ def add_build_query_dry_run_section(
                 "precedence over build.query",
             )
             return
+        if not headers:
+            # build_info is None in this branch (elif chain), so
+            # embed_build_source's raw_build_info is already None; raw_sources
+            # becomes None too once --sources is a pack, unconditionally --
+            # its dispatch condition fails regardless of collect mode, leaving
+            # only the L2 seed path, which itself needs headers (Codex
+            # review, fresh evidence).
+            result.add(
+                _SECTION,
+                "build.query: will NOT run -- --sources is a pack with no L3 "
+                "compile units and no headers give another path to "
+                "collect_inline_pack",
+            )
+            return
 
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
     # itself resolves from for this purpose -- distinct from `discover_project_
@@ -291,6 +334,16 @@ def add_build_query_dry_run_section(
             _SECTION,
             f"build.query: {effective_query!r} -- will NOT run "
             f"(could not parse as a command: {exc})",
+        )
+        return
+    if not argv:
+        # `_run_build_query`'s own `if not argv: return None` -- a
+        # whitespace-only query parses to an empty argv and is never
+        # actually run (Codex review, fresh evidence).
+        result.add(
+            _SECTION,
+            f"build.query: {effective_query!r} -- will NOT run "
+            "(parses to an empty command)",
         )
         return
 

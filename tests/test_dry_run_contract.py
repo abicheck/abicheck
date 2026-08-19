@@ -782,6 +782,51 @@ class TestDumpDryRunBuildQueryTrust:
         assert "--sources" in result.output
         assert "already carries L3 compile units" in result.output
 
+    def test_empty_build_query_reports_will_not_run(self, tmp_path: Path) -> None:
+        # Codex review: shlex.split() on a whitespace-only build.query
+        # returns []; _run_build_query itself checks `if not argv: return
+        # None` before invoking anything.
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--sources", str(tmp_path),
+                "-H", str(header), "--build-query", "   ", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+        assert "empty command" in result.output
+
+    def test_empty_build_info_pack_with_no_sources_or_headers_reports_will_not_run(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: embed_build_source's own raw_build_info/raw_sources
+        # both collapse to None unconditionally here (build_info is a pack,
+        # no --sources given) -- its dispatch guard fails regardless of
+        # collect mode, leaving only the headers-gated L2 seed path.
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"")
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        BuildSourcePack(root=pack_dir).write()
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path), "--build-info", str(pack_dir),
+                "--build-query", "cmake -S . -B build", "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "will NOT run" in result.output
+        assert "pack with no L3 compile units" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
