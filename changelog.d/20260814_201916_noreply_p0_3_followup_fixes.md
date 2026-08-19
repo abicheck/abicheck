@@ -828,3 +828,65 @@
   resolved path with different extension casing (e.g. `.EXE`) than the
   fixture file's own on-disk casing, both naming the same file on a
   case-insensitive filesystem.
+- **Round 24 (Codex, four more findings on `eafb343061` in the same
+  `env`-prefix area, plus a self-found host-pathsep bug live Windows CI
+  surfaced in round 23's own new tests).**
+  (9) `_argv.expand_env_split_prefixes()` only ever checked position 0 for
+  a leading `env`, so a launcher preceding a NESTED `env -S`
+  (`sccache env -S 'clang-cl /c x.cc'`) never got its split-string
+  expanded, reproducing round 23's Finding 2 bug through a different
+  prefix shape. Fixed by extracting the one shared interleaved-
+  unwrap traversal (`_traverse_env_and_launcher_prefix`) that
+  `strip_launchers`, `expand_env_split_prefixes`, and the new
+  `effective_directory` (below) all now build on, instead of three
+  independently-drifting copies of the same loop.
+  (10) Two real L4-replay call sites
+  (`source_extractors.castxml.CastxmlSourceExtractor.extract`,
+  `source_extractors.clang.ClangSourceExtractor.extract`) never consumed
+  round 23's own chdir-folding fix at all: both still spawned their
+  compiler subprocess with `cwd=compile_unit.directory` unchanged, while
+  `replay_extra_flags()` carries raw, unmodified relative flag values
+  straight from `compile_unit.argv`. A new `_argv.effective_directory()`
+  composes `directory` with any leading `env -C`/`--chdir` prefix
+  in `argv`, now threaded into both extractors' subprocess `cwd`
+  computation (their `source`/compile-database `file` resolution
+  deliberately keeps using the raw, un-chdir'd `directory`, since that
+  pairing is independent build-system metadata, not part of what `env -C`
+  affects).
+  (11) `_fold_chdir_into_operands()` (round 23 Finding 8) classified each
+  token independently by string shape (separator-presence, leading
+  `-`/`/`) rather than tracking flag CONTEXT while walking -- so a
+  SEPARATE-form macro value (`-D FOO=a/b`, two tokens) had its own value
+  token misread as a bare positional path operand purely because it
+  contains a `/`, corrupting the macro definition. Rewritten as a
+  stateful, context-aware scan that tracks a macro flag's own following
+  token and never resolves it (mirroring the already-correct combined-form
+  handling).
+  (12) The same string-shape guess also silently skipped a real relative
+  path with NO separator at all (`-Iinclude`/`-I include`, a one-level
+  subdirectory) -- fixed by the same context-aware rewrite: a
+  known path-bearing flag's value now folds unconditionally once flag
+  context has established it as a path, regardless of whether the text
+  itself contains a separator. Also newly recognizes the bare
+  (non-`=`) `--sysroot DIR` separate-form spelling and GCC's `-include
+  FILE` (separate-form only, no combined spelling exists).
+  Separately, live Windows CI on round 23's own push surfaced a genuine
+  production bug in `_resolve_env_path_entries()` (Finding 3's own
+  helper): it split/joined on host-native `os.pathsep` (`;` on Windows)
+  instead of POSIX `env`'s own fixed `:` PATH separator, and then handed
+  a `:`-joined string to a single `shutil.which(path=...)` call, which
+  ALSO splits on host-native `os.pathsep` internally -- doubly wrong on
+  Windows, and additionally ambiguous there against a Windows drive-letter
+  colon (`C:\...`). Fixed by always splitting on a literal `:` via a new
+  `_split_posix_path_value()` (which specifically does NOT split a
+  Windows drive-letter colon), and by returning a LIST of candidate
+  directories that the caller now searches with one single-directory
+  `shutil.which` call per candidate, sidestepping any pathsep-
+  representation question entirely. The round-23 tests this broke were
+  also fixed to stop computing a handful of expected values via
+  host-native `os.path.join`/`os.path.normpath` for POSIX-spelled
+  evidence tokens (a driver path, an `-I`/positional operand containing
+  `/`) -- those are pinned as literal, always-forward-slash strings now,
+  matching this module's own pre-existing pinning discipline (see
+  `test_strip_launchers_env_chdir_multiple_dotdot_segments_normalized`)
+  instead of silently reintroducing host-dependence into the test itself.

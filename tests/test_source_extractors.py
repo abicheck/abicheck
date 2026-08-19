@@ -391,6 +391,82 @@ def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> 
     assert tu.extractor["name"] == "castxml-source"
 
 
+def test_extract_runs_in_env_chdir_effective_directory(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Round 24, Finding 10 (Codex, fresh evidence): ``env -C DIR`` chdirs
+    the WHOLE invoked process before it execs the real command, so a
+    compile unit recorded with an ``env -C build ...`` prefix in its
+    ``argv`` must actually run this subprocess from
+    ``<directory>/build``, not bare ``directory`` -- otherwise a raw,
+    unmodified relative flag (``-iquote ../include``) that
+    ``replay_extra_flags()`` carries straight from ``compile_unit.argv``
+    resolves against the wrong directory."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
+        captured["cwd"] = kw.get("cwd")
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    (tmp_path / "build").mkdir()
+    cu = _cu(
+        source="src/foo.cpp",
+        directory=str(tmp_path),
+        argv=["env", "-C", "build", "castxml", "-c", "src/foo.cpp"],
+    )
+    extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
+    assert captured["cwd"] == str(tmp_path / "build")
+
+
+def test_extract_without_env_chdir_negative_control(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Negative control for Finding 10: a compile unit with NO ``env -C``
+    prefix in its ``argv`` runs from bare ``directory``, unchanged -- the
+    common case for every non-``env`` compile unit."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:
+            return _Result()
+        captured["cwd"] = kw.get("cwd")
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    cu = _cu(
+        source="src/foo.cpp",
+        directory=str(tmp_path),
+        argv=["castxml", "-c", "src/foo.cpp"],
+    )
+    extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
+    assert captured["cwd"] == str(tmp_path)
+
+
 def test_extract_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
     # P0 follow-up: same fix family as the L2 header-AST subprocess
     # (abicheck/deadline.py) — the castxml L4 extractor must go through

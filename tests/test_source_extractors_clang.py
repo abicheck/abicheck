@@ -2739,6 +2739,88 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     assert tu.fact_set["compiler_family"] == "clang"
 
 
+def test_extract_runs_ast_and_macro_passes_in_env_chdir_effective_directory(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Round 24, Finding 10 (Codex, fresh evidence): a compile unit whose
+    ``argv`` carries a leading ``env -C build ...`` prefix must have BOTH
+    the AST pass and the macro pass run with ``cwd=<directory>/build``,
+    not bare ``directory`` -- real ``env -C`` chdirs the whole invoked
+    process before it execs the real compiler."""
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
+
+    (tmp_path / "build").mkdir()
+    cwds: list[object] = []
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            cwds.append(kw.get("cwd"))
+            return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __clang_major__ 18\n")
+        cwds.append(kw.get("cwd"))
+        return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
+
+    extractor = _patch_run(monkeypatch, handler)
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    extractor.extract(
+        _cu(
+            source="foo.cpp",
+            directory=str(tmp_path),
+            argv=["env", "-C", "build", "clang++", "-c", "foo.cpp"],
+        ),
+        public_header_roots=["include/foo.h"],
+        target_id="t",
+    )
+    assert cwds == [str(tmp_path / "build"), str(tmp_path / "build")]
+
+
+def test_extract_without_env_chdir_negative_control(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Negative control for Finding 10: a compile unit with NO ``env -C``
+    prefix runs from bare ``directory``, unchanged."""
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
+
+    cwds: list[object] = []
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            cwds.append(kw.get("cwd"))
+            return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __clang_major__ 18\n")
+        cwds.append(kw.get("cwd"))
+        return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
+
+    extractor = _patch_run(monkeypatch, handler)
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    extractor.extract(
+        _cu(
+            source="foo.cpp",
+            directory=str(tmp_path),
+            argv=["clang++", "-c", "foo.cpp"],
+        ),
+        public_header_roots=["include/foo.h"],
+        target_id="t",
+    )
+    assert cwds == [str(tmp_path), str(tmp_path)]
+
+
 @pytest.mark.parametrize(
     ("clang_bin", "expected"),
     [

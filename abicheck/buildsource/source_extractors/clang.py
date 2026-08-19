@@ -73,6 +73,7 @@ from ..source_abi import (
     default_fact_set,
 )
 from ._argv import (
+    effective_directory,
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
@@ -1528,6 +1529,17 @@ class ClangSourceExtractor:
         source = Path(unredact_home(compile_unit.source))
         if not source.is_absolute() and directory:
             source = Path(directory) / source
+        # The EFFECTIVE directory the subprocess actually runs from -- distinct
+        # from `directory` above, which stays the raw, un-chdir'd compile-unit
+        # directory the `source`/compile-database `file` pair is genuinely
+        # anchored to (Codex review, Finding 10, fresh evidence). A leading
+        # `env -C DIR` prefix in `compile_unit.argv` means the real build's
+        # compiler process ran from `<directory>/DIR`, not bare `directory` --
+        # `replay_extra_flags()` (see its own docstring) carries raw, unmodified
+        # relative flag values (`-iquote ../include`) straight from
+        # `compile_unit.argv`, which only resolve correctly when THIS
+        # subprocess's own cwd matches that same effective directory.
+        run_directory = effective_directory(compile_unit.argv, directory) or directory
 
         ast_cmd = build_clang_command(
             compile_unit,
@@ -1541,7 +1553,7 @@ class ClangSourceExtractor:
         # keep their AST payloads on disk (not heap) until each parses, so the
         # GIL-serialized thread pool stops stacking N giant strings (the UXL OOM).
         ast_path, ast_stderr, ast_rc = self._run_ast_to_file(
-            ast_cmd, directory, compile_unit.source
+            ast_cmd, run_directory, compile_unit.source
         )
         try:
             if ast_path.stat().st_size == 0:
@@ -1615,7 +1627,9 @@ class ClangSourceExtractor:
         # Drop the large AST tree before the macro pass spawns another subprocess,
         # so its memory is reclaimed and doesn't stack with the macro pass.
         del ast_root
-        self._attach_macros(tu, compile_unit, source, directory, effective_public_roots)
+        self._attach_macros(
+            tu, compile_unit, source, run_directory, effective_public_roots
+        )
         self._stamp_fact_set_and_coverage(tu)
         return tu
 

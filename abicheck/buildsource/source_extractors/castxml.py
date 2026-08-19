@@ -42,6 +42,7 @@ from ... import deadline
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
 from ._argv import (
+    effective_directory,
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
@@ -377,16 +378,27 @@ class CastxmlSourceExtractor:
             # being expanded is the accepted tradeoff for replaying redacted
             # home-path macros correctly.
             cmd = [_unredact_home(tok) for tok in cmd]
-            # Run in the compile unit's directory so relative -I/-isystem and
-            # forced-include paths resolve exactly as the real build did
-            # (compile_commands.json `directory`). Bound by min(self.timeout,
-            # active --budget deadline) — run_bounded() alone would honor a
-            # generous outer deadline verbatim instead of this call's own cap
-            # — and process-group-safe on timeout (P0 follow-up; Codex review,
-            # PR #591, round 7). Both a local timeout and a scan-deadline
-            # overflow fold into the same SourceExtractionError contract as
-            # an ordinary failure — this extractor's errors already degrade
-            # to partial per-TU coverage rather than aborting the scan.
+            # Run in the compile unit's EFFECTIVE directory so relative
+            # -I/-isystem and forced-include paths resolve exactly as the
+            # real build did (compile_commands.json `directory`) --
+            # `effective_directory()` composes `directory` with any leading
+            # `env -C DIR`/`--chdir` prefix recorded in `compile_unit.argv`
+            # (Codex review, Finding 10, fresh evidence): real `env -C`
+            # genuinely chdirs the whole invoked process before it execs
+            # the compiler, so `replay_extra_flags()`'s own raw,
+            # unmodified `-iquote ../include`-style survivors (scanned
+            # straight from `compile_unit.argv` -- see that function's own
+            # docstring) only resolve correctly when THIS subprocess's cwd
+            # matches the real chdir'd directory too; bare `directory`
+            # alone left them resolving one (or more) levels off. Bound by
+            # min(self.timeout, active --budget deadline) — run_bounded()
+            # alone would honor a generous outer deadline verbatim instead
+            # of this call's own cap — and process-group-safe on timeout
+            # (P0 follow-up; Codex review, PR #591, round 7). Both a local
+            # timeout and a scan-deadline overflow fold into the same
+            # SourceExtractionError contract as an ordinary failure — this
+            # extractor's errors already degrade to partial per-TU
+            # coverage rather than aborting the scan.
             result = run_bounded_for_extraction(
                 cmd,
                 timeout=self.timeout,
@@ -394,7 +406,7 @@ class CastxmlSourceExtractor:
                 unit_label=compile_unit.source,
                 capture_output=True,
                 text=True,
-                cwd=directory or None,
+                cwd=effective_directory(compile_unit.argv, directory) or None,
             )
             if (
                 result.returncode != 0

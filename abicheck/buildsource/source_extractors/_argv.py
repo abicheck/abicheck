@@ -742,6 +742,107 @@ def _skip_env_prefix(argv: list[str], i: int) -> tuple[int, str | None, str | No
     return i, chdir, env_path
 
 
+def _traverse_env_and_launcher_prefix(
+    argv: list[str],
+) -> tuple[int, str | None, str | None]:
+    """Walk *argv* from the start, unwrapping every interleaved ``env``
+    prefix (splicing any ``-S``/``--split-string`` value in place via
+    :func:`_skip_env_prefix`) and compiler-launcher prefix -- the ONE
+    shared traversal :func:`strip_launchers`, :func:`expand_env_split_prefixes`,
+    and :func:`effective_directory` all build on, rather than three
+    independently-drifting copies of the same interleaving logic (Codex
+    review, Finding 9/10 follow-up, "the same traversal, one
+    implementation" -- extracted after Finding 9 showed a second,
+    independently-written copy of this exact loop had silently drifted
+    from :func:`strip_launchers`'s own).
+
+    **Mutates** *argv* **in place for** ``-S``/``--split-string`` splicing,
+    same as :func:`_skip_env_prefix` itself -- callers that must not
+    mutate the caller's own list (every one of this function's current
+    callers) pass an already-copied ``argv``.
+
+    Returns ``(i, chdir, env_path)``: *i* is the index of the first token
+    that is neither an ``env`` invocation nor a recognized compiler
+    launcher (the real driver position, or ``len(argv)`` if the whole list
+    was prefix); *chdir* is the fully COMPOSED effective ``-C``/``--chdir``
+    value across every ``env`` layer seen -- two RELATIVE values compose
+    (``env -C a env -C b ...`` -> ``a/b``), a later ABSOLUTE value fully
+    replaces whatever was accumulated (P2 review round 19 + Codex review
+    Finding 7); *env_path* is the most recently seen ``PATH=`` override.
+    """
+    i = 0
+    chdir: str | None = None
+    env_path: str | None = None
+    progressed = True
+    while progressed:
+        progressed = False
+        new_i, new_chdir, new_path = _skip_env_prefix(argv, i)
+        if new_i != i:
+            i = new_i
+            progressed = True
+            if new_chdir is not None:
+                if chdir and not is_absolute_path_token(new_chdir):
+                    chdir = join_path_token(chdir, new_chdir)
+                else:
+                    chdir = new_chdir
+            if new_path is not None:
+                env_path = new_path
+        while (
+            i < len(argv)
+            and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
+        ):
+            i += 1
+            while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
+                i += 1
+            progressed = True
+    return i, chdir, env_path
+
+
+def effective_directory(argv: list[str], directory: str | None) -> str | None:
+    """The real directory the wrapped command executes from, once any
+    leading ``env -C``/``--chdir`` prefix in *argv* is accounted for
+    (Codex review, Finding 10, fresh evidence).
+
+    GNU ``env -C DIR`` genuinely chdirs the whole invoked process before it
+    ``execvp()``s the real command -- so for ``env -C build clang -iquote
+    ../include -c x.cc`` recorded with ``directory=/work``, the compiler
+    ACTUALLY runs from ``/work/build``, not bare ``/work``. Round 23's
+    Finding 7/8 fixes folded this into the STRING VALUES
+    :func:`strip_launchers` returns, but two real L4-replay call sites
+    (``source_extractors.castxml.CastxmlExtractor.extract``,
+    ``source_extractors.clang.ClangSourceExtractor``) never consumed that
+    correction at all: both still spawn their subprocess with
+    ``cwd=compile_unit.directory`` (the raw, un-chdir'd directory)
+    unchanged, and ``replay_extra_flags()``'s own ``-iquote``/``-I``/etc.
+    scan (:func:`_scan_argv_for_extra_flags`) deliberately reads
+    ``compile_unit.argv`` VERBATIM -- so those RAW relative flag values,
+    unmodified, get handed to a subprocess running from the WRONG
+    directory. Once the subprocess ``cwd`` itself is corrected via this
+    function, those raw, unmodified relative flag values resolve
+    correctly on their own (the same way real ``env -C`` makes them work
+    for the real compiler) -- no separate flag-value folding is needed on
+    this path, only the ``cwd`` fix.
+
+    Returns *directory* unchanged when there is no ``env -C``/``--chdir``
+    prefix in *argv* at all (the common case, and every non-``env``
+    compile unit) -- a complete no-op. Returns ``None``/falsy *directory*
+    unchanged too (nothing to compose against).
+    """
+    if not directory:
+        return directory
+    _i, chdir, _env_path = _traverse_env_and_launcher_prefix(list(argv))
+    if not chdir:
+        return directory
+    # `chdir` is read straight from possibly-redacted evidence (ADR-032
+    # D7) -- unredact any `~` home placeholder before composing, the same
+    # treatment every other path-shaped `CompileUnit`-derived value in
+    # this module already gets (`unredact_home`'s own docstring).
+    chdir = unredact_home(chdir)
+    if is_absolute_path_token(chdir):
+        return normalize_path_token(chdir)
+    return join_path_token(directory, chdir)
+
+
 def expand_env_split_prefixes(argv: list[str]) -> list[str]:
     """Return a COPY of *argv* with every leading ``env -S``/``--split-string``
     prefix's value expanded and spliced in place -- without stripping the
@@ -779,27 +880,87 @@ def expand_env_split_prefixes(argv: list[str]) -> list[str]:
     A nested ``env -S '... env -C build ...'`` (the split string itself
     happens to start with another ``env`` invocation) is expanded
     recursively -- the loop below re-checks ``argv[i]`` after each
-    expansion and keeps unwrapping as long as it still names ``env``,
-    mirroring :func:`strip_launchers`'s own repeated-unwrap loop. Only the
-    ``env``-prefix scanning power is reused here (never the compiler-cache
-    launcher stripping, which stays :func:`strip_launchers`'s own job) --
-    the loop stops the moment ``argv[i]`` is not itself an ``env``
-    invocation, leaving any launcher/driver tokens after it completely
-    untouched.
+    expansion and keeps unwrapping as long as progress is still being made.
+
+    **Also follows an interleaved compiler-launcher, not just a leading
+    ``env`` (Codex review, Finding 9, fresh evidence).** An earlier
+    revision only ever checked position 0 -- for ``sccache env -S
+    'clang-cl /c x.cc'`` (a launcher preceding a NESTED ``env -S``),
+    ``argv[0]`` is ``"sccache"``, not ``"env"``, so the loop's own
+    condition never even entered and the ``-S`` value was left completely
+    unexpanded. This function's one caller,
+    :func:`~abicheck.buildsource.adapters.base._msvc_driver_scan`, then
+    scanned the raw, unexpanded 4-token argv -- seeing neither a real
+    ``/c`` marker nor a ``clang-cl``-basename token at any position --
+    and returned ``(False, None)`` for a genuinely MSVC-dialect command.
+    Mirrors :func:`strip_launchers`'s OWN interleaved traversal exactly
+    (alternating an ``env``-prefix attempt with a compiler-launcher-prefix
+    attempt, looping while either one still makes progress) so ``-S`` is
+    expanded at every layer this module already knows how to unwrap a
+    prefix at -- just without :func:`strip_launchers`'s own final
+    slicing/env-context-folding step, since this function's whole
+    contract is "return the full, still-prefixed, EXPANDED token stream"
+    rather than "return the bare driver and its own arguments".
     """
     argv = list(argv)
-    i = 0
-    while i < len(argv) and basename(argv[i]).lower() in _ENV_BASENAMES:
-        new_i, _chdir, _env_path = _skip_env_prefix(argv, i)
-        if new_i == i:
-            break
-        i = new_i
+    _traverse_env_and_launcher_prefix(argv)
     return argv
+
+
+#: Matches a Windows drive-letter-and-separator sequence (``C:\`` / ``C:/``)
+#: at the START of the string it is tested against -- used by
+#: :func:`_split_posix_path_value` to recognize the ONE legitimate reason a
+#: literal ``:`` inside a POSIX-style ``:``-joined PATH value must NOT be
+#: treated as a separator: a single ``PATH`` entry that is itself an
+#: absolute Windows path.
+_DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _split_posix_path_value(value: str) -> list[str]:
+    """Split *value* on a LITERAL ``:`` -- POSIX ``env``'s own, fixed
+    ``PATH`` entry separator, regardless of the analyzing host's own
+    ``os.pathsep`` (Codex review, live Windows CI signal, fresh evidence;
+    see :func:`_resolve_env_path_entries`'s own docstring for why
+    host-native ``os.pathsep`` is wrong here at all).
+
+    **Does NOT split a Windows drive-letter colon** (``C:\\...``/
+    ``C:/...``): a genuine POSIX-recorded multi-entry value never contains
+    one (POSIX has no drive letters), but this module's own tests --
+    and, plausibly, real evidence gathered by an `env` invocation captured
+    while a build itself ran under Windows -- legitimately use a single
+    Windows-absolute-path ``PATH`` entry, which a blind "split on every
+    ``:``" would otherwise cut in two (``C:\\Users\\x`` ->
+    ``["C", "\\Users\\x"]``). Detected the same way ``is_absolute_path_token``
+    already recognizes a Windows-absolute token (a single ASCII letter
+    immediately followed by ``:`` and a path separator) -- checked
+    positionally against each candidate colon (exactly one preceding,
+    unsplit character that is itself a letter), not merely "the string
+    somewhere contains a drive-letter pattern", so a colon anywhere else
+    in the same value still splits normally.
+    """
+    parts: list[str] = []
+    current: list[str] = []
+    n = len(value)
+    for i, ch in enumerate(value):
+        is_drive_colon = (
+            ch == ":"
+            and len(current) == 1
+            and current[0].isalpha()
+            and i + 1 < n
+            and value[i + 1] in "\\/"
+        )
+        if ch == ":" and not is_drive_colon:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append("".join(current))
+    return parts
 
 
 def _resolve_env_path_entries(
     env_path: str, chdir: str | None, directory: str | None
-) -> str:
+) -> list[str]:
     """Compose each *relative* entry of an ``env``-supplied ``PATH``
     override against the directory GNU ``env`` actually executes the
     command from, before it is handed to :func:`shutil.which` (Codex
@@ -845,9 +1006,33 @@ def _resolve_env_path_entries(
     ITS OWN caller's (abicheck's) process CWD, not the compile unit's
     effective directory, the identical wrong-CWD failure mode this whole
     function exists to prevent for a genuinely relative entry.
+
+    **Splits on a LITERAL ``:``, never host-native ``os.pathsep`` (live
+    Windows CI signal, fresh evidence).** A recorded ``env``-supplied
+    ``PATH=`` value is POSIX ``env``'s own evidence text -- colon-separated
+    by that utility's OWN, fixed convention, regardless of which host OS
+    later ANALYZES this evidence. ``os.pathsep`` is host-native (``;`` on
+    Windows), so splitting on it there left a colon-separated evidence
+    string as one single, unsplit, bogus entry -- confirmed empirically: a
+    Windows CI run split ``":"`` on ``";"`` (no match) into ``[":"]``, one
+    literal-colon "entry", corrupting every downstream join. Returns a
+    LIST of composed directory candidates now (not a ``:``-joined string)
+    for the identical reason one level up: :func:`_apply_env_context`
+    used to hand the joined string straight to a single
+    ``shutil.which(token, path=...)`` call, which ALSO splits its own
+    ``path`` argument on host-native ``os.pathsep`` internally -- so even a
+    correctly ``:``-joined POSIX-style string was mis-split again by
+    ``shutil.which`` itself on Windows (its own drive-letter colon,
+    ``C:\\...``, made this doubly ambiguous: splitting on a literal ``:``
+    there would also wrongly cut a drive letter in two). Returning a list
+    and letting the caller search each directory with its own
+    single-directory ``shutil.which`` call sidesteps ANY pathsep
+    representation question entirely -- a lone directory string handed to
+    ``shutil.which`` is never split at all, regardless of what characters
+    (``:`` or otherwise) it happens to contain.
     """
     if not directory:
-        return env_path
+        return _split_posix_path_value(env_path)
     base = directory
     if chdir:
         base = (
@@ -855,8 +1040,8 @@ def _resolve_env_path_entries(
             if not is_absolute_path_token(chdir)
             else chdir
         )
-    entries = env_path.split(os.pathsep)
-    composed = [
+    entries = _split_posix_path_value(env_path)
+    return [
         entry
         if is_absolute_path_token(entry)
         else base
@@ -864,7 +1049,6 @@ def _resolve_env_path_entries(
         else join_path_token(base, entry)
         for entry in entries
     ]
-    return os.pathsep.join(composed)
 
 
 def _apply_env_context(
@@ -907,13 +1091,17 @@ def _apply_env_context(
 
     **PATH** (``PATH=...``): only meaningful for a *bare* token (no path
     separator at all) -- a path-shaped token is unambiguous regardless of
-    which ``PATH`` would have been searched. Resolved immediately via
-    ``shutil.which(token, path=env_path)`` into an absolute path when
-    found, so no downstream consumer needs to know the env override
-    existed at all; left unchanged (the pre-fix, bare-name behavior) when
-    the name isn't found on that PATH either -- the same conservative,
-    no-worse-than-before fallback every other best-effort resolution in
-    this module already uses.
+    which ``PATH`` would have been searched. Resolved immediately via a
+    ``shutil.which(token, path=<one directory>)`` call PER composed
+    candidate directory (see :func:`_resolve_env_path_entries`'s own
+    docstring for why one call per directory, not one call with a
+    pathsep-joined string, is what a Windows-analysis-host correctness fix
+    required) into an absolute path when found, so no downstream consumer
+    needs to know the env override existed at all; left unchanged (the
+    pre-fix, bare-name behavior) when the name isn't found in any
+    candidate directory either -- the same conservative, no-worse-than-
+    before fallback every other best-effort resolution in this module
+    already uses.
 
     A token that is itself a flag (starts with ``-``) -- meaning
     :func:`strip_launchers` found no real driver token at all -- is left
@@ -941,23 +1129,22 @@ def _apply_env_context(
             return join_path_token(chdir, token)
         return token
     if env_path:
-        effective_path = _resolve_env_path_entries(env_path, chdir, directory)
-        resolved = shutil.which(token, path=effective_path)
-        if resolved:
-            return resolved
+        for candidate_dir in _resolve_env_path_entries(env_path, chdir, directory):
+            resolved = shutil.which(token, path=candidate_dir)
+            if resolved:
+                return resolved
     return token
 
 
 #: COMBINED-form (single-token, ``-Ivalue``/``/Ivalue``) path-bearing option
-#: prefixes recognized by :func:`_fold_chdir_into_operand` (Codex review,
+#: prefixes recognized by :func:`_fold_chdir_into_operands` (Codex review,
 #: Finding 8, "propagate the effective cwd to whatever resolves trailing
 #: path operands too, not just the compiler token", fresh evidence). Every
 #: one of these genuinely supports the combined spelling with no space, per
 #: GCC/Clang/MSVC's own documented option grammar. ``-include`` is
 #: deliberately excluded -- GCC never accepts a combined ``-includeFILE``
-#: spelling, only the separate ``-include FILE`` form, which needs no entry
-#: here at all (see :func:`_fold_chdir_into_operand`'s own docstring for why
-#: the separate-form value token is already handled generically).
+#: spelling, only the separate ``-include FILE`` form (see
+#: :data:`_CHDIR_FOLD_SEPARATE_PATH_FLAGS` below for that).
 _CHDIR_FOLD_COMBINED_PATH_PREFIXES = (
     "-I",
     "-iquote",
@@ -968,80 +1155,161 @@ _CHDIR_FOLD_COMBINED_PATH_PREFIXES = (
     "/FI",
 )
 #: ``=``-joined (``--sysroot=value``) path-bearing option prefixes recognized
-#: by :func:`_fold_chdir_into_operand`, alongside the combined-form set above.
+#: by :func:`_fold_chdir_into_operands`, alongside the combined-form set above.
 _CHDIR_FOLD_EQUALS_PATH_PREFIXES = ("--sysroot=",)
+#: SEPARATE-form (``-I value``, two tokens) path-bearing option spellings
+#: recognized by :func:`_fold_chdir_into_operands` -- the bare flag itself
+#: (never a prefix match), whose immediately-following token is its path
+#: VALUE and must be resolved regardless of whether that value happens to
+#: contain a path separator (Codex review, Finding 12, fresh evidence -- see
+#: that function's own docstring for why "does the token contain a
+#: separator" was the wrong test to begin with). Includes ``-include``
+#: (GCC's forced-include flag, separate-form only -- deliberately excluded
+#: from the combined set above) and bare ``--sysroot`` (the equals-joined
+#: spelling is handled by :data:`_CHDIR_FOLD_EQUALS_PATH_PREFIXES` instead).
+_CHDIR_FOLD_SEPARATE_PATH_FLAGS = frozenset(
+    {
+        "-I",
+        "-iquote",
+        "-idirafter",
+        "-isystem",
+        "-isysroot",
+        "-include",
+        "--sysroot",
+        "/I",
+        "/FI",
+    }
+)
 
 
-def _fold_chdir_into_operand(token: str, chdir: str) -> str:
-    """Resolve *token* -- one argv entry AFTER the driver -- against *chdir*
-    the same way :func:`_apply_env_context` already resolves the driver
-    token itself (Codex review, Finding 8, fresh evidence).
+def _fold_chdir_path_value(value: str, chdir: str) -> str:
+    """Resolve a single path-bearing VALUE against *chdir*, the shared leaf
+    :func:`_fold_chdir_into_operands` uses for every shape (combined,
+    equals-joined, separate-form, and bare positional) it recognizes.
 
-    GNU ``env -C DIR`` chdirs the WHOLE invoked process before it
-    ``execvp()``s the real command -- every relative filesystem argument the
-    command receives, not merely its own executable name, is interpreted
-    relative to that same chdir'd directory by the real OS. For ``env -C
-    build clang-cl -I../include /c ../src/x.cpp``, real ``env`` genuinely
-    resolves both ``../include`` and ``../src/x.cpp`` against
-    ``<cu.directory>/build``, not bare ``cu.directory``. The round-19 fix
-    folded ``-C``'s effect into the driver token alone
-    (:func:`_apply_env_context`), leaving every other operand resolved
-    against the wrong, un-chdir'ed directory by any downstream consumer that
-    reads the rest of :func:`strip_launchers`'s result.
-
-    Deliberately conservative about WHICH tokens are corrected, to avoid
-    corrupting an arbitrary flag value that merely happens to contain a path
-    separator (a macro definition like ``-DVERSION=1/2``, an arbitrary
-    string) -- mirroring this module's own existing ``MACRO_DEFINITION_
-    PREFIXES``/``unredact_home`` precedent of never touching a ``-D``/``-U``
-    value:
-
-    * A bare, non-flag token (no leading ``-``/``/``) that contains a path
-      separator and is not already absolute is *always* resolved -- this is
-      unambiguous and covers both a positional source-file operand and the
-      VALUE half of any SEPARATE-form path-taking flag (``-I ../include``'s
-      own ``../include`` token), without this function needing to know
-      which flag preceded it at all.
-    * A COMBINED-form single token spelling a known path-bearing option
-      (:data:`_CHDIR_FOLD_COMBINED_PATH_PREFIXES`/
-      :data:`_CHDIR_FOLD_EQUALS_PATH_PREFIXES`) has its recognized prefix
-      stripped, the remaining path portion resolved the same way, and the
-      prefix reattached.
-    * Anything else (an unrecognized flag, a flag whose value has no
-      separator, ``-D``/``-U``/``/D``/``/U`` macro definitions, an
-      already-absolute value) is returned completely unchanged -- the same
-      conservative, no-worse-than-before default the rest of this module
-      already uses throughout.
+    An empty or already-absolute value is returned unchanged -- unambiguous
+    regardless of *chdir*. Deliberately does NOT require *value* to contain
+    a path separator (Codex review, Finding 12, fresh evidence): a
+    single-segment relative directory name (``include``, no ``/``/``\\`` at
+    all) is exactly as real a path as a multi-segment one, and the caller
+    already established via flag/positional CONTEXT (not string shape) that
+    this value is meant as a path -- see :func:`_fold_chdir_into_operands`'s
+    own docstring for the context-tracking this replaces a separator-based
+    guess with.
     """
-    if not token or ("/" not in token and "\\" not in token):
-        return token
-    if not token.startswith(("-", "/")):
-        return token if is_absolute_path_token(token) else join_path_token(chdir, token)
-    for prefix in _CHDIR_FOLD_EQUALS_PATH_PREFIXES:
-        if token.startswith(prefix):
-            value = token[len(prefix) :]
-            if not value or is_absolute_path_token(value):
-                return token
-            return prefix + join_path_token(chdir, value)
-    for prefix in _CHDIR_FOLD_COMBINED_PATH_PREFIXES:
-        if token.startswith(prefix) and len(token) > len(prefix):
-            value = token[len(prefix) :]
-            if is_absolute_path_token(value):
-                return token
-            return prefix + join_path_token(chdir, value)
-    return token
+    if not value or is_absolute_path_token(value):
+        return value
+    return join_path_token(chdir, value)
 
 
 def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]:
-    """Apply :func:`_fold_chdir_into_operand` across every entry of
-    *tokens* (the driver-command's OWN arguments, never the driver token
-    itself -- see :func:`_apply_env_context` for that). A falsy *chdir*
-    (no ``env -C``/``--chdir`` prefix was seen) is a complete no-op,
-    returning *tokens* unchanged.
+    """Fold *chdir* (an ``env -C``/``--chdir`` effective directory) into
+    the driver command's OWN arguments -- everything AFTER the driver
+    token itself, which :func:`_apply_env_context` already handles (Codex
+    review, Finding 8, fresh evidence).
+
+    GNU ``env -C DIR`` chdirs the WHOLE invoked process before it
+    ``execvp()``s the real command -- every relative filesystem argument
+    the command receives, not merely its own executable name, is
+    interpreted relative to that same chdir'd directory by the real OS.
+    For ``env -C build clang-cl -I../include /c ../src/x.cpp``, real
+    ``env`` genuinely resolves both ``../include`` and ``../src/x.cpp``
+    against ``<cu.directory>/build``, not bare ``cu.directory``. A falsy
+    *chdir* (no ``env -C``/``--chdir`` prefix was seen) is a complete
+    no-op, returning *tokens* unchanged.
+
+    **A stateful, FLAG-CONTEXT-AWARE scan, not a per-token string-shape
+    guess (Codex review, Findings 11/12, fresh evidence).** An earlier
+    revision classified each token independently by whether it *looked*
+    like a path (started with ``-``/``/``, contained a separator) --
+    proven wrong in two different, opposite directions:
+
+    * **Finding 11 (false positive):** the separate-form VALUE of a
+      ``-D``/``-U``/``/D``/``/U`` macro definition, e.g. ``-D
+      FOO=a/b`` -- two tokens, ``"-D"`` and ``"FOO=a/b"`` -- has its own
+      value token misread as a bare positional path operand purely
+      because it contains a ``/``, corrupting the macro's literal text
+      value (``FOO=a/b`` -> ``FOO=build/a/b``). Fixed by tracking, while
+      walking, that a macro flag's OWN following token is never resolved
+      -- mirroring this module's existing ``MACRO_DEFINITION_PREFIXES``
+      precedent for the combined form, extended here to the separate one.
+    * **Finding 12 (false negative):** a real relative path can have NO
+      separator at all -- ``-Iinclude`` (combined) or ``-I include``
+      (separate) both name a subdirectory one level down, exactly as
+      real a path as ``-I../include``, but the previous "must contain a
+      separator" gate silently left both unresolved. Fixed by deciding
+      whether to fold from flag/positional CONTEXT (is this token, or the
+      token immediately after a known path-taking flag, a path VALUE at
+      all) rather than the token's own textual shape -- see
+      :func:`_fold_chdir_path_value`, the shared leaf every recognized
+      shape below funnels through, which folds unconditionally once
+      context has established a value is a path.
+
+    Recognizes, in order, at each position:
+
+    1. A macro flag (bare ``-D``/``-U``/``/D``/``/U``, separate-form) --
+       consumes the flag AND its value token verbatim, never resolved.
+    2. A macro flag's COMBINED form (``-DFOO=...``, longer than the bare
+       prefix) -- passed through verbatim, same as (1).
+    3. An ``=``-joined path flag (:data:`_CHDIR_FOLD_EQUALS_PATH_PREFIXES`)
+       -- the portion after ``=`` is resolved.
+    4. A COMBINED-form path flag (:data:`_CHDIR_FOLD_COMBINED_PATH_PREFIXES`)
+       -- the portion after the flag prefix is resolved.
+    5. A SEPARATE-form path flag (:data:`_CHDIR_FOLD_SEPARATE_PATH_FLAGS`)
+       -- the flag itself is passed through, and the FOLLOWING token
+       (its value) is resolved regardless of its own shape.
+    6. A bare, non-flag (no leading ``-``/``/``) positional token not
+       already consumed as a flag's value above (a source-file operand)
+       -- resolved unconditionally.
+    7. Anything else (an unrecognized flag) -- passed through unchanged,
+       the same conservative, no-worse-than-before default this module
+       already uses throughout.
     """
     if not chdir:
         return tokens
-    return [_fold_chdir_into_operand(tok, chdir) for tok in tokens]
+    out: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok in MACRO_DEFINITION_PREFIXES and i + 1 < n:
+            out.append(tok)
+            out.append(tokens[i + 1])
+            i += 2
+            continue
+        if tok.startswith(MACRO_DEFINITION_PREFIXES) and len(tok) > 2:
+            out.append(tok)
+            i += 1
+            continue
+        matched = False
+        for prefix in _CHDIR_FOLD_EQUALS_PATH_PREFIXES:
+            if tok.startswith(prefix):
+                out.append(prefix + _fold_chdir_path_value(tok[len(prefix) :], chdir))
+                matched = True
+                break
+        if matched:
+            i += 1
+            continue
+        for prefix in _CHDIR_FOLD_COMBINED_PATH_PREFIXES:
+            if tok.startswith(prefix) and len(tok) > len(prefix):
+                out.append(prefix + _fold_chdir_path_value(tok[len(prefix) :], chdir))
+                matched = True
+                break
+        if matched:
+            i += 1
+            continue
+        if tok in _CHDIR_FOLD_SEPARATE_PATH_FLAGS and i + 1 < n:
+            out.append(tok)
+            out.append(_fold_chdir_path_value(tokens[i + 1], chdir))
+            i += 2
+            continue
+        if not tok.startswith(("-", "/")):
+            out.append(_fold_chdir_path_value(tok, chdir))
+            i += 1
+            continue
+        out.append(tok)
+        i += 1
+    return out
 
 
 def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[str]:
@@ -1111,36 +1379,12 @@ def strip_launchers(argv: list[str], *, directory: str | None = None) -> list[st
     command receives (a source file operand, an ``-I``/``-isystem``-family
     include path, ...) is interpreted relative to that same chdir'd
     directory by the real OS, not merely the executable name. See
-    :func:`_fold_chdir_into_operand`'s own docstring for exactly which
+    :func:`_fold_chdir_into_operands`'s own docstring for exactly which
     tokens are (and, to avoid corrupting an unrelated flag value, are NOT)
     corrected.
     """
     argv = list(argv)
-    i = 0
-    progressed = True
-    chdir: str | None = None
-    env_path: str | None = None
-    while progressed:
-        progressed = False
-        new_i, new_chdir, new_path = _skip_env_prefix(argv, i)
-        if new_i != i:
-            i = new_i
-            progressed = True
-            if new_chdir is not None:
-                if chdir and not is_absolute_path_token(new_chdir):
-                    chdir = join_path_token(chdir, new_chdir)
-                else:
-                    chdir = new_chdir
-            if new_path is not None:
-                env_path = new_path
-        while (
-            i < len(argv)
-            and basename(argv[i]).lower().removesuffix(".exe") in COMPILER_LAUNCHERS
-        ):
-            i += 1
-            while i < len(argv) and _LAUNCHER_CONFIG_OVERRIDE_RE.match(argv[i]):
-                i += 1
-            progressed = True
+    i, chdir, env_path = _traverse_env_and_launcher_prefix(argv)
     result = argv[i:]
     if not result or (chdir is None and env_path is None):
         return result
