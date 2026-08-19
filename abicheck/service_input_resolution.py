@@ -148,6 +148,7 @@ def _seeded_includes_and_compile_context(
     build_config: Path | None = None,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    allow_build_query: bool = False,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -219,6 +220,27 @@ def _seeded_includes_and_compile_context(
     primitive instead of a second, independent call to the same underlying
     function.
 
+    **Enforced here, not merely forwarded (Codex review, fresh evidence)**:
+    *allow_build_query* gates whether *build_config*/*build_query*/
+    *build_compile_db* are forwarded at all — when it is not exactly
+    ``True``, all three are forced to ``None`` regardless of what the caller
+    passed, so this function's own real trust decision does not rest on
+    ``collect_inline_pack``'s identically-named parameter, which is a
+    documented, deprecated no-op (``buildsource/inline.py``'s own
+    ``collect_inline_pack`` docstring: "``allow_build_query`` is accepted
+    only for backward compatibility and is ignored"). Threading
+    *build_config*/*build_query* through without this local gate would let
+    any caller of this Tier-2 primitive execute an operator-supplied
+    ``build.query`` command merely by supplying a path, with no separate
+    consent step — exactly the "surprise a library caller cannot see coming"
+    this function's own docstring already warns against for the *inferred*
+    query below; explicit ``build.query`` needs the identical discipline.
+    The CLI's own gating (``dump_cmd`` only resolves a non-``None``
+    ``build_config``/``build_query`` when ``--config``/``--build-query`` was
+    genuinely typed) is a different, CLI-side act of consent that this
+    parameter existing lets that one call site assert explicitly, rather than
+    this function inferring consent from mere presence.
+
     Returns ``(includes, context, applied, cleanups)`` — ``includes`` is
     *side.includes* augmented with any build-derived seed dirs; ``applied``
     is True only when a real L3 context was found and folded in, which is
@@ -235,6 +257,17 @@ def _seeded_includes_and_compile_context(
     if not (side.sources or side.build_info) or not evidence.headers:
         return list(side.includes), evidence.compile, False, []
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
+
+    # The real trust gate for this function, not merely a pass-through --
+    # see this function's own docstring for why relying on
+    # seed_includes_and_fold_compile_context's/collect_inline_pack's own
+    # `allow_build_query` parameter would be wrong (it's a documented no-op
+    # there). An unauthorized caller must never reach a trusted-query
+    # decision downstream, regardless of what it passed.
+    if allow_build_query is not True:
+        build_config = None
+        build_query = None
+        build_compile_db = None
 
     ctx = evidence.compile
     cleanups: list[Callable[[], None]] = []
@@ -395,6 +428,7 @@ def _resolve_side_snapshot_impl(
                 build_config=build_config,
                 build_query=build_query,
                 build_compile_db=build_compile_db,
+                allow_build_query=bool(allow_build_query),
             )
         )
         snap = service.resolve_input(

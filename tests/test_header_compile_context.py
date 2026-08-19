@@ -1569,6 +1569,71 @@ def test_seeded_includes_and_compile_context_preserves_none_on_no_op_fold(
     assert ctx is None
 
 
+def test_seeded_includes_never_forwards_build_query_without_explicit_permission(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, real reproduction: `collect_inline_pack`'s own
+    `allow_build_query` parameter is a documented, deprecated no-op (see its
+    docstring), so a caller supplying `build_config`/`build_query` to
+    `_seeded_includes_and_compile_context` without ALSO passing
+    `allow_build_query=True` must never reach
+    `seed_includes_and_fold_compile_context` with those values live -- this
+    function's own local gate is the real trust boundary, not a downstream
+    parameter that turns out to do nothing. Confirmed to fail against the
+    pre-fix code (build_config/build_query reached the fold unconditionally,
+    regardless of allow_build_query)."""
+    from abicheck.api_types import InputSpec
+    from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+
+    captured: dict[str, object] = {}
+
+    def _fake_seed(*, pending_cleanups, **kwargs):
+        captured.update(kwargs)
+        return [], False, CompileContext(), ()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        _fake_seed,
+    )
+
+    header = tmp_path / "h.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    side = InputSpec(path=tmp_path / "lib.so", sources=tmp_path, headers=(header,))
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    trusted_config = tmp_path / "trusted.abicheck.yml"
+
+    # allow_build_query omitted (defaults False) -- the operator-supplied
+    # build_config/build_query must NOT reach the fold, even though both
+    # were given.
+    _seeded_includes_and_compile_context(
+        side,
+        evidence,
+        build_config=trusted_config,
+        build_query="cmake -S . -B build",
+        build_compile_db="build/compile_commands.json",
+    )
+    assert captured["build_config"] is None
+    assert captured["build_query"] is None
+    assert captured["build_compile_db"] is None
+
+    # allow_build_query=True -- now they reach the fold as given.
+    captured.clear()
+    _seeded_includes_and_compile_context(
+        side,
+        evidence,
+        build_config=trusted_config,
+        build_query="cmake -S . -B build",
+        build_compile_db="build/compile_commands.json",
+        allow_build_query=True,
+    )
+    assert captured["build_config"] == trusted_config
+    assert captured["build_query"] == "cmake -S . -B build"
+    assert captured["build_compile_db"] == "build/compile_commands.json"
+
+
 def test_resolve_side_snapshot_stamps_parsed_with_build_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
