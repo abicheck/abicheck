@@ -655,7 +655,7 @@ class TestDumpDryRunBuildQueryTrust:
         assert result.exit_code == 0, result.output
         assert "will run (trusted -- explicit --config)" in result.output
 
-    def test_headers_and_active_collect_mode_reports_query_runs_twice(
+    def test_headers_and_active_collect_mode_reports_query_may_run_twice(
         self, tmp_path: Path
     ) -> None:
         # Codex review, fresh evidence: verified against the real (non-dry)
@@ -667,6 +667,13 @@ class TestDumpDryRunBuildQueryTrust:
         # a real artifact) and embed_build_source (gated on collect_mode !=
         # "off") -- neither caches or shares its result with the other. The
         # default (non-depth-restricted) collect mode used here reaches both.
+        # A LATER Codex review found this could not be reported as an
+        # unconditional "WILL RUN TWICE" either: whether the dump even
+        # reaches the second call site depends on the intervening header-AST
+        # parse succeeding (verified empirically -- a real dump with no
+        # castxml on PATH ran the query exactly once, via the L2 seed,
+        # before the parse failed and aborted the command) -- so this report
+        # now describes reachability rather than a guaranteed count.
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")  # --dry-run never opens/parses it
         header = tmp_path / "api.h"
@@ -680,9 +687,9 @@ class TestDumpDryRunBuildQueryTrust:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "WILL RUN TWICE" in result.output
+        assert "RUNS AT LEAST ONCE, AND AGAIN IF THE DUMP REACHES" in result.output
         assert "two independent, non-deduplicated call sites" in result.output
-        # A dry run never actually executes the query, twice or otherwise.
+        # A dry run never actually executes the query, once or twice.
         assert not (tmp_path / "build").exists()
 
     def test_headers_active_collect_mode_and_raw_build_info_reports_maybe_twice(
@@ -715,9 +722,9 @@ class TestDumpDryRunBuildQueryTrust:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "MAY RUN ONCE OR TWICE" in result.output
-        assert "WILL RUN TWICE" not in result.output
-        assert "cannot be determined without actually running the query" in result.output
+        assert "RUNS AT LEAST ONCE, POSSIBLY TWICE" in result.output
+        assert "RUNS AT LEAST ONCE, AND AGAIN IF THE DUMP REACHES" not in result.output
+        assert "cannot be determined without" in result.output
         # A dry run never actually executes the query.
         assert not (build_dir / "compile_commands.json").exists()
 
