@@ -44,6 +44,10 @@ from ...header_utils import (
     match_msvc_forced_include,
 )
 from ..build_evidence import CompileUnit
+from ._argv_shortopts import (
+    is_short_flag_cluster,
+    resolve_bare_token_with_default_path as resolve_bare_token_with_default_path,
+)
 
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
 CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
@@ -845,12 +849,21 @@ def _skip_env_prefix(
                 env_path = _ENV_PATH_CLEARED
             i += 1
             continue
+        if is_short_flag_cluster(arg):  # e.g. -iv == -i -v (Codex round 29)
+            if "i" in arg[1:]:
+                env_path = _ENV_PATH_CLEARED
+            i += 1
+            continue
         if arg.startswith(_ENV_OPTIONAL_SIG_FLAG_PREFIXES):
             i += 1
             continue
         if arg in _ENV_CHDIR_FLAGS and i + 1 < len(argv):
             chdir = argv[i + 1]
             i += 2
+            continue
+        if arg.startswith("-C") and len(arg) > 2 and not arg.startswith("--"):
+            chdir = arg[2:]  # -Cbuild == -C build (Codex round 29)
+            i += 1
             continue
         if arg.startswith("--chdir="):
             chdir = arg.removeprefix("--chdir=")
@@ -1411,8 +1424,11 @@ _CHDIR_FOLD_COMBINED_PATH_PREFIXES = (
     "-idirafter",
     "-isystem",
     "-isysroot",
+    "-cxx-isystem",
     "/I",
     "/FI",
+    "/imsvc",
+    "/external:I",
 )
 #: ``=``-joined (``--sysroot=value``) path-bearing option prefixes recognized
 #: by :func:`_fold_chdir_into_operands`, alongside the combined-form set above.
@@ -1435,9 +1451,12 @@ _CHDIR_FOLD_SEPARATE_PATH_FLAGS = frozenset(
         "-isystem",
         "-isysroot",
         "-include",
+        "-cxx-isystem",
         "--sysroot",
         "/I",
         "/FI",
+        "/imsvc",
+        "/external:I",
     }
 )
 #: SEPARATE-form value-taking flags whose value is confirmed NOT a path --
@@ -1568,15 +1587,10 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
     6. A SEPARATE-form path flag (:data:`_CHDIR_FOLD_SEPARATE_PATH_FLAGS`)
        -- the flag itself is passed through, and the FOLLOWING token
        (its value) is resolved regardless of its own shape.
-    7. A bare, non-flag (no leading ``-``/``/``) positional token not
-       already consumed as a flag's value above (a source-file operand)
-       -- resolved unconditionally.
-    8. Anything else (an unrecognized flag, or a flag this module cannot
-       positively confirm is path- or non-path-valued) -- passed through
-       unchanged, the same conservative, no-worse-than-before default this
-       module already uses throughout; its own possible operand (if any)
-       is not specially tracked either and falls through to whichever of
-       (7)/(8) it itself matches on the next iteration.
+    7. A response-file token (``@args.rsp``, Codex round 29): ``@``
+       preserved, only its payload resolved.
+    8. A bare, non-flag positional token -- resolved unconditionally.
+    9. Anything else -- unchanged.
     """
     if not chdir:
         return tokens
@@ -1620,6 +1634,10 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
             out.append(tok)
             out.append(_fold_chdir_path_value(tokens[i + 1], chdir))
             i += 2
+            continue
+        if tok.startswith("@") and len(tok) > 1:
+            out.append("@" + _fold_chdir_path_value(tok[1:], chdir))
+            i += 1
             continue
         if not tok.startswith(("-", "/")):
             out.append(_fold_chdir_path_value(tok, chdir))
@@ -1759,18 +1777,19 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
     the full reasoning. Degrading to the same language-based ``g++``/``gcc``
     fallback used for a missing/flag-only command is the correct response:
     a name this provably unresolvable carries no more real toolchain
-    identity than no recorded command at all.
+    identity than no recorded command at all -- UNLESS
+    :func:`resolve_bare_token_with_default_path` (round 29) resolves it.
     """
     if override:
         return override
     argv = strip_launchers(compile_unit.argv, directory=compile_unit.directory)
-    if (
-        argv
-        and argv[0]
-        and not argv[0].startswith("-")
-        and not env_path_cleared_for_bare_token(compile_unit.argv, argv[0])
-    ):
-        return _resolve_relative_driver(argv[0], compile_unit.directory)
+    if argv and argv[0] and not argv[0].startswith("-"):
+        if env_path_cleared_for_bare_token(compile_unit.argv, argv[0]):
+            resolved = resolve_bare_token_with_default_path(argv[0])
+            if resolved:
+                return resolved
+        else:
+            return _resolve_relative_driver(argv[0], compile_unit.directory)
     return "g++" if compile_unit.language.lower() in CXX_LANGS else "gcc"
 
 

@@ -367,3 +367,80 @@ def test_sources_from_argv_returns_every_tu():
     ]
     # source_from_argv stays the first element.
     assert source_from_argv(["g++", "-c", "a.cpp", "b.cpp"]) == "a.cpp"
+
+
+# -- Round 29 (Codex): normalize legacy target features before mode --------
+# -- classification ----------------------------------------------------------
+
+
+def test_legacy_xclang_target_feature_survivor_matches_canonical_shape():
+    """A legacy persisted-pack survivor ``-Xclang -target-feature=+sse2``
+    (the pre-canonicalization ``-Xclang``-marked spelling) and a freshly
+    produced ``-target-feature=+sse2`` survivor must classify into the
+    IDENTICAL ``(key, value)`` ``BuildOption`` shape -- otherwise
+    ``build_diff`` reads a legacy-collected pack and a freshly-collected
+    one as a spurious remove+add for the same effective compiler state."""
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu_legacy = CompileUnit(
+        id="cu://legacy.cc",
+        source="legacy.cc",
+        language="CXX",
+        directory="/work",
+        output="legacy.o",
+        abi_relevant_flags=["-Xclang -target-feature=+sse2"],
+    )
+    cu_fresh = CompileUnit(
+        id="cu://fresh.cc",
+        source="fresh.cc",
+        language="CXX",
+        directory="/work",
+        output="fresh.o",
+        abi_relevant_flags=["-target-feature=+sse2"],
+    )
+    legacy_opts = {(o.key, o.value) for o in derive_build_options([cu_legacy])}
+    fresh_opts = {(o.key, o.value) for o in derive_build_options([cu_fresh])}
+    assert legacy_opts == fresh_opts == {("target_feature:sse2", "+sse2")}
+
+
+def test_legacy_xclang_target_feature_last_wins_still_applies():
+    """The last-wins per-feature-name semantics (round 27 Finding 3) still
+    apply correctly when the sequence mixes legacy-marked and canonical
+    survivor spellings for the SAME feature name."""
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu = CompileUnit(
+        id="cu://mixed.cc",
+        source="mixed.cc",
+        language="CXX",
+        directory="/work",
+        output="mixed.o",
+        abi_relevant_flags=[
+            "-Xclang -target-feature=+sse2",
+            "-target-feature=-sse2",
+        ],
+    )
+    opts = {(o.key, o.value) for o in derive_build_options([cu])}
+    assert opts == {("target_feature:sse2", "-sse2")}
+
+
+def test_legacy_xclang_target_feature_negative_control_unrelated_flag_unaffected():
+    """Negative control: an ordinary, unrelated ``-Xclang``-wrapped flag
+    that is NOT a split-operand-ABI-flag survivor at all is completely
+    unaffected by the new strip -- it still falls through to the generic
+    option path exactly as before."""
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu = CompileUnit(
+        id="cu://unrelated.cc",
+        source="unrelated.cc",
+        language="CXX",
+        directory="/work",
+        output="unrelated.o",
+        abi_relevant_flags=["-Xclang -some-other-cc1-flag"],
+    )
+    opts = [(o.key, o.value) for o in derive_build_options([cu])]
+    assert opts == [("-Xclang -some-other-cc1-flag", "-Xclang -some-other-cc1-flag")]

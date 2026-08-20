@@ -1523,11 +1523,18 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     # name. See `env_path_cleared_for_bare_token`'s own docstring. `None`
     # here degrades exactly like "no CL-style token found anywhere and no
     # generic fallback either" -- this function's own pre-existing
-    # not-derivable outcome.
-    from .source_extractors._argv import env_path_cleared_for_bare_token
+    # not-derivable outcome. Round 29 follow-up (Codex review, fresh
+    # evidence): a genuinely PATH-less `execvp` still searches the
+    # platform's own default path (`os.defpath`) rather than failing
+    # outright -- `resolve_bare_token_with_default_path` is tried before
+    # giving up, mirroring `pick_compiler_binary`'s identical fix.
+    from .source_extractors._argv import (
+        env_path_cleared_for_bare_token,
+        resolve_bare_token_with_default_path,
+    )
 
     if env_path_cleared_for_bare_token(cu.argv, token):
-        return None
+        return resolve_bare_token_with_default_path(token)
     return _resolve_driver_token(token, cu.directory)
 
 

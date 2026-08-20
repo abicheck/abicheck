@@ -1013,7 +1013,34 @@ def _structured_unit_options(cu: CompileUnit) -> list[tuple[str, str, str]]:
 
 
 def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
-    """Classify *flag* as a last-one-wins runtime-mode option: (key, value), or None."""
+    """Classify *flag* as a last-one-wins runtime-mode option: (key, value), or None.
+
+    **Strips a legacy ``-Xclang ``-marked split-operand-ABI-flag survivor
+    BEFORE classification (Codex review round 29, "Normalize legacy
+    target features before mode classification", fresh evidence).** A
+    persisted pack from before the last-wins ``-target-feature=``
+    normalization (this function's own case below) may still carry the
+    pre-canonicalization ``-Xclang -target-feature=+sse2`` marked
+    spelling. Without this strip, ``flag.startswith("-target-feature=")``
+    never matches (the marker is a different leading substring), so this
+    function returns ``None`` for it, and the caller
+    (``derive_build_options``) falls through to
+    ``_add_generic_flag_option`` instead -- which DOES already strip the
+    identical marker for its own dispatch (see its own docstring), so a
+    legacy-marked survivor and a freshly-produced one land in two
+    DIFFERENT ``BuildOption`` shapes for the same effective flag (old:
+    key ``"-target-feature"``/value ``"-target-feature=+sse2"``; new: key
+    ``"target_feature:sse2"``/value ``"+sse2"``) -- a spurious
+    remove+add in ``build_diff`` comparing a legacy-collected pack against
+    a freshly-collected one, despite both recording the identical
+    effective compiler state. Mirrors
+    ``_add_generic_flag_option``'s own established
+    ``is_split_operand_abi_flag_survivor``-gated strip exactly, so both
+    functions agree on which flags are legacy-marked and how the marker
+    is removed -- not a second, independently-drifting implementation.
+    """
+    if is_split_operand_abi_flag_survivor(flag):
+        flag = flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
     if flag in _RUNTIME_MODE_FLAGS:
         base_key, value = _RUNTIME_MODE_FLAGS[flag]
         # exceptions/rtti/threadsafe-statics have language-dependent

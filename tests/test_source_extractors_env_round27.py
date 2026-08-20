@@ -100,11 +100,22 @@ def test_nested_env_dash_i_state_persists_through_a_further_no_opinion_layer() -
 
 
 def test_pick_compiler_binary_falls_back_to_default_under_env_dash_i() -> None:
-    """``env -i cc ...`` recorded for a C++ compile unit: the bare ``cc``
-    token could never have been found by the real, PATH-less invocation, so
-    ``pick_compiler_binary`` must not trust it as toolchain identity --
-    degrading to the same language-based ``g++`` fallback used for a
-    missing/flag-only recorded command."""
+    """``env -i <unresolvable> ...`` recorded for a C++ compile unit: the
+    bare token could never have been found by the real, PATH-less
+    invocation -- neither via abicheck's own inherited ``PATH`` NOR via the
+    platform's PATH-absent default search path (:data:`os.defpath`, round
+    29 follow-up) -- so ``pick_compiler_binary`` must not trust it as
+    toolchain identity, degrading to the same language-based ``g++``
+    fallback used for a missing/flag-only recorded command.
+
+    Uses a token guaranteed absent from :data:`os.defpath` (round 29
+    follow-up, Codex review, fresh evidence) rather than the previous
+    ``"cc"`` -- ``resolve_bare_token_with_default_path`` now genuinely
+    resolves ``"cc"`` against a real ``/bin/cc``/``/usr/bin/cc`` on a
+    typical POSIX sandbox, which is the CORRECT new behavior (see
+    ``tests/test_source_extractors_env_round29.py`` for that positive
+    case) but means ``"cc"`` is no longer a valid example of an
+    UNRESOLVABLE bare token."""
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(
@@ -113,7 +124,7 @@ def test_pick_compiler_binary_falls_back_to_default_under_env_dash_i() -> None:
         language="CXX",
         directory="/work",
         output="x.o",
-        argv=["env", "-i", "cc", "-c", "x.cc"],
+        argv=["env", "-i", "this-compiler-does-not-exist-xyz", "-c", "x.cc"],
     )
     assert pick_compiler_binary(cu, override=None) == "g++"
 
@@ -129,7 +140,7 @@ def test_pick_compiler_binary_falls_back_to_gcc_for_c_language_under_env_dash_i(
         language="C",
         directory="/work",
         output="x.o",
-        argv=["env", "-i", "cc", "-c", "x.c"],
+        argv=["env", "-i", "this-compiler-does-not-exist-xyz", "-c", "x.c"],
     )
     assert pick_compiler_binary(cu, override=None) == "gcc"
 

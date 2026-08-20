@@ -1172,3 +1172,88 @@
   behavior, not "unaffected by the fix"). A second live Windows CI re-run
   on this PR's current head, after this fix, confirms all three tests pass
   together with no other failures.
+- **Round 29 (Codex review, 6 findings, all in the same `env`/build-evidence
+  argv-parsing area).** (A) `_fold_chdir_into_operands`'s known-path-flag
+  vocabulary was missing `-cxx-isystem`/`/imsvc`/`/external:I` -- three
+  include-option families `header_utils._INCLUDE_FLAG_PREFIXES` already
+  classifies as include-search flags elsewhere, so an attached-form token
+  like `/imsvcinclude` under `env -C build` stayed relative to the wrong
+  pre-chdir directory. Added to both `_CHDIR_FOLD_COMBINED_PATH_PREFIXES`
+  and `_CHDIR_FOLD_SEPARATE_PATH_FLAGS`. (B) `pick_compiler_binary`/
+  `header_compile_context._derived_gcc_path` unconditionally degraded a
+  PATH-cleared bare driver token (`env -i`/`env -u PATH`) to the
+  language-based `gcc`/`g++` fallback -- but a genuinely PATH-less
+  `execvp` still searches the platform's own default path
+  (`confstr(_CS_PATH)`, confirmed empirically: `env -i cc --version`
+  succeeds on a real system; Python's `os.defpath` is the identical
+  value). New `resolve_bare_token_with_default_path()` is tried first,
+  falling back to the language default only when unresolvable there too.
+  (C) `_fold_chdir_into_operands` corrupted a response-file token
+  (`@args.rsp`) by rebasing the WHOLE token including its leading `@`
+  sigil, producing `build/@args.rsp` -- unrecognizable as a response file
+  by any consumer (`include_graph.depfile_args_from_argv()` included)
+  since the sigil is no longer the first character. Fixed by preserving
+  the sigil and resolving only the payload after it. (D)
+  `adapters.base._mode_flag_option`'s new last-wins `-target-feature=`
+  classification (round 27 Finding 3) never stripped a legacy
+  `-Xclang`-marked survivor before checking `flag.startswith(...)`, so a
+  persisted pack carrying the pre-canonicalization `-Xclang
+  -target-feature=+sse2` spelling fell through to the generic option path
+  and recorded the OLD key/value shape (`-target-feature`/`-Xclang
+  -target-feature=+sse2`) while a freshly-produced pack recorded the NEW
+  shape (`target_feature:sse2`/`+sse2`) for the identical effective
+  compiler state -- a spurious pack-diff false remove+add. Fixed by
+  stripping the marker at the top of `_mode_flag_option`, mirroring
+  `_add_generic_flag_option`'s own already-established strip. (E)
+  `source_extractors.clang._clang_context_args` emitted `CompileUnit.
+  include_paths`/`system_include_paths` verbatim -- both already
+  STRUCTURED, absolute paths resolved by the producing adapter against
+  the compile unit's own `directory`, before any leading `env -C DIR`
+  prefix in `argv` is considered. `extract()`'s own effective-cwd fix
+  (round 26 Finding 10) only corrected the replay SUBPROCESS's cwd, not
+  these two already-absolute fields, so `build_clang_command()` still
+  emitted the wrong absolute `-I` for a unit recorded under `env -C`. New
+  `_rebase_structured_path()` rebases each path from its old base
+  (`compile_unit.directory`) onto the real effective directory via a
+  literal string-prefix substitution. (F) `_skip_env_prefix` did not
+  recognize GNU short-option ATTACHMENT (`-Cbuild`, DIR attached directly
+  to `-C` with no space -- confirmed empirically: `env -Ctmp pwd` chdirs
+  into `/tmp`) or CLUSTERING (`-iv`, multiple no-operand short flags
+  grouped into one token -- confirmed against a real `env`). Both forms
+  previously fell through every recognized shape and hit the terminal
+  `break`, misreading the whole token as the compiler driver. Added
+  recognition for both, the clustering half split into a new sibling leaf
+  module (`source_extractors/_argv_shortopts.py`, alongside the new
+  default-path resolver from (B)) purely to keep `_argv.py` under this
+  repo's 2000-line AI-readiness hard cap -- both helpers are pure/
+  stdlib-only, carrying none of `_argv.py`'s own documented import-cycle
+  risk with `header_compile_context.py`.
+
+  New regression tests: `tests/test_source_extractors_env_round29.py`
+  (Findings A/B/C/F -- 22 cases, each with negative controls: an unrelated
+  MSVC flag not accidentally matched, a genuinely-unresolvable-anywhere
+  bare token still degrading to the language fallback, a response-file
+  token with no `env -C` prefix left unchanged, the pre-existing
+  separate-token `-C DIR`/`--chdir=` forms unaffected by the new attached
+  form, and a cluster containing an unrecognized character falling
+  through unchanged); `tests/test_source_extractors_clang_round29.py`
+  (Finding E -- 6 cases, including a negative control for a path outside
+  `compile_unit.directory` entirely, and the exact-directory-as-include
+  edge case); `tests/test_adapter_base.py` gained 3 cases for Finding D
+  (legacy vs. fresh survivor converge on the identical `BuildOption`
+  shape, last-wins still applies across a mixed legacy/canonical pair, an
+  unrelated `-Xclang`-wrapped flag is unaffected). Two round 27 tests
+  (`test_pick_compiler_binary_falls_back_to_default_under_env_dash_i`/
+  `..._falls_back_to_gcc_for_c_language_under_env_dash_i`) were updated to
+  use a token guaranteed absent from `os.defpath` -- their previous
+  example, `"cc"`, now genuinely resolves via Finding B's own fix on a
+  typical POSIX sandbox (`/bin/cc`), which is correct new behavior, not a
+  regression, but meant `"cc"` was no longer a valid example of an
+  unresolvable token.
+
+  Verification: `ruff check`/`ruff format --check` clean, `mypy
+  abicheck/` 0 errors (373 source files), `check_ai_readiness.py` 0
+  errors / 130 warnings (the new `_argv.py` line-count split keeps it at
+  exactly the 2000-line hard-cap boundary, WARN not ERROR), the full
+  env/gcc_path/clang/adapter_base/header_compile_context test family
+  (748 tests) passes, full fast suite run locally.
