@@ -1718,25 +1718,6 @@ def scan_cmd(
         # alone, never consulting severity).
         sev_config = resolved_cfg.severity
         resolved_exit_scheme = resolved_cfg.exit_code_scheme
-        # The same label `compare --dry-run` prints, from the same function
-        # and the same *resolved* config -- so a `.abicheck.yml`-only severity
-        # setup previews correctly, which is the case that function was
-        # itself fixed for. The real *pack_paths* now, not `()`: a `kind:
-        # gate` pack is no longer rejected outright on `scan` (CLI cleanup
-        # phase two, "PR B"), so `dry_run_scheme_label`'s own "a selected
-        # --pack may adjust it" caveat is exactly the honest answer here too
-        # -- resolving the pack this early would run D8 conflict detection
-        # against different pins than the real (later) resolution does, the
-        # same reason `compare --dry-run` never resolves it early either
-        # (see that function's own docstring).
-        from .cli_compare_receipt import dry_run_scheme_label
-
-        scheme_label = dry_run_scheme_label(resolved_cfg, pack_paths)
-        # Only a severity-scheme run has a gate to describe; under `legacy`
-        # the severity values still resolve but never score anything, so
-        # previewing them would imply a gate the run will not run.
-        if resolved_exit_scheme == "severity":
-            sev_config_for_preview = sev_config
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison
@@ -1810,6 +1791,22 @@ def scan_cmd(
     if resolved_cfg is not None:
         sev_config = resolved_cfg.severity
         resolved_exit_scheme = resolved_cfg.exit_code_scheme
+        # `scheme_label`/`sev_config_for_preview` (what `--dry-run` prints)
+        # must be derived from THIS, possibly pack-folded, `resolved_cfg` --
+        # not the pre-fold snapshot `_resolve_scan_evaluation_config` was
+        # given (Codex review, fresh evidence: computing them earlier, before
+        # this fold, left `scan --dry-run` describing the legacy/pre-pack
+        # scheme even when a selected gate pack had just changed it for the
+        # real run). The same label `compare --dry-run` prints, from the same
+        # function and the same *resolved* config.
+        from .cli_compare_receipt import dry_run_scheme_label
+
+        scheme_label = dry_run_scheme_label(resolved_cfg, pack_paths)
+        # Only a severity-scheme run has a gate to describe; under `legacy`
+        # the severity values still resolve but never score anything, so
+        # previewing them would imply a gate the run will not run.
+        if resolved_exit_scheme == "severity":
+            sev_config_for_preview = sev_config
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)

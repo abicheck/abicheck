@@ -638,6 +638,33 @@ class TestOnlyAppliedFieldsAreAccepted:
         summary = json.loads(with_pack.output)
         assert summary["verdict"] == "BREAKING"
 
+    def test_a_gate_pack_is_reflected_in_scan_dry_run_preview(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `scan --dry-run`'s previewed
+        exit-code scheme/severity must describe the pack-folded gate that
+        will actually run, not a stale snapshot computed before the pack was
+        applied. Reproduces the exact repro from that review: a pack
+        demoting `abi_breaking` to `warning` must be visible in the preview,
+        not left showing the legacy/pre-pack scheme."""
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--dry-run", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "exit-code scheme: severity" in result.output
+        assert "abi_breaking=warning" in result.output
+
     def test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
