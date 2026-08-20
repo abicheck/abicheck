@@ -193,6 +193,55 @@ def test_gate_flags_extra_tier1_targets(
     assert filename in errors[0]
 
 
+def test_nested_frontend_single_dot_relative_import_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`compat/cli.py` lives one package below the top level, so its own
+    single-dot relative import (`from .service import ...`) names a
+    *sibling* within `abicheck.compat`, not abicheck's own top-level
+    `service` module — it must not be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    compat = pkg / "compat"
+    compat.mkdir()
+    (compat / "cli.py").write_text(
+        "from .service import resolve_input\ndef go(a):\n    return resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_nested_frontend_correctly_leveled_relative_import_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The converse of the case above: `compat/cli.py` reaching abicheck's
+    own top-level `service` module needs *two* dots (`from ..service import
+    ...`), and that correctly-leveled import must still be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    compat = pkg / "compat"
+    compat.mkdir()
+    (compat / "cli.py").write_text(
+        "from ..service import resolve_input\ndef go(a):\n    return resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "compat/cli.py" in errors[0]
+
+
 def test_service_resolve_input_call_is_not_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

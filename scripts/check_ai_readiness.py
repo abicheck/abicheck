@@ -149,16 +149,21 @@ ERROR_LINES = 2000
 # WARN on every run, so the debt stays visible rather than invisible.
 #
 # `check_ai_readiness.py` itself is the one entry that isn't pre-existing
-# debt this change merely discovered — the checks added in this same commit
-# pushed it over 2000 lines. It stays here rather than being split because
-# its largest self-contained block (`check_cli_contract` and its ~15 private
+# debt this change merely discovered — the checks added in the commit that
+# introduced `engine-cli-boundary` pushed it over 2000 lines, and PR #813's
+# `cli-contract` extension (`dumper.dump`/`service.resolve_input`, plus the
+# `_dotted_path`/`_importfrom_names_module`/`_relative_import_level_for_source`
+# helpers their false-positive/false-negative fixes needed) grew it further
+# still. It stays here rather than being split because its largest
+# self-contained block (`check_cli_contract` and its now ~20 private
 # helpers, ADR-037 D10) is exactly what `tests/test_cli_contract.py`
 # monkeypatches by module-level name (e.g. `gate._VERDICT_CMD_MODULES`)
 # before calling `gate.check_cli_contract(...)` — moving that block to a
 # sibling module would make `check_cli_contract` read a *different* module's
 # globals than the ones the monkeypatch rebinds, silently breaking those
 # tests' ability to patch the very state they're asserting against. That
-# split needs its own pass that also updates the test file, not this one.
+# split needs its own pass that also updates the test file, not one folded
+# reactively into an unrelated correctness fix under continued review.
 LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
     {
         "scripts/benchmark_comparison.py",
@@ -2175,18 +2180,40 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
-def _importfrom_names_module(dotted: str, level: int, module: str) -> bool:
+def _relative_import_level_for_source(path: Path) -> int:
+    """The ``ImportFrom.level`` a module at *path* must use to reach
+    abicheck's own top-level package via a relative import.
+
+    Python's relative-import level counts dots from the *importing*
+    module's own containing package, not from a fixed depth: a top-level
+    module (``abicheck/cli.py``) reaches ``abicheck`` with a single dot
+    (``from . import checker``, level 1), while a module one package
+    deeper (``abicheck/compat/cli.py``, whose own package is
+    ``abicheck.compat``) needs two (``from .. import checker``, level 2) —
+    a single dot there resolves to ``abicheck.compat.checker`` instead, a
+    different module entirely.
+    """
+    depth = len(path.resolve().relative_to(PKG.resolve()).parent.parts)
+    return depth + 1
+
+
+def _importfrom_names_module(
+    dotted: str, level: int, module: str, required_level: int
+) -> bool:
     """True if an ``ImportFrom(module=dotted, level=level)`` genuinely names
-    abicheck's own top-level ``<module>`` — a relative ``.{module}`` or an
-    absolute ``abicheck.{module}`` — not an unrelated module that merely
-    *ends* in or *is spelled* the same bare name (``from vendor.service
-    import resolve_input`` and a bare ``from service import resolve_input``
-    must not be mistaken for abicheck's own ``service`` module; a real
-    front-end module here always spells its own sibling either relatively
-    or through the ``abicheck.`` prefix, never as a bare top-level name).
+    abicheck's own top-level ``<module>`` — a relative ``.{module}`` at
+    exactly *required_level* dots (see ``_relative_import_level_for_source``
+    — a *different* level names a different, sibling module even when the
+    trailing spelling matches) or an absolute ``abicheck.{module}`` — not an
+    unrelated module that merely *ends* in or *is spelled* the same bare
+    name (``from vendor.service import resolve_input`` and a bare ``from
+    service import resolve_input`` must not be mistaken for abicheck's own
+    ``service`` module; a real front-end module here always spells its own
+    sibling either relatively or through the ``abicheck.`` prefix, never as
+    a bare top-level name).
     """
     if level >= 1:
-        return dotted == module
+        return level == required_level and dotted == module
     return dotted == f"abicheck.{module}"
 
 
@@ -2199,20 +2226,24 @@ def _import_names_module(dotted: str, module: str) -> bool:
 
 
 def _tier1_func_bindings(
-    tree: ast.Module, module: str, funcs: frozenset[str]
+    tree: ast.Module, module: str, funcs: frozenset[str], required_level: int
 ) -> set[str]:
     """Return the local names bound to one of *funcs* via a direct import of
     *module*'s function(s) in *tree*.
 
     Handles ``from .<module> import <func>`` and ``... import <func> as X`` at
     module or function scope, so a lazily-imported alias is caught too.
+    *required_level* is the source file's own relative-import depth — see
+    ``_relative_import_level_for_source``.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.ImportFrom)
             and node.module is not None
-            and _importfrom_names_module(node.module, node.level, module)
+            and _importfrom_names_module(
+                node.module, node.level, module, required_level
+            )
         ):
             for alias in node.names:
                 if alias.name in funcs:
@@ -2232,7 +2263,9 @@ def _dotted_path(node: ast.expr) -> str | None:
     return None
 
 
-def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
+def _tier1_module_bindings(
+    tree: ast.Module, module: str, required_level: int
+) -> set[str]:
     """Return every spelling *tree* could call ``<module>.<func>(...)``
     through: local names bound to *module* itself, plus the full dotted path
     an *unaliased* ``import abicheck.<module>`` leaves reachable off the
@@ -2242,14 +2275,23 @@ def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
     <module> [as X]``, and ``import abicheck.<module> [as X]`` alike, so an
     aliased ``core.<func>(...)`` call is recognised — and, for the unaliased
     import form, so is the literal ``abicheck.<module>.<func>(...)`` — not
-    just a call through a name bound directly to *module*.
+    just a call through a name bound directly to *module*. *required_level*
+    is the source file's own relative-import depth (see
+    ``_relative_import_level_for_source``): a bare ``from . import
+    <module>`` only names the top-level abicheck module at exactly that
+    level, since a nested front end's single dot names a *sibling* within
+    its own subpackage instead.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            # ``from . import <module>`` (module is None) or ``from abicheck import <module>``
-            # — not an unrelated ``from vendor import <module>``-shaped import.
-            if node.module is None or node.module == "abicheck":
+            # ``from . import <module>`` (module is None, level must match
+            # this source's own depth) or ``from abicheck import <module>``
+            # — not an unrelated ``from vendor import <module>``-shaped
+            # import, and not a nested front end's own same-subpackage sibling.
+            if (node.module is None and node.level == required_level) or (
+                node.module == "abicheck"
+            ):
                 for alias in node.names:
                     if alias.name == module:
                         names.add(alias.asname or alias.name)
@@ -2483,9 +2525,10 @@ def check_cli_contract(f: Findings) -> None:
             if is_wrapper_module
             else frozenset()
         )
+        required_level = _relative_import_level_for_source(path)
         for module, funcs, guidance in _TIER1_TARGETS:
-            bound = _tier1_func_bindings(tree, module, funcs)
-            target_modules = _tier1_module_bindings(tree, module)
+            bound = _tier1_func_bindings(tree, module, funcs, required_level)
+            target_modules = _tier1_module_bindings(tree, module, required_level)
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
