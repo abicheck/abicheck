@@ -978,13 +978,19 @@ performance duplication (redundant inferred build queries).
 3. Move `scan` to the same object.
 4. Move the release fan-out off its six raw gate/severity strings.
 5. Move `appcompat.check_appcompat()`'s and `check_plugin_host_contract()`'s
-   own direct `compare_snapshots()` calls, and `deps compare`'s
-   `stack_checker._run_abi_diff()`'s direct `checker.compare()` call, onto
-   `EffectiveEvaluationConfig` too — without this step, the Comparison
-   equivalence acceptance test's requirement that these three paths produce
-   identical configuration digests, contract/assurance decisions, and exit
-   contributions stays unimplementable even after every other Phase 2 item
-   lands, since none of the other items touch these three call sites.
+   own direct `compare_snapshots()` calls, `deps compare`'s
+   `stack_checker._run_abi_diff()`'s direct `checker.compare()` call, and
+   `cli_compare_release._collect_matrix_result()`'s own direct
+   `compare_snapshots()` call (release's probe-matrix build-configuration
+   comparison, which independently loads suppression/policy/pack state
+   rather than reusing the per-library release fan-out's already-resolved
+   configuration) onto `EffectiveEvaluationConfig` too — without this step,
+   the Comparison equivalence acceptance test's requirement that these four
+   paths produce identical configuration digests, contract/assurance
+   decisions, and exit contributions stays unimplementable even after every
+   other Phase 2 item lands, since item 4 (the release fan-out's six raw
+   gate/severity strings) covers only the per-library comparisons, not this
+   separate release-global one, and none of the other items touch it either.
 6. Include the effective-config digest in every report and every
    aggregate input (building on the reporter's existing digest work from
    CLI-cleanup-phase-two's PR B).
