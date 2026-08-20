@@ -80,7 +80,7 @@ Generated output, per skill, per target tree:
    starts depending on surface that first ships in a later release, not when
    the tree's own version moves.
 
-## Portfolio status (portfolio reset, 2026-08-20)
+## Portfolio status (content rewrite, 2026-08-20 — "PR 2")
 
 The four-skill portfolio the earlier (2026-08-11) freeze shipped was itself
 frozen precisely because none of the four had measured evidence that it
@@ -92,12 +92,49 @@ that the *behavior* it produced beat the unequipped baseline. Per
 [ADR-058's 2026-08-20 amendment](../docs/contribute/adr/058-native-compatibility-agent-skills.md),
 that observation was carried to its conclusion: publishing three more
 prototypes ahead of any such evidence was scaling packaging ahead of
-validated product value, so the portfolio is now reset to **one** internal
-candidate.
+validated product value, so the portfolio was reset to **one** internal
+candidate. A second, same-date amendment ("PR 2") then rewrote that
+candidate's workflow content — the four-step plan the reset amendment
+implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
 | `review-native-library-change` (formerly `native-binary-compatibility-review`) | **Internal candidate — not yet validated, not for external publication.** | The sole published skill and the sole subject of any future G37 behavioral/comparative-lift evaluation. Not to be cited as validated in any user-facing claim until that evidence exists. |
+
+**What "PR 2" integrated, over the bare rename the reset amendment left in
+place:**
+
+- A **customer-outcome framing**: the workflow opens on the decision being
+  served ("will this break existing users, why, and what's the least costly
+  safe fix"), not a CLI preflight, and ends on a structured decision report
+  (`references/abicheck-adapter.md`'s field map; `SKILL.md`'s own decision
+  table) rather than a command transcript.
+- A **real, integrated named-consumer branch** (`SKILL.md`'s own step on
+  narrowing to one consumer), not just the single linking citation to
+  `shared/consumer-scoping.md` the reset amendment left behind. States
+  inline when to reach for `--used-by` versus `--required-symbol`/
+  `--required-symbols`, and the `verdict`-is-scoped /
+  `full_verdict`-is-global reading rule.
+- A new `references/remediation-patterns.md` (pImpl, reserved slots,
+  versioned interfaces, capability negotiation, deprecation lifecycle,
+  anti-patterns), cited from the recommendation step — harvested from
+  `native-api-evolution`'s removed `design-patterns.md`, not a second copy
+  of that skill's own workflow.
+- An explicit **v0.1 validated-scope statement**: C/C++ shared libraries,
+  Linux ELF, GCC/Clang, built artifacts plus public headers, matched
+  profiles, PR/branch/candidate-build review. Everything else (Mach-O,
+  PE/COFF, DPC++, cross-compiler migration, headerless review) can still be
+  attempted, but the skill now says explicitly not to report that attempt
+  with validated confidence.
+- All exact CLI invocations, flag combinations, and report-JSON field
+  paths moved out of `SKILL.md`'s body into a new
+  `references/abicheck-adapter.md`, per the Layer A/B/C split above.
+
+**Still open, unattempted by PR 2** (the ADR amendment above is the fuller
+account): `native-release-compatibility`'s whole-release-matrix-qualification
+concern remains explicitly *not* folded in; PR 3 (a complete G37 evaluation
+corpus and an actual behavioral run) and PR 4 (a thin external-distribution
+repository, removing the internal-candidate marker) are both fully open.
 
 `native-api-evolution`, `native-consumer-compatibility`, and
 `native-release-compatibility` are no longer published — their source is
