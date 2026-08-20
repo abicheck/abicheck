@@ -1162,3 +1162,63 @@ class TestBaselineExplicitScopeCoversPostManifest:
             fields_no_manifest["surface.explicit_scope"]
             != fields_empty_manifest["surface.explicit_scope"]
         )
+
+
+class TestRichTierFallsBackToResultExplicitScope:
+    """Codex review, PR #803, fresh evidence: a `--pack`-only run (no
+    `--contract`) stamps `result.evaluation_config` without ever building a
+    `PersistedContractContext`, so nothing merges the observed
+    `--post-manifest` scope into `resolved_config.surface.explicit_scope` --
+    it stays unset even though `checker.compare()` already resolved and
+    recorded the real scope digest on `result.explicit_scope_source_sha256`.
+    The rich tier must fall back to that result-level digest, the same way
+    it already falls back for `suppressions`."""
+
+    def test_falls_back_when_resolved_config_has_no_explicit_scope(self):
+        config = _minimal_evaluation_config()  # surface.explicit_scope is None
+        result = _result(
+            evaluation_config=config,
+            explicit_scope_source_sha256="sha256:frompostmanifest",
+        )
+        assert getattr(result, "contract_context", None) is None
+
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["surface.explicit_scope"] == "sha256:frompostmanifest"
+
+    def test_resolved_config_scope_still_wins_when_present(self):
+        """The fallback must not shadow a real resolved-config scope --
+        only fill in when the config side is genuinely empty."""
+        config = _minimal_evaluation_config(
+            surface=SurfaceConfig(
+                explicit_scope=DigestedItems(items=("a",), sha256="sha256:fromconfig")
+            )
+        )
+        result = _result(
+            evaluation_config=config,
+            explicit_scope_source_sha256="sha256:frompostmanifest",
+        )
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["surface.explicit_scope"] == "sha256:fromconfig"
+
+    def test_two_different_manifests_no_longer_collide_under_a_pack(self):
+        config = _minimal_evaluation_config()
+        result_a = _result(
+            evaluation_config=config,
+            explicit_scope_source_sha256="sha256:manifest_a",
+        )
+        result_b = _result(
+            evaluation_config=config,
+            explicit_scope_source_sha256="sha256:manifest_b",
+        )
+        fields_a = effective_config_fields(
+            result_a, severity_config=None, exit_code_scheme="legacy"
+        )
+        fields_b = effective_config_fields(
+            result_b, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields_a["surface.explicit_scope"] != fields_b["surface.explicit_scope"]
+        assert effective_config_digest(fields_a) != effective_config_digest(fields_b)

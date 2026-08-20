@@ -348,7 +348,16 @@ def effective_config_fields_from_full_config(
     likewise a checker-level fact with no D7 namespace of its own (Codex
     review, PR #803: an earlier revision hard-coded this field empty for
     the rich tier, so two ``--contract`` runs differing only in
-    ``--scope-public-headers`` collided). *require_complete_analysis*
+    ``--scope-public-headers`` collided). ``surface.explicit_scope`` falls
+    back to *result.explicit_scope_source_sha256* the same way
+    ``suppressions`` already falls back to *result.suppression_source_
+    sha256* below (Codex review, PR #803, fresh evidence): a ``--pack``-only
+    run (no ``--contract``) stamps *resolved_config* without ever building a
+    ``PersistedContractContext``, so nothing merges the observed
+    ``--post-manifest`` scope into *resolved_config.surface.explicit_scope*
+    -- leaving it unset even though ``checker.compare()`` already resolved
+    and recorded the real scope digest on *result* itself.
+    *require_complete_analysis*
     mirrors the identically-named CLI/API flag (P0.4's analysis-
     completeness gate): it is not a D7 configuration namespace at all --
     ``compatibility_evaluation_config.py`` has no field for it -- but it
@@ -404,7 +413,8 @@ def effective_config_fields_from_full_config(
         ),
         "surface.explicit_scope": _digested_items_str(
             getattr(surface, "explicit_scope", None)
-        ),
+        )
+        or str(getattr(result, "explicit_scope_source_sha256", "") or ""),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
         ),

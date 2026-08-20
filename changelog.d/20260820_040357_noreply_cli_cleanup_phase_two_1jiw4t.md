@@ -49,4 +49,11 @@
   truthiness, since a `--post-manifest` committing to zero exports
   (`public_surface_allowlist=set()`) is a real, distinct, active scope
   from no manifest at all — the same `is not None` rule the comparison's
-  own `scope_active` check already used for this parameter.
+  own `scope_active` check already used for this parameter. The rich
+  tier's `surface.explicit_scope` now also falls back to
+  `result.explicit_scope_source_sha256` (the same way `suppressions`
+  already falls back to `result.suppression_source_sha256`), since a
+  `--pack`-only run stamps `evaluation_config` without ever building a
+  `PersistedContractContext` to merge the observed `--post-manifest`
+  scope into it — leaving that field unset even though `checker.compare()`
+  already resolved and recorded the real scope digest on the result.
