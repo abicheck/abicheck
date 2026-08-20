@@ -1735,27 +1735,18 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         assert called["attach"] is False
         assert resolution.snapshot.build_context_defines == set()
 
-    @pytest.mark.parametrize("collect_mode", ["off", "build"])
-    def test_compile_db_filter_with_resolvable_db_raises(
-        self, monkeypatch, tmp_path: Path, collect_mode: str
+    def test_collector_never_receives_a_source_filter(
+        self, monkeypatch, tmp_path: Path
     ) -> None:
-        """Codex review, PR #809 (two rounds). Round 1: combining
-        ``InputSpec.compile_db_filter`` with a compile-database
-        ``build_info`` at a non-"off" collect mode must be refused, the same
-        way the native ``dump`` CLI refuses it via
-        ``compile_db_filter_scope_error`` -- otherwise the ADR-039 collector
-        scopes to the filtered subset while the L3 embed reads the whole,
-        unfiltered database. Round 2: unlike the native CLI, this shared
-        pipeline's own L2 context (``_seeded_includes_and_compile_context``,
-        the P0.3 fold) has no filter concept at all and always resolves from
-        the whole database *regardless of collect_mode* -- so exempting
-        ``collect_mode == "off"`` (mirroring the CLI's own condition, which
-        is only safe there because the CLI threads the filter into its L2
-        context a different way) would leave the identical inconsistency
-        for a headers-only, no-L3-embed request. Parametrized over both
-        values to pin that the rejection is unconditional here."""
+        """``InputSpec`` deliberately has no ``compile_db_filter`` field
+        (Codex review, PR #809, fresh evidence: an earlier version of this
+        field always raised whenever combined with a resolvable compile
+        database, so it had no successful execution path where it narrowed
+        anything -- see ``InputSpec``'s own comment). Pin that the shared
+        pipeline always calls the ADR-039 collector with the default,
+        unfiltered ``source_filter=None`` for a real compile database +
+        headers, rather than raising or narrowing."""
         from abicheck import service, service_input_resolution as sir
-        from abicheck.errors import ValidationError
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1772,25 +1763,26 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
             ),
         )
 
-        side = InputSpec(
-            path=tmp_path / "lib.so",
-            headers=(hdr,),
-            build_info=db,
-            compile_db_filter="*/widget.cpp",
-        )
+        captured: dict[str, object] = {}
+        real_attach = sir.attach_build_context
+
+        def _spy_attach(snap, compile_db_arg, headers, extra_flags, **kw):
+            captured["source_filter"] = kw.get("source_filter")
+            return real_attach(snap, compile_db_arg, headers, extra_flags, **kw)
+
+        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+
+        side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,), build_info=db)
         evidence = SideEvidence(
-            headers=[hdr],
-            compile=None,
-            collect_mode=collect_mode,
-            dump_manifest=None,
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
         )
-        with pytest.raises(ValidationError, match="compile_db_filter"):
-            sir._resolve_side_snapshot_impl(
-                side,
-                evidence,
-                lang="c++",
-                header_backend="auto",
-                fmt="elf",
-                public_headers=[hdr],
-                public_header_dirs=[],
-            )
+        sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert captured["source_filter"] is None

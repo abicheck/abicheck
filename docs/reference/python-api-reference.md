@@ -146,7 +146,6 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `compile` | `CompileContext \| None` | `None` |
 | `public_header_dirs` | `tuple[Path, ...]` | `()` |
 | `follow_linker_scripts` | `bool` | `True` |
-| `compile_db_filter` | `str \| None` | `None` |
 
 ## `LayerResult`
 

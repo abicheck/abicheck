@@ -624,44 +624,25 @@ def _resolve_side_snapshot_impl(
             compile_db_path = compile_db_from_build_info(
                 side.build_info, tuple(collector_headers)
             )
-            # `compile_db_filter` is rejected unconditionally alongside a
-            # resolvable compile database on this pipeline -- broader than
-            # the native `dump` CLI's own `compile_db_filter_scope_error`
-            # (which exempts `collect_mode == "off"`, since on the CLI path
-            # the filter *does* reach the L2 header-AST context there too,
-            # via `cli_helpers_compare._resolve_build_context_flags`). This
-            # shared pipeline's own L2 context comes from a structurally
-            # different mechanism, `_seeded_includes_and_compile_context`
-            # (the P0.3 L3->L2 fold, already run above, before this block),
-            # which has no `compile_db_filter` parameter at all and always
-            # resolves from the *whole* database, regardless of
-            # `collect_mode` -- so exempting "off" here would be wrong, not
-            # just incomplete: even a headers-only, no-L3-embed request
-            # would still fold an unfiltered `compile_ctx` into the real
-            # parse while this collector saw only the filtered subset
-            # (Codex review, PR #809, fresh evidence -- a P1 finding on the
-            # first version of this check that only exempted `collect_mode
-            # != "off"`, mirroring the CLI's own condition, missed that the
-            # CLI's condition is only safe *because* the CLI's own filter
-            # threading covers the "off" case a different way this pipeline
-            # doesn't have). Threading the filter into the L2 fold itself
-            # (mirroring what the CLI's separate mechanism does) is a real,
-            # separate feature addition to shared, heavily-reviewed L2-seed
-            # machinery (`buildsource/l2_seed.py`/`header_compile_context.py`
-            # -- no other caller of either has ever needed a filter concept
-            # there), not a same-PR follow-up -- see the plan doc's PR C
-            # status notes.
-            if side.compile_db_filter and compile_db_path is not None:
-                raise ValidationError(
-                    "compile_db_filter is not supported together with a "
-                    "resolvable compile database on this pipeline: the L2 "
-                    "header-AST context is resolved from the whole, "
-                    "unfiltered compile database regardless of collect mode, "
-                    "so a filtered ADR-039 build-context view would disagree "
-                    "with what informed the actual header parse. Pass a "
-                    "pre-filtered compile_commands.json as build_info "
-                    "instead, or drop compile_db_filter."
-                )
+            # No `compile_db_filter` field is threaded through here (and
+            # `InputSpec` deliberately doesn't carry one -- see its own
+            # comment): this shared pipeline's own L2 header-AST context
+            # (`_seeded_includes_and_compile_context`, the P0.3 L3->L2 fold,
+            # already run above) always resolves from the *whole*, unfiltered
+            # compile database, unlike the native `dump` CLI, which threads
+            # its `--compile-db-filter` into its own, structurally different
+            # L2 mechanism too (`cli_helpers_compare._resolve_build_context_
+            # flags`). Exposing a filter here that could only ever disagree
+            # with the unfiltered L2 parse -- or, if rejected outright
+            # whenever combined with a resolvable database, never actually
+            # narrow anything -- would be worse than not exposing one at all
+            # (Codex review, PR #809, fresh evidence: an earlier version of
+            # this pipeline added exactly such a field, and it had no
+            # successful execution path where it narrowed anything). A real
+            # implementation needs the filter threaded into the shared L2
+            # fold itself, a separate feature addition to
+            # `buildsource/l2_seed.py`/`header_compile_context.py` -- see the
+            # plan doc's PR C status notes.
             if (
                 compile_db_path is not None
                 and collector_headers
@@ -675,7 +656,6 @@ def _resolve_side_snapshot_impl(
                         side.compile.gcc_option_tokens if side.compile else (),
                         side.compile.gcc_options if side.compile else None,
                     ),
-                    source_filter=side.compile_db_filter,
                 )
         if side.sources or side.build_info:
             # Known, accepted limitation (Codex review, fresh evidence, not

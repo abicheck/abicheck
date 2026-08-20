@@ -27,10 +27,14 @@ from . import dumper_cache
 from .dumper import dump
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
+
+# `_attach_build_context`/`_user_define_flags` are called directly below by
+# `perform_elf_dump` (not just re-exported for a caller elsewhere), so this
+# static edge to `header_conditionals` is structurally required regardless of
+# re-export strategy -- unlike the two names in the lazy `__getattr__` shim
+# further down, which `perform_elf_dump` never calls itself.
 from .header_conditionals import (
     attach_build_context as _attach_build_context,
-    compile_db_filter_scope_error as compile_db_filter_scope_error,
-    compile_db_from_build_info as compile_db_from_build_info,
     user_define_flags as _user_define_flags,
 )
 
@@ -93,6 +97,32 @@ class _WriteSnapshotOutput(Protocol):
 # are now `header_conditionals.user_define_flags`/`attach_build_context`,
 # imported above under their original private names — see that module for the
 # ADR-039 collection logic and why it moved (PR C, CLI cleanup phase two).
+
+# ── Back-compat re-export shim (lazy, per AGENTS.md's moved-helper
+#    convention) ────────────────────────────────────────────────────────────
+# `compile_db_from_build_info`/`compile_db_filter_scope_error` moved to
+# `header_conditionals.py` alongside `_attach_build_context`/
+# `_user_define_flags` above -- but unlike those two, nothing in this module
+# calls either of these itself (confirmed by grep: no `compile_db_from_
+# build_info(`/`compile_db_filter_scope_error(` call site here). They exist
+# only so `from .cli_dump_helpers import compile_db_from_build_info,
+# compile_db_filter_scope_error` (cli.py) and existing tests keep working
+# unchanged. A static re-export here would be an eager dependency edge this
+# module has no other reason to carry for these two names, so this
+# module-level `__getattr__` (PEP 562) resolves them lazily via
+# `importlib.import_module` instead -- mirroring the identical shim at the
+# tail of `cli_buildsource.py` (Codex review, PR #809).
+_HEADER_CONDITIONALS_REEXPORTS = frozenset(
+    {"compile_db_from_build_info", "compile_db_filter_scope_error"}
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _HEADER_CONDITIONALS_REEXPORTS:
+        import importlib
+
+        return getattr(importlib.import_module("abicheck.header_conditionals"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def resolve_dump_debug_format(

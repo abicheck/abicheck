@@ -170,15 +170,21 @@ class InputSpec:
     # (D4) would have silently dropped that guard, so it is request surface,
     # not an MCP-local wrapper concern.
     follow_linker_scripts: bool = True
-    # PR C (CLI cleanup phase two, typed dump/scan convergence): mirrors
-    # `dump --compile-db-filter` -- a glob narrowing which entries of the
-    # compile database resolved from `build_info` the ADR-039 build-context
-    # collector (`header_conditionals.collect_build_context`, reached via
-    # `service_input_resolution._resolve_side_snapshot_impl`) scans. `None`
-    # (the default) means "no filter", matching every pre-existing caller
-    # that never set this. This field only ever feeds the ADR-039 collector,
-    # never the header-AST parse itself.
-    compile_db_filter: str | None = None
+    # PR C (CLI cleanup phase two, typed dump/scan convergence) deliberately
+    # does *not* add a `compile_db_filter` field here mirroring `dump
+    # --compile-db-filter`. This pipeline's own L2 header-AST context
+    # (`_seeded_includes_and_compile_context`, the P0.3 L3->L2 fold) has no
+    # filter concept and always resolves from the *whole*, unfiltered compile
+    # database -- unlike the native `dump` CLI, which threads its filter into
+    # its own, structurally different L2 mechanism too
+    # (`cli_helpers_compare._resolve_build_context_flags`). Exposing a field
+    # here that could only ever be combined with a resolvable compile
+    # database by raising (never by actually narrowing the ADR-039
+    # collector's scan) would be a field with no successful use -- see the
+    # plan doc's PR C status notes; a real implementation needs the filter
+    # threaded into the shared L2 fold itself, a separate feature addition to
+    # `buildsource/l2_seed.py`/`header_compile_context.py` (Codex review,
+    # PR #809).
 
     @classmethod
     def of(
@@ -198,7 +204,6 @@ class InputSpec:
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
         follow_linker_scripts: bool = True,
-        compile_db_filter: str | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -216,7 +221,6 @@ class InputSpec:
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),
             follow_linker_scripts=follow_linker_scripts,
-            compile_db_filter=compile_db_filter,
         )
 
 
