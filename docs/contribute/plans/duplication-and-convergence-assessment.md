@@ -214,9 +214,14 @@ read from.
 
 ```python
 @dataclass(frozen=True)
+class EffectiveGate:
+    exit_code_scheme: str      # e.g. "legacy" or "severity"
+    severity: EffectiveSeverity
+
+@dataclass(frozen=True)
 class EffectiveEvaluationConfig:
     policy: EffectivePolicy
-    severity: EffectiveSeverity
+    gate: EffectiveGate
     contract: EffectiveContract
     assurance: EffectiveAssurance
     surface: EffectiveSurface
@@ -224,6 +229,16 @@ class EffectiveEvaluationConfig:
     provenance: ConfigProvenance
     digest: str
 ```
+
+`gate` carries the resolved `exit_code_scheme` alongside severity, not
+severity alone — for a run combining `--exit-code-scheme legacy` with a
+severity-only gate pack, severity by itself can't recover which scheme was
+selected, so a consumer would otherwise have to keep an out-of-band raw
+string (defeating the point of one runtime object) or re-derive the scheme
+from severity, reintroducing the exact bug CLI-cleanup-phase-two's PR B
+already found and fixed once (a re-derived scheme let a severity-only gate
+pack silently override an explicit `--exit-code-scheme legacy`). Both
+fields feed the digest.
 
 consumed directly by `compare`, `scan`, the release fan-out, and bundle/
 matrix findings alike, with the resolver remaining the *only* place D7's
@@ -623,10 +638,19 @@ effective compile-context digest; public-surface scope fingerprint;
 dependency scope; build/source coverage; cache-relevant directory set.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
---against`, release per-library compare, and the Python API must produce
-identical: canonical finding IDs (`finding_identity.py`); effective
-verdicts; configuration digest; contract decisions; assurance decisions;
-compatibility exit contribution.
+--against`'s own nested baseline comparison, release per-library compare,
+and the Python API must produce identical: canonical finding IDs
+(`finding_identity.py`); effective verdicts; configuration digest; contract
+decisions; assurance decisions; compatibility exit contribution. Scoped
+deliberately to `scan`'s baseline comparison rather than its overall
+result: `scan --against --crosscheck KEY=error` intentionally lets
+`scan_engine._crosscheck_severity_exit` promote an otherwise-clean run to
+`API_BREAK` (recorded as `promoted_crosscheck`) — a real, scan-only axis
+Phase 3's `crosscheck_promotion` contribution deliberately preserves, not
+a divergence to eliminate. Requiring `scan`'s *overall* effective verdict
+to match `compare`'s would either fail on this correct behavior or invite
+removing the promotion; test scan-specific contributions (crosscheck,
+budget overflow) separately from this equivalence check.
 
 **Renderer equivalence.** Every renderer, given the same `ReportEnvelope`,
 must expose the same effective verdict, finding IDs, blocking findings,
