@@ -340,11 +340,40 @@ def _dump_via_cli_to_file(
 # fix to either path's include-dir seeding closes this, the xfail turns into
 # an unexpected pass and fails loudly, which is exactly the signal needed to
 # update this test and AGENTS.md's known-gap entry together.
+#
+# Applied via `pytest.param(..., marks=...)` below rather than an early
+# `pytest.xfail()` call inside the test body (Codex review): calling
+# `pytest.xfail()` unconditionally aborts the test *before* the body runs,
+# so it can only ever report XFAIL -- there is no code path left that could
+# execute the real assertions and XPASS, which defeats the entire point of
+# `strict=True` (a future fix closing the gap would keep reporting XFAIL
+# forever, silently, instead of failing loudly as an unexpected pass). The
+# mark-based form still lets pytest run the body and only *then* treats a
+# failure as expected / a pass as unexpected -- so the shape below actually
+# gets exercised on every run, not skipped over.
 _SCAN_KNOWN_DIVERGENT_SHAPES = frozenset({"extra-include-dir"})
 
 
+def _scan_shape_param(shape_name: str) -> object:
+    if shape_name in _SCAN_KNOWN_DIVERGENT_SHAPES:
+        return pytest.param(
+            shape_name,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    f"{shape_name}: known-open dump-vs-scan include-dir "
+                    "seeding divergence (see this module's own comment "
+                    "above this test)"
+                ),
+            ),
+        )
+    return shape_name
+
+
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
-@pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
+@pytest.mark.parametrize(
+    "shape_name", [_scan_shape_param(name) for name in sorted(_BUILD_SHAPES)]
+)
 def test_scan_against_real_dump_baseline_is_comparable(
     tmp_path: Path, shape_name: str
 ) -> None:
@@ -352,11 +381,6 @@ def test_scan_against_real_dump_baseline_is_comparable(
     shapes: a real ``dump`` baseline must be comparable via
     ``scan --against`` -- never ``NOT_COMPARABLE`` -- for an unchanged
     codebase."""
-    if shape_name in _SCAN_KNOWN_DIVERGENT_SHAPES:
-        pytest.xfail(
-            f"{shape_name}: known-open dump-vs-scan include-dir seeding "
-            "divergence (see this module's own comment above this test)"
-        )
     shape = _BUILD_SHAPES[shape_name]
     so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
     baseline = tmp_path / "baseline.json"
