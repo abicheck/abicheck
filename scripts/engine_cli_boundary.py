@@ -207,7 +207,19 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     (a call, an attribute access, ``importlib.import_module(...)``, ...)
     cannot be proven to name the submodule from syntax alone, so it is
     conservatively still treated as shadowing, per this module's
-    false-negative-over-false-positive default for the boundary gate."""
+    false-negative-over-false-positive default for the boundary gate.
+
+    A plain ``ast.Import`` (``import X [as alias_name]``) is always a
+    shadow, unconditionally: it carries no relative-import level, so it can
+    never spell the ``from . import alias_name`` self-reference and always
+    binds the name to some other module. An absolute ``ImportFrom`` gets
+    the identical two self-reference exceptions as the relative form --
+    ``from <path.to.base_dir> import alias_name [as X]`` and
+    ``from <path.to.base_dir>.alias_name import anything [as X]`` -- since
+    both spellings resolve to the same file on disk; an absolute *sibling*
+    re-export is not chased the way a relative one is, an accepted,
+    narrower gap (nothing in this repo spells an intra-package import
+    absolutely)."""
     init_path = base_dir / "__init__.py"
     if not init_path.is_file():
         return False
@@ -235,6 +247,15 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if stmt.name == alias_name:
                 return True
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                if (alias.asname or alias.name) == alias_name:
+                    # `import X [as alias_name]` -- a plain import can never
+                    # be the relative `from . import alias_name` self-
+                    # reference (ast.Import carries no relative-import
+                    # level), so it always binds alias_name to some other
+                    # module -- an ordinary shadow.
+                    return True
         if isinstance(stmt, ast.ImportFrom):
             for alias in stmt.names:
                 if (alias.asname or alias.name) != alias_name:
@@ -267,6 +288,23 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                     # the name `x` -- transitively still the real submodule,
                     # not a shadow. See _sibling_reexports_submodule.
                     continue
+                if stmt.level == 0 and stmt.module:
+                    # Absolute spelling of the same two self-reference
+                    # shapes already handled above for the relative form:
+                    # `from <path.to.base_dir> import alias_name [as X]`
+                    # (bare self-reference) or `from <path.to.base_dir>.
+                    # alias_name import anything [as X]` (direct-from-
+                    # submodule) both resolve to the identical real file a
+                    # relative spelling would. A same-package *sibling*
+                    # re-export spelled absolutely is not chased -- an
+                    # accepted, narrower gap than the relative case, since
+                    # nothing in this repo spells an intra-package import
+                    # absolutely rather than relatively.
+                    resolved = ROOT.joinpath(*stmt.module.split("."))
+                    if resolved == base_dir and alias.name == alias_name:
+                        continue
+                    if resolved == base_dir / alias_name:
+                        continue
                 return True
     return False
 

@@ -297,6 +297,89 @@ def test_reexport_of_real_submodule_through_alias_still_flagged(
     assert "scan_engine.py" in errors[0]
 
 
+def test_plain_import_binding_alias_name_shadows_real_submodule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`import math as cli` inside `__init__.py` binds `cli` to the stdlib
+    `math` module — an `ast.Import` can never spell the relative `from .
+    import cli` self-reference (it carries no relative-import level), so
+    it always shadows a same-named `cli.py` submodule sitting alongside
+    it. Must NOT be flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg11"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (engine_pkg / "__init__.py").write_text("import math as cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg11 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
+def test_absolute_importfrom_bare_self_reference_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from abicheck.engine_pkg12 import cli` inside
+    `engine_pkg12/__init__.py` is the absolute spelling of `from . import
+    cli` — it resolves to the identical real submodule file. Must still be
+    flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg12"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    (engine_pkg / "__init__.py").write_text("from abicheck.engine_pkg12 import cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg12 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
+def test_absolute_importfrom_direct_from_submodule_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from abicheck.engine_pkg13.cli import main as cli` imports a symbol
+    directly from the real submodule, spelled absolutely rather than
+    relatively (the `from .cli import main as cli` case already covered,
+    but via `abicheck.<pkg>.cli` instead of `.cli`). Must still be
+    flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg13"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("def main() -> None:\n    pass\n")
+    (engine_pkg / "__init__.py").write_text(
+        "from abicheck.engine_pkg13.cli import main as cli\n"
+    )
+    (pkg / "scan_engine.py").write_text("from .engine_pkg13 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_importfrom_directly_from_the_real_submodule_still_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
