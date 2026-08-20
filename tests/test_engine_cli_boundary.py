@@ -88,82 +88,101 @@ _ENGINE_VIOLATION_CASES: list[pytest.ParameterSet] = [
     pytest.param(
         "scan_engine.py",
         "import click\n",
+        {},
         id="scan_engine-import-click",
     ),
     pytest.param(
         "service_widget.py",
         "def go():\n    import click\n    return click\n",
+        {},
         id="service-lazy-import-click",
     ),
     pytest.param(
         "service_widget.py",
         "from click import echo\n",
+        {},
         id="service-from-click-import",
     ),
     pytest.param(
         "service_widget.py",
         "from .cli_dump_helpers import _gated_source_label\n",
+        {},
         id="service-relative-cli-submodule",
     ),
     pytest.param(
         "service_widget.py",
         "from . import cli_scan_helpers\n",
+        # `cli_scan_helpers` must be a *real* submodule on disk for this to
+        # be a genuine boundary crossing — see
+        # test_symbol_named_like_cli_module_is_not_flagged below for the
+        # negative case where no such file exists.
+        {"cli_scan_helpers.py": "\n"},
         id="service-relative-import-cli-name",
     ),
     pytest.param(
         "scan_engine.py",
         "from abicheck.cli_buildsource import embed_build_source\n",
+        {},
         id="scan_engine-absolute-cli-submodule",
     ),
     pytest.param(
         "scan_engine.py",
         "import abicheck.cli_dump_helpers\n",
+        {},
         id="scan_engine-absolute-import-dotted",
     ),
     pytest.param(
         "service_widget.py",
         "from abicheck import cli_dump_helpers\n",
+        {"cli_dump_helpers.py": "\n"},
         id="service-from-abicheck-import-cli-name",
     ),
     pytest.param(
         "artifact_plan.py",
         "import click\n",
+        {},
         id="artifact-module-import-click",
     ),
     pytest.param(
         "scan_engine.py",
         "from .compat import cli\n",
+        {"compat/cli.py": "\n"},
         id="scan_engine-nested-cli-adapter-relative-alias",
     ),
     pytest.param(
         "scan_engine.py",
         "from .compat.cli import compat_group\n",
+        {},
         id="scan_engine-nested-cli-adapter-relative-submodule",
     ),
     pytest.param(
         "scan_engine.py",
         "import abicheck.compat.cli\n",
+        {},
         id="scan_engine-nested-cli-adapter-absolute-dotted",
     ),
     pytest.param(
         "service_widget.py",
         "from abicheck.compat import cli\n",
+        {"compat/cli.py": "\n"},
         id="service-nested-cli-adapter-absolute-alias",
     ),
     pytest.param(
         "service_widget.py",
         "from abicheck.compat.cli import compat_group\n",
+        {},
         id="service-nested-cli-adapter-absolute-submodule",
     ),
 ]
 
 
-@pytest.mark.parametrize("filename, source", _ENGINE_VIOLATION_CASES)
+@pytest.mark.parametrize("filename, source, extra_files", _ENGINE_VIOLATION_CASES)
 def test_gate_flags_violation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     filename: str,
     source: str,
+    extra_files: dict[str, str],
 ) -> None:
     """The gate is not a no-op: each way of crossing the boundary is caught."""
     import scripts.check_ai_readiness as gate
@@ -171,6 +190,10 @@ def test_gate_flags_violation(
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
     (pkg / filename).write_text(source)
+    for rel_path, contents in extra_files.items():
+        path = pkg / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
@@ -180,6 +203,29 @@ def test_gate_flags_violation(
     errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
     assert len(errors) == 1
     assert filename in errors[0]
+
+
+def test_symbol_named_like_cli_module_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ordinary symbol (constant, function, class) that merely happens
+    to be *spelled* like a CLI module — `cli_default` imported from an
+    unrelated, non-CLI module — is not a real submodule on disk and must
+    not be flagged; only a genuine CLI-module import creates the
+    engine-to-CLI-frontend dependency this check exists to catch."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "model.py").write_text("cli_default = 1\n")
+    (pkg / "scan_engine.py").write_text("from .model import cli_default\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = gate.Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
 def test_allowlisted_site_is_not_flagged(

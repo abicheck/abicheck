@@ -2465,7 +2465,43 @@ def _is_cli_component(name: str) -> bool:
     return name == "cli" or name.startswith("cli_")
 
 
-def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
+def _alias_is_real_submodule(base_dir: Path, alias_name: str) -> bool:
+    """Does *alias_name* actually name a submodule file/package under
+    *base_dir* on disk — as opposed to an ordinary symbol (function,
+    constant, class) that merely happens to be *spelled* like a CLI module?
+    Only a genuine submodule import creates the engine-to-CLI-frontend
+    dependency this check exists to catch: ``from .model import
+    cli_default`` importing a plain constant named ``cli_default`` is not a
+    CLI dependency at all, even though the imported name starts with
+    ``cli_``. A dotted *module path* (`mod` itself, e.g. the `.compat.cli`
+    in `from .compat.cli import x`) needs no such check — Python requires
+    every component of a dotted import path to already be a real
+    module/package, so that part is unambiguous by construction; it's only
+    the *trailing* imported name in `from X import name` that could be
+    either a submodule or an ordinary symbol."""
+    return (base_dir / f"{alias_name}.py").is_file() or (
+        base_dir / alias_name / "__init__.py"
+    ).is_file()
+
+
+def _relative_import_base_dir(rel: str, level: int, mod: str) -> Path:
+    """Directory a relative ``from`` import's *mod* (possibly empty)
+    resolves to on disk, treating every engine module here as an ordinary
+    module file rather than a package's own ``__init__.py`` — level 1
+    resolves within the importing file's own directory, and each
+    additional level walks up one more parent, mirroring Python's own
+    relative-import semantics."""
+    base = ROOT / Path(rel).parent
+    for _ in range(level - 1):
+        base = base.parent
+    if mod:
+        base = base.joinpath(*mod.split("."))
+    return base
+
+
+def _engine_boundary_violations(
+    node: ast.Import | ast.ImportFrom, rel: str
+) -> list[str]:
     """Return one human description per prohibited alias *node* imports
     (``click`` or a ``cli``/``cli_*`` sibling — top-level or nested, e.g.
     ``abicheck.compat.cli``), possibly more than one — an import statement
@@ -2479,7 +2515,12 @@ def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
     or a CLI frontend" rule regardless of where in the file the import
     sits, and regardless of how deep the CLI module is nested (a
     ``cli_*.py`` sibling of ``cli.py``, or a ``cli.py`` living inside a
-    sub-package like ``compat/``)."""
+    sub-package like ``compat/``). *rel* (the importing file's own
+    repo-relative path) is only used to resolve a relative import's base
+    directory when verifying a trailing imported *alias* actually names a
+    real submodule on disk (see ``_alias_is_real_submodule``) — a dotted
+    module path never needs that check, since Python itself guarantees
+    every component of one is a real module."""
     if isinstance(node, ast.Import):
         found = []
         for alias in node.names:
@@ -2490,7 +2531,9 @@ def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
             # abicheck.compat.cli` (also catches a bare `... as X`, which
             # still binds the whole dotted path). Any component after
             # `abicheck`, not just the first, since a nested CLI adapter's
-            # own cli-ness can show up several segments deep.
+            # own cli-ness can show up several segments deep. No submodule
+            # check needed: every component of a dotted `import a.b.c` is
+            # already, by Python's own import semantics, a real module.
             elif parts[0] == "abicheck" and any(
                 _is_cli_component(p) for p in parts[1:]
             ):
@@ -2506,10 +2549,12 @@ def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
         # dotted `mod` component).
         if any(_is_cli_component(c) for c in mod_components):
             return [f"from {'.' * node.level}{mod} import ..."]
+        base_dir = _relative_import_base_dir(rel, node.level, mod)
         return [
             f"from {'.' * node.level}{mod} import {alias.name}"
             for alias in node.names
             if _is_cli_component(alias.name)
+            and _alias_is_real_submodule(base_dir, alias.name)
         ]
     # Absolute import.
     if mod == "click" or mod.startswith("click."):
@@ -2521,10 +2566,12 @@ def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
         # abicheck.compat import cli`) an imported alias naming it instead.
         if any(_is_cli_component(c) for c in mod_components if c != "abicheck"):
             return [f"from {mod} import ..."]
+        base_dir = ROOT.joinpath(*mod_components)
         found = [
             f"from {mod} import {alias.name}"
             for alias in node.names
             if _is_cli_component(alias.name)
+            and _alias_is_real_submodule(base_dir, alias.name)
         ]
         if found:
             return found
@@ -2545,7 +2592,7 @@ def _engine_boundary_sites(tree: ast.Module, rel: str) -> list[tuple[str, int, s
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
-        for desc in _engine_boundary_violations(node):
+        for desc in _engine_boundary_violations(node, rel):
             matches.append((node.lineno, desc))
     matches.sort(key=lambda m: m[0])
     occurrence: dict[str, int] = {}
