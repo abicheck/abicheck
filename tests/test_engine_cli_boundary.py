@@ -380,6 +380,74 @@ def test_absolute_importfrom_direct_from_submodule_still_flagged(
     assert "scan_engine.py" in errors[0]
 
 
+def test_unaliased_dotted_import_binds_only_first_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`import cli.helpers` (no `as`) inside `__init__.py` binds only the
+    *first* dotted component, `cli` — Python's own dotted-import rule — to
+    whatever top-level `cli` package that resolves to (here, an unrelated
+    one, not `engine_pkg14/cli.py`). `from .engine_pkg14 import cli` then
+    resolves to that unrelated binding, never reaching the real, same-named
+    `cli.py` submodule sitting alongside it. Must NOT be flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    # An unrelated top-level package also named `cli`, with a `helpers`
+    # submodule — this is what `import cli.helpers` actually binds `cli` to.
+    unrelated_cli_pkg = tmp_path / "cli"
+    unrelated_cli_pkg.mkdir()
+    (unrelated_cli_pkg / "__init__.py").write_text("")
+    (unrelated_cli_pkg / "helpers.py").write_text("# unrelated third-party module\n")
+
+    engine_pkg = pkg / "engine_pkg14"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (engine_pkg / "__init__.py").write_text("import cli.helpers\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg14 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
+def test_importfrom_reexport_through_sibling_package_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`engine_pkg15/__init__.py` does `from .frontend import cli`, where
+    `frontend` is a *subpackage* (`frontend/__init__.py`), not a plain
+    module file — and `frontend/__init__.py` re-exports the real submodule
+    from its own parent via `from .. import cli` (relative-import level 2,
+    since `frontend`'s own directory is one level deeper than
+    `engine_pkg15`'s). Importing `engine_pkg15` still transitively reaches
+    the real `cli.py` submodule, so this must still be flagged — the sibling
+    chase must recognize a package facade, not only a plain module file."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg15"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    frontend_pkg = engine_pkg / "frontend"
+    frontend_pkg.mkdir()
+    (frontend_pkg / "__init__.py").write_text("from .. import cli\n")
+    (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg15 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_importfrom_directly_from_the_real_submodule_still_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

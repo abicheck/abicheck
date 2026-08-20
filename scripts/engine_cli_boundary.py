@@ -212,7 +212,12 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     A plain ``ast.Import`` (``import X [as alias_name]``) is always a
     shadow, unconditionally: it carries no relative-import level, so it can
     never spell the ``from . import alias_name`` self-reference and always
-    binds the name to some other module. An absolute ``ImportFrom`` gets
+    binds the name to some other module. This includes the unaliased dotted
+    form ``import alias_name.submodule`` -- Python binds only the *first*
+    dotted component (``alias_name``) in that case, not the full dotted
+    path, so the bound name is derived from ``alias.name.split(".")[0]``
+    when there is no ``asname``, exactly mirroring Python's own dotted
+    ``import`` binding rule. An absolute ``ImportFrom`` gets
     the identical two self-reference exceptions as the relative form --
     ``from <path.to.base_dir> import alias_name [as X]`` and
     ``from <path.to.base_dir>.alias_name import anything [as X]`` -- since
@@ -249,12 +254,16 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                 return True
         if isinstance(stmt, ast.Import):
             for alias in stmt.names:
-                if (alias.asname or alias.name) == alias_name:
-                    # `import X [as alias_name]` -- a plain import can never
-                    # be the relative `from . import alias_name` self-
-                    # reference (ast.Import carries no relative-import
-                    # level), so it always binds alias_name to some other
-                    # module -- an ordinary shadow.
+                # `import X [as alias_name]` -- a plain import can never be
+                # the relative `from . import alias_name` self-reference
+                # (ast.Import carries no relative-import level), so it
+                # always binds alias_name to some other module -- an
+                # ordinary shadow. Without an `asname`, a dotted path like
+                # `import cli.helpers` binds only the first component
+                # (`cli`), not the full dotted string -- Python's own
+                # dotted-import binding rule.
+                bound_name = alias.asname or alias.name.split(".")[0]
+                if bound_name == alias_name:
                     return True
         if isinstance(stmt, ast.ImportFrom):
             for alias in stmt.names:
@@ -339,25 +348,43 @@ def _sibling_reexports_submodule(
     the same as ``_package_shadows_attribute``'s own Assign-based exception
     already distinguishes.
 
-    Deliberately bounded, not full symbol resolution: only chases a
-    same-package, dot-free sibling *module file* (``base_dir/X.py``), never
-    a nested subpackage, an absolute import, or a cross-package hop, and
-    only up to ``_MAX_REEXPORT_HOPS`` deep (also guards against a
-    re-export cycle, since each hop consumes one unit of depth regardless
-    of the module graph's own shape) -- true to this checker's own
-    false-negative-over-false-positive default, a chain this doesn't
-    resolve is conservatively left unflagged rather than chased further."""
+    *sibling_stem* may name either a plain module file (``base_dir/X.py``)
+    or a subpackage (``base_dir/X/__init__.py``) -- a package facade
+    re-exports the same way a module does (``frontend/__init__.py`` doing
+    ``from .. import cli``), just one directory level deeper, so escaping
+    back to *base_dir* from inside it needs a relative-import ``level`` of
+    2, not 1. The required level is derived from which shape actually
+    exists on disk (a module file always needs level 1; a subpackage always
+    needs level 2), so both shapes share this one implementation instead of
+    two near-duplicates.
+
+    Deliberately bounded, not full symbol resolution: a further hop only
+    ever chases another dot-free *module* sibling of *base_dir* (never a
+    nested subpackage one level down from a subpackage, an absolute import,
+    or a cross-package hop), and only up to ``_MAX_REEXPORT_HOPS`` deep
+    (also guards against a re-export cycle, since each hop consumes one
+    unit of depth regardless of the module graph's own shape) -- true to
+    this checker's own false-negative-over-false-positive default, a chain
+    this doesn't resolve is conservatively left unflagged rather than
+    chased further."""
     if depth >= _MAX_REEXPORT_HOPS:
         return False
-    sibling_path = base_dir / f"{sibling_stem}.py"
-    if not sibling_path.is_file():
+    sibling_file = base_dir / f"{sibling_stem}.py"
+    sibling_pkg_init = base_dir / sibling_stem / "__init__.py"
+    if sibling_file.is_file():
+        sibling_path = sibling_file
+        required_level = 1
+    elif sibling_pkg_init.is_file():
+        sibling_path = sibling_pkg_init
+        required_level = 2
+    else:
         return False
     try:
         tree = ast.parse(_read(sibling_path), filename=str(sibling_path))
     except SyntaxError:
         return False
     for stmt in tree.body:
-        if not isinstance(stmt, ast.ImportFrom) or stmt.level != 1:
+        if not isinstance(stmt, ast.ImportFrom) or stmt.level != required_level:
             continue
         for alias in stmt.names:
             if (alias.asname or alias.name) != target:
