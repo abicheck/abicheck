@@ -92,7 +92,7 @@ from independently reconstructing a subtly different one.
 
 ### P0 — Artifact extraction and evidence resolution
 
-The largest duplication and correctness risk. At least five
+The largest duplication and correctness risk. At least six
 partially-equivalent paths exist today:
 
 1. Typed dump: `DumpRequest → resolve_dump_request() → execute_dump_request()`
@@ -105,6 +105,15 @@ partially-equivalent paths exist today:
 5. Dump dry-run: `render_dump_dry_run()`, a second, independent
    approximation of resolution — its own docstring calls this "Cheap,
    read-only resolution only... never runs castxml/clang"
+6. Standalone application-compatibility: `appcompat.check_appcompat()` calls
+   `dumper.dump()` directly for both sides (its own docstring: "Dumps and
+   compares the two libraries itself"), bypassing every one of the five
+   paths above — a caller who reaches `check_appcompat()` directly (rather
+   than through `compare`'s own app-usage scoping, which calls
+   `scope_diff_to_app()` against an already-resolved diff instead) gets none
+   of what `ResolvedArtifactPlan` would eventually centralize: resource
+   lifetime, the L3→L2 compile-context fold, cache-relevant paths, or
+   post-processing hooks.
 
 `service_dump_pipeline.py` documents directly that native dump behavior
 historically lived around `resolve_input()` in CLI code, forcing non-CLI
@@ -144,7 +153,8 @@ contract and fingerprints; effective compiler context; coverage and
 degradation; executed stages and timings; advisories; post-processing
 results. The same pipeline must serve `dump`, each side of `compare`, scan
 candidate and native baseline extraction, release per-library extraction,
-and ABICC descriptor extraction.
+ABICC descriptor extraction, and standalone appcompat's own dump-both-sides
+path.
 
 **Lifetime problem.** Some effective include paths can point into a
 temporary inferred-build directory that is deleted once the resolving
@@ -570,8 +580,12 @@ sign-off, not a routine PR).
 4. Route scan candidate and native baseline through the same pipeline.
 5. Route PE/Mach-O through the same orchestration while preserving
    backend-specific extraction.
-6. Make dry-run render the resolved plan.
-7. Delete the now-redundant duplicated seed/fold/resolve paths this closes
+6. Route `appcompat.check_appcompat()`'s standalone dump-both-sides path
+   through the same pipeline too, so a direct caller of that function gets
+   the same resource lifetime, compile-context fold, and cache-relevant
+   paths `compare`'s own app-usage scoping already benefits from.
+7. Make dry-run render the resolved plan.
+8. Delete the now-redundant duplicated seed/fold/resolve paths this closes
    over (several are already named as follow-ups in AGENTS.md's L3→L2-fold
    entry).
 
