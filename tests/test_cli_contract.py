@@ -217,6 +217,27 @@ def test_nested_frontend_single_dot_relative_import_is_not_flagged(
     assert not any(c == "cli-contract" for c, _ in findings.errors)
 
 
+def test_relative_import_of_a_module_named_abicheck_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from .abicheck import service` is a *relative* import (level 1) that
+    resolves to `abicheck.abicheck.service`, not the package root — it must
+    not be mistaken for the absolute `from abicheck import service` form."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_weird.py").write_text(
+        "from .abicheck import service\ndef go(a):\n    return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
 def test_nested_frontend_correctly_leveled_relative_import_is_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

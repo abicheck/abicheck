@@ -2286,11 +2286,14 @@ def _tier1_module_bindings(
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             # ``from . import <module>`` (module is None, level must match
-            # this source's own depth) or ``from abicheck import <module>``
-            # — not an unrelated ``from vendor import <module>``-shaped
-            # import, and not a nested front end's own same-subpackage sibling.
+            # this source's own depth) or an *absolute* ``from abicheck
+            # import <module>`` (level 0 — a relative ``from .abicheck
+            # import <module>`` is a different module, `abicheck.abicheck`,
+            # not the package root) — not an unrelated ``from vendor import
+            # <module>``-shaped import, and not a nested front end's own
+            # same-subpackage sibling.
             if (node.module is None and node.level == required_level) or (
-                node.module == "abicheck"
+                node.level == 0 and node.module == "abicheck"
             ):
                 for alias in node.names:
                     if alias.name == module:
