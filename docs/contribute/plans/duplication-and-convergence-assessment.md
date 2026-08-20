@@ -150,29 +150,49 @@ and ABICC descriptor extraction.
 temporary inferred-build directory that is deleted once the resolving
 function returns (the deferred-cleanup design AGENTS.md's L3→L2-fold entry
 documents at length). Returning more paths from a resolve step is not
-sufficient — the execution API needs an explicit resource scope:
+sufficient — and scoping the resource to `execute_artifact_plan()` alone is
+*also* not sufficient, for two reasons the design has to account for
+together: the directory can already be at risk of cleanup by the time
+`resolve_artifact_request()` returns — before any `execute_...` call ever
+starts — and the dry-run path below resolves a plan but deliberately never
+executes it, so a scope that only opens at `execute_artifact_plan()` would
+never close for dry-run at all. Ownership has to span resolution through
+execution (or through dry-run's own inspection), not begin partway through:
 
 ```python
-with execute_artifact_plan(plan) as result:
-    run_header_graph(result)
-    attach_build_context(result)
-    persist_snapshot(result)
+with resolve_artifact_request(request) as plan:
+    # plan.session owns the inferred-build directory (if any) from here
+    if dry_run:
+        return render_plan(plan)          # closes on context-manager exit
+    with execute_artifact_plan(plan) as result:
+        run_header_graph(result)
+        attach_build_context(result)
+        persist_snapshot(result)
+        # result borrows plan.session's resources; still open here
 ```
 
-Cleanup happens only after every extraction and post-processing consumer
-has finished, removing the need for each call site to re-derive its own
-ordering and deferred-cleanup rules — the exact class of bug the L3→L2-fold
-entry's fifth finding (self-deadlocking duplicate inferred queries) had to
-be fixed for one call site at a time.
+`resolve_artifact_request()` returns a context-managed
+`ResolvedArtifactPlan` whose `__exit__` releases whatever resources
+resolution itself allocated (regardless of whether execution ever runs), and
+`execute_artifact_plan()` borrows that same session rather than opening a
+second one — so cleanup happens only after every extraction and
+post-processing consumer, *and* dry-run's own inspection, has finished. This
+removes the need for each call site to re-derive its own ordering and
+deferred-cleanup rules — the exact class of bug the L3→L2-fold entry's fifth
+finding (self-deadlocking duplicate inferred queries) had to be fixed for
+one call site at a time.
 
 **Dry-run renders the plan, not a second prediction.** `resolve_dump_request`
 (added by the CLI-cleanup-phase-two "PR C" slice) already provides a real
 "resolve without executing" mode — the missing piece is wiring
-`render_dump_dry_run()` to build from it instead of independently
-re-deriving depth/collect-mode/backend feasibility. Dry-run should report
-one of: definitely valid; definitely invalid; unresolved until execution;
-requires trusted build execution — never maintain its own approximation of
-execution semantics.
+`render_dump_dry_run()` to build from it, through the same
+context-managed `ResolvedArtifactPlan` described above, instead of
+independently re-deriving depth/collect-mode/backend feasibility (and
+instead of any bespoke cleanup of its own — dry-run closes the same session
+resolution opened, on the same `with` exit, whether or not execution ever
+runs). Dry-run should report one of: definitely valid; definitely invalid;
+unresolved until execution; requires trusted build execution — never
+maintain its own approximation of execution semantics.
 
 ### P0 — Effective configuration and pack application
 
@@ -516,7 +536,11 @@ sign-off, not a routine PR).
 
 ### Phase 1 — Finish artifact-resolution convergence
 
-1. Introduce `ResolvedArtifactPlan` and an execution-session lifetime.
+1. Introduce `ResolvedArtifactPlan` as a context-managed session that owns
+   any resource resolution itself allocates (e.g. an inferred-build
+   directory) from `resolve_artifact_request()` onward — not scoped to
+   `execute_artifact_plan()` alone, since dry-run resolves without ever
+   executing and must still close the same session.
 2. Move `perform_elf_dump`'s remaining post-processing hooks (ADR-039
    build-context collection, the header-graph second pass, the optional
    clang-layout-tool attach) into explicit post-processing stages against
