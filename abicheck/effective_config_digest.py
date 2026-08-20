@@ -279,24 +279,32 @@ def _digested_items_str(items: Any) -> str:
 
 
 def _reclassify_str(rules: Any) -> str:
-    """Stable, order-independent encoding of the *active* (non-expired)
-    subset of a ``PolicyFile.reclassify`` rule set
-    (``ReclassifyRule.to_report_dict()``, the same shared audit encoding
-    ``reporter.py``/``sarif.py`` already render, filtered through the same
-    ``active_reclassify_rules`` every other renderer disclosing this set
-    already uses), so two runs differing only in an active selector-scoped
-    reclassification rule -- which can change a finding's classification
-    the same way a plain ``policy.overrides`` entry does -- produce
-    different digests. An expired rule never matches, so it is excluded
-    here too, matching what every other renderer already discloses."""
+    """Order-*preserving* encoding of the *active* (non-expired) subset of
+    a ``PolicyFile.reclassify`` rule set (``ReclassifyRule.to_report_dict()``,
+    the same shared audit encoding ``reporter.py``/``sarif.py`` already
+    render, filtered through the same ``active_reclassify_rules`` every
+    other renderer disclosing this set already uses), so two runs differing
+    only in an active selector-scoped reclassification rule -- which can
+    change a finding's classification the same way a plain
+    ``policy.overrides`` entry does -- produce different digests. An
+    expired rule never matches, so it is excluded here too, matching what
+    every other renderer already discloses.
+
+    Deliberately **not** sorted (Codex review, PR #803, fresh evidence): a
+    ``reclassify`` list is first-match-wins in policy-file order, so two
+    rule sets that are the same rules in a different order -- e.g. a
+    ``break`` rule and an ``ignore`` rule that both match the same selector,
+    swapped -- can select a different rule for an overlapping finding and
+    therefore a different verdict, while a sorted encoding would collapse
+    them to the identical digest."""
     from .reclassify import active_reclassify_rules
 
     active = active_reclassify_rules(list(rules or ()))
-    encoded = sorted(
+    encoded = [
         json.dumps(dict(sorted(rule.to_report_dict().items())), separators=(",", ":"))
         for rule in active
-    )
-    return _json_list(encoded)
+    ]
+    return json.dumps(encoded, separators=(",", ":"))
 
 
 def _enum_value(value: Any) -> str:
@@ -488,33 +496,35 @@ def effective_config_fields(
 ) -> dict[str, str]:
     """The digest field dict for *result*, picking the richest available tier.
 
-    Prefers ``result.evaluation_config`` (a real ``CompatibilityEvaluationConfig``,
-    isinstance-checked so a stand-in/test double never fools this into the
-    rich tier) when present -- populated whenever ``--pack``/``--contract``
-    resolved one, *not only* under ``--contract`` (Codex review, PR #803:
-    an earlier revision read this only off ``contract_context``, which
-    stays unset without ``--contract``, so a ``--pack``-only run's real
-    pack identities were silently unreachable at report time even though
-    they were genuinely resolved). Falls back to ``result.contract_context.
-    evaluation_context.resolved_config`` for a caller that only populated
-    the older block, then to the baseline tier. This is the single function
-    every front end (``compare``, the release fan-out, ``scan --against``)
-    should call -- it is what makes "one digest algorithm" true rather than
-    each front end approximating the same shape independently.
+    Prefers ``result.contract_context.evaluation_context.resolved_config``
+    over the bare ``result.evaluation_config`` whenever a
+    ``PersistedContractContext`` exists (Codex review, PR #803, fresh
+    evidence): ``contract_context.with_resolved_config`` merges *observed*
+    overlay evidence (``contract.overlays``/``surface.explicit_scope`` --
+    e.g. a ``--post-manifest`` overlay, which no front-end input model
+    describes at all) into a *new* config object, but
+    ``record_resolved_config`` (both `compare` and `scan`) always leaves the
+    unmerged, front-end-only config on ``result.evaluation_config`` too --
+    an earlier revision of this function preferred that unmerged copy
+    unconditionally, which made the merge itself unreachable for any run
+    that actually built a contract context (i.e. every ``--contract`` run),
+    silently discarding exactly the observed-overlay data the merge exists
+    to carry. Falls back to the bare ``result.evaluation_config`` (a real
+    ``CompatibilityEvaluationConfig``, isinstance-checked so a stand-in/test
+    double never fools this into the rich tier) when no context exists at
+    all -- populated whenever ``--pack``/``--contract`` resolved one, *not
+    only* under ``--contract`` (an earlier revision read this only off
+    ``contract_context``, which stays unset without ``--contract``, so a
+    ``--pack``-only run's real pack identities were silently unreachable at
+    report time even though they were genuinely resolved). Falls back to
+    the baseline tier last. This is the single function every front end
+    (``compare``, the release fan-out, ``scan --against``) should call --
+    it is what makes "one digest algorithm" true rather than each front end
+    approximating the same shape independently.
     """
     from .compatibility_evaluation_config import CompatibilityEvaluationConfig
 
     policy_file = getattr(result, "policy_file", None)
-    evaluation_config = getattr(result, "evaluation_config", None)
-    if isinstance(evaluation_config, CompatibilityEvaluationConfig):
-        return effective_config_fields_from_full_config(
-            evaluation_config,
-            result=result,
-            policy_file=policy_file,
-            require_complete_analysis=require_complete_analysis,
-            severity_config=severity_config,
-            exit_code_scheme=exit_code_scheme,
-        )
     ctx = getattr(result, "contract_context", None)
     if ctx is not None:
         from .contract_evidence import PersistedContractContext
@@ -529,6 +539,16 @@ def effective_config_fields(
                 severity_config=severity_config,
                 exit_code_scheme=exit_code_scheme,
             )
+    evaluation_config = getattr(result, "evaluation_config", None)
+    if isinstance(evaluation_config, CompatibilityEvaluationConfig):
+        return effective_config_fields_from_full_config(
+            evaluation_config,
+            result=result,
+            policy_file=policy_file,
+            require_complete_analysis=require_complete_analysis,
+            severity_config=severity_config,
+            exit_code_scheme=exit_code_scheme,
+        )
     return effective_config_fields_from_diff_result(
         result,
         severity_config=severity_config,

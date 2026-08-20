@@ -877,3 +877,83 @@ class TestRichTierGateAxesUseCallerSuppliedValues:
             f_strict != f_info
         )
         assert effective_config_digest(f_strict) != effective_config_digest(f_info)
+
+
+class TestReclassifyPreservesOrder:
+    """Codex review, PR #803, fresh evidence: reclassify is first-match-wins
+    in policy-file order, so sorting the encoded rules collapsed two
+    genuinely different, order-swapped rule sets (which select a different
+    rule -- and therefore a different verdict -- for an overlapping finding)
+    to the identical digest."""
+
+    def test_swapped_overlapping_rules_hash_differently(self):
+        break_rule = ReclassifyRule(to_verdict=Verdict.BREAKING, symbol="foo")
+        ignore_rule = ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="foo")
+
+        break_first = _result(
+            policy_file=PolicyFile(reclassify=[break_rule, ignore_rule])
+        )
+        ignore_first = _result(
+            policy_file=PolicyFile(reclassify=[ignore_rule, break_rule])
+        )
+        f1 = effective_config_fields(
+            break_first, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            ignore_first, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["policy.reclassify"] != f2["policy.reclassify"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+
+class TestRichTierPrefersContractContextMergedConfig:
+    """Codex review, PR #803, fresh evidence: contract_context.
+    with_resolved_config merges *observed* overlay evidence (e.g. a
+    --post-manifest overlay, which no front-end input model describes) into
+    a new config object -- but record_resolved_config always also leaves
+    the unmerged, front-end-only config on result.evaluation_config, and an
+    earlier revision of effective_config_fields preferred that unmerged
+    copy unconditionally, making the merge unreachable for every run that
+    actually built a contract context."""
+
+    def _persisted_context(self, resolved_config):
+        from abicheck.contract_evidence import (
+            ContractEvidenceBlock,
+            EvaluationContextBlock,
+            PersistedContractContext,
+        )
+
+        return PersistedContractContext(
+            contract_evidence=ContractEvidenceBlock(),
+            evaluation_context=EvaluationContextBlock(
+                resolved_config=resolved_config
+            ),
+        )
+
+    def test_merged_context_config_wins_over_unmerged_evaluation_config(self):
+        unmerged = _minimal_evaluation_config()
+        merged = _minimal_evaluation_config(
+            contract=ContractConfig(mode=ContractMode.PUBLIC, overlays=("api::v2",))
+        )
+        result = _result(evaluation_config=unmerged)
+        result.contract_context = self._persisted_context(merged)
+
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        # Must reflect the *merged* config's overlays, not the unmerged one.
+        assert fields["contract.overlays"] == '["api::v2"]'
+
+    def test_falls_back_to_bare_evaluation_config_without_a_context(self):
+        """A --pack-only run (no --contract) has no contract_context at
+        all -- the bare evaluation_config must still be reachable."""
+        config = _minimal_evaluation_config(
+            contract=ContractConfig(mode=ContractMode.PUBLIC, overlays=("api::v3",))
+        )
+        result = _result(evaluation_config=config)
+        assert getattr(result, "contract_context", None) is None
+
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["contract.overlays"] == '["api::v3"]'

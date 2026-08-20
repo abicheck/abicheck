@@ -27,4 +27,10 @@
   `CompatibilityEvaluationConfig` directly — closing a real bug where a
   `--pack`-only `scan --against` recorded its digest from `resolve_scan_
   config`'s deliberately gate-blanked config instead of the run's real
-  `--severity-preset`/`--exit-code-scheme`.
+  `--severity-preset`/`--exit-code-scheme`. Two more fixes: the rich tier
+  now prefers `contract_context`'s merged, observed-overlay config (which
+  can carry a `--post-manifest` overlay no front-end input model
+  describes) over the unmerged `evaluation_config` copy whenever both
+  exist; and `policy.reclassify` no longer sorts its encoded rules, since
+  `reclassify` is first-match-wins in policy-file order and two
+  order-swapped, overlapping rules can select a different verdict.
