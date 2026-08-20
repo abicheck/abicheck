@@ -151,10 +151,14 @@ def _alias_is_real_submodule(base_dir: Path, alias_name: str) -> bool:
     every component of a dotted import path to already be a real
     module/package, so that part is unambiguous by construction; it's only
     the *trailing* imported name in `from X import name` that could be
-    either a submodule or an ordinary symbol."""
-    return (base_dir / f"{alias_name}.py").is_file() or (
-        base_dir / alias_name / "__init__.py"
-    ).is_file()
+    either a submodule or an ordinary symbol.
+
+    A plain directory (no ``__init__.py``) counts too: PEP 420 makes any
+    such directory a valid, importable namespace package, so ``from .
+    import cli_tools`` for a directory-only ``abicheck/cli_tools/`` is a
+    real CLI-frontend dependency Python would actually resolve, not a
+    false positive to guard against."""
+    return (base_dir / f"{alias_name}.py").is_file() or (base_dir / alias_name).is_dir()
 
 
 def _relative_import_base_dir(rel: str, level: int, mod: str) -> Path:

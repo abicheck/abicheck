@@ -124,6 +124,14 @@ _ENGINE_VIOLATION_CASES: list[pytest.ParameterSet] = [
         id="service-relative-import-cli-name",
     ),
     pytest.param(
+        "service_widget.py",
+        "from . import cli_tools\n",
+        # A directory with no __init__.py is still a real, importable PEP
+        # 420 namespace package — Python would resolve this import.
+        {"cli_tools/helpers.py": "\n"},
+        id="service-relative-import-cli-namespace-package",
+    ),
+    pytest.param(
         "scan_engine.py",
         "from abicheck.cli_buildsource import embed_build_source\n",
         {},

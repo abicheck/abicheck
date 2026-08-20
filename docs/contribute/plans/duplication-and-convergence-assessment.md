@@ -286,6 +286,7 @@ class EffectiveGate:
     exit_code_scheme: str      # e.g. "legacy" or "severity"
     severity: EffectiveSeverity
     require_complete_analysis: bool
+    scope: ScopedGateSelection | None  # ADR-043 --used-by/--required-symbol
 
 @dataclass(frozen=True)
 class EffectiveEvaluationConfig:
@@ -325,7 +326,16 @@ the other on incomplete evidence, and the existing digest implementation
 `gate.require_complete_analysis` key — leaving it out of the sole runtime
 object this section proposes would mean two runs with genuinely different
 gate behavior could still land on the same `EffectiveEvaluationConfig` and
-digest. All three `gate` fields feed the digest.
+digest. `scope` belongs for the same reason again: two runs selecting
+different `--used-by` consumers or `--required-symbol` entrypoints
+(ADR-043's scoped-gate selection) can produce different scoped findings,
+verdicts, and exit contributions, and the existing digest implementation
+already records this input as its own `gate.scope` key
+(`effective_config_digest.py`'s `_gate_scope_str()`, encoding the
+selection kind and its resolved targets) — omitting it here would recreate
+the identical out-of-band-input problem `require_complete_analysis` above
+was added to close, letting two differently-scoped runs share one digest.
+All four `gate` fields feed the digest.
 
 This object is consumed directly by `compare`, `scan`, the release
 fan-out, and bundle/matrix findings alike, with the resolver remaining the
