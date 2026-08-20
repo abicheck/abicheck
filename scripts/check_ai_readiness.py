@@ -2162,33 +2162,39 @@ _TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
 #: through it rather than bypassing the rule directly.
 _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 
-# ``"<rel-path>:<lineno>"`` call sites deliberately exempted, each needing a
-# reason in review. Pre-populated with the pre-existing, already-documented
-# `dumper.dump`/`service.resolve_input` direct-call sites Phase 1 of the same
-# plan names as duplication to converge (`cli_dump_helpers.perform_elf_dump`,
-# `appcompat.check_appcompat`, `cli_scan_baseline`'s baseline resolution) —
-# a new entry beyond these needs the same reviewed sign-off (mirrors the
-# INTENTIONAL_SUBSET philosophy of D10.2).
+# ``"<rel-path>:<lineno>:<module>.<func>"`` call sites deliberately
+# exempted, each needing a reason in review. The target identity is part of
+# the key — not just ``path:lineno`` — so replacing an allowlisted call with
+# a *different* Tier-1 violation on the same line (or adding a second one to
+# it) cannot silently inherit the exemption; the freshness test below
+# depends on this to actually verify the reviewed target is still there, not
+# just that *some* finding exists at that site. Pre-populated with the
+# pre-existing, already-documented `dumper.dump`/`service.resolve_input`
+# direct-call sites Phase 1 of the same plan names as duplication to
+# converge (`cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`,
+# `cli_scan_baseline`'s baseline resolution) — a new entry beyond these
+# needs the same reviewed sign-off (mirrors the INTENTIONAL_SUBSET
+# philosophy of D10.2).
 CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
     {
         # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
         # rather than through `service_dump_pipeline.run_dump_request` —
         # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1743",
+        "abicheck/cli_dump_helpers.py:1743:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
-        "abicheck/appcompat.py:1599",
-        "abicheck/appcompat.py:1608",
+        "abicheck/appcompat.py:1599:dumper.dump",
+        "abicheck/appcompat.py:1608:dumper.dump",
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.
-        "abicheck/cli_scan_baseline.py:1119",
+        "abicheck/cli_scan_baseline.py:1119:service.resolve_input",
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.
-        "abicheck/compat/cli.py:313",
-        "abicheck/compat/cli.py:970",
-        "abicheck/compat/cli.py:1154",
+        "abicheck/compat/cli.py:313:dumper.dump",
+        "abicheck/compat/cli.py:970:checker.compare",
+        "abicheck/compat/cli.py:1154:dumper.dump",
     }
 )
 
@@ -2558,8 +2564,11 @@ def check_cli_contract(f: Findings) -> None:
                     continue
                 if module == "service" and node.lineno in wrapper_call_lines:
                     continue
-                if f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
-                    called = func.attr if isinstance(func, ast.Attribute) else func.id
+                called = func.attr if isinstance(func, ast.Attribute) else func.id
+                if (
+                    f"{rel}:{node.lineno}:{module}.{called}"
+                    not in CLI_CONTRACT_ALLOWLIST
+                ):
                     f.err(
                         "cli-contract",
                         f"{rel}:{node.lineno}: front-end calls Tier-1 `{module}.{called}` "

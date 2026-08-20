@@ -389,8 +389,14 @@ def test_cli_resolve_exemption_is_scoped_to_the_wrapper_function(
 
 def test_cli_contract_allowlist_entries_are_real_violations() -> None:
     """Every `CLI_CONTRACT_ALLOWLIST` entry must still name a genuine Tier-1
-    call site in the real tree — otherwise the allowlist rots into a rubber
-    stamp for a call that was already fixed or removed."""
+    call site *for its own recorded target* in the real tree — otherwise the
+    allowlist rots into a rubber stamp for a call that was already fixed or
+    removed, or silently starts covering a *different* Tier-1 violation that
+    happens to land on the same line (the key includes the module/function
+    identity specifically so this can be verified, not just that some
+    finding exists at that `path:lineno`)."""
+    import re
+
     import scripts.check_ai_readiness as gate
 
     findings = gate.Findings()
@@ -400,14 +406,18 @@ def test_cli_contract_allowlist_entries_are_real_violations() -> None:
         gate.check_cli_contract(findings)
     finally:
         gate.CLI_CONTRACT_ALLOWLIST = original
-    flagged_sites = {
-        m.split(":", 2)[0] + ":" + m.split(":", 2)[1]
-        for c, m in findings.errors
-        if c == "cli-contract"
-    }
+    pattern = re.compile(r"^([^:]+:\d+): front-end calls Tier-1 `([^`]+)` ")
+    flagged_sites: set[str] = set()
+    for c, m in findings.errors:
+        if c != "cli-contract":
+            continue
+        match = pattern.match(m)
+        if match is not None:
+            flagged_sites.add(f"{match.group(1)}:{match.group(2)}")
     stale = original - flagged_sites
     assert not stale, (
-        f"allowlist entries no longer correspond to a real violation: {stale}"
+        f"allowlist entries no longer correspond to a real violation for "
+        f"their own recorded target: {stale}"
     )
 
 
