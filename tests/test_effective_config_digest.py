@@ -1342,3 +1342,176 @@ class TestPatternVerdictsAxis:
         )
         assert f_off["policy.pattern_verdicts"] != f_on["policy.pattern_verdicts"]
         assert effective_config_digest(f_off) != effective_config_digest(f_on)
+
+
+class TestCollapseVersionedSymbolsAxis:
+    """Codex review, PR #803, fresh evidence: compare(...,
+    collapse_versioned_symbols=...) can remove a versioned symbol-version
+    remove/add pair entirely, turning an otherwise BREAKING verdict
+    non-breaking -- but neither digest tier recorded the resolved
+    boolean."""
+
+    def test_flag_changes_the_baseline_digest(self):
+        off = _result(collapse_versioned_symbols_enabled=False)
+        on = _result(collapse_versioned_symbols_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.collapse_versioned_symbols"] == "False"
+        assert f2["policy.collapse_versioned_symbols"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_flag_changes_the_rich_tier_digest(self):
+        config = _minimal_evaluation_config()
+        off = _result(evaluation_config=config, collapse_versioned_symbols_enabled=False)
+        on = _result(evaluation_config=config, collapse_versioned_symbols_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.collapse_versioned_symbols"] != f2["policy.collapse_versioned_symbols"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_stamps_the_flag(self):
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1"}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        off = compare(old_snap, new_snap, collapse_versioned_symbols=False)
+        on = compare(old_snap, new_snap, collapse_versioned_symbols=True)
+        assert off.collapse_versioned_symbols_enabled is False
+        assert on.collapse_versioned_symbols_enabled is True
+
+
+class TestSurfaceMetricsAxis:
+    """Codex review, PR #803, fresh evidence: --surface-metrics
+    (compare(..., surface_metrics=...)) appends suppressible aggregate-
+    drift findings and can flip NO_CHANGE to COMPATIBLE, but was
+    previously unrepresented in the digest."""
+
+    def test_flag_changes_the_baseline_digest(self):
+        off = _result(surface_metrics_enabled=False)
+        on = _result(surface_metrics_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.surface_metrics"] == "False"
+        assert f2["policy.surface_metrics"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_flag_changes_the_rich_tier_digest(self):
+        config = _minimal_evaluation_config()
+        off = _result(evaluation_config=config, surface_metrics_enabled=False)
+        on = _result(evaluation_config=config, surface_metrics_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.surface_metrics"] != f2["policy.surface_metrics"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_stamps_the_flag(self):
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1"}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        off = compare(old_snap, new_snap, surface_metrics=False)
+        on = compare(old_snap, new_snap, surface_metrics=True)
+        assert off.surface_metrics_enabled is False
+        assert on.surface_metrics_enabled is True
+
+
+class TestEnvMatrixAxis:
+    """Codex review, PR #803, fresh evidence: --env-matrix's resolved
+    runtime floors can reclassify a version-requirement finding (e.g. a
+    GLIBC floor turning a RISK into BREAKING) and add deployment findings,
+    but the matrix's content identity was absent from the digest -- two
+    runs against identical snapshots but different runtime-floor files
+    previously collided on the digest."""
+
+    def test_env_matrix_changes_the_baseline_digest(self):
+        no_matrix = _result()
+        with_matrix = _result(env_matrix_source_sha256="sha256:envdigest")
+        f1 = effective_config_fields(
+            no_matrix, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            with_matrix, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["policy.env_matrix"] == ""
+        assert f2["policy.env_matrix"] == "sha256:envdigest"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_different_env_matrices_hash_differently_in_the_rich_tier(self):
+        config = _minimal_evaluation_config()
+        result_a = _result(
+            evaluation_config=config, env_matrix_source_sha256="sha256:matrix_a"
+        )
+        result_b = _result(
+            evaluation_config=config, env_matrix_source_sha256="sha256:matrix_b"
+        )
+        f1 = effective_config_fields(
+            result_a, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            result_b, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["policy.env_matrix"] != f2["policy.env_matrix"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_computes_a_real_content_digest(self):
+        """End-to-end through the real compare() entry point: different
+        --env-matrix content produces different digests, and identical
+        content produces identical (stable) digests."""
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1"}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+
+        no_matrix = compare(old_snap, new_snap)
+        assert no_matrix.env_matrix_source_sha256 is None
+
+        matrix_a = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        matrix_b = EnvironmentMatrix(runtime_floors={"GLIBC": "2.31"})
+        with_a = compare(old_snap, new_snap, env_matrix=matrix_a)
+        with_a_again = compare(old_snap, new_snap, env_matrix=matrix_a)
+        with_b = compare(old_snap, new_snap, env_matrix=matrix_b)
+
+        assert with_a.env_matrix_source_sha256 is not None
+        assert with_a.env_matrix_source_sha256.startswith("sha256:")
+        assert with_a.env_matrix_source_sha256 == with_a_again.env_matrix_source_sha256
+        assert with_a.env_matrix_source_sha256 != with_b.env_matrix_source_sha256

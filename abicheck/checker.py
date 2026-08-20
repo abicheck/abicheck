@@ -1200,6 +1200,19 @@ def compare(
         else None
     )
 
+    # Canonical content digest of the resolved --env-matrix (Codex review,
+    # PR #803, fresh evidence): `dataclasses.asdict` recursively serializes
+    # `EnvironmentMatrix`'s own nested `SyclConstraints`/`CudaConstraints`
+    # dataclasses into a plain, JSON-safe dict for `content_digest`. `None`
+    # when no --env-matrix was given at all.
+    import dataclasses as _dataclasses
+
+    env_matrix_source_sha256 = (
+        "sha256:" + content_digest(_dataclasses.asdict(env_matrix))
+        if env_matrix is not None
+        else None
+    )
+
     result = DiffResult(
         old_version=old.version,
         new_version=new.version,
@@ -1212,6 +1225,9 @@ def compare(
         suppression_source_sha256=suppression_source_sha256,
         explicit_scope_source_sha256=explicit_scope_source_sha256,
         pattern_verdicts_enabled=bool(pattern_verdicts),
+        collapse_versioned_symbols_enabled=bool(collapse_versioned_symbols),
+        surface_metrics_enabled=bool(surface_metrics),
+        env_matrix_source_sha256=env_matrix_source_sha256,
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

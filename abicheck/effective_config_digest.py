@@ -105,6 +105,9 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "policy.reclassify",
     "policy.frozen_namespaces",
     "policy.pattern_verdicts",
+    "policy.collapse_versioned_symbols",
+    "policy.surface_metrics",
+    "policy.env_matrix",
     "surface.internal_namespaces",
     "surface.explicit_scope",
     "surface.scope_to_public_surface",
@@ -452,6 +455,15 @@ def effective_config_fields_from_full_config(
         "policy.pattern_verdicts": str(
             bool(getattr(result, "pattern_verdicts_enabled", False))
         ),
+        "policy.collapse_versioned_symbols": str(
+            bool(getattr(result, "collapse_versioned_symbols_enabled", False))
+        ),
+        "policy.surface_metrics": str(
+            bool(getattr(result, "surface_metrics_enabled", False))
+        ),
+        "policy.env_matrix": str(
+            getattr(result, "env_matrix_source_sha256", "") or ""
+        ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(surface, "internal_namespaces", ())
         ),
@@ -520,6 +532,15 @@ def effective_config_fields_from_diff_result(
         ),
         "policy.pattern_verdicts": str(
             bool(getattr(result, "pattern_verdicts_enabled", False))
+        ),
+        "policy.collapse_versioned_symbols": str(
+            bool(getattr(result, "collapse_versioned_symbols_enabled", False))
+        ),
+        "policy.surface_metrics": str(
+            bool(getattr(result, "surface_metrics_enabled", False))
+        ),
+        "policy.env_matrix": str(
+            getattr(result, "env_matrix_source_sha256", "") or ""
         ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(policy_file, "internal_namespaces", ())

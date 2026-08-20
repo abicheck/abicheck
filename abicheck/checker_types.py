@@ -622,6 +622,34 @@ class DiffResult:
     # abicheck's own built-in idiom/antipattern detection gated on this one
     # boolean, the same shape as ``scope_to_public_surface`` above.
     pattern_verdicts_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ``compare(..., collapse_versioned_symbols=...)`` was
+    # requested for this comparison -- when enabled, post-processing can
+    # remove a versioned symbol-version remove/add pair entirely, turning
+    # an otherwise ``BREAKING`` verdict non-breaking, with no other trace
+    # of the setting on ``result``. Same shape as ``pattern_verdicts_
+    # enabled`` above: a checker-level boolean with no D7 namespace of its
+    # own, recorded directly rather than nested under any D7 field.
+    collapse_versioned_symbols_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ``compare(..., surface_metrics=...)`` (``--surface-metrics``)
+    # was requested for this comparison -- when enabled,
+    # ``_apply_surface_metrics`` appends suppressible ADR-027 A1/D1.2
+    # aggregate-drift findings and can flip ``NO_CHANGE`` to ``COMPATIBLE``.
+    # Same shape as ``pattern_verdicts_enabled`` above.
+    surface_metrics_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence): a
+    # canonical content digest of the resolved ``--env-matrix`` (ADR-020b
+    # declared deployment constraints) this comparison ran with, when one
+    # was given. ``_env_matrix_contract_changes`` can reclassify a
+    # version-requirement finding against ``env_matrix.runtime_floors``
+    # (e.g. a GLIBC floor turning a RISK into BREAKING) and add deployment
+    # findings, so two runs against identical snapshots but different
+    # runtime-floor files must not collide on the digest. ``None`` when no
+    # ``--env-matrix`` was given at all -- distinct from one resolving to
+    # every constraint left unspecified, the same "selected vs. absent"
+    # distinction ``explicit_scope_source_sha256`` already draws.
+    env_matrix_source_sha256: str | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,

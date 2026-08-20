@@ -655,7 +655,21 @@ from typing import Any
 #:       two otherwise-identical runs differing only in this flag collided
 #:       on the digest whenever no idiom/antipattern happened to match,
 #:       since the applied-modulation ledger alone is indistinguishable
-#:       from the flag never having been set).
+#:       from the flag never having been set). One more fix landed in the
+#:       same further review round: ``effective_config_fields`` gains
+#:       ``policy.collapse_versioned_symbols`` (``compare(...,
+#:       collapse_versioned_symbols=...)``, which can remove a versioned
+#:       symbol-version remove/add pair entirely, turning an otherwise
+#:       ``BREAKING`` verdict non-breaking), ``policy.surface_metrics``
+#:       (``--surface-metrics``, which appends suppressible aggregate-drift
+#:       findings and can flip ``NO_CHANGE`` to ``COMPATIBLE``), and
+#:       ``policy.env_matrix`` (a content digest of the resolved
+#:       ``--env-matrix``, ADR-020b: ``_env_matrix_contract_changes`` can
+#:       reclassify a version-requirement finding against declared runtime
+#:       floors and add deployment findings) -- three more checker-level
+#:       axes that were previously unrepresented in the digest, all
+#:       following the identical shape ``policy.pattern_verdicts`` already
+#:       established. Additive keys.
 REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
@@ -971,7 +985,11 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        2.46 entry describes in full: ``surface.explicit_scope`` now also
 #:        covers ``--post-manifest``'s ``public_surface_allowlist`` and
 #:        merges rather than falls back between the two explicit-scope
-#:        sources; ``policy.pattern_verdicts`` was added.
+#:        sources; ``policy.pattern_verdicts`` was added. One more fix,
+#:        same round as `compare`'s report_schema_version 2.46 entry:
+#:        ``policy.collapse_versioned_symbols``, ``policy.surface_metrics``,
+#:        and ``policy.env_matrix`` were added, sharing the identical
+#:        computation (see that entry for the full reasoning).
 SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

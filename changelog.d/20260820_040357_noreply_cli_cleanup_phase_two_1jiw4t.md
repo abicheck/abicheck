@@ -71,4 +71,13 @@
   so two otherwise-identical runs differing only in this flag collided on
   the digest whenever no idiom/antipattern happened to match (the
   applied-modulation ledger alone is indistinguishable from the flag never
-  having been set).
+  having been set). Three more checker-level axes were added in the same
+  shape: `policy.collapse_versioned_symbols` (`--collapse-versioned-
+  symbols`, which can remove a versioned symbol-version remove/add pair
+  entirely, turning an otherwise `BREAKING` verdict non-breaking),
+  `policy.surface_metrics` (`--surface-metrics`, which appends suppressible
+  aggregate-drift findings and can flip `NO_CHANGE` to `COMPATIBLE`), and
+  `policy.env_matrix` (a new `DiffResult.env_matrix_source_sha256` field —
+  a content digest of the resolved `--env-matrix`, since its runtime floors
+  can reclassify a version-requirement finding, e.g. a GLIBC floor turning
+  a RISK into `BREAKING`, and add deployment findings).
