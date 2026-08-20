@@ -396,6 +396,26 @@ def test_engine_module_importing_service_is_not_flagged(
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
+def test_unrelated_third_party_package_named_abicheck_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from vendor.abicheck.cli import helper` names an unrelated
+    third-party `vendor.abicheck` package, not this repo's own `abicheck` —
+    only a *root* `abicheck` component is this repo's package."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "scan_engine.py").write_text("from vendor.abicheck.cli import helper\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
 # ── `_is_engine_module` scope itself ─────────────────────────────────────────
 
 

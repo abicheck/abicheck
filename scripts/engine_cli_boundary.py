@@ -236,12 +236,17 @@ def _engine_boundary_violations(
     # Absolute import.
     if mod == "click" or mod.startswith("click."):
         return [f"from {mod} import ..."]
-    if "abicheck" in mod_components:
+    if mod_components and mod_components[0] == "abicheck":
         # `from abicheck.compat.cli import main` / `from abicheck import
         # cli_dump_helpers` — a dotted component naming the CLI module, or
         # (when `mod` itself has no such component, e.g. `from
         # abicheck.compat import cli`) an imported alias naming it instead.
-        if any(_is_cli_component(c) for c in mod_components if c != "abicheck"):
+        # `mod_components[0]`, not just membership: `from vendor.abicheck
+        # .cli import x` names an unrelated third-party `vendor.abicheck`
+        # package, not this repo's own `abicheck` — matching the identical
+        # `parts[0] == "abicheck"` check the `ast.Import` branch already
+        # uses above.
+        if any(_is_cli_component(c) for c in mod_components[1:]):
             return [f"from {mod} import ..."]
         base_dir = ROOT.joinpath(*mod_components)
         found = [
