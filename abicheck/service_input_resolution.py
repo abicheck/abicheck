@@ -362,6 +362,8 @@ def resolve_side_snapshot(
     debuginfod_url: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     include_labels: dict[Path, str] | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
@@ -377,6 +379,17 @@ def resolve_side_snapshot(
     :attr:`abicheck.api_types.CompareRequest.lang_explicit` /
     :attr:`abicheck.api_types.DumpRequest.lang_explicit`. Forwarded to
     :func:`abicheck.service.resolve_input` unchanged.
+
+    ``symbols_only``/``debug_presence_only`` (PR 3A, dump/scan resolver
+    convergence): forwarded to :func:`abicheck.service.resolve_input`
+    unchanged. Both default ``False``, matching that function's own
+    defaults, so every pre-existing caller (``compare``, ``dump``'s typed
+    pipeline) is unaffected — only ``scan``'s candidate-side resolution,
+    which supports a binary-depth/debug-presence-only scan, needs to pass a
+    non-default value. Before this, only ``scan_engine._build_new_snapshot``
+    (which calls :func:`abicheck.service.resolve_input` directly, bypassing
+    this shared primitive entirely) could express either flag — see
+    ``AGENTS.md``'s PR C entry for the gap this closes.
 
     A thin wrapper over :func:`_resolve_side_snapshot_impl` (PR 3A, dump/scan
     resolver convergence) — identical signature, identical behavior, for every
@@ -396,6 +409,8 @@ def resolve_side_snapshot(
         debuginfod_url=debuginfod_url,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
+        symbols_only=symbols_only,
+        debug_presence_only=debug_presence_only,
         include_labels=include_labels,
         notify=notify,
     ).snapshot
@@ -415,6 +430,8 @@ def _resolve_side_snapshot_impl(
     debuginfod_url: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     include_labels: dict[Path, str] | None = None,
     notify: Callable[[str], None] | None = None,
     build_config: Path | None = None,
@@ -428,7 +445,8 @@ def _resolve_side_snapshot_impl(
     PR 3A (dump/scan resolver convergence, CLI cleanup phase two): everything
     :func:`resolve_side_snapshot` already did, plus returning the fold's own
     effective ``includes``/:class:`CompileContext` (see :class:`SideResolution`)
-    and two extra optional pass-throughs (*changed_paths*, *allow_build_query*)
+    and three extra optional pass-throughs (*changed_paths*,
+    *allow_build_query*, and the *symbols_only*/*debug_presence_only* pair)
     that only ``scan``'s candidate-side resolution needs — every other caller
     leaves them at their no-op defaults, so this is a strict superset of the
     prior behavior, not a new decision point. *build_config*/*build_query*/
@@ -498,6 +516,8 @@ def _resolve_side_snapshot_impl(
             follow_linker_scripts=side.follow_linker_scripts,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
             include_labels=include_labels,
             notify=notify,
         )

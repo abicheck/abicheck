@@ -1126,6 +1126,150 @@ pipelines a fourth time.
   > `execute_dump_request` split. That split remains real, additive
   > progress in its own right (§2 above) — it is the primitive a future
   > `dump_cmd` migration would build on, just not yet consumed by one.
+  >
+  > **Slice landed (2026-08-20): both of the "two newly-found blockers"
+  > above closed, plus the debug-artifact-resolution question confirmed.**
+  > (1) The debug-artifact divergence: read both resolutions in full rather
+  > than assumed equivalent. `perform_elf_dump`'s only caller is `dump_cmd`
+  > (confirmed by grep — no second call site exists), and `dump_cmd` never
+  > sets `symbols_only`/`debug_presence_only` at all (`dump` has no such
+  > flags — only `scan`/`compare` do), so `_dump_elf`'s extra `not
+  > symbols_only and not debug_presence_only` gate is vacuously true for
+  > every input `perform_elf_dump` can actually receive. The remaining
+  > differences (`debug_roots=debug_roots` vs. `list(debug_roots) or
+  > None`; `click.echo` vs. `notify`/`_logger`; `if artifact:` vs. `if
+  > artifact is not None`) are all behaviorally inert — `BuildIdTreeResolver`/
+  > `PathMirrorResolver` etc. already do `list(debug_roots or [])`
+  > internally, a `DebugArtifact` dataclass instance is always truthy, and
+  > the messaging difference is cosmetic. **Confirmed equivalent for the
+  > real call shape — no code change needed here**, closing this question
+  > without the "reconciling two independently written implementations"
+  > investigation this note flagged as still open.
+  >
+  > (2) `symbols_only`/`debug_presence_only` now thread through
+  > `resolve_side_snapshot`/`_resolve_side_snapshot_impl` into
+  > `service.resolve_input`, both defaulting `False` (matching
+  > `resolve_input`'s own defaults) so every pre-existing caller is
+  > unaffected — a strict superset of the prior behavior, the same shape
+  > as this primitive's existing `changed_paths`/`allow_build_query`
+  > pass-throughs. `scan_engine._build_new_snapshot` does not consume this
+  > yet (it still calls `service.resolve_input` directly, not through this
+  > shared primitive — see below), so this closes the *primitive's*
+  > capability gap, not yet the caller-side migration. Regression test:
+  > `tests/test_header_compile_context.py::
+  > test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only`
+  > (confirmed to fail against the pre-fix code with `TypeError: unexpected
+  > keyword argument 'symbols_only'`).
+  >
+  > (3) The `public_headers`/`public_header_dirs` construction divergence:
+  > **investigated, a fix attempted and merged, then reverted the same day
+  > after a real regression was caught by review — recorded in full since
+  > the reasoning that looked right the first time was genuinely
+  > incomplete, not merely under-tested.** The first pass read one consumer
+  > of `embed_build_source`'s `public_header_roots`
+  > (`source_extractors._argv.split_public_roots`/`_ClassifyContext.
+  > classify()`, `source_extractors/clang.py`) and confirmed a directory
+  > root already classifies every file under it via segment/prefix
+  > matching — so `_build_new_snapshot`'s `_expand_public_headers`-based
+  > expansion looked purely redundant against *that* consumer, and the fix
+  > switched the call to the simpler, unexpanded raw pass-through
+  > `embed_side_build_source` already uses. That reasoning missed a
+  > **second, differently-shaped consumer of the identical
+  > `public_header_roots` list**: `clang_public_roots.
+  > _equivalent_public_roots_for_unit`, the install-tree-vs-build-tree
+  > "mirror detection" heuristic L4 replay uses when a public root names a
+  > physically different tree from the build's own include dir (a common
+  > shape for release/package validation, per that module's own
+  > docstring). Its promotion rule is asymmetric by root shape: a *file*
+  > root promotes an equivalent build-tree header on a single sampled
+  > match; a *directory* root needs `>= _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES`
+  > (2) sampled matches before promoting the whole directory. So a build
+  > include directory that happens to mirror only ONE header out of a
+  > larger public root (a small per-module local include directory against
+  > a larger installed SDK tree) loses that mirror-promotion entirely once
+  > the directory stops being pre-expanded into individual files — proven
+  > by direct reproduction against `_equivalent_public_roots_for_unit`
+  > itself (three installed headers, one mirrored in the build tree: the
+  > expanded-file-roots call promotes the mirrored header; the single
+  > directory-root call promotes nothing). `embed_side_build_source`'s own
+  > raw pass-through (already shipped, used by `compare`/`dump`) carries
+  > the identical weakness — not fixed here, since unifying either
+  > direction changes real classification behavior for a real consumer,
+  > and deciding which needs its own scoped design (harden
+  > `_equivalent_public_roots_for_unit`'s directory threshold, or thread
+  > real expansion into the shared primitive instead), not a same-PR
+  > revert-and-redo. **Reverted `_build_new_snapshot`'s call back to the
+  > expanded shape** — the one proven not to regress this heuristic — and
+  > pinned two regression tests: the reverted call's own shape
+  > (`tests/test_scan_l2_cleanup_ordering.py::
+  > test_scan_candidate_expands_public_header_dirs_before_embed`) and, more
+  > importantly, the underlying asymmetry itself, directly against
+  > `_equivalent_public_roots_for_unit`
+  > (`tests/test_clang_public_roots_coverage.py::
+  > test_equivalent_public_roots_promotes_on_single_match_only_for_file_roots`)
+  > so a future "simplify this like the other primitive" pass doesn't
+  > silently reintroduce the same regression by generalizing from only the
+  > first consumer again.
+  >
+  > **What this slice does not close**: `_build_new_snapshot` still calls
+  > `service.resolve_input`/`embed_build_source` directly rather than
+  > routing through `_resolve_side_snapshot_impl`/`SideResolution` — the
+  > two additive fixes above make that future migration *safe*, they don't
+  > perform it. Investigating the migration itself surfaced one more
+  > wrinkle beyond what this section had already named: `_build_new_
+  > snapshot`'s own `allow_build_query` parameter gates only its
+  > `embed_build_source` call (whether the *inferred/auto-discovered* build
+  > query may run) and is never threaded into its `seed_includes_and_
+  > fold_compile_context` call at all (that call always passes `build_
+  > query=None, build_compile_db=None` — `scan` has no `--build-query`/
+  > `--build-compile-db` CLI flags to begin with, unlike `dump`) — whereas
+  > `_resolve_side_snapshot_impl`'s `_gated_build_query_inputs` gates both
+  > the seed and the embed step from one shared decision. Reconciling this
+  > correctly needs confirming what `_build_new_snapshot`'s `allow_build_
+  > query` is actually meant to authorize today (the auto-discovery-vs-
+  > seed distinction, not just the embed step) before the two functions'
+  > gating can be safely unified — a real, separate investigation, not a
+  > follow-up to this slice's two closed items. Blockers 4 (post-processing
+  > hooks), 5 (`dump_cmd` building a real `DumpRequest`), and 6 (a
+  > pair-aware scan-baseline primitive) remain fully open, unchanged from
+  > the notes above.
+  >
+  > **Blocker 4 narrowed by re-reading `service.py`'s own ELF `run_dump`
+  > tail against `perform_elf_dump`'s three named post-processing passes,
+  > one at a time, rather than assuming all three are equally missing
+  > (2026-08-20, no code change).** Two of the three already run on the
+  > shared `resolve_side_snapshot`/`resolve_input` path — `service.
+  > resolve_input`'s native-binary dispatch calls `run_dump`, and
+  > `run_dump`'s ELF branch already calls `_attach_header_graph` (the G31
+  > header-graph second pass) and `attach_clang_layout` (the G28 clang-
+  > layout-tool attach) unconditionally, the identical two functions
+  > `perform_elf_dump` calls by name. So `_resolve_side_snapshot_impl`
+  > (and therefore `compare`'s implicit-dump path and `dump`'s typed
+  > `run_dump_request`) already gets both — blocker 4's "no equivalent
+  > hook" framing was accurate for the ADR-039 pass alone, not for all
+  > three. **The ADR-039 build-context collector (`_attach_build_context`,
+  > `cli_dump_helpers.py`) is confirmed, by grep, to have exactly one call
+  > site in the whole codebase — `perform_elf_dump` itself.** Not `handle_
+  > non_elf_dump` (PE/Mach-O `dump`), not `service.py`'s `run_dump`/`_dump_
+  > elf`/`_dump_pe`/`_dump_macho`, not `scan_engine._build_new_snapshot`.
+  > It is ELF-`dump`-CLI-only today, and this is a materially different
+  > kind of gap than "the shared primitive is missing a hook to call an
+  > existing, portable step": `_attach_build_context` is driven entirely by
+  > CLI-only inputs (`-p`/`--compile-db`, `--compile-db-filter`,
+  > `effective_compile_db` — a raw, unfiltered compile-database path plus a
+  > source-glob filter, resolved by `cli.py`'s own flag parsing) that have
+  > no representation anywhere in `CompileContext`, `InputSpec`, or
+  > `DumpRequest` — there is no typed-API field to route through a hook
+  > even once one exists. Closing this needs *new* typed-API surface (an
+  > `InputSpec`/`DumpRequest` field carrying a compile-DB path + filter,
+  > threaded through `_resolve_side_snapshot_impl` to a new call to
+  > `_attach_build_context` or an equivalent), not merely wiring an
+  > existing portable step into an existing hook — a real, separate,
+  > additive feature addition on its own, out of proportion to a
+  > same-session follow-up given `_attach_build_context`'s own documented
+  > "must not be unioned snapshot-wide" invariant (AGENTS.md's L3→L2-fold
+  > entry, ninth finding) that any new call site would have to re-verify
+  > against. Not attempted here. Blockers 5 and 6 are unchanged.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
@@ -1274,22 +1418,55 @@ the parser to lists only — every existing trusted string config would break.
 > overriding config, no query configured, determinism, and 26 review-caught
 > reachability/precedence/pack-normalization/exit-code-class/config-discovery
 > edge cases besides — each asserting the query is never actually executed).
-> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is satisfied for
-> every input shape the module's own docstring doesn't name as an open
-> gap** — `cli_dump_dry_run_build_query.py` documents two deliberately
-> unclosed cases where the report can still claim "will run" when the real
-> input would not: a Flow-2 `abicheck_inputs/` pack as the sole
-> `--sources`/`--build-info` input, and a `-H` directory containing no
-> supported header (this second one predates the module — `render_dump_
-> dry_run` has never expanded `-H` directories for validation). Closing
-> either is a scoped follow-up (a second pack-format recognizer for the
-> first; a design decision about real directory-walk validation for the
-> second), not a blocker for the trust decision this prerequisite exists to
-> make visible — but PR 3C's removal itself (`dump --build-query`/`dump
-> --build-compile-db` deletion) should not proceed until both are closed or
-> explicitly accepted as permanent gaps, on top of still waiting on the
-> ordering's own blocker: PR 3A's full convergence (both `dump` and `scan`
-> resolvers), which remains open per that section's own status notes above.
+> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is now satisfied for
+> every input shape except one.** `cli_dump_dry_run_build_query.py`
+> originally documented two deliberately unclosed cases where the report
+> could still claim "will run" when the real input would not: a Flow-2
+> `abicheck_inputs/` pack as the sole `--sources`/`--build-info` input, and a
+> `-H` directory containing no supported header.
+>
+> **The Flow-2 pack gap is closed (2026-08-20), and it turned out to be two
+> gaps, not one.** Investigating this module's own docstring ("Flow-2 packs
+> fold into `raw_build_info`/`raw_sources` the identical way a
+> `BuildSourcePack` does in `embed_build_source`") to add the missing
+> recognizer here surfaced a real, independent gap in the L2-seed
+> **production** path itself: `buildsource.l2_seed._l2_seed_pack_inputs` (the
+> pack-precedence resolver `seed_includes_and_fold_compile_context` uses)
+> only ever recognized a classic `BuildSourcePack` (`is_pack_dir`), never a
+> Flow-2 pack — so a Flow-2 pack given alongside `-H` headers was silently
+> treated by the *real* L2 seed as a literal, un-normalized source tree: its
+> own compile-unit include dirs never reached L2 seeding, and a trusted,
+> explicit `build.query`/`--config` could genuinely be re-executed against
+> the pack directory itself. This was the load-bearing finding: mirroring
+> `embed_build_source`'s recognition in the dry-run preview *alone*, without
+> also fixing `_l2_seed_pack_inputs`, would have made the preview *wrong* for
+> every L2-seed-reachable branch (reporting "will NOT run" for an input the
+> unfixed L2 seed's own resolution would still have genuinely reached
+> `cfg.query` through) — a worse regression than the pre-existing gap. Fixed
+> both, root cause first: `_l2_seed_pack_inputs` now also recognizes a Flow-2
+> pack (folding its `BuildEvidence` via the lighter
+> `load_inputs_manifest`/`_load_build_evidence` pair, not the full
+> `ingest_inputs_pack`, which this L3-only seed doesn't need), and only then
+> did `cli_dump_dry_run_build_query.py` gain the identical, now-correct
+> recognition (`_is_pack_dir_any`/`_pack_dir_build_evidence`) across all
+> seven of its own pack-precedence checks. See `abicheck/buildsource/
+> l2_seed.py`'s own docstrings and `changelog.d/
+> 1787253700_claude_l2_seed_flow2_pack_recognition.md` for the full account.
+> Tests: `tests/test_l2_seed_flow2_packs.py` (the production resolver,
+> including an end-to-end `derive_l2_include_dirs` case) and `tests/
+> test_dry_run_build_query_flow2_packs.py` (the dry-run preview, mirroring
+> the existing classic-pack CLI tests one-for-one).
+>
+> **The `-H` directory gap remains open** (it predates this module —
+> `render_dump_dry_run` has never expanded `-H` directories for validation).
+> Closing it needs a design decision about real directory-walk validation
+> inside `--dry-run`'s own established "cheap, read-only... no I/O beyond
+> stat()/PATH lookups" contract, not a scoped fix to this module alone — so
+> PR 3C's removal itself (`dump --build-query`/`dump --build-compile-db`
+> deletion) should not proceed until it is closed or explicitly accepted as
+> a permanent gap, on top of still waiting on the ordering's own blocker:
+> PR 3A's full convergence (both `dump` and `scan` resolvers), which remains
+> open per that section's own status notes above.
 
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.

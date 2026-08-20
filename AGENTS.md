@@ -4268,6 +4268,80 @@ Once a root command genuinely clears the bar above, pick the right home:
   explicit ordering requirement — see `docs/contribute/plans/cli-cleanup-
   phase-two.md`'s PR 3A section for the equivalent, fuller account.
 
+  **Slice landed (2026-08-20): both "narrower blockers" above closed, plus
+  the debug-artifact-resolution question this entry raised confirmed
+  equivalent — no code change needed for that half.** `perform_elf_dump`
+  has exactly one caller (`dump_cmd`, confirmed by grep), and `dump_cmd`
+  never sets `symbols_only`/`debug_presence_only` (`dump` has no such
+  flags at all — only `scan`/`compare` do), so `_dump_elf`'s extra `not
+  symbols_only and not debug_presence_only` gate around its debug-artifact
+  resolution is vacuously true for every input `perform_elf_dump` can
+  actually pass it; the remaining textual differences (`debug_roots` vs.
+  `list(debug_roots) or None`, `click.echo` vs. `notify`, `if artifact:`
+  vs. `if artifact is not None`) are all behaviorally inert (the resolver
+  backends already do `list(debug_roots or [])` internally, and a
+  `DebugArtifact` instance is always truthy). `symbols_only`/
+  `debug_presence_only` now thread through `resolve_side_snapshot`/
+  `_resolve_side_snapshot_impl` into `service.resolve_input`, both
+  defaulting `False` so every pre-existing caller is unaffected — the same
+  additive shape as the existing `changed_paths`/`allow_build_query`
+  pass-throughs (`tests/test_header_compile_context.py::
+  test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only`,
+  confirmed to fail pre-fix with `TypeError: unexpected keyword argument
+  'symbols_only'`). The `public_headers` construction divergence:
+  **a fix was attempted and merged, then reverted the same day after
+  review caught a real regression it missed — kept here in full because
+  the first pass's reasoning was genuinely incomplete, not just
+  under-tested.** The first pass read one consumer of `embed_build_
+  source`'s `public_header_roots` (`source_extractors._argv.
+  split_public_roots`/`_ClassifyContext.classify()`) and confirmed a
+  directory root already classifies every file under it via segment/
+  prefix matching, so the `_expand_public_headers`-based expansion looked
+  purely redundant *against that consumer* — and switched
+  `_build_new_snapshot`'s call to the simpler, unexpanded raw pass-through
+  `embed_side_build_source` already uses. That missed a **second,
+  differently-shaped consumer of the same list**:
+  `clang_public_roots._equivalent_public_roots_for_unit`, the
+  install-tree-vs-build-tree "mirror detection" heuristic L4 replay uses
+  when a public root names a physically different tree from the build's
+  own include dir. Its promotion rule is asymmetric by root shape: a
+  *file* root promotes on a single sampled match; a *directory* root
+  needs `>= _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES` (2) matches before
+  promoting the whole directory — so a build include dir mirroring only
+  ONE header out of a larger public root loses that promotion entirely
+  once the directory stops being pre-expanded, confirmed by direct
+  reproduction against the function itself (three installed headers, one
+  mirrored in the build tree: expanded file roots promote it, a single
+  directory root promotes nothing). `embed_side_build_source`'s own raw
+  pass-through (already shipped, used by `compare`/`dump`) carries the
+  identical weakness — not fixed here, since unifying either direction
+  changes real classification behavior for a real consumer, and deciding
+  which needs its own scoped design, not a same-PR revert-and-redo.
+  Reverted `_build_new_snapshot`'s call back to the expanded shape and
+  pinned two regression tests: the call's own shape (`tests/
+  test_scan_l2_cleanup_ordering.py::
+  test_scan_candidate_expands_public_header_dirs_before_embed`) and the
+  underlying asymmetry directly against `_equivalent_public_roots_for_unit`
+  itself (`tests/test_clang_public_roots_coverage.py::
+  test_equivalent_public_roots_promotes_on_single_match_only_for_file_roots`),
+  so a future "simplify this like the other primitive" pass doesn't
+  silently reintroduce the same regression. **Neither fix routes
+  `_build_new_snapshot` through `_resolve_side_snapshot_impl` itself** —
+  they make that future migration safe, they don't perform it.
+  Investigating the migration surfaced one more wrinkle this entry hadn't
+  named: `_build_new_snapshot`'s own `allow_build_query` gates only its
+  `embed_build_source` call, never its `seed_includes_and_fold_compile_
+  context` call (which always passes `build_query=None, build_compile_
+  db=None` — `scan` has no such CLI flags to begin with), whereas
+  `_resolve_side_snapshot_impl`'s `_gated_build_query_inputs` gates both
+  from one shared decision; reconciling that needs confirming what
+  `_build_new_snapshot`'s `allow_build_query` is actually meant to
+  authorize today, before the two functions' gating can be safely
+  unified. Blockers 4 (post-processing hooks) and 5/6 (`dump_cmd` building
+  a real `DumpRequest`; a pair-aware scan-baseline primitive) remain fully
+  open, unchanged from the notes above — see the plan doc's own PR 3A
+  section for the identical, fuller account.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

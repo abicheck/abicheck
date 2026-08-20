@@ -198,5 +198,57 @@ def test_mirror_candidates_promotes_whole_dir_when_enough_matches() -> None:
     assert out == [m._dir_spelling(Path("inc"))]
 
 
+# -- _equivalent_public_roots_for_unit: file-root vs. directory-root asymmetry
+
+
+def test_equivalent_public_roots_promotes_on_single_match_only_for_file_roots(
+    tmp_path: Path,
+) -> None:
+    """A public *directory* root needs >= 2 sampled matches to promote a build
+    include dir as an equivalent public root; a public *file* root promotes on
+    a single match. Real-world consequence (Codex review on #804, confirmed
+    by direct reproduction against this exact function): pre-expanding a
+    public header directory into its individual files before calling this
+    function detects a build tree that mirrors only ONE header out of a
+    larger public root; passing the directory unexpanded misses it entirely.
+    See ``scan_engine._build_new_snapshot``'s own docstring/comment at its
+    ``embed_build_source`` call site for why it deliberately keeps the
+    expansion rather than the simpler raw pass-through
+    ``service_input_resolution.embed_side_build_source`` uses.
+    """
+    install = tmp_path / "install" / "pkg"
+    install.mkdir(parents=True)
+    (install / "a.h").write_text("void a(void);\n", encoding="utf-8")
+    (install / "b.h").write_text("void b(void);\n", encoding="utf-8")
+    (install / "c.h").write_text("void c(void);\n", encoding="utf-8")
+
+    build_include = tmp_path / "build" / "include"
+    build_include.mkdir(parents=True)
+    # The build tree mirrors only ONE of the three installed public headers.
+    (build_include / "a.h").write_text("void a(void);\n", encoding="utf-8")
+
+    cu = CompileUnit(
+        id="cu1",
+        source=str(tmp_path / "build" / "x.c"),
+        directory=str(tmp_path / "build"),
+        argv=["cc", "-I", str(build_include), "-c", "x.c"],
+        include_paths=[str(build_include)],
+    )
+
+    expanded_roots = [str(install / "a.h"), str(install / "b.h"), str(install / "c.h")]
+    promoted_expanded = [
+        r
+        for r in m._equivalent_public_roots_for_unit(expanded_roots, cu)
+        if r not in expanded_roots
+    ]
+    assert promoted_expanded == [str(build_include / "a.h")]
+
+    dir_roots = [str(install)]
+    promoted_dir = [
+        r for r in m._equivalent_public_roots_for_unit(dir_roots, cu) if r not in dir_roots
+    ]
+    assert promoted_dir == []
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

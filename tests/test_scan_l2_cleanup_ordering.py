@@ -266,6 +266,68 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     assert seeded in eff_includes  # effective includes carry the seed for the baseline
 
 
+def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp_path):
+    """PR C (dump/scan resolver convergence) — pinned the OTHER way after a
+    real regression was caught by review.
+
+    An earlier revision of this call switched ``embed_build_source``'s
+    ``public_headers``/``public_header_dirs`` to the simpler, unexpanded raw
+    pass-through ``service_input_resolution.embed_side_build_source`` uses,
+    reasoning that ``source_extractors._argv.split_public_roots``/
+    ``_ClassifyContext`` already classify a directory root correctly via
+    prefix/segment matching, making the expansion redundant. That reasoning
+    holds for *that* consumer — but a *second*, differently-shaped consumer
+    of the same ``public_header_roots`` list,
+    ``clang_public_roots._equivalent_public_roots_for_unit`` (the
+    install-tree-vs-build-tree "mirror detection" heuristic), needs >= 2
+    sampled header matches to promote a *directory* root as an equivalent
+    build-tree root, but promotes on a single match for a *file* root — so a
+    build include directory that happens to mirror only one header out of a
+    larger public root lost that promotion entirely once the directory
+    stopped being pre-expanded (Codex review on #804, confirmed by direct
+    reproduction against ``_equivalent_public_roots_for_unit`` itself before
+    this revert). Reverted to keep the expansion. This test pins the correct
+    (expanded) shape so a future "simplify this like the other primitive"
+    pass doesn't reintroduce the same regression.
+    """
+    pub_dir = tmp_path / "include"
+    pub_dir.mkdir()
+    (pub_dir / "api.h").write_text("void api(void);\n", encoding="utf-8")
+    pub_file = tmp_path / "standalone.h"
+    pub_file.write_text("void standalone(void);\n", encoding="utf-8")
+
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: object())
+
+    embed_kwargs: dict = {}
+
+    def fake_embed(*args, **kwargs):
+        embed_kwargs.update(kwargs)
+
+    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="build",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+        public_headers=[pub_file],
+        public_header_dirs=[pub_dir],
+    )
+
+    # public_headers carries the individually-expanded files from BOTH the
+    # standalone file and the directory's own contents; public_header_dirs
+    # stays as given (also fed to embed_build_source, which unions both).
+    assert set(embed_kwargs["public_headers"]) == {
+        str(pub_file),
+        str(pub_dir / "api.h"),
+    }
+    assert embed_kwargs["public_header_dirs"] == (str(pub_dir),)
+
+
 def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_path):
     # The flock must be released on the error path too (finally), so a failed L2
     # parse still can't wedge a later inferred query.
