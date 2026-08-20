@@ -181,11 +181,15 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     name *before* attempting to import a same-named submodule -- so a
     same-named ``cli``/``cli_*`` submodule file sitting alongside it is
     never actually reached by this particular import statement. Restricted
-    to ``Assign``/``AnnAssign``/``FunctionDef``/``ClassDef`` bindings: those
-    unambiguously bind to something other than the submodule itself, unlike
-    e.g. ``from . import cli`` inside ``__init__.py``, which binds the name
-    to the submodule object itself and so isn't a real shadow at all. A
-    namespace package (no ``__init__.py``) can't shadow anything this way."""
+    to ``Assign``/``AnnAssign`` (with a value)/``FunctionDef``/``ClassDef``
+    bindings: those unambiguously bind to something other than the
+    submodule itself, unlike e.g. ``from . import cli`` inside
+    ``__init__.py``, which binds the name to the submodule object itself
+    and so isn't a real shadow at all. A bare annotation with no value
+    (``cli: object``) is deliberately excluded -- it only records an
+    ``__annotations__`` entry and creates no runtime attribute at all, so
+    it can't shadow anything either. A namespace package (no
+    ``__init__.py``) can't shadow anything this way."""
     init_path = base_dir / "__init__.py"
     if not init_path.is_file():
         return False
@@ -198,8 +202,11 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
             isinstance(t, ast.Name) and t.id == alias_name for t in stmt.targets
         ):
             return True
-        if isinstance(stmt, ast.AnnAssign) and (
-            isinstance(stmt.target, ast.Name) and stmt.target.id == alias_name
+        if (
+            isinstance(stmt, ast.AnnAssign)
+            and stmt.value is not None
+            and isinstance(stmt.target, ast.Name)
+            and stmt.target.id == alias_name
         ):
             return True
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

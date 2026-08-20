@@ -268,6 +268,34 @@ def test_package_attribute_shadowing_same_named_submodule_is_not_flagged(
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
+def test_annotation_only_init_declaration_does_not_suppress_real_submodule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare annotation with no value (`cli: object`) in `__init__.py`
+    creates no runtime attribute — it only records an `__annotations__`
+    entry — so it must not be treated as shadowing a same-named `cli.py`
+    submodule. `from .pkg import cli` still imports the real submodule in
+    this shape, and the gate must still flag it."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg2"
+    engine_pkg.mkdir()
+    (engine_pkg / "__init__.py").write_text("cli: object\n")
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg2 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_genuine_nested_cli_adapter_alias_still_flagged_with_init_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
