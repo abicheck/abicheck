@@ -549,8 +549,22 @@ class CompilerInvocation:
     include_search: tuple[IncludeSearchEntry, ...]
     forced_includes: tuple[Path, ...]
     abi_flags: tuple[AbiFlag, ...]
+    sources: tuple[str, ...]
     opaque_flags: tuple[str, ...]
 ```
+
+`sources` — every positional argv token naming a translation unit, in
+argv order, mirroring the existing `sources_from_argv()`'s own "return
+**every** one" contract (`gcc -c a.c b.c` compiles two TUs in one
+invocation, and a caller that wants all of them must not stop at the
+first). `opaque_flags` cannot stand in for this: it is scoped to
+unrecognized *flag* tokens, not positional operands, and nothing about a
+bare filename argument marks it as source rather than some other kind of
+operand. Without a dedicated field, an L2/L4 replay or build-attribution
+consumer would have no way to recover which TU(s) an invocation actually
+compiled without rescanning `original_argv` itself — exactly the
+"parse once" contract this model exists to establish, and the omission
+this field closes.
 
 `recorded_directory` is the compile-database entry's own `directory` field
 (or the equivalent for a live build-adapter query) — not optional, since a
