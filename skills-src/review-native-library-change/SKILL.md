@@ -59,6 +59,19 @@ consumers, no rebuild), source API (their code still compiles), or runtime
 [compatibility contracts](../shared/compatibility-contracts.md).
 When the user has not said and the answers would differ, answer both.
 
+**Runtime is only partly this workflow's to answer.** This workflow's own
+comparison (steps 2–9, all `compare`) proves the symbol-version-floor half of
+runtime compatibility — a raised `GLIBC_*`/`GLIBCXX_*`/`CXXABI_*` requirement
+surfaces as `runtime_floor_raised` and is read in step 5 like any other
+finding. It does **not** drive `abicheck deps tree`/`abicheck deps compare`,
+so it cannot confirm the rest of runtime compatibility: whether the binary's
+full dependency graph actually resolves in a specific sysroot or container
+image. When the contract is runtime, report the symbol-floor half from this
+workflow's own evidence, and report the "does it actually load there" half as
+`NOT_VERIFIED` unless the user separately ran `deps tree --sysroot` or `deps
+compare` — do not let a clean `compare` verdict read as a full runtime
+`VERIFIED_COMPATIBLE`.
+
 Also confirm what the answer is actually *for*: ship this PR as-is, restore
 a removed entry point, decide a version bump, or clear one named consumer.
 That decision is what step 10's report exists to serve — everything before
@@ -234,7 +247,7 @@ End with this shape, not a command transcript:
 | Field | Content |
 |---|---|
 | **Decision** | one of the five states below |
-| **Contract reviewed** | binary / source / runtime — from step 1 |
+| **Contract reviewed** | binary / source / runtime — from step 1; for runtime, name which half (symbol-version floor vs. dependency-graph loadability) was actually reviewed |
 | **Baseline** | what users actually have, or were built against — from step 2 |
 | **Profiles** | compiler, target, language standard, ABI-affecting flags — from step 3 |
 | **Evidence** | artifacts and evidence depth actually reached, coverage limitations — from steps 4–5 |
@@ -252,7 +265,7 @@ End with this shape, not a command transcript:
 | `COMPATIBLE_WITH_DEPLOYMENT_RISK` | `COMPATIBLE_WITH_RISK` | no break, but a risk finding remains — most commonly a raised runtime/symbol-version floor |
 | `SOURCE_BREAK` | `API_BREAK` | consumers must recompile; no already-compiled binary is affected |
 | `BINARY_BREAK` | `BREAKING` | an already-compiled, already-linked consumer stops working without a rebuild |
-| `NOT_VERIFIED` | `verdict: null` (comparability refused), or an evidence tier short of what step 4 required, or a combination outside this skill's [validated v0.1 scope](#validated-scope-v01) | the question was not actually answered — state why, and what would answer it |
+| `NOT_VERIFIED` | `verdict: null` (comparability refused), or an evidence tier short of what step 4 required, or a combination outside this skill's [validated v0.1 scope](#validated-scope-v01), or a runtime contract's dependency-graph-loadability half when no `deps tree`/`deps compare` was run | the question was not actually answered — state why, and what would answer it |
 
 A *raised symbol-version floor* is **not** a "remaining unknown": `compare`
 emits `runtime_floor_raised` as a risk and can promote it to a break against

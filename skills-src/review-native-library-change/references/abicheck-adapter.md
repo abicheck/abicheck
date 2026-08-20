@@ -73,7 +73,7 @@ abicheck compare OLD NEW \
   --required-symbol plugin_init --required-symbol plugin_shutdown \
   --header old=../old-side/include/plugin_api.h \
   --header new=include/plugin_api.h \
-  --depth headers --format json
+  --depth headers --report-mode root-cause --format json
 ```
 
 or, from a maintained list:
@@ -82,7 +82,7 @@ or, from a maintained list:
 abicheck compare OLD NEW --required-symbols host-contract.txt \
   --header old=../old-side/include/plugin_api.h \
   --header new=include/plugin_api.h \
-  --depth headers --format json
+  --depth headers --report-mode root-cause --format json
 ```
 
 Supply the entrypoint's headers on both branches, and require
