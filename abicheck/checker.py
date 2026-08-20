@@ -1138,6 +1138,81 @@ def compare(
             internal_namespaces=_internal_namespaces(policy_file),
         )
 
+    from .contract_context import suppression_config_for
+
+    # `suppression.source_sha256` alone is `None` for a digest-less but
+    # fully active list (the public constructor, ABICC's -skip-symbols
+    # lists, and SuppressionList.merge() all produce this shape) --
+    # `suppression_config_for`'s own rule_identities()-content-digest
+    # fallback is the established, already-tested primitive for exactly
+    # this case (Codex review, PR #803, fresh evidence).
+    _suppression_config = suppression_config_for(suppression)
+    suppression_source_sha256 = (
+        _suppression_config.sha256 if _suppression_config is not None else None
+    )
+
+    # Canonical content digest of every resolved explicit-scope input
+    # (Codex review, PR #803, fresh evidence -- generalized after an
+    # initial version covered only `force_public_symbols`): both
+    # `force_public_symbols` (from `--public-symbols-list`/`.abicheck.yml`'s
+    # `scope.public_symbols`) and `public_surface_allowlist` (from
+    # `--post-manifest`'s resolved `pp_*`/ufunc-loop allowlist,
+    # `_resolve_post_manifest_allowlist` one layer above this function) are
+    # already-resolved `set[str] | None` by the time they reach here, and
+    # both independently change which findings `compare()` retains -- so a
+    # digest of just one axis would let two runs differing only by the
+    # other collide. Keyed JSON (not a delimiter-joined string) keeps the
+    # two axes distinguishable and avoids the non-injective-join class of
+    # bug already fixed elsewhere in this same digest work.
+    #
+    # `public_surface_allowlist` is gated on `is not None`, not truthiness
+    # (Codex review, PR #803, fresh evidence): an empty allowlist is a real,
+    # distinct, active configuration -- a POST manifest committing to zero
+    # exports -- and `scope_active` a few lines above this block already
+    # treats `public_surface_allowlist is not None` as "scoping is active"
+    # for exactly this reason (line ~1038). Collapsing `set()` to "no
+    # explicit scope at all" would let an absent manifest and a
+    # zero-export manifest hash identically while `FilterNonPublicSurface`
+    # filters every concrete export under the latter. `force_public_symbols`
+    # deliberately keeps the plain truthiness check: every other consumer of
+    # this parameter in the codebase (`contract_evaluation.py`,
+    # `contract_pipeline.py`, `service_compare_pipeline.py`, ...) already
+    # treats an empty set as equivalent to `None` for this specific axis --
+    # there is no "force nothing explicitly public" state distinct from "no
+    # forcing at all" anywhere else this parameter is consumed, so the two
+    # axes are intentionally not symmetric here.
+    # `content_digest` is the same canonical-JSON-then-SHA-256 primitive
+    # `contract_context.py` already uses for overlay content digests
+    # (CodeRabbit review, PR #803, fresh evidence) -- reused here instead of
+    # a second, independently-hand-rolled hashing convention.
+    from .contract_evidence_collect import content_digest
+
+    _explicit_scope_sources: dict[str, list[str]] = {}
+    if force_public_symbols:
+        _explicit_scope_sources["force_public_symbols"] = sorted(force_public_symbols)
+    if public_surface_allowlist is not None:
+        _explicit_scope_sources["public_surface_allowlist"] = sorted(
+            public_surface_allowlist
+        )
+    explicit_scope_source_sha256 = (
+        "sha256:" + content_digest(_explicit_scope_sources)
+        if _explicit_scope_sources
+        else None
+    )
+
+    # Canonical content digest of the resolved --env-matrix (Codex review,
+    # PR #803, fresh evidence): `dataclasses.asdict` recursively serializes
+    # `EnvironmentMatrix`'s own nested `SyclConstraints`/`CudaConstraints`
+    # dataclasses into a plain, JSON-safe dict for `content_digest`. `None`
+    # when no --env-matrix was given at all.
+    import dataclasses as _dataclasses
+
+    env_matrix_source_sha256 = (
+        "sha256:" + content_digest(_dataclasses.asdict(env_matrix))
+        if env_matrix is not None
+        else None
+    )
+
     result = DiffResult(
         old_version=old.version,
         new_version=new.version,
@@ -1147,6 +1222,14 @@ def compare(
         suppressed_count=len(suppressed),
         suppressed_changes=suppressed,
         suppression_file_provided=suppression is not None,
+        suppression_source_sha256=suppression_source_sha256,
+        explicit_scope_source_sha256=explicit_scope_source_sha256,
+        pattern_verdicts_enabled=bool(pattern_verdicts),
+        collapse_versioned_symbols_enabled=bool(collapse_versioned_symbols),
+        surface_metrics_enabled=bool(surface_metrics),
+        env_matrix_source_sha256=env_matrix_source_sha256,
+        reconcile_build_context_enabled=bool(reconcile_build_context),
+        scope_to_public_surface_requested=bool(scope_to_public_surface),
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

@@ -715,13 +715,29 @@ def _write_release_summary_file(
     added_keys: list[str],
     old_map: dict[str, Path],
     new_map: dict[str, Path],
+    severity_config: SeverityConfig | None = None,
 ) -> None:
-    """Write per-library summary JSON to output directory."""
+    """Write per-library summary JSON to output directory.
+
+    *severity_config*, when in effect, feeds the same effective-config
+    digest ``_format_release_json`` (the primary release report) already
+    stamps -- this ``--output-dir`` sibling document is a separate write
+    path and previously carried neither effective-config field at all
+    (Codex review, PR #803, fresh evidence: only the optional per-library
+    ``to_json`` sidecar files did), via the one shared helper
+    ``_release_summary_effective_config_block`` so the two can never
+    independently drift.
+    """
+    from .cli_compare_release_helpers import _release_summary_effective_config_block
+
+    digest, fields = _release_summary_effective_config_block(severity_config)
     summary_data: dict[str, object] = {
         "verdict": worst_verdict,
         "libraries": library_results,
         "unmatched_old": [old_map[k].name for k in removed_keys],
         "unmatched_new": [new_map[k].name for k in added_keys],
+        "effective_config_digest": digest,
+        "effective_config_fields": fields,
     }
     summary_path = output_dir / "summary.json"
     _safe_write_output(summary_path, json.dumps(summary_data, indent=2))
@@ -859,6 +875,7 @@ def _finalize_release_output(
             added_keys,
             old_map,
             new_map,
+            severity_config=severity_config,
         )
 
     # ADR-049 Phase 7's orthogonal contract-coverage axis, release/package

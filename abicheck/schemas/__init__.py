@@ -572,7 +572,123 @@ from typing import Any
 #:       renderer must actually gate a ``"notice"`` entry on instead of the
 #:       level alone; it is always ``True`` for ``"error"``/``"warning"``.
 #:       Additive key on an existing array item.
-REPORT_SCHEMA_VERSION = "2.44"
+#: 2.45 -- CLI cleanup phase two, PR B: two new top-level keys,
+#:       ``effective_config_digest`` (a ``sha256:...`` fingerprint) and
+#:       ``effective_config_fields`` (the field dict it was hashed from, so
+#:       a mismatch can be attributed to a specific field rather than read
+#:       as an opaque hash -- mirrors the existing ``profile_fingerprint``/
+#:       ``scope_fingerprint`` precedent in ``comparability.py``). Computed
+#:       by ``effective_config_digest.effective_config_fields`` from
+#:       whichever tier of resolved configuration this comparison actually
+#:       has (a full ``CompatibilityEvaluationConfig`` under ``--contract``/
+#:       ``--pack``, else the policy/gate fields every comparison resolves
+#:       regardless -- see that module's own docstring). Identical
+#:       computation for `compare` and the directory/package release
+#:       fan-out (both funnel through ``reporter_contract_blocks.
+#:       add_contract_context``) and for `scan --against` (schema 1.19,
+#:       below) -- "one effective configuration ... with the same
+#:       effective-config digest recorded in every report" (the plan's own
+#:       still-open PR B goal). Unconditional, like ``exit`` conceptually
+#:       is: every comparison has a resolved configuration to fingerprint.
+#:       Additive keys.
+#: 2.46 -- ``effective_config_fields`` (2.45, above) gains
+#:       ``gate.require_complete_analysis`` (Codex review, PR #803, fresh
+#:       evidence): ``--require-complete-analysis`` genuinely changes gating
+#:       behavior for an otherwise-identical incomplete-evidence result (its
+#:       ``analysis_assurance_exit_contribution`` floors to 1 vs. 0) but is
+#:       not a D7 ``CompatibilityEvaluationConfig`` namespace field, so two
+#:       reports differing only in this flag previously collided on the
+#:       digest. Threaded through the same way ``severity_config``/
+#:       ``exit_code_scheme`` already are. Also: the directory/package
+#:       release fan-out's ``--output-dir`` sibling document
+#:       (``summary.json``, written by ``cli_compare_release.
+#:       _write_release_summary_file``) now carries both effective-config
+#:       fields too -- previously only the primary release JSON and the
+#:       optional per-library sidecar files did, so this write path alone
+#:       was silently missing the "same digest in every report" invariant.
+#:       Additive key/keys, on an existing report shape shared by every
+#:       front end. Two more fixes landed under this same still-unreleased
+#:       version: the baseline tier's ``policy.base`` now carries a
+#:       recognized built-in policy's full ``id@version:sha256`` identity
+#:       (matching the rich tier's own fix, one review round earlier) rather
+#:       than the bare name; and ``effective_config_digest``/
+#:       ``effective_config_fields`` are now schema-optional (removed from
+#:       the real-verdict branch's ``then.required``) and omitted from
+#:       ``compat check --report-format json`` output (``include_exit_
+#:       decision=False``), mirroring the pre-existing ``exit`` block's own
+#:       optional status -- this digest's gate axes describe only the
+#:       native legacy/severity scheme and don't represent compat's own
+#:       transform options (``-strict``, ``-source``/``-binary``, ...), so
+#:       emitting it there would let two behaviorally different compat
+#:       reports claim an identical effective configuration. Two more
+#:       fixes landed in a further review round: ``effective_config_
+#:       fields`` gains ``gate.scope`` (ADR-043 ``--used-by``/
+#:       ``--required-symbol(s)`` scoped-gate selection, which can replace
+#:       the reported verdict/findings/exit code but was previously
+#:       unrepresented -- two runs selecting different consumers/
+#:       entrypoints against the identical pair collided on the digest);
+#:       and the rich tier's ``gate.exit_code_scheme``/``gate.severity.*``
+#:       now always come from the caller's own already-resolved severity/
+#:       exit-code-scheme (the same pair used for the sibling ``exit``
+#:       block) rather than from the resolved
+#:       ``CompatibilityEvaluationConfig`` directly -- closing a real bug
+#:       where a ``--pack``-only ``scan --against`` recorded its digest
+#:       from ``resolve_scan_config``'s deliberately gate-blanked config
+#:       instead of the run's real ``--severity-preset``/
+#:       ``--exit-code-scheme``. Three more fixes landed in further review
+#:       rounds under this same still-unreleased version: ``surface.
+#:       explicit_scope`` now folds in ``--post-manifest``'s resolved
+#:       ``public_surface_allowlist`` (a second, independent explicit-scope
+#:       axis alongside ``--public-symbols-list``, keyed separately so
+#:       neither can collide with the other), gated on ``is not None``
+#:       rather than truthiness (an empty ``--post-manifest`` allowlist is
+#:       a real, distinct, active scope, not the absence of one); the rich
+#:       tier *merges* that same result-level scope digest with
+#:       ``resolved_config.surface.explicit_scope`` rather than falling
+#:       back to only one, since ``force_public_symbols`` is threaded into
+#:       ``compare()`` unconditionally and a single ``--pack``-only run
+#:       combining ``--public-symbols-list`` and ``--post-manifest`` can
+#:       populate both sources at once; and ``effective_config_fields``
+#:       gains ``policy.pattern_verdicts`` (ADR-027 A4's ``--pattern-
+#:       verdicts``/``--explain-patterns``, which can modulate a finding's
+#:       verdict and the process exit but was previously unrepresented --
+#:       two otherwise-identical runs differing only in this flag collided
+#:       on the digest whenever no idiom/antipattern happened to match,
+#:       since the applied-modulation ledger alone is indistinguishable
+#:       from the flag never having been set). One more fix landed in the
+#:       same further review round: ``effective_config_fields`` gains
+#:       ``policy.collapse_versioned_symbols`` (``compare(...,
+#:       collapse_versioned_symbols=...)``, which can remove a versioned
+#:       symbol-version remove/add pair entirely, turning an otherwise
+#:       ``BREAKING`` verdict non-breaking), ``policy.surface_metrics``
+#:       (``--surface-metrics``, which appends suppressible aggregate-drift
+#:       findings and can flip ``NO_CHANGE`` to ``COMPATIBLE``), and
+#:       ``policy.env_matrix`` (a content digest of the resolved
+#:       ``--env-matrix``, ADR-020b: ``_env_matrix_contract_changes`` can
+#:       reclassify a version-requirement finding against declared runtime
+#:       floors and add deployment findings) -- three more checker-level
+#:       axes that were previously unrepresented in the digest, all
+#:       following the identical shape ``policy.pattern_verdicts`` already
+#:       established. Additive keys. One more fix, same further review
+#:       round: ``policy.reconcile_build_context`` (``compare(...,
+#:       reconcile_build_context=...)``, ``--reconcile-build-context``,
+#:       which can move a phantom breaking finding from ``kept`` into the
+#:       reconciliation audit bucket, changing the verdict and exit code)
+#:       -- same shape again. One more fix, same round: ``effective_config_
+#:       fields`` gains ``surface.scope_to_public_surface_requested`` --
+#:       distinct from the existing ``surface.scope_to_public_surface``,
+#:       which ``checker.compare()`` stamps with the *derived*
+#:       ``scope_active = scope_to_public_surface or public_surface_
+#:       allowlist is not None`` and therefore reads ``True`` whenever a
+#:       ``--post-manifest`` allowlist is active regardless of the raw
+#:       flag. ``post_processing.FilterNonPublicSurface._run_allowlist``
+#:       only honors the ``force_public_symbols`` widening overlay when the
+#:       *raw* flag is true, so two runs sharing the same POST manifest and
+#:       forced-public symbols but opposite raw ``--scope-public-headers``
+#:       settings previously published an identical
+#:       ``surface.scope_to_public_surface`` value despite retaining
+#:       genuinely different findings.
+REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -863,7 +979,39 @@ REPORT_SCHEMA_VERSION = "2.44"
 #:        contributions)`` invariant -- Codex review). Additive key, absent
 #:        only for the same NOT_COMPARABLE/audit-only shapes
 #:        ``analysis_assurance`` itself is.
-SCAN_SCHEMA_VERSION = "1.18"
+#: 1.19 -- CLI cleanup phase two, PR B: the ``diff`` block gains
+#:        ``effective_config_digest``/``effective_config_fields`` --
+#:        `compare`'s report_schema_version 2.45 counterpart, computed by
+#:        the identical ``effective_config_digest.effective_config_fields``
+#:        call with this comparison's own ``sev_config``/``exit_scheme``
+#:        (the same pair the ``exit`` block immediately above was resolved
+#:        from). Additive keys, absent only for the same NOT_COMPARABLE/
+#:        audit-only shapes ``exit``/``analysis_assurance`` themselves are.
+#: 1.20 -- ``effective_config_fields`` (1.19, above) gains
+#:        ``gate.require_complete_analysis`` and ``gate.scope`` -- `compare`'s
+#:        report_schema_version 2.46 counterpart, same fields, same reasons
+#:        (see that version's own entry). Also: the rich tier's gate axes
+#:        now come from the caller's own resolved severity/exit-code-scheme
+#:        rather than the resolved ``CompatibilityEvaluationConfig``
+#:        directly -- this is *scan*'s own bug being fixed here, since
+#:        ``resolve_scan_config`` deliberately blanks that config's own
+#:        gate fields, and a ``--pack``-only ``scan --against`` previously
+#:        recorded the digest from that blanked copy instead of the run's
+#:        real gate. Additive keys. Three more fixes landed under this same
+#:        still-unreleased version, sharing the identical
+#:        ``effective_config_digest`` call `compare`'s report_schema_version
+#:        2.46 entry describes in full: ``surface.explicit_scope`` now also
+#:        covers ``--post-manifest``'s ``public_surface_allowlist`` and
+#:        merges rather than falls back between the two explicit-scope
+#:        sources; ``policy.pattern_verdicts`` was added. One more fix,
+#:        same round as `compare`'s report_schema_version 2.46 entry:
+#:        ``policy.collapse_versioned_symbols``, ``policy.surface_metrics``,
+#:        and ``policy.env_matrix`` were added, sharing the identical
+#:        computation (see that entry for the full reasoning). One more:
+#:        ``policy.reconcile_build_context`` was added, same round. One
+#:        more: ``surface.scope_to_public_surface_requested`` was added,
+#:        same round as `compare`'s report_schema_version 2.46 entry.
+SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

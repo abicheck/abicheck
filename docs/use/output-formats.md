@@ -665,11 +665,30 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.44",
+  "report_schema_version": "2.46",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
 ```
+
+> **`effective_config_digest`/`effective_config_fields` (schema 2.45; the
+> field set itself grew again in 2.46 -- see below).**
+> Every `compare`/`compare-release` JSON report, and every `scan --against`
+> report's `diff` block (`scan_schema_version` 1.19, field-set update 1.20),
+> carries a
+> `sha256:...` fingerprint of the resolved gate/policy/surface/contract
+> configuration the comparison actually ran under, alongside the named
+> field dict it was hashed from — so two reports (or a report replayed
+> later) can be compared for "did the resolved configuration change"
+> without a byte-for-byte diff, and a mismatch can be attributed to a
+> specific field rather than read as an opaque hash. `effective_config_
+> fields["_tier"]` is `"contract"` when the run resolved a full
+> `CompatibilityEvaluationConfig` (whenever `--pack` selected a pack, not
+> only under `--contract` — real pack identities included) or `"baseline"`
+> otherwise (the policy/gate fields every comparison resolves regardless);
+> the two tiers are not cross-comparable. See
+> `abicheck.effective_config_digest`'s own module docstring for the full
+> field set and precedence.
 
 #### `scan --against`: the report cap and truncation (`--max-findings`)
 

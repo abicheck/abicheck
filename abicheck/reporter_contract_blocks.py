@@ -99,16 +99,38 @@ def add_contract_context(
     # follows an unrelated 0/1/2 ABICC-style scheme, so this block's
     # native-scheme `code` would disagree with the real compat exit for the
     # same run (Codex review).
+    scheme = "severity" if severity_config is not None else "legacy"
     if include_exit_decision:
         from .exit_decision import resolve_compare_exit_decision
 
-        scheme = "severity" if severity_config is not None else "legacy"
         d["exit"] = resolve_compare_exit_decision(
-            result, severity_config, scheme,
+            result,
+            severity_config,
+            scheme,
             require_complete_analysis=require_complete_analysis,
         ).to_dict()
     add_annotations(d, result, severity_config=severity_config)
     add_use_case_impact(d, result, displayed)
+    # Same `include_exit_decision` gate as the `exit` block above, for the
+    # identical reason (Codex review, PR #803, fresh evidence): the digest's
+    # `gate.exit_code_scheme`/`gate.severity.*` axes describe the *native*
+    # legacy/severity scheme, and carry no representation of `compat
+    # check`'s own transform/gate options (`-strict`, `-source`/`-binary`,
+    # `-warn-newsym`, ...) -- which are a materially different option
+    # vocabulary belonging to a different front end (`compat/cli.py`), not a
+    # gap in this digest's own field set to widen. Emitting it anyway would
+    # let two `compat check --report-format json` reports that differ only
+    # by `-strict` (a real verdict-changing transform) carry the identical
+    # digest, silently claiming "same effective configuration" the same way
+    # the `exit` block would if it weren't already skipped here.
+    if include_exit_decision:
+        add_effective_config_digest(
+            d,
+            result,
+            severity_config=severity_config,
+            exit_code_scheme=scheme,
+            require_complete_analysis=require_complete_analysis,
+        )
 
     ctx = result.contract_context
     if ctx is None:
@@ -149,6 +171,72 @@ def add_contract_context(
     d["contract_coverage_exit_contribution"] = coverage_exit_for_context(ctx)
 
 
+def add_effective_config_digest(
+    d: dict[str, Any],
+    result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+    exit_code_scheme: str | None = None,
+    require_complete_analysis: bool = False,
+) -> None:
+    """CLI cleanup phase two, PR B: the effective-configuration digest --
+    "one effective configuration ... with the same effective-config digest
+    recorded in every report", computed identically for `compare` (via
+    :func:`add_contract_context`), the directory/package release fan-out
+    (same call), :func:`~abicheck.reporter.to_stat_json` (which bypasses
+    :func:`add_contract_context` entirely, so it calls this directly), and
+    `scan --against` (:mod:`abicheck.cli_scan_baseline`, same function).
+    :func:`~abicheck.effective_config_digest.effective_config_fields` itself
+    picks the richest tier this comparison actually resolved (a full
+    ``CompatibilityEvaluationConfig`` under ``--contract``/``--pack``, else
+    the policy/gate fields every comparison resolves regardless). The
+    caller (:func:`add_contract_context`) gates this the same way it gates
+    the ``exit`` block -- skipped when ``include_exit_decision=False``
+    (``compat/cli.py``'s ``compat check --report-format json``, Codex
+    review, PR #803, fresh evidence): the digest's gate axes describe the
+    *native* legacy/severity scheme and carry no representation of
+    ``compat check``'s own transform options (``-strict``, ``-source``/
+    ``-binary``, ...), so emitting it there would let two behaviorally
+    different compat reports claim the identical effective configuration.
+    Both fields are schema-optional for exactly this reason, mirroring
+    ``exit``'s own optional status.
+
+    *exit_code_scheme*, when given, is the caller's own already-resolved
+    scheme (e.g. `scan --against`'s ``exit_scheme``, which additionally
+    depends on its own ``exit_code_scheme`` parameter, not just whether
+    *severity_config* is set) -- reused rather than re-derived, so the
+    digest can never disagree with the ``exit`` block it sits beside. The
+    default (``None``) reproduces the same ``"severity" if severity_config
+    is not None else "legacy"`` derivation :func:`add_contract_context`
+    already uses for that block.
+
+    *require_complete_analysis* mirrors the identically-named CLI/API flag
+    (P0.4's analysis-completeness gate, `--require-complete-analysis`) --
+    it genuinely changes gating behavior (an otherwise-identical
+    incomplete-evidence result exits 0 vs. 1 depending on it) but is not a
+    D7 ``CompatibilityEvaluationConfig`` namespace field, so it is threaded
+    here the same way *severity_config*/*exit_code_scheme* already are
+    rather than silently absent from the fingerprint (Codex review,
+    PR #803, fresh evidence).
+    """
+    from .effective_config_digest import (
+        effective_config_digest,
+        effective_config_fields,
+    )
+
+    scheme = exit_code_scheme or (
+        "severity" if severity_config is not None else "legacy"
+    )
+    ec_fields = effective_config_fields(
+        result,
+        severity_config=severity_config,
+        exit_code_scheme=scheme,
+        require_complete_analysis=require_complete_analysis,
+    )
+    d["effective_config_digest"] = effective_config_digest(ec_fields)
+    d["effective_config_fields"] = ec_fields
+
+
 def add_annotations(
     d: dict[str, Any],
     result: DiffResult,
@@ -173,6 +261,6 @@ def add_annotations(
     """
     from .annotations import annotation_report_entries
 
-    d["annotations"] = annotation_report_entries(result, severity_config=severity_config)
-
-
+    d["annotations"] = annotation_report_entries(
+        result, severity_config=severity_config
+    )

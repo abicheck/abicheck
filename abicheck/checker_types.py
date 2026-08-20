@@ -552,6 +552,129 @@ class DiffResult:
     # gate, or an exit code, because an unattributed finding is an absence of
     # proof, not proof the finding is harmless.
     use_case_impact: object | None = None
+    # CLI cleanup phase two, PR B (Codex review, PR #803): the resolved
+    # ``CompatibilityEvaluationConfig`` this comparison was configured with,
+    # when one was resolved at all -- unlike ``contract_context`` above,
+    # this is populated whenever ``--pack`` selected a pack, *not only*
+    # under ``--contract`` (``resolve_and_apply``/``resolve_cli_config``
+    # already resolve one for a pack-only run; it was previously only
+    # attached to the report through ``contract_context``, which stays
+    # unset without ``--contract``, so a pack-only run's real pack
+    # identities were unreachable at report time). ``field(kw_only=True)``,
+    # appended at the true end, per this file's own established
+    # positional-field-safety convention (see ``vtable_covers_unverifiable_
+    # layout_gap``/``symbol_binding`` above) -- inserting an ordinary
+    # positional field here would silently reinterpret every existing
+    # positional caller's later arguments. Typed ``object`` for the same
+    # circular-import reason as ``contract_context``/``analysis_assurance``
+    # above. Read by ``effective_config_digest.effective_config_fields``,
+    # which prefers ``contract_context``'s own nested resolved config over
+    # this one whenever a ``PersistedContractContext`` exists (Codex
+    # review, PR #803, fresh evidence: ``contract_context.with_resolved_
+    # config`` merges *observed* overlay evidence -- e.g. a
+    # ``--post-manifest`` overlay no front-end input model describes --
+    # into a *new* config object, so the two are not always the same
+    # object even though both are stamped from the same D7 resolution),
+    # falling back to this field only when no context exists at all (the
+    # ``--pack``-only case this field exists for).
+    evaluation_config: object | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803): the resolved
+    # --suppress file's own content digest (``SuppressionList.source_
+    # sha256``), when one was given -- for an ordinary comparison with
+    # neither ``--contract`` nor ``--pack``, no ``CompatibilityEvaluation
+    # Config`` is ever resolved, so ``effective_config_digest``'s baseline
+    # tier had no way to detect that two runs differing only in which
+    # suppression file they loaded (each removing different findings)
+    # resolved genuinely different configuration. ``None`` when no
+    # suppression file was given, distinct from ``suppression_file_
+    # provided``'s bool (this field is the content, not just presence).
+    suppression_source_sha256: str | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # a canonical content digest of every resolved explicit-scope input:
+    # ``compare(..., force_public_symbols=...)`` (resolved from
+    # ``--public-symbols-list``/``.abicheck.yml``'s ``scope.public_
+    # symbols``) and ``compare(..., public_surface_allowlist=...)`` (the
+    # resolved ``--post-manifest`` allowlist, where an *empty* allowlist is
+    # a distinct active scope, not the absence of one), for the same reason
+    # ``suppression_source_sha256`` above exists: an ordinary comparison
+    # with neither ``--contract`` nor ``--pack`` never resolves a
+    # ``CompatibilityEvaluationConfig``, so the baseline tier had no way to
+    # detect that two runs selecting different forced-public/manifest
+    # scopes (which can retain different findings) resolved genuinely
+    # different configuration. ``None`` when neither source was active at
+    # all.
+    explicit_scope_source_sha256: str | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ADR-027 A4 pattern-aware verdict modulation
+    # (``compare(..., pattern_verdicts=...)``, opt-in via
+    # ``--pattern-verdicts``/``--explain-patterns``) was requested for this
+    # comparison. ``pattern_modulations`` (elsewhere on this dataclass)
+    # records the *ledger of applied* modulations, which is empty whenever
+    # no idiom/antipattern happened to match -- indistinguishable from the
+    # flag never having been set at all, even though the *configuration*
+    # genuinely differed
+    # (a policy demotion/raise can change ``kept``/``verdict``/the exit
+    # code the moment a matching idiom appears, per ``checker.py``'s own
+    # ``_apply_pattern_verdicts_step``). Recorded directly on ``result``
+    # rather than nested under any D7 namespace, since it isn't a D7
+    # ``CompatibilityEvaluationConfig`` concept at all -- there is no
+    # external, user-authored "patterns" config to content-digest, only
+    # abicheck's own built-in idiom/antipattern detection gated on this one
+    # boolean, the same shape as ``scope_to_public_surface`` above.
+    pattern_verdicts_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ``compare(..., collapse_versioned_symbols=...)`` was
+    # requested for this comparison -- when enabled, post-processing can
+    # remove a versioned symbol-version remove/add pair entirely, turning
+    # an otherwise ``BREAKING`` verdict non-breaking, with no other trace
+    # of the setting on ``result``. Same shape as ``pattern_verdicts_
+    # enabled`` above: a checker-level boolean with no D7 namespace of its
+    # own, recorded directly rather than nested under any D7 field.
+    collapse_versioned_symbols_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ``compare(..., surface_metrics=...)`` (``--surface-metrics``)
+    # was requested for this comparison -- when enabled,
+    # ``_apply_surface_metrics`` appends suppressible ADR-027 A1/D1.2
+    # aggregate-drift findings and can flip ``NO_CHANGE`` to ``COMPATIBLE``.
+    # Same shape as ``pattern_verdicts_enabled`` above.
+    surface_metrics_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence): a
+    # canonical content digest of the resolved ``--env-matrix`` (ADR-020b
+    # declared deployment constraints) this comparison ran with, when one
+    # was given. ``_env_matrix_contract_changes`` can reclassify a
+    # version-requirement finding against ``env_matrix.runtime_floors``
+    # (e.g. a GLIBC floor turning a RISK into BREAKING) and add deployment
+    # findings, so two runs against identical snapshots but different
+    # runtime-floor files must not collide on the digest. ``None`` when no
+    # ``--env-matrix`` was given at all -- distinct from one resolving to
+    # every constraint left unspecified, the same "selected vs. absent"
+    # distinction ``explicit_scope_source_sha256`` already draws.
+    env_matrix_source_sha256: str | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ``compare(..., reconcile_build_context=...)``
+    # (``--reconcile-build-context``) was requested for this comparison --
+    # when enabled, ``reconcile_build_context_findings`` can move a phantom
+    # breaking finding from ``kept`` into the reconciliation audit bucket,
+    # changing the verdict and exit code. Same shape as
+    # ``pattern_verdicts_enabled`` above.
+    reconcile_build_context_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # the *raw* ``compare(..., scope_to_public_surface=...)`` value the
+    # caller passed in -- distinct from ``scope_to_public_surface`` above,
+    # which ``checker.compare()`` stamps with the *derived* ``scope_active
+    # = scope_to_public_surface or public_surface_allowlist is not None``
+    # (so it reads ``True`` whenever a ``--post-manifest`` allowlist is
+    # active, regardless of the raw flag). That collapsing matters:
+    # ``post_processing.FilterNonPublicSurface._run_allowlist`` only honors
+    # the ``force_public_symbols`` widening overlay when the *raw* flag is
+    # true (deliberately -- the CLI already warns that overlay is ignored
+    # under ``--no-scope-public-headers``), so two runs sharing the same
+    # POST manifest and forced-public symbols but opposite raw
+    # ``--scope-public-headers`` settings can retain genuinely different
+    # findings while ``scope_to_public_surface`` reads identically
+    # ``True`` for both. Default ``True``, matching ``compare()``'s own
+    # parameter default.
+    scope_to_public_surface_requested: bool = field(default=True, kw_only=True)
 
     def _effective_kind_sets(
         self,

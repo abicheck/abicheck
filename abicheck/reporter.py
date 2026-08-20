@@ -214,11 +214,12 @@ def to_stat_json(
 
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
-        # Same persistence `add_contract_context` does for the full JSON
-        # path, which `--stat` bypasses entirely (Codex review).
+        # Same persistence `add_contract_context` does for the full JSON path, which `--stat` bypasses entirely (Codex review).
         d["analysis_assurance_exit_contribution"] = analysis_assurance_exit_contribution(
             result, require_complete=require_complete_analysis
         )
+    from .reporter_contract_blocks import add_effective_config_digest
+    add_effective_config_digest(d, result, severity_config=severity_config, require_complete_analysis=require_complete_analysis)
     # Deliberately NOT `add_use_case_impact` here, unlike the full JSON path
     # (`reporter_contract_blocks`): this function's contract is the summary
     # object alone, and a per-finding attribution block is the opposite of a

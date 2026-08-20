@@ -1249,13 +1249,32 @@ def _run_baseline_compare(
     from .exit_decision import resolve_compare_exit_decision
 
     exit_scheme = (
-        "severity" if exit_code_scheme == "severity" and sev_config is not None
+        "severity"
+        if exit_code_scheme == "severity" and sev_config is not None
         else "legacy"
     )
     summary["exit"] = resolve_compare_exit_decision(
-        diff, sev_config, exit_scheme,
+        diff,
+        sev_config,
+        exit_scheme,
         require_complete_analysis=require_complete_analysis,
     ).to_dict()
+
+    # CLI cleanup phase two, PR B: the same effective-config digest
+    # `add_contract_context` persists for `compare`/the release fan-out --
+    # same shared helper, same `exit_scheme`/`sev_config` pair the `exit`
+    # block immediately above was just resolved from, so all three front
+    # ends agree byte-for-byte whenever they actually resolved the same
+    # configuration.
+    from .reporter_contract_blocks import add_effective_config_digest
+
+    add_effective_config_digest(
+        summary,
+        diff,
+        severity_config=sev_config,
+        exit_code_scheme=exit_scheme,
+        require_complete_analysis=require_complete_analysis,
+    )
 
     from .cli_compare_helpers import _verdict_exit_code
     from .contract_coverage_exit import fold_coverage_exit

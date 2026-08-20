@@ -278,20 +278,44 @@ def resolve_scan_config(
 
 
 def record_resolved_config(result: Any, config: Any) -> None:
-    """Install *config* on *result*'s persisted context, if it has one.
+    """Install *config* on *result*'s persisted context, if it has one, and
+    unconditionally on ``result.evaluation_config`` for the effective-
+    config digest's rich tier (CLI cleanup phase two, PR B).
 
-    A no-op unless ``--contract`` produced a context. Unlike
-    ``compare``'s equivalent there is no gate half to reconcile *for this
-    receipt specifically*: ``config`` (from :func:`resolve_scan_config`) has
-    its severity/exit-code-scheme fields blanked to built-in defaults
-    regardless of what real ``--severity-preset``/``--exit-code-scheme`` flags the
-    run was given (see :func:`_without_gate_settings`), so there is nothing
-    to reconcile with -- it is inert by construction, not because ``scan``
-    lacks a gate (it has one; see the module docstring). The "values from
-    the run, provenance from the resolver" split ``compare`` needs would only
-    arise once this receipt's severity fields are wired to the resolution
-    that actually scores the run.
+    Not a no-op without ``--contract`` (an earlier revision of this
+    docstring said it was, before that stamp existed) -- a ``--pack``-only
+    ``scan --against`` never builds a ``PersistedContractContext`` either,
+    so ``effective_config_digest``'s rich tier needs ``result.
+    evaluation_config`` regardless of the ``contract_context`` branch
+    below, mirroring ``cli_compare_receipt.record_resolved_config``'s
+    identical fix.
+
+    ``config`` (from :func:`resolve_scan_config`) has its own severity/
+    exit-code-scheme fields blanked to built-in defaults regardless of what
+    real ``--severity-preset``/``--exit-code-scheme`` flags the run was
+    given (see :func:`_without_gate_settings`) -- unlike `compare`'s
+    equivalent, there is no gate half to reconcile *here*: this receipt
+    never needs those blanked fields, because
+    :func:`~abicheck.effective_config_digest.effective_config_fields_
+    from_full_config` reads ``gate.exit_code_scheme``/``gate.severity.*``
+    from its own *severity_config*/*exit_code_scheme* parameters -- the
+    same already-resolved pair ``_run_baseline_compare`` threads for the
+    sibling ``exit`` block -- rather than from ``config.gate`` at all
+    (CodeRabbit review, PR #803, fresh evidence: an earlier revision of
+    that function read the gate axes off *resolved_config* directly, so
+    stamping this blanked ``config`` here silently discarded the run's
+    real gate from the digest).
     """
+    if config is None:
+        return
+    # CLI cleanup phase two, PR B (Codex review, PR #803): stamped
+    # unconditionally, mirroring `cli_compare_receipt.record_resolved_
+    # config`'s identical fix -- a `--pack`-only `scan --against` (no
+    # `--contract`) never builds a `PersistedContractContext` either, so
+    # `effective_config_digest`'s rich tier needs this regardless of the
+    # branch below.
+    result.evaluation_config = config
+
     from .contract_evidence import PersistedContractContext
 
     ctx = getattr(result, "contract_context", None)
