@@ -975,7 +975,18 @@ re-extraction all belong in this matrix, not just in Phase 1's routing
 list — a phase that satisfies every equivalence test here except one
 direct caller's path would still leave that caller resolving depth,
 compile context, cache paths, or resource lifetime differently from
-everything else.
+everything else. Run this matrix once per **binary backend** (ELF,
+PE/COFF, Mach-O), not once against a single ELF fixture: Phase 1
+deliberately keeps PE/Mach-O's own backend-specific extraction path
+(`handle_non_elf_dump`) rather than folding it into the ELF pipeline, so an
+ELF-only fixture can satisfy every assertion above while a PE or Mach-O
+caller still resolves depth, compile context, scope, or cache inputs
+differently — exactly the class of divergence this gate exists to catch.
+Not every one of the eleven paths above has a PE/Mach-O caller today (e.g.
+`deps compare`'s `stack_checker._run_abi_diff()` and the L0/POI supplementary
+re-extractions are ELF-specific in practice), so the backend axis applies
+wherever a path is genuinely reachable on more than one platform — `dump`,
+compare-side resolution, and scan candidate/baseline resolution all are.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
 --against`'s own nested baseline comparison, release per-library compare,
