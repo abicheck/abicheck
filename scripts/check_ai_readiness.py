@@ -2106,21 +2106,79 @@ def check_banned_imports(f: Findings) -> None:
 # Check: CLI interface contract (ADR-037 D10.1)
 # ---------------------------------------------------------------------------
 
-# Tier-1 core entry points a front-end must never call directly — it must route
-# through the Tier-2 service layer (``service.run_compare`` /
-# ``service.compare_snapshots``). ADR-037 D1/D10.1.
-_TIER1_CORE_FUNCS: frozenset[str] = frozenset({"compare"})
+# Tier-1 core entry points a front-end must never call directly — each maps
+# the module defining it to the function name(s) and the guidance a
+# violation should carry. ADR-037 D1/D10.1 covers ``checker.compare``;
+# ``dumper.dump``/``service.resolve_input`` extend the identical rule per
+# Phase 0 item 2 of
+# docs/contribute/plans/duplication-and-convergence-assessment.md — a
+# front-end reaching any of the three bypasses the one shared
+# resolve/execute path the rest of that plan is converging on.
+_TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
+    (
+        "checker",
+        frozenset({"compare"}),
+        "route through `service.run_compare` / `service.compare_snapshots`",
+    ),
+    (
+        "dumper",
+        frozenset({"dump"}),
+        "route through `service.run_dump` / `service_dump_pipeline.run_dump_request`",
+    ),
+    (
+        "service",
+        frozenset({"resolve_input"}),
+        "route through `service_input_resolution.resolve_side_snapshot` "
+        "(or `cli_resolve._resolve_input`, its CLI-side wrapper)",
+    ),
+)
+
+#: Modules exempted from the ``service.resolve_input`` entry above:
+#: ``cli_resolve.py``'s own ``_resolve_input()`` *is* the CLI's sanctioned,
+#: framework-aware wrapper over ``service.resolve_input`` (see its module
+#: docstring) — the same role ``service.py`` itself plays for
+#: ``checker.compare``. Nothing else in ``cli*.py``/``appcompat.py`` may
+#: bypass it, so only this one module's own definition is exempt.
+_RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 
 # ``"<rel-path>:<lineno>"`` call sites deliberately exempted, each needing a
-# reason in review. Empty by design — a new exemption is a reviewed decision,
-# not an accident (mirrors the INTENTIONAL_SUBSET philosophy of D10.2).
-CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset()
+# reason in review. Pre-populated with the pre-existing, already-documented
+# `dumper.dump`/`service.resolve_input` direct-call sites Phase 1 of the same
+# plan names as duplication to converge (`cli_dump_helpers.perform_elf_dump`,
+# `appcompat.check_appcompat`, `cli_scan_baseline`'s baseline resolution) —
+# a new entry beyond these needs the same reviewed sign-off (mirrors the
+# INTENTIONAL_SUBSET philosophy of D10.2).
+CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
+        # rather than through `service_dump_pipeline.run_dump_request` —
+        # tracked as Phase 1 item 1 of the convergence plan.
+        "abicheck/cli_dump_helpers.py:1743",
+        # Standalone application-compatibility (P0 item 6): dumps both
+        # sides directly rather than through any of the other paths.
+        "abicheck/appcompat.py:1599",
+        "abicheck/appcompat.py:1608",
+        # Scan baseline resolution (P0 item 4's baseline half): calls
+        # `service.resolve_input()` directly rather than through
+        # `service_input_resolution.resolve_side_snapshot`.
+        "abicheck/cli_scan_baseline.py:1119",
+        # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
+        # frontend and engine path"): its own parallel engine path calls
+        # both `dumper.dump()` and `checker.compare()` directly.
+        "abicheck/compat/cli.py:313",
+        "abicheck/compat/cli.py:970",
+        "abicheck/compat/cli.py:1154",
+    }
+)
 
 
-def _checker_compare_bindings(tree: ast.Module) -> set[str]:
-    """Return the local names bound to ``checker.compare`` via import in *tree*.
+def _tier1_func_bindings(
+    tree: ast.Module, module: str, funcs: frozenset[str]
+) -> set[str]:
+    """Return the local names bound to one of *funcs* via a direct import of
+    *module*'s function(s) in *tree*.
 
-    Handles ``from .checker import compare`` and ``... import compare as X`` at
+    Handles ``from .<module> import <func>`` and ``... import <func> as X`` at
     module or function scope, so a lazily-imported alias is caught too.
     """
     names: set[str] = set()
@@ -2128,47 +2186,50 @@ def _checker_compare_bindings(tree: ast.Module) -> set[str]:
         if (
             isinstance(node, ast.ImportFrom)
             and node.module is not None
-            and node.module.split(".")[-1] == "checker"
+            and node.module.split(".")[-1] == module
         ):
             for alias in node.names:
-                if alias.name in _TIER1_CORE_FUNCS:
+                if alias.name in funcs:
                     names.add(alias.asname or alias.name)
     return names
 
 
-def _checker_module_bindings(tree: ast.Module) -> set[str]:
-    """Return local names bound to the ``checker`` *module* itself.
+def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
+    """Return local names bound to *module* itself.
 
-    Catches ``from . import checker [as X]`` / ``from abicheck import checker
-    [as X]`` and ``import abicheck.checker as X``, so an aliased
-    ``core.compare(...)`` call is recognised, not just the literal
-    ``checker.compare(...)``.
+    Catches ``from . import <module> [as X]`` / ``from abicheck import
+    <module> [as X]`` and ``import abicheck.<module> as X``, so an aliased
+    ``core.<func>(...)`` call is recognised, not just the literal
+    ``<module>.<func>(...)``.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            # ``from . import checker`` (module is None) or ``from abicheck import checker``.
+            # ``from . import <module>`` (module is None) or ``from abicheck import <module>``.
             if node.module is None or node.module.split(".")[-1] == "abicheck":
                 for alias in node.names:
-                    if alias.name == "checker":
+                    if alias.name == module:
                         names.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[-1] == "checker":
-                    # ``import abicheck.checker`` binds ``abicheck``; only an
-                    # explicit ``as X`` gives a usable ``X.compare`` call name.
+                if alias.name.split(".")[-1] == module:
+                    # ``import abicheck.<module>`` binds ``abicheck``; only an
+                    # explicit ``as X`` gives a usable ``X.<func>`` call name.
                     if alias.asname:
                         names.add(alias.asname)
     return names
 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
-    """The front-end modules the contract covers: every ``cli*.py`` and the
-    consumer-side ``appcompat.py`` (a verdict-emitting front-end too). The MCP
+    """The front-end modules the contract covers: every ``cli*.py``, the
+    consumer-side ``appcompat.py`` (a verdict-emitting front-end too), and
+    ``compat/cli.py`` (the ABICC-compatible CLI wrapper — a *nested* front
+    end `PKG.glob("cli*.py")` alone would miss, per Phase 0 item 2 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md). The MCP
     server was removed; agent integrations route through these same
     front ends (CLI or the typed Python API) rather than a separate tier."""
     yield from PKG.glob("cli*.py")
-    for extra in ("appcompat.py",):
+    for extra in ("appcompat.py", "compat/cli.py"):
         path = PKG / extra
         if path.is_file():
             yield path
@@ -2330,15 +2391,19 @@ def _check_one_default_per_flag(f: Findings) -> None:
 
 def check_cli_contract(f: Findings) -> None:
     """ERROR if a front-end module calls a Tier-1 core entry point
-    (``checker.compare``) directly instead of routing through the Tier-2 service.
+    (``checker.compare``, ``dumper.dump``, ``service.resolve_input``) directly
+    instead of routing through the Tier-2 service.
 
     Covers every ``abicheck/cli*.py`` and ``abicheck/appcompat.py``. ADR-037
-    D1/D10.1: front-ends are thin adapters; one classification path is what keeps
-    ``compare`` / ``compare-release`` / ``appcompat`` from drifting apart
-    (the ``scope_public`` default divergence the ADR documents). Importing a
-    ``checker`` *type* for annotations or result-rendering stays legal — the gate
-    keys on the *call expression*, not the import statement. Both a direct
-    ``compare`` import and an aliased ``checker``-module call are detected.
+    D1/D10.1: front-ends are thin adapters; one classification/resolution path
+    is what keeps ``compare`` / ``compare-release`` / ``appcompat`` from
+    drifting apart (the ``scope_public`` default divergence the ADR documents)
+    — the same reasoning Phase 0 item 2 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md extends to
+    ``dumper.dump``/``service.resolve_input``. Importing a target module's
+    *type* for annotations or result-rendering stays legal — the gate keys on
+    the *call expression*, not the import statement. Both a direct function
+    import and an aliased module-attribute call are detected for each target.
     """
     for path in sorted(_iter_cli_contract_sources()):
         rel = _rel(path)
@@ -2346,25 +2411,28 @@ def check_cli_contract(f: Findings) -> None:
             tree = ast.parse(_read(path), filename=rel)
         except SyntaxError:
             continue
-        bound = _checker_compare_bindings(tree)
-        checker_modules = _checker_module_bindings(tree)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+        for module, funcs, guidance in _TIER1_TARGETS:
+            if module == "service" and path.stem in _RESOLVE_INPUT_WRAPPER_MODULES:
                 continue
-            func = node.func
-            is_tier1 = (isinstance(func, ast.Name) and func.id in bound) or (
-                isinstance(func, ast.Attribute)
-                and func.attr in _TIER1_CORE_FUNCS
-                and isinstance(func.value, ast.Name)
-                and func.value.id in checker_modules
-            )
-            if is_tier1 and f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
-                f.err(
-                    "cli-contract",
-                    f"{rel}:{node.lineno}: front-end calls Tier-1 `checker.compare` "
-                    "directly; route through `service.run_compare` / "
-                    "`service.compare_snapshots` (ADR-037 D1/D10.1)",
+            bound = _tier1_func_bindings(tree, module, funcs)
+            target_modules = _tier1_module_bindings(tree, module)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                is_tier1 = (isinstance(func, ast.Name) and func.id in bound) or (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in funcs
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id in target_modules
                 )
+                if is_tier1 and f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
+                    called = func.attr if isinstance(func, ast.Attribute) else func.id
+                    f.err(
+                        "cli-contract",
+                        f"{rel}:{node.lineno}: front-end calls Tier-1 `{module}.{called}` "
+                        f"directly; {guidance} (ADR-037 D1/D10.1)",
+                    )
     # D10.2 shared-decorator coverage + D10.4 one-default-per-flag (ADR-037 D3).
     _check_decorator_coverage(f)
     _check_one_default_per_flag(f)

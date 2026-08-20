@@ -812,9 +812,9 @@ CLI / Python facade / Action / compat adapters
 
 Engine modules may not import `click`; engine/service modules may not
 import `cli_*`; CLI modules may not call `dumper.dump`, `checker.compare`,
-or `service.resolve_input` directly (mirroring the existing `cli-contract`
-gate, which already enforces the last rule for `checker.compare` — the
-other two constraints are new); frontends only build requests, call
+or `service.resolve_input` directly (the `cli-contract` gate now enforces
+all three, allowlist-and-shrink over today's pre-existing call sites — see
+Phase 0 item 2 below); frontends only build requests, call
 application operations, render results, and translate exceptions;
 pack detection belongs under `buildsource`, not a CLI helper module;
 progress notification uses callbacks/events, not `click.echo`.
@@ -933,7 +933,28 @@ block-everything-immediately):
    than attempted as a drive-by widening of this check's first version.
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
-   gate, which today only covers `checker.compare`).
+   gate, which previously only covered `checker.compare`). **Implemented**:
+   `scripts/check_ai_readiness.py`'s `check_cli_contract` now walks a
+   generic `_TIER1_TARGETS` table (`checker.compare`, `dumper.dump`,
+   `service.resolve_input`) over every `cli*.py`, `appcompat.py`, and
+   `compat/cli.py` module (the last was previously outside this check's own
+   `_iter_cli_contract_sources()` scan entirely, despite being exactly the
+   "nested front end" this item names), allowlist-and-shrink
+   (`CLI_CONTRACT_ALLOWLIST`, pre-populated with the seven pre-existing,
+   already-documented call sites this same plan's P0/P1 sections name:
+   `cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`'s two
+   dump calls, `cli_scan_baseline`'s baseline resolution, and
+   `compat/cli.py`'s three direct calls). `cli_resolve.py`'s own
+   `_resolve_input()` — the CLI's designated, framework-aware wrapper over
+   `service.resolve_input` (see its module docstring) — is the one
+   exemption from the `service.resolve_input` rule, the same role
+   `service.py` itself already plays for `checker.compare`.
+   `tests/test_cli_contract.py` mirrors both the generalized detection (an
+   aliased-import and an aliased-module-call case per new target, plus a
+   not-flagged case for the sanctioned wrapper) and a
+   `test_cli_contract_allowlist_entries_are_real_violations` freshness
+   check so a fixed call site can't leave a stale allowlist entry behind
+   unnoticed.
 3. Every artifact extraction call site *for the seven user-facing
    operations and the two internal supplementary call sites named in
    Phase 1* routes through the future artifact application service.

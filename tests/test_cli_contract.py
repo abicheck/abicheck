@@ -42,10 +42,13 @@ from scripts.check_ai_readiness import Findings, check_cli_contract  # noqa: E40
 
 
 def test_no_tier_skip() -> None:
-    """No ``abicheck/cli*.py`` module calls Tier-1 ``checker.compare`` directly.
+    """No ``abicheck/cli*.py`` module calls a Tier-1 core entry point
+    (``checker.compare``, ``dumper.dump``, ``service.resolve_input``) directly
+    outside the reviewed ``CLI_CONTRACT_ALLOWLIST``.
 
-    Front-ends must route through ``service.run_compare`` /
-    ``service.compare_snapshots`` (ADR-037 D1/D10.1).
+    Front-ends must route through the Tier-2 service layer (ADR-037 D1/D10.1;
+    the latter two extend the identical rule per Phase 0 item 2 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md).
     """
     findings = Findings()
     check_cli_contract(findings)
@@ -127,6 +130,126 @@ def test_service_compare_call_is_not_flagged(
     findings = gate.Findings()
     gate.check_cli_contract(findings)
     assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+# ── Phase 0 item 2 of the convergence plan: `dumper.dump` / `service.resolve_input`
+#    extend the identical Tier-1 rule ─────────────────────────────────────────
+
+_EXTRA_TIER1_VIOLATION_CASES: list[pytest.ParameterSet] = [
+    pytest.param(
+        "cli_dumps_directly.py",
+        "from .dumper import dump\ndef go(a):\n    return dump(a)\n",
+        id="dumper-dump-direct-import",
+    ),
+    pytest.param(
+        "cli_dumps_aliased.py",
+        "from . import dumper as core\ndef go(a):\n    return core.dump(a)\n",
+        id="dumper-dump-aliased-module-call",
+    ),
+    pytest.param(
+        "cli_resolves_directly.py",
+        "from .service import resolve_input\ndef go(a):\n    return resolve_input(a)\n",
+        id="service-resolve-input-direct-import",
+    ),
+    pytest.param(
+        "cli_resolves_aliased.py",
+        "from . import service as svc\ndef go(a):\n    return svc.resolve_input(a)\n",
+        id="service-resolve-input-aliased-module-call",
+    ),
+]
+
+
+@pytest.mark.parametrize("filename, source", _EXTRA_TIER1_VIOLATION_CASES)
+def test_gate_flags_extra_tier1_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    source: str,
+) -> None:
+    """`dumper.dump`/`service.resolve_input` are caught the same way
+    `checker.compare` already is, by direct import and by aliased module call."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / filename).write_text(source)
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert filename in errors[0]
+
+
+def test_service_resolve_input_call_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Routing through `service_input_resolution.resolve_side_snapshot` must
+    NOT be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_ok.py").write_text(
+        "from .service_input_resolution import resolve_side_snapshot\n"
+        "def go(a):\n"
+        "    return resolve_side_snapshot(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_cli_resolve_own_wrapper_is_exempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cli_resolve.py` is the sanctioned CLI-side wrapper over
+    `service.resolve_input` (see its module docstring) — its own call must not
+    be flagged, even though every other `cli*.py` module is checked."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_cli_contract_allowlist_entries_are_real_violations() -> None:
+    """Every `CLI_CONTRACT_ALLOWLIST` entry must still name a genuine Tier-1
+    call site in the real tree — otherwise the allowlist rots into a rubber
+    stamp for a call that was already fixed or removed."""
+    import scripts.check_ai_readiness as gate
+
+    findings = gate.Findings()
+    original = gate.CLI_CONTRACT_ALLOWLIST
+    try:
+        gate.CLI_CONTRACT_ALLOWLIST = frozenset()
+        gate.check_cli_contract(findings)
+    finally:
+        gate.CLI_CONTRACT_ALLOWLIST = original
+    flagged_sites = {
+        m.split(":", 2)[0] + ":" + m.split(":", 2)[1]
+        for c, m in findings.errors
+        if c == "cli-contract"
+    }
+    stale = original - flagged_sites
+    assert not stale, (
+        f"allowlist entries no longer correspond to a real violation: {stale}"
+    )
 
 
 # ── D10.2: shared-decorator coverage (ADR-037 D3 / G22 Phase 2) ──────────────
