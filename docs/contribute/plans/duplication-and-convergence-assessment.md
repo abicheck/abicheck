@@ -546,7 +546,13 @@ a launcher prefix can itself change the effective directory (`env -C build
 clang ...`, GNU `env`'s documented `-C`/`--chdir`) independently of any
 `recorded_directory` compose (`env -C a env -C b ...` → `a/b`), so
 `effective_directory` — mirroring the existing `effective_directory()`
-helper — is what replay must actually resolve relative operands against;
+helper — is what replay must actually resolve relative operands against,
+**including a compile-database entry's own `@response-file` expansion**:
+`build_context.py`'s existing parser currently expands response files
+against the recorded directory before stripping/applying launcher
+prefixes, which is the identical class of bug this field exists to
+close — response-file expansion belongs after launcher-prefix resolution,
+against `effective_directory`, exactly like every other relative operand.
 `recorded_directory` stays the raw, unmodified compile-database value for
 identity/provenance. `environment` is a small structured type, not a bare
 mapping (or a mapping-vs-cleared-sentinel union — a first pass at this
@@ -576,11 +582,16 @@ does. Without this, replay would have to rescan `original_argv` itself
 (defeating the parse-once contract again) or risk resolving a different
 include search than the real build used. This generalizes, rather than
 replaces, `_argv.py`'s existing `_EnvPathCleared` sentinel and
-`path_cleared` state (that module's own narrower need — "was `PATH`
-specifically cleared, for driver-lookup purposes" — is the `"PATH" in
-unset or clear_inherited` case of this broader model) — the parsed model
-should carry what a real `env` invocation can express, not a simplified
-projection of it.
+`path_cleared` state — but the equivalence is narrower than "OR the two
+flags": `"PATH" in unset` alone is always correct (an explicit unset always
+means "no `PATH`"), while `clear_inherited` alone is **not** — a clear
+followed by a later `PATH=...` assignment in the same folded chain (`env -i
+PATH=/sdk clang ...`) leaves `PATH` genuinely set, not cleared, since the
+fold (per the ordering note above) already applied the assignment on top
+of the clear. The correct equivalence is `"PATH" in unset or
+(clear_inherited and "PATH" not in {name for name, _ in assignments})` —
+"cleared and never reassigned." The parsed model should carry what a real
+`env` invocation can express, not a simplified projection of it.
 
 `unset` and `assignments` are **not** independently-collected sets that a
 consumer merges later — nested launchers can make identical raw field
