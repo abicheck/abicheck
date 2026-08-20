@@ -455,7 +455,7 @@ class CompilerInvocation:
     original_argv: tuple[str, ...]
     recorded_directory: Path
     effective_directory: Path
-    environment: Mapping[str, str] | EnvironmentCleared
+    environment: EnvironmentOverlay
     launchers: tuple[str, ...]
     driver_token: str
     resolved_driver: Path | str
@@ -490,17 +490,39 @@ clang ...`, GNU `env`'s documented `-C`/`--chdir`) independently of any
 `effective_directory` — mirroring the existing `effective_directory()`
 helper — is what replay must actually resolve relative operands against;
 `recorded_directory` stays the raw, unmodified compile-database value for
-identity/provenance. `environment` is `EnvironmentCleared` rather than a
-plain empty mapping when the recorded `argv` opens with `env -i` or
-clears `PATH` via `env -u PATH` — a plain `{}` is indistinguishable from
-"no override recorded" without also materializing the process's real
-inherited environment, which a compile-database entry never captures, so a
-consumer would otherwise have to rescan `original_argv` itself (defeating
-the parse-once contract again) or risk replaying with an inherited `PATH`
-that resolves a different compiler than the real build used. This mirrors
-`_argv.py`'s existing `_EnvPathCleared` sentinel and `path_cleared` state,
-not a new invention — the parsed model should carry what that module
-already tracks, not a simplified projection of it.
+identity/provenance. `environment` is a small structured type, not a bare
+mapping (or a mapping-vs-cleared-sentinel union — a first pass at this
+model tried exactly that and it still couldn't represent GNU `env`'s real
+grammar, `env [OPTIONS] [NAME=VALUE]... COMMAND`, which lets `-i`/`-u` and
+inline assignments compose in one invocation: `env -i CPATH=/sdk clang
+...` clears the inherited environment and then sets one variable on top;
+`env -u CPATH clang ...` removes a single named variable, independent of
+any clearing; either shape can carry any number of ordinary `NAME=VALUE`
+assignments alongside it):
+
+```python
+@dataclass(frozen=True)
+class EnvironmentOverlay:
+    clear_inherited: bool                    # env -i / a bare env with no inherited passthrough
+    unset: frozenset[str]                    # env -u NAME (may repeat)
+    assignments: tuple[tuple[str, str], ...] # NAME=VALUE, in argv order
+```
+
+A plain `{}` (or a single cleared-vs-not sentinel) can't carry this: it
+can't distinguish "no override recorded" from a real `env -i` clear, can't
+hold an assignment applied *on top of* a clear in the same invocation, and
+can't name which variable(s) an `-u` removed — and the distinction matters
+concretely, since `CPATH`/`C_INCLUDE_PATH`/`CPLUS_INCLUDE_PATH` directly
+alter compiler include search, not merely driver lookup the way `PATH`
+does. Without this, replay would have to rescan `original_argv` itself
+(defeating the parse-once contract again) or risk resolving a different
+include search than the real build used. This generalizes, rather than
+replaces, `_argv.py`'s existing `_EnvPathCleared` sentinel and
+`path_cleared` state (that module's own narrower need — "was `PATH`
+specifically cleared, for driver-lookup purposes" — is the `"PATH" in
+unset or clear_inherited` case of this broader model) — the parsed model
+should carry what a real `env` invocation can express, not a simplified
+projection of it.
 
 Raw compiler-command parsing happens once; replay, ambiguity detection,
 build-option drift, and reporting all consume the structured fields instead
