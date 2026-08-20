@@ -45,3 +45,8 @@
   with neither `--contract` nor `--pack` involved either) via a keyed JSON
   encoding rather than a delimiter-joined string, so the two axes can't
   collide with each other or with a same-content-different-shape input.
+  `public_surface_allowlist` is gated on `is not None` rather than
+  truthiness, since a `--post-manifest` committing to zero exports
+  (`public_surface_allowlist=set()`) is a real, distinct, active scope
+  from no manifest at all — the same `is not None` rule the comparison's
+  own `scope_active` check already used for this parameter.

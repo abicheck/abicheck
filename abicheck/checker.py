@@ -1164,13 +1164,30 @@ def compare(
     # other collide. Keyed JSON (not a delimiter-joined string) keeps the
     # two axes distinguishable and avoids the non-injective-join class of
     # bug already fixed elsewhere in this same digest work.
+    #
+    # `public_surface_allowlist` is gated on `is not None`, not truthiness
+    # (Codex review, PR #803, fresh evidence): an empty allowlist is a real,
+    # distinct, active configuration -- a POST manifest committing to zero
+    # exports -- and `scope_active` a few lines above this block already
+    # treats `public_surface_allowlist is not None` as "scoping is active"
+    # for exactly this reason (line ~1038). Collapsing `set()` to "no
+    # explicit scope at all" would let an absent manifest and a
+    # zero-export manifest hash identically while `FilterNonPublicSurface`
+    # filters every concrete export under the latter. `force_public_symbols`
+    # deliberately keeps the plain truthiness check: every other consumer of
+    # this parameter in the codebase (`contract_evaluation.py`,
+    # `contract_pipeline.py`, `service_compare_pipeline.py`, ...) already
+    # treats an empty set as equivalent to `None` for this specific axis --
+    # there is no "force nothing explicitly public" state distinct from "no
+    # forcing at all" anywhere else this parameter is consumed, so the two
+    # axes are intentionally not symmetric here.
     import hashlib
     import json as _json
 
     _explicit_scope_sources: dict[str, list[str]] = {}
     if force_public_symbols:
         _explicit_scope_sources["force_public_symbols"] = sorted(force_public_symbols)
-    if public_surface_allowlist:
+    if public_surface_allowlist is not None:
         _explicit_scope_sources["public_surface_allowlist"] = sorted(
             public_surface_allowlist
         )

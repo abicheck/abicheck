@@ -1115,3 +1115,50 @@ class TestBaselineExplicitScopeCoversPostManifest:
             both.explicit_scope_source_sha256,
         }
         assert len(digests) == 3, digests
+
+    def test_empty_post_manifest_allowlist_is_a_distinct_active_scope(self):
+        """Codex review, PR #803, fresh evidence: `public_surface_allowlist=
+        set()` is a real, active configuration -- a POST manifest committing
+        to zero exports -- not the same as no manifest at all
+        (`public_surface_allowlist=None`). A truthiness check collapses the
+        two, so an absent manifest and a zero-export manifest previously
+        hashed identically even though `FilterNonPublicSurface` filters
+        every concrete export under the latter and nothing under the
+        former."""
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pp_a", "pp_a")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pp_a", "pp_a")], **common
+        )
+
+        no_manifest = compare(old_snap, new_snap)
+        empty_manifest = compare(old_snap, new_snap, public_surface_allowlist=set())
+
+        assert no_manifest.explicit_scope_source_sha256 is None
+        assert empty_manifest.explicit_scope_source_sha256 is not None
+        assert empty_manifest.explicit_scope_source_sha256 != (
+            no_manifest.explicit_scope_source_sha256
+        )
+
+        fields_no_manifest = effective_config_fields(
+            no_manifest, severity_config=None, exit_code_scheme="legacy"
+        )
+        fields_empty_manifest = effective_config_fields(
+            empty_manifest, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            fields_no_manifest["surface.explicit_scope"]
+            != fields_empty_manifest["surface.explicit_scope"]
+        )
