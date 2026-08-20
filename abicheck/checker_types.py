@@ -590,16 +590,19 @@ class DiffResult:
     # provided``'s bool (this field is the content, not just presence).
     suppression_source_sha256: str | None = field(default=None, kw_only=True)
     # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
-    # a canonical content digest of the resolved forced-public-symbol set
-    # (``compare(..., force_public_symbols=...)``, itself resolved from
+    # a canonical content digest of every resolved explicit-scope input:
+    # ``compare(..., force_public_symbols=...)`` (resolved from
     # ``--public-symbols-list``/``.abicheck.yml``'s ``scope.public_
-    # symbols`` one layer above ``compare()``), for the identical reason
+    # symbols``) and ``compare(..., public_surface_allowlist=...)`` (the
+    # resolved ``--post-manifest`` allowlist, where an *empty* allowlist is
+    # a distinct active scope, not the absence of one), for the same reason
     # ``suppression_source_sha256`` above exists: an ordinary comparison
     # with neither ``--contract`` nor ``--pack`` never resolves a
     # ``CompatibilityEvaluationConfig``, so the baseline tier had no way to
-    # detect that two runs selecting different forced-public roots (which
-    # can retain different findings) resolved genuinely different
-    # configuration. ``None`` when no explicit scope was forced at all.
+    # detect that two runs selecting different forced-public/manifest
+    # scopes (which can retain different findings) resolved genuinely
+    # different configuration. ``None`` when neither source was active at
+    # all.
     explicit_scope_source_sha256: str | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(

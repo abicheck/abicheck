@@ -1181,8 +1181,11 @@ def compare(
     # there is no "force nothing explicitly public" state distinct from "no
     # forcing at all" anywhere else this parameter is consumed, so the two
     # axes are intentionally not symmetric here.
-    import hashlib
-    import json as _json
+    # `content_digest` is the same canonical-JSON-then-SHA-256 primitive
+    # `contract_context.py` already uses for overlay content digests
+    # (CodeRabbit review, PR #803, fresh evidence) -- reused here instead of
+    # a second, independently-hand-rolled hashing convention.
+    from .contract_evidence_collect import content_digest
 
     _explicit_scope_sources: dict[str, list[str]] = {}
     if force_public_symbols:
@@ -1192,11 +1195,7 @@ def compare(
             public_surface_allowlist
         )
     explicit_scope_source_sha256 = (
-        "sha256:" + hashlib.sha256(
-            _json.dumps(
-                _explicit_scope_sources, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
-        ).hexdigest()
+        "sha256:" + content_digest(_explicit_scope_sources)
         if _explicit_scope_sources
         else None
     )

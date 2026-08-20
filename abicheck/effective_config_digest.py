@@ -278,6 +278,44 @@ def _digested_items_str(items: Any) -> str:
     return str(getattr(items, "sha256", "") or "")
 
 
+def _rich_tier_explicit_scope_str(surface: Any, result: Any) -> str:
+    """``surface.explicit_scope`` for the rich tier, merging *two*
+    independent explicit-scope sources rather than falling back to only
+    one (CodeRabbit review, PR #803, fresh evidence: a plain ``or``
+    fallback -- "use the config's digest when present, else the result's"
+    -- is unsound, because the two sources are not alternatives; a single
+    run can carry both at once).
+
+    *resolved_config.surface.explicit_scope* (D7's
+    :func:`compatibility_evaluation_frontend._explicit_scope`) covers only
+    ``--public-symbol``/``--public-symbols-list``/``.abicheck.yml``'s
+    ``scope.public_symbols``. *result.explicit_scope_source_sha256*
+    (``checker.compare()``) independently covers *both* the resolved
+    ``force_public_symbols`` set *and* ``--post-manifest``'s
+    ``public_surface_allowlist`` -- and ``force_public_symbols`` is always
+    threaded into ``compare()`` regardless of ``--pack``/``--contract``
+    (``cli_compare_helpers.py``'s ``force_public`` local is resolved once
+    and passed unconditionally), so a ``--pack``-only run combining
+    ``--public-symbols-list`` *and* ``--post-manifest`` genuinely
+    populates both sources at once. Falling back only when the config side
+    is empty would silently drop the post-manifest axis whenever the
+    config side happens to be populated too -- exactly the collision this
+    field exists to prevent. Both digest strings are already canonical
+    content digests, so keying them together (rather than trying to
+    de-duplicate their overlapping coverage of ``force_public_symbols``)
+    is safe: two runs are indistinguishable here only when *both*
+    contributing digests agree."""
+    config_scope = _digested_items_str(getattr(surface, "explicit_scope", None))
+    result_scope = str(getattr(result, "explicit_scope_source_sha256", "") or "")
+    if not config_scope and not result_scope:
+        return ""
+    return json.dumps(
+        {"config": config_scope, "compare": result_scope},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _reclassify_str(rules: Any) -> str:
     """Order-*preserving* encoding of the *active* (non-expired) subset of
     a ``PolicyFile.reclassify`` rule set (``ReclassifyRule.to_report_dict()``,
@@ -348,15 +386,17 @@ def effective_config_fields_from_full_config(
     likewise a checker-level fact with no D7 namespace of its own (Codex
     review, PR #803: an earlier revision hard-coded this field empty for
     the rich tier, so two ``--contract`` runs differing only in
-    ``--scope-public-headers`` collided). ``surface.explicit_scope`` falls
-    back to *result.explicit_scope_source_sha256* the same way
-    ``suppressions`` already falls back to *result.suppression_source_
-    sha256* below (Codex review, PR #803, fresh evidence): a ``--pack``-only
-    run (no ``--contract``) stamps *resolved_config* without ever building a
-    ``PersistedContractContext``, so nothing merges the observed
-    ``--post-manifest`` scope into *resolved_config.surface.explicit_scope*
-    -- leaving it unset even though ``checker.compare()`` already resolved
-    and recorded the real scope digest on *result* itself.
+    ``--scope-public-headers`` collided). ``surface.explicit_scope`` is
+    computed by :func:`_rich_tier_explicit_scope_str`, which *merges*
+    *resolved_config.surface.explicit_scope* with
+    *result.explicit_scope_source_sha256* rather than falling back to only
+    one (CodeRabbit review, PR #803, fresh evidence, following an earlier
+    Codex-reported gap: a ``--pack``-only run combining
+    ``--public-symbols-list`` and ``--post-manifest`` can populate *both*
+    at once, since ``force_public_symbols`` is threaded into
+    ``compare()`` unconditionally -- a plain ``or`` fallback would then
+    silently drop whichever axis lost the fallback race). See that
+    function's own docstring for the full reasoning.
     *require_complete_analysis*
     mirrors the identically-named CLI/API flag (P0.4's analysis-
     completeness gate): it is not a D7 configuration namespace at all --
@@ -411,10 +451,7 @@ def effective_config_fields_from_full_config(
         "surface.internal_namespaces": _namespaces_str(
             getattr(surface, "internal_namespaces", ())
         ),
-        "surface.explicit_scope": _digested_items_str(
-            getattr(surface, "explicit_scope", None)
-        )
-        or str(getattr(result, "explicit_scope_source_sha256", "") or ""),
+        "surface.explicit_scope": _rich_tier_explicit_scope_str(surface, result),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
         ),

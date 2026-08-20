@@ -50,10 +50,17 @@
   (`public_surface_allowlist=set()`) is a real, distinct, active scope
   from no manifest at all — the same `is not None` rule the comparison's
   own `scope_active` check already used for this parameter. The rich
-  tier's `surface.explicit_scope` now also falls back to
-  `result.explicit_scope_source_sha256` (the same way `suppressions`
-  already falls back to `result.suppression_source_sha256`), since a
-  `--pack`-only run stamps `evaluation_config` without ever building a
-  `PersistedContractContext` to merge the observed `--post-manifest`
-  scope into it — leaving that field unset even though `checker.compare()`
-  already resolved and recorded the real scope digest on the result.
+  tier's `surface.explicit_scope` now *merges*
+  `resolved_config.surface.explicit_scope` (which covers only
+  `--public-symbols-list`/`.abicheck.yml`'s `scope.public_symbols`) with
+  `result.explicit_scope_source_sha256` (which independently covers both
+  that same axis and `--post-manifest`), rather than falling back to only
+  one — `force_public_symbols` is threaded into `compare()`
+  unconditionally, so a single `--pack`-only run combining
+  `--public-symbols-list` and `--post-manifest` can populate both sources
+  at once, and a plain `or` fallback would silently drop whichever axis
+  lost the fallback race. Also: `explicit_scope_source_sha256`'s own
+  hashing now reuses the shared `contract_evidence_collect.content_digest`
+  primitive instead of a second hand-rolled convention, and a tautological
+  test assertion (`a != b or (c != d)`, which never fails on its own) was
+  tightened to assert the specific field it claimed to check.

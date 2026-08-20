@@ -342,7 +342,10 @@ class TestAdditionalAxes:
             with_scope, severity_config=None, exit_code_scheme="legacy"
         )
         assert f1["surface.explicit_scope"] == ""
-        assert f2["surface.explicit_scope"] == "scope-digest"
+        # Merged with the (empty, here) result-level scope digest -- see
+        # TestRichTierMergesResultExplicitScope for the merge itself.
+        assert f2["surface.explicit_scope"] != ""
+        assert "scope-digest" in f2["surface.explicit_scope"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
     def test_contract_overlays_change_the_rich_tier_digest(self):
@@ -873,8 +876,9 @@ class TestRichTierGateAxesUseCallerSuppliedValues:
         f_info = effective_config_fields(
             result, severity_config=info_only, exit_code_scheme="severity"
         )
-        assert f_strict["gate.severity.abi_breaking"] != f_info["gate.severity.abi_breaking"] or (
-            f_strict != f_info
+        assert (
+            f_strict["gate.severity.abi_breaking"]
+            != f_info["gate.severity.abi_breaking"]
         )
         assert effective_config_digest(f_strict) != effective_config_digest(f_info)
 
@@ -1164,17 +1168,21 @@ class TestBaselineExplicitScopeCoversPostManifest:
         )
 
 
-class TestRichTierFallsBackToResultExplicitScope:
-    """Codex review, PR #803, fresh evidence: a `--pack`-only run (no
-    `--contract`) stamps `result.evaluation_config` without ever building a
+class TestRichTierMergesResultExplicitScope:
+    """CodeRabbit review, PR #803, fresh evidence, following an earlier
+    Codex-reported gap: a `--pack`-only run (no `--contract`) stamps
+    `result.evaluation_config` without ever building a
     `PersistedContractContext`, so nothing merges the observed
     `--post-manifest` scope into `resolved_config.surface.explicit_scope` --
-    it stays unset even though `checker.compare()` already resolved and
-    recorded the real scope digest on `result.explicit_scope_source_sha256`.
-    The rich tier must fall back to that result-level digest, the same way
-    it already falls back for `suppressions`."""
+    it stays unset (or covers only `--public-symbols-list`) even though
+    `checker.compare()` already resolved and recorded the real, combined
+    scope digest on `result.explicit_scope_source_sha256`. A plain `or`
+    fallback is unsound here: `force_public_symbols` is threaded into
+    `compare()` unconditionally, so a single `--pack`-only run combining
+    `--public-symbols-list` and `--post-manifest` can populate *both*
+    sources at once -- the rich tier must merge them, not pick one."""
 
-    def test_falls_back_when_resolved_config_has_no_explicit_scope(self):
+    def test_uses_result_scope_when_resolved_config_has_no_explicit_scope(self):
         config = _minimal_evaluation_config()  # surface.explicit_scope is None
         result = _result(
             evaluation_config=config,
@@ -1185,24 +1193,68 @@ class TestRichTierFallsBackToResultExplicitScope:
         fields = effective_config_fields(
             result, severity_config=None, exit_code_scheme="legacy"
         )
-        assert fields["surface.explicit_scope"] == "sha256:frompostmanifest"
+        assert fields["surface.explicit_scope"] != ""
 
-    def test_resolved_config_scope_still_wins_when_present(self):
-        """The fallback must not shadow a real resolved-config scope --
-        only fill in when the config side is genuinely empty."""
-        config = _minimal_evaluation_config(
+    def test_a_change_to_either_source_changes_the_merged_scope(self):
+        """Neither source may be silently dropped when both are present --
+        varying either one alone must change the merged field."""
+        config_a = _minimal_evaluation_config(
             surface=SurfaceConfig(
-                explicit_scope=DigestedItems(items=("a",), sha256="sha256:fromconfig")
+                explicit_scope=DigestedItems(items=("a",), sha256="sha256:fromconfig_a")
             )
         )
-        result = _result(
-            evaluation_config=config,
+        config_b = _minimal_evaluation_config(
+            surface=SurfaceConfig(
+                explicit_scope=DigestedItems(items=("b",), sha256="sha256:fromconfig_b")
+            )
+        )
+
+        # Same post-manifest digest, different --public-symbols-list config
+        # digest: the merged field must still change.
+        result_config_a = _result(
+            evaluation_config=config_a,
             explicit_scope_source_sha256="sha256:frompostmanifest",
         )
-        fields = effective_config_fields(
-            result, severity_config=None, exit_code_scheme="legacy"
+        result_config_b = _result(
+            evaluation_config=config_b,
+            explicit_scope_source_sha256="sha256:frompostmanifest",
         )
-        assert fields["surface.explicit_scope"] == "sha256:fromconfig"
+        fields_config_a = effective_config_fields(
+            result_config_a, severity_config=None, exit_code_scheme="legacy"
+        )
+        fields_config_b = effective_config_fields(
+            result_config_b, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            fields_config_a["surface.explicit_scope"]
+            != fields_config_b["surface.explicit_scope"]
+        )
+
+        # Same --public-symbols-list config digest, different post-manifest:
+        # the merged field must still change too (the bug this class guards
+        # against -- an earlier `or` fallback would have collapsed these to
+        # the identical config-side digest, ignoring the manifest entirely).
+        result_manifest_a = _result(
+            evaluation_config=config_a,
+            explicit_scope_source_sha256="sha256:manifest_a",
+        )
+        result_manifest_b = _result(
+            evaluation_config=config_a,
+            explicit_scope_source_sha256="sha256:manifest_b",
+        )
+        fields_manifest_a = effective_config_fields(
+            result_manifest_a, severity_config=None, exit_code_scheme="legacy"
+        )
+        fields_manifest_b = effective_config_fields(
+            result_manifest_b, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            fields_manifest_a["surface.explicit_scope"]
+            != fields_manifest_b["surface.explicit_scope"]
+        )
+        assert effective_config_digest(fields_manifest_a) != effective_config_digest(
+            fields_manifest_b
+        )
 
     def test_two_different_manifests_no_longer_collide_under_a_pack(self):
         config = _minimal_evaluation_config()
