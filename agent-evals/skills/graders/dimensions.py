@@ -424,9 +424,18 @@ def dimension_6(
     # drop the real unscoped report while the failed scoped call backs
     # nothing, letting a COMPATIBLE claim through with no scoped verdict
     # behind it at all (Codex review, PR #808).
+    #
+    # It must also not be a self-comparison. `compare old.so old.so
+    # --used-by renderer` exits with a real verdict (NO_CHANGE, trivially)
+    # while comparing nothing — passing both the scoping check above and
+    # `ev.ran_to_a_verdict`, which would let `only_scoped` drop a real
+    # unscoped BREAKING report in favor of a scoped call that never actually
+    # compared the two sides (Codex review, PR #808).
     resolved, _dangling = _cited(calls, claim)
     claim_is_scoped = any(
-        ev.is_consumer_scoped(c) and ev.ran_to_a_verdict(c)
+        ev.is_consumer_scoped(c)
+        and ev.ran_to_a_verdict(c)
+        and not ev.compares_one_side_against_itself(c)
         for c in resolved.values()
     )
     reported = ev.strongest_reported_verdict(
@@ -463,6 +472,7 @@ def dimension_6(
             ev.consumer_scope_targets(c) & declared_targets
             for c in resolved.values()
             if ev.ran_to_a_verdict(c)
+            and not ev.compares_one_side_against_itself(c)
         )
         if not matched:
             reasons.append(

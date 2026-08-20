@@ -888,6 +888,76 @@ class TestDimensionSix:
         assert result.status == "fail"
         assert any("own report" in r for r in result.reasons)
 
+    def test_a_scoped_self_comparison_does_not_exempt_a_cited_unscoped_report(
+        self, tmp_path
+    ):
+        """`compare old.so old.so --used-by renderer` exits with a real
+        verdict (trivially NO_CHANGE) while comparing nothing -- it must not
+        satisfy the only_scoped exemption any more than a failed scoped call
+        does, or a real unscoped BREAKING report gets dropped in favor of a
+        scoped call that never actually compared the two sides (Codex
+        review, PR #808)."""
+        calls = [
+            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
+            {
+                "seq": 1,
+                "call_id": "c1",
+                "argv": ["compare", "old.so", "old.so", "--used-by", "renderer"],
+                "exit_code": 0,
+                "stdout_path": "captured/1.out",
+                "outputs": [],
+            },
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0, 1], confident=True),
+            SCENARIO_COMPATIBLE,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
+                "captured/1.out": json.dumps({"verdict": "NO_CHANGE"}),
+            },
+        )
+        assert result.status == "fail"
+        assert any("own report" in r for r in result.reasons)
+
+    def test_a_scoped_self_comparison_does_not_satisfy_the_declared_target_check(
+        self, tmp_path
+    ):
+        """The same self-comparison exclusion applied to the declared-target
+        check: a self-comparison scoped to the exact right consumer still
+        never compared the two sides, so it must not satisfy the requirement
+        either."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            {
+                "seq": 0,
+                "call_id": "c0",
+                "argv": ["compare", "old.so", "old.so", "--used-by", "renderer"],
+                "exit_code": 0,
+                "stdout_path": "captured/0.out",
+                "outputs": [],
+            }
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={"captured/0.out": json.dumps({"verdict": "NO_CHANGE"})},
+        )
+        assert result.status == "fail"
+        assert any("declared" in r for r in result.reasons)
+
     def test_scoping_to_the_wrong_consumer_fails(self, tmp_path):
         """A scenario declaring `invocation.used_by: [renderer]` is testing
         whether the run scoped to *that* consumer specifically -- a call
