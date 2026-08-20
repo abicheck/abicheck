@@ -93,9 +93,14 @@ from independently reconstructing a subtly different one.
 ### P0 — Artifact extraction and evidence resolution
 
 The largest duplication and correctness risk. At least ten
-partially-equivalent paths exist today — nine user-facing operations (1–7,
-9–10) plus one internal, backend-level exception (8, the probe harness,
-called out below as not itself a user-facing operation):
+partially-equivalent paths exist today, in three groups: seven user-facing
+operations (1–7); one internal, backend-level exception (8, the probe
+harness, called out below as not itself a user-facing operation, since
+nothing outside its own module calls it); and two internal, supplementary
+extraction call sites invoked *by* the user-facing `compare`/`scan`
+operations above, not separate operations a user invokes directly (9–10,
+each its own `service.resolve_input(..., symbols_only=True)` call distinct
+from either side's primary resolution):
 
 1. Typed dump: `DumpRequest → resolve_dump_request() → execute_dump_request()`
    (`service_dump_pipeline.py`)
@@ -126,18 +131,20 @@ called out below as not itself a user-facing operation):
    `run_probe_matrix(..., snapshot=True)`, the header-only-library
    compile-and-snapshot driver behind G25/G26-family evidence-tier work)
    also calls `dumper.dump()` directly on each compiled probe object.
-   Deliberately called out separately from the nine user-facing operations
-   above (paths 1–7, 9–10), since it isn't one — see "backend-level
-   exception" below.
-9. L0 export-delta re-extraction: `l0_export_delta.collect_l0_export_delta()`
-   — invoked by both native `compare` and scan baseline reconciliation —
-   independently calls `service.resolve_input()` twice with
-   `symbols_only=True`, a *supplementary* extraction distinct from either
-   side's primary resolution. Missing this from the migration would let
-   `compare`/`scan`'s primary-side equivalence tests pass while this
-   secondary path still misses the centralized lifetime, fingerprint, and
+   Deliberately called out separately from the seven user-facing operations
+   above (paths 1–7), since it isn't one — see "backend-level exception"
+   below.
+9. L0 export-delta re-extraction (an internal supplementary call site, not
+   a separate user-facing operation): `l0_export_delta.
+   collect_l0_export_delta()` — invoked by both native `compare` and scan
+   baseline reconciliation — independently calls `service.resolve_input()`
+   twice with `symbols_only=True`, a *supplementary* extraction distinct
+   from either side's primary resolution. Missing this from the migration
+   would let `compare`/`scan`'s primary-side equivalence tests pass while
+   this secondary path still misses the centralized lifetime, fingerprint, and
    post-processing behavior.
-10. Scan's POI (point-of-interest) export prepass:
+10. Scan's POI (point-of-interest) export prepass (also an internal
+    supplementary call site, not a separate user-facing operation):
     `scan_engine._load_exports_for_poi()` — a separate, best-effort
     `service.resolve_input(..., symbols_only=True)` call `scan_engine.py`
     makes for both baseline and candidate ahead of the primary extraction,
@@ -552,6 +559,7 @@ from shared *helper functions* to a shared *parsed object*:
 class SourceOperand:
     path: str
     language: Language  # effective language for THIS operand specifically
+    effective_output: Path | None  # this source's own resolved object output
 
 
 @dataclass(frozen=True)
@@ -613,14 +621,36 @@ the exact divergence this parsed model exists to eliminate. Any caller
 that only cares about a single-source TU's language reads
 `sources[0].language`.
 
-`output` — the resolved `-o <file>` operand (or `None` when absent, e.g.
-a compile-only invocation relying on the default `<source>.o` naming).
-Real build attribution already needs and stores this today
-(`CompileUnit.output`, populated by `_output_from_argv()` in every build
-adapter and consumed by the source graph) — omitting it from the parsed
-model would mean output-to-source/link attribution has no way to recover
-it except by rescanning `original_argv`, the same parse-once violation
-`sources` was added to avoid.
+`output` — the resolved `-o <file>` operand *for a link-shaped invocation*
+(or `None` when absent). A link invocation produces exactly one artifact
+(an executable or shared library from `.o`/`.a` inputs), so a single field
+is correct there, and real build attribution already needs and stores this
+today (`CompileUnit.output`/`LinkUnit.output`, both populated by
+`_output_from_argv()` in every build adapter and consumed by the source
+graph and `link_attribution.py`) — omitting it from the parsed model would
+mean output-to-source/link attribution has no way to recover it except by
+rescanning `original_argv`, the same parse-once violation `sources` was
+added to avoid.
+
+For a **compile** invocation, `output` alone cannot describe the result:
+`gcc -c a.c b.c` (multi-source, compile-only, no explicit `-o` — and GCC
+itself rejects combining an explicit `-o` with `-c`/`-S`/`-E` across more
+than one source file, so this is the *only* legal shape for a multi-source
+compile-only invocation) implicitly produces `a.o` and `b.o`, one per
+source, from each source's own basename — a single `Path | None` cannot
+hold both. `SourceOperand.effective_output` carries this per-source
+instead: the resolved object path this specific source compiles to,
+whether that's the invocation's single explicit `-o` (only ever legal
+paired with exactly one source) or this source's own default `<stem>.o`/
+`<stem>.obj` naming when no explicit `-o` applies to it. The existing
+`CompileUnit.output`/`_output_from_argv()` this model is meant to replace
+already assumes one source per compile unit in practice (every build
+adapter's own compile-line parser extracts one `source`/`output` pair per
+recognized line, matching how real build-system-generated compile
+databases and recipe lines are emitted — a build system splitting its own
+multi-source invocations before recording them, not this model inventing
+new semantics), so `effective_output` generalizes that existing,
+per-source assumption rather than contradicting it.
 
 `recorded_directory` is the compile-database entry's own `directory` field
 (or the equivalent for a live build-adapter query) — not optional, since a
@@ -855,9 +885,10 @@ block-everything-immediately):
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
    gate, which today only covers `checker.compare`).
-3. Every artifact extraction call site *for the nine user-facing
-   operations named in Phase 1* routes through the future artifact
-   application service. Deliberately excludes `probe_harness.
+3. Every artifact extraction call site *for the seven user-facing
+   operations and the two internal supplementary call sites named in
+   Phase 1* routes through the future artifact application service.
+   Deliberately excludes `probe_harness.
    _snapshot_object_file()`: it has no CLI/API entry point today (nothing
    outside `probe_harness.py` and its own tests calls
    `run_probe_matrix()`), so it is a backend-level exception recorded here
@@ -1062,11 +1093,20 @@ candidate/baseline extraction, when export-delta POI tracking applies) —
 must produce identical exported-symbol projections against each other and
 against the corresponding full resolution's own export set, plus the
 subset of the full-resolution fields a symbols-only call actually
-populates: effective evidence depth, resource lifetime/session handling,
-and configuration digest. Fields that require header/L2 evidence
-(extraction-contract fingerprint, effective compile-context digest,
-public-surface scope fingerprint) are not claimed for this tier, since a
-`symbols_only=True` call never computes them.
+populates: effective evidence depth and resource lifetime/session
+handling. Fields that require header/L2 evidence (extraction-contract
+fingerprint, effective compile-context digest, public-surface scope
+fingerprint) are not claimed for this tier, since a `symbols_only=True`
+call never computes them. Nor is a *configuration* digest claimed here at
+all: that's `EffectiveEvaluationConfig.digest` (Phase 2), a whole-run
+object a CLI/API frontend resolves once before `compare`/`scan` executes
+— `resolve_input(..., symbols_only=True)` itself accepts no configuration
+parameter and returns no digest of any kind (confirmed by reading its
+signature), so this artifact-resolution-tier test has nothing of that
+shape to compare. This tier's own producer/consumer, by contrast, is
+exactly `resolve_input(..., symbols_only=True)` itself — `ArtifactResult`
+(Phase 1's target shape) is what would eventually carry the fields listed
+above as its own resolution-level output, once this migration lands.
 
 Release belongs here specifically because its adapter does real,
 release-only work ahead of the shared resolution step:
