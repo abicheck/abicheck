@@ -453,8 +453,9 @@ from shared *helper functions* to a shared *parsed object*:
 @dataclass(frozen=True)
 class CompilerInvocation:
     original_argv: tuple[str, ...]
-    working_directory: Path
-    environment: Mapping[str, str]
+    recorded_directory: Path
+    effective_directory: Path
+    environment: Mapping[str, str] | EnvironmentCleared
     launchers: tuple[str, ...]
     driver_token: str
     resolved_driver: Path | str
@@ -469,18 +470,37 @@ class CompilerInvocation:
     opaque_flags: tuple[str, ...]
 ```
 
-`working_directory` carries the compile-database entry's own `directory`
-field (or the equivalent for a live build-adapter query) — not optional,
-since a relative source or include operand's meaning depends on it. Two
+`recorded_directory` is the compile-database entry's own `directory` field
+(or the equivalent for a live build-adapter query) — not optional, since a
+relative source or include operand's meaning depends on it. Two
 otherwise-identical `argv` values executed from different directories can
 resolve entirely different headers, so recording `original_argv` alone
 would force replay and include normalization to either fall back to
 abicheck's own process cwd (silently wrong whenever that differs from the
 compile unit's own recorded directory) or keep an out-of-band value next to
 the parsed object — exactly the "parse once" contract this model exists to
-establish. It also participates in the invocation's own identity, the same way this
-same field already has to for the L3→L2 fold's cache-key/relative-path
-handling described in AGENTS.md's own entry for that work.
+establish. It participates in the invocation's own identity, the same way
+this field already has to for the L3→L2 fold's cache-key/relative-path
+handling described in AGENTS.md's own entry for that work. `recorded_directory`
+alone is not sufficient, though — the two fields split for a real reason
+the existing `_argv.py`/`clang.py` parsing machinery already had to solve:
+a launcher prefix can itself change the effective directory (`env -C build
+clang ...`, GNU `env`'s documented `-C`/`--chdir`) independently of any
+`recorded_directory` compose (`env -C a env -C b ...` → `a/b`), so
+`effective_directory` — mirroring the existing `effective_directory()`
+helper — is what replay must actually resolve relative operands against;
+`recorded_directory` stays the raw, unmodified compile-database value for
+identity/provenance. `environment` is `EnvironmentCleared` rather than a
+plain empty mapping when the recorded `argv` opens with `env -i` or
+clears `PATH` via `env -u PATH` — a plain `{}` is indistinguishable from
+"no override recorded" without also materializing the process's real
+inherited environment, which a compile-database entry never captures, so a
+consumer would otherwise have to rescan `original_argv` itself (defeating
+the parse-once contract again) or risk replaying with an inherited `PATH`
+that resolves a different compiler than the real build used. This mirrors
+`_argv.py`'s existing `_EnvPathCleared` sentinel and `path_cleared` state,
+not a new invention — the parsed model should carry what that module
+already tracks, not a simplified projection of it.
 
 Raw compiler-command parsing happens once; replay, ambiguity detection,
 build-option drift, and reporting all consume the structured fields instead
