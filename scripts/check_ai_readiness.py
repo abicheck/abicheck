@@ -2133,12 +2133,15 @@ _TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
     ),
 )
 
-#: Modules exempted from the ``service.resolve_input`` entry above:
-#: ``cli_resolve.py``'s own ``_resolve_input()`` *is* the CLI's sanctioned,
-#: framework-aware wrapper over ``service.resolve_input`` (see its module
-#: docstring) — the same role ``service.py`` itself plays for
-#: ``checker.compare``. Nothing else in ``cli*.py``/``appcompat.py`` may
-#: bypass it, so only this one module's own definition is exempt.
+#: Modules whose ``_resolve_input()`` function is exempted from the
+#: ``service.resolve_input`` entry above: ``cli_resolve.py``'s own
+#: ``_resolve_input()`` *is* the CLI's sanctioned, framework-aware wrapper
+#: over ``service.resolve_input`` (see its module docstring) — the same role
+#: ``service.py`` itself plays for ``checker.compare``. The exemption is
+#: scoped to calls inside that one function
+#: (``_resolve_input_wrapper_call_lines``), not the whole module — a
+#: *different* function added later to the same file must still route
+#: through it rather than bypassing the rule directly.
 _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 
 # ``"<rel-path>:<lineno>"`` call sites deliberately exempted, each needing a
@@ -2194,13 +2197,29 @@ def _tier1_func_bindings(
     return names
 
 
-def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
-    """Return local names bound to *module* itself.
+def _dotted_path(node: ast.expr) -> str | None:
+    """The full dotted-attribute spelling of a ``Name``/``Attribute`` chain
+    (``abicheck.service`` for ``abicheck.service``'s AST), or ``None`` if
+    *node* is not a plain dotted chain (a call result, a subscript, ...)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_path(node.value)
+        return None if base is None else f"{base}.{node.attr}"
+    return None
 
-    Catches ``from . import <module> [as X]`` / ``from abicheck import
-    <module> [as X]`` and ``import abicheck.<module> as X``, so an aliased
-    ``core.<func>(...)`` call is recognised, not just the literal
-    ``<module>.<func>(...)``.
+
+def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
+    """Return every spelling *tree* could call ``<module>.<func>(...)``
+    through: local names bound to *module* itself, plus the full dotted path
+    an *unaliased* ``import abicheck.<module>`` leaves reachable off the
+    implicitly-bound ``abicheck`` name.
+
+    Catches ``from . import <module> [as X]``, ``from abicheck import
+    <module> [as X]``, and ``import abicheck.<module> [as X]`` alike, so an
+    aliased ``core.<func>(...)`` call is recognised — and, for the unaliased
+    import form, so is the literal ``abicheck.<module>.<func>(...)`` — not
+    just a call through a name bound directly to *module*.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -2213,11 +2232,30 @@ def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.split(".")[-1] == module:
-                    # ``import abicheck.<module>`` binds ``abicheck``; only an
-                    # explicit ``as X`` gives a usable ``X.<func>`` call name.
                     if alias.asname:
                         names.add(alias.asname)
+                    else:
+                        # ``import abicheck.<module>`` binds only ``abicheck``;
+                        # the module itself stays reachable as the full
+                        # dotted path off it (``abicheck.<module>.<func>``).
+                        names.add(alias.name)
     return names
+
+
+def _resolve_input_wrapper_call_lines(tree: ast.Module) -> frozenset[int]:
+    """Line numbers of every ``Call`` inside ``_resolve_input()``'s own body —
+    the only lines the ``service.resolve_input`` rule may exempt in a module
+    listed in ``_RESOLVE_INPUT_WRAPPER_MODULES``. Scoped to just this one
+    function (not the whole module) so a *different* function added later to
+    the same file cannot silently bypass the rule too.
+    """
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_resolve_input":
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call):
+                    lines.add(call.lineno)
+    return frozenset(lines)
 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
@@ -2411,9 +2449,17 @@ def check_cli_contract(f: Findings) -> None:
             tree = ast.parse(_read(path), filename=rel)
         except SyntaxError:
             continue
+        is_wrapper_module = path.stem in _RESOLVE_INPUT_WRAPPER_MODULES
+        # Only the reviewed wrapper *call*, inside `_resolve_input()` itself,
+        # is exempt — not every `service.resolve_input` call anywhere else in
+        # the same module, which would let a future bypass elsewhere in this
+        # file accumulate unnoticed.
+        wrapper_call_lines = (
+            _resolve_input_wrapper_call_lines(tree)
+            if is_wrapper_module
+            else frozenset()
+        )
         for module, funcs, guidance in _TIER1_TARGETS:
-            if module == "service" and path.stem in _RESOLVE_INPUT_WRAPPER_MODULES:
-                continue
             bound = _tier1_func_bindings(tree, module, funcs)
             target_modules = _tier1_module_bindings(tree, module)
             for node in ast.walk(tree):
@@ -2423,10 +2469,13 @@ def check_cli_contract(f: Findings) -> None:
                 is_tier1 = (isinstance(func, ast.Name) and func.id in bound) or (
                     isinstance(func, ast.Attribute)
                     and func.attr in funcs
-                    and isinstance(func.value, ast.Name)
-                    and func.value.id in target_modules
+                    and _dotted_path(func.value) in target_modules
                 )
-                if is_tier1 and f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
+                if not is_tier1:
+                    continue
+                if module == "service" and node.lineno in wrapper_call_lines:
+                    continue
+                if f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
                     called = func.attr if isinstance(func, ast.Attribute) else func.id
                     f.err(
                         "cli-contract",

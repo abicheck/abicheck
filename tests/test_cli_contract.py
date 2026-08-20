@@ -156,6 +156,16 @@ _EXTRA_TIER1_VIOLATION_CASES: list[pytest.ParameterSet] = [
         "from . import service as svc\ndef go(a):\n    return svc.resolve_input(a)\n",
         id="service-resolve-input-aliased-module-call",
     ),
+    pytest.param(
+        "cli_dumps_qualified.py",
+        "import abicheck.dumper\ndef go(a):\n    return abicheck.dumper.dump(a)\n",
+        id="dumper-dump-unaliased-qualified-call",
+    ),
+    pytest.param(
+        "cli_resolves_qualified.py",
+        "import abicheck.service\ndef go(a):\n    return abicheck.service.resolve_input(a)\n",
+        id="service-resolve-input-unaliased-qualified-call",
+    ),
 ]
 
 
@@ -226,6 +236,35 @@ def test_cli_resolve_own_wrapper_is_exempt(
     findings = gate.Findings()
     gate.check_cli_contract(findings)
     assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_cli_resolve_exemption_is_scoped_to_the_wrapper_function(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `cli_resolve.py` exemption covers only calls inside
+    `_resolve_input()` itself — a *different* function in the same module
+    bypassing `service.resolve_input()` directly must still be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+        "\n"
+        "def _other_bypass(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:7" in errors[0]
 
 
 def test_cli_contract_allowlist_entries_are_real_violations() -> None:
