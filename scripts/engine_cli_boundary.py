@@ -188,7 +188,11 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     those unambiguously bind to something other than the real submodule,
     unlike ``from . import cli`` (no module, no rename) inside
     ``__init__.py``, which binds the name to the submodule object itself
-    and so isn't a real shadow at all. A bare annotation with no value
+    and so isn't a real shadow at all -- nor is ``from .cli import anything
+    [as X]`` (source module equal to *alias_name*), since importing *any*
+    name out of a module first requires Python to load/execute that module,
+    regardless of which symbol is pulled or what it's locally renamed to.
+    A bare annotation with no value
     (``cli: object``) is deliberately excluded -- it only records an
     ``__annotations__`` entry and creates no runtime attribute at all, so
     it can't shadow anything either. A namespace package (no
@@ -242,6 +246,13 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                 ):
                     # `from . import alias_name [as alias_name]` -- binds the
                     # name to the real submodule object itself, not a shadow.
+                    continue
+                if stmt.level == 1 and stmt.module == alias_name:
+                    # `from .alias_name import anything [as alias_name]` --
+                    # imports FROM the real submodule directly. Python must
+                    # load/execute that submodule to resolve *any* name out
+                    # of it, regardless of which symbol is actually pulled
+                    # or what it's locally renamed to -- not a shadow.
                     continue
                 if (
                     stmt.level == 1

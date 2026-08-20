@@ -297,6 +297,36 @@ def test_reexport_of_real_submodule_through_alias_still_flagged(
     assert "scan_engine.py" in errors[0]
 
 
+def test_importfrom_directly_from_the_real_submodule_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`__init__.py` doing `from .cli import main as cli` imports a symbol
+    directly FROM the real `cli.py` submodule (not a re-export via some
+    other file) — Python must load/execute `cli.py` to resolve `main` out
+    of it, regardless of which symbol is pulled or that it's locally
+    renamed. Must still be flagged, even though the binding is an
+    `ImportFrom` naming a specific symbol rather than the bare `from .
+    import cli` self-reference."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg10"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("def main() -> None:\n    pass\n")
+    (engine_pkg / "__init__.py").write_text("from .cli import main as cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg10 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_importfrom_reexport_of_ordinary_symbol_shadows_real_submodule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
