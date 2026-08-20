@@ -132,9 +132,13 @@ place:**
 
 **Still open, unattempted by PR 2** (the ADR amendment above is the fuller
 account): `native-release-compatibility`'s whole-release-matrix-qualification
-concern remains explicitly *not* folded in; PR 3 (a complete G37 evaluation
-corpus and an actual behavioral run) and PR 4 (a thin external-distribution
-repository, removing the internal-candidate marker) are both fully open.
+concern remains explicitly *not* folded in. **PR 3 landed** (a complete G37
+evaluation corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's
+"PR 3" amendment and `agent-evals/skills/pilot-results/README.md`; its
+dominant finding is a harness turn-budget confound, not a skill-quality
+result, so the skill is still not behaviorally validated. PR 4 (a thin
+external-distribution repository, removing the internal-candidate marker)
+remains fully open.
 
 `native-api-evolution`, `native-consumer-compatibility`, and
 `native-release-compatibility` are no longer published — their source is

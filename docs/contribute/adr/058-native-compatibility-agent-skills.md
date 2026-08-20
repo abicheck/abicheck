@@ -26,9 +26,14 @@ rewrite")**: a customer-outcome framing, a ten-step decision procedure, an
 integrated named-consumer branch, a narrowed v0.1 validated scope, and a
 structured decision-report contract mapped onto abicheck's real `Verdict`
 values. Still an unvalidated internal candidate — the rewrite changes what
-the skill claims to cover, not its evaluation status; PR 3 (a complete G37
-evaluation corpus and an actual run) and PR 4 (external publication) remain
-open.
+the skill claims to cover, not its evaluation status. **PR 3 (below) landed
+the G37 evaluation corpus and a real 48-run pilot** — real numbers now
+exist, but the pilot's own dominant finding is a harness confound (a
+12-turn budget cutting off 31% of runs, asymmetrically by arm), so the
+pilot is evidence the harness now works end to end, not evidence the skill
+is validated; see `agent-evals/skills/pilot-results/README.md` for the full
+account and its own "what this pilot does not claim" section. PR 4
+(external publication) remains open.
 **Decision maker:** (pending — recorded per repository convention)
 
 > **Amendment (2026-08-20, portfolio reset to one internal candidate).**
@@ -190,6 +195,78 @@ open.
 > rewritten branch structure is PR 3's job, not this one's.
 > `skills-src/CLAUDE.md`'s portfolio-status section carries a matching
 > summary of what is now integrated versus still open.
+
+> **Amendment (2026-08-20, PR 3 — G37 evaluation corpus and first real
+> pilot).** The 2026-08-20 PR 2 amendment above left PR 3 ("a complete
+> evaluation corpus and an actual run against it") fully open. This
+> amendment records that PR 3 has now landed, and states plainly what it
+> did and did not establish.
+> **What changed.** All six scenarios `agent-evals/skills/scenarios.yaml`
+> had carried as `status: planned` since the portfolio-reset amendment —
+> `not-comparable-pair`, `evidence-too-shallow`, `contract-coverage-
+> incomplete`, `consumer-unaffected-despite-break`, `consumer-actually-
+> affected`, `plugin-required-symbol-loss` — were promoted to `ready`,
+> each backed by a real, individually-verified fixture under
+> `agent-evals/skills/fixtures/`. The corpus now stands at 12 scenarios (6
+> Category A, drawn from `examples/ground_truth.json`; 6 Category B, with
+> their own stated expected outcome), covering all four of dimension 2's
+> uncertainty kinds and the named-consumer scoping behavior
+> `shared/consumer-scoping.md` documents. The runner (`runners/
+> claude_code.py`), the deterministic graders (`graders/dimensions.py`,
+> `graders/evidence.py`, `graders/claim.py`), and the claim contract
+> (`schema/claim.schema.json`) also gained real fixes during this PR's
+> review, most substantively: a `full_verdict` field so a consumer-scoped
+> claim's library-wide result is actually requested and graded, and a
+> declared-consumer-target check so a claim cannot pass a consumer-scoping
+> scenario by citing a call scoped to the wrong (or no) consumer.
+> **The pilot itself: 48 runs (12 scenarios × 2 arms × 2 repetitions, one
+> model — `claude-sonnet-5` — confirmed single-model across every run),
+> graded against the corpus and rules above.** Full account, including
+> per-dimension and per-scenario tables, in
+> `agent-evals/skills/pilot-results/README.md`. **The pilot's own dominant
+> finding is a harness confound, not a skill-quality signal**: the
+> runner's `claude -p --max-turns 12` ceiling cut off 31% of all runs
+> (`error_max_turns`) before they produced any final answer at all, and
+> the two arms hit it at materially different rates — the skill arm's own
+> ten-step decision procedure is more turn-hungry than the baseline's
+> ad-hoc approach, so it was disproportionately truncated (46% of skill
+> runs vs. 17% of baseline runs). Correct-verdict rate was identical
+> across arms on the full run (9/24, 38%, dominated by this confound); on
+> completed runs only, the skill arm's accuracy looked meaningfully higher
+> (9/13, 69%, vs. 9/20, 45%) — reported as an observation to investigate
+> with a corrected harness, not a validated result, given how few runs
+> that comparison rests on. The one clean, confound-independent signal
+> this pilot did produce: dimension 1 (correct workflow chosen) passed
+> 23/24 (96%) on the skill arm against 6/24 (25%) on the baseline arm —
+> the skill reliably steers the agent toward a real `abicheck compare`
+> where an unequipped agent mostly reasons from `nm`/`readelf` instead,
+> which is exactly the without-the-skill behavior this comparison exists
+> to characterize.
+> **What this amendment does not claim.** The skill remains the
+> **internal candidate** the 2026-08-20 reset amendment designated — not
+> yet behaviorally validated, and not for external publication or
+> citation as validated in any user-facing claim. This pilot is
+> explicitly not a statistically powered comparison (n=2 per scenario per
+> arm, one model, one environment) and does not establish skill lift;
+> its own "what this pilot does not claim" section states this directly.
+> Dimensions 4 (root-cause quality) and 5 (remediation quality) have no
+> judge model wired yet and were not graded — four of the rubric's six
+> dimensions were scored, not all six. The trigger-corpus
+> (activation-precision) runner does not exist yet either. The pilot
+> results document's own "Recommended next steps" section, in priority
+> order, is: raise `--max-turns` and re-run (the single change most
+> likely to change every number in this pilot); re-run at a larger
+> repetition count once that is done, before drawing any conclusion about
+> skill lift; wire dimensions 4/5 to a judge model; and investigate the
+> four scenarios that failed on both arms at every repetition
+> (`vtable-change`, `evidence-too-shallow`, `contract-coverage-
+> incomplete`, `changed-signature`) once truncated runs are excluded from
+> the picture. None of this amendment's changes should be read as
+> evidence that any of that follow-up work is done. PR 4 (external
+> publication, removing the internal-candidate marker) remains fully
+> open, unattempted by this amendment — if anything, this pilot's own
+> confound finding is a reason to run a corrected pilot before PR 4 is
+> even considered, not a reason to move toward it.
 
 > **Amendment (2026-08-11, flagship-first portfolio freeze — superseded by
 > the 2026-08-20 amendment above).** A strategy

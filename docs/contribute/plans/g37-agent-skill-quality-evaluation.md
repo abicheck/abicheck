@@ -1053,18 +1053,25 @@ skill's worth), not a redesign. A prototype skill's corpus is out of scope
 for this phase; see the scope note for when it re-enters.
 
 **Status: corpus buildout done, at the low end of target (12 scenarios: 6
-Category A + 6 Category B).** Two real environment prerequisites the
-harness had never had to satisfy (an `abicheck --version` inside the
-flagship's declared floor; a CastXML build inside abicheck's own supported
-policy range) were found and documented in the same pass — see
-`agent-evals/skills/CLAUDE.md`'s "Environment prerequisites for a real
-run". **The live A/B pilot run against this corpus is still in progress as
-of this note** — once it completes, its results land as
-`agent-evals/skills/pilot-results/README.md` and a matching ADR-058 "PR 3"
-amendment; until both exist and are committed, treat the run itself as not
-yet done, not merely unsummarized. Phase 3's corpus half being done does
-not advance Phases
-4-6 below; those remain fully open.
+Category A + 6 Category B), and a real 48-run A/B pilot has completed
+against it.** Two real environment prerequisites the harness had never had
+to satisfy (an `abicheck --version` inside the flagship's declared floor; a
+CastXML build inside abicheck's own supported policy range) were found and
+documented in the same pass — see `agent-evals/skills/CLAUDE.md`'s
+"Environment prerequisites for a real run". Full results, per-dimension and
+per-scenario tables, and next steps are in
+`agent-evals/skills/pilot-results/README.md`; the matching ADR-058 "PR 3"
+amendment records the same. **Read the pilot honestly, not as a validation
+result**: its own dominant finding is a harness confound — a 12-turn
+runner ceiling (`--max-turns 12`) cut off 31% of all 48 runs before they
+produced any answer, and did so asymmetrically by arm (46% of skill runs
+vs. 17% of baseline runs), so the headline correct-verdict numbers are not
+a fair skill-vs-baseline comparison as they stand. The one confound-clean
+signal — dimension 1 (correct workflow chosen) passing 96% on the skill
+arm vs. 25% on baseline — is real. Phase 3's corpus and pilot being done
+does not advance Phases 4-6 below; those remain fully open, and the
+pilot's own "Recommended next steps" (raise `--max-turns` and re-run, first)
+is the actual next action here, not a fresh Phase-3 pass.
 
 ### Phase 4 — Cross-agent *(M)*
 
