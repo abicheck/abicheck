@@ -40,8 +40,17 @@ dimensions:
     grader: deterministic
     gating: zero_tolerance
     note: >-
-      Four kinds, four rules. Two of them permit a definite verdict, so a
+      Three kinds, three rules. One of them permits a definite verdict, so a
       single "never answer under uncertainty" rule would fail a correct agent.
+      A fourth kind, `matrix_target_unrun`, is narrowed out of this rubric
+      (ADR-058's 2026-08-20 portfolio-reset amendment): it was owned by the
+      whole-release-matrix-qualification scenario, whose owning skill
+      (`native-release-compatibility`) is no longer published, so no scenario
+      can exercise it. The grading logic for it
+      (`graders/dimensions.py::_rule_unrun`) is left in place, unreachable
+      through the live corpus, rather than deleted — restoring the kind when
+      a second skill claims that scope needs only re-adding it here and to
+      the scenario/claim schemas, not rebuilding the rule.
     uncertainty_rules:
       not_comparable:
         verdict: must_be_null
@@ -49,9 +58,6 @@ dimensions:
       evidence_too_shallow:
         verdict: may_be_stated
         requires: [not_confident, unresolved_named]
-      matrix_target_unrun:
-        verdict: may_be_stated
-        requires: [unrun_targets_reported, executed_cells_not_presented_as_release]
       contract_coverage_incomplete:
         # ADR-049 Phase 7: coverage is orthogonal to compatibility. A report can
         # legitimately carry BREAKING *and* a coverage failure at once, so

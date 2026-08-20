@@ -507,11 +507,14 @@ Core pipeline (in order of data flow):
    `abicheck/buildsource/CLAUDE.md` for its module map.
 
 10. **Published Agent Skills (ADR-058)** — `skills-src/` is the one
-   hand-authored source (four `SKILL.md` files in Layer A, one `shared/`
-   tree of Layer-B domain fragments); `scripts/gen_agent_skills.py`
-   publishes it into three committed, self-contained trees
-   (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`). Never
-   hand-edit the generated trees. See `skills-src/CLAUDE.md`.
+   hand-authored source (one `SKILL.md` in Layer A — the portfolio was
+   reset to a single internal candidate, `review-native-library-change`,
+   see `skills-src/CLAUDE.md`'s portfolio-status table and ADR-058's
+   2026-08-20 amendment — plus one `shared/` tree of Layer-B domain
+   fragments); `scripts/gen_agent_skills.py` publishes it into three
+   committed, self-contained trees (`.agents/skills/`, `.claude/skills/`,
+   `.gemini/skills/`). Never hand-edit the generated trees. See
+   `skills-src/CLAUDE.md`.
 
 Beyond the core package: `.github/AGENTS.md` (CI/workflow architecture),
 `action/AGENTS.md` (the composite GitHub Action's shell-script layer), and

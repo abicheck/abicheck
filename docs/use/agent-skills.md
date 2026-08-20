@@ -12,8 +12,8 @@ generated: false
 
 # Agent Skills
 
-abicheck publishes four [Agent Skills](https://agentskills.io) — portable,
-triggerable packages of native-compatibility expertise that a coding agent
+abicheck publishes one [Agent Skill](https://agentskills.io) — a portable,
+triggerable package of native-compatibility expertise that a coding agent
 (Claude Code, GitHub Copilot, OpenAI Codex, Cursor, Gemini CLI) loads when a
 user asks a compatibility question in their own words.
 
@@ -24,40 +24,44 @@ deterministic verification engine. See
 [ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md) for why
 the portfolio is shaped this way.
 
-> **Requires unreleased abicheck 0.6.x to run.** You can install these
-> skills (copying a directory works regardless of your abicheck version)
+> **Requires unreleased abicheck 0.6.x to run.** You can install this skill
+> (copying a directory works regardless of your abicheck version)
 > against the latest published release, **{{ latest_published_version }}**
-> — but each skill checks
+> — but it checks
 > the installed abicheck version against its own declared range —
-> `>=0.6.0,<0.7.0` for every skill published today — and refuses to run
+> `>=0.6.0,<0.7.0` — and refuses to run
 > rather than fail partway through, since several commands/options it
 > drives postdate 0.5.0 (see "Prerequisites" below). The check runs
 > `abicheck --version` — the executable actually on `PATH` when the skill
 > runs, not a source checkout's `pyproject.toml` (the two can differ, e.g.
 > a 0.6.x checkout with a separately installed 0.5.0 package). If that
-> version isn't inside the `0.6.x` range, an installed skill will decline
+> version isn't inside the `0.6.x` range, the installed skill will decline
 > to execute.
 
-**Portfolio status (2026-08-11):** none of the four skills has measured
+**Portfolio status (2026-08-20):** the portfolio was reset from four
+published skills down to **one internal candidate**. No skill has measured
 evidence yet that it improves agent behavior over a well-documented CLI
-alone. `native-binary-compatibility-review` is the sole flagship subject of
-[G37](../contribute/plans/g37-agent-skill-quality-evaluation.md)'s ongoing
-behavioral evaluation; the other three are published but frozen at
-**prototype** status — working, reviewed content, but not validated and not
-receiving new scope — until the flagship experiment demonstrates a
-measurable lift. See
+alone, so publishing three additional, unvalidated skills alongside the one
+flagship was scaling packaging ahead of any validated product value.
+`native-api-evolution`, `native-consumer-compatibility`, and
+`native-release-compatibility` — previously published at prototype status —
+are no longer published; their source is recoverable from git history for
+whenever a second skill is built. `review-native-library-change` (renamed
+from `native-binary-compatibility-review`) is the sole surviving skill and
+is an **internal candidate**: working, reviewed content, but not yet
+validated and not for external publication or citation as validated in any
+user-facing claim, pending
+[G37](../contribute/plans/g37-agent-skill-quality-evaluation.md)'s
+still-unrun behavioral evaluation. See
 [ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md)'s
-2026-08-11 amendment for the full rationale (the same table is also kept in
-`skills-src/CLAUDE.md`, the skills' own source tree).
+2026-08-20 amendment for the full rationale (the same status is also kept in
+`skills-src/CLAUDE.md`, the skill's own source tree).
 
 ## The catalogue
 
 | Skill | Status | The question it answers |
 |---|---|---|
-| [`native-binary-compatibility-review`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-binary-compatibility-review/SKILL.md) | **Flagship** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
-| [`native-api-evolution`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-api-evolution/SKILL.md) | Prototype | "How do I make this API change *without* breaking compatibility?" — design-time guidance (pImpl, reserved slots, versioned interfaces, deprecation lifecycles), ending by verifying the resulting change. |
-| [`native-release-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-release-compatibility/SKILL.md) | Prototype | "Can we ship this as a minor version, or does it need a major bump?" — a release-level decision across every library, platform, and profile. |
-| [`native-consumer-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-consumer-compatibility/SKILL.md) | Prototype | "Will *this specific* application, plugin, or host keep working?" — a per-consumer answer that can differ from the library's global verdict. |
+| [`review-native-library-change`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/review-native-library-change/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 
 ## Installing them
 
@@ -107,7 +111,7 @@ is refused up front instead of failing partway through a workflow.
 
 Edit `skills-src/`, never the generated trees. `skills-src/CLAUDE.md` is the
 contributor contract — the three-layer model, the shared-fragment rules, and
-the admission bar a fifth public skill would have to clear. The phased plan is
+the admission bar a second public skill would have to clear. The phased plan is
 [G36](../contribute/plans/g36-native-compatibility-agent-skills.md).
 
 ```bash

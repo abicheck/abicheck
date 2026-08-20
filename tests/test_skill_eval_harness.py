@@ -52,7 +52,7 @@ shim = _load_script(EVAL_DIR / "shim" / "abicheck", "skill_eval_shim")
 runner = _load_script(EVAL_DIR / "runners" / "claude_code.py", "skill_eval_runner")
 
 SCENARIO_BREAKING = {
-    "skill": "native-binary-compatibility-review",
+    "skill": "review-native-library-change",
     "expected": {"verdict": "BREAKING"},
 }
 
@@ -157,7 +157,7 @@ class TestRunnerTreatment:
 
     def test_a_baseline_arm_that_can_see_a_skill_is_not_evidence(self):
         problem = runner.check_treatment(
-            "baseline", SCENARIO_BREAKING, ["native-api-evolution"]
+            "baseline", SCENARIO_BREAKING, ["other-skill"]
         )
         assert problem and "baseline arm could see" in problem
 
@@ -165,7 +165,7 @@ class TestRunnerTreatment:
         problem = runner.check_treatment(
             "skill",
             SCENARIO_BREAKING,
-            sorted([SCENARIO_BREAKING["skill"], "native-api-evolution"]),
+            sorted([SCENARIO_BREAKING["skill"], "other-skill"]),
         )
         assert problem is not None
 
@@ -187,11 +187,61 @@ class TestRunnerTreatment:
             {
                 "type": "system",
                 "subtype": "init",
+                "skills": ["pdf", "review-native-library-change"],
+            }
+        ]
+        assert runner.visible_native_skills(events) == ["review-native-library-change"]
+        assert runner.visible_native_skills([]) is None
+
+    def test_a_retired_skill_installed_at_user_scope_is_not_hidden(self):
+        """A stale/retired skill must surface, never be filtered out.
+
+        `_published_skill_names()` only reads the *current* checkout's
+        published directories — a machine that still has one of the three
+        skills removed by ADR-058's 2026-08-20 portfolio-reset amendment (or
+        the pre-rename `native-binary-compatibility-review`) installed at
+        user scope reports it in the real init event too. Silently dropping
+        it here would let `check_treatment()` accept a contaminated
+        baseline/skill-arm run as clean evidence instead of rejecting it.
+        """
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
                 "skills": ["pdf", "native-api-evolution"],
             }
         ]
         assert runner.visible_native_skills(events) == ["native-api-evolution"]
-        assert runner.visible_native_skills([]) is None
+
+        old_name_events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["native-binary-compatibility-review"],
+            }
+        ]
+        assert runner.visible_native_skills(old_name_events) == [
+            "native-binary-compatibility-review"
+        ]
+
+    def test_an_unrelated_dev_skill_is_never_a_treatment_conflict(self):
+        """`.claude/skills/` also holds `grill-with-docs`, an unrelated
+        hand-authored developer skill with nothing to do with the abicheck
+        portfolio. Both arms share it identically, so it must never be
+        treated as a conflicting treatment — `_published_skill_names()`
+        reads `skills-src/` (the abicheck portfolio's own source of truth),
+        not `PUBLISHED_SKILLS` (`.claude/skills/`, which mixes the two).
+        """
+        assert "grill-with-docs" not in runner._published_skill_names()
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["grill-with-docs", "pdf"],
+            }
+        ]
+        assert runner.visible_native_skills(events) == []
+        assert runner.check_treatment("baseline", SCENARIO_BREAKING, []) is None
 
     def test_the_final_answer_comes_from_the_result_event(self):
         events = [
@@ -309,7 +359,7 @@ class TestRunnerTreatment:
     def test_recovery_will_not_launder_a_rejected_run_into_evidence(self, tmp_path):
         """`_run_once` writes final.md *before* checking the treatment, so a
         rejected run looks exactly like a crashed one on the next resume."""
-        out_dir = self._unindexed_run(tmp_path, ["native-api-evolution"])
+        out_dir = self._unindexed_run(tmp_path, ["other-skill"])
         with pytest.raises(RuntimeError, match="should see exactly"):
             runner._recovered_record(out_dir, "sid", "skill", 0, SCENARIO_BREAKING)
 
@@ -405,7 +455,7 @@ class TestWorkspaceIsolation:
     def test_the_installed_skill_is_not_scanned_as_a_leak(self, tmp_path):
         """Naming the tool is the treatment's whole job."""
         work = tmp_path / "ws"
-        skill = work / ".claude" / "skills" / "native-api-evolution"
+        skill = work / ".claude" / "skills" / "other-skill"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text("run abicheck compare\n", encoding="utf-8")
         assert runner.workspace_leaks(work) == []

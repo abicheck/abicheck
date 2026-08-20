@@ -55,7 +55,7 @@
               "id": {"type": "string"},
               "state": {
                 "enum": ["pass", "risk", "break", "not_comparable", "not_run"],
-                "description": "native-release-compatibility/SKILL.md's five per-cell states. not_run is unknown and blocks; it is never collapsible into pass."
+                "description": "The five per-cell matrix-qualification states, originally defined for the now-unpublished native-release-compatibility skill (ADR-058's 2026-08-20 portfolio-reset amendment) and kept as reserved vocabulary for its eventual second-skill successor. not_run is unknown and blocks; it is never collapsible into pass."
               }
             }
           }

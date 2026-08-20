@@ -28,13 +28,6 @@
             ],
             "verdict": "may_be_stated"
           },
-          "matrix_target_unrun": {
-            "requires": [
-              "unrun_targets_reported",
-              "executed_cells_not_presented_as_release"
-            ],
-            "verdict": "may_be_stated"
-          },
           "not_comparable": {
             "requires": [
               "reason_carried"
@@ -72,41 +65,12 @@
     "schema_version": 1
   },
   "scenarios": {
-    "api-only-break": {
-      "affects": [
-        "native-api-evolution"
-      ],
-      "category": "A",
-      "digest": "sha256:edf9f9866f0e94455aeffb986a42b64913f6bbf87767439368a878ba2a72737e",
-      "expected": {
-        "kinds": [
-          "param_default_value_changed",
-          "param_default_value_removed"
-        ],
-        "min_evidence": "L2",
-        "resolved_from": "examples/ground_truth.json",
-        "verdict": "API_BREAK"
-      },
-      "inputs": "examples/case32_param_defaults",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "We changed some default argument values in our public C++ header. Do programs already built against this library keep working, and does anything need to happen before we ship it?",
-      "roots": [
-        "agent-evals/skills/scenarios.yaml",
-        "examples/case32_param_defaults",
-        "examples/ground_truth.json"
-      ],
-      "skill": "native-api-evolution",
-      "status": "ready"
-    },
     "changed-signature": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "A",
-      "digest": "sha256:f2b4c17ccdf9e2d1c68a2c571af7156c47bfe655318c967bb86983a3eb30c63a",
+      "digest": "sha256:8a91b7aa50e70048554a795b12ff767e18a4985502657105f6800971e129a7b3",
       "expected": {
         "kinds": [
           "func_params_changed"
@@ -126,15 +90,15 @@
         "examples/case02_param_type_change",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "ready"
     },
     "compatible-addition": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "A",
-      "digest": "sha256:9339724bc8968dd6e57c9a9631772452de65d1056511dd3f96645c2389a8c75a",
+      "digest": "sha256:c3518734fb782ac70d297a9faa22cc43137ddfae2cc303cf8eb01b64205e40cc",
       "expected": {
         "kinds": [
           "func_added"
@@ -156,15 +120,15 @@
         "examples/case03_compat_addition",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "ready"
     },
     "consumer-actually-affected": {
       "affects": [
-        "native-consumer-compatibility"
+        "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:3f28803e0f513eb9fc3c73d8f0afb91d710cfbf2ee10a0eb27e998a121c25ea8",
+      "digest": "sha256:010d5ab7ec7fbcba8d67212f41faf1ecc60944926dbb7c09c726ef7262015c68",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -182,15 +146,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "native-consumer-compatibility",
+      "skill": "review-native-library-change",
       "status": "planned"
     },
     "consumer-unaffected-despite-break": {
       "affects": [
-        "native-consumer-compatibility"
+        "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:2e5043ad64f898c1b87e542037a0e0758878147cd71a2df7197ff5c9a3a9938c",
+      "digest": "sha256:2a26c08440c23f934d14f774aeed917b213abbedff428e4c1622fc4b0bb81c57",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "COMPATIBLE"
@@ -208,15 +172,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "native-consumer-compatibility",
+      "skill": "review-native-library-change",
       "status": "planned"
     },
     "contract-coverage-incomplete": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:c4a7f2c801233153d3e0ba13003cfcd003ccbbfef49095569aa1f3901fd7770a",
+      "digest": "sha256:1aa86388e9d9aac0d16960896ca6f39a99c480783e3c8e3c4d9daa3998751952",
       "expected": {
         "uncertainty": "contract_coverage_incomplete",
         "verdict": "COMPATIBLE"
@@ -233,15 +197,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "planned"
     },
     "enum-value-change": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "A",
-      "digest": "sha256:7423a669b718ccf6e5cb0b279d51ba87f8f8f3311dca89d4cf161571bd772a2d",
+      "digest": "sha256:d5eec9ce621a3678f02b342661121ba57361b5ad151fddf0f4ee415b484140ab",
       "expected": {
         "kinds": [
           "enum_member_value_changed"
@@ -261,15 +225,15 @@
         "examples/case08_enum_value_change",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "ready"
     },
     "evidence-too-shallow": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:75c03bb6efc9b3a379f5c7323624c50792ff9b5b3c9d04923682b194819d818f",
+      "digest": "sha256:600016a8bc3b113b536d76a9e01a0c1200d24331e9d326efeb2a81e220a3894e",
       "expected": {
         "uncertainty": "evidence_too_shallow",
         "verdict": "COMPATIBLE"
@@ -285,43 +249,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
-      "status": "planned"
-    },
-    "matrix-target-unrun": {
-      "affects": [
-        "native-release-compatibility"
-      ],
-      "category": "B",
-      "digest": "sha256:a0053ec6bdc002bd64d7eec8aa225201796a1d4b5632f951625183404b4cf50f",
-      "expected": {
-        "uncertainty": "matrix_target_unrun",
-        "verdict": "COMPATIBLE"
-      },
-      "inputs": "agent-evals/skills/fixtures/matrix-target-unrun",
-      "invocation": {
-        "matrix_targets": [
-          "linux-x86_64",
-          "macos-arm64",
-          "windows-x86_64"
-        ]
-      },
-      "platforms": [],
-      "prompt": "We ship this library on Linux, macOS and Windows. The Windows build agent was down this cycle. Can we release 2.4 as a minor version?",
-      "roots": [
-        "agent-evals/skills/fixtures/matrix-target-unrun",
-        "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
-      ],
-      "skill": "native-release-compatibility",
+      "skill": "review-native-library-change",
       "status": "planned"
     },
     "not-comparable-pair": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:a981645ef66588e7b0aa16e3d117a0bb13e5376c388491a186fa3d3472386e3f",
+      "digest": "sha256:cf10ceb77d025e1fb9b36a1e322711c494a53dfba52caa9cb017f7f92ec1fcc7",
       "expected": {
         "uncertainty": "not_comparable",
         "verdict": null
@@ -337,15 +273,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "planned"
     },
     "plugin-required-symbol-loss": {
       "affects": [
-        "native-consumer-compatibility"
+        "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:21e42361d34137f135aa25330768b20ac228607b3f78506c6b5afbb1074612d5",
+      "digest": "sha256:af0665113668ae0870c2d591d2e8164550bf218fc4a0876a0df61c84e9b3fa8f",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -364,15 +300,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "native-consumer-compatibility",
+      "skill": "review-native-library-change",
       "status": "planned"
     },
     "removed-export": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "A",
-      "digest": "sha256:aaaa972b77397aa0d6fb3024c23172ccc77a6511235b5791ba7bc605c604d120",
+      "digest": "sha256:2c7672994801264c7862b61f1a540c849c0dc5f7bf2dc3ee3acd00f86fbdbf42",
       "expected": {
         "kinds": [
           "func_removed"
@@ -394,43 +330,15 @@
         "examples/case01_symbol_removal",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
-      "status": "ready"
-    },
-    "soname-unchanged": {
-      "affects": [
-        "native-release-compatibility"
-      ],
-      "category": "A",
-      "digest": "sha256:da51ceced6e238f1e8fb344df96e75f693ce2fea92a16b4c122ff52a777edaab",
-      "expected": {
-        "kinds": [
-          "soname_missing"
-        ],
-        "min_evidence": "L0",
-        "resolved_from": "examples/ground_truth.json",
-        "verdict": "COMPATIBLE"
-      },
-      "inputs": "examples/case05_soname",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "Can this go out as a minor version, or does it need a SONAME bump?",
-      "roots": [
-        "agent-evals/skills/scenarios.yaml",
-        "examples/case05_soname",
-        "examples/ground_truth.json"
-      ],
-      "skill": "native-release-compatibility",
+      "skill": "review-native-library-change",
       "status": "ready"
     },
     "struct-layout-drift": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "A",
-      "digest": "sha256:1b50145f198c691bcf53a1866f3c245857b5ab9d19920a8cae7aa57dbabe30fd",
+      "digest": "sha256:17c5b39afe1a7fd5f620c657502e9cc060edafcdd59c7b17188847af711ad175",
       "expected": {
         "kinds": [
           "type_size_changed"
@@ -450,15 +358,15 @@
         "examples/case07_struct_layout",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "ready"
     },
     "vtable-change": {
       "affects": [
-        "native-binary-compatibility-review"
+        "review-native-library-change"
       ],
       "category": "A",
-      "digest": "sha256:e79ee82c5b067e4a1a50aef30ca070fe9ea963c59548b6f9eda8418f34cb53f1",
+      "digest": "sha256:a2fc3352cc0c3cd7b70cd7eb83d2f0e3d49fc7c44d433c606c3dd5d309ba4f1b",
       "expected": {
         "kinds": [
           "type_vtable_changed"
@@ -478,19 +386,16 @@
         "examples/case09_cpp_vtable",
         "examples/ground_truth.json"
       ],
-      "skill": "native-binary-compatibility-review",
+      "skill": "review-native-library-change",
       "status": "ready"
     }
   },
   "shared": {
     "harness": {
       "affects": [
-        "native-api-evolution",
-        "native-binary-compatibility-review",
-        "native-consumer-compatibility",
-        "native-release-compatibility"
+        "review-native-library-change"
       ],
-      "digest": "sha256:2d7a111e7515933d09aea5d4737b8881edf3e6a193f52ec1bd304994a2a5ab4a",
+      "digest": "sha256:b9c49954d49f3793377914bc32255359c08a3c306f6f480f8a3bb77bab94b62b",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -501,12 +406,9 @@
     },
     "trigger_corpus": {
       "affects": [
-        "native-api-evolution",
-        "native-binary-compatibility-review",
-        "native-consumer-compatibility",
-        "native-release-compatibility"
+        "review-native-library-change"
       ],
-      "digest": "sha256:8470329beed40dc34cea75fff2b6c3c209b575db5ec9b73167a8810fe284eabf",
+      "digest": "sha256:105fb296c985187076d4b6ec053b7ffc53b99ba2ecb1b7915cfe4e00c2933c81",
       "prompt_ids": [
         "positive-0",
         "positive-1",
@@ -527,41 +429,14 @@
     }
   },
   "skills": {
-    "native-api-evolution": {
+    "review-native-library-change": {
       "affects": [
-        "native-api-evolution"
+        "review-native-library-change"
       ],
       "roots": [
-        ".agents/skills/native-api-evolution"
+        ".agents/skills/review-native-library-change"
       ],
-      "tree": "sha256:e1bab8b37b7fd86a1688910e282e4ae6368143697f70f6d7fb745364dfa5e06c"
-    },
-    "native-binary-compatibility-review": {
-      "affects": [
-        "native-binary-compatibility-review"
-      ],
-      "roots": [
-        ".agents/skills/native-binary-compatibility-review"
-      ],
-      "tree": "sha256:e3e3191dd4520c10b191b6273abfe903cbcf58ebbf0f8ff0351ef93f141f0341"
-    },
-    "native-consumer-compatibility": {
-      "affects": [
-        "native-consumer-compatibility"
-      ],
-      "roots": [
-        ".agents/skills/native-consumer-compatibility"
-      ],
-      "tree": "sha256:112ac1d17ebd839e23d629f07eaf0d555eaa5f619f2fd0f589918848341dba43"
-    },
-    "native-release-compatibility": {
-      "affects": [
-        "native-release-compatibility"
-      ],
-      "roots": [
-        ".agents/skills/native-release-compatibility"
-      ],
-      "tree": "sha256:ebaf028c69626dd45c73681f619eb84622c6d5ddaabeeda2f00417ae0c222fc0"
+      "tree": "sha256:54a739e53ed2dd0b6b171f016e24a30043dcdb3af3bd703bae04beac445728f7"
     }
   }
 }

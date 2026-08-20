@@ -30,11 +30,12 @@ the tool in the prompt would hand the baseline arm the same answer.
 
 **The workspace must live outside this repository, and that is enforced rather
 than documented.** Claude Code discovers skills from the project the working
-directory belongs to, and this repository's own root carries all four published
-trees in `.claude/skills/`. A workspace anywhere beneath it therefore hands the
+directory belongs to, and this repository's own root carries every published
+tree in `.claude/skills/`. A workspace anywhere beneath it therefore hands the
 *baseline* arm every skill it is defined by not having — verified against the
-real CLI, which reported all four visible from an in-repo directory and exactly
-the one installed from a workspace outside it. That is not a degraded
+real CLI, which reported every published skill visible from an in-repo
+directory and exactly the one installed from a workspace outside it. That is
+not a degraded
 measurement, it is the absence of one: both arms would be skill arms and the
 comparison would read as "the skill changes nothing".
 
@@ -67,25 +68,35 @@ from graders import claim as claim_mod  # noqa: E402
 
 SHIM = EVAL_DIR / "shim" / "abicheck"
 PUBLISHED_SKILLS = ROOT / ".claude" / "skills"
+
+#: Source of truth for which skill directories are *abicheck's own*, as
+#: opposed to everything else `.claude/skills/` (`PUBLISHED_SKILLS`) happens
+#: to contain — e.g. `grill-with-docs`, an unrelated hand-authored developer
+#: skill this repo also ships that has nothing to do with the abicheck
+#: portfolio. `_published_skill_names()` reads directory names from here, not
+#: from `PUBLISHED_SKILLS` itself: `.claude/skills/` is a real install path
+#: Claude Code reads from and reports skills out of regardless of who
+#: authored them, so treating everything under it as a conflicting
+#: "treatment" skill would reject a baseline run for seeing `grill-with-docs`
+#: — a skill both arms share identically and that has no bearing on the A/B
+#: comparison this harness measures.
+SKILLS_SRC = ROOT / "skills-src"
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
 ARMS = ("skill", "baseline")
 
 #: G37's 2026-08-11 scope note (docs/contribute/plans/
-#: g37-agent-skill-quality-evaluation.md) and ADR-058's same-dated amendment:
-#: `native-binary-compatibility-review` is the sole flagship subject for every
-#: phase, and the other three shipped skills are prototype status — not an
-#: L2/L3 evaluation target until the flagship experiment shows measurable
-#: lift. `scenarios.yaml` still carries `status: ready` entries for
-#: `native-api-evolution` and `native-release-compatibility` (declared before
-#: the freeze; not yet re-scoped to `status: planned` there — see that file's
-#: own status-field contract before repurposing it for this), so the default,
-#: unscoped "every ready scenario" selection below would otherwise run
-#: prototype-skill scenarios and mix their results into a nominally
-#: flagship-only experiment. Filtered here rather than in the pack so a
-#: prototype skill's already-authored scenarios stay intact for when it
-#: re-enters scope, one skill at a time, rather than needing to be re-added.
-FLAGSHIP_SKILL = "native-binary-compatibility-review"
+#: g37-agent-skill-quality-evaluation.md) named
+#: `native-binary-compatibility-review` (renamed `review-native-library-
+#: change`) as the sole flagship subject for every phase. ADR-058's
+#: 2026-08-20 portfolio-reset amendment went further and removed the other
+#: three shipped skills from the published portfolio entirely, so this
+#: filter is now a no-op in practice — every scenario in `scenarios.yaml`
+#: already names this one skill — but is kept rather than removed: it is
+#: what re-scopes a future second skill's scenarios out of a
+#: still-flagship-only run the moment one is added, without needing this
+#: filter re-introduced from scratch.
+FLAGSHIP_SKILL = "review-native-library-change"
 
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
@@ -453,16 +464,80 @@ def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
         )
 
 
+#: Skill directory names this repo has published and then retired.
+#:
+#: A machine running this harness can still have one of these installed at
+#: user scope (e.g. a checkout from before ADR-058's 2026-08-20
+#: portfolio-reset amendment, or a stale `~/.claude/skills/` copy) even
+#: though its directory no longer exists in the *current* checkout. Reading
+#: only the checkout's live `skills-src/`-derived directories would silently
+#: drop such a skill from `visible_native_skills`'s filter — an `init` event
+#: naming it would simply disappear, and `check_treatment` would then accept
+#: a baseline run that could actually see a (retired) treatment skill, or a
+#: skill run whose visible skill list looks like exactly `[scenario["skill"]]`
+#: while a second, retired skill was also visible and silently filtered out.
+#: Either way the isolation this harness exists to prove would be
+#: contaminated without any visible sign of it. Keeping the retired names
+#: here — alongside the dynamically discovered current ones — means a
+#: leftover installation is *never* hidden, only ever surfaced (and then
+#: correctly rejected by `check_treatment`).
+_RETIRED_SKILL_NAMES = frozenset(
+    {
+        "native-binary-compatibility-review",  # renamed -> review-native-library-change
+        "native-api-evolution",
+        "native-consumer-compatibility",
+        "native-release-compatibility",
+    }
+)
+
+
+def _published_skill_names() -> set[str]:
+    """The abicheck skill directories currently published, per `SKILLS_SRC`.
+
+    Not a `native-`-prefix heuristic: `review-native-library-change`
+    (renamed from `native-binary-compatibility-review` by ADR-058's
+    2026-08-20 portfolio-reset amendment) does not start with `native-`, and
+    a prefix check silently dropped it from every visibility read — the
+    treatment check then saw an empty visible-skill list for a skill-arm run
+    that genuinely had the skill installed, and rejected it. Reading the real
+    published directory names is correct regardless of what any current or
+    future skill happens to be called.
+
+    Reads `SKILLS_SRC` (`skills-src/`), not `PUBLISHED_SKILLS`
+    (`.claude/skills/`) — the latter also holds unrelated hand-authored
+    developer skills (e.g. `grill-with-docs`) that are not part of the
+    abicheck portfolio this harness measures, and treating one of those as a
+    conflicting "treatment" skill would reject a run for seeing a skill both
+    arms share identically. `skills-src/` is the one hand-authored source
+    (`skills-src/CLAUDE.md`) every generated tree, `PUBLISHED_SKILLS`
+    included, derives from — every name here is guaranteed to actually be
+    generated into `PUBLISHED_SKILLS` too, since `scripts/gen_agent_skills.py
+    --check` (part of the `pr` verification profile) fails otherwise.
+    """
+    if not SKILLS_SRC.is_dir():
+        return set()
+    return {
+        p.name
+        for p in SKILLS_SRC.iterdir()
+        if p.is_dir() and p.name != "shared" and (p / "SKILL.md").is_file()
+    }
+
+
 def visible_native_skills(events: list[dict]) -> list[str] | None:
-    """The published skills the CLI reported seeing, or None if it never said.
+    """The published or formerly-published skills the CLI reported seeing.
 
     `None` and `[]` are different answers and must not collapse: an absent
     `init` event means the treatment is unverified, while an empty list is
     positive evidence that the baseline arm saw nothing.
+
+    Filters against `_published_skill_names() | _RETIRED_SKILL_NAMES`, not
+    the current checkout's published names alone — see `_RETIRED_SKILL_NAMES`
+    for why a retired name must never be silently dropped from this list.
     """
+    conflicting = _published_skill_names() | _RETIRED_SKILL_NAMES
     for event in events:
         if event.get("type") == "system" and event.get("subtype") == "init":
-            return sorted(s for s in event.get("skills", []) if s.startswith("native-"))
+            return sorted(s for s in event.get("skills", []) if s in conflicting)
     return None
 
 

@@ -80,40 +80,48 @@ Generated output, per skill, per target tree:
    starts depending on surface that first ships in a later release, not when
    the tree's own version moves.
 
-## Portfolio status (G37 scope freeze, 2026-08-11)
+## Portfolio status (portfolio reset, 2026-08-20)
 
-None of the four shipped skills has measured evidence yet that it improves
-agent behavior over a well-documented CLI/`AGENTS.md` alone — every gate
-that exists today (`test_gen_agent_skills.py`,
+The four-skill portfolio the earlier (2026-08-11) freeze shipped was itself
+frozen precisely because none of the four had measured evidence that it
+improved agent behavior over a well-documented CLI/`AGENTS.md` alone — every
+gate that existed then (`test_gen_agent_skills.py`,
 `test_agent_skills_structural.py`, `test_agent_skills_drift.py`,
-`test_agent_skills_triggers.py`) proves the *artifact* is well-formed, never
-that the *behavior* it produces beats the unequipped baseline. Per
-[ADR-058's 2026-08-11 amendment](../docs/contribute/adr/058-native-compatibility-agent-skills.md),
-the portfolio is frozen at the four skills already shipped, and each carries
-one of two statuses until G37 says otherwise:
+`test_agent_skills_triggers.py`) proved the *artifact* well-formed, never
+that the *behavior* it produced beat the unequipped baseline. Per
+[ADR-058's 2026-08-20 amendment](../docs/contribute/adr/058-native-compatibility-agent-skills.md),
+that observation was carried to its conclusion: publishing three more
+prototypes ahead of any such evidence was scaling packaging ahead of
+validated product value, so the portfolio is now reset to **one** internal
+candidate.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `native-binary-compatibility-review` | **Flagship** | The sole subject of G37's L1l/L2/L3 behavioral and comparative-lift evaluation. Content changes here are expected and should be validated against G37's evidence bundles as that infrastructure lands. |
-| `native-api-evolution` | Prototype | Published, but frozen — no new scope, not an L2/L3 evaluation target, not to be cited as validated in any user-facing claim. |
-| `native-release-compatibility` | Prototype | Same as above. |
-| `native-consumer-compatibility` | Prototype | Same as above. |
+| `review-native-library-change` (formerly `native-binary-compatibility-review`) | **Internal candidate — not yet validated, not for external publication.** | The sole published skill and the sole subject of any future G37 behavioral/comparative-lift evaluation. Not to be cited as validated in any user-facing claim until that evidence exists. |
+
+`native-api-evolution`, `native-consumer-compatibility`, and
+`native-release-compatibility` are no longer published — their source is
+recoverable from git history (the commit preceding this reset on this
+branch), not from the live `skills-src/` tree. Their valuable parts are not
+lost: the flagship's remediation guidance and consumer-scoping dial already
+draw on the same `shared/remediation-catalog.md` and
+`shared/consumer-scoping.md` fragments those three cited, and
+`native-release-compatibility`'s whole-release-matrix-qualification concern
+remains a distinct future second-skill candidate (`qualify-native-library-
+release`, not yet built) rather than something folded into this skill's
+scope. See the ADR amendment for the full accounting of what was deferred.
 
 **What this means in practice:**
 
-- Don't extend a prototype skill's workflow, references, or admitted scope.
-  A bug fix (a stale flag, a wrong claim) is still fine — it's *growth* that
-  is frozen, not maintenance.
-- Don't build G37 evaluation scenarios, fixtures, or corpus entries against
-  a prototype skill. G37's Phase 1 corpus targets
-  `native-binary-compatibility-review` only — see that plan's scope note.
-- A prototype skill is promoted back to active/candidate-for-second-flagship
-  status only after the flagship experiment shows a measurable, reproducible
-  lift on G37 D7's gating comparator — `skill-agent:` (offered via
-  progressive disclosure) vs. `baseline` (bare agent, no skill) — not on a
-  schedule and not by removing this table row.
-- This freeze does not reopen ADR-058's five-criteria admission bar for a
-  *new* (fifth) skill — see "Adding a public skill" below, unchanged.
+- Don't add a second published skill. Rebuilding
+  `native-release-compatibility` (or anything else) as a public skill needs
+  its own pass through ADR-058's five-criteria admission bar, informed by
+  whatever this one candidate's evaluation actually finds — not a
+  restoration from git history.
+- Don't cite `review-native-library-change` as validated in any user-facing
+  claim; no behavioral evidence exists yet.
+- This reset does not reopen ADR-058's five-criteria admission bar for a
+  *new* skill on its own — see "Adding a public skill" below, unchanged.
 
 ## Adding a public skill
 
@@ -124,9 +132,9 @@ domain knowledge to justify a skill. A candidate failing any one becomes a
 `shared/` fragment or a branch inside an existing skill, not a fifth skill.
 P2 candidates and the evidence each needs are recorded in
 `docs/contribute/plans/g36-native-compatibility-agent-skills.md`. The
-portfolio freeze above is a stronger, additional bar on top of this one:
+portfolio status above is a stronger, additional bar on top of this one:
 even a candidate that clears all five criteria should not be pursued while
-the flagship experiment is still open.
+the sole candidate skill's own evaluation is still open.
 
 ## Workflow
 

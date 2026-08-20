@@ -2,7 +2,9 @@
 
 **Date:** 2026-08-09
 **Status:** Accepted — partially implemented. G36 P0.1–P0.3 and P0.6–P0.9
-have landed: `skills-src/` with the four `SKILL.md` files and Layer-B
+have landed: `skills-src/` with its `SKILL.md` file(s) — four originally,
+reduced to one (`review-native-library-change`) by the 2026-08-20 portfolio
+reset amendment below — and Layer-B
 fragments, `scripts/gen_agent_skills.py` generating the three publication
 trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`), AI-readiness
 and docs-contract gate coverage, structural/tool-API-drift/trigger tests, and
@@ -13,14 +15,93 @@ independent product-surface changes; and all of P1 (behavioral evaluation
 against the examples corpus, cross-agent validation, and public publication
 channels), none of which have run yet. See
 [G36](../plans/g36-native-compatibility-agent-skills.md) for phase-by-phase
-status. **Portfolio expansion is frozen as of the 2026-08-11 amendment
-below**: `native-binary-compatibility-review` is the sole flagship
-evaluation target for G37's behavioral/comparative-lift work; the other
-three shipped skills are demoted to prototype status until it demonstrates
-measurable lift over an unequipped agent.
+status. **The published portfolio was reset to one skill as of the
+2026-08-20 amendment below**: `review-native-library-change` (renamed from
+`native-binary-compatibility-review`) is the sole published skill and an
+internal candidate, not yet validated and not for external publication; the
+other three skills the 2026-08-11 amendment had demoted to prototype status
+are no longer published at all.
 **Decision maker:** (pending — recorded per repository convention)
 
-> **Amendment (2026-08-11, flagship-first portfolio freeze).** A strategy
+> **Amendment (2026-08-20, portfolio reset to one internal candidate).**
+> The 2026-08-11 amendment below froze the portfolio at four skills — one
+> flagship under evaluation, three prototypes kept published but frozen —
+> on the premise that "removing working, reviewed content is not the goal."
+> A further strategy review found that premise itself was the mistake: none
+> of the four skills had (or has, as of this amendment) any measured
+> evidence that it improves agent behavior over a well-documented
+> CLI/`AGENTS.md` alone, so publishing three additional, unvalidated skills
+> alongside the one flagship was scaling *packaging* — three more
+> discoverable, installable artifacts — ahead of any validated *product*
+> value. Sunk review effort on the three prototypes is not a reason to keep
+> them on the public discovery surface while that question remains open for
+> the one skill they were frozen behind.
+> **Decision:** reset the published/discoverable portfolio from four skills
+> to **one**. `native-api-evolution`, `native-consumer-compatibility`, and
+> `native-release-compatibility` are removed from `skills-src/` and from all
+> three generated trees (`.agents/skills/`, `.claude/skills/`,
+> `.gemini/skills/`) — not merely re-labeled. Their source remains fully
+> recoverable from git history (the commit on this repository's default
+> branch immediately preceding this reset, and every commit before it) for
+> whenever a second skill is built; it is not carried forward in the live
+> `skills-src/` tree. The sole survivor, `native-binary-compatibility-review`,
+> is renamed `review-native-library-change` (directory, `name:` frontmatter,
+> and every internal cross-reference) and is explicitly designated an
+> **internal candidate**: not yet behaviorally validated, and not to be
+> published externally or cited as validated in any user-facing claim. Its
+> own workflow content is unchanged by this amendment beyond the rename and
+> one added citation (see below) — a full content rewrite is deliberately
+> deferred, not attempted here.
+> Two of the three removed skills' concerns are **not** folded into the
+> survivor's content by this amendment, and are recorded as still-open,
+> deferred follow-up work rather than done:
+> - `native-api-evolution`'s design-pattern guidance (pImpl, reserved slots,
+>   versioned interfaces, deprecation lifecycles) and
+>   `native-consumer-compatibility`'s named-application/plugin scoping are
+>   candidates to become, respectively, remediation guidance and an optional
+>   scoped branch *within* `review-native-library-change` — but that is a
+>   real content rewrite of the skill's workflow, not attempted in this
+>   amendment. The one exception: `shared/consumer-scoping.md` (the
+>   `--used-by`/`--required-symbol` dial both `native-consumer-compatibility`
+>   and `native-api-evolution` cited) would otherwise have been orphaned by
+>   this reset (skills-src/CLAUDE.md rule 4), so
+>   `review-native-library-change`'s `SKILL.md` now carries one linking
+>   citation to it — not a narrative integration.
+> - `native-release-compatibility`'s whole-release-matrix-qualification
+>   concern (multiple libraries, platforms, and build profiles judged
+>   against the last supported release) is a genuinely distinct capability
+>   from a single change's compatibility review, and remains a candidate for
+>   a **second**, independently-admitted skill (working name
+>   `qualify-native-library-release`) once the first candidate's own
+>   evaluation justifies the investment in a second one — its content is
+>   deliberately *not* folded into `review-native-library-change`.
+> Also deferred, and not attempted here: moving `agent-evals/skills/` under
+> `tests/`/`validation/`; completing the G37 evaluation corpus and actually
+> running any evaluation against the sole surviving candidate; and building
+> a thin external-distribution repository for eventual publication. None of
+> this amendment's changes should be read as evidence that any of that work
+> is done. The eval harness's own scenario corpus (`agent-evals/skills/
+> scenarios.yaml`) and rubric (`agent-evals/skills/rubric.yaml`) were
+> narrowed in the same change that made this amendment, strictly to stay
+> internally consistent with a one-skill portfolio: scenarios owned by
+> `native-api-evolution`/`native-release-compatibility` were removed
+> outright (that capability is not claimed by the survivor), the one
+> dimension-2 uncertainty kind — `matrix_target_unrun` — that had no
+> scenario left once its owning skill was removed was narrowed
+> correspondingly, and the three `native-consumer-compatibility` scenarios
+> were **reassigned** to `review-native-library-change` rather than
+> removed, since that capability *was* absorbed (the one linking citation
+> above) — this is bookkeeping to keep existing gates green and coverage
+> matched to actual claimed capability, not progress on the deferred
+> corpus/evaluation work above.
+> This does not reopen ADR-058's five-criteria admission bar for a new
+> skill on its own (unchanged from the 2026-08-11 amendment's own framing)
+> — it only removes what was frozen at that bar's own admission-scale
+> premise. `skills-src/CLAUDE.md`'s portfolio-status table carries the same
+> one-row state as this amendment.
+
+> **Amendment (2026-08-11, flagship-first portfolio freeze — superseded by
+> the 2026-08-20 amendment above).** A strategy
 > reassessment ahead of G37's implementation found that none of the four
 > shipped skills has any evidence yet that it improves agent behavior over a
 > well-documented CLI and `AGENTS.md`/`CLAUDE.md` alone — every gate that
@@ -182,14 +263,20 @@ without knowing the tool exists:
 7. "How do I keep ABI compatibility across compiler/client profiles?"
 
 abicheck should appear inside the resulting workflow as a deterministic
-verification engine, not as the user-facing job. Phrasings 1–4 map directly
-onto the four P0 skills (Decision → Public skill taxonomy, below); 5 is
-folded into `native-binary-compatibility-review`'s root-cause step; 6 and 7
-are P1 candidates (Decision → Skill admission criteria) — real jobs, not yet
-admitted for lack of validated usage evidence. This list is the source both
-`SKILL.md` `description` fields (Decision → Skill content model) and the
-trigger-test positive corpus (Testing and evaluation architecture, and
-G36's P0.8) are built from.
+verification engine, not as the user-facing job. At the time these seven
+phrasings were written, 1–4 mapped directly onto the four P0 skills
+(Decision → Public skill taxonomy, below) and 5 was folded into
+`native-binary-compatibility-review`'s root-cause step; 6 and 7 remain P1
+candidates (Decision → Skill admission criteria) — real jobs, not yet
+admitted for lack of validated usage evidence. **Since the 2026-08-20
+portfolio-reset amendment above**, phrasings 1, 4, and 5 are all claimed by
+the sole surviving skill, `review-native-library-change` (4's
+named-consumer scoping was absorbed via `--used-by`/`--required-symbol`,
+not dropped — see that amendment); 2 and 3 are currently unclaimed, tracked
+as future scope for that same skill and for a distinct future second skill
+respectively. This list is the source both `SKILL.md` `description` fields
+(Decision → Skill content model) and the trigger-test positive corpus
+(Testing and evaluation architecture, and G36's P0.8) are built from.
 
 ## Ecosystem validation (informs Decision, not repeated there)
 

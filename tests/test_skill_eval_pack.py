@@ -172,7 +172,7 @@ def test_scenario_digest_covers_the_ground_truth_entry() -> None:
     scenario = {
         "id": "removed-export",
         "category": "A",
-        "skill": "native-binary-compatibility-review",
+        "skill": "review-native-library-change",
         "status": "ready",
         "case": "case01_symbol_removal",
     }
@@ -367,7 +367,7 @@ def test_every_hash_maps_to_a_skill(pack: dict[str, Any]) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        ".agents/skills/native-api-evolution/SKILL.md",
+        ".agents/skills/review-native-library-change/SKILL.md",
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json",
         "examples/case01_symbol_removal/old.h",
@@ -390,7 +390,7 @@ def test_an_unrouted_input_is_reported(pack: dict[str, Any]) -> None:
 
 
 #: One file every synthetic bundle claims to have read.
-SKILL_READ = ".agents/skills/native-binary-compatibility-review/SKILL.md"
+SKILL_READ = ".agents/skills/review-native-library-change/SKILL.md"
 
 
 def _observed(rel_path: str) -> dict[str, str]:
@@ -410,7 +410,7 @@ def _observed(rel_path: str) -> dict[str, str]:
 
 
 def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
-    skill = "native-binary-compatibility-review"
+    skill = "review-native-library-change"
     scenario = "removed-export"
     hashes = {
         "skill_tree": pack["skills"][skill]["tree"],
@@ -440,7 +440,7 @@ def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
 def _write_bundle(tmp_path: Path, bundle: dict[str, Any]) -> Path:
     meta = (
         tmp_path
-        / "native-binary-compatibility-review"
+        / "review-native-library-change"
         / "removed-export"
         / "0"
         / "meta.json"
@@ -480,7 +480,7 @@ def test_a_stale_skill_tree_hash_fails(
     assert "stale" in out
     # The failure nominates what to re-run — a check that rejects evidence
     # without naming its replacement is the deadlock D6 states as an invariant.
-    assert "native-binary-compatibility-review" in out
+    assert "review-native-library-change" in out
 
 
 @pytest.mark.parametrize(
@@ -541,10 +541,16 @@ def test_a_bundle_filed_under_the_wrong_skill_is_checked_against_that_skill(
     pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """`skill_tree` resolves through the bundle's own directory, not a field, so
-    a bundle cannot claim to be evidence for a skill it is not filed under."""
-    bundle = _bundle(
-        pack, hashes={"skill_tree": pack["skills"]["native-api-evolution"]["tree"]}
-    )
+    a bundle cannot claim to be evidence for a skill it is not filed under.
+
+    With only one skill published (ADR-058's 2026-08-20 portfolio-reset
+    amendment), there is no second real skill's tree hash to borrow here — the
+    checker itself does not special-case "another skill's real hash" versus
+    "any other digest" (see `check_skill_eval_freshness.check_bundle`: the
+    comparison is a plain string mismatch against the hash the bundle's own
+    directory routes to), so a synthetic-but-well-formed digest exercises the
+    identical code path a second real skill's tree hash would."""
+    bundle = _bundle(pack, hashes={"skill_tree": "sha256:" + "9" * 64})
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
 
@@ -572,14 +578,34 @@ def test_a_bundle_naming_an_unknown_scenario_fails(
 def test_a_bundle_filed_under_the_wrong_skill_for_its_scenario_fails(
     pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`api-only-break` belongs to a different skill than the directory this
+    """A scenario belonging to a different skill than the directory this
     bundle is filed under — evidence attributed to the wrong skill is how a
-    skill ends up with coverage it never earned."""
-    scenario = "api-only-break"
+    skill ends up with coverage it never earned.
+
+    With only one skill published (ADR-058's 2026-08-20 portfolio-reset
+    amendment) every real scenario now names that same skill, so there is no
+    real scenario belonging to "a different skill" to borrow here. A
+    synthetic scenario, injected via a patched pack load, exercises the
+    identical `scenario.get("skill") != skill` check in
+    `check_skill_eval_freshness.check_bundle` that a second real skill's
+    scenario would."""
+    scenario_id = "synthetic-other-skill-scenario"
+    synthetic = dict(pack)
+    synthetic["scenarios"] = {
+        **pack["scenarios"],
+        scenario_id: {
+            **pack["scenarios"]["removed-export"],
+            "skill": "synthetic-other-skill",
+        },
+    }
+    monkeypatch.setattr(freshness, "_load_pack", lambda: synthetic)
     bundle = _bundle(
-        pack, hashes={"scenarios": {scenario: pack["scenarios"][scenario]["digest"]}}
+        pack,
+        hashes={
+            "scenarios": {scenario_id: synthetic["scenarios"][scenario_id]["digest"]}
+        },
     )
-    bundle["scenario_id"] = scenario
+    bundle["scenario_id"] = scenario_id
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
 
@@ -662,16 +688,20 @@ def test_a_bundle_missing_a_required_hash_fails(
 def test_an_input_routing_only_to_a_hash_this_bundle_lacks_fails(
     pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Routing to *some* hash in the pack is not enough. A binary-review bundle
-    that read another skill's SKILL.md records only its own tree hash, so an
-    edit to the skill it actually read leaves it 'fresh' — completeness is a
-    property of this bundle's own recorded hashes, not of the pack."""
+    """Routing to *some* hash in the pack is not enough. A bundle that read
+    a *different scenario's* fixture records only the scenario hash it
+    actually named, so an edit to the scenario it merely happened to read
+    leaves it 'fresh' — completeness is a property of this bundle's own
+    recorded hashes, not of the pack."""
     bundle = _bundle(pack)
     # Real digest: the input is current, so the only thing wrong with it is
     # that no hash this bundle recorded covers it. A placeholder would fail
     # the content comparison instead and pass this test for the wrong reason.
+    # `_bundle()` names the `removed-export` scenario only, so a file unique
+    # to a different scenario's own fixture (`changed-signature`'s case
+    # directory) routes to a scenario hash this bundle did not record.
     bundle["observed_inputs"].append(
-        _observed(".agents/skills/native-api-evolution/SKILL.md")
+        _observed("examples/case02_param_type_change/v1.h")
     )
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 

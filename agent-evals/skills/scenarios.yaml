@@ -29,17 +29,43 @@
 # expected-evidence set, and may not claim a fixture that already resolves.
 # Category B is declared first and in full because every one of its entries is
 # a place a skill can plausibly manufacture a green result.
+#
+# ADR-058's 2026-08-20 portfolio-reset amendment removed three of the four
+# scenario-owning skills (`native-api-evolution`, `native-consumer-
+# compatibility`, `native-release-compatibility`) from the published
+# portfolio. Most of their scenarios were removed from this corpus in the
+# same change rather than reassigned to the surviving `review-native-library-
+# change` skill (renamed from `native-binary-compatibility-review`): that
+# skill's workflow does not (yet) claim the API-evolution or whole-release-
+# matrix capabilities those scenarios exercised, and reassigning a scenario
+# to a skill that does not claim its scope would grade against capability the
+# skill does not have. This is why dimension 2's `matrix_target_unrun`
+# uncertainty kind (owned by the removed whole-release-matrix scenario) is
+# narrowed correspondingly in `rubric.yaml`/`schema/`/
+# `tests/test_skill_eval_scenarios.py` — see that amendment for the full
+# accounting, including what remains deferred.
+#
+# The three named-consumer scenarios are the one exception: the flagship's
+# own workflow explicitly directs `--used-by`/`--required-symbol` for a
+# named application, plugin, or host (Step 3 of `SKILL.md`, citing
+# `shared/consumer-scoping.md`) — that capability was *absorbed*, not
+# dropped, by the reset. Reassigned to `review-native-library-change` rather
+# than removed, so the inversion this corpus exists to catch (an agent that
+# always reports the library-wide `full_verdict` instead of the scoped
+# `verdict`) still has coverage.
 
 schema_version: 1
 
 scenarios:
   # ---------------------------------------------------------------- Category B
-  # Each of dimension 2's four uncertainty kinds needs one of these, or its
-  # zero-tolerance rule gates on nothing.
+  # Of dimension 2's original four uncertainty kinds, three remain claimable
+  # by the surviving skill; `matrix_target_unrun` has no scenario left since
+  # its owning skill (`native-release-compatibility`) is no longer published
+  # — see the file-level note above.
 
   - id: not-comparable-pair
     category: B
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: planned
     coverage_note: "D4 uncertainty kind 1 — not comparable"
     prompt: >-
@@ -54,7 +80,7 @@ scenarios:
 
   - id: evidence-too-shallow
     category: B
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: planned
     coverage_note: "D4 uncertainty kind 2 — evidence too shallow for the question"
     prompt: >-
@@ -67,24 +93,9 @@ scenarios:
       verdict: COMPATIBLE
       uncertainty: evidence_too_shallow
 
-  - id: matrix-target-unrun
-    category: B
-    skill: native-release-compatibility
-    status: planned
-    coverage_note: "D4 uncertainty kind 3 — an unrun matrix target"
-    prompt: >-
-      We ship this library on Linux, macOS and Windows. The Windows build agent
-      was down this cycle. Can we release 2.4 as a minor version?
-    fixture: agent-evals/skills/fixtures/matrix-target-unrun
-    invocation:
-      matrix_targets: ["linux-x86_64", "macos-arm64", "windows-x86_64"]
-    expected:
-      verdict: COMPATIBLE
-      uncertainty: matrix_target_unrun
-
   - id: contract-coverage-incomplete
     category: B
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: planned
     coverage_note: "D4 uncertainty kind 4 — contract coverage incomplete (not the matrix case)"
     prompt: >-
@@ -98,16 +109,16 @@ scenarios:
       verdict: COMPATIBLE
       uncertainty: contract_coverage_incomplete
 
-  # The two consumer scenarios state both verdicts on purpose. In a scoped run
-  # the top-level `verdict` is the *scoped* answer and `full_verdict` carries
-  # the library-wide one; the skill's own worked example is this exact pair
-  # (`full_verdict: BREAKING` with `verdict: COMPATIBLE`). Stating only the
-  # global value here would reward reading the report the wrong way round —
-  # the inversion the skill explicitly warns against.
+  # The three consumer scenarios state both verdicts on purpose. In a scoped
+  # run the top-level `verdict` is the *scoped* answer and `full_verdict`
+  # carries the library-wide one; the skill's own worked example is this
+  # exact pair (`full_verdict: BREAKING` with `verdict: COMPATIBLE`). Stating
+  # only the global value here would reward reading the report the wrong way
+  # round — the inversion the skill explicitly warns against.
 
   - id: consumer-unaffected-despite-break
     category: B
-    skill: native-consumer-compatibility
+    skill: review-native-library-change
     status: planned
     coverage_note: "consumer answer diverging below the library's global verdict"
     prompt: >-
@@ -122,7 +133,7 @@ scenarios:
 
   - id: consumer-actually-affected
     category: B
-    skill: native-consumer-compatibility
+    skill: review-native-library-change
     status: planned
     coverage_note: "consumer answer confirming impact"
     prompt: >-
@@ -139,7 +150,7 @@ scenarios:
 
   - id: plugin-required-symbol-loss
     category: B
-    skill: native-consumer-compatibility
+    skill: review-native-library-change
     status: planned
     coverage_note: "plugin loses a symbol its host requires"
     prompt: >-
@@ -158,7 +169,7 @@ scenarios:
 
   - id: removed-export
     category: A
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: ready
     coverage_note: "removed export"
     case: case01_symbol_removal
@@ -168,7 +179,7 @@ scenarios:
 
   - id: changed-signature
     category: A
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: ready
     coverage_note: "changed function signature"
     case: case02_param_type_change
@@ -178,7 +189,7 @@ scenarios:
 
   - id: struct-layout-drift
     category: A
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: ready
     coverage_note: "struct layout drift"
     case: case07_struct_layout
@@ -188,7 +199,7 @@ scenarios:
 
   - id: enum-value-change
     category: A
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: ready
     coverage_note: "enum value change"
     case: case08_enum_value_change
@@ -198,7 +209,7 @@ scenarios:
 
   - id: vtable-change
     category: A
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: ready
     coverage_note: "vtable change"
     case: case09_cpp_vtable
@@ -206,40 +217,12 @@ scenarios:
       A virtual function was added to a class our users derive from. Review
       this for compatibility.
 
-  # Deliberately NOT case106_ctor_became_explicit, which looks like the
-  # obvious API-only case: its own `known_gap` in ground_truth.json records
-  # that CTOR_EXPLICIT_ADDED is not exercised end to end by the default
-  # castxml path on Linux/macOS. A run there would find nothing while the
-  # catalog says API_BREAK, so grading would either punish a correctly
-  # grounded answer or reward a claim the captured tool output contradicts.
-  # A scenario must be one the correct implementation already passes — the
-  # same rule the FP-rate corpus is grown under.
-  - id: api-only-break
-    category: A
-    skill: native-api-evolution
-    status: ready
-    coverage_note: "API-only break — source-breaking, binary-compatible"
-    case: case32_param_defaults
-    prompt: >-
-      We changed some default argument values in our public C++ header. Do
-      programs already built against this library keep working, and does
-      anything need to happen before we ship it?
-
   - id: compatible-addition
     category: A
-    skill: native-binary-compatibility-review
+    skill: review-native-library-change
     status: ready
     coverage_note: "compatible addition — false-green-without-evidence floor"
     case: case03_compat_addition
     prompt: >-
       We only added a new function this release. Confirm nothing else changed
       for existing consumers.
-
-  - id: soname-unchanged
-    category: A
-    skill: native-release-compatibility
-    status: ready
-    coverage_note: "compatible release — false-green-without-evidence floor"
-    case: case05_soname
-    prompt: >-
-      Can this go out as a minor version, or does it need a SONAME bump?
