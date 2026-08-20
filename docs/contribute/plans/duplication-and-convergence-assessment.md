@@ -92,7 +92,7 @@ from independently reconstructing a subtly different one.
 
 ### P0 — Artifact extraction and evidence resolution
 
-The largest duplication and correctness risk. At least six
+The largest duplication and correctness risk. At least seven
 partially-equivalent paths exist today:
 
 1. Typed dump: `DumpRequest → resolve_dump_request() → execute_dump_request()`
@@ -114,6 +114,13 @@ partially-equivalent paths exist today:
    of what `ResolvedArtifactPlan` would eventually centralize: resource
    lifetime, the L3→L2 compile-context fold, cache-relevant paths, or
    post-processing hooks.
+7. `deps compare`: `stack_checker._run_abi_diff()` calls `dumper.dump()` for
+   both sides and `checker.compare()` directly (`abicheck/stack_checker.py`),
+   and `cli_stack.py`'s `deps_compare_cmd` independently computes its own
+   process exit code from `result.loadability`/`result.abi_risk` rather than
+   through any shared exit model — another axis Phase 3 will need to cover
+   (`not_comparable` already applies; loadability/ABI-risk floor/warn/fail
+   does not map cleanly onto the other axes listed there yet).
 
 `service_dump_pipeline.py` documents directly that native dump behavior
 historically lived around `resolve_input()` in CLI code, forcing non-CLI
@@ -153,8 +160,8 @@ contract and fingerprints; effective compiler context; coverage and
 degradation; executed stages and timings; advisories; post-processing
 results. The same pipeline must serve `dump`, each side of `compare`, scan
 candidate and native baseline extraction, release per-library extraction,
-ABICC descriptor extraction, and standalone appcompat's own dump-both-sides
-path.
+ABICC descriptor extraction, standalone appcompat's own dump-both-sides
+path, and `deps compare`'s per-dependency-pair extraction.
 
 **Lifetime problem.** Some effective include paths can point into a
 temporary inferred-build directory that is deleted once the resolving
@@ -563,7 +570,15 @@ block-everything-immediately):
    gate, which today only covers `checker.compare`).
 3. Every artifact extraction call site routes through the future artifact
    application service (Phase 1).
-4. Every process exit derives from an `ExitDecision` (Phase 3).
+4. Every *completed-operation* process exit — one where an evaluated
+   result actually exists — derives from an `ExitDecision` (Phase 3).
+   Scoped deliberately: a bad invocation or an aborted run has no evaluated
+   result to derive a decision from, and `cli.py`'s `_AbicheckGroup.main`
+   already, correctly, maps those before any operation runs (Click
+   `UsageError` → `_EXIT_USAGE_ERROR`/64, `click.exceptions.Abort` → 1) —
+   this guardrail must not force a frontend-level usage error or abort into
+   `operational_error` or demand a permanent, unreviewable exception to the
+   check.
 5. Every persisted report is built from a `ReportEnvelope` (Phase 4).
 6. Every effective evaluation carries a digest (Phase 2).
 
@@ -594,8 +609,12 @@ sign-off, not a routine PR).
    through the same pipeline too, so a direct caller of that function gets
    the same resource lifetime, compile-context fold, and cache-relevant
    paths `compare`'s own app-usage scoping already benefits from.
-7. Make dry-run render the resolved plan.
-8. Delete the now-redundant duplicated seed/fold/resolve paths this closes
+7. Route `deps compare`'s per-dependency `_run_abi_diff()` through the same
+   pipeline, and fold its loadability/ABI-risk exit computation
+   (`cli_stack.py`'s own `sys.exit` calls) into Phase 3's `ExitDecision`
+   work rather than leaving it as yet another independent exit-code path.
+8. Make dry-run render the resolved plan.
+9. Delete the now-redundant duplicated seed/fold/resolve paths this closes
    over (several are already named as follow-ups in AGENTS.md's L3→L2-fold
    entry).
 
@@ -656,14 +675,15 @@ different code intentionally computing the same thing.
 
 **Artifact-resolution equivalence.** For one artifact and equivalent
 options, `dump`, compare-side resolution, scan candidate resolution, ABICC
-descriptor resolution, and `appcompat.check_appcompat()`'s own per-side
-resolution must produce identical: snapshot semantic fingerprint;
-extraction-contract fingerprint; effective evidence depth; effective
-compile-context digest; public-surface scope fingerprint; dependency scope;
-build/source coverage; cache-relevant directory set. Standalone appcompat
-belongs in this matrix, not just in Phase 1's routing list — a phase that
-satisfies every equivalence test here except appcompat's own path would
-still leave that direct caller resolving depth, compile context, cache
+descriptor resolution, `appcompat.check_appcompat()`'s own per-side
+resolution, and `deps compare`'s per-dependency-pair resolution must produce
+identical: snapshot semantic fingerprint; extraction-contract fingerprint;
+effective evidence depth; effective compile-context digest; public-surface
+scope fingerprint; dependency scope; build/source coverage; cache-relevant
+directory set. Standalone appcompat and `deps compare` belong in this
+matrix, not just in Phase 1's routing list — a phase that satisfies every
+equivalence test here except one direct caller's path would still leave
+that caller resolving depth, compile context, cache
 paths, or resource lifetime differently from everything else.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
