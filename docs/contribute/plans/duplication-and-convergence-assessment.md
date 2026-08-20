@@ -325,19 +325,25 @@ with axes covering `clean` (mirroring the existing `ExitDecision`'s own
 and another making the field optional), `compatibility_gate`,
 `scoped_gate`, `contract_coverage`, `analysis_assurance`,
 `crosscheck_promotion`, `not_comparable`, `budget_overflow`,
-`operational_error`, `removed_required_artifact`,
+`evidence_contract_error` (`scan`'s own `EVIDENCE_CONTRACT_ERROR` verdict —
+`service_scan.run_scan()` returns it, with `exit_code=1`, when an explicitly
+pinned `--depth` can't collect its required evidence; documented separately
+from `not_comparable`/`budget_overflow` in `run_scan_core()` today, and
+without its own axis it can only collapse into a generic
+`operational_error` or stay the opaque exit-1 heuristic this phase exists
+to remove), `operational_error`, `removed_required_artifact`,
 `missing_required_target`, `unexpected_target`, and two axes for `deps
 compare`'s own dependency-loadability result — `dependency_load_failure`
 and `dependency_abi_risk` — since `cli_stack.py`'s `deps_compare_cmd`
 today distinguishes three outcomes (loadability/ABI-break failure → 4,
 ABI risk or loadability warning → 1) that don't map onto any axis above;
-and per-operation policies (`NativeCompareExitPolicy`, `ScanExitPolicy`,
-`ReleaseExitPolicy`, `AggregateExitPolicy`, `AbiccExitPolicy`, and
-`DepsCompareExitPolicy` for the two new axes plus the existing
-`not_comparable`) that read the same evaluated result but keep each
-operation's own external exit-code contract — `compat`'s `0/1/2/...`
-mapping in particular should be derived through `AbiccExitPolicy`, not
-bypass the shared model.
+and per-operation policies (`NativeCompareExitPolicy`, `ScanExitPolicy` —
+now also covering `evidence_contract_error` — `ReleaseExitPolicy`,
+`AggregateExitPolicy`, `AbiccExitPolicy`, and `DepsCompareExitPolicy` for
+the two new dependency axes plus the existing `not_comparable`) that read
+the same evaluated result but keep each operation's own external
+exit-code contract — `compat`'s `0/1/2/...` mapping in particular should
+be derived through `AbiccExitPolicy`, not bypass the shared model.
 
 ### P1 — Reporting composes too late
 
@@ -701,29 +707,46 @@ different code intentionally computing the same thing.
 **Artifact-resolution equivalence.** For one artifact and equivalent
 options, `dump`, compare-side resolution, scan candidate resolution, ABICC
 descriptor resolution, `appcompat.check_appcompat()`'s own per-side
-resolution, and `deps compare`'s per-dependency-pair resolution must produce
-identical: snapshot semantic fingerprint; extraction-contract fingerprint;
-effective evidence depth; effective compile-context digest; public-surface
-scope fingerprint; dependency scope; build/source coverage; cache-relevant
-directory set. Standalone appcompat and `deps compare` belong in this
-matrix, not just in Phase 1's routing list — a phase that satisfies every
-equivalence test here except one direct caller's path would still leave
-that caller resolving depth, compile context, cache
+resolution, `deps compare`'s per-dependency-pair resolution, and release's
+own per-library extraction must produce identical: snapshot semantic
+fingerprint; extraction-contract fingerprint; effective evidence depth;
+effective compile-context digest; public-surface scope fingerprint;
+dependency scope; build/source coverage; cache-relevant directory set.
+Release belongs here specifically because its adapter does real,
+release-only work ahead of the shared resolution step:
+`cli_compare_release._run_compare_pair()` follows GNU ld linker scripts and
+applies its own per-library header/include mapping before ever calling
+`service.run_compare()` — the target shape's promise to "serve... release
+per-library extraction" is otherwise untested at the one place release's
+extraction can still diverge even when ordinary compare-side resolution
+passes cleanly. Standalone appcompat, `deps compare`, and release all
+belong in this matrix, not just in Phase 1's routing list — a phase that
+satisfies every equivalence test here except one direct caller's path would
+still leave that caller resolving depth, compile context, cache
 paths, or resource lifetime differently from everything else.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
 --against`'s own nested baseline comparison, release per-library compare,
 the Python API, `appcompat.check_appcompat()`'s pre-scope
 `compare_snapshots()` call (before its own `scope_diff_to_app()` step
-applies app-usage narrowing), and each dependency pair's `_run_abi_diff()`
-inside `deps compare` must produce identical: canonical finding IDs
+applies app-usage narrowing), each dependency pair's `_run_abi_diff()`
+inside `deps compare`, and `compat`'s ABICC adapter's own comparison
+*before* its intentional strict/source-only/new-symbol-warning
+transformations (`compat/_helpers.py`'s `_apply_strict()` and siblings)
+apply must produce identical: canonical finding IDs
 (`finding_identity.py`); effective verdicts; configuration digest; contract
 decisions; assurance decisions; compatibility exit contribution. Naming
-appcompat and `deps compare` here matters independently of Phase 1's own
-migration list — that phase only guarantees their *extraction* moves onto
-the shared pipeline; without this equivalence test also covering their
+appcompat, `deps compare`, and ABICC's pre-transformation comparison here
+matters independently of Phase 1's own migration list — that phase, and
+Phase 5's ABICC migration, only guarantee their *extraction* moves onto the
+shared pipeline; without this equivalence test also covering their
 *comparison* step, their finding IDs, contract decisions, or verdict
 processing could still silently diverge even after extraction converges.
+ABICC's own strict/source-only/new-symbol transformations are intentional,
+documented ABICC-compatibility behavior (not divergence to eliminate) —
+test them as before/after pairs against the shared pre-transformation
+result, the same way `scan`'s crosscheck promotion is tested below, rather
+than requiring the *post*-transformation result to match `compare`'s.
 Scoped deliberately to `scan`'s baseline comparison rather than its overall
 result: `scan --against --crosscheck KEY=error` intentionally lets
 `scan_engine._crosscheck_severity_exit` promote an otherwise-clean run to
