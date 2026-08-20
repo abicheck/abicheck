@@ -190,9 +190,19 @@ exec "$SKILL_EVAL_REAL_PYTHON" "$@"
 #: `platform.system()` -> the spelling `examples/ground_truth.json` uses.
 _HOST_PLATFORM = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
 
+#: `platform.machine()` -> one canonical spelling. Real values observed:
+#: `x86_64` (Linux/macOS-Intel), `AMD64` (Windows), `aarch64` (Linux ARM,
+#: e.g. GitHub's `ubuntu-24.04-arm` runner), `arm64` (macOS Apple Silicon).
+_HOST_ARCHITECTURE = {"AMD64": "x86_64", "aarch64": "arm64"}
+
 
 def host_platform() -> str:
     return _HOST_PLATFORM.get(platform.system(), platform.system().lower())
+
+
+def host_architecture() -> str:
+    machine = platform.machine()
+    return _HOST_ARCHITECTURE.get(machine, machine)
 
 
 def supported_here(scenario: dict) -> bool:
@@ -202,9 +212,20 @@ def supported_here(scenario: dict) -> bool:
     platform-specific behaviour against a Linux expectation, which is a wrong
     number rather than a missing one. An empty list is "no declared
     restriction" — Category B fixtures, built for this evaluation.
+
+    `architectures` is the identical check one axis over: `platforms`
+    restricts by OS, `architectures` by CPU — needed the moment a fixture
+    ships a prebuilt, architecture-specific artifact (Codex review) rather
+    than building both sides from source on whichever host runs it, since
+    only the latter is automatically architecture-consistent. A `linux`-only
+    fixture is not automatically `x86_64`-only: this repository's own CI runs
+    an `aarch64` Linux lane (`ubuntu-24.04-arm`) elsewhere.
     """
     platforms = scenario.get("platforms") or []
-    return not platforms or host_platform() in platforms
+    if platforms and host_platform() not in platforms:
+        return False
+    architectures = scenario.get("architectures") or []
+    return not architectures or host_architecture() in architectures
 
 
 #: Compilers that can build a fixture, per language. `cl` appears in both:
@@ -1242,7 +1263,9 @@ def main(argv: list[str] | None = None) -> int:
     for sid, scenario in scenarios.items():
         if not supported_here(scenario):
             print(
-                f"skip {sid}: not supported on {host_platform()} ({scenario['platforms']})"
+                f"skip {sid}: not supported on {host_platform()}/{host_architecture()} "
+                f"(platforms={scenario.get('platforms') or []}, "
+                f"architectures={scenario.get('architectures') or []})"
             )
             continue
         for arm in arms:

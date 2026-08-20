@@ -62,6 +62,12 @@
           "minItems": 1,
           "description": "Category B only: hosts this fixture actually supports, matching a Category A case's own PLATFORMS declaration. Omitted means unrestricted -- state it explicitly whenever the fixture's mechanics (a raw ELF .so build, a Linux-only toolchain assumption) are not actually portable, or a non-Linux runner executes it and the skill's own out-of-validated-scope NOT_VERIFIED response is graded against a concrete verdict it was never meant to produce."
         },
+        "architectures": {
+          "type": "array",
+          "items": {"enum": ["x86_64", "arm64"]},
+          "minItems": 1,
+          "description": "Category B only: CPU architectures this fixture actually supports -- the identical restriction one axis over from `platforms`. Omitted means unrestricted, which is correct for a fixture that builds both sides from source on whichever host runs it (automatically architecture-consistent). State it explicitly only when the fixture ships a prebuilt, architecture-specific artifact (e.g. a committed .so) that a from-source side built on a different architecture would not actually match -- an OS-only `platforms` restriction (e.g. `[linux]`) does not by itself guarantee one architecture, since this repository's own CI runs both x86_64 and aarch64 Linux lanes."
+        },
         "invocation": {
           "type": "object",
           "description": "Category B only: the parameters the catalog cannot express.",
@@ -106,8 +112,8 @@
           "if": {"properties": {"category": {"const": "A"}}, "required": ["category"]},
           "then": {
             "required": ["case"],
-            "comment": "Category B-only fields. A Category A scenario restating a catalog-owned outcome is exactly the second copy the catalog exists to prevent -- platforms included, since that fact is already owned by the case's own PLATFORMS declaration in examples/ground_truth.json.",
-            "not": {"anyOf": [{"required": ["invocation"]}, {"required": ["expected"]}, {"required": ["fixture"]}, {"required": ["platforms"]}]}
+            "comment": "Category B-only fields. A Category A scenario restating a catalog-owned outcome is exactly the second copy the catalog exists to prevent -- platforms/architectures included, since those facts are already owned by the case's own PLATFORMS declaration in examples/ground_truth.json.",
+            "not": {"anyOf": [{"required": ["invocation"]}, {"required": ["expected"]}, {"required": ["fixture"]}, {"required": ["platforms"]}, {"required": ["architectures"]}]}
           }
         },
         {

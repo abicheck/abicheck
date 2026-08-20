@@ -69,6 +69,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "A",
       "digest": "sha256:8a91b7aa50e70048554a795b12ff767e18a4985502657105f6800971e129a7b3",
       "expected": {
@@ -97,6 +98,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "A",
       "digest": "sha256:c3518734fb782ac70d297a9faa22cc43137ddfae2cc303cf8eb01b64205e40cc",
       "expected": {
@@ -127,6 +129,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "B",
       "digest": "sha256:c06270533c0bc60fa9c3c0ffecd9700fe2ff6d0a37ce9eaa56b7b9235133f789",
       "expected": {
@@ -155,6 +158,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "B",
       "digest": "sha256:9de2cb7bebd309b0a6b5b28d016d9efdd6ed996d8fcef91f899b6f0f7dc614ef",
       "expected": {
@@ -183,6 +187,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "B",
       "digest": "sha256:fa9d30f3a05888c690d3d4202cf7ed6592e5e2cddd32a2f7a628212782958b87",
       "expected": {
@@ -210,6 +215,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "A",
       "digest": "sha256:d5eec9ce621a3678f02b342661121ba57361b5ad151fddf0f4ee415b484140ab",
       "expected": {
@@ -238,8 +244,11 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [
+        "x86_64"
+      ],
       "category": "B",
-      "digest": "sha256:c7d20391191b7b0aa98eae4e3df644b1c27aab714c7788c393544d9a86b23899",
+      "digest": "sha256:cc08ef679ac7c2641a314314b0a5f3c7f0e9317126f41ded1abbef002106cb96",
       "expected": {
         "uncertainty": "evidence_too_shallow",
         "verdict": "COMPATIBLE"
@@ -264,6 +273,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "B",
       "digest": "sha256:56cfcc88fa0d1bbd808afc7ab699017d2e4657e92b9709e9ca2d366d1ee3609c",
       "expected": {
@@ -290,6 +300,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "B",
       "digest": "sha256:2f8a4a834772652d8f2014ec5172ba8c037cc0cef08da834a4acf9a459466cc6",
       "expected": {
@@ -319,6 +330,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "A",
       "digest": "sha256:2c7672994801264c7862b61f1a540c849c0dc5f7bf2dc3ee3acd00f86fbdbf42",
       "expected": {
@@ -349,6 +361,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "A",
       "digest": "sha256:17c5b39afe1a7fd5f620c657502e9cc060edafcdd59c7b17188847af711ad175",
       "expected": {
@@ -377,6 +390,7 @@
       "affects": [
         "review-native-library-change"
       ],
+      "architectures": [],
       "category": "A",
       "digest": "sha256:a2fc3352cc0c3cd7b70cd7eb83d2f0e3d49fc7c44d433c606c3dd5d309ba4f1b",
       "expected": {
@@ -407,7 +421,7 @@
       "affects": [
         "review-native-library-change"
       ],
-      "digest": "sha256:b9c49954d49f3793377914bc32255359c08a3c306f6f480f8a3bb77bab94b62b",
+      "digest": "sha256:682964bc9e353475da5cea3bbb51a4ee4a3c8150479c9ee3088cd80944cc7816",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",

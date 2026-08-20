@@ -372,6 +372,23 @@ def _category_b_platforms(scenario: dict[str, Any]) -> list[str]:
     return list(scenario.get("platforms") or [])
 
 
+def _category_b_architectures(scenario: dict[str, Any]) -> list[str]:
+    """A Category B scenario's own declared CPU-architecture restriction, or
+    `[]` ("unrestricted") when it declares none.
+
+    The identical rule as `_category_b_platforms`, one axis over: `platforms`
+    restricts by OS, this restricts by CPU. Needed because an OS-only
+    restriction does not by itself guarantee one architecture (this
+    repository's own CI runs both x86_64 and aarch64 Linux lanes) --
+    unrestricted is correct for a fixture that builds both sides from source
+    on whichever host runs it, but a fixture shipping a prebuilt,
+    architecture-specific artifact must say so explicitly (Codex review), or
+    a from-source side built on a different host architecture silently stops
+    matching it.
+    """
+    return list(scenario.get("architectures") or [])
+
+
 def build_pack() -> dict[str, Any]:
     manifest = _load_scenarios()
     ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
@@ -394,6 +411,7 @@ def build_pack() -> dict[str, Any]:
         # answer.
         expected = dict(scenario.get("expected") or {})
         platforms: list[str] = _category_b_platforms(scenario)
+        architectures: list[str] = _category_b_architectures(scenario)
         if scenario["category"] == "A":
             entry = ground_truth.get("verdicts", {}).get(scenario["case"], {})
             expected = {
@@ -407,12 +425,17 @@ def build_pack() -> dict[str, Any]:
             # fixture and grade the (correct) platform-specific behaviour
             # against a Linux expectation.
             platforms = entry.get("platforms", [])
+            # No catalog case ships a prebuilt, architecture-specific
+            # artifact -- every case builds both sides from source, which is
+            # automatically architecture-consistent -- so Category A never
+            # has an architecture restriction to carry.
 
         scenarios[scenario["id"]] = {
             "skill": scenario["skill"],
             "category": scenario["category"],
             "status": scenario["status"],
             "platforms": platforms,
+            "architectures": architectures,
             "prompt": scenario["prompt"],
             "inputs": fixture_root,
             "invocation": scenario.get("invocation", {}),

@@ -89,6 +89,14 @@ scenarios:
       still tell me whether the struct layouts our plugins depend on changed?
     fixture: agent-evals/skills/fixtures/evidence-too-shallow
     platforms: [linux]
+    # old/liblib.so is a committed, prebuilt x86_64 binary (the whole point
+    # of this fixture -- only the stripped binary survived, so there is
+    # nothing to rebuild from). The new side is built from source at run
+    # time on whichever host runs the harness, so an aarch64 Linux runner
+    # (this repository's CI has one) would build new/ for arm64 against an
+    # x86_64 old/, producing a real elf_machine_changed cross-architecture
+    # break instead of the intended shallow-evidence result.
+    architectures: [x86_64]
     invocation:
       depth: symbols
     expected:

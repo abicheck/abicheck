@@ -164,6 +164,51 @@ def test_category_b_platform_restrictions_are_honored_not_widened(
     ) == ["linux"]
 
 
+def test_category_b_architecture_restrictions_are_honored_not_widened(
+    pack: dict[str, Any],
+) -> None:
+    """A Category B scenario's own `architectures` declaration must survive
+    into the pack exactly — the identical rule as `platforms`, one axis
+    over (CPU rather than OS).
+
+    Regression: `evidence-too-shallow` ships a committed, prebuilt x86_64
+    binary as its old side (the fixture's whole premise is that only the
+    binary survived, so there is no source to rebuild it from) while its
+    new side is built from source on whichever host runs the harness. An
+    OS-only `platforms: [linux]` restriction does not by itself guarantee
+    one CPU architecture — this repository's CI runs both x86_64 and
+    aarch64 Linux lanes — so on an aarch64 host the new side would build
+    for arm64 against an x86_64 old side, producing a real cross-
+    architecture break instead of the intended shallow-evidence result.
+    """
+    manifest = yaml.safe_load(
+        (REPO / "agent-evals" / "skills" / "scenarios.yaml").read_text(encoding="utf-8")
+    )
+    declared = {
+        s["id"]: s["architectures"]
+        for s in manifest["scenarios"]
+        if "architectures" in s
+    }
+    assert declared, "no scenario declares architectures — test would pass vacuously"
+    for scenario_id, architectures in declared.items():
+        assert pack["scenarios"][scenario_id]["category"] == "B", scenario_id
+        assert (
+            pack["scenarios"][scenario_id]["architectures"] == architectures
+        ), scenario_id
+
+    # Negative control: a Category B scenario that does *not* declare
+    # `architectures` — every one of them except the fixture above — must
+    # still resolve to unrestricted (`[]`).
+    undeclared_b = [
+        s["id"]
+        for s in manifest["scenarios"]
+        if s["category"] == "B" and "architectures" not in s
+    ]
+    assert undeclared_b, "no undeclared Category B scenario left to use as a control"
+    for scenario_id in undeclared_b:
+        assert pack["scenarios"][scenario_id]["architectures"] == [], scenario_id
+
+
 def test_pack_carries_the_gating_contract(pack: dict[str, Any]) -> None:
     """`k` and each dimension's gating mode are what a consumer grades with."""
     rubric = pack["rubric"]
