@@ -88,6 +88,7 @@ into, per ``apply_release_gate_pack``), not pack identity.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -142,20 +143,44 @@ def _overrides_str(overrides: Any) -> str:
     return ";".join(f"{kind}={verdict}" for kind, verdict in pairs)
 
 
+def _json_list(items: Any) -> str:
+    """Canonical (sorted, compact) JSON array encoding for a string
+    collection -- injective, unlike a delimiter-joined string (Codex
+    review, PR #803, fresh evidence: `";".join(...)` collapses
+    `("api;detail",)` and `("api", "detail")` to the identical
+    `"api;detail"`, even though a namespace/selector pattern is an
+    arbitrary string that can legally contain the delimiter)."""
+    return json.dumps(sorted(str(item) for item in (items or ())), separators=(",", ":"))
+
+
 def _namespaces_str(namespaces: Any) -> str:
-    return ";".join(sorted(str(ns) for ns in (namespaces or ())))
+    return _json_list(namespaces)
+
+
+def _identity_str(identity: Any) -> str:
+    """``id@version:sha256`` for one ``ImmutableIdentity``, or ``""`` when
+    absent. Includes the digest, not just the ``id`` -- for a base policy,
+    ``builtin_policy_identity()`` deliberately hashes the policy's effective
+    ``ChangeKind`` sets into it (Codex review, PR #803, fresh evidence: an
+    earlier revision recorded only the bare ``id``, so the same policy
+    *name* classifying findings differently across a tool version bump --
+    exactly what the digest reflects -- produced an unchanged field)."""
+    if identity is None:
+        return ""
+    return (
+        f"{getattr(identity, 'id', '')}@{getattr(identity, 'version', '')}:"
+        f"{getattr(identity, 'sha256', '')}"
+    )
 
 
 def _packs_str(*pack_groups: Any) -> str:
-    """``id@version:sha256`` for every pack identity across *pack_groups*."""
-    identities: set[str] = set()
-    for group in pack_groups:
-        for identity in group or ():
-            identities.add(
-                f"{getattr(identity, 'id', '')}@{getattr(identity, 'version', '')}:"
-                f"{getattr(identity, 'sha256', '')}"
-            )
-    return ";".join(sorted(identities))
+    """``id@version:sha256`` for every pack identity across *pack_groups*,
+    canonical-JSON-encoded (see :func:`_json_list`) -- a pack id/version/
+    sha256 are far more constrained than a namespace pattern, but the same
+    injectivity argument applies uniformly rather than being special-cased
+    away for "probably safe" inputs."""
+    identities = {_identity_str(identity) for group in pack_groups for identity in group or ()}
+    return _json_list(identities)
 
 
 def _digested_items_str(items: Any) -> str:
@@ -184,10 +209,10 @@ def _reclassify_str(rules: Any) -> str:
 
     active = active_reclassify_rules(list(rules or ()))
     encoded = sorted(
-        ";".join(f"{k}={v}" for k, v in sorted(rule.to_report_dict().items()))
+        json.dumps(dict(sorted(rule.to_report_dict().items())), separators=(",", ":"))
         for rule in active
     )
-    return "|".join(encoded)
+    return _json_list(encoded)
 
 
 def _enum_value(value: Any) -> str:
@@ -243,7 +268,7 @@ def effective_config_fields_from_full_config(
     )
     return {
         "_tier": "contract",
-        "policy.base": str(getattr(getattr(policy, "base", None), "id", "") or ""),
+        "policy.base": _identity_str(getattr(policy, "base", None)),
         "policy.overrides": _overrides_str(getattr(policy, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
         "policy.frozen_namespaces": _namespaces_str(

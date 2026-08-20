@@ -92,7 +92,7 @@ class TestEffectiveConfigFields:
         assert fields["_tier"] == "baseline"
         assert fields["gate.exit_code_scheme"] == "legacy"
         assert fields["policy.overrides"] == ""
-        assert fields["surface.internal_namespaces"] == ""
+        assert fields["surface.internal_namespaces"] == "[]"
 
     def test_baseline_tier_reads_policy_file_and_severity(self):
         policy_file = PolicyFile(
@@ -108,7 +108,7 @@ class TestEffectiveConfigFields:
         assert fields["_tier"] == "baseline"
         assert fields["policy.base"] == "strict_abi"
         assert fields["policy.overrides"] == "func_removed=API_BREAK"
-        assert fields["surface.internal_namespaces"] == "detail;impl"
+        assert fields["surface.internal_namespaces"] == '["detail","impl"]'
         assert fields["gate.exit_code_scheme"] == "severity"
         assert fields["gate.severity.abi_breaking"] == "error"
 
@@ -301,7 +301,7 @@ class TestAdditionalAxes:
         f2 = effective_config_fields(
             reclassified, severity_config=None, exit_code_scheme="legacy"
         )
-        assert f1["policy.reclassify"] == ""
+        assert f1["policy.reclassify"] == "[]"
         assert f2["policy.reclassify"] != ""
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
@@ -356,8 +356,8 @@ class TestAdditionalAxes:
         f2 = effective_config_fields(
             with_overlays, severity_config=None, exit_code_scheme="legacy"
         )
-        assert f1["contract.overlays"] == ""
-        assert f2["contract.overlays"] == "api::v2"
+        assert f1["contract.overlays"] == "[]"
+        assert f2["contract.overlays"] == '["api::v2"]'
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
     def test_scope_to_public_surface_changes_the_rich_tier_digest(self):
@@ -490,6 +490,6 @@ class TestPolicyFrozenNamespaces:
         f2 = effective_config_fields(
             frozen, severity_config=None, exit_code_scheme="legacy"
         )
-        assert f1["policy.frozen_namespaces"] == ""
-        assert f2["policy.frozen_namespaces"] == "detail::impl"
+        assert f1["policy.frozen_namespaces"] == "[]"
+        assert f2["policy.frozen_namespaces"] == '["detail::impl"]'
         assert effective_config_digest(f1) != effective_config_digest(f2)
