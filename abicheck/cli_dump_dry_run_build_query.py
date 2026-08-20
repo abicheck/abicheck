@@ -140,19 +140,6 @@ further, per this repository's own "known gaps over risky reactive
 patches" convention -- this module has now been through twenty-two review
 rounds):
 
-- Flow-2 ``abicheck_inputs/`` packs (recognized by
-  ``cli_buildsource_helpers._is_inputs_pack_dir``, a *different* recognizer
-  from ``BuildSourcePack``'s own ``is_pack_dir``) fold into
-  ``raw_build_info``/``raw_sources`` the identical way a ``BuildSourcePack``
-  does in ``cli_buildsource.embed_build_source``, but this module does not
-  detect that input shape at all -- a Flow-2 pack as the sole
-  ``--build-info``/``--sources`` input, with no discoverable compile DB or
-  headers, is still reported as "will run" when it would not. Closing this
-  needs importing a second pack-format recognizer and a second,
-  differently-shaped facts model (``InputsManifest``/``load_inputs_manifest``)
-  rather than reusing anything ``BuildSourcePack``-shaped already handled
-  above -- a genuinely separate input format, not a follow-up to the same
-  mechanism.
 - Every reachability check above reads the *raw*, unexpanded ``headers``
   tuple exactly as ``dump_cmd`` receives it from Click -- a directory entry
   counts as "headers present" even when ``_expand_header_inputs`` (called
@@ -232,10 +219,34 @@ rounds):
   non-idempotent-unsafe for this input shape *before* they run it for
   real.
 
-This closes the full set of ``BuildSourcePack``-shaped paths into
-``collect_inline_pack`` this module is aware of (the two gaps above
-excepted); a new bypass mechanism added to that function in the future
-would need a matching addition here, the same way each of these did.
+This closes the full set of ``BuildSourcePack``-shaped *and* Flow-2
+``abicheck_inputs/``-shaped paths into ``collect_inline_pack``/the L2 seed
+this module is aware of (the header-directory-validation gap above
+excepted); a new bypass mechanism added to either path in the future would
+need a matching addition here, the same way each of these did.
+
+**Update: the Flow-2 gap above is closed.** It was originally two gaps, not
+one: this module's own lack of Flow-2 recognition, *and* a real production
+gap this investigation found in the L2-seed path itself --
+``buildsource.l2_seed._l2_seed_pack_inputs`` (the pack-precedence resolver
+``seed_includes_and_fold_compile_context`` uses) only ever recognized a
+classic ``BuildSourcePack`` (``is_pack_dir``), never a Flow-2 pack, even
+though ``embed_build_source`` already recognized both uniformly. A Flow-2
+pack given as ``--sources``/``--build-info`` alongside ``-H`` headers was
+therefore silently treated by the L2 seed as a literal, un-normalized
+source tree -- its own compile-unit include dirs never reached L2 seeding,
+and a trusted, explicit ``build.query``/``--config`` could genuinely be
+re-executed against the pack directory itself. Fixed at the root
+(``_l2_seed_pack_inputs`` now also checks ``_is_inputs_pack_dir``, folding
+in a Flow-2 pack's ``BuildEvidence`` via the same lighter
+``load_inputs_manifest``/``_load_build_evidence`` pair this module uses
+below, rather than the full ``ingest_inputs_pack``), which is what makes
+this module's own uniform ``_is_pack_dir_any``/``_pack_dir_build_evidence``
+treatment of both call sites correct rather than merely convenient --
+before that fix, mirroring ``embed_build_source``'s recognition here alone
+would have made this preview *wrong* for the L2-seed-reachable branches
+(reporting "will NOT run" for an input the L2 seed's own un-fixed
+resolution would still have genuinely reached ``cfg.query`` through).
 """
 
 from __future__ import annotations
@@ -245,12 +256,69 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .buildsource.build_evidence import BuildEvidence
     from .dry_run import DryRunResult
 
 _SECTION = "Build query (trust)"
 
 
-def _resolve_compile_db_hint_line(compile_db_hint: str, effective_sources: Path | None) -> str:
+def _is_pack_dir_any(path: Path | None) -> bool:
+    """True when *path* is either pack-directory shape the real resolvers
+    fold in and null the corresponding ``raw_build_info``/``raw_sources``
+    operand for -- a classic :class:`BuildSourcePack` (``is_pack_dir``) or a
+    Flow-2 ``abicheck_inputs/`` pack (ADR-035 D5, ``_is_inputs_pack_dir``).
+
+    Both ``embed_build_source`` and (since the fix this module's own
+    docstring records) ``buildsource.l2_seed._l2_seed_pack_inputs`` treat
+    both shapes identically for this purpose (``bi_is_pack or bi_is_inputs``
+    / ``src_is_pack or src_is_inputs``, both unconditionally nulling the raw
+    operand regardless of whether the pack carries any L3 evidence) -- so
+    every reachability branch in this module that keys off "is this operand
+    itself a pack" can safely recognize both the same way too.
+    """
+    from .buildsource.inline import is_pack_dir
+    from .cli_buildsource_helpers import _is_inputs_pack_dir
+
+    return is_pack_dir(path) or _is_inputs_pack_dir(path)
+
+
+def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
+    """The ``BuildEvidence`` a pack directory at *path* would fold in.
+
+    Mirrors whichever of the two real loaders the production pack-precedence
+    resolvers use for *path*: a classic ``BuildSourcePack.load(path).
+    build_evidence`` for the ``is_pack_dir`` shape, or -- for a Flow-2
+    ``abicheck_inputs/`` pack -- the lighter, comparable-cost
+    ``load_inputs_manifest`` + ``_load_build_evidence`` pair that parses only
+    the pack's compile DB, **not** the full ``ingest_inputs_pack`` (which
+    additionally reads and parses every ``source_facts/*.jsonl`` file -- real
+    extra I/O this reachability question, "does this pack already carry L3
+    compile units", does not need; this module's own contract is "no I/O
+    beyond stat()/PATH lookups" wherever a cheaper equivalent exists) --
+    mirroring ``buildsource.l2_seed._l2_seed_pack_build_evidence``'s
+    identical choice for the identical reason. Raises the same way the real
+    loaders do for a structurally malformed pack (``FileNotFoundError``/
+    ``ValueError``, or a broader shape-mismatch exception a malformed
+    manifest can raise -- see the two call sites' own ``except Exception``
+    handling, which does not key on the exception's type), so both call
+    sites can share one catch-all shape regardless of which pack kind was
+    actually loaded.
+    """
+    from .buildsource.inline import is_pack_dir
+
+    if is_pack_dir(path):
+        from .buildsource.pack import BuildSourcePack
+
+        return BuildSourcePack.load(path).build_evidence
+    from .buildsource.inputs_pack import _load_build_evidence, load_inputs_manifest
+
+    manifest = load_inputs_manifest(path)
+    return _load_build_evidence(path, manifest, [])
+
+
+def _resolve_compile_db_hint_line(
+    compile_db_hint: str, effective_sources: Path | None
+) -> str:
     """The ``resulting compile-DB path:`` line for a configured hint.
 
     `_run_build_query`'s own resolution isn't a literal-string label --
@@ -275,7 +343,11 @@ def _resolve_compile_db_hint_line(compile_db_hint: str, effective_sources: Path 
     try:
         existing_match = (
             next(
-                (m for m in sorted(effective_sources.glob(compile_db_hint)) if m.is_file()),
+                (
+                    m
+                    for m in sorted(effective_sources.glob(compile_db_hint))
+                    if m.is_file()
+                ),
                 None,
             )
             if effective_sources is not None
@@ -345,7 +417,6 @@ def add_build_query_dry_run_section(
     from .buildsource.inline import (
         _compile_db_at,
         discover_build_config,
-        is_pack_dir,
         load_build_config,
     )
 
@@ -473,11 +544,9 @@ def add_build_query_dry_run_section(
     # only inside the --build-info-is-absent-or-non-pack branch further
     # down, since that branch is an `elif` a non-pack --build-info would
     # otherwise skip entirely (Codex review, fresh evidence).
-    if sources is not None and is_pack_dir(sources):
-        from .buildsource.pack import BuildSourcePack
-
+    if sources is not None and _is_pack_dir_any(sources):
         try:
-            src_pack_evidence = BuildSourcePack.load(sources).build_evidence
+            src_pack_evidence = _pack_dir_build_evidence(sources)
         except Exception as exc:  # noqa: BLE001 -- best-effort preview load; see
             # the note above this try (Codex review, fresh evidence): a
             # structurally malformed manifest (e.g. a JSON `null` where a
@@ -541,7 +610,8 @@ def add_build_query_dry_run_section(
                 # unconditional load -- fails and aborts the overall
                 # command).
                 result.add(
-                    _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
+                    _SECTION,
+                    f"build.query: could not load --sources pack {sources}: {exc}",
                 )
                 if collect_active:
                     if l2_seed_reachable:
@@ -567,7 +637,8 @@ def add_build_query_dry_run_section(
                 src_pack_evidence = None
             elif collect_active:
                 result.add(
-                    _SECTION, f"build.query: could not load --sources pack {sources}: {exc}"
+                    _SECTION,
+                    f"build.query: could not load --sources pack {sources}: {exc}",
                 )
                 result.block(f"--sources names an unloadable pack ({sources}): {exc}")
                 return
@@ -592,11 +663,9 @@ def add_build_query_dry_run_section(
     else:
         src_pack_evidence = None
 
-    if build_info is not None and is_pack_dir(build_info):
-        from .buildsource.pack import BuildSourcePack
-
+    if build_info is not None and _is_pack_dir_any(build_info):
         try:
-            bi_pack_evidence = BuildSourcePack.load(build_info).build_evidence
+            bi_pack_evidence = _pack_dir_build_evidence(build_info)
         except Exception as exc:  # noqa: BLE001 -- best-effort preview load,
             # broadened for the identical reason the sibling --sources pack
             # load above was (Codex review, fresh evidence): a structurally
@@ -616,7 +685,9 @@ def add_build_query_dry_run_section(
                     _SECTION,
                     f"build.query: could not load --build-info pack {build_info}: {exc}",
                 )
-                result.block(f"--build-info names an unloadable pack ({build_info}): {exc}")
+                result.block(
+                    f"--build-info names an unloadable pack ({build_info}): {exc}"
+                )
             else:
                 result.add(
                     _SECTION,
@@ -636,7 +707,9 @@ def add_build_query_dry_run_section(
     # config auto-discovery and the query's own cwd must use that same
     # normalized value, not the pack directory itself (Codex review, fresh
     # evidence).
-    effective_sources = None if (sources is not None and is_pack_dir(sources)) else sources
+    effective_sources = (
+        None if (sources is not None and _is_pack_dir_any(sources)) else sources
+    )
 
     # Two independent real call sites can load `cfg_path`, with two different
     # reachability conditions and two different failure behaviors:
@@ -676,9 +749,9 @@ def add_build_query_dry_run_section(
     # resolved --build-info compile database never got validated at all --
     # verified end-to-end that the real run still raises for that exact
     # combination).
-    raw_operand_present = (build_info is not None and not is_pack_dir(build_info)) or (
-        effective_sources is not None
-    )
+    raw_operand_present = (
+        build_info is not None and not _is_pack_dir_any(build_info)
+    ) or (effective_sources is not None)
     config_readable = l2_seed_reachable or raw_operand_present
     # `embed_build_source`'s own auto-discovery is `discover_build_config
     # (raw_sources)` -- keyed on `effective_sources` alone, never
@@ -697,7 +770,9 @@ def add_build_query_dry_run_section(
     # `--sources` is itself a pack), so `discover_from` above always agrees
     # with what `embed_build_source` would independently discover -- no
     # divergence to guard against in that case.
-    raise_on_bad_config = collect_active and raw_operand_present and effective_sources is not None
+    raise_on_bad_config = (
+        collect_active and raw_operand_present and effective_sources is not None
+    )
 
     # Same source (source-tree-root-only, no upward walk) `embed_build_source`
     # itself resolves from for this purpose -- distinct from `discover_project_
@@ -752,7 +827,9 @@ def add_build_query_dry_run_section(
             if raise_on_bad_config:
                 import click
 
-                raise click.UsageError(f"cannot parse build config {cfg_path}: {exc}") from exc
+                raise click.UsageError(
+                    f"cannot parse build config {cfg_path}: {exc}"
+                ) from exc
             result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
             # `cfg_path` here was discovered from `discover_from` above, which
             # -- when `l2_seed_reachable` -- is the *unnormalized* `sources`,
@@ -858,7 +935,7 @@ def add_build_query_dry_run_section(
     # unaffected by config validation above, since these branches answer
     # whether `collect_inline_pack`/`_resolve_compile_db` would even look at
     # `cfg.query` given the operands' own shapes.
-    if build_info is not None and is_pack_dir(build_info):
+    if build_info is not None and _is_pack_dir_any(build_info):
         # `_l2_seed_pack_inputs`/`embed_build_source`'s own `base_build=
         # bi_pack.build_evidence` fold a --build-info pack's own L3 compile
         # units in *before* _resolve_compile_db is even considered --
@@ -925,7 +1002,7 @@ def add_build_query_dry_run_section(
                 "over build.query",
             )
             return
-    elif sources is not None and is_pack_dir(sources):
+    elif sources is not None and _is_pack_dir_any(sources):
         # `_l2_seed_pack_inputs` folds a --sources pack into base_build the
         # identical way a --build-info pack does, but only when no
         # --build-info was also given (an explicit --build-info always wins
@@ -955,7 +1032,9 @@ def add_build_query_dry_run_section(
             )
             return
 
-    effective_query = build_query if build_query is not None else (cfg.query if cfg else None)
+    effective_query = (
+        build_query if build_query is not None else (cfg.query if cfg else None)
+    )
     # `_run_build_query`'s own resolution of the compile-DB path it expects
     # the query to have (re)written is gated on `sources is not None`: with
     # no source tree (an absent --sources, or one that normalized to None
@@ -967,7 +1046,9 @@ def add_build_query_dry_run_section(
     _configured_compile_db_hint = (
         build_compile_db if build_compile_db is not None else cfg_compile_db
     )
-    compile_db_hint = _configured_compile_db_hint if effective_sources is not None else None
+    compile_db_hint = (
+        _configured_compile_db_hint if effective_sources is not None else None
+    )
 
     if not effective_query:
         result.add(_SECTION, "build.query: (none configured)")
@@ -1002,8 +1083,14 @@ def add_build_query_dry_run_section(
         )
         return
 
-    trust_source = "explicit --config" if build_config is not None else "explicit --build-query"
-    cwd = effective_sources if effective_sources is not None and effective_sources.is_dir() else Path.cwd()
+    trust_source = (
+        "explicit --config" if build_config is not None else "explicit --build-query"
+    )
+    cwd = (
+        effective_sources
+        if effective_sources is not None and effective_sources.is_dir()
+        else Path.cwd()
+    )
     if compile_db_hint and Path(compile_db_hint).is_absolute():
         # `_run_build_query`'s own resolution -- reached here, since we are
         # already inside the "trusted, will run" branch -- calls
@@ -1050,7 +1137,9 @@ def add_build_query_dry_run_section(
         # review, fresh evidence -- the common, glob-free `build.compile_db:
         # build/compile_commands.json` case previously printed the literal
         # string even when `--sources` was some other, unrelated directory).
-        compile_db_line = _resolve_compile_db_hint_line(compile_db_hint, effective_sources)
+        compile_db_line = _resolve_compile_db_hint_line(
+            compile_db_hint, effective_sources
+        )
     elif _configured_compile_db_hint and effective_sources is None:
         compile_db_line = (
             f"resulting compile-DB path: (build.compile_db is configured, "
@@ -1175,10 +1264,14 @@ def add_build_query_dry_run_section(
     # None` split above (which only distinguishes *why* a reachable second
     # invocation may or may not still run `cfg.query`).
     raw_build_info_for_embed = (
-        None if (build_info is None or is_pack_dir(build_info)) else build_info
+        None if (build_info is None or _is_pack_dir_any(build_info)) else build_info
     )
-    embed_dispatch_possible = raw_build_info_for_embed is not None or effective_sources is not None
-    both_sites_reachable = l2_seed_reachable and collect_active and embed_dispatch_possible
+    embed_dispatch_possible = (
+        raw_build_info_for_embed is not None or effective_sources is not None
+    )
+    both_sites_reachable = (
+        l2_seed_reachable and collect_active and embed_dispatch_possible
+    )
     count_suffix: str
     count_note: tuple[str, ...]
     if both_sites_reachable and raw_build_info_for_embed is None:
@@ -1216,9 +1309,7 @@ def add_build_query_dry_run_section(
             "reaches build-source embedding, or once if it does not",
         )
     elif both_sites_reachable:
-        count_suffix = (
-            " -- RUNS AT LEAST ONCE, POSSIBLY TWICE -- see note below"
-        )
+        count_suffix = " -- RUNS AT LEAST ONCE, POSSIBLY TWICE -- see note below"
         count_note = (
             "note: this input combination reaches build.query from two "
             "independent, non-deduplicated call sites in the real run: the "

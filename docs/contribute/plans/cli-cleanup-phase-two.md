@@ -1418,22 +1418,55 @@ the parser to lists only — every existing trusted string config would break.
 > overriding config, no query configured, determinism, and 26 review-caught
 > reachability/precedence/pack-normalization/exit-code-class/config-discovery
 > edge cases besides — each asserting the query is never actually executed).
-> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is satisfied for
-> every input shape the module's own docstring doesn't name as an open
-> gap** — `cli_dump_dry_run_build_query.py` documents two deliberately
-> unclosed cases where the report can still claim "will run" when the real
-> input would not: a Flow-2 `abicheck_inputs/` pack as the sole
-> `--sources`/`--build-info` input, and a `-H` directory containing no
-> supported header (this second one predates the module — `render_dump_
-> dry_run` has never expanded `-H` directories for validation). Closing
-> either is a scoped follow-up (a second pack-format recognizer for the
-> first; a design decision about real directory-walk validation for the
-> second), not a blocker for the trust decision this prerequisite exists to
-> make visible — but PR 3C's removal itself (`dump --build-query`/`dump
-> --build-compile-db` deletion) should not proceed until both are closed or
-> explicitly accepted as permanent gaps, on top of still waiting on the
-> ordering's own blocker: PR 3A's full convergence (both `dump` and `scan`
-> resolvers), which remains open per that section's own status notes above.
+> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is now satisfied for
+> every input shape except one.** `cli_dump_dry_run_build_query.py`
+> originally documented two deliberately unclosed cases where the report
+> could still claim "will run" when the real input would not: a Flow-2
+> `abicheck_inputs/` pack as the sole `--sources`/`--build-info` input, and a
+> `-H` directory containing no supported header.
+>
+> **The Flow-2 pack gap is closed (2026-08-20), and it turned out to be two
+> gaps, not one.** Investigating this module's own docstring ("Flow-2 packs
+> fold into `raw_build_info`/`raw_sources` the identical way a
+> `BuildSourcePack` does in `embed_build_source`") to add the missing
+> recognizer here surfaced a real, independent gap in the L2-seed
+> **production** path itself: `buildsource.l2_seed._l2_seed_pack_inputs` (the
+> pack-precedence resolver `seed_includes_and_fold_compile_context` uses)
+> only ever recognized a classic `BuildSourcePack` (`is_pack_dir`), never a
+> Flow-2 pack — so a Flow-2 pack given alongside `-H` headers was silently
+> treated by the *real* L2 seed as a literal, un-normalized source tree: its
+> own compile-unit include dirs never reached L2 seeding, and a trusted,
+> explicit `build.query`/`--config` could genuinely be re-executed against
+> the pack directory itself. This was the load-bearing finding: mirroring
+> `embed_build_source`'s recognition in the dry-run preview *alone*, without
+> also fixing `_l2_seed_pack_inputs`, would have made the preview *wrong* for
+> every L2-seed-reachable branch (reporting "will NOT run" for an input the
+> unfixed L2 seed's own resolution would still have genuinely reached
+> `cfg.query` through) — a worse regression than the pre-existing gap. Fixed
+> both, root cause first: `_l2_seed_pack_inputs` now also recognizes a Flow-2
+> pack (folding its `BuildEvidence` via the lighter
+> `load_inputs_manifest`/`_load_build_evidence` pair, not the full
+> `ingest_inputs_pack`, which this L3-only seed doesn't need), and only then
+> did `cli_dump_dry_run_build_query.py` gain the identical, now-correct
+> recognition (`_is_pack_dir_any`/`_pack_dir_build_evidence`) across all
+> seven of its own pack-precedence checks. See `abicheck/buildsource/
+> l2_seed.py`'s own docstrings and `changelog.d/
+> 1787253700_claude_l2_seed_flow2_pack_recognition.md` for the full account.
+> Tests: `tests/test_l2_seed_flow2_packs.py` (the production resolver,
+> including an end-to-end `derive_l2_include_dirs` case) and `tests/
+> test_dry_run_build_query_flow2_packs.py` (the dry-run preview, mirroring
+> the existing classic-pack CLI tests one-for-one).
+>
+> **The `-H` directory gap remains open** (it predates this module —
+> `render_dump_dry_run` has never expanded `-H` directories for validation).
+> Closing it needs a design decision about real directory-walk validation
+> inside `--dry-run`'s own established "cheap, read-only... no I/O beyond
+> stat()/PATH lookups" contract, not a scoped fix to this module alone — so
+> PR 3C's removal itself (`dump --build-query`/`dump --build-compile-db`
+> deletion) should not proceed until it is closed or explicitly accepted as
+> a permanent gap, on top of still waiting on the ordering's own blocker:
+> PR 3A's full convergence (both `dump` and `scan` resolvers), which remains
+> open per that section's own status notes above.
 
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.

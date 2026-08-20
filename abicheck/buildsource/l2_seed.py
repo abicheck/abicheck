@@ -95,6 +95,52 @@ def _l2_seed_config(
     )
 
 
+def _is_inputs_pack_dir(path: Path | None) -> bool:
+    """True when *path* is a Flow-2 ``abicheck_inputs/`` directory (ADR-035 D5).
+
+    A local copy of ``cli_buildsource_helpers._is_inputs_pack_dir``'s own
+    None/is_dir guard around ``inputs_pack.is_inputs_pack``, not an import of
+    it: ``cli_buildsource_helpers`` sits several layers above this leaf
+    module (it is reached from ``cli_buildsource`` -> ``cli_dump_helpers`` ->
+    this module, among other paths), so importing it here -- even
+    function-locally -- closes a real cycle the AI-readiness
+    ``import-cycle-growth`` gate correctly rejects. ``inputs_pack.py`` itself
+    has no such path back to here, so importing straight from it is safe.
+    """
+    if path is None or not path.is_dir():
+        return False
+    from .inputs_pack import is_inputs_pack
+
+    return is_inputs_pack(path)
+
+
+def _l2_seed_pack_build_evidence(path: Path) -> Any:
+    """The ``BuildEvidence`` a pack directory at *path* folds into L2 seeding.
+
+    Mirrors whichever of the two real loaders ``embed_build_source``'s own
+    pack recognition would use for *path*: a classic ``BuildSourcePack``
+    (``is_pack_dir``) loads via ``BuildSourcePack.load``; a Flow-2
+    ``abicheck_inputs/`` pack (ADR-035 D5) loads via the lighter,
+    comparable-cost ``load_inputs_manifest`` + ``_load_build_evidence`` pair
+    -- parsing only the pack's own compile DB, not the full
+    ``ingest_inputs_pack`` (which additionally reads and parses every
+    ``source_facts/*.jsonl`` file: real extra I/O this L3-only seed does not
+    need, and it would also require an ``exported_symbols`` list this
+    caller, deep inside L2 seeding, has no access to). Raises the same way
+    the real loaders do for a structurally malformed pack
+    (``FileNotFoundError``/``ValueError``) -- both callers of
+    :func:`_l2_seed_pack_inputs` already treat this whole resolution as
+    best-effort and degrade to "no seeded dirs" on any exception, so this
+    function does not need its own catch.
+    """
+    if is_pack_dir(path):
+        return BuildSourcePack.load(path).build_evidence
+    from .inputs_pack import _load_build_evidence, load_inputs_manifest
+
+    manifest = load_inputs_manifest(path)
+    return _load_build_evidence(path, manifest, [])
+
+
 def _l2_seed_pack_inputs(
     build_info: Path | None, sources: Path | None
 ) -> tuple[Any, Path | None, Path | None]:
@@ -107,16 +153,34 @@ def _l2_seed_pack_inputs(
     only when *no* ``--build-info`` was given (not merely no build-info *pack*):
     a raw ``--build-info`` must still be resolved by ``collect_inline_pack``,
     not skipped by folding the pack into ``base_build`` (Codex review).
+
+    Also recognizes a Flow-2 ``abicheck_inputs/`` pack (ADR-035 D5,
+    ``_is_inputs_pack_dir``) the identical way it recognizes a classic
+    ``BuildSourcePack`` -- ``embed_build_source`` already folds both shapes
+    in uniformly (``bi_is_pack or bi_is_inputs`` / ``src_is_pack or
+    src_is_inputs``), but this function, the L2-seed path's own pack
+    recognizer, previously checked only ``is_pack_dir``. Confirmed by
+    reading both real call sites: neither ``collect_inline_pack`` nor
+    anything it calls has its own Flow-2 recognition, so an un-normalized
+    Flow-2 pack directory reaching it was silently treated as a literal
+    source tree -- its own compile-unit include dirs never reached L2
+    seeding at all, and (the sharper failure mode) a trusted, explicit
+    ``build.query``/``--config`` could genuinely be re-executed against the
+    pack directory as if it were a real, queryable project checkout, even
+    though the pack already carries its own resolved L3 evidence to fold in
+    directly instead.
     """
     base_build = None
     raw_build_info = build_info
-    if build_info is not None and is_pack_dir(build_info):
-        base_build = BuildSourcePack.load(build_info).build_evidence
+    if build_info is not None and (
+        is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
+    ):
+        base_build = _l2_seed_pack_build_evidence(build_info)
         raw_build_info = None
     raw_sources = sources
-    if sources is not None and is_pack_dir(sources):
+    if sources is not None and (is_pack_dir(sources) or _is_inputs_pack_dir(sources)):
         if build_info is None:
-            base_build = BuildSourcePack.load(sources).build_evidence
+            base_build = _l2_seed_pack_build_evidence(sources)
         raw_sources = None
     return base_build, raw_build_info, raw_sources
 
