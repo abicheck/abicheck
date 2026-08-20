@@ -564,7 +564,6 @@ class CompilerInvocation:
     driver_token: str
     resolved_driver: Path | str
     driver_mode: DriverMode
-    language: Language
     standard: str | None
     target: TargetConfig
     defines: tuple[DefineOp, ...]
@@ -602,6 +601,17 @@ multi-source case like this one wrong today. `SourceOperand.language`
 must be resolved positionally (tracking `-x` state as it walks `argv`,
 the way `sources_from_argv()`'s own forced-language tracking already
 does) rather than by calling `effective_language()` once per source.
+`CompilerInvocation` itself deliberately carries no invocation-wide
+`language` field alongside this: a top-level field left undefined for a
+mixed-language invocation like the one above, or defined only as some
+other value (the driver's initial default, say), would give consumers two
+sources of language truth that can legitimately disagree — and since this
+model's whole premise is that a consumer must never rescan `original_argv`
+to resolve ambiguity, a second, lower-fidelity authority would just invite
+some consumer to read it instead of `sources[i].language` and reproduce
+the exact divergence this parsed model exists to eliminate. Any caller
+that only cares about a single-source TU's language reads
+`sources[0].language`.
 
 `output` — the resolved `-o <file>` operand (or `None` when absent, e.g.
 a compile-only invocation relying on the default `<source>.o` naming).
