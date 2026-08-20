@@ -174,26 +174,68 @@ class CompileUnit:
     undefines: list[str] = field(default_factory=list)
     include_paths: list[str] = field(default_factory=list)
     system_include_paths: list[str] = field(default_factory=list)
-    #: The subset of ``include_paths``/``system_include_paths`` VALUES (by
-    #: string identity, not position -- both lists share one namespace here)
-    #: that were already absolute exactly as recorded in the real build's
-    #: ``-I``/``-isystem`` operand, as opposed to a relative operand this
+    #: Parallel to ``include_paths``/``system_include_paths`` respectively
+    #: (same index, own list per structured field -- deliberately NOT a
+    #: shared value-identity set), recording whether each entry's ORIGINAL,
+    #: as-written ``-I``/``-isystem`` operand was already absolute exactly
+    #: as recorded in the real build, as opposed to a relative operand this
     #: pipeline resolved by joining it onto ``directory`` (round 30 Finding
-    #: 2, Codex review, fresh evidence). A consumer that needs to rebase a
-    #: *derived* (relative-then-joined) structured path onto a different
-    #: effective directory -- e.g. once a leading ``env -C DIR`` prefix is
-    #: accounted for -- but must never rebase a path that was genuinely
-    #: absolute in the source command reads this set; an entry absent here
-    #: (including on any pre-this-field persisted snapshot, where the field
-    #: is always empty) is conservatively treated as "unknown provenance,
-    #: derived" -- the same pre-existing rebase behavior every path had
-    #: before this field existed.
-    explicit_absolute_include_paths: list[str] = field(default_factory=list)
+    #: 2; round 31 Finding 1, Codex review, fresh evidence). A value-keyed
+    #: ``set[str]`` of "explicitly absolute strings" cannot distinguish two
+    #: *occurrences* that normalize to the identical final string -- e.g. a
+    #: unit recording both ``-Iinclude`` (relative, resolves to
+    #: ``directory/include``) and ``-I<directory>/include`` (already
+    #: explicitly absolute) has both ``include_paths`` entries end up as the
+    #: exact same string, and a value-based set would then treat BOTH as
+    #: explicit. Position-aligned per-entry booleans keep each occurrence's
+    #: own provenance independent, so one can be rebased under a leading
+    #: ``env -C DIR`` prefix while the other correctly is not.
+    #:
+    #: A pack persisted by a version of abicheck that predates this field
+    #: (or a caller that never populated it) has these lists absent/empty
+    #: while ``include_paths``/``system_include_paths`` are non-empty --
+    #: :meth:`explicit_or_unknown` treats that length mismatch as "unknown
+    #: provenance" for the WHOLE structured field (round 31 Finding 3, Codex
+    #: review, fresh evidence) and degrades to "do not rebase" (same as
+    #: every entry being explicit), never to "derived": the pre-round-30
+    #: pipeline never rebased a structured include path at all, so an old,
+    #: previously-correct persisted pack must not have its replay semantics
+    #: silently changed by a rebase it was never subject to.
+    #: ``kw_only=True`` (CodeRabbit review, fresh evidence): these fields
+    #: were inserted after ``system_include_paths`` rather than appended at
+    #: the end of the dataclass. Every in-repo caller already uses keyword
+    #: arguments, but ``CompileUnit`` carries no explicit ``__init__`` and
+    #: nothing stops an external positional caller from existing --
+    #: per-field ``kw_only`` (the same convention already established by
+    #: ``AbiSnapshot``/``Change`` in ``model.py``/``checker_types.py``) means
+    #: a field inserted anywhere in the list can never silently shift what
+    #: a positional caller's later arguments bind to.
+    include_paths_explicit: list[bool] = field(default_factory=list, kw_only=True)
+    system_include_paths_explicit: list[bool] = field(
+        default_factory=list, kw_only=True
+    )
     input_files: list[str] = field(default_factory=list)
     sysroot: str | None = None
     target_triple: str = ""
     abi_relevant_flags: list[str] = field(default_factory=list)
     raw_ref: str = ""  # content-addressed path under raw/
+
+    def explicit_or_unknown(self, *, system: bool) -> list[bool]:
+        """Per-entry "treat as explicitly absolute, do not rebase" flags for
+        ``include_paths`` (``system=False``) or ``system_include_paths``
+        (``system=True``), degrading unknown/legacy provenance (a length
+        mismatch against the corresponding path list) to "do not rebase" --
+        see ``include_paths_explicit``'s own docstring for why.
+        """
+        paths = self.system_include_paths if system else self.include_paths
+        explicit = (
+            self.system_include_paths_explicit
+            if system
+            else self.include_paths_explicit
+        )
+        if len(explicit) != len(paths):
+            return [True] * len(paths)
+        return list(explicit)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -210,9 +252,8 @@ class CompileUnit:
             "undefines": list(self.undefines),
             "include_paths": list(self.include_paths),
             "system_include_paths": list(self.system_include_paths),
-            "explicit_absolute_include_paths": list(
-                self.explicit_absolute_include_paths
-            ),
+            "include_paths_explicit": list(self.include_paths_explicit),
+            "system_include_paths_explicit": list(self.system_include_paths_explicit),
             "input_files": list(self.input_files),
             "sysroot": self.sysroot,
             "target_triple": self.target_triple,
@@ -236,8 +277,9 @@ class CompileUnit:
             undefines=list(d.get("undefines", [])),
             include_paths=list(d.get("include_paths", [])),
             system_include_paths=list(d.get("system_include_paths", [])),
-            explicit_absolute_include_paths=list(
-                d.get("explicit_absolute_include_paths", [])
+            include_paths_explicit=list(d.get("include_paths_explicit", [])),
+            system_include_paths_explicit=list(
+                d.get("system_include_paths_explicit", [])
             ),
             input_files=list(d.get("input_files", [])),
             sysroot=d.get("sysroot"),

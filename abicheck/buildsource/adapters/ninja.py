@@ -175,9 +175,8 @@ class NinjaAdapter:
             system_include_paths=[
                 self.redaction.path(str(p)) for p in ctx.system_includes
             ],
-            explicit_absolute_include_paths=[
-                self.redaction.path(str(p)) for p in ctx.explicit_absolute_paths()
-            ],
+            include_paths_explicit=list(ctx.include_paths_explicit),
+            system_include_paths_explicit=list(ctx.system_includes_explicit),
             sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
             target_triple=ctx.target_triple or "",
             abi_relevant_flags=[

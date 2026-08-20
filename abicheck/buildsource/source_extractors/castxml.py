@@ -50,6 +50,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._argv_shortopts import rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
 
@@ -254,6 +255,15 @@ def build_castxml_command(
     Mirrors the compile unit's language standard, defines/undefines, include and
     system-include paths, sysroot, and target triple, so source replay sees the
     headers the compiler actually saw under the flags it actually used.
+
+    Round 31 CodeRabbit Finding C (fresh evidence): rebases the structured
+    ``include_paths``/``system_include_paths`` fields onto the compile
+    unit's real EFFECTIVE (``env -C``-composed) directory, the identical
+    fix ``clang.py``'s ``_clang_context_args()`` already applies -- setting
+    the castxml subprocess's own ``cwd`` to the effective directory (an
+    earlier round) does not by itself fix a WRONG include path already
+    baked into the argv; ``-I/work/include`` is still ``-I/work/include``
+    regardless of which directory castxml is launched from.
     """
     cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
     cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
@@ -264,10 +274,31 @@ def build_castxml_command(
         cmd.append(f"-D{key}={value}" if value else f"-D{key}")
     for undef in compile_unit.undefines:
         cmd.append(f"-U{undef}")
-    for inc in compile_unit.include_paths:
-        cmd += ["-I", inc]
-    for inc in compile_unit.system_include_paths:
-        cmd += ["-isystem", inc]
+    run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
+    include_explicit = compile_unit.explicit_or_unknown(system=False)
+    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
+    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
+        cmd += [
+            "-I",
+            rebase_structured_path(
+                inc,
+                compile_unit.directory,
+                run_directory,
+                explicit_absolute=is_explicit,
+            ),
+        ]
+    for inc, is_explicit in zip(
+        compile_unit.system_include_paths, system_include_explicit
+    ):
+        cmd += [
+            "-isystem",
+            rebase_structured_path(
+                inc,
+                compile_unit.directory,
+                run_directory,
+                explicit_absolute=is_explicit,
+            ),
+        ]
     if compile_unit.sysroot:
         cmd.append(f"--sysroot={compile_unit.sysroot}")
     if compile_unit.target_triple and cc_id != "msvc":

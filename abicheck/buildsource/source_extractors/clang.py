@@ -81,6 +81,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._argv_shortopts import rebase_structured_path as _rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 from .clang_nodes import (
@@ -309,56 +310,6 @@ def _std_flag(standard: str, msvc: bool) -> list[str]:
     return [f"/std:{standard}"] if msvc else [f"-std={standard}"]
 
 
-def _rebase_structured_path(
-    path: str,
-    old_base: str,
-    new_base: str | None,
-    *,
-    explicit_absolute: bool = False,
-) -> str:
-    """Rebase an already-absolute structured ``CompileUnit`` path field from
-    *old_base* (the compile unit's raw, un-chdir'd ``directory``) onto
-    *new_base* (the real effective directory once a leading ``env -C DIR``
-    prefix is accounted for) — see :func:`_clang_context_args`'s own call
-    site for the full reasoning.
-
-    A literal string-prefix substitution, not a lexical path join: *path*
-    was itself already constructed by an adapter joining *old_base* onto a
-    relative operand, so this exactly undoes that one join and re-applies
-    it against *new_base*, without needing to re-derive or guess which
-    join grammar (POSIX/Windows) the adapter originally used. Returns
-    *path* unchanged whenever there is nothing to rebase: *new_base* is
-    falsy/identical to *old_base* (no ``env -C`` prefix present), *old_base*
-    itself is falsy (nothing to anchor the prefix match against), *path*
-    does not actually start with *old_base* (an absolute path the real
-    build recorded verbatim, never relative to the compile unit's own
-    directory in the first place — e.g. a system/sysroot include dir), or
-    *explicit_absolute* is ``True``.
-
-    *explicit_absolute* (round 30 Finding 2, Codex review, fresh evidence):
-    a plain string-prefix match cannot tell an EXPLICITLY absolute operand
-    (``-I/work/include``, recorded verbatim, never relative to
-    ``compile_unit.directory`` in the first place — must NOT move just
-    because ``env -C`` changed the effective directory, since an absolute
-    path is absolute regardless of cwd) apart from a RELATIVE operand
-    (``-Iinclude``) an adapter already resolved to an absolute path by
-    joining it onto *old_base* — both look identical here: an absolute
-    string that happens to start with *old_base*. The caller resolves this
-    ambiguity via ``CompileUnit.explicit_absolute_include_paths`` (captured
-    at the one point in the pipeline — before that join — where the real
-    answer is still known) and passes it through as this flag.
-    """
-    if explicit_absolute:
-        return path
-    if not new_base or new_base == old_base or not old_base:
-        return path
-    if path == old_base:
-        return new_base
-    if path.startswith(old_base + "/") or path.startswith(old_base + "\\"):
-        return new_base + path[len(old_base) :]
-    return path
-
-
 def _clang_context_args(
     compile_unit: CompileUnit, compiler_binary: str | None, *, clang_bin: str = "clang"
 ) -> tuple[list[str], bool]:
@@ -449,23 +400,32 @@ def _clang_context_args(
     # be -- it was never relative to the pre-chdir directory in the first
     # place.
     run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
-    explicit_absolute = set(compile_unit.explicit_absolute_include_paths)
-    for inc in compile_unit.include_paths:
+    # Round 31 Finding 1 (Codex review, fresh evidence): provenance is
+    # tracked per LIST POSITION, not by value -- two occurrences that
+    # normalize to the identical final string (one relative-then-joined,
+    # one genuinely explicit) must not collapse onto one shared answer.
+    # `explicit_or_unknown()` also degrades a legacy/absent-field pack to
+    # "do not rebase" rather than "derived" (round 31 Finding 3).
+    include_explicit = compile_unit.explicit_or_unknown(system=False)
+    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
+    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
         cmd += [
             inc_opt,
             _rebase_structured_path(
                 inc,
                 compile_unit.directory,
                 run_directory,
-                explicit_absolute=inc in explicit_absolute,
+                explicit_absolute=is_explicit,
             ),
         ]
-    for inc in compile_unit.system_include_paths:
+    for inc, is_explicit in zip(
+        compile_unit.system_include_paths, system_include_explicit
+    ):
         rebased = _rebase_structured_path(
             inc,
             compile_unit.directory,
             run_directory,
-            explicit_absolute=inc in explicit_absolute,
+            explicit_absolute=is_explicit,
         )
         cmd += ["/I", rebased] if msvc else ["-isystem", rebased]
     if compile_unit.sysroot and not msvc:

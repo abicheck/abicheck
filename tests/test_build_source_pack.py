@@ -522,13 +522,57 @@ def test_compile_db_records_explicit_absolute_include_provenance(tmp_path):
     expected_vendor = redaction.path(vendor_path)
     expected_local = redaction.path(local_path)
     expected_sysvendor = redaction.path(sysvendor_path)
-    assert expected_vendor in cu.explicit_absolute_include_paths
-    assert expected_sysvendor in cu.explicit_absolute_include_paths
-    assert expected_local not in cu.explicit_absolute_include_paths
+    # Provenance is position-aligned with the corresponding structured list,
+    # not a shared value-keyed set (round 31 Finding 1).
+    assert len(cu.include_paths) == len(cu.include_paths_explicit)
+    assert len(cu.system_include_paths) == len(cu.system_include_paths_explicit)
+    vendor_idx = cu.include_paths.index(expected_vendor)
+    local_idx = cu.include_paths.index(expected_local)
+    sysvendor_idx = cu.system_include_paths.index(expected_sysvendor)
+    assert cu.include_paths_explicit[vendor_idx] is True
+    assert cu.include_paths_explicit[local_idx] is False
+    assert cu.system_include_paths_explicit[sysvendor_idx] is True
     # Both still resolve to their correct absolute value in the plain lists.
     assert expected_vendor in cu.include_paths
     assert expected_local in cu.include_paths
     assert expected_sysvendor in cu.system_include_paths
+
+
+def test_compile_db_records_explicit_absolute_provenance_per_occurrence(tmp_path):
+    """Round 31 Finding 1 (Codex review, fresh evidence): a compile unit
+    recording BOTH a relative ``-Iinclude`` and an explicit absolute
+    ``-I<directory>/include`` operand -- which normalize to the identical
+    final string -- must have each occurrence's provenance tracked
+    independently rather than collapsing onto one shared, value-keyed
+    answer. A value-based ``set[str]`` of "explicitly absolute strings"
+    cannot represent this at all: both occurrences would read as
+    "explicit", losing the genuinely-relative one."""
+    include_dir = str(tmp_path / "include")
+    cdb = _write_cdb(
+        tmp_path,
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "arguments": [
+                    "c++",
+                    "-Iinclude",  # relative -- resolves to <tmp_path>/include
+                    f"-I{include_dir}",  # explicit absolute, same final string
+                    "-c",
+                    "a.cpp",
+                ],
+            },
+        ],
+    )
+    ev = CompileDbAdapter(cdb).collect()
+    cu = ev.compile_units[0]
+    redaction = DEFAULT_REDACTION
+    expected = redaction.path(include_dir)
+    assert cu.include_paths == [expected, expected]
+    assert len(cu.include_paths_explicit) == 2
+    # First occurrence (the relative -Iinclude) is derived, not explicit;
+    # the second (the literal absolute -I<dir>) is genuinely explicit.
+    assert cu.include_paths_explicit == [False, True]
 
 
 # ── Ninja adapter (ADR-029 D5) ───────────────────────────────────────────────

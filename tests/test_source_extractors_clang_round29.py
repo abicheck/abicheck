@@ -48,6 +48,7 @@ def test_build_clang_command_rebases_include_paths_under_env_chdir() -> None:
         output="x.o",
         argv=["env", "-C", "build", "clang", "-Iinclude", "-c", "x.cc"],
         include_paths=["/work/include"],
+        include_paths_explicit=[False],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     assert "-I" in cmd
@@ -64,6 +65,7 @@ def test_build_clang_command_rebases_system_include_paths_under_env_chdir() -> N
         output="x.o",
         argv=["env", "-C", "build", "clang", "-isystem", "sysinc", "-c", "x.cc"],
         system_include_paths=["/work/sysinc"],
+        system_include_paths_explicit=[False],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     assert "-isystem" in cmd
@@ -82,6 +84,7 @@ def test_build_clang_command_rebases_multiple_nested_include_paths() -> None:
         output="x.o",
         argv=["env", "-C", "build", "clang", "-c", "x.cc"],
         include_paths=["/work/include/nested/deep"],
+        include_paths_explicit=[False],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     assert cmd[cmd.index("-I") + 1] == "/work/build/include/nested/deep"
@@ -96,7 +99,7 @@ def test_build_clang_command_explicit_absolute_include_not_rebased_under_env_chd
     though it string-prefix-matches ``compile_unit.directory`` exactly the
     same way a relative ``-Iinclude`` operand the adapter already resolved
     to that same absolute string would. Without
-    ``explicit_absolute_include_paths`` recording which is which, both look
+    ``include_paths_explicit`` recording which is which, both look
     identical to ``_rebase_structured_path`` and the explicit path was
     incorrectly rewritten to ``/work/build/include`` -- the exact
     corruption this field exists to prevent."""
@@ -108,7 +111,7 @@ def test_build_clang_command_explicit_absolute_include_not_rebased_under_env_chd
         output="x.o",
         argv=["env", "-C", "build", "clang", "-I/work/include", "-c", "x.cc"],
         include_paths=["/work/include"],
-        explicit_absolute_include_paths=["/work/include"],
+        include_paths_explicit=[True],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     assert cmd[cmd.index("-I") + 1] == "/work/include"
@@ -117,7 +120,7 @@ def test_build_clang_command_explicit_absolute_include_not_rebased_under_env_chd
 def test_build_clang_command_relative_include_still_rebased_under_env_chdir() -> None:
     """Regression guard for the round-29 fix itself: a genuinely RELATIVE
     ``-Iinclude`` operand (nothing recorded in
-    ``explicit_absolute_include_paths``) is still correctly rebased onto
+    ``include_paths_explicit``) is still correctly rebased onto
     the effective ``env -C`` directory, unaffected by Finding 2's fix."""
     cu = CompileUnit(
         id="cu://x.cc",
@@ -127,7 +130,7 @@ def test_build_clang_command_relative_include_still_rebased_under_env_chdir() ->
         output="x.o",
         argv=["env", "-C", "build", "clang", "-Iinclude", "-c", "x.cc"],
         include_paths=["/work/include"],
-        explicit_absolute_include_paths=[],
+        include_paths_explicit=[False],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     assert cmd[cmd.index("-I") + 1] == "/work/build/include"
@@ -157,7 +160,7 @@ def test_build_clang_command_mixed_explicit_and_relative_includes_resolve_indepe
             "x.cc",
         ],
         include_paths=["/work/vendor", "/work/local"],
-        explicit_absolute_include_paths=["/work/vendor"],
+        include_paths_explicit=[True, False],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     idxs = [i for i, tok in enumerate(cmd) if tok == "-I"]
@@ -217,6 +220,108 @@ def test_build_clang_command_negative_control_directory_itself_as_include() -> N
         output="x.o",
         argv=["env", "-C", "build", "clang", "-c", "x.cc"],
         include_paths=["/work"],
+        include_paths_explicit=[False],
     )
     cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
     assert cmd[cmd.index("-I") + 1] == "/work/build"
+
+
+# -- Round 31 Finding 1 (Codex review, fresh evidence): provenance tracked
+# per LIST POSITION, not by shared value identity -----------------------
+
+
+def test_build_clang_command_same_string_occurring_twice_resolves_independently() -> (
+    None
+):
+    """Two DIFFERENT ``include_paths`` occurrences that normalize to the
+    IDENTICAL final string -- one genuinely relative (``-Iinclude``,
+    resolves to ``/work/include``), one genuinely explicit
+    (``-I/work/include``) -- must not collapse onto one shared answer. A
+    value-keyed ``set[str]`` of "explicitly absolute strings" cannot tell
+    the two apart at all (both entries equal ``"/work/include"``); only
+    position-aligned ``include_paths_explicit`` can. The first occurrence
+    (index 0, derived) rebases; the second (index 1, explicit) does not."""
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory="/work",
+        output="x.o",
+        argv=[
+            "env",
+            "-C",
+            "build",
+            "clang",
+            "-Iinclude",
+            "-I/work/include",
+            "-c",
+            "x.cc",
+        ],
+        include_paths=["/work/include", "/work/include"],
+        include_paths_explicit=[False, True],
+    )
+    cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
+    idxs = [i for i, tok in enumerate(cmd) if tok == "-I"]
+    values = [cmd[i + 1] for i in idxs]
+    assert values == ["/work/build/include", "/work/include"]
+
+
+# -- Round 31 Finding 3 (Codex review, fresh evidence): a legacy pack with
+# the provenance field absent must degrade to "unknown, do not rebase" --
+
+
+def test_build_clang_command_legacy_pack_without_provenance_field_not_rebased() -> (
+    None
+):
+    """A ``CompileUnit`` loaded from a pack persisted before
+    ``include_paths_explicit``/``system_include_paths_explicit`` existed
+    (``from_dict`` on a dict lacking those keys) has both lists come back
+    empty while ``include_paths`` is non-empty -- a length mismatch
+    ``explicit_or_unknown()`` treats as "unknown provenance" and degrades
+    to "do not rebase" (never to "derived", which would newly rebase a
+    path an older abicheck version always left untouched, silently
+    changing that old, previously-correct pack's replay semantics)."""
+    legacy_dict = {
+        "id": "cu://x.cc",
+        "source": "x.cc",
+        "language": "CXX",
+        "directory": "/work",
+        "output": "x.o",
+        "argv": ["env", "-C", "build", "clang", "-I/work/include", "-c", "x.cc"],
+        "include_paths": ["/work/include"],
+        # No "include_paths_explicit" key at all -- simulates a pack
+        # persisted before round 30/31.
+    }
+    cu = CompileUnit.from_dict(legacy_dict)
+    assert cu.include_paths_explicit == []
+    cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
+    # Old, pre-round-30 behavior: never rebased at all.
+    assert cmd[cmd.index("-I") + 1] == "/work/include"
+
+
+def test_build_clang_command_modern_pack_with_empty_provenance_list_still_rebases() -> (
+    None
+):
+    """Negative control distinguishing "legacy, field truly absent" from
+    "modern, field present and correctly empty": a unit with ZERO
+    ``include_paths`` has an empty ``include_paths_explicit`` too by
+    construction (nothing to record provenance for), which must not be
+    misread as "unknown" -- there is nothing to rebase either way, so the
+    degradation is unobservable, but a unit that DOES have includes and a
+    correctly-populated (all-``False``) explicit list must still rebase
+    normally, not fall back to "unknown" just because the round-trip
+    happened to produce an all-``False`` list."""
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory="/work",
+        output="x.o",
+        argv=["env", "-C", "build", "clang", "-Iinclude", "-c", "x.cc"],
+        include_paths=["/work/include"],
+        include_paths_explicit=[False],
+    )
+    round_tripped = CompileUnit.from_dict(cu.to_dict())
+    assert round_tripped.include_paths_explicit == [False]
+    cmd = build_clang_command(round_tripped, Path("/work/x.cc"), clang_bin="clang")
+    assert cmd[cmd.index("-I") + 1] == "/work/build/include"

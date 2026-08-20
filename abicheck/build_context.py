@@ -676,8 +676,11 @@ class BuildContext:
     #: prefix is accounted for) but must NEVER rebase a path that was
     #: genuinely absolute in the source command needs this provenance
     #: captured at the one point it is still available: before the join.
-    include_paths_explicit: list[bool] = field(default_factory=list)
-    system_includes_explicit: list[bool] = field(default_factory=list)
+    #: ``kw_only=True`` (CodeRabbit review, fresh evidence) -- same
+    #: mid-list-insertion reasoning as ``CompileUnit.include_paths_explicit``
+    #: in ``build_evidence.py``.
+    include_paths_explicit: list[bool] = field(default_factory=list, kw_only=True)
+    system_includes_explicit: list[bool] = field(default_factory=list, kw_only=True)
     language_standard: str | None = None
     target_triple: str | None = None
     sysroot: Path | None = None
@@ -727,27 +730,6 @@ class BuildContext:
     def has_conflicts(self) -> bool:
         """Return True if define or standard conflicts were detected."""
         return bool(self.define_conflicts) or len(self.standard_variants) > 1
-
-    def explicit_absolute_paths(self) -> list[Path]:
-        """Return every ``include_paths``/``system_includes`` entry whose
-        ORIGINAL ``-I``/``-isystem`` operand was already absolute (round 30
-        Finding 2, Codex review, fresh evidence) -- see
-        ``include_paths_explicit``'s own docstring. Callers building a
-        :class:`~abicheck.buildsource.build_evidence.CompileUnit` from this
-        context pass the (redacted) string form of this list as
-        ``CompileUnit.explicit_absolute_include_paths``.
-        """
-        out: list[Path] = [
-            p
-            for p, explicit in zip(self.include_paths, self.include_paths_explicit)
-            if explicit
-        ]
-        out += [
-            p
-            for p, explicit in zip(self.system_includes, self.system_includes_explicit)
-            if explicit
-        ]
-        return out
 
 
 def _entry_matches_filter(entry: CompileEntry, pattern: str) -> bool:
