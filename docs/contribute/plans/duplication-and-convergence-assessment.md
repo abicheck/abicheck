@@ -267,14 +267,18 @@ class ExitContribution:
 @dataclass(frozen=True)
 class ExitDecision:
     code: int
-    primary_reason: ExitAxis
+    primary_reason: ExitAxis  # CLEAN when every contribution is inactive
     contributing_reasons: tuple[ExitAxis, ...]
     contributions: tuple[ExitContribution, ...]
 ```
 
-with axes covering `compatibility_gate`, `scoped_gate`, `contract_coverage`,
-`analysis_assurance`, `crosscheck_promotion`, `not_comparable`,
-`budget_overflow`, `operational_error`, `removed_required_artifact`,
+with axes covering `clean` (mirroring the existing `ExitDecision`'s own
+`ExitReason.CLEAN` — a successful run still needs a real, non-optional
+`primary_reason` rather than one implementation fabricating a failure axis
+and another making the field optional), `compatibility_gate`,
+`scoped_gate`, `contract_coverage`, `analysis_assurance`,
+`crosscheck_promotion`, `not_comparable`, `budget_overflow`,
+`operational_error`, `removed_required_artifact`,
 `missing_required_target`, and `unexpected_target`; and per-operation
 policies (`NativeCompareExitPolicy`, `ScanExitPolicy`, `ReleaseExitPolicy`,
 `AggregateExitPolicy`, `AbiccExitPolicy`) that read the same evaluated
