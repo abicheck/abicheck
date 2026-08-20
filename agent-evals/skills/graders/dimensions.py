@@ -468,17 +468,26 @@ def dimension_6(
         (scenario.get("invocation") or {}).get("used_by") or []
     ) | frozenset((scenario.get("invocation") or {}).get("required_symbols") or [])
     if declared_targets:
-        matched = any(
-            ev.consumer_scope_targets(c) & declared_targets
-            for c in resolved.values()
-            if ev.ran_to_a_verdict(c)
-            and not ev.compares_one_side_against_itself(c)
-        )
-        if not matched:
+        # A non-empty overlap is not enough when more than one target is
+        # declared: `plugin-required-symbol-loss` declares BOTH
+        # plugin_register and plugin_teardown, and the removed one
+        # (plugin_teardown) is the whole point of the scenario. A claim
+        # citing only `--required-symbol plugin_register` overlapped the
+        # declared set under the old any()-based check and passed without
+        # the removed symbol ever being checked. Union what every
+        # qualifying cited call actually covered and require the full
+        # declared set to be a subset of it — a real workflow can cover
+        # several targets across several calls (Codex review, PR #808).
+        covered: set[str] = set()
+        for c in resolved.values():
+            if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c):
+                covered |= ev.consumer_scope_targets(c)
+        missing = declared_targets - covered
+        if missing:
             reasons.append(
                 (
                     "cited no call scoped to the scenario's own declared "
-                    f"target(s) ({sorted(declared_targets)})",
+                    f"target(s) — missing {sorted(missing)}",
                     True,
                 )
             )

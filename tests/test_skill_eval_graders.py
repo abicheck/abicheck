@@ -1054,6 +1054,136 @@ class TestDimensionSix:
         )
         assert result.status == "pass", result.reasons
 
+    def test_a_used_by_path_matches_the_declared_bare_consumer_name(self, tmp_path):
+        """`--used-by` takes a real path to the consumer binary
+        (references/abicheck-adapter.md's own worked example), not the bare
+        logical name a scenario's invocation.used_by declares -- the literal
+        operand alone would hard-fail every correctly-scoped run (Codex
+        review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0,
+                argv=[
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--used-by",
+                    "workspace/consumer/renderer",
+                ],
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "pass", result.reasons
+
+    def test_covering_only_one_of_two_declared_symbols_fails(self, tmp_path):
+        """`plugin-required-symbol-loss` declares BOTH plugin_register and
+        plugin_teardown, and the removed one (plugin_teardown) is the whole
+        point of the scenario -- a claim citing only a call scoped to the
+        unaffected symbol must not pass on partial overlap alone (Codex
+        review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {
+                "required_symbols": ["plugin_register", "plugin_teardown"]
+            },
+            "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0,
+                argv=[
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--required-symbol",
+                    "plugin_register",
+                ],
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="BREAKING",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+        )
+        assert result.status == "fail"
+        assert any("plugin_teardown" in r for r in result.reasons)
+
+    def test_covering_both_declared_symbols_across_two_calls_passes(self, tmp_path):
+        """Coverage can be established across multiple calls, matching a
+        real workflow that checks each declared symbol separately."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {
+                "required_symbols": ["plugin_register", "plugin_teardown"]
+            },
+            "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0,
+                argv=[
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--required-symbol",
+                    "plugin_register",
+                ],
+            ),
+            a_breaking_call(
+                1,
+                argv=[
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--required-symbol",
+                    "plugin_teardown",
+                ],
+            ),
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="BREAKING",
+                full_verdict="BREAKING",
+                evidence=[0, 1],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
+                "captured/1.out": json.dumps({"verdict": "BREAKING"}),
+            },
+        )
+        assert result.status == "pass", result.reasons
+
     def test_a_scenario_with_no_declared_target_is_unaffected(self, tmp_path):
         """A plain (non-consumer-scoped) scenario declares no `invocation`, so
         this check must not fire at all -- confirming it is additive, not a

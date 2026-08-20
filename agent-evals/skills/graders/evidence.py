@@ -454,7 +454,7 @@ def is_consumer_scoped(call: dict) -> bool:
 
 
 def consumer_scope_targets(call: dict) -> frozenset[str]:
-    """The literal consumer/symbol values this call passed to a scoping dial.
+    """The consumer/symbol identities this call passed to a scoping dial.
 
     Only `--used-by`/`--required-symbol`, each repeatable and each carrying
     its value as a plain string operand, are recoverable this way.
@@ -464,19 +464,34 @@ def consumer_scope_targets(call: dict) -> frozenset[str]:
     targets, and the false-negative-over-false-positive default this module
     uses throughout applies: silently under-matching is preferable to
     fabricating a match.
+
+    `--used-by` takes a real path to the consumer binary
+    (`references/abicheck-adapter.md`'s own worked example: `--used-by
+    path/to/consumer-binary`), not a bare logical name — while a scenario's
+    `invocation.used_by` declares the logical name (`renderer`) the fixture
+    calls it. Matching the literal operand alone would hard-fail every
+    correctly-scoped run, so each raw value contributes both itself *and*
+    its path basename — `--required-symbol`'s operand is already a bare
+    symbol name with no path structure, so its basename is the value
+    itself and this is a no-op there.
     """
     argv = call.get("argv", [])
     targets: set[str] = set()
+
+    def _add(value: str) -> None:
+        targets.add(value)
+        targets.add(Path(value).name)
+
     i = 0
     while i < len(argv):
         token = argv[i]
         if token in ("--used-by", "--required-symbol") and i + 1 < len(argv):
-            targets.add(argv[i + 1])
+            _add(argv[i + 1])
             i += 2
             continue
         for flag in ("--used-by", "--required-symbol"):
             if token.startswith(f"{flag}="):
-                targets.add(token[len(flag) + 1 :])
+                _add(token[len(flag) + 1 :])
                 break
         i += 1
     return frozenset(targets)
