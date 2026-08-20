@@ -255,6 +255,16 @@ def test_cli_resolve_own_wrapper_is_exempt(
             "    return vendor.service.resolve_input(a)\n",
             id="unrelated-import-suffix-collision",
         ),
+        pytest.param(
+            "cli_bare_importfrom.py",
+            "from service import resolve_input\ndef go(a):\n    return resolve_input(a)\n",
+            id="bare-absolute-importfrom-collision",
+        ),
+        pytest.param(
+            "cli_bare_import.py",
+            "import service\ndef go(a):\n    return service.resolve_input(a)\n",
+            id="bare-absolute-import-collision",
+        ),
     ],
 )
 def test_unrelated_module_with_matching_suffix_is_not_flagged(

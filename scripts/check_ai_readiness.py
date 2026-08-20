@@ -2179,20 +2179,23 @@ def _importfrom_names_module(dotted: str, level: int, module: str) -> bool:
     """True if an ``ImportFrom(module=dotted, level=level)`` genuinely names
     abicheck's own top-level ``<module>`` — a relative ``.{module}`` or an
     absolute ``abicheck.{module}`` — not an unrelated module that merely
-    *ends* in the same name (``from vendor.service import resolve_input``
-    must not be mistaken for abicheck's own ``service`` module).
+    *ends* in or *is spelled* the same bare name (``from vendor.service
+    import resolve_input`` and a bare ``from service import resolve_input``
+    must not be mistaken for abicheck's own ``service`` module; a real
+    front-end module here always spells its own sibling either relatively
+    or through the ``abicheck.`` prefix, never as a bare top-level name).
     """
     if level >= 1:
         return dotted == module
-    return dotted in (module, f"abicheck.{module}")
+    return dotted == f"abicheck.{module}"
 
 
 def _import_names_module(dotted: str, module: str) -> bool:
     """True if a plain ``import <dotted>`` genuinely names abicheck's own
-    top-level ``<module>`` (bare ``<module>`` or absolute
-    ``abicheck.<module>``), for the identical reason as
-    ``_importfrom_names_module`` above."""
-    return dotted in (module, f"abicheck.{module}")
+    top-level ``<module>`` (``abicheck.<module>`` only — never a bare
+    ``<module>``), for the identical reason as ``_importfrom_names_module``
+    above."""
+    return dotted == f"abicheck.{module}"
 
 
 def _tier1_func_bindings(
