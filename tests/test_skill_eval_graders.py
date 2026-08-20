@@ -467,8 +467,7 @@ class TestEvidenceReading:
         )
         assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
         assert (
-            ev.strongest_reported_verdict(run, calls, only_scoped=True)
-            == "COMPATIBLE"
+            ev.strongest_reported_verdict(run, calls, only_scoped=True) == "COMPATIBLE"
         )
 
     @pytest.mark.parametrize(
@@ -483,9 +482,84 @@ class TestEvidenceReading:
         assert ev.is_consumer_scoped({"argv": argv})
 
     def test_is_consumer_scoped_false_for_an_unscoped_call(self):
-        assert not ev.is_consumer_scoped(
-            {"argv": ["compare", "old.so", "new.so"]}
+        assert not ev.is_consumer_scoped({"argv": ["compare", "old.so", "new.so"]})
+
+    @pytest.mark.parametrize(
+        "used_by",
+        [
+            "workspace/consumer/renderer.so",
+            "workspace/consumer/renderer.so.2",
+            "workspace/consumer/renderer.dll",
+            "workspace/consumer/renderer.dylib",
+            "workspace/consumer/renderer.exe",
+        ],
+    )
+    def test_a_compiled_used_by_artifact_matches_the_bare_consumer_name(self, used_by):
+        """A real build gives `--used-by` a platform suffix; the plain
+        basename match alone (`renderer.so`) never equals the scenario's
+        declared bare name (`renderer`) -- Codex review, PR #808."""
+        targets = ev.consumer_scope_targets(
+            {"argv": ["compare", "old.so", "new.so", "--used-by", used_by]}
         )
+        assert "renderer" in targets
+
+    def test_an_unsuffixed_used_by_path_is_unaffected(self):
+        """No suffix to strip -- the plain basename match still covers this,
+        and stripping must not remove or corrupt it."""
+        targets = ev.consumer_scope_targets(
+            {
+                "argv": [
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--used-by",
+                    "workspace/consumer/renderer",
+                ]
+            }
+        )
+        assert "renderer" in targets
+
+    def test_required_symbols_file_contents_contribute_targets(self, tmp_path):
+        """`--required-symbols FILE` names a file, not the symbols
+        themselves -- the file's own listed symbols must each become a
+        target, resolved against the call's own recorded cwd (Codex
+        review, PR #808)."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "syms.txt").write_text(
+            "plugin_register\nplugin_teardown\n", encoding="utf-8"
+        )
+        call = {
+            "argv": [
+                "compare",
+                "old.so",
+                "new.so",
+                "--required-symbols",
+                "syms.txt",
+            ],
+            "cwd": str(workspace),
+        }
+        targets = ev.consumer_scope_targets(call)
+        assert {"plugin_register", "plugin_teardown"} <= targets
+
+    def test_required_symbols_file_missing_or_unresolvable_is_a_silent_no_op(
+        self, tmp_path
+    ):
+        """False-negative-over-false-positive: a workspace already gone, or
+        no recorded cwd at all, must not raise and must not fabricate a
+        match."""
+        no_cwd = ev.consumer_scope_targets(
+            {"argv": ["compare", "a", "b", "--required-symbols", "syms.txt"]}
+        )
+        assert no_cwd == frozenset()
+
+        missing_file = ev.consumer_scope_targets(
+            {
+                "argv": ["compare", "a", "b", "--required-symbols", "syms.txt"],
+                "cwd": str(tmp_path / "gone"),
+            }
+        )
+        assert missing_file == frozenset()
 
 
 class TestDimensionOne:
@@ -694,6 +768,34 @@ class TestDimensionTwo:
         assert (
             dim.dimension_2(run, scenario, ev.load_calls(run), withheld).status
             == "pass"
+        )
+
+    def test_an_uncited_contract_call_does_not_excuse_a_cited_uncontracted_claim(
+        self, tmp_path
+    ):
+        """The refutation must scope to the claim's own *cited* calls, not
+        every call the run happened to make -- an unrelated --contract call
+        elsewhere in the transcript must not excuse a claim resting on a
+        plain, uncontracted comparison (Codex review, PR #808)."""
+        cited = a_breaking_call(0, argv=["compare", "a", "b"])
+        uncited_contract_call = a_breaking_call(
+            1, argv=["compare", "a", "b", "--contract", "public"]
+        )
+        run = build_run(tmp_path, final="", calls=[cited, uncited_contract_call])
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="BREAKING",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        assert (
+            dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed).status
+            == "fail"
         )
 
     def test_a_coverage_scenario_may_not_drop_the_verdict(self, tmp_path):
@@ -1103,9 +1205,7 @@ class TestDimensionSix:
         review, PR #808)."""
         scenario = {
             "skill": "review-native-library-change",
-            "invocation": {
-                "required_symbols": ["plugin_register", "plugin_teardown"]
-            },
+            "invocation": {"required_symbols": ["plugin_register", "plugin_teardown"]},
             "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
         }
         calls = [
@@ -1140,9 +1240,7 @@ class TestDimensionSix:
         real workflow that checks each declared symbol separately."""
         scenario = {
             "skill": "review-native-library-change",
-            "invocation": {
-                "required_symbols": ["plugin_register", "plugin_teardown"]
-            },
+            "invocation": {"required_symbols": ["plugin_register", "plugin_teardown"]},
             "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
         }
         calls = [

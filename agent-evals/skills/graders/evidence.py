@@ -453,34 +453,90 @@ def is_consumer_scoped(call: dict) -> bool:
     return False
 
 
+#: Compiled-artifact suffixes stripped from a `--used-by` operand's basename,
+#: on top of the plain basename match — a versioned SONAME (`renderer.so.2`)
+#: strips every trailing `.N` segment along with the leading `.so`.
+_BINARY_SUFFIX_RE = re.compile(r"\.(so(\.\d+)*|dll|dylib|exe)$", re.IGNORECASE)
+
+
+def _stripped_binary_name(name: str) -> str | None:
+    """`name` with one trailing compiled-artifact suffix removed, if any.
+
+    `--used-by` names a real path to the *built* consumer
+    (`references/abicheck-adapter.md`'s own worked example: `--used-by
+    path/to/consumer-binary`), and a real build almost always gives that
+    path a platform suffix (`renderer.so`, `renderer.so.2`, `renderer.dll`)
+    — while a scenario's `invocation.used_by` declares the bare logical name
+    (`renderer`) the fixture calls it. The plain-basename match already
+    handles a literal, suffix-free operand; this closes the far more common
+    case of an actual compiled artifact. Returns `None` when nothing
+    matched, so a caller adds only a genuinely new candidate.
+    """
+    match = _BINARY_SUFFIX_RE.search(name)
+    if not match:
+        return None
+    return name[: match.start()] or None
+
+
+def _required_symbols_file_targets(call: dict, value: str) -> list[str]:
+    """The symbol names listed in a `--required-symbols FILE` argument.
+
+    Best-effort, silently empty on any failure — matching the
+    false-negative-over-false-positive default this module uses throughout.
+    `value` is resolved against the call's own recorded `cwd` (the shim
+    stamps this from `Path.cwd()` at call time — the workspace directory
+    under the run directory, which persists on disk after the run, unlike
+    the process's own transient cwd), not against the run directory itself:
+    a relative `--required-symbols` operand is relative to where the agent
+    ran the command, which need not be the workspace root.
+    """
+    cwd = call.get("cwd")
+    if not cwd:
+        return []
+    path = (Path(cwd) / value).resolve()
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
 def consumer_scope_targets(call: dict) -> frozenset[str]:
     """The consumer/symbol identities this call passed to a scoping dial.
 
-    Only `--used-by`/`--required-symbol`, each repeatable and each carrying
-    its value as a plain string operand, are recoverable this way.
-    `--required-symbols FILE` names a *file*, not the symbols themselves, so a
-    call using it contributes nothing here — there is no way to tell from
-    argv alone whether the file's contents match a scenario's declared
-    targets, and the false-negative-over-false-positive default this module
-    uses throughout applies: silently under-matching is preferable to
-    fabricating a match.
+    `--used-by`/`--required-symbol`, each repeatable and each carrying its
+    value as a plain string operand, are recovered directly from argv.
+    `--required-symbols FILE` names a *file*, not the symbols themselves —
+    its contents are read (see `_required_symbols_file_targets`) and each
+    listed symbol contributes as its own target; a file that can't be read
+    (workspace already gone, unreadable path) contributes nothing rather
+    than fabricating a match.
 
-    `--used-by` takes a real path to the consumer binary
-    (`references/abicheck-adapter.md`'s own worked example: `--used-by
-    path/to/consumer-binary`), not a bare logical name — while a scenario's
-    `invocation.used_by` declares the logical name (`renderer`) the fixture
-    calls it. Matching the literal operand alone would hard-fail every
-    correctly-scoped run, so each raw value contributes both itself *and*
-    its path basename — `--required-symbol`'s operand is already a bare
-    symbol name with no path structure, so its basename is the value
-    itself and this is a no-op there.
+    `--used-by` takes a real path to the consumer binary, not a bare logical
+    name — while a scenario's `invocation.used_by` declares the logical name
+    (`renderer`) the fixture calls it. Matching the literal operand alone
+    would hard-fail every correctly-scoped run, so each raw value
+    contributes itself, its path basename, and (see `_stripped_binary_name`)
+    that basename with one compiled-artifact suffix stripped —
+    `--required-symbol`'s operand is already a bare symbol name with no path
+    structure or suffix, so both transforms are no-ops there.
     """
     argv = call.get("argv", [])
     targets: set[str] = set()
 
     def _add(value: str) -> None:
         targets.add(value)
-        targets.add(Path(value).name)
+        basename = Path(value).name
+        targets.add(basename)
+        stripped = _stripped_binary_name(basename)
+        if stripped:
+            targets.add(stripped)
+
+    def _add_required_symbols_file(value: str) -> None:
+        for symbol in _required_symbols_file_targets(call, value):
+            _add(symbol)
 
     i = 0
     while i < len(argv):
@@ -489,10 +545,18 @@ def consumer_scope_targets(call: dict) -> frozenset[str]:
             _add(argv[i + 1])
             i += 2
             continue
+        if token == "--required-symbols" and i + 1 < len(argv):
+            _add_required_symbols_file(argv[i + 1])
+            i += 2
+            continue
+        matched = False
         for flag in ("--used-by", "--required-symbol"):
             if token.startswith(f"{flag}="):
                 _add(token[len(flag) + 1 :])
+                matched = True
                 break
+        if not matched and token.startswith("--required-symbols="):
+            _add_required_symbols_file(token[len("--required-symbols=") :])
         i += 1
     return frozenset(targets)
 

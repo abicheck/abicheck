@@ -162,12 +162,16 @@ def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str 
         return None
     if reason == "contract_coverage_incomplete":
         # ADR-049 Phase 7: without --contract the coverage contribution is
-        # identically 0, so no domain can be short of evidence.
-        if not any("--contract" in (c.get("argv") or []) for c in calls):
+        # identically 0, so no domain can be short of evidence. Scoped to the
+        # claim's own *cited* calls, not every call the run happened to make
+        # — an unrelated --contract call elsewhere in the transcript must not
+        # excuse a claim that itself rests on a plain, uncontracted call.
+        resolved, _dangling = _cited(calls, claim)
+        if not any("--contract" in (c.get("argv") or []) for c in resolved.values()):
             return (
-                "claimed contract coverage is incomplete, but no recorded call "
-                "asked for contract evaluation, under which coverage is not "
-                "assessed at all"
+                "claimed contract coverage is incomplete, but none of the "
+                "cited calls asked for contract evaluation, under which "
+                "coverage is not assessed at all"
             )
         return None
     return None  # evidence_too_shallow: not refutable from the bundle
