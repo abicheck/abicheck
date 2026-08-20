@@ -689,6 +689,59 @@ def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     return old.parsed_with_build_context and new.parsed_with_build_context
 
 
+#: The literal ``language_standard`` prefix a probed (never explicitly
+#: pinned) default carries -- see ``dumper_toolchain._probe_default_
+#: language_standard``'s own docstring. Mirrored here (not imported) since
+#: this module has no other reason to depend on ``dumper_toolchain``.
+_PROBED_STANDARD_PREFIX = "probed:"
+
+
+def _language_standard_probe_upgrade_corroborated(
+    old_fields: dict[str, str], new_fields: dict[str, str]
+) -> bool:
+    """Whether a differing ``language_standard`` is fully explained by this
+    probe having been *added* by an abicheck upgrade, not by a genuine
+    toolchain difference (Codex review, fresh evidence).
+
+    A baseline persisted before ``dumper_toolchain._probe_default_language_
+    standard`` existed recorded an *empty* ``language_standard`` for any
+    unpinned (no explicit ``-std=``, no forced-C++20-heuristic) dump --
+    that was the only value this field could ever take for that shape of
+    input. A freshly re-dumped snapshot of the identical input under the
+    identical toolchain now records a real ``"probed:..."`` value there
+    instead, purely because the tool was upgraded -- comparing the two
+    would otherwise raise ``ProfileMismatchError`` on every such baseline,
+    solely from the upgrade itself, not from anything about the library
+    changing.
+
+    Waived only when independently corroborated by an EXACT, non-empty
+    ``compiler_family``/``compiler_version`` match on both sides: the
+    probed default is a deterministic function of the exact resolved
+    compiler binary, so an unchanged ``compiler_version`` is strong,
+    specific evidence the unpinned default did not actually change either
+    -- mirroring the platform carve-out's own "verify each specific
+    differing field, not just some other field on the same axis" discipline
+    (:func:`_platform_identity_confirmed`). A *changed* ``compiler_version``
+    already raises today (no carve-out exists for it, and none is added
+    here), which is correct: upgrading the compiler between the baseline
+    and the comparison is a real profile change this gate should still
+    catch.
+    """
+    old_std = old_fields.get("language_standard", "")
+    new_std = new_fields.get("language_standard", "")
+    is_upgrade_transition = (
+        old_std == "" and new_std.startswith(_PROBED_STANDARD_PREFIX)
+    ) or (new_std == "" and old_std.startswith(_PROBED_STANDARD_PREFIX))
+    if not is_upgrade_transition:
+        return False
+    for key in ("compiler_family", "compiler_version"):
+        old_v = old_fields.get(key, "")
+        new_v = new_fields.get(key, "")
+        if not old_v or not new_v or old_v != new_v:
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class ComparabilityMismatch:
     """Returned by :func:`check_contracts_comparable` in ``diagnostic=True``
@@ -1017,11 +1070,18 @@ def _unexplained_profile_fields(
     (Codex review, PR #641 follow-up, fourth round): a release combining two
     independently-sanctioned deltas (e.g. a header addition AND a corroborated
     C++-standard raise) must not raise just because neither carve-out's static
-    field-set covers ``differing`` in full on its own. The four carve-outs'
-    field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/:data:`_BUILD_CONTEXT_FIELDS`/
-    :data:`_HEADER_SEQUENCE_FIELDS`/:data:`_INCLUDE_SEQUENCE_FIELDS`) are
-    mutually disjoint, so processing order never matters -- each only ever
-    narrows the working set, never re-adds to it.
+    field-set covers ``differing`` in full on its own. Four of the five
+    carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
+    :data:`_BUILD_CONTEXT_FIELDS`/:data:`_HEADER_SEQUENCE_FIELDS`/
+    :data:`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so their relative
+    order never matters -- each only ever narrows the working set, never
+    re-adds to it. The fifth,
+    :func:`_language_standard_probe_upgrade_corroborated`, is a narrower,
+    single-field carve-out over ``language_standard`` -- a field the
+    build-context carve-out's own set already covers -- so it is checked
+    *after* the build-context one specifically (its broader waiver, when it
+    applies, already subsumes this one; when it doesn't, this one still gets
+    its own independent chance).
     """
     old_fields = old_contract.profile_fields
     new_fields = new_contract.profile_fields
@@ -1047,6 +1107,20 @@ def _unexplained_profile_fields(
         # discard that finding instead of letting the more specific
         # detector classify it correctly.
         unexplained -= build_candidate
+
+    # abicheck-internal-bugs finding 2 follow-up (Codex review): waive a
+    # language_standard-only mismatch that is fully explained by this PR's
+    # own probe having been added by an upgrade -- see
+    # _language_standard_probe_upgrade_corroborated's own docstring. Checked
+    # after the build-context carve-out (whose broader waiver already
+    # subsumes this one when both sides carry real build evidence) and
+    # narrowly scoped to this single field so it can never mask a genuine
+    # compiler_family/compiler_version difference riding alongside it.
+    if (
+        "language_standard" in unexplained
+        and _language_standard_probe_upgrade_corroborated(old_fields, new_fields)
+    ):
+        unexplained.discard("language_standard")
 
     # Both sequence carve-outs below additionally require
     # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):

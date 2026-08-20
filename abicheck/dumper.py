@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache
-from ._compiler_options import has_explicit_cpp_std, split_gcc_options
+from ._compiler_options import split_gcc_options
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -142,6 +142,7 @@ from .dumper_toolchain import (
     _parser_ast_toolchain as _parser_ast_toolchain,
     _parser_ast_unsupported_reasons as _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind as _parser_frontend_context_kind,
+    _resolve_force_cpp as _resolve_force_cpp,
     _resolve_selected_tool as _resolve_selected_tool,
     _resolve_standard_provenance as _resolve_standard_provenance,
     _safe_mtime as _safe_mtime,
@@ -193,41 +194,6 @@ def _resolve_header_backend(backend: str | None) -> str:
     if env in ("castxml", "clang", "hybrid"):
         return env
     return "castxml"
-
-
-def _resolve_force_cpp(
-    lang: str | None,
-    headers: list[Path],
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
-) -> bool:
-    """Decide whether the TU is C++ when no ``lang`` was explicitly given.
-
-    An explicit ``--lang c++``/``cpp`` always wins. Otherwise, C++20
-    concept/requires syntax (including an abbreviated constrained parameter
-    like ``void f(std::integral auto x);``, which needs no
-    class/namespace/template keyword at all) is on its own sufficient proof
-    the header is C++ — without this, a header whose only C++ signal is such
-    syntax stayed auto-detected as C (Codex review). Shared by both the clang
-    and castxml frontends so the auto-detection rule cannot drift between
-    them.
-
-    ``for_language_mode_decision=True`` (Codex review): a
-    ``#if __cplusplus``/``#ifdef __cplusplus``-guarded C++20 construct
-    must not by itself promote an auto-detected header to C++ mode — in C
-    mode ``__cplusplus`` is undefined, so that guard's content is not
-    actually reachable there, and forcing C++ purely because it exists
-    would then turn an *active*, unguarded use of the same word as an
-    ordinary C identifier elsewhere in the header into a reserved-word
-    parse error once C++20 mode is wrongly forced.
-    """
-    if lang:
-        return bool(lang.upper() in ("C++", "CPP"))
-    return (
-        _detect_cpp_headers(headers)
-        or _detect_cpp20_headers(headers, for_language_mode_decision=True)
-        or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
-    )
 
 
 def _resolve_clang_langmode(

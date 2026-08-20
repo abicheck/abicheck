@@ -35,4 +35,15 @@
   comparability gate refuses the comparison. Best-effort and additive: the
   common same-toolchain, no-flags workflow is unaffected, and a probe
   failure (unsupported driver, e.g. MSVC `cl.exe`) degrades to the prior
-  behavior.
+  behavior. The probe resolves the *actual* language mode the header-AST
+  parse used (`dumper_toolchain._resolve_force_cpp`, the same auto-detection
+  decision the real parse makes — not just a bare `--lang c`/`c++` check),
+  so a header that auto-detects as C is probed in C mode even when `lang`
+  wasn't explicitly given. A new `comparability.py` carve-out
+  (`_language_standard_probe_upgrade_corroborated`) keeps an existing,
+  pre-upgrade baseline (recorded with an empty `language_standard`, since
+  this probe didn't exist yet) comparable against a freshly re-dumped
+  snapshot of the identical input under the identical resolved compiler
+  (confirmed via an unchanged `compiler_family`/`compiler_version`) — an
+  abicheck upgrade adding evidence must not by itself make an
+  otherwise-unchanged baseline `NOT_COMPARABLE`.

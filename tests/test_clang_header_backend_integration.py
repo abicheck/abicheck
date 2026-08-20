@@ -473,8 +473,16 @@ def test_clang_backend_reconstructs_vtable_and_flags_vptr_introduced(
         capture_output=True,
     )
 
-    old_snap = dump(v1_so, [old_header], header_backend="clang")
-    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    # lang="c++" pinned explicitly on both sides (abicheck-internal-bugs
+    # finding 2 follow-up): the old header alone has no C++-only syntax, so
+    # auto-detection would parse it as C while the new header (genuinely
+    # needing `virtual`) auto-detects as C++ -- a real language-mode
+    # asymmetry the comparability gate now correctly refuses, but not what
+    # this test is about. Both files belong to the same C++ library (built
+    # with g++), so pinning `lang` explicitly is the correct, real-world
+    # practice here regardless.
+    old_snap = dump(v1_so, [old_header], header_backend="clang", lang="c++")
+    new_snap = dump(v2_so, [new_header], header_backend="clang", lang="c++")
     old_widget = next(t for t in old_snap.types if t.name == "Widget")
     new_widget = next(t for t in new_snap.types if t.name == "Widget")
     assert old_widget.vtable == []

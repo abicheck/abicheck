@@ -27,8 +27,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ._compiler_options import has_explicit_std, split_gcc_options
+from ._compiler_options import has_explicit_cpp_std, has_explicit_std, split_gcc_options
 from .buildsource.redaction import DEFAULT_REDACTION
+from .dumper_ast_config import _detect_cpp_headers
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
 
@@ -390,12 +391,54 @@ def _extract_explicit_std_value(
 _PROBED_STANDARD_PREFIX = "probed:"
 
 
-def _probe_language_mode(lang: str | None) -> str:
-    """``"c"`` or ``"c++"`` for :func:`_probe_default_language_standard`,
-    mirroring the same ``lang == "c"`` convention used throughout this
-    module (and ``dumper.py``'s own ``compiler = "cc" if lang == "c" else
-    "c++"``) — any other value (``None``, ``"c++"``, ...) means C++."""
-    return "c" if (lang or "").strip().lower() == "c" else "c++"
+def _resolve_force_cpp(
+    lang: str | None,
+    headers: list[Path],
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> bool:
+    """Decide whether the TU is C++ when no ``lang`` was explicitly given.
+
+    An explicit ``--lang c++``/``cpp`` always wins. Otherwise, C++20
+    concept/requires syntax (including an abbreviated constrained parameter
+    like ``void f(std::integral auto x);``, which needs no
+    class/namespace/template keyword at all) is on its own sufficient proof
+    the header is C++ — without this, a header whose only C++ signal is such
+    syntax stayed auto-detected as C (Codex review). Shared by both the clang
+    and castxml frontends so the auto-detection rule cannot drift between
+    them.
+
+    ``for_language_mode_decision=True`` (Codex review): a
+    ``#if __cplusplus``/``#ifdef __cplusplus``-guarded C++20 construct
+    must not by itself promote an auto-detected header to C++ mode — in C
+    mode ``__cplusplus`` is undefined, so that guard's content is not
+    actually reachable there, and forcing C++ purely because it exists
+    would then turn an *active*, unguarded use of the same word as an
+    ordinary C identifier elsewhere in the header into a reserved-word
+    parse error once C++20 mode is wrongly forced.
+
+    Relocated here from ``dumper.py`` (Codex review, abicheck-internal-bugs
+    finding 2 follow-up): :func:`_probe_default_language_standard`'s own
+    probe needs this exact decision — the raw ``lang`` argument alone is
+    not enough, since an unspecified ``lang`` (the common case: ``dump``'s
+    own CLI squashes its Click default back to ``None`` so auto-detection
+    can run — see ``cli_dump_helpers.perform_elf_dump``'s ``lang_explicit``
+    handling) can still auto-detect as either C or C++ depending on the
+    header's own content, and probing the wrong language mode would record
+    a ``language_standard`` that describes a dialect the real parse never
+    actually used, weakening the comparability guard's precision (Codex
+    review: "two compiler versions with the same C default but different
+    C++ defaults will be rejected as non-comparable despite matching
+    extraction contexts"). ``dumper.py`` re-exports this name unchanged for
+    its own callers.
+    """
+    if lang:
+        return bool(lang.upper() in ("C++", "CPP"))
+    return (
+        _detect_cpp_headers(headers)
+        or _detect_cpp20_headers(headers, for_language_mode_decision=True)
+        or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
+    )
 
 
 @lru_cache(maxsize=32)
@@ -472,7 +515,7 @@ def _resolve_standard_provenance(
     gcc_option_tokens: tuple[str, ...],
     *,
     probe_compiler_bin: str | None = None,
-    probe_lang_mode: str | None = None,
+    lang: str | None = None,
 ) -> str | None:
     """Best-effort resolved C/C++ standard for snapshot provenance (schema
     v15, P1 toolchain-profile audit).
@@ -487,15 +530,25 @@ def _resolve_standard_provenance(
     is given, :func:`_probe_default_language_standard` is asked what that
     resolved compiler's own unpinned default actually is (best-effort, never
     guessed at from nothing); otherwise ``None``.
+
+    *lang* is resolved through :func:`_resolve_force_cpp` (the identical
+    decision the real header-AST parse makes — never derived from *lang*
+    alone, Codex review): an unspecified *lang* can still auto-detect as
+    either C or C++ depending on *headers*' own content, and probing the
+    wrong language mode would record a dialect the real parse never
+    actually used.
     """
     if has_explicit_std(gcc_options, gcc_option_tokens):
         return _extract_explicit_std_value(gcc_options, gcc_option_tokens)
     if headers and _detect_cpp20_headers(headers):
         return "gnu++20"
     if probe_compiler_bin:
-        probed = _probe_default_language_standard(
-            probe_compiler_bin, probe_lang_mode or "c++"
+        probe_lang_mode = (
+            "c++"
+            if _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
+            else "c"
         )
+        probed = _probe_default_language_standard(probe_compiler_bin, probe_lang_mode)
         if probed is not None:
             return probed
     return None
@@ -549,7 +602,7 @@ def _ast_compile_provenance(
             (ast_toolchain or {}).get("compiler_selected")
             or (ast_toolchain or {}).get("selected")
         ),
-        probe_lang_mode=_probe_language_mode(lang),
+        lang=lang,
     )
     args = _combined_option_tokens(gcc_options, gcc_option_tokens)
     return {

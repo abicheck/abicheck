@@ -36,7 +36,7 @@ from abicheck.dumper import (
 from abicheck.dumper_toolchain import (
     _extract_explicit_std_value,
     _probe_default_language_standard,
-    _probe_language_mode,
+    _resolve_force_cpp,
 )
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
@@ -157,15 +157,33 @@ class TestAstCompileProvenance:
         assert prov["ast_sysroot"] == str(Path("~") / "sdk" / "sysroot")
 
 
-class TestProbeLanguageMode:
-    def test_c_lang_is_c_mode(self):
-        assert _probe_language_mode("c") == "c"
-        assert _probe_language_mode("C") == "c"
+class TestResolveForceCpp:
+    """The real language-mode decision the header-AST parse itself makes
+    (relocated from ``dumper.py`` alongside this PR's probe fix — Codex
+    review: the probe must resolve the same mode the real parse used,
+    since an unspecified ``lang`` can auto-detect as either C or C++
+    depending on the header's own content)."""
 
-    def test_everything_else_is_cpp_mode(self):
-        assert _probe_language_mode("c++") == "c++"
-        assert _probe_language_mode(None) == "c++"
-        assert _probe_language_mode("") == "c++"
+    def test_explicit_c_never_forces_cpp(self):
+        assert _resolve_force_cpp("c", [], None, ()) is False
+
+    def test_explicit_cpp_forces_cpp(self):
+        assert _resolve_force_cpp("c++", [], None, ()) is True
+        assert _resolve_force_cpp("cpp", [], None, ()) is True
+
+    def test_unspecified_lang_with_plain_c_compatible_header_stays_c(
+        self, tmp_path: Path
+    ):
+        header = tmp_path / "h.h"
+        header.write_text("int f(int x);\n", encoding="utf-8")
+        assert _resolve_force_cpp(None, [header], None, ()) is False
+
+    def test_unspecified_lang_with_cpp_only_syntax_auto_detects_cpp(
+        self, tmp_path: Path
+    ):
+        header = tmp_path / "h.h"
+        header.write_text("namespace ns { int f(int x); }\n", encoding="utf-8")
+        assert _resolve_force_cpp(None, [header], None, ()) is True
 
 
 class TestProbeDefaultLanguageStandard:
@@ -275,7 +293,7 @@ class TestResolveStandardProvenanceProbing:
             "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
         )
         result = _resolve_standard_provenance(
-            [], "-std=gnu++11", (), probe_compiler_bin="cc", probe_lang_mode="c++"
+            [], "-std=gnu++11", (), probe_compiler_bin="cc", lang="c++"
         )
         assert result == "gnu++11"
 
@@ -292,9 +310,32 @@ class TestResolveStandardProvenanceProbing:
             "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
         )
         result = _resolve_standard_provenance(
-            [], None, (), probe_compiler_bin="my-clang", probe_lang_mode="c++"
+            [], None, (), probe_compiler_bin="my-clang", lang="c++"
         )
         assert result == "probed:__cplusplus=STUBBED:my-clang"
+
+    def test_probe_lang_mode_follows_real_auto_detection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """abicheck-internal-bugs finding 2 follow-up (Codex review): with
+        no explicit ``lang``, the probe must use whatever
+        ``_resolve_force_cpp`` (the real parse's own decision) resolves to
+        for these headers -- not unconditionally "c++"."""
+        seen_modes = []
+
+        def fake_probe(compiler_bin, lang_mode):
+            seen_modes.append(lang_mode)
+            return "probed:stub"
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        c_header = tmp_path / "c.h"
+        c_header.write_text("int f(int x);\n", encoding="utf-8")
+        _resolve_standard_provenance(
+            [c_header], None, (), probe_compiler_bin="cc", lang=None
+        )
+        assert seen_modes == ["c"]
 
 
 class TestAstCompileProvenanceProbing:
