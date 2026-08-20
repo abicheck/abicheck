@@ -189,7 +189,18 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     (``cli: object``) is deliberately excluded -- it only records an
     ``__annotations__`` entry and creates no runtime attribute at all, so
     it can't shadow anything either. A namespace package (no
-    ``__init__.py``) can't shadow anything this way."""
+    ``__init__.py``) can't shadow anything this way. One further exception:
+    an ``Assign``/value-carrying-``AnnAssign`` whose right-hand side is
+    exactly a bare name previously bound by ``from . import alias_name [as
+    X]`` -- i.e. an explicit re-export of the real submodule through an
+    intermediate alias, such as ``from . import cli as _cli; cli = _cli``
+    -- still resolves ``alias_name`` to the submodule object itself, not to
+    an unrelated attribute, so it must not be treated as a shadow either.
+    Only this one restricted pattern is recognized: a general expression
+    (a call, an attribute access, ``importlib.import_module(...)``, ...)
+    cannot be proven to name the submodule from syntax alone, so it is
+    conservatively still treated as shadowing, per this module's
+    false-negative-over-false-positive default for the boundary gate."""
     init_path = base_dir / "__init__.py"
     if not init_path.is_file():
         return False
@@ -197,10 +208,13 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
         tree = ast.parse(_read(init_path), filename=str(init_path))
     except SyntaxError:
         return False
+    submodule_aliases = _names_bound_to_submodule(tree, alias_name)
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == alias_name for t in stmt.targets
         ):
+            if _value_is_submodule_alias(stmt.value, submodule_aliases):
+                continue
             return True
         if (
             isinstance(stmt, ast.AnnAssign)
@@ -208,11 +222,38 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
             and isinstance(stmt.target, ast.Name)
             and stmt.target.id == alias_name
         ):
+            if _value_is_submodule_alias(stmt.value, submodule_aliases):
+                continue
             return True
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if stmt.name == alias_name:
                 return True
     return False
+
+
+def _names_bound_to_submodule(tree: ast.Module, alias_name: str) -> set[str]:
+    """Every local name in *tree* (an ``__init__.py``) bound directly to the
+    real ``alias_name`` submodule object via ``from . import alias_name [as
+    X]`` -- the one import shape that binds the submodule itself, as
+    opposed to a name defined *inside* it."""
+    names: set[str] = set()
+    for stmt in tree.body:
+        if (
+            isinstance(stmt, ast.ImportFrom)
+            and (stmt.module or "") == ""
+            and stmt.level == 1
+        ):
+            for alias in stmt.names:
+                if alias.name == alias_name:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def _value_is_submodule_alias(value: ast.expr, submodule_aliases: set[str]) -> bool:
+    """Is *value* a bare reference to one of *submodule_aliases* -- i.e.
+    does this assignment's right-hand side name the real submodule object
+    itself, rather than an unrelated value?"""
+    return isinstance(value, ast.Name) and value.id in submodule_aliases
 
 
 def _relative_import_base_dir(rel: str, level: int, mod: str) -> Path:

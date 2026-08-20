@@ -268,6 +268,35 @@ def test_package_attribute_shadowing_same_named_submodule_is_not_flagged(
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
+def test_reexport_of_real_submodule_through_alias_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from . import cli as _cli; cli = _cli` re-exports the real
+    submodule object itself through an intermediate alias — the `cli =
+    _cli` assignment's right-hand side names the submodule, not an
+    unrelated value, so `from .pkg import cli` still loads the real CLI
+    adapter and the gate must still flag it, even though the assignment
+    target matches `alias_name`."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg3"
+    engine_pkg.mkdir()
+    (engine_pkg / "__init__.py").write_text("from . import cli as _cli\ncli = _cli\n")
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg3 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_annotation_only_init_declaration_does_not_suppress_real_submodule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
