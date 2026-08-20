@@ -434,3 +434,62 @@ class TestReleaseSummaryCarriesDigest:
         plain = self._release_json()
         severity = self._release_json(severity_config=resolve_severity_config("strict"))
         assert plain["effective_config_digest"] != severity["effective_config_digest"]
+
+
+class TestSuppressionsWithNoSourceDigest:
+    """Codex review, PR #803, fresh evidence: a SuppressionList built without
+    a source file (the public constructor, ABICC's -skip-symbols lists, or
+    SuppressionList.merge(), which drops both inputs' digests even when each
+    half came from a file) has no source_sha256, but is still a genuinely
+    active, content-distinct rule set -- checker.compare() must fall back to
+    a content digest of its rules rather than recording nothing."""
+
+    def test_digest_less_but_active_suppression_list_is_still_hashed(self):
+        from abicheck.suppression import Suppression, SuppressionList
+
+        empty = _result(suppression_source_sha256=None)
+        rules = SuppressionList([Suppression(symbol="foo")])
+        assert rules.source_sha256 is None  # the digest-less shape under test
+
+        from abicheck.contract_context import suppression_config_for
+
+        config = suppression_config_for(rules)
+        active = _result(suppression_source_sha256=config.sha256)
+
+        f1 = effective_config_fields(
+            empty, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            active, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["suppressions"] == ""
+        assert f2["suppressions"] != ""
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_two_distinct_digest_less_rule_sets_hash_differently(self):
+        from abicheck.contract_context import suppression_config_for
+        from abicheck.suppression import Suppression, SuppressionList
+
+        rules_a = SuppressionList([Suppression(symbol="foo")])
+        rules_b = SuppressionList([Suppression(symbol="bar")])
+        digest_a = suppression_config_for(rules_a).sha256
+        digest_b = suppression_config_for(rules_b).sha256
+        assert digest_a != digest_b
+
+
+class TestPolicyFrozenNamespaces:
+    """Codex review, PR #803, fresh evidence: PolicyFile.frozen_namespaces
+    exempts findings from override downgrades (checker.py), so two --policy
+    documents differing only in a frozen namespace can produce different
+    classifications while carrying an identical digest without this field."""
+
+    def test_frozen_namespaces_change_the_baseline_digest(self):
+        plain = _result()
+        frozen = _result(policy_file=PolicyFile(frozen_namespaces=["detail::impl"]))
+        f1 = effective_config_fields(plain, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(
+            frozen, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["policy.frozen_namespaces"] == ""
+        assert f2["policy.frozen_namespaces"] == "detail::impl"
+        assert effective_config_digest(f1) != effective_config_digest(f2)

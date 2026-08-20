@@ -1138,6 +1138,8 @@ def compare(
             internal_namespaces=_internal_namespaces(policy_file),
         )
 
+    from .contract_context import suppression_config_for
+
     result = DiffResult(
         old_version=old.version,
         new_version=new.version,
@@ -1147,7 +1149,18 @@ def compare(
         suppressed_count=len(suppressed),
         suppressed_changes=suppressed,
         suppression_file_provided=suppression is not None,
-        suppression_source_sha256=getattr(suppression, "source_sha256", None),
+        # `suppression.source_sha256` alone is `None` for a digest-less but
+        # fully active list (the public constructor, ABICC's -skip-symbols
+        # lists, and SuppressionList.merge() all produce this shape) --
+        # `suppression_config_for`'s own rule_identities()-content-digest
+        # fallback is the established, already-tested primitive for exactly
+        # this case (Codex review, PR #803, fresh evidence).
+        suppression_source_sha256=(
+            _suppression_config.sha256
+            if (_suppression_config := suppression_config_for(suppression))
+            is not None
+            else None
+        ),
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

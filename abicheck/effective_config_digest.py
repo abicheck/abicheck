@@ -102,6 +102,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "policy.base",
     "policy.overrides",
     "policy.reclassify",
+    "policy.frozen_namespaces",
     "surface.internal_namespaces",
     "surface.explicit_scope",
     "surface.scope_to_public_surface",
@@ -245,6 +246,9 @@ def effective_config_fields_from_full_config(
         "policy.base": str(getattr(getattr(policy, "base", None), "id", "") or ""),
         "policy.overrides": _overrides_str(getattr(policy, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
+        "policy.frozen_namespaces": _namespaces_str(
+            getattr(policy_file, "frozen_namespaces", ())
+        ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(surface, "internal_namespaces", ())
         ),
@@ -295,6 +299,9 @@ def effective_config_fields_from_diff_result(
         "policy.base": str(getattr(result, "policy", "") or ""),
         "policy.overrides": _overrides_str(getattr(policy_file, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
+        "policy.frozen_namespaces": _namespaces_str(
+            getattr(policy_file, "frozen_namespaces", ())
+        ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(policy_file, "internal_namespaces", ())
         ),
