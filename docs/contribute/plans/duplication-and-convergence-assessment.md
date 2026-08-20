@@ -236,9 +236,19 @@ class EffectiveEvaluationConfig:
     assurance: EffectiveAssurance
     surface: EffectiveSurface
     evidence: EffectiveEvidencePolicy
+    suppressions: EffectiveSuppressions
     provenance: ConfigProvenance
     digest: str
 ```
+
+`suppressions` carries resolved rule identity, not just a policy summary —
+the existing `CompatibilityEvaluationConfig` already models `suppressions`
+as its own field, separate from `policy`, precisely because a suppression
+rule directly changes which findings reach verdict and gate calculation.
+Without it here, two runs given different `--suppress` inputs could share
+an identical `EffectiveEvaluationConfig` and digest while producing
+different findings and exit codes — defeating the digest's whole point as
+a parity key.
 
 `gate` carries the resolved `exit_code_scheme` alongside severity, not
 severity alone — for a run combining `--exit-code-scheme legacy` with a
@@ -645,11 +655,16 @@ detector cannot catch, since the class of bug this plan targets is
 different code intentionally computing the same thing.
 
 **Artifact-resolution equivalence.** For one artifact and equivalent
-options, `dump`, compare-side resolution, scan candidate resolution, and
-ABICC descriptor resolution must produce identical: snapshot semantic
-fingerprint; extraction-contract fingerprint; effective evidence depth;
-effective compile-context digest; public-surface scope fingerprint;
-dependency scope; build/source coverage; cache-relevant directory set.
+options, `dump`, compare-side resolution, scan candidate resolution, ABICC
+descriptor resolution, and `appcompat.check_appcompat()`'s own per-side
+resolution must produce identical: snapshot semantic fingerprint;
+extraction-contract fingerprint; effective evidence depth; effective
+compile-context digest; public-surface scope fingerprint; dependency scope;
+build/source coverage; cache-relevant directory set. Standalone appcompat
+belongs in this matrix, not just in Phase 1's routing list — a phase that
+satisfies every equivalence test here except appcompat's own path would
+still leave that direct caller resolving depth, compile context, cache
+paths, or resource lifetime differently from everything else.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
 --against`'s own nested baseline comparison, release per-library compare,
