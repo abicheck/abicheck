@@ -24,13 +24,18 @@
   fields, matching `perform_elf_dump`'s own behavior — without this, the
   common directory-`-H` input case left `conditional_fields` silently empty
   even though the headers under it were genuinely parsed. The collector is
-  now also restricted to `fmt == "elf"`, matching the established ELF-only
+  now also restricted to a real ELF snapshot (`snap.elf is not None`,
+  checked post-resolution rather than the pre-resolution `fmt` value —
+  a GNU ld linker script's `fmt` reads as `None` before `resolve_input`
+  follows it to its real ELF target), matching the established ELF-only
   scope of the ADR-039 collector (a PE/Mach-O typed dump/compare no longer
   silently disagrees with the native PE/Mach-O dump path, which never calls
   this collector). Combining `InputSpec.compile_db_filter` with a
-  compile-database `build_info` at a non-`"off"` collect mode is now
-  refused with a `ValidationError` — the typed-API equivalent of the native
-  `dump` CLI's own `compile_db_filter_scope_error` usage error — since the
-  filtered collector and the unfiltered L3 embed would otherwise disagree
-  on which translation units the snapshot's evidence covers.
+  resolvable compile database is now refused with a `ValidationError`
+  unconditionally (not only at a non-`"off"` collect mode, unlike the
+  native `dump` CLI's own `compile_db_filter_scope_error`) — this shared
+  pipeline's own L2 header-AST context always resolves from the whole,
+  unfiltered database regardless of collect mode, so a filtered ADR-039
+  view would disagree with what informed the actual header parse even for
+  a headers-only, no-L3-embed request.
 

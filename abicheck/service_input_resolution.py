@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING
 from .errors import SnapshotError, ValidationError
 from .header_conditionals import (
     attach_build_context,
-    compile_db_filter_scope_error,
     compile_db_from_build_info,
     user_define_flags as _user_define_flags,
 )
@@ -562,7 +561,22 @@ def _resolve_side_snapshot_impl(
         # snapshot-wide" invariant `user_define_flags`'s own docstring states
         # (see the ninth finding in the root AGENTS.md's L3->L2-fold entry for
         # why).
-        if fmt == "elf":
+        # `snap.elf is not None` -- not the pre-resolution `fmt` parameter
+        # (Codex review, PR #809, fresh evidence): `fmt` is computed by the
+        # caller from `service.detect_binary_format(side.path)` *before*
+        # `service.resolve_input()` runs, and a GNU ld linker script (the
+        # conventional development `libfoo.so` symlink, e.g. `INPUT(libfoo.
+        # so.1)`) reads as `None` there -- but `resolve_input`'s own
+        # `follow_linker_scripts=True` default (unset by this pipeline)
+        # follows the script to its real ELF target and returns a genuine
+        # ELF snapshot (`snap.elf` populated, `snap.from_headers=True`) with
+        # `fmt` never updated to reflect it. Gating on the stale `fmt` would
+        # silently skip the collector for this common ELF input form.
+        # `snap.elf` is the model's own post-resolution signal (populated by
+        # `dumper.dump()` for every real ELF parse, regardless of whether the
+        # original path was a direct `.so` or a followed linker script), so
+        # it can't go stale the way a pre-computed `fmt` string can.
+        if snap.elf is not None:
             # `evidence.headers` may still contain a directory entry -- exactly
             # what `service.resolve_input`/`_dump_elf` expands internally (via
             # `service_scan.expand_header_inputs`) before parsing, for the
@@ -610,21 +624,44 @@ def _resolve_side_snapshot_impl(
             compile_db_path = compile_db_from_build_info(
                 side.build_info, tuple(collector_headers)
             )
-            # `--compile-db-filter`'s typed-API equivalent: the native `dump`
-            # CLI refuses this same combination as a usage error
-            # (`compile_db_filter_scope_error`) rather than silently letting
-            # the L2 collector scope to the filtered subset while the L3
-            # embed below (`embed_side_build_source`) reads the whole,
-            # unfiltered database -- a snapshot whose layers would then cover
-            # different translation units (Codex review, PR #809). Reused
-            # here unchanged, raising the Tier-2 `ValidationError` this API's
-            # contract uses in place of the CLI's `click.UsageError`.
-            if (
-                _filter_scope_msg := compile_db_filter_scope_error(
-                    side.compile_db_filter, compile_db_path, evidence.collect_mode
+            # `compile_db_filter` is rejected unconditionally alongside a
+            # resolvable compile database on this pipeline -- broader than
+            # the native `dump` CLI's own `compile_db_filter_scope_error`
+            # (which exempts `collect_mode == "off"`, since on the CLI path
+            # the filter *does* reach the L2 header-AST context there too,
+            # via `cli_helpers_compare._resolve_build_context_flags`). This
+            # shared pipeline's own L2 context comes from a structurally
+            # different mechanism, `_seeded_includes_and_compile_context`
+            # (the P0.3 L3->L2 fold, already run above, before this block),
+            # which has no `compile_db_filter` parameter at all and always
+            # resolves from the *whole* database, regardless of
+            # `collect_mode` -- so exempting "off" here would be wrong, not
+            # just incomplete: even a headers-only, no-L3-embed request
+            # would still fold an unfiltered `compile_ctx` into the real
+            # parse while this collector saw only the filtered subset
+            # (Codex review, PR #809, fresh evidence -- a P1 finding on the
+            # first version of this check that only exempted `collect_mode
+            # != "off"`, mirroring the CLI's own condition, missed that the
+            # CLI's condition is only safe *because* the CLI's own filter
+            # threading covers the "off" case a different way this pipeline
+            # doesn't have). Threading the filter into the L2 fold itself
+            # (mirroring what the CLI's separate mechanism does) is a real,
+            # separate feature addition to shared, heavily-reviewed L2-seed
+            # machinery (`buildsource/l2_seed.py`/`header_compile_context.py`
+            # -- no other caller of either has ever needed a filter concept
+            # there), not a same-PR follow-up -- see the plan doc's PR C
+            # status notes.
+            if side.compile_db_filter and compile_db_path is not None:
+                raise ValidationError(
+                    "compile_db_filter is not supported together with a "
+                    "resolvable compile database on this pipeline: the L2 "
+                    "header-AST context is resolved from the whole, "
+                    "unfiltered compile database regardless of collect mode, "
+                    "so a filtered ADR-039 build-context view would disagree "
+                    "with what informed the actual header parse. Pass a "
+                    "pre-filtered compile_commands.json as build_info "
+                    "instead, or drop compile_db_filter."
                 )
-            ) is not None:
-                raise ValidationError(_filter_scope_msg)
             if (
                 compile_db_path is not None
                 and collector_headers

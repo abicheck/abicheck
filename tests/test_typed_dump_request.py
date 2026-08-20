@@ -22,6 +22,7 @@ import pytest
 
 from abicheck.api_types import CompareRequest, DumpRequest, InputSpec
 from abicheck.compile_context import CompileContext
+from abicheck.elf_metadata import ElfMetadata
 from abicheck.errors import SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import snapshot_to_json
@@ -1445,7 +1446,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         monkeypatch.setattr(
             service,
             "resolve_input",
-            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
         )
 
         side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,), build_info=db)
@@ -1464,6 +1467,62 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         assert "GUARD" in resolution.snapshot.build_context_defines
         assert "Widget" in resolution.snapshot.conditional_fields
         assert "guarded" in resolution.snapshot.conditional_fields["Widget"]
+
+    def test_collector_runs_for_a_followed_linker_script_even_when_fmt_is_none(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #809, fresh evidence: `fmt` is computed by the
+        caller from `service.detect_binary_format(side.path)` *before*
+        `service.resolve_input()` runs -- a GNU ld linker script (the
+        conventional development `libfoo.so` symlink, e.g.
+        `INPUT(libfoo.so.1)`) reads as `None` there, but `resolve_input`'s
+        own `follow_linker_scripts=True` default follows it to a real ELF
+        target and returns a genuine ELF snapshot. Gating on the stale
+        `fmt` (rather than the post-resolution `snap.elf`) would silently
+        skip the collector for this common ELF input form -- reproduced
+        here by passing `fmt=None` (what the caller would have computed
+        for the raw linker-script text) while the resolved snapshot is a
+        real ELF one."""
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text(
+            "struct Widget {\n"
+            "  int x;\n"
+            "#ifdef GUARD\n"
+            "  int guarded;\n"
+            "#endif\n"
+            "};\n",
+            encoding="utf-8",
+        )
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        db = self._compile_db(tmp_path, src, "-DGUARD=1")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
+        )
+
+        side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,), build_info=db)
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        resolution = sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt=None,
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert "GUARD" in resolution.snapshot.build_context_defines
+        assert "Widget" in resolution.snapshot.conditional_fields
 
     def test_collector_expands_a_header_directory_before_scanning(
         self, monkeypatch, tmp_path: Path
@@ -1497,7 +1556,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         monkeypatch.setattr(
             service,
             "resolve_input",
-            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
         )
 
         side = InputSpec(
@@ -1541,7 +1602,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         monkeypatch.setattr(
             service,
             "resolve_input",
-            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
         )
         # Simulate the L3->L2 fold resolving a CompileContext carrying the
         # database's own -DL3ONLY=1 -- this must never reach the collector.
@@ -1586,53 +1649,6 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         assert captured["extra_flags"] == ["-DUSERONLY=1"]
         assert "-DL3ONLY=1" not in captured["extra_flags"]
 
-    def test_collector_honors_compile_db_filter(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
-        from abicheck import service, service_input_resolution as sir
-        from abicheck.service_compare_evidence import SideEvidence
-
-        hdr = tmp_path / "widget.h"
-        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
-        src = tmp_path / "widget.cpp"
-        src.write_text('#include "widget.h"\n', encoding="utf-8")
-        db = self._compile_db(tmp_path, src, "-DGUARD=1")
-
-        monkeypatch.setattr(
-            service,
-            "resolve_input",
-            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
-        )
-
-        captured: dict[str, object] = {}
-        real_attach = sir.attach_build_context
-
-        def _spy_attach(snap, compile_db_arg, headers, extra_flags, **kw):
-            captured["source_filter"] = kw.get("source_filter")
-            return real_attach(snap, compile_db_arg, headers, extra_flags, **kw)
-
-        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
-
-        side = InputSpec(
-            path=tmp_path / "lib.so",
-            headers=(hdr,),
-            build_info=db,
-            compile_db_filter="*/widget.cpp",
-        )
-        evidence = SideEvidence(
-            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
-        )
-        sir._resolve_side_snapshot_impl(
-            side,
-            evidence,
-            lang="c++",
-            header_backend="auto",
-            fmt="elf",
-            public_headers=[hdr],
-            public_header_dirs=[],
-        )
-        assert captured["source_filter"] == "*/widget.cpp"
-
     def test_collector_skipped_when_no_compile_db_resolvable(
         self, monkeypatch, tmp_path: Path
     ) -> None:
@@ -1647,7 +1663,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         monkeypatch.setattr(
             service,
             "resolve_input",
-            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
         )
         called = {"attach": False}
 
@@ -1717,16 +1735,25 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         assert called["attach"] is False
         assert resolution.snapshot.build_context_defines == set()
 
-    def test_compile_db_filter_with_l3_embed_raises(
-        self, monkeypatch, tmp_path: Path
+    @pytest.mark.parametrize("collect_mode", ["off", "build"])
+    def test_compile_db_filter_with_resolvable_db_raises(
+        self, monkeypatch, tmp_path: Path, collect_mode: str
     ) -> None:
-        """Codex review, PR #809: combining ``InputSpec.compile_db_filter``
-        with a compile-database ``build_info`` at a non-"off" collect mode
-        must be refused, the same way the native ``dump`` CLI refuses it via
+        """Codex review, PR #809 (two rounds). Round 1: combining
+        ``InputSpec.compile_db_filter`` with a compile-database
+        ``build_info`` at a non-"off" collect mode must be refused, the same
+        way the native ``dump`` CLI refuses it via
         ``compile_db_filter_scope_error`` -- otherwise the ADR-039 collector
-        would scope to the filtered subset while the L3 embed below reads
-        the whole, unfiltered database, producing a snapshot whose layers
-        cover different translation units."""
+        scopes to the filtered subset while the L3 embed reads the whole,
+        unfiltered database. Round 2: unlike the native CLI, this shared
+        pipeline's own L2 context (``_seeded_includes_and_compile_context``,
+        the P0.3 fold) has no filter concept at all and always resolves from
+        the whole database *regardless of collect_mode* -- so exempting
+        ``collect_mode == "off"`` (mirroring the CLI's own condition, which
+        is only safe there because the CLI threads the filter into its L2
+        context a different way) would leave the identical inconsistency
+        for a headers-only, no-L3-embed request. Parametrized over both
+        values to pin that the rejection is unconditional here."""
         from abicheck import service, service_input_resolution as sir
         from abicheck.errors import ValidationError
         from abicheck.service_compare_evidence import SideEvidence
@@ -1740,7 +1767,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         monkeypatch.setattr(
             service,
             "resolve_input",
-            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
         )
 
         side = InputSpec(
@@ -1750,9 +1779,12 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
             compile_db_filter="*/widget.cpp",
         )
         evidence = SideEvidence(
-            headers=[hdr], compile=None, collect_mode="build", dump_manifest=None
+            headers=[hdr],
+            compile=None,
+            collect_mode=collect_mode,
+            dump_manifest=None,
         )
-        with pytest.raises(ValidationError, match="compile-db-filter"):
+        with pytest.raises(ValidationError, match="compile_db_filter"):
             sir._resolve_side_snapshot_impl(
                 side,
                 evidence,
