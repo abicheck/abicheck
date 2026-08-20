@@ -262,6 +262,9 @@ class BuildConfig:
     debug_debuginfod_url: str | None = None
     #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
     exit_code_scheme: str = "auto"
+    #: Whether ``exit_code_scheme:`` was literally present -- it defaults to
+    #: ``"auto"`` either way, so this lets a stated ``auto`` outrank a pack.
+    exit_code_scheme_explicit: bool = False
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -500,6 +503,7 @@ class BuildConfig:
                 "exit_code_scheme",
             )
             or "auto",
+            exit_code_scheme_explicit="exit_code_scheme" in top,
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -625,7 +629,10 @@ class BuildConfig:
             if block:
                 out[key] = block
 
-        if self.exit_code_scheme and self.exit_code_scheme != "auto":
+        # An explicit `auto` round-trips too, not just a non-`auto` value.
+        if self.exit_code_scheme and (
+            self.exit_code_scheme != "auto" or self.exit_code_scheme_explicit
+        ):
             out["exit_code_scheme"] = self.exit_code_scheme
         if self.version:
             out["version"] = self.version

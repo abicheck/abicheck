@@ -270,9 +270,7 @@ def test_build_clang_command_same_string_occurring_twice_resolves_independently(
 # the provenance field absent must degrade to "unknown, do not rebase" --
 
 
-def test_build_clang_command_legacy_pack_without_provenance_field_not_rebased() -> (
-    None
-):
+def test_build_clang_command_legacy_pack_without_provenance_field_not_rebased() -> None:
     """A ``CompileUnit`` loaded from a pack persisted before
     ``include_paths_explicit``/``system_include_paths_explicit`` existed
     (``from_dict`` on a dict lacking those keys) has both lists come back

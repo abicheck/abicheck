@@ -333,12 +333,37 @@ class TestSeverityAndExitScheme:
         )
         assert cfg.gate.exit_code_scheme == "legacy"
 
-    def test_a_project_auto_is_indistinguishable_from_unset(self):
+    def test_a_project_auto_is_indistinguishable_from_unset_without_the_explicit_flag(
+        self,
+    ):
         # BuildConfig.exit_code_scheme defaults to the string "auto", so a
-        # project stating it cannot be told apart from one that never did.
+        # bare ProjectCompatibilityInputs(exit_code_scheme="auto") -- with no
+        # exit_code_scheme_explicit=True, i.e. not routed through
+        # from_build_config's real presence tracking -- cannot be told apart
+        # from one that never stated it.
         stated = _resolve(project=ProjectCompatibilityInputs(exit_code_scheme="auto"))
         unset = _resolve(project=ProjectCompatibilityInputs())
         assert stated == unset
+
+    def test_an_explicit_project_auto_pin_beats_a_gate_pack(self):
+        # Codex review, fresh evidence: a project's ``.abicheck.yml`` writing
+        # `exit_code_scheme: auto` literally (exit_code_scheme_explicit=True,
+        # what BuildConfig.from_dict/from_build_config actually produce for a
+        # real project config) is a real, stated selection -- it must resolve
+        # `auto`'s own meaning (severity-active -> "severity") and outrank a
+        # lower-precedence pack, not silently read as "unstated" the way the
+        # sibling test above does for a directly-constructed object with no
+        # presence tracking.
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(severity_preset="strict"),
+            project=ProjectCompatibilityInputs(
+                exit_code_scheme="auto", exit_code_scheme_explicit=True
+            ),
+        )
+        assert cfg.gate.exit_code_scheme == "severity"
+        assert (
+            cfg.provenance[EXIT_CODE_SCHEME_FIELD].layer is SelectorLayer.PROJECT_CONFIG
+        )
 
     def test_explicit_scheme_wins_over_severity_activity(self):
         cfg = _resolve(
@@ -518,6 +543,32 @@ class TestPackComposition:
             )
         )
         assert cfg.gate.severity.addition is SeverityLevel.ERROR
+
+    def test_an_explicit_project_auto_pin_outranks_a_gate_pack(self, tmp_path):
+        # Codex review, fresh evidence: a project explicitly pinning
+        # `exit_code_scheme: auto` (exit_code_scheme_explicit=True, what a
+        # real .abicheck.yml produces) must outrank a pack's concrete
+        # scheme, the same way an explicit CLI `--exit-code-scheme auto`
+        # already does -- not read as "unstated" purely because BuildConfig
+        # also defaults an absent key to the string "auto".
+        pack = _write_pack(
+            tmp_path / "g.yml",
+            pack_id="legacy_gate",
+            kind="gate",
+            assignments="gate.exit_code_scheme: legacy\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                severity_preset="strict", pack_paths=(str(pack),)
+            ),
+            project=ProjectCompatibilityInputs(
+                exit_code_scheme="auto", exit_code_scheme_explicit=True
+            ),
+        )
+        # severity_preset="strict" activates severity -> auto resolves to
+        # "severity", and the project's explicit pin of that resolution
+        # outranks the pack's "legacy" assignment.
+        assert cfg.gate.exit_code_scheme == "severity"
 
     def test_a_project_preset_also_outranks_such_a_pack(self, tmp_path):
         pack = _write_pack(

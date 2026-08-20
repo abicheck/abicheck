@@ -53,7 +53,13 @@ import pytest
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_compile_context import resolve_header_compile_context
 from abicheck.errors import HeaderCompileContextAmbiguousError
-from abicheck.header_utils import forced_include_operands
+from abicheck.header_utils import (
+    _DASH_I_DIVIDER,
+    _include_class_path_pairs,
+    dedup_paths_preserve_order,
+    drop_include_tokens_duplicating_paths,
+    forced_include_operands,
+)
 
 
 def _cu(**kwargs: object) -> CompileUnit:
@@ -811,3 +817,257 @@ class TestIncludeSeedIsRestrictedToMatchedUnits:
         assert [cu.id for cu in result.matched_units] == ["cu://widget"]
         # The historical read view stays exactly consistent with it.
         assert result.matched_unit_count == len(result.matched_units) == 1
+
+
+class TestDedupIncludeDirsAcrossCompositionSites:
+    """AGENTS.md's L3->L2-fold "nineteenth finding" (candidate mechanism
+    confirmed via a minimal, castxml-free repro): `dump`'s ELF/PE-Mach-O
+    paths compose their final include list as an L2-seeded list *plus*
+    `resolve_inferred_header_roots`'s own, separately-derived additions --
+    two lists that can resolve to the identical directory. Left undeduped,
+    the duplicate reaches `declared_includes`/`include_sequence` and (via a
+    parallel duplication in `_merge_l3_compile_context`, covered by
+    `test_header_compile_context.py`) the rendered command's own
+    `gcc_option_tokens`, spuriously failing `profile_fingerprint`
+    comparability against a `scan --against` candidate whose own,
+    single-pass fold never double-derives the same directory."""
+
+    def test_dedup_paths_preserve_order_drops_exact_and_resolved_duplicates(
+        self, tmp_path: Path
+    ) -> None:
+        d = tmp_path / "inc"
+        d.mkdir()
+        out = dedup_paths_preserve_order([d, tmp_path / "inc", d])
+        assert out == [d]
+
+    def test_dedup_paths_preserve_order_keeps_distinct_directories(
+        self, tmp_path: Path
+    ) -> None:
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        out = dedup_paths_preserve_order([a, b, a])
+        assert out == [a, b]
+
+    def test_drop_include_tokens_duplicating_paths_drops_spaced_duplicate(
+        self, tmp_path: Path
+    ) -> None:
+        d = tmp_path / "inc"
+        toks = ("-DFOO=1", "-I", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-DFOO=1", "-fPIC"]
+
+    def test_drop_include_tokens_duplicating_paths_drops_attached_duplicate(
+        self, tmp_path: Path
+    ) -> None:
+        d = tmp_path / "inc"
+        toks = (f"-I{d}", "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-fPIC"]
+
+    def test_drop_include_tokens_duplicating_paths_keeps_non_matching_directory(
+        self, tmp_path: Path
+    ) -> None:
+        d = tmp_path / "inc"
+        other = tmp_path / "other"
+        toks = ("-I", str(other), "-I", str(d))
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-I", str(other)]
+
+    def test_drop_include_tokens_duplicating_paths_is_class_sensitive(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802: an ``-I``-class duplicate must not eat an
+        ``-isystem`` entry for the same directory -- GCC/Clang consult
+        ``-iquote``/``-I``/``-isystem``/``-idirafter`` as distinct search
+        buckets regardless of argv order, so dropping a same-directory
+        entry in a *different* class would change which bucket the
+        directory is searched from."""
+        d = tmp_path / "inc"
+        toks = ("-isystem", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-isystem", str(d), "-fPIC"]
+
+    def test_isystem_after_is_not_misparsed_as_attached_isystem(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802: ``-isystem-after <dir>`` is Clang's own,
+        genuinely distinct flag (real ``clang --help-hidden``, always
+        spaced) -- not a longer spelling of ``-isystem``. Before
+        ``_INCLUDE_FLAG_PREFIXES`` carried its own entry for it, the
+        first-match-wins scan misparsed it as an *attached* ``-isystem``
+        flag whose directory was the bogus suffix ``"-after"``, stranding
+        the real directory operand as a stray, unconsumed token."""
+        d = tmp_path / "inc"
+        toks = ("-isystem-after", str(d), "-fPIC")
+        # The (flag-class, directory) pair recognized from "already
+        # covered" tokens must key on the real "-isystem-after" class, not
+        # a corrupted "-isystem"/"-after" split.
+        pairs = _include_class_path_pairs(toks)
+        assert pairs == {("-isystem-after", str(d.resolve()))}
+        # And the real directory operand must never be stranded as an
+        # unconsumed bare token when deduping against an unrelated class.
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-isystem-after", str(d), "-fPIC"]
+        # A genuine duplicate in the same "-isystem-after" class is still
+        # correctly dropped.
+        out2 = drop_include_tokens_duplicating_paths(toks, ["-isystem-after", str(d)])
+        assert out2 == ["-fPIC"]
+
+    def test_dash_i_divider_is_preserved_and_splits_pre_post_i_class(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802: GCC's bare ``-I-`` divider changes the
+        search semantics of every ``-I`` after it (searched for both quoted
+        and angle-bracket includes) relative to every ``-I`` before it
+        (quoted only) -- confirmed against real GCC 13. Before this, ``-I-``
+        was misparsed as an attached ``-I`` flag naming the bogus directory
+        ``"-"``, and a post-divider ``-I <dir>`` could be wrongly dropped as
+        a "duplicate" of an unrelated, pre-divider ``-I <dir>`` for the same
+        directory -- silently turning a resolvable ``#include <x.h>`` into
+        "file not found"."""
+        d = tmp_path / "inc"
+        # already_covered carries no divider of its own, so its "-I <dir>"
+        # is entirely pre-divider semantics.
+        already_covered = ["-I", str(d)]
+
+        # A post-divider "-I <dir>" for the identical directory must survive
+        # -- it is a different search class, not a duplicate.
+        toks = (_DASH_I_DIVIDER, "-I", str(d))
+        out = drop_include_tokens_duplicating_paths(toks, already_covered)
+        assert out == [_DASH_I_DIVIDER, "-I", str(d)]
+
+        # A pre-divider "-I <dir>" for the same directory is still
+        # correctly recognized as a real duplicate and dropped.
+        toks_pre = ("-I", str(d), _DASH_I_DIVIDER)
+        out_pre = drop_include_tokens_duplicating_paths(toks_pre, already_covered)
+        assert out_pre == [_DASH_I_DIVIDER]
+
+        # The divider itself is never treated as an attached "-I" flag
+        # naming the directory "-".
+        pairs = _include_class_path_pairs((_DASH_I_DIVIDER,))
+        assert pairs == set()
+
+    def test_dash_i_divider_state_carries_from_already_covered_into_toks(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #802 (second round): the divider state must
+        carry *across* the already_covered -> toks boundary, not just
+        within toks itself. Every caller renders already_covered (the
+        already-built command, e.g. `extra_includes`) into the argv
+        *before* toks (`gcc_option_tokens`) -- `cmd += drop_include_tokens_
+        duplicating_paths(gcc_option_tokens, cmd)` -- so a "-I-" anywhere in
+        already_covered means toks starts life already past the divider,
+        even though toks itself carries no "-I-" of its own. Scanning toks
+        from a fresh pre-divider state regardless of what already_covered
+        ended in would wrongly classify its "-I <dir>" as the same class as
+        an unrelated pre-divider entry in already_covered, and silently
+        drop it -- reproducing `-I A -I- -I A` collapsing to `-I A -I-`."""
+        d = tmp_path / "inc"
+        # already_covered = "-I A -I-": a pre-divider "-I A" followed by the
+        # divider itself.
+        already_covered = ["-I", str(d), _DASH_I_DIVIDER]
+        # toks = the trailing "-I A", rendered *after* already_covered in
+        # the real command and therefore already past the divider -- it
+        # must survive, not be dropped as a duplicate of the pre-divider
+        # entry inside already_covered.
+        toks = ("-I", str(d))
+        out = drop_include_tokens_duplicating_paths(toks, already_covered)
+        assert out == ["-I", str(d)]
+
+
+class TestMergeL3CompileContextDropsDuplicateExplicitInclude:
+    """A second, deeper mechanism behind the same nineteenth finding:
+    `_merge_l3_compile_context`'s `derived` compile context and the
+    caller's own *explicit* `gcc_options`/`gcc_option_tokens` can
+    independently carry an `-I`/`-isystem` for the identical directory
+    (e.g. a legacy `-p`/`--compile-db` match and this P0.3 fold both
+    derived from the same compile database) -- confirmed by directly
+    inspecting both `CompileContext` objects a real `dump` invocation
+    passes into the merge, not reconstructed from a diff reason alone."""
+
+    def test_drops_derived_include_duplicating_explicit_gcc_options_string(
+        self,
+    ) -> None:
+        from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+        from abicheck.compile_context import CompileContext
+
+        derived = CompileContext(
+            gcc_option_tokens=("-std=c++17", "-I", "/proj/include", "-fPIC")
+        )
+        explicit = CompileContext(gcc_options="-std=c++17 -I /proj/include")
+        merged = _merge_l3_compile_context(explicit, derived)
+        assert merged is not None
+        # The derived copy of "-I /proj/include" is dropped -- explicit's own
+        # (now in explicit_tail, from the split gcc_options string) is the
+        # only surviving occurrence, and it still searches before every
+        # other derived token per the established first-match-wins rule.
+        assert merged.gcc_option_tokens == (
+            "-std=c++17",
+            "-fPIC",
+            "-std=c++17",
+            "-I",
+            "/proj/include",
+        )
+        assert merged.gcc_option_tokens.count("-I") == 1
+
+    def test_keeps_derived_include_when_directories_differ(self) -> None:
+        from abicheck.buildsource.l2_seed import _merge_l3_compile_context
+        from abicheck.compile_context import CompileContext
+
+        derived = CompileContext(gcc_option_tokens=("-I", "/build/gen"))
+        explicit = CompileContext(gcc_options="-I /user/inc")
+        merged = _merge_l3_compile_context(explicit, derived)
+        assert merged is not None
+        assert merged.gcc_option_tokens == ("-I", "/user/inc", "-I", "/build/gen")
+
+
+class TestIncludeDedupCoversAttachedFormsAndResolveFailure:
+    """Two branch-coverage gaps flagged by Codecov's patch-coverage gate on
+    PR #802: the attached-flag spelling on the *already_covered* side of
+    `drop_include_tokens_duplicating_paths`, and the defensive
+    `Path.resolve()` `OSError` fallback both dedup helpers share."""
+
+    def test_already_covered_attached_form_is_recognized(
+        self, tmp_path: Path
+    ) -> None:
+        # `already_covered` (here `-I<dir>`, no space) walks through the
+        # identical `_include_class_path_pairs()` parser as `toks` -- the
+        # attached-form branch is only exercised from *this* side, since
+        # every prior test used the spaced form (`-I`, `str(d)`).
+        d = tmp_path / "inc"
+        toks = ("-I", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, [f"-I{d}"])
+        assert out == ["-fPIC"]
+
+    def test_dedup_paths_preserve_order_falls_back_on_resolve_oserror(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_resolve = Path.resolve
+
+        def _flaky_resolve(self: Path, strict: bool = False) -> Path:
+            if self.name == "loops":
+                raise OSError("ELOOP")
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", _flaky_resolve)
+        p = tmp_path / "loops"
+        # A resolve() failure degrades to the raw str(p) as the dedup key --
+        # two references to the same unresolvable path still collapse.
+        out = dedup_paths_preserve_order([p, tmp_path / "loops"])
+        assert out == [p]
+
+    def test_drop_include_tokens_duplicating_paths_falls_back_on_resolve_oserror(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_resolve = Path.resolve
+
+        def _flaky_resolve(self: Path, strict: bool = False) -> Path:
+            if self.name == "loops":
+                raise OSError("ELOOP")
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", _flaky_resolve)
+        d = tmp_path / "loops"
+        toks = ("-I", str(d), "-fPIC")
+        out = drop_include_tokens_duplicating_paths(toks, ["-I", str(d)])
+        assert out == ["-fPIC"]

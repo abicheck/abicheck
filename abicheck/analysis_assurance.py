@@ -115,6 +115,7 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -126,6 +127,7 @@ from .model import AbiSnapshot
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
+    from .buildsource.source_graph import SourceGraphSummary
 
 __all__ = [
     "ANALYSIS_ASSURANCE_SCHEMA_VERSION",
@@ -191,6 +193,12 @@ def _is_l5_graph_extractor_record(name: str) -> bool:
     ``":"``."""
     family = name.split(":", 1)[0]
     return family in _L5_GRAPH_EXTRACTOR_FAMILIES
+
+
+#: P0.4 (P2 review): ``fold_archive_graph`` correctly records nothing on a side with no ``static_library`` node.
+_CONDITIONALLY_APPLICABLE_FAMILIES: dict[str, Callable[[SourceGraphSummary], bool]] = {
+    "archive_graph": lambda sg: any(n.kind == "static_library" for n in sg.nodes),
+}
 
 
 @dataclass
@@ -1229,19 +1237,23 @@ def _graph_completeness(
     if (
         old_confirmed_families or new_confirmed_families
     ) and old_confirmed_families != new_confirmed_families:
-        asymmetric_family_coverage = True
-        only_old = sorted(old_confirmed_families - new_confirmed_families)
-        only_new = sorted(new_confirmed_families - old_confirmed_families)
-        one_sided = sorted(set(only_old) | set(only_new))
-        notes.append(
-            "graph completeness unknown: the old side confirmed coverage "
-            f"for {sorted(old_confirmed_families)!r} while the new side "
-            f"confirmed coverage for {sorted(new_confirmed_families)!r} -- "
-            f"{one_sided!r} family/families are confirmed on only one side, "
-            "and buildsource/source_graph_findings.py only trusts a family "
-            "when BOTH sides cover it, so the cross-snapshot graph diff "
-            "cannot compare on it"
-        )
+        # Finding (P2 review): exclude a family genuinely inapplicable on the side lacking confirmation.
+        _cap = _CONDITIONALLY_APPLICABLE_FAMILIES
+
+        def _gap(a: set[str], b: set[str], other: SourceGraphSummary) -> set[str]:
+            return {f for f in a - b if _cap.get(f) is None or _cap[f](other)}
+
+        only_old = _gap(old_confirmed_families, new_confirmed_families, new_graph)
+        only_new = _gap(new_confirmed_families, old_confirmed_families, old_graph)
+        one_sided = sorted(only_old | only_new)
+        asymmetric_family_coverage = bool(one_sided)
+        if one_sided:
+            notes.append(
+                f"graph completeness unknown: {one_sided!r} family/families are "
+                f"confirmed on only one side (old={sorted(old_confirmed_families)!r}, "
+                f"new={sorted(new_confirmed_families)!r}) -- only a family both sides "
+                "cover is trusted (buildsource/source_graph_findings.py)"
+            )
 
     if degraded:
         return "degraded", notes

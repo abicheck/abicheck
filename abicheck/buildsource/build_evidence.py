@@ -192,15 +192,29 @@ class CompileUnit:
     #: ``env -C DIR`` prefix while the other correctly is not.
     #:
     #: A pack persisted by a version of abicheck that predates this field
-    #: (or a caller that never populated it) has these lists absent/empty
-    #: while ``include_paths``/``system_include_paths`` are non-empty --
-    #: :meth:`explicit_or_unknown` treats that length mismatch as "unknown
-    #: provenance" for the WHOLE structured field (round 31 Finding 3, Codex
-    #: review, fresh evidence) and degrades to "do not rebase" (same as
-    #: every entry being explicit), never to "derived": the pre-round-30
-    #: pipeline never rebased a structured include path at all, so an old,
-    #: previously-correct persisted pack must not have its replay semantics
-    #: silently changed by a rebase it was never subject to.
+    #: has both position-aligned lists absent (empty). That is
+    #: indistinguishable, by list length alone, from a caller who simply
+    #: never populated per-entry provenance for a directly-constructed
+    #: ``CompileUnit`` (every pre-round-31 test in this repo, for one) --
+    #: and those two cases need OPPOSITE defaults: a direct construction's
+    #: omitted field should degrade to "derived" (rebase), the pre-
+    #: round-30 behavior every existing caller already assumed, while a
+    #: genuinely legacy PERSISTED pack must degrade to "unknown, do not
+    #: rebase" (round 31 Finding 3, Codex review, fresh evidence) -- the
+    #: pre-round-30 pipeline never rebased a structured include path at
+    #: all, so an old, previously-correct persisted pack must not have its
+    #: replay semantics silently changed by a rebase it was never subject
+    #: to. ``include_provenance_known`` is the explicit signal that tells
+    #: :meth:`explicit_or_unknown` which of the two defaults applies --
+    #: ``True`` (the ordinary default, for every direct construction and
+    #: every adapter-produced unit) trusts the paired lists at face value
+    #: (falling back to "derived" only for a length mismatch, which should
+    #: not occur on a real adapter-produced unit); ``False`` (set only by
+    #: :meth:`from_dict` when loading a dict that has neither
+    #: ``include_paths_explicit`` nor ``system_include_paths_explicit`` --
+    #: the actual legacy-schema signal) forces "unknown, do not rebase"
+    #: regardless of what the (necessarily empty) lists contain.
+    include_provenance_known: bool = field(default=True, kw_only=True)
     #: ``kw_only=True`` (CodeRabbit review, fresh evidence): these fields
     #: were inserted after ``system_include_paths`` rather than appended at
     #: the end of the dataclass. Every in-repo caller already uses keyword
@@ -223,18 +237,26 @@ class CompileUnit:
     def explicit_or_unknown(self, *, system: bool) -> list[bool]:
         """Per-entry "treat as explicitly absolute, do not rebase" flags for
         ``include_paths`` (``system=False``) or ``system_include_paths``
-        (``system=True``), degrading unknown/legacy provenance (a length
-        mismatch against the corresponding path list) to "do not rebase" --
-        see ``include_paths_explicit``'s own docstring for why.
+        (``system=True``).
+
+        A genuinely legacy pack (``include_provenance_known`` is ``False``
+        -- see its own docstring) degrades every entry to "do not rebase",
+        regardless of list contents. Otherwise a length mismatch between
+        the provenance list and its path list (a direct construction that
+        never populated per-entry provenance at all) degrades every entry
+        to "derived" (rebase), the pre-round-30 default every existing
+        caller already assumed.
         """
         paths = self.system_include_paths if system else self.include_paths
+        if not self.include_provenance_known:
+            return [True] * len(paths)
         explicit = (
             self.system_include_paths_explicit
             if system
             else self.include_paths_explicit
         )
         if len(explicit) != len(paths):
-            return [True] * len(paths)
+            return [False] * len(paths)
         return list(explicit)
 
     def to_dict(self) -> dict[str, Any]:
@@ -252,6 +274,7 @@ class CompileUnit:
             "undefines": list(self.undefines),
             "include_paths": list(self.include_paths),
             "system_include_paths": list(self.system_include_paths),
+            "include_provenance_known": self.include_provenance_known,
             "include_paths_explicit": list(self.include_paths_explicit),
             "system_include_paths_explicit": list(self.system_include_paths_explicit),
             "input_files": list(self.input_files),
@@ -277,6 +300,22 @@ class CompileUnit:
             undefines=list(d.get("undefines", [])),
             include_paths=list(d.get("include_paths", [])),
             system_include_paths=list(d.get("system_include_paths", [])),
+            # A legacy pack (persisted before round 30/31) has NEITHER key
+            # at all -- the real "this pack predates per-entry include
+            # provenance" signal (round 31 Finding 3) -- as opposed to a
+            # modern pack that legitimately has no includes to record
+            # provenance for. Falls back to deriving the flag from key
+            # PRESENCE only when the pack itself predates
+            # ``include_provenance_known`` too (every pack this PR
+            # produces sets it explicitly, so this fallback only matters
+            # for a hypothetical intermediate schema between the two).
+            include_provenance_known=bool(
+                d.get(
+                    "include_provenance_known",
+                    "include_paths_explicit" in d
+                    or "system_include_paths_explicit" in d,
+                )
+            ),
             include_paths_explicit=list(d.get("include_paths_explicit", [])),
             system_include_paths_explicit=list(
                 d.get("system_include_paths_explicit", [])

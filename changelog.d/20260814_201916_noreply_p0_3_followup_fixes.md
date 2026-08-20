@@ -1401,3 +1401,69 @@
      only spied on `sys.stdout.reconfigure`, matching neither its own name
      nor guarding against a stderr-only import-time side effect; now spies
      and asserts on both streams.
+- **Round 31 (Codex review, fresh evidence on commit `1248386`): three
+  more findings refining round 30's explicit-absolute-include-provenance
+  and chdir-fold-generalization fixes.**
+  1. `CompileUnit.explicit_absolute_include_paths` tracked provenance by
+     VALUE (a set of which absolute path strings were "explicitly
+     absolute"), not by list position -- so a unit recording BOTH a
+     relative `-Iinclude` (resolves to `directory/include`) and an
+     explicit `-I<directory>/include` at once, where both normalize to
+     the identical final string, had BOTH entries marked "explicitly
+     absolute" by the shared value-keyed set, and `_clang_context_args()`
+     never emitted the real relative-rebased path the first occurrence
+     should have produced. Fixed by replacing the value-keyed set with
+     position-aligned `CompileUnit.include_paths_explicit`/
+     `system_include_paths_explicit` lists (parallel to `include_paths`/
+     `system_include_paths`), consumed via a new
+     `CompileUnit.explicit_or_unknown()` helper, and wiring the identical
+     fix into `castxml.py`'s `build_castxml_command()` too -- which had
+     the same env-`C`-rebase gap for its own structured include paths,
+     never previously fixed at all.
+  2. `_fold_chdir_into_operands()`'s suffix-only source-file-operand
+     detector (round 30 Finding 4) never recognized an EXTENSIONLESS
+     source file paired with an explicit `-x <language>` flag (e.g.
+     `clang -x c++ generated -Iinclude` -- `generated` has no suffix at
+     all, but the preceding `-x c++` already states unambiguously that it
+     is the source file). Left un-rebased under `env -C`, this loses the
+     TU's include graph or macro evidence downstream in
+     `include_graph.py`/`preprocessor_scan.py`. Fixed by tracking, during
+     the same scan, whether an explicit `-x` was already seen, and
+     treating a later bare token as a source operand either way (suffix
+     match OR context) -- an unrecognized flag's own non-path value with
+     no preceding `-x` is still left untouched, preserving round 30's
+     safe-by-default behavior.
+  3. A pack persisted by a version of abicheck that predates
+     `include_paths_explicit`/`system_include_paths_explicit` loads with
+     both lists absent -- indistinguishable, by list length alone, from a
+     directly-constructed `CompileUnit` that simply never populated
+     per-entry provenance (every pre-round-31 test in this repo). Those
+     two cases need OPPOSITE defaults: an old, previously-correct
+     persisted pack was never rebased at all under the pre-round-30
+     pipeline, so it must degrade to "unknown, do not rebase" (not
+     "derived", which would newly rebase a path and silently change that
+     pack's replay semantics) -- while a direct construction should keep
+     the pre-round-30 "derived" (rebase) default every existing caller
+     already assumed. Fixed with a new `CompileUnit.include_provenance_known`
+     flag: `True` (the default for direct construction and every
+     adapter-produced unit) trusts the paired lists at face value,
+     falling back to "derived" only on an unexpected length mismatch;
+     `from_dict()` sets it `False` only when loading a dict with NEITHER
+     new provenance key present at all -- the actual legacy-schema
+     signal -- forcing "unknown, do not rebase" for that pack regardless
+     of the (necessarily empty) lists' contents.
+
+  `_rebase_structured_path` (renamed `rebase_structured_path`, now shared
+  by both header backends), `_fold_chdir_into_operands`,
+  `is_absolute_path_token`, `normalize_path_token`, and `join_path_token`
+  moved from `_argv.py` into `_argv_shortopts.py` to keep `_argv.py` under
+  the 2000-line AI-readiness hard cap after these additions.
+
+  `CompileUnit.to_dict()`'s new keys (`include_provenance_known`,
+  `include_paths_explicit`, `system_include_paths_explicit`) drifted the
+  four committed L3 example fixtures (`case152_enum_size_flag_flip`,
+  `case153_struct_packing_flip`, `case154_lto_mode_flip`,
+  `case155_char_signedness_flip`) against `scripts/gen_l3l4l5_examples.py`
+  -- regenerated via that script (`--check` confirms no other case
+  drifted; the diff is purely additive, no other fixture content
+  changed).

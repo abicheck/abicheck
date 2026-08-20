@@ -601,21 +601,170 @@ class TestOnlyAppliedFieldsAreAccepted:
         for field_name in UNAPPLIED_PACK_FIELDS:
             assert field_name not in help_text, field_name
 
-    def test_a_gate_pack_is_rejected_by_scan_which_has_no_gate(
+    def test_a_gate_pack_is_applied_to_scan(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """CLI cleanup phase two, "PR B": a `kind: gate` pack now configures
+        `scan --against` instead of being rejected outright -- `scan`'s exit
+        code has honored `--severity-preset`/`--exit-code-scheme` (direct CLI
+        flags and `.abicheck.yml`) since the fix that closed the "scan never
+        consults severity" gap (AGENTS.md "Known gaps"); a gate pack is one
+        more source for that same real gate, mirroring
+        `test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme`
+        (the single-pair `compare` version) and
+        `test_gate_pack_is_applied_to_a_release_comparison` (the release
+        fan-out version)."""
         old, new = pair
         gate = _pack(
             tmp_path,
-            "gate.yml",
-            "id: g\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.exit_code_scheme: severity\n",
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        without_pack = CliRunner().invoke(
+            main, ["scan", str(new), "--against", str(old)]
+        )
+        assert without_pack.exit_code == 4, without_pack.output
+
+        with_pack = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+        # The finding is still reported -- only the gate moved.
+        summary = json.loads(with_pack.output)
+        assert summary["verdict"] == "BREAKING"
+
+    def test_a_gate_pack_is_reflected_in_scan_dry_run_preview(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `scan --dry-run`'s previewed
+        exit-code scheme/severity must describe the pack-folded gate that
+        will actually run, not a stale snapshot computed before the pack was
+        applied. Reproduces the exact repro from that review: a pack
+        demoting `abi_breaking` to `warning` must be visible in the preview,
+        not left showing the legacy/pre-pack scheme."""
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
         )
         result = CliRunner().invoke(
-            main, ["scan", str(new), "--against", str(old), "--pack", str(gate)]
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--dry-run", "--pack", str(gate),
+            ],
         )
-        assert result.exit_code == 64, result.output
-        assert "gate" in result.output
+        assert result.exit_code == 0, result.output
+        assert "exit-code scheme: severity" in result.output
+        assert "abi_breaking=warning" in result.output
+        # Codex review, fresh evidence: by the time this preview is
+        # rendered, the pack has already been folded into resolved_cfg (the
+        # values just asserted above ARE the pack-adjusted ones) -- claiming
+        # "a selected --pack may adjust it" here would self-contradict the
+        # very label it's attached to.
+        assert "may adjust it" not in result.output
+
+    def test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """Codex review on #801: the precedence rule D8 states for every
+        other front end -- an explicitly stated value always outranks a
+        pack -- must hold for `scan --against` too. Reproduces the exact
+        repro from that review: a removed export scanned with an explicit
+        `--severity-preset strict` must still exit 4 even when a selected
+        gate pack tries to demote `abi_breaking` to `warning`; without the
+        fix the pack silently won and this exited 0."""
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--severity-preset", "strict",
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads(result.output)
+        assert summary["verdict"] == "BREAKING"
+
+    def test_a_gate_pack_cannot_override_a_project_config_severity_preset(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The project-config (`.abicheck.yml`) tier of the identical
+        precedence bug -- found while fixing the explicit-CLI tier above,
+        by the same mechanism (`cli_scan_receipt`'s ADR-049 receipt not
+        knowing a project-config value was already stated, so a selected
+        pack looked unopposed)."""
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("severity:\n  preset: strict\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--config", str(cfg),
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads(result.output)
+        assert summary["verdict"] == "BREAKING"
+
+    def test_a_gate_pack_cannot_override_an_explicit_project_auto_scheme(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """A project's explicit `exit_code_scheme: auto` is a real, stated
+        selection -- it must outrank a gate pack's concrete scheme, not read
+        as "unstated" purely because `BuildConfig.exit_code_scheme` also
+        defaults an absent key to the string ``"auto"`` (Codex review, fresh
+        evidence). ``severity.preset: info-only`` activates the severity
+        scheme (auto -> severity) with every category at `info`, so a
+        removed export exits 0 under it -- while the pack's `legacy` scheme
+        would exit 4 for the same BREAKING verdict, which is exactly the
+        divergence this precedence protects against.
+        """
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "legacy.yml",
+            "id: legacy_scheme\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.exit_code_scheme: legacy\n",
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "exit_code_scheme: auto\nseverity:\n  preset: info-only\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--config", str(cfg),
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        summary = json.loads(result.output)
+        assert summary["verdict"] == "BREAKING"
 
     def test_scan_rejects_an_unapplied_field_from_the_resolution(
         self, pair: tuple[Path, Path], tmp_path: Path

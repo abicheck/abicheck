@@ -176,9 +176,13 @@ contributor.
 from whether a severity setting is in effect", so it is resolved to `legacy` or
 `severity` before the object is built. Selecting it is still a stated choice,
 though — an explicit `--exit-code-scheme auto` outranks a project config's
-concrete scheme, and the receipt records `auto` as what was selected. (A
-project config's own `auto` is indistinguishable from an unset key, since that
-is `BuildConfig`'s default for it, so it contributes nothing.)
+concrete scheme, and the receipt records `auto` as what was selected. A
+project config's own `exit_code_scheme: auto` is the same kind of stated
+choice, *provided the key was actually written* — `BuildConfig` defaults an
+absent key to the identical string `"auto"`, so presence is tracked
+separately (`exit_code_scheme_explicit`) and only a literally-written `auto`
+resolves and outranks a lower-precedence gate pack the same way the explicit
+CLI flag does; an absent key still contributes nothing.
 
 `suppression.strict: true` and `suppression.require_justification: true` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.

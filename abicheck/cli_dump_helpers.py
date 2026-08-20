@@ -1617,8 +1617,7 @@ def perform_elf_dump(
     _effective_lang = lang if (lang_explicit or lang == "c") else None
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
     # ADR-050 D1 follow-up (G30 pilot validation): fold -H/--header's own directory
-    # arguments into the extraction contract's scope (not just
-    # public_header_dirs/apply_provenance's opt-in flags), matching
+    # arguments into the extraction contract's scope (not just public_header_dirs/apply_provenance's opt-in flags), matching
     # `compare`'s own --header handling (cli_resolve._resolve_compare_
     # snapshots, via the same split_public_header_inputs helper) -- so a
     # `dump --header <dir>` baseline and a live `compare --header <dir>`
@@ -1634,6 +1633,7 @@ def perform_elf_dump(
     # above the standard system dirs) when the compile context supplies its own
     # includes — see its docstring.
     from .header_utils import (
+        dedup_paths_preserve_order,
         deferred_token_dirs,
         resolve_inferred_header_roots,
         split_public_header_inputs,
@@ -1743,7 +1743,7 @@ def perform_elf_dump(
             snap = dump(
                 so_path=so_path,
                 headers=resolved_headers,
-                extra_includes=eff_includes + inc_extra,
+                extra_includes=dedup_paths_preserve_order(eff_includes + inc_extra),
                 version=version,
                 compiler=compiler,
                 gcc_path=gcc_path,

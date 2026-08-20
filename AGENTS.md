@@ -287,8 +287,15 @@ Core pipeline (in order of data flow):
      (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
      empty — each is a pack recorded as active configuration that changes
      nothing, which is the single failure all of these guard. `compare`
-     takes all three kinds; `scan --against` takes policy/contract and
-     rejects a gate pack, having no gate of its own. The directory/package
+     takes all three kinds; `scan --against` now takes all three too (CLI
+     cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's
+     `gate.exit_code_scheme`/`gate.severity.*` fold onto the real
+     `ResolvedCompareConfig` `resolve_compare_config` already produces
+     (`pack_application.apply_to_compare_config`, the identical function
+     single-pair `compare` uses, called from `cli_scan._resolve_scan_
+     evaluation_config`), since `scan`'s exit code has honored the resolved
+     severity/exit-code-scheme config since the fix that closed the "scan
+     never consults severity" gap below. The directory/package
      release fan-out (`cli_compare_release.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — it has no `GateOptions`-
      shaped object of its own, so a `kind: gate` pack's `gate.exit_code_
@@ -840,7 +847,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes
@@ -1870,6 +1877,109 @@ Once a root command genuinely clears the bar above, pick the right home:
   against the new core pin yet — doing so now would just encode a baseline
   that a fresh `scan --against` still can't cleanly compare to, the same
   problem this diagnostic exists to catch, not fix.
+
+  **Two real mechanisms found and fixed by actually inspecting the
+  differing `include_sequence` token values, using a minimal, castxml-free
+  local repro (a `g++`-compiled one-header library + a hand-written
+  `compile_commands.json`, `--ast-frontend clang`) rather than a live
+  Bazel/castxml run — the repro this whole footnote's own "not fixed here"
+  note said was the missing prerequisite.** Both are real instances of
+  candidate (b) above (a duplicated `-I`/`-isystem` entry), reached from
+  two different composition points, neither previously identified:
+  (1) `perform_elf_dump`'s own `extra_includes=eff_includes + inc_extra`
+  (and `service_header_scoped._try_header_scoped_dump`'s identical
+  `eff_includes += inc_extra`) concatenate two independently-derived
+  include-dir lists with no dedup — fixed with a new
+  `header_utils.dedup_paths_preserve_order()`, applied at both composition
+  sites. (2) The load-bearing one for this specific repro:
+  `l2_seed._merge_l3_compile_context`'s `derived_includes` (the P0.3 fold's
+  own derived compile-unit include dirs) and the caller's own *explicit*
+  `gcc_options`/`gcc_option_tokens` can independently carry an `-I` for the
+  identical directory — concretely, a `--build-info` compile database is
+  matched *both* by this fold's own resolver *and* by the pre-existing
+  legacy `-p`/`--compile-db` auto-match mechanism that populates
+  `perform_elf_dump`'s `effective_gcc_options` string before the fold ever
+  runs, so the same directory reaches the merged `gcc_option_tokens` twice:
+  once via `explicit_tail` (the split `gcc_options` string) and once via
+  `derived_includes`. Confirmed via direct inspection of both
+  `CompileContext` objects the merge receives (`explicit.gcc_options`
+  literally contained `"-I <dir>"`, `derived.gcc_option_tokens` literally
+  contained `("-I", "<dir>", ...)`  for the same `<dir>`) — not
+  reconstructed from `diff.reason` alone, closing exactly the evidentiary
+  gap the "Two further Codex review rounds" paragraph above says was still
+  missing. Fixed with a new `header_utils.drop_include_tokens_duplicating_
+  paths()`, which drops a `derived_includes` pair whose directory already
+  appears among `explicit_tail + explicit.gcc_option_tokens`'s own
+  include-search operands — "explicit wins, searches first" is unaffected,
+  since only the later, redundant `derived` copy is ever dropped. Verified
+  end to end: the real compiler argv `dump` sends to clang no longer
+  repeats `-I <dir>`, and a fresh `dump` baseline's `ast_compile_args` now
+  matches a `scan --against` candidate's own (both carry exactly one `-I
+  <dir>` for the matched project directory) — see
+  `tests/test_build_context_completeness.py`'s
+  `TestDedupIncludeDirsAcrossCompositionSites`/
+  `TestMergeL3CompileContextDropsDuplicateExplicitInclude`.
+
+  **A Codex review round on the same PR found the first version of this
+  fix class-blind, and it was fixed before merge.** `drop_include_tokens_
+  duplicating_paths()`'s first cut matched purely on resolved directory,
+  ignoring which include-search *class* (`-I`/`-isystem`/`-iquote`/
+  `-idirafter`) each entry belonged to — but a real compiler consults
+  those as distinct search buckets in a fixed order regardless of argv
+  position (the identical class-blindness `_split_include_tokens`'s own
+  docstring already documents as a known gap one function over), so
+  dropping an `-isystem <dir>` merely because an unrelated `-I <dir>`
+  existed elsewhere could change which bucket that directory is searched
+  from for a colliding header basename — concretely, `-I A -I B -isystem
+  A` resolves a colliding name from `B`, while the class-blind rewrite
+  `-I A -I B` resolves it from `A` instead. Fixed by making the dedup key
+  `(flag-class, resolved directory)` rather than the directory alone, via
+  a new `_include_class_path_pairs()` shared by both the "already
+  covered" side and the token walk being filtered — see
+  `TestDedupIncludeDirsAcrossCompositionSites::
+  test_drop_include_tokens_duplicating_paths_is_class_sensitive`. Both
+  call sites' "already covered" argument changed shape accordingly (raw
+  tokens, not bare `Path`s) so the class of an *already-emitted* entry is
+  never lost either.
+
+  **Not fully closed — a third, deeper mechanism survives and still
+  reproduces `NOT_COMPARABLE` on `include_sequence` for the identical
+  repro, confirmed by direct inspection after the two fixes above.** Even
+  with both duplicate-`-I` bugs fixed, `dump`'s baseline and `scan`'s
+  candidate still disagree, because the matched directory reaches
+  `declared_includes` (the sole source `dumper_contract.
+  _attach_extraction_contract` builds `include_sequence`'s slots from) via
+  **structurally different channels on the two paths** rather than merely
+  differing in count: on `dump`, the legacy `-p`/`--compile-db` match
+  supplies the directory as part of `effective_gcc_options` *before* the
+  L2 seed ever runs, and `seed_l2_includes`'s own suppression rule
+  (correctly) declines to seed a directory when explicit context already
+  supplies one — so the directory reaches the parse only through
+  `gcc_option_tokens`, and `eff_includes`/`declared_includes` stays empty
+  for it. `scan_engine._build_new_snapshot` has no equivalent legacy `-p`
+  step at all — nothing pre-populates `effective_gcc_options` before its
+  own fold runs, so the identical directory reaches the *same* fold's L2
+  seed unsuppressed, landing in `eff_includes`/`declared_includes` instead.
+  Two structurally different `declared_includes` — empty vs. one entry —
+  for the same real include root is exactly what `include_sequence` is
+  built to detect, so it correctly (if unhelpfully) still fires. **Not
+  fixed here**: closing it needs a design decision this pass did not have
+  standing to make on its own — either `dump`'s CLI stops running the
+  legacy `-p`/`--compile-db` auto-match whenever `--build-info` already
+  feeds the new P0.3 fold (the two have overlapped, silently, since the
+  fold was introduced — this pass is the first evidence either mechanism's
+  *placement choice* for a resolved directory is externally observable,
+  not just its content), or `scan`'s candidate resolution gains an
+  equivalent legacy-match step so both paths agree on *which* channel
+  supplies a matched directory, not merely that they supply the same one.
+  Either is a real, cross-cutting change to which of two established
+  mechanisms wins for a `dump`-only surface `scan` has no counterpart to
+  — not a mechanical follow-up to either dedup fix above. Confirmed via
+  the same local repro: after both fixes, `dump`'s `ast_compile_args`
+  still carries `-I <dir>` (via `gcc_option_tokens`) while `declared_
+  includes` is empty; `scan`'s candidate carries the identical `-I <dir>`
+  via `declared_includes` instead — same effective compiler argv, still a
+  real `profile_fingerprint`/`include_sequence` disagreement.
 
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
@@ -4073,6 +4183,87 @@ Once a root command genuinely clears the bar above, pick the right home:
   `test_header_compile_context.py`/`test_clang_header_backend_integration.py`
   suites (unchanged, still green), the full fast unit suite, and
   `mypy`/`ruff` clean on both touched files.
+
+  **Re-investigated (2026-08-19): the dry-run migration (blocker 1) is
+  larger than "wire the renderer to `resolve_dump_request()`" —
+  `dump_cmd` has no `DumpRequest` to resolve in the first place, on
+  either branch.** Read `cli.py`'s `dump_cmd` in full, not assumed: it
+  never constructs a `DumpRequest` object anywhere (confirmed by grep —
+  no `DumpRequest(` call site exists in `cli.py` or `cli_dump_helpers.py`
+  today). Its real resolution path is two CLI-only helpers,
+  `resolve_dump_collect_context`/`resolve_dump_compile_context`
+  (`cli_dump_helpers.py`), computing `collect_mode`/`header_backend`/
+  `includes`/`gcc_option_tokens` directly off raw Click parameters,
+  entirely independent of `service_input_resolution`/
+  `service_dump_pipeline.resolve_dump_request` — and this is not a
+  dry-run-only path: those same locals feed the real `dump()` call a few
+  hundred lines later in the same function, on the non-dry-run branch.
+  So migrating `render_dump_dry_run` to build from a real
+  `ResolvedDumpRequest` is not an isolated renderer change: it requires
+  first constructing a `DumpRequest` from `dump_cmd`'s ~30 CLI
+  parameters (matching Click's own parsing precisely — including the
+  `_resolved_compile_context`/`_resolved_collect_mode`/`_resolved_
+  include_labels`/`_resolved_lang_explicit` private hooks `compare`'s own
+  `ctx.invoke` already threads through this same command for its
+  implicit-dump operand), and doing so for *both* branches at once, so
+  the preview and the real run cannot silently diverge the moment only
+  one of them migrates. That is blocker 2 restated from the other
+  direction: the real run cannot move to `execute_dump_request()`
+  without the post-processing hooks blocker 2 already names, and the
+  dry-run preview cannot honestly move to `resolve_dump_request()` alone
+  while the real run it previews keeps using a wholly different resolver
+  — a preview built from one resolver describing an execution built from
+  another would be strictly worse than today's "two independent
+  implementations, kept in sync by hand," since it would *look*
+  authoritative without being connected to what actually runs. Not
+  attempted here, for the same reason blockers 2/3 were not: a real,
+  cross-cutting redesign of `dump_cmd`'s ~250-line resolution section
+  (`cli_dump_helpers.py` is already at its 2000-line AI-readiness hard
+  cap, so any new shared surface needs a sibling module, not an inline
+  addition), not a follow-up to the already-landed `resolve_dump_request`/
+  `execute_dump_request` split — that split remains real, additive
+  progress in its own right, just not yet consumed by `dump_cmd`.
+
+  **Slice landed (2026-08-19, same session): `service_input_resolution.
+  SideResolution`/`_resolve_side_snapshot_impl`, plus two newly-found,
+  narrower blockers on the next step.** `_resolve_side_snapshot_impl`
+  (the real implementation behind `resolve_side_snapshot`, now a one-line
+  wrapper) returns the P0.3 fold's own effective `includes`/
+  `CompileContext` — previously computed inside `resolve_side_snapshot`
+  and discarded after use — as a new `SideResolution` object;
+  `service_dump_pipeline.DumpResult` surfaces the same two fields,
+  populated by `execute_dump_request`. Purely additive, zero behavior
+  change for every existing caller, fully tested
+  (`tests/test_typed_dump_request.py`). This is real progress toward "one
+  shared primitive," but attempting the next step — routing
+  `perform_elf_dump`'s primary parse through it — found the two are not
+  simply duplicate callers of one function: `perform_elf_dump` receives an
+  *already-resolved* `debug_info_path` from its caller (`dump_cmd`, via
+  `_resolve_debug_artifact`), while `service._dump_elf` (which
+  `_resolve_side_snapshot_impl` reaches through `service.resolve_input`)
+  has no such parameter at all and independently *re-derives* the
+  identical fact from raw `debug_roots`/`enable_debuginfod`/
+  `debuginfod_url`. Merging the two needs the two debug-artifact
+  resolutions confirmed equivalent first — a real, separate investigation,
+  not a follow-up edit. A parallel check of `scan_engine._build_new_
+  snapshot` (which already calls `service.resolve_input` directly, so it
+  doesn't share this particular ELF-pipeline divergence) found two
+  different, narrower blockers instead: it passes `symbols_only`/
+  `debug_presence_only` to `resolve_input`, which `_resolve_side_snapshot_
+  impl` never threads through yet (a straightforward additive gap); and
+  its `embed_build_source` call constructs `public_headers` differently
+  from `embed_side_build_source`'s own construction (`_expand_public_
+  headers` over the combined headers+dirs list, vs. the shared wrapper's
+  separate, unexpanded treatment) — a genuine behavioral difference
+  needing reconciliation, not just a naming one. Neither was attempted
+  this session, per this file's own "known gaps over risky reactive
+  patches" convention, given this exact code area's extensive prior
+  history of exactly this shape of subtle divergence (18+ numbered
+  findings on the L3→L2-fold entry above). **PR 3A's full convergence
+  remains open; PR 3C (the "PR F" removal of `dump --build-query`/
+  `dump --build-compile-db`) stays blocked on it**, per the plan doc's own
+  explicit ordering requirement — see `docs/contribute/plans/cli-cleanup-
+  phase-two.md`'s PR 3A section for the equivalent, fuller account.
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode

@@ -111,6 +111,26 @@ CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 #: include-search flag at all. Left as a known gap (see ``AGENTS.md``).
 _INCLUDE_FLAG_PREFIXES = (
     "-I",
+    # Listed ahead of the plain "-isystem" it textually extends: every match
+    # here is a first-match-wins scan (`next(p for p in _INCLUDE_FLAG_
+    # PREFIXES if t.startswith(p))`), and "-isystem-after" is Clang's own,
+    # genuinely distinct flag (`-isystem-after <dir>` -- confirmed against
+    # real `clang --help-hidden`, always spaced, never an attached form) --
+    # not a longer spelling of "-isystem" itself. Ordered after "-I" a real
+    # match would still find first-match-wins if it were left later: a real
+    # "-isystem-after" token also `startswith("-isystem")`, so scanning
+    # "-isystem" first would misparse it as an *attached* "-isystem" flag
+    # whose "directory" is the bogus suffix "-after", stranding the real
+    # directory operand as a bare, unconsumed token (Codex review, PR #802 --
+    # confirmed with the reviewer's own repro: `gcc_options='-isystem-after
+    # /a'` alongside `gcc_option_tokens=('-isystem-after', '/b')` left a bare
+    # `/b` in the composed command). Pre-existing in every consumer that
+    # already did `t.startswith(p)` against this tuple before this PR
+    # (`_has_include_build_context`, `include_operand_dirs`, ...), not
+    # introduced by this PR's own two new functions -- fixed once here,
+    # for the whole shared tuple, rather than only for the two consumers a
+    # reviewer happened to be reading.
+    "-isystem-after",
     "-isystem",
     "-iquote",
     "-idirafter",
@@ -455,6 +475,189 @@ def _flag_tokens(toks: list[str]) -> list[str]:
     return out
 
 
+#: GCC's plain (non-quote-form) ``-I-`` divider: a bare, operand-less flag,
+#: never an attached-form ``-I<dir>`` whose directory happens to be ``"-"``.
+#: It splits the ``-I`` search list in two with *different* semantics on
+#: each side (GCC docs, "Directory Options") — a directory given before it
+#: is searched only for a quoted (``#include "..."``) include and never for
+#: an angle-bracket one, while a directory given after it is searched for
+#: both, the same as an ordinary ``-I`` with no divider present at all.
+#: Treating the two sides as one interchangeable ``-I`` class (as an
+#: earlier version of :func:`_include_class_path_pairs` effectively did, by
+#: never recognizing this token at all and misparsing it as an attached
+#: ``-I`` flag naming the bogus directory ``"-"``) can drop a *different*
+#: post-divider ``-I <dir>`` as a "duplicate" of an identical-looking
+#: pre-divider one — turning a resolvable ``#include <x.h>`` into
+#: "file not found" (Codex review, PR #802, confirmed against real GCC 13).
+_DASH_I_DIVIDER = "-I-"
+
+
+def _include_class_path_pairs(toks: Sequence[str]) -> set[tuple[str, str]]:
+    """Every ``(flag-class, resolved-directory)`` pair present in *toks*.
+
+    The flag *class* (the matched prefix itself, e.g. ``"-I"`` vs.
+    ``"-isystem"``) is part of the key, not just the directory — GCC/Clang
+    consult ``-iquote``/``-I``/``-isystem``/``-idirafter`` as **distinct
+    search buckets in a fixed order regardless of argv position** (see
+    :func:`_split_include_tokens`'s own documented gap on this exact point),
+    so a directory present via one class is not interchangeable with the
+    same directory present via another — dropping an ``-isystem <dir>``
+    merely because an unrelated ``-I <dir>`` exists elsewhere would change
+    which bucket that directory is searched from for a colliding basename
+    (Codex review, PR #802).
+
+    A plain ``-I`` entry is further split into a ``"-I:pre"``/``"-I:post"``
+    sub-class depending on whether it appears before or after a
+    :data:`_DASH_I_DIVIDER` token *within this same sequence* — see that
+    constant's own docstring for why the two sides are not interchangeable
+    either, even though both are nominally "the ``-I`` class". No divider
+    present at all means every ``-I`` entry is ``"-I:pre"``, preserving the
+    pre-existing behaviour for the (overwhelmingly common) undivided case.
+    """
+    pairs: set[tuple[str, str]] = set()
+    i = 0
+    n = len(toks)
+    after_divider = False
+    while i < n:
+        t = toks[i]
+        if t == _DASH_I_DIVIDER:
+            after_divider = True
+            i += 1
+            continue
+        matched_prefix = next(
+            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None
+        )
+        if matched_prefix is None:
+            i += 1
+            continue
+        if t == matched_prefix and i + 1 < n:
+            operand = toks[i + 1]
+            consumed = 2
+        else:
+            operand = t[len(matched_prefix) :]
+            consumed = 1
+        try:
+            key = str(Path(operand).resolve())
+        except OSError:
+            key = operand
+        class_key = matched_prefix
+        if matched_prefix == "-I":
+            class_key = "-I:post" if after_divider else "-I:pre"
+        pairs.add((class_key, key))
+        i += consumed
+    return pairs
+
+
+def drop_include_tokens_duplicating_paths(
+    toks: Sequence[str], already_covered: Sequence[str]
+) -> list[str]:
+    """*toks* with an include-search flag+operand pair dropped when the
+    identical ``(flag-class, directory)`` pair already appears in
+    *already_covered* (a raw token list, in the same shape as *toks*).
+
+    ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.cli_dump_helpers.
+    perform_elf_dump`/:func:`abicheck.service_header_scoped._try_header_
+    scoped_dump`) both render the L3->L2 fold's merged compile context into
+    ``gcc_option_tokens`` via ``header_compile_context._context_flags`` —
+    which independently renders the *same* matched compile unit's
+    ``include_paths``/``system_include_paths`` as their own ``-I``/
+    ``-isystem`` tokens that the L2 include-dir seed (``eff_includes``,
+    rendered separately as ``extra_includes``) already covers. Both a
+    command builder's ``extra_includes`` loop *and* its verbatim
+    ``gcc_option_tokens`` append then emit an ``-I`` for the identical
+    directory — and since ``dumper_contract._attach_extraction_contract``
+    builds ``declared_includes`` **exclusively** from ``extra_includes``
+    (never ``gcc_option_tokens``), the duplicate never doubles a
+    ``declared_includes``/``include_sequence`` slot by itself, but a
+    real compiler still processes the same ``-I`` twice, and (more load-
+    bearing) a `scan --against` candidate resolution — whose single-pass
+    fold (:func:`abicheck.buildsource.l2_seed.
+    seed_includes_and_fold_compile_context`) never separately renders a
+    matched unit's include dirs into both places — never emits this
+    second copy for the identical project, so the two sides' full argv
+    (and therefore, on backends that fold gcc_option_tokens into their own
+    header-parse identity) can disagree for reasons no diagnostic names.
+    Confirmed via a minimal, castxml-free repro reproducing this exact
+    shape (AGENTS.md's L3->L2-fold "nineteenth finding").
+
+    Applied to ``gcc_option_tokens`` only, against the already-emitted
+    ``extra_includes`` — never the reverse, since ``extra_includes`` is
+    :func:`declared_includes`'s one canonical source and must always keep
+    every entry it's given. Dedup key is ``(flag-class, resolved absolute
+    path)`` — see :func:`_include_class_path_pairs`'s own docstring for why
+    the class must be part of the key, not just the directory: a real
+    compiler treats ``-iquote``/``-I``/``-isystem``/``-idirafter`` as
+    distinct search buckets regardless of argv order, so a same-directory
+    entry in a *different* class is never dropped, only an exact class+path
+    duplicate. Search-priority is unaffected for the entries that *are*
+    dropped: it is always the later, redundant duplicate of an identical
+    class+directory pair that goes, never the earlier one.
+
+    A :data:`_DASH_I_DIVIDER` (``"-I-"``) token in *toks* is always kept
+    verbatim — it is never itself a class+path pair to drop — and, per
+    :func:`_include_class_path_pairs`'s own ``"-I:pre"``/``"-I:post"``
+    split, flips which sub-class a subsequent plain ``-I`` in *toks*
+    belongs to, so an ``-I <dir>`` after the divider is never dropped as a
+    "duplicate" of a same-looking ``-I <dir>`` in *already_covered* (which,
+    lacking its own divider, is entirely ``"-I:pre"``) — doing so would
+    silently change which includes that directory is searched for.
+
+    The divider state also carries **across** the *already_covered* ->
+    *toks* boundary, not just within *toks* itself (Codex review, PR #802):
+    every caller renders *already_covered* into the command *before* *toks*
+    (``cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens,
+    cmd)``), so a ``"-I-"`` anywhere in *already_covered* means every plain
+    ``-I`` in *toks* is *already* past the divider by the time the real
+    compiler sees it — even one with no ``"-I-"`` of its own. Scanning
+    *toks* from a fresh ``"-I:pre"`` state regardless of what
+    *already_covered* ended in would misclassify such an entry as
+    pre-divider, letting it be dropped as a false "duplicate" of an
+    unrelated pre-divider ``-I <dir>`` in *already_covered* that is not
+    actually the same search class once the real, composed argv is
+    considered.
+    """
+    covered = _include_class_path_pairs(already_covered)
+    out: list[str] = []
+    i = 0
+    n = len(toks)
+    # A "-I-" anywhere in *already_covered* means *toks* -- rendered after
+    # it in the real command -- starts life already past the divider.
+    after_divider = _DASH_I_DIVIDER in already_covered
+    while i < n:
+        t = toks[i]
+        if t == _DASH_I_DIVIDER:
+            after_divider = True
+            out.append(t)
+            i += 1
+            continue
+        matched_prefix = next(
+            (p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None
+        )
+        if matched_prefix is None:
+            out.append(t)
+            i += 1
+            continue
+        if t == matched_prefix and i + 1 < n:
+            operand = toks[i + 1]
+            consumed = 2
+        else:
+            operand = t[len(matched_prefix) :]
+            consumed = 1
+        try:
+            key = str(Path(operand).resolve())
+        except OSError:
+            key = operand
+        class_key = matched_prefix
+        if matched_prefix == "-I":
+            class_key = "-I:post" if after_divider else "-I:pre"
+        if (class_key, key) in covered:
+            i += consumed
+            continue
+        out.extend(toks[i : i + consumed])
+        i += consumed
+    return out
+
+
 def _msvc_deferred_flag(toks: list[str]) -> str:
     """The MSVC/clang-cl bucket to defer an inferred root below *toks* (#454).
 
@@ -510,6 +713,54 @@ def _deferred_include_flag(toks: list[str]) -> str:
     if any(t.startswith(p) for t in toks for p in _ABOVE_SYSTEM_GNU_PREFIXES):
         return "-isystem"
     return "-idirafter"
+
+
+def dedup_paths_preserve_order(paths: Sequence[Path]) -> list[Path]:
+    """*paths* with exact duplicates dropped, first-occurrence order kept.
+
+    ``dump``'s ELF and PE/Mach-O paths both compose their final
+    ``extra_includes``/``declared_includes`` list as an L2-seeded include
+    list *plus* :func:`resolve_inferred_header_roots`'s own inferred-root
+    additions (``eff_includes + inc_extra``) — two independently derived
+    lists that can resolve to the *same* directory (e.g. a matched compile
+    unit's own ``-I`` dir, once from the L3->L2 fold's seed and again from
+    the inferred-root resolver's own, separate lookup over the *pre-fold*
+    tokens). Left undeduped, that directory gets two ``declared_includes``
+    slots for one real include root, and
+    ``comparability_fields._include_slot_tokens`` tokenizes one slot per
+    entry — so the resulting ``include_sequence`` carries an extra token a
+    `scan --against` candidate resolution (which folds the seed and the L3
+    context in one pass, with no separate ``inc_extra`` add — see
+    ``scan_engine._build_new_snapshot``) never produces for the identical
+    project, and the two sides spuriously fail ``profile_fingerprint``
+    comparability on ``include_sequence`` alone (AGENTS.md's "nineteenth
+    finding" on the L3->L2-fold known gap, candidate mechanism (b) —
+    confirmed via a minimal, castxml-free repro: two independent
+    ``dump`` calls of the same project agree bit-for-bit, but a `dump`
+    baseline's own duplicated ``-I`` disagrees with `scan`'s deduped
+    candidate).
+
+    Dedup key is the resolved absolute path (mirroring
+    :func:`_implicit_header_includes`'s own ``_add`` helper above) so a
+    relative and an absolute spelling of the same directory collapse too,
+    not just two textually-identical entries. Order is preserved rather
+    than sorted: an include-search directory is first-match-wins, so
+    reordering could change which same-named header a real compile picks
+    up (the same reasoning ``build_context_include_dirs_ordered`` already
+    documents for its own dedup).
+    """
+    seen: set[str] = set()
+    out: list[Path] = []
+    for p in paths:
+        try:
+            key = str(p.resolve())
+        except OSError:
+            key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
 
 
 def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:

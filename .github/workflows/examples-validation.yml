@@ -11,6 +11,7 @@ on:
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
+      - ".github/actions/install-system-deps/action.yml"
   pull_request:
     branches: [main]
     paths:
@@ -21,6 +22,7 @@ on:
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
+      - ".github/actions/install-system-deps/action.yml"
   workflow_dispatch:
 
 concurrency:
@@ -68,9 +70,9 @@ jobs:
         run: mkdir -p results
 
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ clang cmake curl ca-certificates
 
       - uses: ./.github/actions/setup-castxml
 
@@ -285,9 +287,9 @@ jobs:
         run: mkdir -p results
 
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ clang cmake curl ca-certificates
 
       - uses: ./.github/actions/setup-castxml
 
@@ -369,9 +371,9 @@ jobs:
         run: mkdir -p results
 
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ clang cmake binutils curl ca-certificates
 
       - uses: ./.github/actions/setup-castxml
 
@@ -470,9 +472,9 @@ jobs:
           pattern: examples-validation-*
 
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ clang cmake binutils curl ca-certificates
 
       - uses: ./.github/actions/setup-castxml
 

@@ -91,10 +91,10 @@ def pack_option(f: F) -> F:
         "consumer needs a per-comparison contract context the release "
         "fan-out never builds per library). On `scan` "
         "this requires --against (a pack's only application there is "
-        "the baseline comparison) and a 'kind: gate' pack is rejected: "
-        "`scan --against` does honour --severity-preset/--exit-code-scheme "
-        "given directly, but does not yet fold a gate pack's gate.* "
-        "assignments, so pass those settings directly instead.",
+        "the baseline comparison), and a 'kind: gate' pack's gate.exit_"
+        "code_scheme/gate.severity.<category> apply to the baseline "
+        "comparison's exit code the same way --severity-preset/"
+        "--exit-code-scheme given directly already do.",
     )(f)
     return f
 

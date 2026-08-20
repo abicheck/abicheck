@@ -808,24 +808,28 @@ pipelines a fourth time.
   of them are re-resolved at execution time the way the backend is.
 
   `DumpResult` states the executed outcome: the
-  real snapshot and the *achieved* effective depth (only knowable from the
-  completed snapshot) — see the "storage result" note two sentences below
-  for why it carries nothing more yet. **Corrected ownership (CodeRabbit
-  review, fresh evidence — an earlier draft of this sentence called the
-  omitted fields "CLI-presentation-layer concerns `execute_dump_request()`
-  doesn't touch", which overstates the gap):** the resolved compile
-  context and the dependency scope genuinely *are* computed inside
-  `execute_dump_request()`'s own call chain — `resolve_side_snapshot`
-  performs the P0.3 L3→L2 compile-context fold internally (see
-  `service_input_resolution.py`'s `_seeded_includes_and_compile_context`),
+  real snapshot, the *achieved* effective depth (only knowable from the
+  completed snapshot), and — **landed 2026-08-19, updating this paragraph in
+  place per Codex review rather than leaving a contradictory later status
+  note** — the P0.3 L3→L2 fold's own `effective_includes`/
+  `effective_compile_context`, now genuinely surfaced as fields (previously
+  computed internally and discarded; see the "Slice landed (2026-08-19...)"
+  note below this bullet for the exact shape and its own lifetime caveat).
+  **Corrected ownership (CodeRabbit review, fresh evidence — an earlier
+  draft of this sentence called the omitted fields "CLI-presentation-layer
+  concerns `execute_dump_request()` doesn't touch", which overstated the
+  gap):** the resolved compile context and the dependency scope genuinely
+  *are* computed inside `execute_dump_request()`'s own call chain —
+  `resolve_side_snapshot`/`_resolve_side_snapshot_impl` performs the P0.3
+  L3→L2 compile-context fold internally (see `service_input_resolution.py`),
   and `populate_side_dependency_info` runs directly in
-  `execute_dump_request()` when `follow_dependencies` is set. The gap is
-  narrower than "not touched": these values are computed but not
-  *surfaced* as `DumpResult` fields, an output-shape gap, not a
-  processing one. Only the ADR-039 build-context collector's own
-  diagnostics are a genuine CLI-layer concern here — those post-processing
-  passes live in `perform_elf_dump` alone, which `execute_dump_request`
-  does not call (blocker 2 above).
+  `execute_dump_request()` when `follow_dependencies` is set. The compile
+  context is now surfaced (this landed slice); the dependency scope is not
+  yet a `DumpResult` field — still open, distinct from the compile-context
+  gap this paragraph originally described. Only the ADR-039 build-context
+  collector's own diagnostics are a genuine CLI-layer concern here — those
+  post-processing passes live in `perform_elf_dump` alone, which
+  `execute_dump_request` does not call (blocker 2 above).
   Execution consumes a `ResolvedDumpRequest` and produces a `DumpResult`;
   `--dry-run` never reaches that step. **The storage result is not part of
   the `DumpResult` this slice's `execute_dump_request()` produces (Codex
@@ -837,9 +841,8 @@ pipelines a fourth time.
   storage result to report. A storage field is a real, separate addition
   for whichever future slice folds `cli.py`'s `fold_dump_provenance_into_json`
   write step into this pipeline (not attempted here) — until then, treat
-  `DumpResult` as snapshot + achieved depth only, and update this paragraph
-  again when that slice actually adds the field, rather than describing a
-  field that does not exist yet. See the follow-up investigation below this
+  `DumpResult` as snapshot + achieved depth + effective includes/compile
+  context, no storage result. See the follow-up investigation below this
   bullet for the concrete function split
   (`resolve_dump_request`/`execute_dump_request`) and why `run_dump_request`
   itself keeps returning a bare `AbiSnapshot`. The root `AGENTS.md` "Known
@@ -1004,6 +1007,70 @@ pipelines a fourth time.
   > dedicated pass, not as a rushed follow-on to an already-large
   > investigation.
   >
+  > **Slice landed (2026-08-19, this session): `DumpResult`/
+  > `_resolve_side_snapshot_impl` split, and two concrete new blockers found
+  > while attempting the next slice.** `service_input_resolution.py` gained
+  > `SideResolution` (snapshot + the fold's own effective `includes`/
+  > `CompileContext`, both previously discarded after use) and
+  > `_resolve_side_snapshot_impl` (the real implementation;
+  > `resolve_side_snapshot` is now a one-line wrapper, unchanged for every
+  > existing caller). `service_dump_pipeline.DumpResult` surfaces the same
+  > two fields, populated by `execute_dump_request`. Both additive, fully
+  > tested, zero behavior change for existing callers — a genuinely safe
+  > slice, per this note's own "Net" paragraph above.
+  >
+  > Attempting the *next* slice — routing `perform_elf_dump`'s primary parse
+  > through this shared primitive instead of its own direct
+  > `seed_includes_and_fold_compile_context()` + `dumper.dump()` call — found
+  > this is **not** the small step it looked like: `perform_elf_dump` and
+  > `service._dump_elf` (which `_resolve_side_snapshot_impl` reaches via
+  > `service.resolve_input`) are two **independently evolved** ELF-resolution
+  > pipelines, not one function called from two places. Concretely:
+  > `perform_elf_dump` receives an *already-resolved* `debug_info_path`
+  > (computed by its caller, `dump_cmd`, via `_resolve_debug_artifact`, from
+  > `--debug-root`/`--debuginfod`), while `service._dump_elf` has no
+  > `debug_info_path` parameter at all — it independently *re-derives* the
+  > identical fact from raw `debug_roots`/`enable_debuginfod`/`debuginfod_url`
+  > via its own call to `debug_resolver.resolve_debug_info`. Routing through
+  > `resolve_input` would mean either dropping `perform_elf_dump`'s
+  > already-resolved artifact on the floor, or reconciling two independently
+  > written debug-artifact-resolution implementations to confirm they agree
+  > — itself a real, separate investigation, not a follow-up edit.
+  > `perform_elf_dump`'s `extra_hash_dirs`/`scope_header_dirs` are *not* an
+  > equivalent problem (`_dump_elf` derives its own, deliberately-aligned
+  > versions of both internally — confirmed by its own comments referencing
+  > this exact alignment), so only the debug-artifact-resolution divergence
+  > blocks this specific slice.
+  >
+  > A parallel check of the *other* half — `scan_engine._build_new_snapshot`,
+  > which already calls `service.resolve_input` directly (not `dumper.dump()`,
+  > so it doesn't share `perform_elf_dump`'s ELF-pipeline-divergence problem)
+  > — found a second, independent blocker: `_build_new_snapshot` passes
+  > `symbols_only`/`debug_presence_only` to `resolve_input` (needed for a
+  > binary-depth/debug-presence-only scan), but `_resolve_side_snapshot_impl`
+  > never threads either through (always `False`/`False`) — a real, if
+  > narrower, additive gap to close first. Its `embed_build_source` call also
+  > constructs `public_headers` differently from `embed_side_build_source`'s
+  > (`_expand_public_headers` over the *combined* headers+dirs list, vs. the
+  > shared wrapper's separate, unexpanded treatment of each) — a genuine
+  > behavioral difference, not just a parameter-naming one, that needs
+  > reconciling (which construction is actually correct for which caller)
+  > before scan can safely route through the shared wrapper's embed step.
+  >
+  > **Neither of these two newly-found blockers was attempted this session**
+  > — each needs its own focused investigation (confirm the debug-artifact
+  > resolutions are equivalent before merging them; decide which
+  > public-header construction is correct and unify), and rushing either
+  > under continued session time pressure is exactly what this file's "known
+  > gaps over risky reactive patches" convention exists to prevent, especially
+  > given this exact code area's extensive prior history of exactly this
+  > shape of subtle divergence (see `AGENTS.md`'s L3→L2-fold "Known gaps"
+  > entry, 18+ numbered findings). **PR 3A's full convergence is therefore
+  > still open after this session — PR 3C (PR F) remains blocked** on it, per
+  > this section's own explicit ordering requirement. What this session adds
+  > is a materially more precise map of exactly what blocks it, plus one more
+  > safely-landed, real piece of the eventual solution.
+  >
   > **Slice landed (2026-08-18): the `resolve_dump_request`/
   > `execute_dump_request` split from finding 2 above, coded.**
   > `service_dump_pipeline.py` now has `ResolvedDumpRequest`/`DumpResult`
@@ -1016,6 +1083,49 @@ pipelines a fourth time.
   > That migration, blocker (1)'s scan-baseline narrowing, and blockers 2/3
   > (post-processing hooks, pair-aware scan decision) all remain open. See
   > the root `AGENTS.md`'s PR C entry for the verification detail.
+  >
+  > **Re-investigated (2026-08-19): the dry-run migration (blocker 1) is
+  > confirmed larger than "wire the renderer to a new function call" —
+  > `dump_cmd` has no `DumpRequest` to resolve in the first place.** Read
+  > `cli.py`'s `dump_cmd` in full rather than assumed: it never constructs a
+  > `DumpRequest` anywhere, on either the `--dry-run` or the real-run branch
+  > (confirmed by grep — no `DumpRequest(` call site exists in `cli.py` or
+  > `cli_dump_helpers.py`). Its actual resolution path is two CLI-only
+  > helpers, `resolve_dump_collect_context`/`resolve_dump_compile_context`
+  > (`cli_dump_helpers.py`), which compute `collect_mode`/`header_backend`/
+  > `includes`/`gcc_option_tokens` directly from raw Click parameters —
+  > entirely independent of `service_input_resolution`/
+  > `service_dump_pipeline.resolve_dump_request`, and **not only for the
+  > dry-run report**: those same two locals feed the real (non-dry-run)
+  > `dump()` call a few hundred lines later in the same function. So
+  > migrating `render_dump_dry_run` to build from a real
+  > `ResolvedDumpRequest` is not an isolated renderer change — it requires
+  > first constructing a `DumpRequest` from `dump_cmd`'s ~30 CLI parameters
+  > (matching Click's parsing exactly, including the `_resolved_compile_
+  > context`/`_resolved_collect_mode`/`_resolved_include_labels`/
+  > `_resolved_lang_explicit` private hooks `compare`'s own `ctx.invoke`
+  > already threads through this same command for its implicit-dump
+  > operand), and doing so for **both** branches — dry-run and the real
+  > run — so the two cannot silently diverge the moment one of them
+  > migrates and the other doesn't. That is exactly the scope blocker (2)
+  > already named ("`perform_elf_dump` runs three post-processing passes...
+  > `run_dump_request` has no equivalent hook") from the opposite end: the
+  > real run cannot move to `execute_dump_request()` without those hooks,
+  > and the dry-run preview cannot honestly move to `resolve_dump_request()`
+  > alone while the real run it is meant to preview keeps using a
+  > completely different resolver — a preview built from one resolver
+  > describing an execution built from another is worse than today's "two
+  > independent implementations, kept in sync by hand," since it *looks*
+  > authoritative without being connected to what actually runs. Not
+  > attempted here, for the same reason blockers 2/3 were not: this is a
+  > real, cross-cutting redesign of `dump_cmd`'s ~250-line resolution
+  > section (already documented as needing careful, dedicated review —
+  > `cli_dump_helpers.py` sits at its 2000-line AI-readiness hard cap, so
+  > any new shared surface has to be added to a sibling module, not inline),
+  > not a follow-up to the already-landed `resolve_dump_request`/
+  > `execute_dump_request` split. That split remains real, additive
+  > progress in its own right (§2 above) — it is the primitive a future
+  > `dump_cmd` migration would build on, just not yet consumed by one.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
@@ -1131,6 +1241,55 @@ the parser to lists only — every existing trusted string config would break.
    the requested depth.
 5. Docs carry a minimal throwaway-config example, so the removed flags have a
    one-paste replacement.
+
+> **Prerequisite status (2026-08-19).** 1 and 2 were already implemented —
+> predating this plan (ADR-032 D5): `cli_buildsource.py`'s
+> `cfg_trusted_for_query = build_config is not None or build_query is not
+> None` is the exact gate, and `buildsource.inline._resolve_compile_db`
+> already skips an auto-discovered `.abicheck.yml`'s `build.query` with a
+> recorded diagnostic rather than running it. 4 was already covered too —
+> `tests/test_dry_run_contract.py::
+> test_depth_source_with_prebuilt_pack_build_info_does_not_block` pins the
+> "gate on achieved depth, not compile-DB presence" behavior this item
+> describes. 5 was already covered by existing docs (`docs/reference/
+> config-file.md`, `docs/start/real-world-example.md`,
+> `docs/learn/build-source-data.md`). **3 was the real gap** — `dump
+> --dry-run` had no visibility into the trust decision at all
+> (`render_dump_dry_run` never received `build_query`/`build_compile_db`).
+> Closed additively: a new leaf module,
+> `cli_dump_dry_run_build_query.add_build_query_dry_run_section()` (split
+> out rather than added inline, since `cli_dump_helpers.py` sits at its
+> 2000-line AI-readiness hard cap), mirrors — read-only, never executing —
+> the exact trust decision and `argv`/`cwd` construction
+> `cli_buildsource.embed_build_source`/`buildsource.inline._run_build_query`
+> make at real-run time, and reports the resulting compile-DB path when
+> `build.compile_db` is configured. Wired into `dump_cmd`'s existing
+> `--dry-run` branch in `cli.py`, after `render_dump_dry_run` builds the rest
+> of the report. `dry_run.py`'s shared `SECTION_ORDER` gained one new title
+> ("Build query (trust)") so the section renders in a stable position for
+> every command using `DryRunResult` (only `dump` populates it today; an
+> unpopulated section renders nothing). Tests:
+> `tests/test_dry_run_contract.py::TestDumpDryRunBuildQueryTrust` (untrusted
+> auto-discovered config, trusted `--config`, trusted CLI `--build-query`
+> overriding config, no query configured, determinism, and 26 review-caught
+> reachability/precedence/pack-normalization/exit-code-class/config-discovery
+> edge cases besides — each asserting the query is never actually executed).
+> **Prerequisites 1, 2, 4, and 5 are fully satisfied; 3 is satisfied for
+> every input shape the module's own docstring doesn't name as an open
+> gap** — `cli_dump_dry_run_build_query.py` documents two deliberately
+> unclosed cases where the report can still claim "will run" when the real
+> input would not: a Flow-2 `abicheck_inputs/` pack as the sole
+> `--sources`/`--build-info` input, and a `-H` directory containing no
+> supported header (this second one predates the module — `render_dump_
+> dry_run` has never expanded `-H` directories for validation). Closing
+> either is a scoped follow-up (a second pack-format recognizer for the
+> first; a design decision about real directory-walk validation for the
+> second), not a blocker for the trust decision this prerequisite exists to
+> make visible — but PR 3C's removal itself (`dump --build-query`/`dump
+> --build-compile-db` deletion) should not proceed until both are closed or
+> explicitly accepted as permanent gaps, on top of still waiting on the
+> ordering's own blocker: PR 3A's full convergence (both `dump` and `scan`
+> resolvers), which remains open per that section's own status notes above.
 
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.
@@ -1266,10 +1425,9 @@ The report keeps stating both halves explicitly, so the number is explainable:
 removed.**
 
 **(1) Pack parity — the review's PR B, and the harder blocker.** `--pack` is
-accepted by a single-pair `compare`, rejected by the release fan-out, and only
-partially honoured by `scan` (`cli_scan.py` rejects a gate pack outright,
-having no gate of its own — see the root `AGENTS.md` on `pack_application.py`).
-A pack can assign `gate.exit_code_scheme` and `gate.severity.*`. Removing
+accepted by a single-pair `compare`; the release fan-out and `scan` used to
+reject or only partially honour parts of it (see the slices below for what
+closed). A pack can assign `gate.exit_code_scheme` and `gate.severity.*`. Removing
 `--exit-code-scheme` while pack resolution still differs per front end leaves
 no answerable question about how a legacy pack migrates: the answer would be
 "depends which command reads it." Land first: packs resolved **once** into one
@@ -1357,21 +1515,83 @@ report.
 > config`, the per-library JSON write inside `_compare_release_libraries`,
 > `_compute_release_severity_exit_code`, `_fold_release_global_severity`)
 > agrees with the pack, the same "one fold point, not several independently
-> re-deriving ones" discipline slice 1 established. **What is still open,
-> deliberately not attempted in this slice** (unchanged from slice 1's own
-> list, restated here since the gate-pack gap it named is now closed): the
-> full `GateOptions` object shared by `compare`/release/`scan`/the Action;
-> the effective-config digest recorded in every report; and `scan
-> --against`'s own `kind: gate` rejection (`cli_scan.py`, unaffected by
-> this slice — a scan's exit code follows its verdict directly and still
-> has no gate of its own to fold a pack into). All three still need the
-> `GateOptions` unification as a prerequisite. Tests:
-> `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
+> re-deriving ones" discipline slice 1 established. **What was still open
+> after this slice** (unchanged from slice 1's own list, restated here since
+> the gate-pack gap it named is now closed): the full `GateOptions` object
+> shared by `compare`/release/`scan`/the Action; the effective-config digest
+> recorded in every report; and `scan --against`'s own `kind: gate`
+> rejection. The first two remain open (below); the third closed in slice 3.
+> Tests: `tests/test_pack_application.py`'s `TestOnlyAppliedFieldsAreAccepted`
 > (`test_gate_pack_is_applied_to_a_release_comparison`, replacing the
 > now-stale rejection test of the same name minus "is_applied", and
-> `test_gate_pack_severity_moves_a_release_onto_the_severity_scheme`);
-> `scan`'s own `test_a_gate_pack_is_rejected_by_scan_which_has_no_gate` is
-> unchanged and still passes, confirming this slice left `scan` alone.
+> `test_gate_pack_severity_moves_a_release_onto_the_severity_scheme`).
+>
+> **Slice 3 landed (2026-08-19): `scan --against` also accepts a `kind:
+> gate` pack.** Unlike the release fan-out (slice 2, above), `scan` already
+> has a real `ResolvedCompareConfig` object to fold a pack's contribution
+> into — `resolve_compare_config`, the exact function single-pair `compare`
+> uses, already runs inside `scan_cmd` to resolve `--severity-preset`/
+> `--exit-code-scheme` (direct CLI flags and `.abicheck.yml`) into the
+> `sev_config`/`resolved_exit_scheme` `run_scan_core` gates on — the "scan
+> never consults severity" gap this closed in an earlier PR. So this slice
+> reuses `pack_application.apply_to_compare_config` **directly**, unchanged,
+> rather than a raw-string mirror of it the way the release fan-out's
+> `apply_release_gate_pack` needed: `_resolve_scan_evaluation_config` now
+> takes the already-resolved `resolved_cfg` as a parameter, folds the
+> selected packs' `PackApplication` into it with `apply_to_compare_config`
+> (gated on `gate_supported=True`, no longer `False`), and returns the
+> folded object as a third return value; `scan_cmd` re-derives `sev_config`/
+> `resolved_exit_scheme` from it before `run_scan_core` runs, and
+> `dry_run_scheme_label(resolved_cfg, pack_paths)` (the real `pack_paths`,
+> not a hardcoded `()`) gives `scan --dry-run` the same honest "a selected
+> --pack may adjust it" caveat `compare --dry-run` already gives, rather
+> than resolving the pack early against different pins than the real
+> (later) resolution uses — the same reason `compare --dry-run` never
+> resolves one early either (`dry_run_scheme_label`'s own docstring).
+> **Still open after this slice, unchanged**: the full `GateOptions` object
+> shared by `compare`/release/`scan`/the Action (this slice folds directly
+> onto `ResolvedCompareConfig`, same as single-pair `compare` already did —
+> it does not create a new shared object), and the effective-config digest
+> recorded in every report. Tests: `tests/test_pack_application.py`'s
+> `TestOnlyAppliedFieldsAreAccepted::test_a_gate_pack_is_applied_to_scan`,
+> replacing the now-stale `test_a_gate_pack_is_rejected_by_scan_which_has_
+> no_gate`.
+>
+> **Follow-up fix, same day (Codex review on #801, fresh evidence, real
+> reproduction): the initial slice 3 had a real D8-precedence bug, not just
+> an incomplete receipt.** `_resolve_scan_evaluation_config` built the
+> `PackApplication` from `resolve_scan_config`'s own ADR-049 receipt object
+> — but `SCAN_CONFIG_PARAMS` never included `severity_preset`/
+> `exit_code_scheme`, and that receipt's own `_without_gate_settings` helper
+> additionally blanked the six project-config-sourced gate fields to avoid a
+> stale two-resolver disagreement. So neither an explicit
+> `--severity-preset`/`--exit-code-scheme` nor a `.abicheck.yml` `severity:`/
+> `exit_code_scheme:` block was ever visible to this resolver's D7
+> precedence — every selected gate pack looked unopposed regardless of what
+> was actually stated, and `apply_to_compare_config` (correctly assuming its
+> caller's `PackApplication` already respected D7 precedence, the same
+> assumption that holds for `compare`) silently let the pack win. Reproduced
+> concretely: a removed export scanned with `--severity-preset strict` and a
+> `gate.severity.abi_breaking: warning` pack exited 0, not 4. Fixed at the
+> root: `severity_preset`/`exit_code_scheme` joined `SCAN_CONFIG_PARAMS`
+> (closing the explicit-CLI tier), and `_without_gate_settings` was removed
+> entirely rather than merely extended (closing the project-config tier
+> too) — verified safe specifically for `scan`, which has no `--profile`
+> option unlike `compare`, so `ProjectCompatibilityInputs.from_build_config`
+> and `resolve_compare_config` read the identical six fields off the
+> identical `project_cfg` object with the identical `explicit CLI > project
+> config > built-in default` precedence and cannot disagree the way the
+> blanking was originally written to guard against. `service_scan.
+> run_scan`'s hand-built params dict (the API front end, which has no
+> `severity_preset`/`exit_code_scheme` CLI flags to be explicit about) now
+> passes both as `None`, matching every other field `ScanRequest` does not
+> carry. Tests: `tests/test_pack_application.py`'s
+> `test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset` and
+> `test_a_gate_pack_cannot_override_a_project_config_severity_preset` (both
+> confirmed to fail with the pre-fix exit 0, verified via negative control);
+> `tests/test_cli_scan_receipt_unit.py`'s `TestGateConfigReceipt` rewritten
+> from `TestGateBlanking` to assert the new, accurate provenance instead of
+> the old blanked-to-default one.
 
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.
