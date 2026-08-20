@@ -20,7 +20,15 @@ status. **The published portfolio was reset to one skill as of the
 `native-binary-compatibility-review`) is the sole published skill and an
 internal candidate, not yet validated and not for external publication; the
 other three skills the 2026-08-11 amendment had demoted to prototype status
-are no longer published at all.
+are no longer published at all. **Its workflow content was then fully
+rewritten (the same date's second amendment below, "PR 2 — flagship content
+rewrite")**: a customer-outcome framing, a ten-step decision procedure, an
+integrated named-consumer branch, a narrowed v0.1 validated scope, and a
+structured decision-report contract mapped onto abicheck's real `Verdict`
+values. Still an unvalidated internal candidate — the rewrite changes what
+the skill claims to cover, not its evaluation status; PR 3 (a complete G37
+evaluation corpus and an actual run) and PR 4 (external publication) remain
+open.
 **Decision maker:** (pending — recorded per repository convention)
 
 > **Amendment (2026-08-20, portfolio reset to one internal candidate).**
@@ -99,6 +107,89 @@ are no longer published at all.
 > — it only removes what was frozen at that bar's own admission-scale
 > premise. `skills-src/CLAUDE.md`'s portfolio-status table carries the same
 > one-row state as this amendment.
+
+> **Amendment (2026-08-20, PR 2 — flagship content rewrite).** The
+> 2026-08-20 portfolio-reset amendment above explicitly deferred a full
+> content rewrite of the survivor's workflow ("its own workflow content is
+> unchanged by this amendment beyond the rename and one added citation — a
+> full content rewrite is deliberately deferred, not attempted here").
+> **This amendment records that the deferred rewrite has now happened**,
+> as the second step of the four-step plan that amendment's own text
+> implied (reset → rewrite → evaluate → publish).
+> **What changed:** `review-native-library-change/SKILL.md` was rewritten
+> around a customer-outcome framing (the job ends in an engineering
+> decision, not a command transcript) and a ten-step decision procedure —
+> establish the contract and the decision it serves; choose the correct
+> baseline; establish comparable artifacts and profiles; gather the
+> strongest deterministic evidence; validate comparability and evidence
+> coverage before interpreting a verdict; explain root causes and blast
+> radius; narrow to a named consumer only when asked and supported;
+> recommend the least disruptive remediation; apply a remediation only with
+> authorization, then rebuild and rerun; report the decision, the proof,
+> and the remaining unknowns. Three concrete, substantive changes over the
+> pre-rewrite content:
+> 1. **A real, integrated named-consumer branch**, not the single linking
+>    citation the 2026-08-20 reset left in place. The skill's own text now
+>    states when to reach for `--used-by` versus `--required-symbol`/
+>    `--required-symbols`, restates the `verdict`-is-the-scoped-answer /
+>    `full_verdict`-is-the-library-wide-answer reading rule inline (not only
+>    by reference), and says explicitly when both must be reported.
+>    `native-consumer-compatibility`'s content (git history, the commit
+>    preceding the 2026-08-20 reset) informed this branch; it is not a
+>    second copy of that skill's own two-branch (application/plugin)
+>    structure, since `--used-by`/`--required-symbol` already collapse that
+>    distinction into one CLI dial the way the removed skill's own "why one
+>    skill, two branches" section argued they should.
+> 2. **A new `references/remediation-patterns.md`**, harvested from
+>    `native-api-evolution/references/design-patterns.md` (same git
+>    history), cited from the recommendation step: pImpl/opaque handles,
+>    reserved fields and slots, versioned interfaces, capability
+>    negotiation, the deprecation lifecycle, and the anti-pattern list —
+>    the deeper design vocabulary `shared/remediation-catalog.md`'s
+>    break-family table intentionally stays a one-line-per-family summary
+>    of.
+> 3. **An explicit, narrowed v0.1 validated-scope statement**: C/C++ shared
+>    libraries; Linux ELF; GCC and Clang; old/new built artifacts plus
+>    public headers; matched compiler and target profiles; PR/branch/
+>    candidate-build review. Outside that combination (Mach-O, PE/COFF,
+>    DPC++, a cross-compiler migration, a headerless review), the workflow
+>    may still be pointed at the problem, but the skill now says explicitly
+>    not to report that attempt with the same confidence — the rewritten
+>    output contract's `NOT_VERIFIED` decision state exists for exactly
+>    this case.
+> The rewrite also replaced the informal five-state decision vocabulary an
+> earlier strategy review had sketched (`VERIFIED_COMPATIBLE`,
+> `COMPATIBLE_WITH_DEPLOYMENT_RISK`, `SOURCE_BREAK`, `BINARY_BREAK`,
+> `NOT_VERIFIED`) with an explicit mapping onto abicheck's real
+> `Verdict` enum (`NO_CHANGE`/`COMPATIBLE`, `COMPATIBLE_WITH_RISK`,
+> `API_BREAK`, `BREAKING`) plus the real `verdict: null` not-comparable
+> outcome, rather than inventing report vocabulary the tool does not
+> produce — the sketch's shape survives as the skill's own reporting
+> contract, its names do not survive as claims about report JSON. All
+> exact CLI invocations, flag combinations, and report-JSON field paths
+> that used to sit in the workflow body moved to a new
+> `references/abicheck-adapter.md`, so the workflow narrative stays
+> readable and the backend mechanics stay swappable without a rewrite —
+> per `skills-src/CLAUDE.md`'s Layer A/B/C split, unchanged by this
+> amendment.
+> `native-release-compatibility`'s whole-release-matrix-qualification
+> concern remains explicitly **not** folded in, exactly as the 2026-08-20
+> amendment already stated — this amendment does not revisit that
+> boundary.
+> **What this amendment does not claim.** This is a content rewrite, not
+> new capability, new evidence, or new status. The skill remains the
+> **internal candidate** the 2026-08-20 amendment designated: not yet
+> behaviorally validated, and not for external publication or citation as
+> validated in any user-facing claim. PR 3 (a complete evaluation corpus
+> and an actual run against it — G37) and PR 4 (a thin external-
+> distribution repository, removing the internal-candidate marker) remain
+> fully open, unattempted by this amendment. The eval harness's scenario
+> corpus (`agent-evals/skills/scenarios.yaml`) and rubric were **not**
+> touched by this amendment beyond what its own freshness/drift gates
+> mechanically require — narrowing or growing that corpus to reflect the
+> rewritten branch structure is PR 3's job, not this one's.
+> `skills-src/CLAUDE.md`'s portfolio-status section carries a matching
+> summary of what is now integrated versus still open.
 
 > **Amendment (2026-08-11, flagship-first portfolio freeze — superseded by
 > the 2026-08-20 amendment above).** A strategy
