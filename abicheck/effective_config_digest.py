@@ -112,6 +112,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "contract.overlays",
     "gate.exit_code_scheme",
     "gate.require_complete_analysis",
+    "gate.scope",
     "gate.severity.abi_breaking",
     "gate.severity.potential_breaking",
     "gate.severity.quality_issues",
@@ -202,6 +203,44 @@ def _builtin_policy_base_str(name: Any) -> str:
         return name_str
 
 
+def _gate_scope_str(result: Any) -> str:
+    """Canonical encoding of an ADR-043 scoped-gate selection
+    (``--used-by``/``--required-symbol(s)``), so two runs selecting
+    different consumers/entrypoints don't collide on the digest (Codex
+    review, PR #803, fresh evidence): ``cli_helpers_compare._apply_used_by_
+    scoping``/``_apply_required_symbol_scoping`` stamp ``DiffResult.
+    gate_scope``/``used_by``/``required_symbols`` onto *result* before the
+    report is rendered, and that scoped gate can genuinely replace the
+    reported verdict/findings/exit code -- but neither this digest's rich
+    nor baseline tier read it (it isn't a D7 ``CompatibilityEvaluationConfig``
+    namespace field, and it isn't a ``PolicyFile``/``SeverityConfig`` fact
+    either), so two ``compare --required-symbol A``/``--required-symbol B``
+    runs against the identical pair previously hashed identically. Reads
+    the same JSON-safe projections (``result.used_by``'s ``app`` paths,
+    ``result.required_symbols``'s ``required_entrypoints``) the renderer
+    itself already serializes -- not a second traversal of the underlying
+    ``AppCompatResult``/``PluginHostContractResult`` objects. ``""`` when no
+    scoping was requested at all, the common case."""
+    gate_scope = getattr(result, "gate_scope", None)
+    if gate_scope is None:
+        return ""
+    if gate_scope == "used_by":
+        used_by = getattr(result, "used_by", None) or ()
+        targets = sorted(str(entry.get("app", "")) for entry in used_by)
+    elif gate_scope == "required_symbol":
+        required = getattr(result, "required_symbols", None) or {}
+        targets = sorted(
+            str(e) for e in (required.get("required_entrypoints", ()) or ())
+        )
+    else:
+        targets = []
+    return json.dumps(
+        {"kind": str(gate_scope), "targets": targets},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _packs_str(*pack_groups: Any) -> str:
     """``id@version:sha256`` for every pack identity across *pack_groups*,
     canonical-JSON-encoded (see :func:`_json_list`) -- a pack id/version/
@@ -266,6 +305,8 @@ def effective_config_fields_from_full_config(
     result: Any = None,
     policy_file: Any = None,
     require_complete_analysis: bool = False,
+    severity_config: SeverityConfig | None = None,
+    exit_code_scheme: str | None = None,
 ) -> dict[str, str]:
     """Rich-tier fields from a real ``CompatibilityEvaluationConfig``.
 
@@ -292,12 +333,31 @@ def effective_config_fields_from_full_config(
     depending on it, Codex review, PR #803), so it is threaded here as an
     independent parameter exactly like *severity_config*/*exit_code_scheme*
     already are, rather than pretended to live inside *resolved_config*.
+
+    *severity_config*/*exit_code_scheme* are the same already-resolved pair
+    every caller already threads for the ``exit`` block (see
+    :func:`effective_config_fields_from_diff_result`'s identical parameters)
+    -- ``gate.exit_code_scheme``/``gate.severity.*`` are populated from
+    *these*, never from *resolved_config.gate* directly (CodeRabbit review,
+    PR #803, fresh evidence: ``scan --against``'s own ``resolve_scan_config``
+    deliberately blanks ``resolved_config.gate``'s severity/exit-code-scheme
+    fields to built-in defaults regardless of the run's real
+    ``--severity-preset``/``--exit-code-scheme`` -- see
+    ``cli_scan_receipt._without_gate_settings`` -- so reading them from
+    *resolved_config* there silently discarded the run's real gate. This
+    also closes a class of drift the module docstring already promises
+    doesn't happen ("the digest can never disagree with the exit block it
+    sits beside"): *resolved_config.gate* is D7's own resolved copy, while
+    *severity_config*/*exit_code_scheme* are the value that actually scored
+    this run's real process exit -- for `compare` the two happen to agree
+    today, but there is no structural guarantee they always will, and using
+    the caller-supplied pair removes the possibility entirely rather than
+    relying on that coincidence).
     """
     policy = getattr(resolved_config, "policy", None)
     surface = getattr(resolved_config, "surface", None)
     contract = getattr(resolved_config, "contract", None)
     gate = getattr(resolved_config, "gate", None)
-    severity = getattr(gate, "severity", None)
     assurance = getattr(resolved_config, "assurance", None)
     evidence = getattr(resolved_config, "evidence", None)
     pack_groups = (
@@ -327,14 +387,17 @@ def effective_config_fields_from_full_config(
         "contract.mode": _enum_value(getattr(contract, "mode", None)),
         "contract.unresolved": str(getattr(contract, "unresolved", "") or ""),
         "contract.overlays": _namespaces_str(getattr(contract, "overlays", ())),
-        "gate.exit_code_scheme": str(getattr(gate, "exit_code_scheme", "") or ""),
+        "gate.exit_code_scheme": str(exit_code_scheme or ""),
         "gate.require_complete_analysis": str(bool(require_complete_analysis)),
-        "gate.severity.abi_breaking": _severity_field(severity, "abi_breaking"),
+        "gate.scope": _gate_scope_str(result),
+        "gate.severity.abi_breaking": _severity_field(severity_config, "abi_breaking"),
         "gate.severity.potential_breaking": _severity_field(
-            severity, "potential_breaking"
+            severity_config, "potential_breaking"
         ),
-        "gate.severity.quality_issues": _severity_field(severity, "quality_issues"),
-        "gate.severity.addition": _severity_field(severity, "addition"),
+        "gate.severity.quality_issues": _severity_field(
+            severity_config, "quality_issues"
+        ),
+        "gate.severity.addition": _severity_field(severity_config, "addition"),
         "assurance.require_evidence": str(
             bool(getattr(assurance, "require_evidence", True))
         ),
@@ -385,6 +448,7 @@ def effective_config_fields_from_diff_result(
         "contract.overlays": "",
         "gate.exit_code_scheme": str(exit_code_scheme or ""),
         "gate.require_complete_analysis": str(bool(require_complete_analysis)),
+        "gate.scope": _gate_scope_str(result),
         "gate.severity.abi_breaking": _severity_field(severity_config, "abi_breaking"),
         "gate.severity.potential_breaking": _severity_field(
             severity_config, "potential_breaking"
@@ -432,6 +496,8 @@ def effective_config_fields(
             result=result,
             policy_file=policy_file,
             require_complete_analysis=require_complete_analysis,
+            severity_config=severity_config,
+            exit_code_scheme=exit_code_scheme,
         )
     ctx = getattr(result, "contract_context", None)
     if ctx is not None:
@@ -444,6 +510,8 @@ def effective_config_fields(
                 result=result,
                 policy_file=policy_file,
                 require_complete_analysis=require_complete_analysis,
+                severity_config=severity_config,
+                exit_code_scheme=exit_code_scheme,
             )
     return effective_config_fields_from_diff_result(
         result,

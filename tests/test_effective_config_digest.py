@@ -727,3 +727,153 @@ class TestCompatReportOmitsTheDigest:
         report = json.loads(to_json(result, include_exit_decision=False))
         assert "effective_config_digest" not in report
         jsonschema.validate(report, load_compare_report_schema())
+
+
+def _scoped_result(**dynamic_attrs) -> DiffResult:
+    """A ``_result()`` with ADR-043 scoping attributes set the way the real
+    CLI sets them (plain attribute assignment onto an already-built
+    ``DiffResult`` -- ``gate_scope``/``used_by``/``required_symbols`` are
+    not dataclass fields, see ``cli_helpers_compare.py``'s ``# type:
+    ignore[attr-defined]`` assignments)."""
+    result = _result()
+    for name, value in dynamic_attrs.items():
+        setattr(result, name, value)
+    return result
+
+
+class TestGateScopeAxis:
+    """Codex review, PR #803, fresh evidence: --used-by/--required-symbol(s)
+    scoping (ADR-043) stamps DiffResult.gate_scope/used_by/required_symbols
+    before the report is rendered and can genuinely replace the reported
+    verdict/findings/exit code, but neither tier read it -- so two runs
+    selecting different consumers/entrypoints against the identical pair
+    collided on the digest."""
+
+    def test_no_scoping_is_empty_string(self):
+        result = _result()
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["gate.scope"] == ""
+
+    def test_different_used_by_apps_hash_differently(self):
+        f1 = effective_config_fields(
+            _scoped_result(gate_scope="used_by", used_by=[{"app": "app1.so"}]),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        f2 = effective_config_fields(
+            _scoped_result(gate_scope="used_by", used_by=[{"app": "app2.so"}]),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        assert f1["gate.scope"] != f2["gate.scope"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_different_required_symbols_hash_differently(self):
+        f1 = effective_config_fields(
+            _scoped_result(
+                gate_scope="required_symbol",
+                required_symbols={"required_entrypoints": ["sym_a"]},
+            ),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        f2 = effective_config_fields(
+            _scoped_result(
+                gate_scope="required_symbol",
+                required_symbols={"required_entrypoints": ["sym_b"]},
+            ),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        assert f1["gate.scope"] != f2["gate.scope"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_used_by_vs_required_symbol_hash_differently_even_with_same_target(self):
+        """The "kind" must participate too, not just the target list."""
+        f1 = effective_config_fields(
+            _scoped_result(gate_scope="used_by", used_by=[{"app": "libfoo"}]),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        f2 = effective_config_fields(
+            _scoped_result(
+                gate_scope="required_symbol",
+                required_symbols={"required_entrypoints": ["libfoo"]},
+            ),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        assert f1["gate.scope"] != f2["gate.scope"]
+
+    def test_gate_scope_also_participates_in_the_rich_tier(self):
+        scoped = _result(evaluation_config=_minimal_evaluation_config())
+        scoped.gate_scope = "used_by"
+        scoped.used_by = [{"app": "app1.so"}]
+        f1 = effective_config_fields(
+            scoped,
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        f2 = effective_config_fields(
+            _result(evaluation_config=_minimal_evaluation_config()),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        assert f1["gate.scope"] != f2["gate.scope"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+
+class TestRichTierGateAxesUseCallerSuppliedValues:
+    """CodeRabbit review, PR #803, fresh evidence: scan --against's own
+    resolve_scan_config deliberately blanks the resolved
+    CompatibilityEvaluationConfig's gate.severity/gate.exit_code_scheme
+    fields to built-in defaults (see cli_scan_receipt._without_gate_
+    settings), but a --pack-only scan --against stamps that same blanked
+    config onto DiffResult.evaluation_config -- so the rich tier must
+    read the gate axes from the caller-supplied severity_config/
+    exit_code_scheme parameters (the same pair used for the sibling exit
+    block), never from resolved_config.gate directly, or the digest
+    silently drops the run's real gate."""
+
+    def test_rich_tier_ignores_resolved_configs_own_gate_fields(self):
+        """A resolved_config carrying one exit_code_scheme/severity must
+        not leak into the digest when the caller supplies a different
+        (real) pair -- proving the rich tier doesn't read resolved_config.
+        gate at all for these two axes."""
+        blanked_config = _minimal_evaluation_config(
+            gate=GateConfig(exit_code_scheme="legacy")
+        )
+        result = _result(evaluation_config=blanked_config)
+        real_severity = resolve_severity_config("strict")
+
+        fields_with_real_gate = effective_config_fields(
+            result, severity_config=real_severity, exit_code_scheme="severity"
+        )
+        fields_with_blanked_gate = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields_with_real_gate["gate.exit_code_scheme"] == "severity"
+        assert fields_with_blanked_gate["gate.exit_code_scheme"] == "legacy"
+        assert (
+            effective_config_digest(fields_with_real_gate)
+            != effective_config_digest(fields_with_blanked_gate)
+        )
+
+    def test_rich_tier_severity_fields_track_the_caller_supplied_severity(self):
+        config = _minimal_evaluation_config()
+        result = _result(evaluation_config=config)
+        strict = resolve_severity_config("strict")
+        info_only = resolve_severity_config("info-only")
+
+        f_strict = effective_config_fields(
+            result, severity_config=strict, exit_code_scheme="severity"
+        )
+        f_info = effective_config_fields(
+            result, severity_config=info_only, exit_code_scheme="severity"
+        )
+        assert f_strict["gate.severity.abi_breaking"] != f_info["gate.severity.abi_breaking"] or (
+            f_strict != f_info
+        )
+        assert effective_config_digest(f_strict) != effective_config_digest(f_info)

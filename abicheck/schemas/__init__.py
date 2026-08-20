@@ -620,7 +620,22 @@ from typing import Any
 #:       native legacy/severity scheme and don't represent compat's own
 #:       transform options (``-strict``, ``-source``/``-binary``, ...), so
 #:       emitting it there would let two behaviorally different compat
-#:       reports claim an identical effective configuration.
+#:       reports claim an identical effective configuration. Two more
+#:       fixes landed in a further review round: ``effective_config_
+#:       fields`` gains ``gate.scope`` (ADR-043 ``--used-by``/
+#:       ``--required-symbol(s)`` scoped-gate selection, which can replace
+#:       the reported verdict/findings/exit code but was previously
+#:       unrepresented -- two runs selecting different consumers/
+#:       entrypoints against the identical pair collided on the digest);
+#:       and the rich tier's ``gate.exit_code_scheme``/``gate.severity.*``
+#:       now always come from the caller's own already-resolved severity/
+#:       exit-code-scheme (the same pair used for the sibling ``exit``
+#:       block) rather than from the resolved
+#:       ``CompatibilityEvaluationConfig`` directly -- closing a real bug
+#:       where a ``--pack``-only ``scan --against`` recorded its digest
+#:       from ``resolve_scan_config``'s deliberately gate-blanked config
+#:       instead of the run's real ``--severity-preset``/
+#:       ``--exit-code-scheme``.
 REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
@@ -921,9 +936,16 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        from). Additive keys, absent only for the same NOT_COMPARABLE/
 #:        audit-only shapes ``exit``/``analysis_assurance`` themselves are.
 #: 1.20 -- ``effective_config_fields`` (1.19, above) gains
-#:        ``gate.require_complete_analysis`` -- `compare`'s
-#:        report_schema_version 2.46 counterpart, same field, same reason
-#:        (see that version's own entry). Additive key.
+#:        ``gate.require_complete_analysis`` and ``gate.scope`` -- `compare`'s
+#:        report_schema_version 2.46 counterpart, same fields, same reasons
+#:        (see that version's own entry). Also: the rich tier's gate axes
+#:        now come from the caller's own resolved severity/exit-code-scheme
+#:        rather than the resolved ``CompatibilityEvaluationConfig``
+#:        directly -- this is *scan*'s own bug being fixed here, since
+#:        ``resolve_scan_config`` deliberately blanks that config's own
+#:        gate fields, and a ``--pack``-only ``scan --against`` previously
+#:        recorded the digest from that blanked copy instead of the run's
+#:        real gate. Additive keys.
 SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

@@ -18,4 +18,13 @@
   (not just its bare name), matching the rich tier. Both fields are omitted
   (schema-optional, like `exit`) from `compat check --report-format json`
   output, since that front end's own transform options (`-strict`,
-  `-source`/`-binary`, ...) aren't represented by this digest.
+  `-source`/`-binary`, ...) aren't represented by this digest. The field
+  set also now covers ADR-043 `--used-by`/`--required-symbol(s)` scoped
+  gates (`gate.scope`), and the rich tier's gate axes
+  (`gate.exit_code_scheme`/`gate.severity.*`) now always come from the
+  caller's own already-resolved severity/exit-code-scheme (the same pair
+  used for the `exit` block) rather than from the resolved
+  `CompatibilityEvaluationConfig` directly — closing a real bug where a
+  `--pack`-only `scan --against` recorded its digest from `resolve_scan_
+  config`'s deliberately gate-blanked config instead of the run's real
+  `--severity-preset`/`--exit-code-scheme`.
