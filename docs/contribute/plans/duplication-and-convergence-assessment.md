@@ -254,6 +254,7 @@ read from.
 class EffectiveGate:
     exit_code_scheme: str      # e.g. "legacy" or "severity"
     severity: EffectiveSeverity
+    require_complete_analysis: bool
 
 @dataclass(frozen=True)
 class EffectiveEvaluationConfig:
@@ -284,8 +285,16 @@ selected, so a consumer would otherwise have to keep an out-of-band raw
 string (defeating the point of one runtime object) or re-derive the scheme
 from severity, reintroducing the exact bug CLI-cleanup-phase-two's PR B
 already found and fixed once (a re-derived scheme let a severity-only gate
-pack silently override an explicit `--exit-code-scheme legacy`). Both
-fields feed the digest.
+pack silently override an explicit `--exit-code-scheme legacy`).
+`require_complete_analysis` belongs in the same object for the identical
+reason, not as a separate follow-on: two otherwise-identical runs differing
+only by `--require-complete-analysis` exit successfully in one and fail in
+the other on incomplete evidence, and the existing digest implementation
+(`effective_config_digest.py`) already records this input as its own
+`gate.require_complete_analysis` key — leaving it out of the sole runtime
+object this section proposes would mean two runs with genuinely different
+gate behavior could still land on the same `EffectiveEvaluationConfig` and
+digest. All three `gate` fields feed the digest.
 
 This object is consumed directly by `compare`, `scan`, the release
 fan-out, and bundle/matrix findings alike, with the resolver remaining the
@@ -412,6 +421,7 @@ any serialization:
 class ReportEnvelope:
     operation: OperationKind
     schema_version: str
+    operational_state: OperationalState  # SUCCESS / NOT_COMPARABLE / ERROR / UNAVAILABLE
     inputs: InputReport
     resolution: ResolutionReport
     effective_config: EffectiveConfigReport
@@ -430,6 +440,18 @@ with `full_evaluation` (the whole-library result) and `effective_evaluation`
 every renderer (JSON, Markdown, SARIF, JUnit, HTML, one-line) as a pure
 projection — none of them modifying verdicts, inventing findings,
 recomputing gate status, or parsing another renderer's output.
+`operational_state` is its own field, not folded into `exit_decision` or
+either `EvaluationSummary` — the "Smaller, concrete duplication" section
+below states the rule this field exists to satisfy: `OperationalState`
+(`SUCCESS`/`NOT_COMPARABLE`/`ERROR`/`UNAVAILABLE`) must stay a distinct
+axis from `CompatibilityVerdict` ordering, never spliced into it. Encoding
+it only as an `ExitDecision` contribution would still leave aggregate and
+renderers reconstructing operational status from exit-code semantics — the
+exact drift this envelope exists to end; placing it inside either
+`EvaluationSummary` would conflate a compatibility result with whether a
+comparison could be evaluated at all, which is precisely what
+`aggregate.py`'s existing, correct separation of these concerns already
+gets right and this envelope must not regress.
 
 ### P1 — Aggregate consumes representations, not decisions
 
@@ -715,19 +737,26 @@ block-everything-immediately):
    drive-by addition to this guardrail's allowlist.
 4. Every *completed-operation exit of a modeled compatibility-analysis
    command* — one of the operations `ExitDecision`'s axes actually cover
-   (`dump`, `compare`, `scan`, release, aggregate, `compat`, appcompat,
-   `deps compare`) — derives from an `ExitDecision` (Phase 3). Scoped
-   deliberately, in two directions: (a) a bad invocation or an aborted run
-   has no evaluated result to derive a decision from, and `cli.py`'s
-   `_AbicheckGroup.main` already, correctly, maps those before any
-   operation runs (Click `UsageError` → `_EXIT_USAGE_ERROR`/64,
-   `click.exceptions.Abort` → 1); (b) a `project validate`/
-   `project validate-build`/`project plan`-family command
-   (`cli_project.py`) builds its own evaluated report and exits
-   `0 if report.ok else 1` on a question `ExitDecision`'s axes don't model
-   at all (config/build-manifest validity, not ABI compatibility) — this
-   guardrail must not force either shape into `operational_error`, or
-   demand a permanent, unreviewable exception for either.
+   (`compare`, `scan`, release, aggregate, `compat`, appcompat, `deps
+   compare`) — derives from an `ExitDecision` (Phase 3). `dump` is
+   deliberately excluded from this list, not merely unmentioned: a plain
+   `dump` performs no compatibility evaluation at all — its own target
+   pipeline (P0's artifact-resolution section above) ends at
+   `ArtifactResult`, never at an evaluated compatibility result, and Phase
+   3's per-operation policy list has no `DumpExitPolicy` for exactly that
+   reason. Requiring `dump`'s exit to derive from `ExitDecision` would force
+   fabricating compatibility-evaluation state a bare extraction command
+   never has. Scoped deliberately in two further directions: (a) a bad
+   invocation or an aborted run has no evaluated result to derive a
+   decision from, and `cli.py`'s `_AbicheckGroup.main` already, correctly,
+   maps those before any operation runs (Click `UsageError` →
+   `_EXIT_USAGE_ERROR`/64, `click.exceptions.Abort` → 1); (b) a `project
+   validate`/`project validate-build`/`project plan`-family command
+   (`cli_project.py`) builds its own evaluated report and exits `0 if
+   report.ok else 1` on a question `ExitDecision`'s axes don't model at all
+   (config/build-manifest validity, not ABI compatibility) — this guardrail
+   must not force any of these three shapes into `operational_error`, or
+   demand a permanent, unreviewable exception for any of them.
 5. Every persisted *compatibility-analysis* report (the same modeled
    operations as item 4) is built from a `ReportEnvelope` (Phase 4).
    Scoped identically and for the identical reason: `project validate` and
