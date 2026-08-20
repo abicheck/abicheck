@@ -128,7 +128,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:010d5ab7ec7fbcba8d67212f41faf1ecc60944926dbb7c09c726ef7262015c68",
+      "digest": "sha256:a4b55ad99b319a193c79859a1f51214dedf7ed0fdbd9d8851701852a8550f5dd",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -147,14 +147,14 @@
         "examples/ground_truth.json"
       ],
       "skill": "review-native-library-change",
-      "status": "planned"
+      "status": "ready"
     },
     "consumer-unaffected-despite-break": {
       "affects": [
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:2a26c08440c23f934d14f774aeed917b213abbedff428e4c1622fc4b0bb81c57",
+      "digest": "sha256:f8fffa38c707a1c52af67855877a0027feeec8d17c3bc61ea4a11256d10c7ae9",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "COMPATIBLE"
@@ -173,14 +173,14 @@
         "examples/ground_truth.json"
       ],
       "skill": "review-native-library-change",
-      "status": "planned"
+      "status": "ready"
     },
     "contract-coverage-incomplete": {
       "affects": [
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:1aa86388e9d9aac0d16960896ca6f39a99c480783e3c8e3c4d9daa3998751952",
+      "digest": "sha256:dbdf429f2c435c6c010a2a15c3de50e43fca21993e779a5af7a592a71cc12481",
       "expected": {
         "uncertainty": "contract_coverage_incomplete",
         "verdict": "COMPATIBLE"
@@ -198,7 +198,7 @@
         "examples/ground_truth.json"
       ],
       "skill": "review-native-library-change",
-      "status": "planned"
+      "status": "ready"
     },
     "enum-value-change": {
       "affects": [
@@ -233,7 +233,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:600016a8bc3b113b536d76a9e01a0c1200d24331e9d326efeb2a81e220a3894e",
+      "digest": "sha256:7cca2bf5a1c30ef23b70b38741855b22185779b4ab7e5d28573c7afeaa155d3c",
       "expected": {
         "uncertainty": "evidence_too_shallow",
         "verdict": "COMPATIBLE"
@@ -250,14 +250,14 @@
         "examples/ground_truth.json"
       ],
       "skill": "review-native-library-change",
-      "status": "planned"
+      "status": "ready"
     },
     "not-comparable-pair": {
       "affects": [
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:cf10ceb77d025e1fb9b36a1e322711c494a53dfba52caa9cb017f7f92ec1fcc7",
+      "digest": "sha256:af074cd44e03e4bde03c6e692e5097662afd3db3da98a433bf6c539f9f92dcff",
       "expected": {
         "uncertainty": "not_comparable",
         "verdict": null
@@ -274,14 +274,14 @@
         "examples/ground_truth.json"
       ],
       "skill": "review-native-library-change",
-      "status": "planned"
+      "status": "ready"
     },
     "plugin-required-symbol-loss": {
       "affects": [
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:af0665113668ae0870c2d591d2e8164550bf218fc4a0876a0df61c84e9b3fa8f",
+      "digest": "sha256:c6c6be2db213afd4c8684130683e69e45cab75c1d0b4546767d6dd6c05c9f2b2",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -301,7 +301,7 @@
         "examples/ground_truth.json"
       ],
       "skill": "review-native-library-change",
-      "status": "planned"
+      "status": "ready"
     },
     "removed-export": {
       "affects": [

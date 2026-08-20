@@ -42,6 +42,60 @@ python agent-evals/skills/runners/claude_code.py --out /tmp/skill-eval --repetit
 python agent-evals/skills/run_skill_eval.py --runs /tmp/skill-eval --json /tmp/grades.json
 ```
 
+## Environment prerequisites for a real run
+
+Two environment gaps block every skill-arm run before it reaches the
+scenario at all, found and closed while producing this directory's first
+real evidence (G37 Phase 3 pilot). Neither is a defect in the skill or the
+harness — both are "the sandbox lacks what a real deployment already has,"
+and a run against an unfixed sandbox produces a *contaminated* comparison,
+not a low score: the skill-arm dead-ends at its own preflight while the
+baseline arm proceeds normally, which reads as "the skill hurts," when the
+actual cause is that neither arm had a workable toolchain.
+
+1. **`abicheck --version` must report a version inside every ready skill's
+   declared `abicheck-version-range`.** A fresh editable install
+   (`pip install -e .`) stamps `importlib.metadata` from `pyproject.toml`'s
+   own `version` field — which, per this repo's own convention
+   (`skills-src/CLAUDE.md` rule 7), stays at the *last cut* release number
+   between releases even though the working tree's actual CLI surface is
+   already ahead of it. `review-native-library-change` declares
+   `>=0.6.0,<0.7.0`; a checkout still reporting an earlier version (e.g.
+   `0.5.0`) makes the skill's own preflight step — correctly, per its own
+   stated contract — refuse to proceed on every single skill-arm run. This
+   surfaced as a real run's own `not_comparable` misfire: see "A `null`
+   verdict is a claim too" below, which was originally written from exactly
+   this failure mode without yet naming the cause. **Do not "fix" this by
+   loosening the skill's declared range** — the range is a real fact about
+   which release contains which CLI surface, not a knob to tune per
+   environment. Instead, for an evaluation environment only, make
+   `abicheck --version` report truthfully what the checkout can already do:
+   patch the installed distribution's own `dist-info/METADATA` `Version:`
+   field to the floor version (e.g. `sed -i 's/^Version: 0.5.0/Version:
+   0.6.0/' $(python -c "import abicheck,os;print(os.path.dirname(abicheck.__file__))")-0.5.0.dist-info/METADATA`
+   or the equivalent for the actual installed distribution path) —
+   never edit `pyproject.toml`'s own `version` field to do this, since that
+   is a real release decision, not an evaluation convenience. This is local,
+   ephemeral, outside version control, and must never be treated as
+   evidence the version was actually released.
+2. **`abicheck compare --depth headers`/`dump` need a header-AST frontend
+   this host can satisfy.** `abicheck`'s default is CastXML, policy-gated to
+   `>=0.6.11,<0.8.0` (`castxml_policy.py`); a plain `apt install castxml` on
+   a recent Ubuntu base commonly resolves an older build (observed:
+   `0.6.3-1build2`) that abicheck correctly refuses as unsupported rather
+   than silently trusting. Either install a real conda-forge CastXML in the
+   supported range, or set `ABICHECK_ALLOW_AST_FALLBACK=1` in the runner's
+   environment (inherited by every nested `abicheck` invocation both arms
+   make) so a rejected CastXML degrades to the direct-Clang backend instead
+   of hard-erroring — `clang`/`clang++` are commonly already present.
+   `--ast-frontend clang` forced explicitly is the alternative if the
+   fallback's own warning noise is unwanted; either is a legitimate,
+   disclosed environment choice, not a change to what is being measured.
+
+Record both facts (and the resolution actually used) alongside any
+evaluation results this directory produces — a scorecard is not
+interpretable without knowing whether these were fixed for that run.
+
 ## The workspace must not contain the answer
 
 Same failure as the `--out` rule below, one directory further in. A catalog case
