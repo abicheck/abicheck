@@ -139,6 +139,43 @@ def reject_hybrid_source_frontend(
             )
 
 
+def _gated_build_query_inputs(
+    build_config: Path | None,
+    build_query: str | None,
+    *,
+    allow_build_query: bool,
+) -> tuple[Path | None, str | None]:
+    """The real trust gate on *build_config*/*build_query* -- shared by both
+    the L2 seed and the L3-L5 embed step so a caller's permission decision is
+    computed once and applied identically everywhere (Codex review, fresh
+    evidence, two rounds).
+
+    ``build_query`` is a trusted **executable command** (``build.query`` in
+    ``.abicheck.yml``, or ``--build-query`` on the CLI); ``build_config`` is a
+    path to a ``.abicheck.yml`` that may itself carry a ``build.query`` key,
+    so it carries the identical execution risk by proxy -- both are forced to
+    ``None`` unless *allow_build_query* is exactly ``True``, regardless of
+    what the caller passed. **``build_compile_db`` is deliberately not
+    gated by this function** (see its own call sites) -- it is a bare path/
+    glob naming an *existing* ``compile_commands.json``, a pure data read
+    with "no such restriction" (matching this repo's own established
+    ``dump --build-compile-db`` vs. ``--build-query`` distinction, and
+    ``embed_build_source``'s own pre-existing behavior). Gating it the same
+    way as the executable inputs would silently degrade a caller's real
+    include paths/defines/dialect for supplying data that was never a
+    permission question in the first place.
+
+    Relying on ``seed_includes_and_fold_compile_context``'s/
+    ``collect_inline_pack``'s own identically-named ``allow_build_query``
+    parameter would be wrong here -- it is a documented, deprecated no-op
+    (``buildsource/inline.py``'s ``collect_inline_pack`` docstring). This
+    function is the one place that decision is actually enforced.
+    """
+    if allow_build_query is not True:
+        return None, None
+    return build_config, build_query
+
+
 def _seeded_includes_and_compile_context(
     side: InputSpec,
     evidence: SideEvidence,
@@ -220,11 +257,16 @@ def _seeded_includes_and_compile_context(
     primitive instead of a second, independent call to the same underlying
     function.
 
-    **Enforced here, not merely forwarded (Codex review, fresh evidence)**:
-    *allow_build_query* gates whether *build_config*/*build_query*/
-    *build_compile_db* are forwarded at all — when it is not exactly
-    ``True``, all three are forced to ``None`` regardless of what the caller
-    passed, so this function's own real trust decision does not rest on
+    **Enforced here, not merely forwarded (Codex review, fresh evidence, two
+    rounds)**: *allow_build_query* gates whether *build_config*/*build_query*
+    — the two potentially-*executable* inputs — are forwarded at all, via the
+    shared :func:`_gated_build_query_inputs` (also used by
+    :func:`_resolve_side_snapshot_impl`'s embed step, so a caller's
+    permission decision is computed once and applied identically to both the
+    seed and the L3-L5 embed). *build_compile_db* is deliberately **not**
+    gated — see that helper's own docstring for why a bare data path/glob
+    naming an existing compile database is not the same risk as a trusted
+    command. This function's own real trust decision does not rest on
     ``collect_inline_pack``'s identically-named parameter, which is a
     documented, deprecated no-op (``buildsource/inline.py``'s own
     ``collect_inline_pack`` docstring: "``allow_build_query`` is accepted
@@ -258,16 +300,11 @@ def _seeded_includes_and_compile_context(
         return list(side.includes), evidence.compile, False, []
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
-    # The real trust gate for this function, not merely a pass-through --
-    # see this function's own docstring for why relying on
-    # seed_includes_and_fold_compile_context's/collect_inline_pack's own
-    # `allow_build_query` parameter would be wrong (it's a documented no-op
-    # there). An unauthorized caller must never reach a trusted-query
-    # decision downstream, regardless of what it passed.
-    if allow_build_query is not True:
-        build_config = None
-        build_query = None
-        build_compile_db = None
+    # See _gated_build_query_inputs's own docstring: build_compile_db is a
+    # data path, not gated -- only the two potentially-executable inputs are.
+    build_config, build_query = _gated_build_query_inputs(
+        build_config, build_query, allow_build_query=allow_build_query
+    )
 
     ctx = evidence.compile
     cleanups: list[Callable[[], None]] = []
@@ -417,6 +454,15 @@ def _resolve_side_snapshot_impl(
     # returning -- it drains its own cleanups internally on
     # HeaderCompileContextAmbiguousError (see its docstring), so an empty
     # list here is correct, not a leak.
+    # Computed once, shared by the seed below and the embed step further
+    # down, so both apply the identical permission decision (Codex review,
+    # fresh evidence) rather than each independently gating build_config/
+    # build_query -- see _gated_build_query_inputs's own docstring.
+    # build_compile_db is deliberately not part of this gate (a data path,
+    # not an executable command) and is forwarded to both call sites as-is.
+    _gated_build_config, _gated_build_query = _gated_build_query_inputs(
+        build_config, build_query, allow_build_query=bool(allow_build_query)
+    )
     cleanups: list[Callable[[], None]] = []
     try:
         includes, compile_ctx, context_applied, cleanups = (
@@ -425,8 +471,8 @@ def _resolve_side_snapshot_impl(
                 evidence,
                 lang=lang,
                 lang_explicit=lang_explicit,
-                build_config=build_config,
-                build_query=build_query,
+                build_config=_gated_build_config,
+                build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
                 allow_build_query=bool(allow_build_query),
             )
@@ -475,6 +521,9 @@ def _resolve_side_snapshot_impl(
                 public_header_dirs,
                 changed_paths=changed_paths,
                 allow_build_query=bool(allow_build_query),
+                build_config=_gated_build_config,
+                build_query=_gated_build_query,
+                build_compile_db=build_compile_db,
             )
     finally:
         # Only after the L2 parse (and any embed) has consumed the seeded dirs:
@@ -501,6 +550,9 @@ def embed_side_build_source(
     *,
     changed_paths: tuple[str, ...] = (),
     allow_build_query: bool = False,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Embed one side's inline L3-L5 build/source evidence into *snap*.
 
@@ -520,6 +572,19 @@ def embed_side_build_source(
     ``dump``'s typed pipeline) is unaffected — only ``scan``'s candidate-side
     resolution passes non-default values, for its POI-focused L4 replay
     scoping and its CLI-resolved trusted-build-query permission.
+
+    *build_config*/*build_query*/*build_compile_db* (Codex review, fresh
+    evidence): the identical build inputs the caller already resolved for
+    the L2 seed (:func:`_resolve_side_snapshot_impl` forwards its own
+    already-gated values here — see :func:`_gated_build_query_inputs`, the
+    single place *build_config*/*build_query* are actually authorized).
+    Without this, the L2 header-AST parse and the L3-L5 embed could resolve
+    *different* build configurations for the same input — the L2 seed using
+    the caller's explicit config while this embed step fell back to
+    auto-discovery — so the snapshot's own evidence layers could silently
+    describe two different builds, and an explicitly requested depth could
+    fail to be satisfied despite the caller having supplied exactly what it
+    needed.
     """
     import click
 
@@ -534,6 +599,9 @@ def embed_side_build_source(
             snap,
             build_info=side.build_info,
             sources=side.sources,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
             changed_paths=changed_paths,
