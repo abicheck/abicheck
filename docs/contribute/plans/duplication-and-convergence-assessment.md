@@ -118,9 +118,14 @@ partially-equivalent paths exist today:
    both sides and `checker.compare()` directly (`abicheck/stack_checker.py`),
    and `cli_stack.py`'s `deps_compare_cmd` independently computes its own
    process exit code from `result.loadability`/`result.abi_risk` rather than
-   through any shared exit model — another axis Phase 3 will need to cover
-   (`not_comparable` already applies; loadability/ABI-risk floor/warn/fail
-   does not map cleanly onto the other axes listed there yet).
+   through any shared exit model — Phase 3 covers this with two new axes
+   and a `DepsCompareExitPolicy` (see that section).
+8. The probe harness: `probe_harness._snapshot_object_file()` (used by
+   `run_probe_matrix(..., snapshot=True)`, the header-only-library
+   compile-and-snapshot driver behind G25/G26-family evidence-tier work)
+   also calls `dumper.dump()` directly on each compiled probe object.
+   Deliberately called out separately from the seven user-facing operations
+   above, since it isn't one — see "backend-level exception" below.
 
 `service_dump_pipeline.py` documents directly that native dump behavior
 historically lived around `resolve_input()` in CLI code, forcing non-CLI
@@ -321,12 +326,18 @@ and another making the field optional), `compatibility_gate`,
 `scoped_gate`, `contract_coverage`, `analysis_assurance`,
 `crosscheck_promotion`, `not_comparable`, `budget_overflow`,
 `operational_error`, `removed_required_artifact`,
-`missing_required_target`, and `unexpected_target`; and per-operation
-policies (`NativeCompareExitPolicy`, `ScanExitPolicy`, `ReleaseExitPolicy`,
-`AggregateExitPolicy`, `AbiccExitPolicy`) that read the same evaluated
-result but keep each operation's own external exit-code contract —
-`compat`'s `0/1/2/...` mapping in particular should be derived through
-`AbiccExitPolicy`, not bypass the shared model.
+`missing_required_target`, `unexpected_target`, and two axes for `deps
+compare`'s own dependency-loadability result — `dependency_load_failure`
+and `dependency_abi_risk` — since `cli_stack.py`'s `deps_compare_cmd`
+today distinguishes three outcomes (loadability/ABI-break failure → 4,
+ABI risk or loadability warning → 1) that don't map onto any axis above;
+and per-operation policies (`NativeCompareExitPolicy`, `ScanExitPolicy`,
+`ReleaseExitPolicy`, `AggregateExitPolicy`, `AbiccExitPolicy`, and
+`DepsCompareExitPolicy` for the two new axes plus the existing
+`not_comparable`) that read the same evaluated result but keep each
+operation's own external exit-code contract — `compat`'s `0/1/2/...`
+mapping in particular should be derived through `AbiccExitPolicy`, not
+bypass the shared model.
 
 ### P1 — Reporting composes too late
 
@@ -568,17 +579,31 @@ block-everything-immediately):
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
    gate, which today only covers `checker.compare`).
-3. Every artifact extraction call site routes through the future artifact
-   application service (Phase 1).
-4. Every *completed-operation* process exit — one where an evaluated
-   result actually exists — derives from an `ExitDecision` (Phase 3).
-   Scoped deliberately: a bad invocation or an aborted run has no evaluated
-   result to derive a decision from, and `cli.py`'s `_AbicheckGroup.main`
-   already, correctly, maps those before any operation runs (Click
-   `UsageError` → `_EXIT_USAGE_ERROR`/64, `click.exceptions.Abort` → 1) —
-   this guardrail must not force a frontend-level usage error or abort into
-   `operational_error` or demand a permanent, unreviewable exception to the
-   check.
+3. Every artifact extraction call site *for the seven user-facing
+   operations named in Phase 1* routes through the future artifact
+   application service. Deliberately excludes `probe_harness.
+   _snapshot_object_file()`: it has no CLI/API entry point today (nothing
+   outside `probe_harness.py` and its own tests calls
+   `run_probe_matrix()`), so it is a backend-level exception recorded here
+   explicitly, not a call site this guardrail can silently forget — if a
+   real user-facing command starts calling `run_probe_matrix()`, that
+   command's routing becomes a Phase 1 item at the same time, not a
+   drive-by addition to this guardrail's allowlist.
+4. Every *completed-operation exit of a modeled compatibility-analysis
+   command* — one of the operations `ExitDecision`'s axes actually cover
+   (`dump`, `compare`, `scan`, release, aggregate, `compat`, appcompat,
+   `deps compare`) — derives from an `ExitDecision` (Phase 3). Scoped
+   deliberately, in two directions: (a) a bad invocation or an aborted run
+   has no evaluated result to derive a decision from, and `cli.py`'s
+   `_AbicheckGroup.main` already, correctly, maps those before any
+   operation runs (Click `UsageError` → `_EXIT_USAGE_ERROR`/64,
+   `click.exceptions.Abort` → 1); (b) a `project validate`/
+   `project validate-build`/`project plan`-family command
+   (`cli_project.py`) builds its own evaluated report and exits
+   `0 if report.ok else 1` on a question `ExitDecision`'s axes don't model
+   at all (config/build-manifest validity, not ABI compatibility) — this
+   guardrail must not force either shape into `operational_error`, or
+   demand a permanent, unreviewable exception for either.
 5. Every persisted report is built from a `ReportEnvelope` (Phase 4).
 6. Every effective evaluation carries a digest (Phase 2).
 
@@ -688,10 +713,18 @@ paths, or resource lifetime differently from everything else.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
 --against`'s own nested baseline comparison, release per-library compare,
-and the Python API must produce identical: canonical finding IDs
+the Python API, `appcompat.check_appcompat()`'s pre-scope
+`compare_snapshots()` call (before its own `scope_diff_to_app()` step
+applies app-usage narrowing), and each dependency pair's `_run_abi_diff()`
+inside `deps compare` must produce identical: canonical finding IDs
 (`finding_identity.py`); effective verdicts; configuration digest; contract
-decisions; assurance decisions; compatibility exit contribution. Scoped
-deliberately to `scan`'s baseline comparison rather than its overall
+decisions; assurance decisions; compatibility exit contribution. Naming
+appcompat and `deps compare` here matters independently of Phase 1's own
+migration list — that phase only guarantees their *extraction* moves onto
+the shared pipeline; without this equivalence test also covering their
+*comparison* step, their finding IDs, contract decisions, or verdict
+processing could still silently diverge even after extraction converges.
+Scoped deliberately to `scan`'s baseline comparison rather than its overall
 result: `scan --against --crosscheck KEY=error` intentionally lets
 `scan_engine._crosscheck_severity_exit` promote an otherwise-clean run to
 `API_BREAK` (recorded as `promoted_crosscheck`) — a real, scan-only axis
