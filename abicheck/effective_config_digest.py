@@ -112,6 +112,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "surface.internal_namespaces",
     "surface.explicit_scope",
     "surface.scope_to_public_surface",
+    "surface.scope_to_public_surface_requested",
     "contract.mode",
     "contract.unresolved",
     "contract.overlays",
@@ -475,6 +476,9 @@ def effective_config_fields_from_full_config(
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
         ),
+        "surface.scope_to_public_surface_requested": str(
+            bool(getattr(result, "scope_to_public_surface_requested", True))
+        ),
         "contract.mode": _enum_value(getattr(contract, "mode", None)),
         "contract.unresolved": str(getattr(contract, "unresolved", "") or ""),
         "contract.overlays": _namespaces_str(getattr(contract, "overlays", ())),
@@ -557,6 +561,9 @@ def effective_config_fields_from_diff_result(
         ),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
+        ),
+        "surface.scope_to_public_surface_requested": str(
+            bool(getattr(result, "scope_to_public_surface_requested", True))
         ),
         "contract.mode": "",
         "contract.unresolved": "",

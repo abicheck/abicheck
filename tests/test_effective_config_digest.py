@@ -1564,3 +1564,113 @@ class TestReconcileBuildContextAxis:
         on = compare(old_snap, new_snap, reconcile_build_context=True)
         assert off.reconcile_build_context_enabled is False
         assert on.reconcile_build_context_enabled is True
+
+
+class TestScopeToPublicSurfaceRequestedAxis:
+    """Codex review, PR #803, fresh evidence: DiffResult.scope_to_public_
+    surface is stamped from the *derived* scope_active =
+    scope_to_public_surface or public_surface_allowlist is not None,
+    which reads True whenever a --post-manifest allowlist is active
+    regardless of the raw --scope-public-headers flag. But
+    FilterNonPublicSurface._run_allowlist only honors the
+    force_public_symbols widening overlay when the *raw* flag is true, so
+    two runs sharing the same manifest and forced-public symbols but
+    opposite raw scope_to_public_surface settings retain genuinely
+    different findings while the pre-fix digest read identically."""
+
+    def test_flag_changes_the_baseline_digest(self):
+        raw_false = _result(scope_to_public_surface_requested=False)
+        raw_true = _result(scope_to_public_surface_requested=True)
+        f1 = effective_config_fields(
+            raw_false, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            raw_true, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["surface.scope_to_public_surface_requested"] == "False"
+        assert f2["surface.scope_to_public_surface_requested"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_flag_changes_the_rich_tier_digest(self):
+        config = _minimal_evaluation_config()
+        raw_false = _result(
+            evaluation_config=config, scope_to_public_surface_requested=False
+        )
+        raw_true = _result(
+            evaluation_config=config, scope_to_public_surface_requested=True
+        )
+        f1 = effective_config_fields(
+            raw_false, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            raw_true, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            f1["surface.scope_to_public_surface_requested"]
+            != f2["surface.scope_to_public_surface_requested"]
+        )
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_reproduces_the_reported_collision(self):
+        """End-to-end: identical POST manifest + forced-public symbols,
+        opposite raw --scope-public-headers -- confirms the two runs
+        genuinely retain different findings (the collision the finding
+        reported) while the new field now distinguishes them."""
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        old_snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("pp_a", "pp_a"), _fn("priv_b", "priv_b")],
+        )
+        new_snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("pp_a", "pp_a")],  # priv_b removed
+        )
+
+        scoped_on = compare(
+            old_snap,
+            new_snap,
+            scope_to_public_surface=True,
+            public_surface_allowlist={"pp_a"},
+            force_public_symbols={"priv_b"},
+        )
+        scoped_off = compare(
+            old_snap,
+            new_snap,
+            scope_to_public_surface=False,
+            public_surface_allowlist={"pp_a"},
+            force_public_symbols={"priv_b"},
+        )
+
+        # Both runs' derived scope_to_public_surface reads True (a
+        # manifest was given), but they retain different findings for
+        # priv_b's removal -- exactly the collision reported.
+        assert scoped_on.scope_to_public_surface is True
+        assert scoped_off.scope_to_public_surface is True
+        priv_b_kept_on = any("priv_b" in c.symbol for c in scoped_on.changes)
+        priv_b_kept_off = any("priv_b" in c.symbol for c in scoped_off.changes)
+        assert priv_b_kept_on != priv_b_kept_off
+
+        fields_on = effective_config_fields(
+            scoped_on, severity_config=None, exit_code_scheme="legacy"
+        )
+        fields_off = effective_config_fields(
+            scoped_off, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            fields_on["surface.scope_to_public_surface_requested"]
+            != fields_off["surface.scope_to_public_surface_requested"]
+        )
+        assert effective_config_digest(fields_on) != effective_config_digest(
+            fields_off
+        )

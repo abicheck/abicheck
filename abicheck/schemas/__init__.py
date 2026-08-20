@@ -674,7 +674,20 @@ from typing import Any
 #:       reconcile_build_context=...)``, ``--reconcile-build-context``,
 #:       which can move a phantom breaking finding from ``kept`` into the
 #:       reconciliation audit bucket, changing the verdict and exit code)
-#:       -- same shape again.
+#:       -- same shape again. One more fix, same round: ``effective_config_
+#:       fields`` gains ``surface.scope_to_public_surface_requested`` --
+#:       distinct from the existing ``surface.scope_to_public_surface``,
+#:       which ``checker.compare()`` stamps with the *derived*
+#:       ``scope_active = scope_to_public_surface or public_surface_
+#:       allowlist is not None`` and therefore reads ``True`` whenever a
+#:       ``--post-manifest`` allowlist is active regardless of the raw
+#:       flag. ``post_processing.FilterNonPublicSurface._run_allowlist``
+#:       only honors the ``force_public_symbols`` widening overlay when the
+#:       *raw* flag is true, so two runs sharing the same POST manifest and
+#:       forced-public symbols but opposite raw ``--scope-public-headers``
+#:       settings previously published an identical
+#:       ``surface.scope_to_public_surface`` value despite retaining
+#:       genuinely different findings.
 REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
@@ -995,7 +1008,9 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        ``policy.collapse_versioned_symbols``, ``policy.surface_metrics``,
 #:        and ``policy.env_matrix`` were added, sharing the identical
 #:        computation (see that entry for the full reasoning). One more:
-#:        ``policy.reconcile_build_context`` was added, same round.
+#:        ``policy.reconcile_build_context`` was added, same round. One
+#:        more: ``surface.scope_to_public_surface_requested`` was added,
+#:        same round as `compare`'s report_schema_version 2.46 entry.
 SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

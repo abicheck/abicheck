@@ -1229,6 +1229,7 @@ def compare(
         surface_metrics_enabled=bool(surface_metrics),
         env_matrix_source_sha256=env_matrix_source_sha256,
         reconcile_build_context_enabled=bool(reconcile_build_context),
+        scope_to_public_surface_requested=bool(scope_to_public_surface),
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

@@ -658,6 +658,23 @@ class DiffResult:
     # changing the verdict and exit code. Same shape as
     # ``pattern_verdicts_enabled`` above.
     reconcile_build_context_enabled: bool = field(default=False, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # the *raw* ``compare(..., scope_to_public_surface=...)`` value the
+    # caller passed in -- distinct from ``scope_to_public_surface`` above,
+    # which ``checker.compare()`` stamps with the *derived* ``scope_active
+    # = scope_to_public_surface or public_surface_allowlist is not None``
+    # (so it reads ``True`` whenever a ``--post-manifest`` allowlist is
+    # active, regardless of the raw flag). That collapsing matters:
+    # ``post_processing.FilterNonPublicSurface._run_allowlist`` only honors
+    # the ``force_public_symbols`` widening overlay when the *raw* flag is
+    # true (deliberately -- the CLI already warns that overlay is ignored
+    # under ``--no-scope-public-headers``), so two runs sharing the same
+    # POST manifest and forced-public symbols but opposite raw
+    # ``--scope-public-headers`` settings can retain genuinely different
+    # findings while ``scope_to_public_surface`` reads identically
+    # ``True`` for both. Default ``True``, matching ``compare()``'s own
+    # parameter default.
+    scope_to_public_surface_requested: bool = field(default=True, kw_only=True)
 
     def _effective_kind_sets(
         self,

@@ -85,4 +85,16 @@
   (`--reconcile-build-context`, a new `DiffResult.
   reconcile_build_context_enabled` field), since it can move a phantom
   breaking finding from `kept` into the reconciliation audit bucket,
-  changing the verdict and exit code.
+  changing the verdict and exit code. A new `surface.scope_to_public_
+  surface_requested` field (`DiffResult.scope_to_public_surface_
+  requested`) records the *raw* `--scope-public-headers` value, distinct
+  from the existing `surface.scope_to_public_surface`, which
+  `checker.compare()` stamps with the *derived* `scope_active =
+  scope_to_public_surface or public_surface_allowlist is not None` and
+  therefore reads `True` whenever a `--post-manifest` allowlist is active
+  regardless of the raw flag —
+  `post_processing.FilterNonPublicSurface._run_allowlist` only honors the
+  `force_public_symbols` widening overlay when the raw flag is true, so
+  two runs sharing the same POST manifest and forced-public symbols but
+  opposite raw `--scope-public-headers` settings previously published an
+  identical digest despite retaining genuinely different findings.
