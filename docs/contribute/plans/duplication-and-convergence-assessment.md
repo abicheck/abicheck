@@ -204,6 +204,21 @@ deferred-cleanup rules — the exact class of bug the L3→L2-fold entry's fifth
 finding (self-deadlocking duplicate inferred queries) had to be fixed for
 one call site at a time.
 
+One more failure mode this shape has to close, not just the two above:
+Python fully evaluates `resolve_artifact_request(request)` — the function
+body runs to completion or raises — *before* `with` ever calls `__enter__`
+on whatever it returns. If resolution allocates the inferred-build
+directory and only *then* fails a later validation step within its own
+body, no `ResolvedArtifactPlan` is ever returned for a `with` block to call
+`__exit__` on — the directory and its lock leak regardless of how carefully
+the caller-side `with` is written, since the caller never sees an object at
+all. `resolve_artifact_request()` therefore can't be "allocate, then
+return a context manager" — its own body needs a `try`/`finally` (or an
+`ExitStack` it owns and only hands off to the returned plan on success) so
+a failure partway through resolution tears down whatever it had already
+allocated before the exception propagates, rather than leaving that
+responsibility for a caller who received nothing.
+
 **Dry-run renders the plan, not a second prediction.** `resolve_dump_request`
 (added by the CLI-cleanup-phase-two "PR C" slice) already provides a real
 "resolve without executing" mode — the missing piece is wiring
@@ -331,18 +346,24 @@ pinned `--depth` can't collect its required evidence; documented separately
 from `not_comparable`/`budget_overflow` in `run_scan_core()` today, and
 without its own axis it can only collapse into a generic
 `operational_error` or stay the opaque exit-1 heuristic this phase exists
-to remove), `operational_error`, `removed_required_artifact`,
+to remove), `bundle_incomplete` (`scan --artifact-set`'s own
+`BUNDLE_INCOMPLETE` verdict — `service_scan.run_scan_set()` returns it,
+also `exit_code=1`, when the member scans complete but not every snapshot
+needed for the cross-library audit could be built; a second, distinct
+scan-only incompleteness signal from `evidence_contract_error`, not a
+duplicate of it), `operational_error`, `removed_required_artifact`,
 `missing_required_target`, `unexpected_target`, and two axes for `deps
 compare`'s own dependency-loadability result — `dependency_load_failure`
 and `dependency_abi_risk` — since `cli_stack.py`'s `deps_compare_cmd`
 today distinguishes three outcomes (loadability/ABI-break failure → 4,
 ABI risk or loadability warning → 1) that don't map onto any axis above;
 and per-operation policies (`NativeCompareExitPolicy`, `ScanExitPolicy` —
-now also covering `evidence_contract_error` — `ReleaseExitPolicy`,
-`AggregateExitPolicy`, `AbiccExitPolicy`, and `DepsCompareExitPolicy` for
-the two new dependency axes plus the existing `not_comparable`) that read
-the same evaluated result but keep each operation's own external
-exit-code contract — `compat`'s `0/1/2/...` mapping in particular should
+now also covering `evidence_contract_error` and `bundle_incomplete` —
+`ReleaseExitPolicy`, `AggregateExitPolicy`, `AbiccExitPolicy`, and
+`DepsCompareExitPolicy` for the two new dependency axes plus the existing
+`not_comparable`) that read the same evaluated result but keep each
+operation's own external exit-code contract — `compat`'s `0/1/2/...`
+mapping in particular should
 be derived through `AbiccExitPolicy`, not bypass the shared model.
 
 ### P1 — Reporting composes too late
@@ -432,6 +453,7 @@ from shared *helper functions* to a shared *parsed object*:
 @dataclass(frozen=True)
 class CompilerInvocation:
     original_argv: tuple[str, ...]
+    working_directory: Path
     environment: Mapping[str, str]
     launchers: tuple[str, ...]
     driver_token: str
@@ -446,6 +468,19 @@ class CompilerInvocation:
     abi_flags: tuple[AbiFlag, ...]
     opaque_flags: tuple[str, ...]
 ```
+
+`working_directory` carries the compile-database entry's own `directory`
+field (or the equivalent for a live build-adapter query) — not optional,
+since a relative source or include operand's meaning depends on it. Two
+otherwise-identical `argv` values executed from different directories can
+resolve entirely different headers, so recording `original_argv` alone
+would force replay and include normalization to either fall back to
+abicheck's own process cwd (silently wrong whenever that differs from the
+compile unit's own recorded directory) or keep an out-of-band value next to
+the parsed object — exactly the "parse once" contract this model exists to
+establish. It also participates in the invocation's own identity, the same way this
+same field already has to for the L3→L2 fold's cache-key/relative-path
+handling described in AGENTS.md's own entry for that work.
 
 Raw compiler-command parsing happens once; replay, ambiguity detection,
 build-option drift, and reporting all consume the structured fields instead
@@ -610,7 +645,19 @@ block-everything-immediately):
    at all (config/build-manifest validity, not ABI compatibility) — this
    guardrail must not force either shape into `operational_error`, or
    demand a permanent, unreviewable exception for either.
-5. Every persisted report is built from a `ReportEnvelope` (Phase 4).
+5. Every persisted *compatibility-analysis* report (the same modeled
+   operations as item 4) is built from a `ReportEnvelope` (Phase 4).
+   Scoped identically and for the identical reason: `project validate` and
+   `project validate-build` (`cli_project.py`) persist their own validation
+   report via `--output` too, but that report has no ABI findings, no
+   full/effective evaluation, and no compatibility `ExitDecision` to carry
+   — it answers a config/build-manifest validity question, not this
+   guardrail's question. Forcing it through `ReportEnvelope` would mean
+   fabricating compatibility semantics a config-validity report doesn't
+   have; a project-config report is either out of scope for this check or,
+   if it should eventually gain its own generic envelope, that is its own
+   design question left to a `project`-specific follow-up, not solved by
+   stretching `ReportEnvelope` to cover it.
 6. Every effective evaluation carries a digest (Phase 2).
 
 Each check starts with a reviewed allowlist of acknowledged pre-existing
