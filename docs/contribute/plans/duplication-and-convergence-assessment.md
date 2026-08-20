@@ -92,7 +92,7 @@ from independently reconstructing a subtly different one.
 
 ### P0 — Artifact extraction and evidence resolution
 
-The largest duplication and correctness risk. At least seven
+The largest duplication and correctness risk. At least ten
 partially-equivalent paths exist today:
 
 1. Typed dump: `DumpRequest → resolve_dump_request() → execute_dump_request()`
@@ -126,6 +126,18 @@ partially-equivalent paths exist today:
    also calls `dumper.dump()` directly on each compiled probe object.
    Deliberately called out separately from the seven user-facing operations
    above, since it isn't one — see "backend-level exception" below.
+9. L0 export-delta re-extraction: `l0_export_delta.collect_l0_export_delta()`
+   — invoked by both native `compare` and scan baseline reconciliation —
+   independently calls `service.resolve_input()` twice with
+   `symbols_only=True`, a *supplementary* extraction distinct from either
+   side's primary resolution. Missing this from the migration would let
+   `compare`/`scan`'s primary-side equivalence tests pass while this
+   secondary path still misses the centralized lifetime, fingerprint, and
+   post-processing behavior.
+10. The plugin-host API: `appcompat.check_plugin_host_contract()` — the
+    plugin-host counterpart to `check_appcompat()` (path 6 above) — also
+    calls `compare_snapshots()` directly rather than through a typed
+    comparison request, for the identical reason path 6 is listed.
 
 `service_dump_pipeline.py` documents directly that native dump behavior
 historically lived around `resolve_input()` in CLI code, forcing non-CLI
@@ -866,23 +878,27 @@ different code intentionally computing the same thing.
 **Artifact-resolution equivalence.** For one artifact and equivalent
 options, `dump`, compare-side resolution, scan candidate resolution, ABICC
 descriptor resolution, `appcompat.check_appcompat()`'s own per-side
-resolution, `deps compare`'s per-dependency-pair resolution, and release's
-own per-library extraction must produce identical: snapshot semantic
-fingerprint; extraction-contract fingerprint; effective evidence depth;
-effective compile-context digest; public-surface scope fingerprint;
-dependency scope; build/source coverage; cache-relevant directory set.
-Release belongs here specifically because its adapter does real,
-release-only work ahead of the shared resolution step:
+resolution, `deps compare`'s per-dependency-pair resolution, release's own
+per-library extraction, and `l0_export_delta.collect_l0_export_delta()`'s
+`symbols_only=True` supplementary re-extraction (invoked by both native
+`compare` and scan baseline reconciliation, independent of either side's
+primary resolution) must produce identical: snapshot semantic fingerprint;
+extraction-contract fingerprint; effective evidence depth; effective
+compile-context digest; public-surface scope fingerprint; dependency
+scope; build/source coverage; cache-relevant directory set. Release
+belongs here specifically because its adapter does real, release-only work
+ahead of the shared resolution step:
 `cli_compare_release._run_compare_pair()` follows GNU ld linker scripts and
 applies its own per-library header/include mapping before ever calling
 `service.run_compare()` — the target shape's promise to "serve... release
 per-library extraction" is otherwise untested at the one place release's
 extraction can still diverge even when ordinary compare-side resolution
-passes cleanly. Standalone appcompat, `deps compare`, and release all
-belong in this matrix, not just in Phase 1's routing list — a phase that
-satisfies every equivalence test here except one direct caller's path would
-still leave that caller resolving depth, compile context, cache
-paths, or resource lifetime differently from everything else.
+passes cleanly. Standalone appcompat, `deps compare`, release, and the L0
+re-extraction all belong in this matrix, not just in Phase 1's routing
+list — a phase that satisfies every equivalence test here except one
+direct caller's path would still leave that caller resolving depth,
+compile context, cache paths, or resource lifetime differently from
+everything else.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
 --against`'s own nested baseline comparison, release per-library compare,
@@ -894,8 +910,10 @@ synthetic snapshots carrying `extra_changes` — a comparison distinct from
 every per-library one this same command also runs), the Python API,
 `appcompat.check_appcompat()`'s pre-scope `compare_snapshots()` call
 (before its own `scope_diff_to_app()` step applies app-usage narrowing),
-each dependency pair's `_run_abi_diff()` inside `deps compare`, and
-`compat`'s ABICC adapter's own comparison *before* its intentional
+`appcompat.check_plugin_host_contract()`'s identical pre-scope comparison
+(the plugin-host counterpart to `check_appcompat()`), each dependency
+pair's `_run_abi_diff()` inside `deps compare`, and `compat`'s ABICC
+adapter's own comparison *before* its intentional
 strict/source-only/new-symbol-warning transformations
 (`compat/_helpers.py`'s `_apply_strict()` and siblings) apply must produce
 identical: canonical finding IDs (`finding_identity.py`); effective
