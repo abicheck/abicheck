@@ -33,18 +33,26 @@
 # ADR-058's 2026-08-20 portfolio-reset amendment removed three of the four
 # scenario-owning skills (`native-api-evolution`, `native-consumer-
 # compatibility`, `native-release-compatibility`) from the published
-# portfolio. Their scenarios were removed from this corpus in the same
-# change, rather than reassigned to the surviving `review-native-library-
+# portfolio. Most of their scenarios were removed from this corpus in the
+# same change rather than reassigned to the surviving `review-native-library-
 # change` skill (renamed from `native-binary-compatibility-review`): that
-# skill's workflow does not (yet) claim the API-evolution, named-consumer, or
-# whole-release-matrix capabilities those scenarios exercised, and reassigning
-# a scenario to a skill that does not claim its scope would grade against
-# capability the skill does not have. This is why dimension 2's
-# `matrix_target_unrun` uncertainty kind (owned by the removed whole-release-
-# matrix scenario) and the consumer-scoped-divergence coverage (owned by the
-# removed consumer scenarios) are narrowed correspondingly in
-# `rubric.yaml`/`schema/`/`tests/test_skill_eval_scenarios.py` — see that
-# amendment for the full accounting, including what remains deferred.
+# skill's workflow does not (yet) claim the API-evolution or whole-release-
+# matrix capabilities those scenarios exercised, and reassigning a scenario
+# to a skill that does not claim its scope would grade against capability the
+# skill does not have. This is why dimension 2's `matrix_target_unrun`
+# uncertainty kind (owned by the removed whole-release-matrix scenario) is
+# narrowed correspondingly in `rubric.yaml`/`schema/`/
+# `tests/test_skill_eval_scenarios.py` — see that amendment for the full
+# accounting, including what remains deferred.
+#
+# The three named-consumer scenarios are the one exception: the flagship's
+# own workflow explicitly directs `--used-by`/`--required-symbol` for a
+# named application, plugin, or host (Step 3 of `SKILL.md`, citing
+# `shared/consumer-scoping.md`) — that capability was *absorbed*, not
+# dropped, by the reset. Reassigned to `review-native-library-change` rather
+# than removed, so the inversion this corpus exists to catch (an agent that
+# always reports the library-wide `full_verdict` instead of the scoped
+# `verdict`) still has coverage.
 
 schema_version: 1
 
@@ -100,6 +108,61 @@ scenarios:
     expected:
       verdict: COMPATIBLE
       uncertainty: contract_coverage_incomplete
+
+  # The three consumer scenarios state both verdicts on purpose. In a scoped
+  # run the top-level `verdict` is the *scoped* answer and `full_verdict`
+  # carries the library-wide one; the skill's own worked example is this
+  # exact pair (`full_verdict: BREAKING` with `verdict: COMPATIBLE`). Stating
+  # only the global value here would reward reading the report the wrong way
+  # round — the inversion the skill explicitly warns against.
+
+  - id: consumer-unaffected-despite-break
+    category: B
+    skill: review-native-library-change
+    status: planned
+    coverage_note: "consumer answer diverging below the library's global verdict"
+    prompt: >-
+      The library team says this release has a breaking change. Does our
+      renderer actually need rebuilding, or can we ship it as-is?
+    fixture: agent-evals/skills/fixtures/consumer-unaffected-despite-break
+    invocation:
+      used_by: ["renderer"]
+    expected:
+      verdict: COMPATIBLE
+      full_verdict: BREAKING
+
+  - id: consumer-actually-affected
+    category: B
+    skill: review-native-library-change
+    status: planned
+    coverage_note: "consumer answer confirming impact"
+    prompt: >-
+      We upgraded the shared library under our analytics daemon without
+      rebuilding it. Is that safe?
+    fixture: agent-evals/skills/fixtures/consumer-actually-affected
+    invocation:
+      used_by: ["analytics-daemon"]
+    expected:
+      # The non-diverging half of the pair: scoped and global agree, so an
+      # agent cannot pass both consumer scenarios by always reporting one field.
+      verdict: BREAKING
+      full_verdict: BREAKING
+
+  - id: plugin-required-symbol-loss
+    category: B
+    skill: review-native-library-change
+    status: planned
+    coverage_note: "plugin loses a symbol its host requires"
+    prompt: >-
+      Will our existing plugins still load into the new host build?
+    fixture: agent-evals/skills/fixtures/plugin-required-symbol-loss
+    invocation:
+      required_symbols: ["plugin_register", "plugin_teardown"]
+    expected:
+      # `--required-symbol` scopes the same way `--used-by` does, so this one
+      # states both verdicts too.
+      verdict: BREAKING
+      full_verdict: BREAKING
 
   # ---------------------------------------------------------------- Category A
   # Expected outcome comes from examples/ground_truth.json — never restated.

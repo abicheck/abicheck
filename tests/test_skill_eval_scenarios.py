@@ -188,13 +188,16 @@ def test_consumer_scoped_scenarios_state_both_verdicts(scenarios: list[dict]) ->
     the wrong way round — the inversion the skill explicitly warns against."""
     scoped = _scoped(scenarios)
     if not scoped:
-        # ADR-058's 2026-08-20 portfolio-reset amendment removed
-        # `native-consumer-compatibility` (the only skill whose scenarios used
-        # `--used-by`/`--required-symbol`) from the published portfolio, so no
-        # scenario is currently consumer-scoped. Not a weakened assertion —
-        # the rule below still applies in full the moment a scoped scenario
-        # exists again.
-        pytest.skip("no consumer-scoped skill is currently published")
+        # `review-native-library-change` still explicitly directs
+        # `--used-by`/`--required-symbol` for a named consumer (its own
+        # workflow, citing `shared/consumer-scoping.md`), so this should not
+        # be empty in practice — see the three `review-native-library-change`
+        # consumer scenarios in scenarios.yaml. Kept as a skip rather than a
+        # hard failure only so a future edit that legitimately drops the last
+        # scoped scenario degrades to "no coverage" instead of a collection
+        # error; the assertion below still applies in full whenever any
+        # scoped scenario exists.
+        pytest.skip("no consumer-scoped scenario is currently defined")
     for scenario in scoped:
         assert "full_verdict" in scenario["expected"], (
             f"{scenario['id']} is consumer-scoped but states no full_verdict"
@@ -208,7 +211,7 @@ def test_at_least_one_scoped_scenario_diverges(scenarios: list[dict]) -> None:
     scoped = _scoped(scenarios)
     if not scoped:
         # See test_consumer_scoped_scenarios_state_both_verdicts above.
-        pytest.skip("no consumer-scoped skill is currently published")
+        pytest.skip("no consumer-scoped scenario is currently defined")
     diverging = [
         s for s in scoped if s["expected"]["verdict"] != s["expected"]["full_verdict"]
     ]

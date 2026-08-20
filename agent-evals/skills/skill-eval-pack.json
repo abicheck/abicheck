@@ -123,6 +123,58 @@
       "skill": "review-native-library-change",
       "status": "ready"
     },
+    "consumer-actually-affected": {
+      "affects": [
+        "review-native-library-change"
+      ],
+      "category": "B",
+      "digest": "sha256:010d5ab7ec7fbcba8d67212f41faf1ecc60944926dbb7c09c726ef7262015c68",
+      "expected": {
+        "full_verdict": "BREAKING",
+        "verdict": "BREAKING"
+      },
+      "inputs": "agent-evals/skills/fixtures/consumer-actually-affected",
+      "invocation": {
+        "used_by": [
+          "analytics-daemon"
+        ]
+      },
+      "platforms": [],
+      "prompt": "We upgraded the shared library under our analytics daemon without rebuilding it. Is that safe?",
+      "roots": [
+        "agent-evals/skills/fixtures/consumer-actually-affected",
+        "agent-evals/skills/scenarios.yaml",
+        "examples/ground_truth.json"
+      ],
+      "skill": "review-native-library-change",
+      "status": "planned"
+    },
+    "consumer-unaffected-despite-break": {
+      "affects": [
+        "review-native-library-change"
+      ],
+      "category": "B",
+      "digest": "sha256:2a26c08440c23f934d14f774aeed917b213abbedff428e4c1622fc4b0bb81c57",
+      "expected": {
+        "full_verdict": "BREAKING",
+        "verdict": "COMPATIBLE"
+      },
+      "inputs": "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
+      "invocation": {
+        "used_by": [
+          "renderer"
+        ]
+      },
+      "platforms": [],
+      "prompt": "The library team says this release has a breaking change. Does our renderer actually need rebuilding, or can we ship it as-is?",
+      "roots": [
+        "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
+        "agent-evals/skills/scenarios.yaml",
+        "examples/ground_truth.json"
+      ],
+      "skill": "review-native-library-change",
+      "status": "planned"
+    },
     "contract-coverage-incomplete": {
       "affects": [
         "review-native-library-change"
@@ -218,6 +270,33 @@
       "prompt": "Here are the previous and current builds of our shared library. Did this change break anything for programs already linked against it?",
       "roots": [
         "agent-evals/skills/fixtures/not-comparable-pair",
+        "agent-evals/skills/scenarios.yaml",
+        "examples/ground_truth.json"
+      ],
+      "skill": "review-native-library-change",
+      "status": "planned"
+    },
+    "plugin-required-symbol-loss": {
+      "affects": [
+        "review-native-library-change"
+      ],
+      "category": "B",
+      "digest": "sha256:af0665113668ae0870c2d591d2e8164550bf218fc4a0876a0df61c84e9b3fa8f",
+      "expected": {
+        "full_verdict": "BREAKING",
+        "verdict": "BREAKING"
+      },
+      "inputs": "agent-evals/skills/fixtures/plugin-required-symbol-loss",
+      "invocation": {
+        "required_symbols": [
+          "plugin_register",
+          "plugin_teardown"
+        ]
+      },
+      "platforms": [],
+      "prompt": "Will our existing plugins still load into the new host build?",
+      "roots": [
+        "agent-evals/skills/fixtures/plugin-required-symbol-loss",
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],

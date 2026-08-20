@@ -83,11 +83,17 @@ are no longer published at all.
 > is done. The eval harness's own scenario corpus (`agent-evals/skills/
 > scenarios.yaml`) and rubric (`agent-evals/skills/rubric.yaml`) were
 > narrowed in the same change that made this amendment, strictly to stay
-> internally consistent with a one-skill portfolio (removing scenarios whose
-> `skill:` named a now-unpublished skill, and the one dimension-2
-> uncertainty kind — `matrix_target_unrun` — that had no scenario left once
-> its owning skill was removed) — this is bookkeeping to keep existing gates
-> green, not progress on the deferred corpus/evaluation work above.
+> internally consistent with a one-skill portfolio: scenarios owned by
+> `native-api-evolution`/`native-release-compatibility` were removed
+> outright (that capability is not claimed by the survivor), the one
+> dimension-2 uncertainty kind — `matrix_target_unrun` — that had no
+> scenario left once its owning skill was removed was narrowed
+> correspondingly, and the three `native-consumer-compatibility` scenarios
+> were **reassigned** to `review-native-library-change` rather than
+> removed, since that capability *was* absorbed (the one linking citation
+> above) — this is bookkeeping to keep existing gates green and coverage
+> matched to actual claimed capability, not progress on the deferred
+> corpus/evaluation work above.
 > This does not reopen ADR-058's five-criteria admission bar for a new
 > skill on its own (unchanged from the 2026-08-11 amendment's own framing)
 > — it only removes what was frozen at that bar's own admission-scale
