@@ -33,7 +33,11 @@ from abicheck.dumper import (
     _cplusplus_macro_for_standard,
     _resolve_standard_provenance,
 )
-from abicheck.dumper_toolchain import _extract_explicit_std_value
+from abicheck.dumper_toolchain import (
+    _extract_explicit_std_value,
+    _probe_default_language_standard,
+    _probe_language_mode,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 
@@ -151,6 +155,240 @@ class TestAstCompileProvenance:
         sysroot = Path(home) / "sdk" / "sysroot"
         prov = _ast_compile_provenance([], None, (), sysroot)
         assert prov["ast_sysroot"] == str(Path("~") / "sdk" / "sysroot")
+
+
+class TestProbeLanguageMode:
+    def test_c_lang_is_c_mode(self):
+        assert _probe_language_mode("c") == "c"
+        assert _probe_language_mode("C") == "c"
+
+    def test_everything_else_is_cpp_mode(self):
+        assert _probe_language_mode("c++") == "c++"
+        assert _probe_language_mode(None) == "c++"
+        assert _probe_language_mode("") == "c++"
+
+
+class TestProbeDefaultLanguageStandard:
+    """ADR-050 D1/D2 follow-up: the profile_fingerprint comparability guard
+    must be able to tell two genuinely different toolchains' unpinned
+    default standards apart, not just an explicit ``-std=``. See
+    ``abicheck-internal-bugs`` finding 2: "the cross-profile comparability
+    guard doesn't fire without L3 build evidence"."""
+
+    def setup_method(self):
+        _probe_default_language_standard.cache_clear()
+
+    def test_probes_real_host_compiler_cpp(self):
+        import shutil
+
+        cxx = shutil.which("g++") or shutil.which("clang++")
+        if cxx is None:
+            pytest.skip("no C++ compiler on PATH")
+        result = _probe_default_language_standard(cxx, "c++")
+        assert result is not None
+        assert result.startswith("probed:__cplusplus=")
+
+    def test_two_different_defaults_produce_different_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The actual mechanism the false-COMPATIBLE bug rested on: two
+        resolved compilers with genuinely different unpinned defaults must
+        probe to genuinely different values."""
+        import subprocess as subprocess_module
+
+        def fake_run(argv, **kwargs):
+            assert argv[1:4] == ["-E", "-dM", "-x"]
+            std = {"cxx17": "201703L", "cxx20": "202002L"}[argv[0]]
+            return subprocess_module.CompletedProcess(
+                argv, 0, stdout=f"#define __cplusplus {std}\n", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+        old = _probe_default_language_standard("cxx17", "c++")
+        new = _probe_default_language_standard("cxx20", "c++")
+        assert old != new
+        assert old == "probed:__cplusplus=201703L"
+        assert new == "probed:__cplusplus=202002L"
+
+    def test_c_mode_absent_stdc_version_is_a_real_value_not_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import subprocess as subprocess_module
+
+        def fake_run(argv, **kwargs):
+            return subprocess_module.CompletedProcess(argv, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+        result = _probe_default_language_standard("old-cc", "c")
+        assert result == "probed:__STDC_VERSION__=<absent>"
+
+    def test_missing_compiler_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        import subprocess as subprocess_module
+
+        def fake_run(argv, **kwargs):
+            raise FileNotFoundError(argv[0])
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+        assert _probe_default_language_standard("/no/such/cc", "c++") is None
+
+    def test_nonzero_exit_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        import subprocess as subprocess_module
+
+        def fake_run(argv, **kwargs):
+            return subprocess_module.CompletedProcess(argv, 1, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+        assert _probe_default_language_standard("cl.exe", "c++") is None
+
+    def test_result_is_cached_per_binary_and_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import subprocess as subprocess_module
+
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(tuple(argv))
+            return subprocess_module.CompletedProcess(
+                argv, 0, stdout="#define __cplusplus 201703L\n", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+        _probe_default_language_standard("cached-cc", "c++")
+        _probe_default_language_standard("cached-cc", "c++")
+        assert len(calls) == 1
+
+
+class TestResolveStandardProvenanceProbing:
+    """``_resolve_standard_provenance``'s probing fallback -- only reached
+    when neither an explicit ``-std=`` nor the C++20-detection heuristic
+    already resolved a value."""
+
+    def setup_method(self):
+        _probe_default_language_standard.cache_clear()
+
+    def test_explicit_std_never_probes(self, monkeypatch: pytest.MonkeyPatch):
+        def fail_probe(*a, **k):
+            raise AssertionError("must not probe when an explicit -std= is given")
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
+        )
+        result = _resolve_standard_provenance(
+            [], "-std=gnu++11", (), probe_compiler_bin="cc", probe_lang_mode="c++"
+        )
+        assert result == "gnu++11"
+
+    def test_no_probe_compiler_bin_stays_none(self):
+        assert _resolve_standard_provenance([], None, ()) is None
+
+    def test_probe_fills_in_when_nothing_else_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        def fake_probe(compiler_bin, lang_mode):
+            return f"probed:__cplusplus=STUBBED:{compiler_bin}"
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        result = _resolve_standard_provenance(
+            [], None, (), probe_compiler_bin="my-clang", probe_lang_mode="c++"
+        )
+        assert result == "probed:__cplusplus=STUBBED:my-clang"
+
+
+class TestAstCompileProvenanceProbing:
+    def setup_method(self):
+        _probe_default_language_standard.cache_clear()
+
+    def test_ast_toolchain_compiler_selected_feeds_the_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        seen = {}
+
+        def fake_probe(compiler_bin, lang_mode):
+            seen["compiler_bin"] = compiler_bin
+            seen["lang_mode"] = lang_mode
+            return "probed:__cplusplus=201402L"
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        prov = _ast_compile_provenance(
+            [],
+            None,
+            (),
+            None,
+            ast_toolchain={"compiler_selected": "/opt/toolchains/g++-9"},
+            lang="c++",
+        )
+        assert seen == {"compiler_bin": "/opt/toolchains/g++-9", "lang_mode": "c++"}
+        assert prov["ast_resolved_standard"] == "probed:__cplusplus=201402L"
+        assert prov["ast_cplusplus_macro"] == "201402L"
+
+    def test_no_ast_toolchain_preserves_prior_behavior(self):
+        """The default (no ``ast_toolchain``/``lang`` given) must be
+        byte-for-byte identical to this function's pre-fix behavior."""
+        prov = _ast_compile_provenance([], None, (), None)
+        assert prov["ast_resolved_standard"] is None
+
+    def test_two_different_resolved_compilers_probe_to_different_standards(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The actual bug this closes: `dump`'d under two different,
+        unpinned toolchains must no longer silently agree on
+        `language_standard`."""
+
+        def fake_probe(compiler_bin, lang_mode):
+            return {
+                "/usr/bin/g++-9": "probed:__cplusplus=201703L",
+                "/usr/bin/clang++-18": "probed:__cplusplus=202002L",
+            }[compiler_bin]
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        old = _ast_compile_provenance(
+            [],
+            None,
+            (),
+            None,
+            ast_toolchain={"compiler_selected": "/usr/bin/g++-9"},
+            lang="c++",
+        )
+        new = _ast_compile_provenance(
+            [],
+            None,
+            (),
+            None,
+            ast_toolchain={"compiler_selected": "/usr/bin/clang++-18"},
+            lang="c++",
+        )
+        assert old["ast_resolved_standard"] != new["ast_resolved_standard"]
+
+    def test_falls_back_to_bare_selected_key(self, monkeypatch: pytest.MonkeyPatch):
+        """``compiler_selected`` is absent for a producer where frontend and
+        compiler are the same binary (e.g. a direct-clang dump) -- falls
+        back to the bare ``selected`` key, mirroring
+        ``_compiler_family_from_toolchain``'s identical fallback."""
+        seen = {}
+
+        def fake_probe(compiler_bin, lang_mode):
+            seen["compiler_bin"] = compiler_bin
+            return "probed:__cplusplus=201703L"
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        _ast_compile_provenance(
+            [],
+            None,
+            (),
+            None,
+            ast_toolchain={"selected": "/usr/bin/clang++"},
+            lang="c++",
+        )
+        assert seen["compiler_bin"] == "/usr/bin/clang++"
 
 
 class TestSnapshotSerializationRoundTrip:

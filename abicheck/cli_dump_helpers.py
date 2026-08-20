@@ -1378,7 +1378,7 @@ def handle_non_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
-        header_roots=headers,
+        header_roots=tuple(headers) + tuple(public_headers) + tuple(public_header_dirs),
         clang_bin=resolve_source_frontend_clang_bin(
             getattr(compile_context, "gcc_path", None),
             getattr(compile_context, "gcc_prefix", None),
@@ -1992,7 +1992,7 @@ def perform_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
-        header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest),
+        header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest) + tuple(public_headers) + tuple(public_header_dirs),
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),

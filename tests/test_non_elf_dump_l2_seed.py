@@ -87,6 +87,52 @@ def test_non_elf_dump_seeds_includes_and_runs_cleanup(monkeypatch, tmp_path):
     assert events == ["seed", "dump", "cleanup"]
 
 
+def test_non_elf_dump_header_roots_includes_public_headers_and_dirs(
+    monkeypatch, tmp_path
+):
+    """abicheck-internal-bugs finding 1: the PE/Mach-O ``dump`` path's
+    ``write_snapshot_output`` call must fold ``public_headers``/
+    ``public_header_dirs`` into ``header_roots`` alongside ``headers`` --
+    matching ``dumper_scoping.apply_dependency_scope_to_run_dump_result``,
+    the choke point ``compare``'s own live-binary dumping uses for the
+    identical dependency-scoping decision. Before the fix this path passed
+    only ``headers``, silently diverging from `compare`'s scoping whenever a
+    library declared its public surface via ``public_headers``/
+    ``public_header_dirs``."""
+    hdr = tmp_path / "h.h"
+    pub_header = tmp_path / "extra.h"
+    pub_dir = tmp_path / "pubdir"
+
+    captured: dict = {}
+
+    def _write(*_a, header_roots=(), **_k):  # noqa: ANN002, ANN003
+        captured["header_roots"] = header_roots
+
+    handle_non_elf_dump(
+        so_path=tmp_path / "foo.dll",
+        binary_fmt="pe",
+        headers=(hdr,),
+        includes=(),
+        version="1",
+        lang="c++",
+        pdb_path=None,
+        follow_deps=False,
+        git_tag=None,
+        build_id=None,
+        no_git=True,
+        output=None,
+        dump_native_binary=lambda *a, **k: AbiSnapshot(
+            library="l", version="1", from_headers=True
+        ),
+        stamp_provenance=lambda *a, **k: None,
+        write_snapshot_output=_write,
+        public_headers=(pub_header,),
+        public_header_dirs=(pub_dir,),
+    )
+
+    assert set(captured["header_roots"]) == {hdr, pub_header, pub_dir}
+
+
 def test_non_elf_dump_gates_inferred_query_for_l2_only(monkeypatch, tmp_path):
     # --depth headers (collect_mode "off") must disable the inferred build query in
     # the PE/Mach-O seed too — the flag is threaded from collect_mode.

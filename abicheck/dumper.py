@@ -1654,9 +1654,7 @@ def _dump_elf(
         language_profile=profile_hint,
         dwarf_layout_coherence=_dwarf_layout_coherence,
         dwarf_layout_coherence_mismatches=_dwarf_layout_coherence_mismatches,
-        **_ast_compile_provenance(
-            list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot
-        ),
+        **_ast_compile_provenance(list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot, ast_toolchain=ast_result.ast_toolchain, lang=lang),
     )
     _populate_elf_visibility(snapshot)
     return snapshot
@@ -1831,7 +1829,7 @@ def _dump_macho(
         frontend_context_kind=_parser_frontend_context_kind(parser),
         platform="macho",
         language_profile=profile_hint,
-        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
+        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
     )
 
 
@@ -1954,7 +1952,7 @@ def _dump_pe(
         frontend_context_kind=_parser_frontend_context_kind(parser),
         platform="pe",
         language_profile=profile_hint,
-        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
+        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
     )
 
 

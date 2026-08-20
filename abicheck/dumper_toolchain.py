@@ -332,9 +332,20 @@ _CPLUSPLUS_MACRO_BY_EDITION: dict[str, str] = {
 def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
     """Map a resolved ``-std=``/``/std:`` value to its standard-mandated
     ``__cplusplus`` literal, or ``None`` when unrecognized (snapshot
-    provenance, schema v15)."""
+    provenance, schema v15).
+
+    A *probed* default (``standard`` starting with the ``"probed:"`` prefix
+    :func:`_probe_default_language_standard` produces — see its own
+    docstring) already carries the literal macro assignment it observed, so
+    it is read straight out of that string rather than looked up in
+    :data:`_CPLUSPLUS_MACRO_BY_EDITION`, which only maps a real ``-std=``
+    edition spelling."""
     if not standard:
         return None
+    if standard.startswith(_PROBED_STANDARD_PREFIX):
+        _, _, assignment = standard.partition(_PROBED_STANDARD_PREFIX)
+        macro, _, value = assignment.partition("=")
+        return value or None if macro == "__cplusplus" else None
     edition = (
         standard.rsplit("+", 1)[-1].lower() if "+" in standard else standard.lower()
     )
@@ -371,10 +382,97 @@ def _extract_explicit_std_value(
     return None
 
 
+#: Prefix distinguishing a *probed* default standard (never asserted by the
+#: caller — see :func:`_probe_default_language_standard`) from a real,
+#: explicit ``-std=``/``/std:`` spelling or the ``force_cpp20`` literal
+#: ``"gnu++20"`` -- so a probed value can never collide with, or be mistaken
+#: for, a user-given one.
+_PROBED_STANDARD_PREFIX = "probed:"
+
+
+def _probe_language_mode(lang: str | None) -> str:
+    """``"c"`` or ``"c++"`` for :func:`_probe_default_language_standard`,
+    mirroring the same ``lang == "c"`` convention used throughout this
+    module (and ``dumper.py``'s own ``compiler = "cc" if lang == "c" else
+    "c++"``) — any other value (``None``, ``"c++"``, ...) means C++."""
+    return "c" if (lang or "").strip().lower() == "c" else "c++"
+
+
+@lru_cache(maxsize=32)
+def _probe_default_language_standard(compiler_bin: str, lang_mode: str) -> str | None:
+    """Best-effort: what C/C++ edition *compiler_bin* actually resolves to
+    when invoked with **no** explicit ``-std=`` at all (ADR-050 D1/D2
+    follow-up — closes the "profile_fingerprint guard doesn't fire without
+    L3 build evidence" gap: two header-AST dumps of genuinely different
+    toolchains/versions, neither given an explicit standard, previously both
+    recorded ``ast_resolved_standard=None`` and so trivially matched on
+    ``language_standard``, letting ``compare`` produce a real verdict for two
+    snapshots extracted under incompatible dialects instead of refusing).
+
+    Probes the compiler's own predefined-macro table the same way
+    ``buildsource.source_extractors.clang._clang_compiler_family`` already
+    does for compiler-family identification (``-E -dM``): the frontend's own
+    unpinned default is a real, observable fact — GCC 9's default C++ dialect
+    genuinely differs from Clang 18's — it just isn't *asserted* by any flag
+    this project passed, so it wasn't previously recorded at all rather than
+    guessed at.
+
+    Returns a ``"probed:"``-prefixed literal macro assignment
+    (``"probed:__cplusplus=201703L"`` / ``"probed:__STDC_VERSION__=201710L"``)
+    rather than a canonical ``-std=`` spelling: the exact edition a given
+    ``__cplusplus``/``__STDC_VERSION__`` value maps to is not always
+    recoverable (a compiler can report a nonstandard literal for a
+    still-experimental standard), but the raw value alone is already
+    sufficient for this function's actual purpose — two probes disagreeing
+    on it is real evidence of a dialect difference, and two probes agreeing
+    is real evidence there isn't one, regardless of what the edition is
+    conventionally called. A pre-C99 C compiler defines no
+    ``__STDC_VERSION__`` at all, so that absence is itself recorded as a
+    distinct value rather than falling through to ``None`` (which would
+    read as "not probed" rather than "genuinely probed as C89/ANSI C").
+
+    ``None`` on any failure (compiler not found, times out, or rejects
+    ``-E -dM`` — e.g. an MSVC ``cl.exe``, which uses different flags
+    entirely) — a probe that can't run is simply not evidence, the same
+    fail-open convention every other best-effort toolchain probe in this
+    codebase already uses. Cached per ``(compiler_bin, lang_mode)`` pair, the
+    same cost shape as ``_clang_compiler_family``/``_clang_compiler_version``,
+    so a whole dump session pays this at most once per distinct resolved
+    compiler.
+    """
+    macro_name = "__STDC_VERSION__" if lang_mode == "c" else "__cplusplus"
+    try:
+        r = subprocess.run(
+            [compiler_bin, "-E", "-dM", "-x", lang_mode, "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    for line in r.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[0] == "#define" and parts[1] == macro_name:
+            value = parts[2].strip() if len(parts) >= 3 else ""
+            return f"{_PROBED_STANDARD_PREFIX}{macro_name}={value}"
+    if lang_mode == "c":
+        # No __STDC_VERSION__ at all is itself a real, distinct signal
+        # (pre-C99 default), not a probe failure.
+        return f"{_PROBED_STANDARD_PREFIX}{macro_name}=<absent>"
+    return None
+
+
 def _resolve_standard_provenance(
     headers: list[Path],
     gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
+    *,
+    probe_compiler_bin: str | None = None,
+    probe_lang_mode: str | None = None,
 ) -> str | None:
     """Best-effort resolved C/C++ standard for snapshot provenance (schema
     v15, P1 toolchain-profile audit).
@@ -385,13 +483,21 @@ def _resolve_standard_provenance(
     a pure function of the same inputs: an explicit ``-std=``/``--std=``/
     ``/std:`` value is recorded verbatim; otherwise, if
     ``_detect_cpp20_headers`` would force C++20, ``"gnu++20"`` is recorded
-    (the exact flag ``force_cpp20`` adds); otherwise ``None`` — the
-    frontend's own unpinned default was used and is not guessed at here.
+    (the exact flag ``force_cpp20`` adds); otherwise, when *probe_compiler_bin*
+    is given, :func:`_probe_default_language_standard` is asked what that
+    resolved compiler's own unpinned default actually is (best-effort, never
+    guessed at from nothing); otherwise ``None``.
     """
     if has_explicit_std(gcc_options, gcc_option_tokens):
         return _extract_explicit_std_value(gcc_options, gcc_option_tokens)
     if headers and _detect_cpp20_headers(headers):
         return "gnu++20"
+    if probe_compiler_bin:
+        probed = _probe_default_language_standard(
+            probe_compiler_bin, probe_lang_mode or "c++"
+        )
+        if probed is not None:
+            return probed
     return None
 
 
@@ -407,6 +513,9 @@ def _ast_compile_provenance(
     gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
     sysroot: Path | None,
+    *,
+    ast_toolchain: dict[str, str] | None = None,
+    lang: str | None = None,
 ) -> _AstCompileProvenance:
     """Structured compile-context provenance kwargs for an ``AbiSnapshot``
     built from a header-AST parse (schema v15). A single call site shared by
@@ -421,9 +530,26 @@ def _ast_compile_provenance(
     carry a secret-looking ``-DTOKEN=...`` define or an absolute home-prefixed
     path, and this is the one place such tokens reach a persisted snapshot
     without going through that established convention.
+
+    ``ast_toolchain``/``lang`` (ADR-050 D1/D2 follow-up): the just-resolved
+    header-AST toolchain identity (``dumper_toolchain._parser_ast_toolchain``'s
+    result — the same dict :func:`_compiler_family_from_toolchain` already
+    reads ``compiler_selected``/``selected`` from) and the caller's raw
+    ``lang``, forwarded to :func:`_resolve_standard_provenance` so it can
+    probe the resolved compiler's own unpinned default standard when no
+    explicit one was given — see that function's own docstring. ``None``
+    for either (the default) preserves the exact prior behavior: no probe
+    attempted, ``ast_resolved_standard`` stays ``None`` for an unpinned dump.
     """
     resolved_standard = _resolve_standard_provenance(
-        headers, gcc_options, gcc_option_tokens
+        headers,
+        gcc_options,
+        gcc_option_tokens,
+        probe_compiler_bin=(
+            (ast_toolchain or {}).get("compiler_selected")
+            or (ast_toolchain or {}).get("selected")
+        ),
+        probe_lang_mode=_probe_language_mode(lang),
     )
     args = _combined_option_tokens(gcc_options, gcc_option_tokens)
     return {
