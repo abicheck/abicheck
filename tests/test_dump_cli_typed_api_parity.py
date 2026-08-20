@@ -288,24 +288,24 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
     # every ABI-relevant flag reaching the typed path's parse must also
     # reach the CLI path's -- compared per `split_compile_args`'s own
     # semantics-preserving normalization, not literal set/list equality
-    # (see that module's docstring: a plain set would miss a -D/-std
-    # last-wins conflict, and a plain sequence would reject the CLI path's
-    # own separately-tracked, harmless flag duplication).
-    cli_last_wins, cli_presence, cli_includes = split_compile_args(
+    # (see that module's docstring for the full reasoning, including why
+    # an *unrecognized* flag defaults to strict, order-preserving
+    # comparison rather than the reverse).
+    cli_last_wins, cli_presence, cli_pairs, cli_unknown = split_compile_args(
         tuple(cli_snap["ast_compile_args"])
     )
-    typed_last_wins, typed_presence, typed_includes = split_compile_args(
+    typed_last_wins, typed_presence, typed_pairs, typed_unknown = split_compile_args(
         tuple(typed_snap["ast_compile_args"])
     )
     assert cli_last_wins or cli_presence, "the CLI dump path resolved no compile flags"
     assert typed_last_wins or typed_presence, (
         "the typed-API dump path resolved no compile flags"
     )
-    # Last-wins state (-D/-U/-std=): exact dict equality -- this is the one
-    # that catches a *conflicting* value reached via a different order on
-    # each path (e.g. one path's effective -DFOO ends up "1", the other's
-    # "2"), which a plain set of tokens cannot distinguish from an
-    # identical, merely-reordered pair.
+    # Last-wins state (-D/-U/-std=/--target=): exact dict equality -- this
+    # is the one that catches a *conflicting* value reached via a
+    # different order on each path (e.g. one path's effective -DFOO ends
+    # up "1", the other's "2"), which a plain set of tokens cannot
+    # distinguish from an identical, merely-reordered pair.
     assert cli_last_wins == typed_last_wins, (
         shape_name,
         cli_last_wins,
@@ -324,13 +324,15 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
         f"{shape_name}: CLI dump path resolved flag(s) {missing_from_typed} "
         "the typed-API path did not"
     )
-    # Include-search flags: exact sequence, order and multiplicity both
-    # significant -- see `split_compile_args`'s own docstring.
-    assert cli_includes == typed_includes, (
-        shape_name,
-        cli_includes,
-        typed_includes,
-    )
+    # Include-search / forced-include flags: exact sequence, order and
+    # multiplicity both significant -- see `split_compile_args`'s own
+    # docstring.
+    assert cli_pairs == typed_pairs, (shape_name, cli_pairs, typed_pairs)
+    # Everything neither path's ast_compile_args composition is known to
+    # emit today, but which this helper has no specific rule for either:
+    # also an exact sequence, by the same "unknown defaults to strict"
+    # reasoning -- not folded into the presence-only set.
+    assert cli_unknown == typed_unknown, (shape_name, cli_unknown, typed_unknown)
 
 
 def _dump_via_cli_to_file(
