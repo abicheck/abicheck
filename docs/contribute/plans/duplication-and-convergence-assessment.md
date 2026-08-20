@@ -439,8 +439,8 @@ class ReportEnvelope:
     effective_config: EffectiveConfigReport
     evidence: EvidenceReport
     findings: tuple[ReportFinding, ...]
-    full_evaluation: EvaluationSummary
-    effective_evaluation: EvaluationSummary
+    full_evaluation: EvaluationSummary | None
+    effective_evaluation: EvaluationSummary | None
     exit_decision: ExitDecision
     dependencies: DependencyReport | None
     timings: StageTimings
@@ -464,6 +464,17 @@ exact drift this envelope exists to end; placing it inside either
 comparison could be evaluated at all, which is precisely what
 `aggregate.py`'s existing, correct separation of these concerns already
 gets right and this envelope must not regress.
+
+`full_evaluation`/`effective_evaluation` are `| None` for the identical
+reason the existing `compare_report.schema.json`'s own `verdict` property
+is nullable and documents three operational sentinel values alongside the
+five real ones: a library that failed during extraction or comparison in
+a release fan-out, or a pair the comparability gate rejected before any
+diff ran, never produces a `DiffResult` — an `ERROR`/`UNAVAILABLE`/
+`NOT_COMPARABLE` `operational_state` report carries whatever partial
+context (`inputs`, `resolution`, `advisories`) is actually available, not
+a fabricated evaluation. Only `operational_state == SUCCESS` obligates
+both evaluation fields to be present.
 
 ### P1 — Aggregate consumes representations, not decisions
 
@@ -772,10 +783,16 @@ block-everything-immediately):
    drive-by addition to this guardrail's allowlist.
 4. Every *completed-operation exit of a modeled compatibility-analysis
    command* — one of the operations `ExitDecision`'s axes actually cover
-   (`compare`, `scan`, release, aggregate, `compat`, appcompat, `deps
-   compare`) — derives from an `ExitDecision` (Phase 3). `dump` is
-   deliberately excluded from this list, not merely unmentioned: a plain
-   `dump` performs no compatibility evaluation at all — its own target
+   (`compare`, `scan`, release, aggregate, `compat check`, appcompat, `deps
+   compare`) — derives from an `ExitDecision` (Phase 3). Named as `compat
+   check` specifically, not bare `compat`: the group has a second
+   subcommand, `compat dump`, which only creates an ABI snapshot and has no
+   evaluated compatibility result — the same fabricated-state problem the
+   next sentence already rules out for native `dump`, so it gets the
+   identical treatment rather than being silently swept in under the
+   group's name. `dump` (native) is deliberately excluded from this list,
+   not merely unmentioned: a plain `dump` performs no compatibility
+   evaluation at all — its own target
    pipeline (P0's artifact-resolution section above) ends at
    `ArtifactResult`, never at an evaluated compatibility result, and Phase
    3's per-operation policy list has no `DumpExitPolicy` for exactly that
@@ -838,10 +855,16 @@ sign-off, not a routine PR).
    pipeline, and fold its loadability/ABI-risk exit computation
    (`cli_stack.py`'s own `sys.exit` calls) into Phase 3's `ExitDecision`
    work rather than leaving it as yet another independent exit-code path.
-8. Make dry-run render the resolved plan.
-9. Delete the now-redundant duplicated seed/fold/resolve paths this closes
-   over (several are already named as follow-ups in AGENTS.md's L3→L2-fold
-   entry).
+8. Route `l0_export_delta.collect_l0_export_delta()`'s `symbols_only=True`
+   supplementary re-extraction through the same pipeline. Explicit,
+   separate step rather than assumed-covered by steps 3/4: `compare`'s and
+   `scan`'s own *primary*-side resolution moving onto
+   `ResolvedArtifactPlan` does nothing for this secondary call, since it
+   resolves independently, after the primary sides are already settled.
+9. Make dry-run render the resolved plan.
+10. Delete the now-redundant duplicated seed/fold/resolve paths this closes
+    over (several are already named as follow-ups in AGENTS.md's L3→L2-fold
+    entry).
 
 Highest-value phase: it removes both correctness duplication (the
 `include_sequence`/comparability-mismatch class of bug) and real
