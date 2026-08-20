@@ -229,6 +229,80 @@ class TestCastxmlEnumHexInit:
         assert {m.name: m.value for m in e.members} == {"A": 16, "B": 32, "C": -1}
 
 
+class TestCastxmlAtomicType:
+    """CastXML schema compatibility for C11 _Atomic nodes."""
+
+    @staticmethod
+    def _atomic_type_name(inner: str, *, tag: str = "AtomicType") -> str:
+        from xml.etree.ElementTree import Element
+
+        from abicheck.dumper_castxml import _CastxmlParser
+
+        root = Element("CastXML")
+        root.append(Element("FundamentalType", id="inner", name=inner))
+        attrs = {"id": "atomic", "type": "inner"}
+        if tag == "Unimplemented":
+            attrs["type_class"] = "Atomic"
+        root.append(Element(tag, **attrs))
+        return _CastxmlParser(root, set(), set())._type_name("atomic")
+
+    def test_atomic_type_and_legacy_node_retain_wrapped_type(self) -> None:
+        assert self._atomic_type_name("int") == "_Atomic(int)"
+        assert self._atomic_type_name("int", tag="Unimplemented") == "_Atomic(int)"
+
+    def test_atomic_wrapped_type_change_is_not_collapsed(self) -> None:
+        from abicheck.checker import ChangeKind, compare
+        from abicheck.model import AbiSnapshot, Function, Param, Visibility
+
+        def snapshot(param_type: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libtest.so", version="1",
+                functions=[Function(
+                    name="f", mangled="_Z1fv", return_type="void",
+                    params=[Param(name="value", type=param_type)],
+                    visibility=Visibility.PUBLIC,
+                )],
+            )
+
+        result = compare(
+            snapshot(self._atomic_type_name("int")),
+            snapshot(self._atomic_type_name("long")),
+        )
+
+        assert any(change.kind == ChangeKind.FUNC_PARAMS_CHANGED for change in result.changes)
+
+    def test_atomic_added_from_castxml_type_preserves_qualifier_change(self) -> None:
+        from abicheck.checker import ChangeKind, compare
+        from abicheck.model import AbiSnapshot, Function, Param, Visibility
+
+        def snapshot(param_type: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libtest.so", version="1",
+                functions=[Function(
+                    name="f", mangled="_Z1fv", return_type="void",
+                    params=[Param(name="value", type=param_type)],
+                    visibility=Visibility.PUBLIC,
+                )],
+            )
+
+        result = compare(snapshot("int"), snapshot(self._atomic_type_name("int")))
+
+        assert any(
+            change.kind == ChangeKind.ATOMIC_QUALIFIER_CHANGED
+            for change in result.changes
+        )
+
+    def test_legacy_atomic_without_type_uses_sentinel(self) -> None:
+        from xml.etree.ElementTree import Element
+
+        from abicheck.dumper_castxml import _CastxmlParser
+
+        root = Element("CastXML")
+        root.append(Element("Unimplemented", id="legacy", type_class="Atomic"))
+
+        assert _CastxmlParser(root, set(), set())._type_name("legacy") == "_Atomic"
+
+
 class TestCastxmlVtableUnindexed:
     """Regression test: multiple virtuals without vtable_index must not collapse."""
 
