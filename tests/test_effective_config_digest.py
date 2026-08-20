@@ -1028,3 +1028,90 @@ class TestBaselineExplicitScope:
             scoped.explicit_scope_source_sha256
             != scoped_different.explicit_scope_source_sha256
         )
+
+
+class TestBaselineExplicitScopeCoversPostManifest:
+    """Codex review, PR #803, fresh evidence: `--post-manifest` reaches
+    compare() as `public_surface_allowlist`, a second, independent
+    explicit-scope axis alongside `force_public_symbols` -- neither
+    `--contract` nor `--pack` is involved, so this is the identical
+    baseline-tier gap `TestBaselineExplicitScope` closed for
+    `force_public_symbols`, just for the other axis. Both must be folded
+    into one keyed digest (not a delimiter-joined string) so the two axes
+    can't collide with each other the way a naive join would."""
+
+    def test_compare_hashes_public_surface_allowlist_too(self):
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pp_a", "pp_a")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pp_a", "pp_a")], **common
+        )
+
+        no_scope = compare(old_snap, new_snap)
+        assert no_scope.explicit_scope_source_sha256 is None
+
+        allowlisted = compare(old_snap, new_snap, public_surface_allowlist={"pp_a"})
+        assert allowlisted.explicit_scope_source_sha256 is not None
+        assert allowlisted.explicit_scope_source_sha256.startswith("sha256:")
+
+        allowlisted_different = compare(
+            old_snap, new_snap, public_surface_allowlist={"pp_b"}
+        )
+        assert (
+            allowlisted.explicit_scope_source_sha256
+            != allowlisted_different.explicit_scope_source_sha256
+        )
+
+    def test_the_two_axes_do_not_collide(self):
+        """A naive `sorted(a | b)` or delimiter-join could make
+        force_public_symbols={"x"} and public_surface_allowlist={"x"}
+        (or a split like {"x", "y"} vs {"xy"}) hash identically -- the
+        keyed-JSON encoding must keep them distinguishable."""
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("shared", "shared")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("shared", "shared")], **common
+        )
+
+        via_force_public = compare(
+            old_snap, new_snap, force_public_symbols={"shared"}
+        )
+        via_allowlist = compare(
+            old_snap, new_snap, public_surface_allowlist={"shared"}
+        )
+        both = compare(
+            old_snap,
+            new_snap,
+            force_public_symbols={"shared"},
+            public_surface_allowlist={"shared"},
+        )
+        digests = {
+            via_force_public.explicit_scope_source_sha256,
+            via_allowlist.explicit_scope_source_sha256,
+            both.explicit_scope_source_sha256,
+        }
+        assert len(digests) == 3, digests

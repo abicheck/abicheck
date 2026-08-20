@@ -1151,22 +1151,36 @@ def compare(
         _suppression_config.sha256 if _suppression_config is not None else None
     )
 
-    # Canonical content digest of the resolved forced-public-symbol set
-    # (Codex review, PR #803, fresh evidence): `force_public_symbols` is
-    # already resolved by the caller (from `--public-symbols-list`/
-    # `.abicheck.yml`'s `scope.public_symbols`, one layer above this
-    # function) into a plain `set[str]` by the time it reaches here, so a
-    # digest of its own sorted content -- not a second read of whatever
-    # file it came from -- is what's available and sufficient to answer
-    # "did the explicit scope change" for `effective_config_digest`'s
-    # baseline tier.
+    # Canonical content digest of every resolved explicit-scope input
+    # (Codex review, PR #803, fresh evidence -- generalized after an
+    # initial version covered only `force_public_symbols`): both
+    # `force_public_symbols` (from `--public-symbols-list`/`.abicheck.yml`'s
+    # `scope.public_symbols`) and `public_surface_allowlist` (from
+    # `--post-manifest`'s resolved `pp_*`/ufunc-loop allowlist,
+    # `_resolve_post_manifest_allowlist` one layer above this function) are
+    # already-resolved `set[str] | None` by the time they reach here, and
+    # both independently change which findings `compare()` retains -- so a
+    # digest of just one axis would let two runs differing only by the
+    # other collide. Keyed JSON (not a delimiter-joined string) keeps the
+    # two axes distinguishable and avoids the non-injective-join class of
+    # bug already fixed elsewhere in this same digest work.
     import hashlib
+    import json as _json
 
+    _explicit_scope_sources: dict[str, list[str]] = {}
+    if force_public_symbols:
+        _explicit_scope_sources["force_public_symbols"] = sorted(force_public_symbols)
+    if public_surface_allowlist:
+        _explicit_scope_sources["public_surface_allowlist"] = sorted(
+            public_surface_allowlist
+        )
     explicit_scope_source_sha256 = (
         "sha256:" + hashlib.sha256(
-            "\x00".join(sorted(force_public_symbols)).encode("utf-8")
+            _json.dumps(
+                _explicit_scope_sources, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
         ).hexdigest()
-        if force_public_symbols
+        if _explicit_scope_sources
         else None
     )
 

@@ -39,4 +39,9 @@
   baseline tier's `surface.explicit_scope` distinguish two ordinary
   comparisons (neither `--contract` nor `--pack`) that resolve different
   `--public-symbols-list`/`.abicheck.yml` `scope.public_symbols` roots,
-  which was previously hard-coded empty.
+  which was previously hard-coded empty. That field now also folds in
+  `--post-manifest`'s resolved `public_surface_allowlist` (a second,
+  independent explicit-scope axis that reaches `compare()` the same way,
+  with neither `--contract` nor `--pack` involved either) via a keyed JSON
+  encoding rather than a delimiter-joined string, so the two axes can't
+  collide with each other or with a same-content-different-shape input.
