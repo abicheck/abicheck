@@ -350,7 +350,7 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                     # can't be proven CLI-touching from syntax alone.
                     mod_components = stmt.module.split(".")
                     if (
-                        mod_components[0] == "abicheck"
+                        mod_components[0] == PKG.name
                         and any(_is_cli_component(c) for c in mod_components[1:])
                         and (resolved.with_suffix(".py").is_file() or resolved.is_dir())
                     ):
