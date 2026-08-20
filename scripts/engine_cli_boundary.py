@@ -180,10 +180,13 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     attribute -- Python checks the already-executed package object for the
     name *before* attempting to import a same-named submodule -- so a
     same-named ``cli``/``cli_*`` submodule file sitting alongside it is
-    never actually reached by this particular import statement. Restricted
-    to ``Assign``/``AnnAssign`` (with a value)/``FunctionDef``/``ClassDef``
-    bindings: those unambiguously bind to something other than the
-    submodule itself, unlike e.g. ``from . import cli`` inside
+    never actually reached by this particular import statement. Recognizes
+    ``Assign``/``AnnAssign`` (with a value)/``FunctionDef``/``ClassDef``
+    bindings and an ``ImportFrom`` re-exporting an ordinary symbol under
+    this name from elsewhere (``from .api import cli``, or a *different*
+    submodule aliased to this name, ``from . import othername as cli``):
+    those unambiguously bind to something other than the real submodule,
+    unlike ``from . import cli`` (no module, no rename) inside
     ``__init__.py``, which binds the name to the submodule object itself
     and so isn't a real shadow at all. A bare annotation with no value
     (``cli: object``) is deliberately excluded -- it only records an
@@ -227,6 +230,19 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
             return True
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if stmt.name == alias_name:
+                return True
+        if isinstance(stmt, ast.ImportFrom):
+            for alias in stmt.names:
+                if (alias.asname or alias.name) != alias_name:
+                    continue
+                if (
+                    (stmt.module or "") == ""
+                    and stmt.level == 1
+                    and alias.name == alias_name
+                ):
+                    # `from . import alias_name [as alias_name]` -- binds the
+                    # name to the real submodule object itself, not a shadow.
+                    continue
                 return True
     return False
 

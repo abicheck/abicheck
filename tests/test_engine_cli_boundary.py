@@ -297,6 +297,61 @@ def test_reexport_of_real_submodule_through_alias_still_flagged(
     assert "scan_engine.py" in errors[0]
 
 
+def test_importfrom_reexport_of_ordinary_symbol_shadows_real_submodule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from .api import cli` inside `__init__.py` binds `cli` to an
+    ordinary symbol re-exported from an unrelated module — not the real
+    `cli.py` submodule sitting alongside it. `from .pkg import cli` then
+    resolves to that re-exported symbol (Python checks the already-executed
+    package attribute before ever importing a same-named submodule), so
+    this must be treated as a shadow, not a real submodule import — even
+    though the binding is an `ImportFrom`, not an `Assign`."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg4"
+    engine_pkg.mkdir()
+    (engine_pkg / "api.py").write_text("def cli() -> None:\n    pass\n")
+    (engine_pkg / "__init__.py").write_text("from .api import cli\n")
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg4 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
+def test_importfrom_aliasing_a_different_submodule_shadows_real_submodule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from . import othername as cli` imports a *different* real
+    submodule and binds it under the name `cli` — not the actual `cli.py`
+    submodule sitting alongside it. Must still be treated as a shadow: the
+    bound object is `othername`, not `cli`."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg5"
+    engine_pkg.mkdir()
+    (engine_pkg / "othername.py").write_text("# an unrelated engine submodule\n")
+    (engine_pkg / "__init__.py").write_text("from . import othername as cli\n")
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg5 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
 def test_annotation_only_init_declaration_does_not_suppress_real_submodule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -513,12 +568,16 @@ def test_unrelated_third_party_package_named_abicheck_is_not_flagged(
 ) -> None:
     """`from vendor.abicheck.cli import helper` names an unrelated
     third-party `vendor.abicheck` package, not this repo's own `abicheck` —
-    only a *root* `abicheck` component is this repo's package."""
+    only a *root* `abicheck` component is this repo's package. Covers both
+    the absolute `ImportFrom` branch and its `ast.Import` sibling
+    (`import vendor.abicheck.cli`), which has its own, separate root-scope
+    check and could independently regress without this second assertion."""
     import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
     (pkg / "scan_engine.py").write_text("from vendor.abicheck.cli import helper\n")
+    (pkg / "service_widget.py").write_text("import vendor.abicheck.cli\n")
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
