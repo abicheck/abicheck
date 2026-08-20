@@ -262,6 +262,32 @@ if TYPE_CHECKING:
 _SECTION = "Build query (trust)"
 
 
+def _is_inputs_pack_dir(path: Path | None) -> bool:
+    """True when *path* is a Flow-2 ``abicheck_inputs/`` directory (ADR-035 D5).
+
+    A local copy of ``cli_buildsource_helpers._is_inputs_pack_dir``'s own
+    None/is_dir guard around ``buildsource.inputs_pack.is_inputs_pack``, not
+    an import of it: ``cli_buildsource_helpers`` sits several layers above
+    this module in the real import graph (``cli.py``'s ``dump_cmd`` reaches
+    this module directly, and ``cli_buildsource_helpers`` itself reaches back
+    to ``cli.py`` via ``service -> service_scan -> scan_engine ->
+    cli_buildsource -> cli_dump_helpers``), so importing it here -- even
+    function-locally -- closes a real cycle the AI-readiness
+    ``import-cycle-growth`` gate correctly rejects (confirmed by CI:
+    ``cli -> cli_dump_dry_run_build_query -> cli_buildsource_helpers ->
+    service -> service_scan -> scan_engine -> cli_buildsource ->
+    cli_dump_helpers -> cli``). ``buildsource.inputs_pack.py`` itself has no
+    such path back to ``cli.py``, so importing straight from it is safe --
+    the identical fix already applied to
+    ``buildsource.l2_seed._is_inputs_pack_dir`` for the identical reason.
+    """
+    if path is None or not path.is_dir():
+        return False
+    from .buildsource.inputs_pack import is_inputs_pack
+
+    return is_inputs_pack(path)
+
+
 def _is_pack_dir_any(path: Path | None) -> bool:
     """True when *path* is either pack-directory shape the real resolvers
     fold in and null the corresponding ``raw_build_info``/``raw_sources``
@@ -277,7 +303,6 @@ def _is_pack_dir_any(path: Path | None) -> bool:
     itself a pack" can safely recognize both the same way too.
     """
     from .buildsource.inline import is_pack_dir
-    from .cli_buildsource_helpers import _is_inputs_pack_dir
 
     return is_pack_dir(path) or _is_inputs_pack_dir(path)
 
@@ -288,21 +313,42 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
     Mirrors whichever of the two real loaders the production pack-precedence
     resolvers use for *path*: a classic ``BuildSourcePack.load(path).
     build_evidence`` for the ``is_pack_dir`` shape, or -- for a Flow-2
-    ``abicheck_inputs/`` pack -- the lighter, comparable-cost
-    ``load_inputs_manifest`` + ``_load_build_evidence`` pair that parses only
-    the pack's compile DB, **not** the full ``ingest_inputs_pack`` (which
-    additionally reads and parses every ``source_facts/*.jsonl`` file -- real
-    extra I/O this reachability question, "does this pack already carry L3
-    compile units", does not need; this module's own contract is "no I/O
-    beyond stat()/PATH lookups" wherever a cheaper equivalent exists) --
-    mirroring ``buildsource.l2_seed._l2_seed_pack_build_evidence``'s
-    identical choice for the identical reason. Raises the same way the real
-    loaders do for a structurally malformed pack (``FileNotFoundError``/
-    ``ValueError``, or a broader shape-mismatch exception a malformed
-    manifest can raise -- see the two call sites' own ``except Exception``
-    handling, which does not key on the exception's type), so both call
-    sites can share one catch-all shape regardless of which pack kind was
-    actually loaded.
+    ``abicheck_inputs/`` pack -- ``validate_inputs_pack``'s hard validation
+    followed by the lighter ``load_inputs_manifest`` + ``_load_build_
+    evidence`` pair for the ``BuildEvidence`` itself, **not** the full
+    ``ingest_inputs_pack`` (which additionally links a full L4
+    ``SourceAbiSurface`` and folds the L5 graph -- real extra work this
+    reachability question, "does this pack already carry L3 compile units",
+    does not need). Raises the same way the real loaders do for a
+    structurally malformed pack (``FileNotFoundError``/``ValueError``, or a
+    broader shape-mismatch exception a malformed manifest can raise -- see
+    the two call sites' own ``except Exception`` handling, which does not
+    key on the exception's type), so both call sites can share one catch-all
+    shape regardless of which pack kind was actually loaded.
+
+    The Flow-2 branch's own hard validation (Codex review, fresh evidence)
+    mirrors ``embed_build_source``'s own real ``_load_inputs_pack_or_raise``
+    -> ``validate_inputs_pack`` -> raise-on-``report.errors`` order exactly:
+    without it, a pack that is structurally readable (``is_inputs_pack``/
+    ``load_inputs_manifest`` both succeed) but whose source facts fail
+    validation (duplicate ``tu_id``s, target-id/fact-set-recipe/fact-set-
+    identity errors) would have this function report a real ``BuildEvidence``
+    and let the surrounding precedence chain conclude "will NOT run --
+    already carries L3 compile units," even though the real
+    ``embed_build_source`` call this pack reaches would raise
+    ``click.ClickException`` (exit 1) before ever getting that far -- a dry
+    run claiming a broken invocation is valid, which is exactly what this
+    module elsewhere blocks for. This does mean the Flow-2 branch is no
+    longer "no I/O beyond stat()/PATH lookups" (``validate_inputs_pack``
+    itself reads every ``source_facts/*.jsonl`` file to check for duplicate
+    ``tu_id``s and per-TU fact-set issues) -- an accepted correctness-over-
+    cheapness tradeoff, the same one this module's own docstring already
+    makes for a large pre-captured Bazel jsonproto. Deliberately **not**
+    applied to the classic-``BuildSourcePack`` branch above: that shape has
+    no equivalent separate "validate" step in production
+    (``_load_pack_or_raise`` is just ``BuildSourcePack.load`` wrapped in a
+    narrow except), so this function's existing load call already matches
+    it exactly.
     """
     from .buildsource.inline import is_pack_dir
 
@@ -311,7 +357,13 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
 
         return BuildSourcePack.load(path).build_evidence
     from .buildsource.inputs_pack import _load_build_evidence, load_inputs_manifest
+    from .buildsource.inputs_validate import validate_inputs_pack
 
+    report = validate_inputs_pack(path)
+    if report.errors:
+        raise ValueError(
+            f"{len(report.errors)} validation error(s): " + "; ".join(report.errors)
+        )
     manifest = load_inputs_manifest(path)
     return _load_build_evidence(path, manifest, [])
 
