@@ -1228,6 +1228,7 @@ def compare(
         collapse_versioned_symbols_enabled=bool(collapse_versioned_symbols),
         surface_metrics_enabled=bool(surface_metrics),
         env_matrix_source_sha256=env_matrix_source_sha256,
+        reconcile_build_context_enabled=bool(reconcile_build_context),
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

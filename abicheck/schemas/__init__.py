@@ -669,7 +669,12 @@ from typing import Any
 #:       floors and add deployment findings) -- three more checker-level
 #:       axes that were previously unrepresented in the digest, all
 #:       following the identical shape ``policy.pattern_verdicts`` already
-#:       established. Additive keys.
+#:       established. Additive keys. One more fix, same further review
+#:       round: ``policy.reconcile_build_context`` (``compare(...,
+#:       reconcile_build_context=...)``, ``--reconcile-build-context``,
+#:       which can move a phantom breaking finding from ``kept`` into the
+#:       reconciliation audit bucket, changing the verdict and exit code)
+#:       -- same shape again.
 REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
@@ -989,7 +994,8 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        same round as `compare`'s report_schema_version 2.46 entry:
 #:        ``policy.collapse_versioned_symbols``, ``policy.surface_metrics``,
 #:        and ``policy.env_matrix`` were added, sharing the identical
-#:        computation (see that entry for the full reasoning).
+#:        computation (see that entry for the full reasoning). One more:
+#:        ``policy.reconcile_build_context`` was added, same round.
 SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

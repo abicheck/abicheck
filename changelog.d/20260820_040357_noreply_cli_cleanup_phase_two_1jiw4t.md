@@ -80,4 +80,9 @@
   `policy.env_matrix` (a new `DiffResult.env_matrix_source_sha256` field —
   a content digest of the resolved `--env-matrix`, since its runtime floors
   can reclassify a version-requirement finding, e.g. a GLIBC floor turning
-  a RISK into `BREAKING`, and add deployment findings).
+  a RISK into `BREAKING`, and add deployment findings). One more axis in
+  the same shape: `policy.reconcile_build_context`
+  (`--reconcile-build-context`, a new `DiffResult.
+  reconcile_build_context_enabled` field), since it can move a phantom
+  breaking finding from `kept` into the reconciliation audit bucket,
+  changing the verdict and exit code.

@@ -650,6 +650,14 @@ class DiffResult:
     # every constraint left unspecified, the same "selected vs. absent"
     # distinction ``explicit_scope_source_sha256`` already draws.
     env_matrix_source_sha256: str | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ``compare(..., reconcile_build_context=...)``
+    # (``--reconcile-build-context``) was requested for this comparison --
+    # when enabled, ``reconcile_build_context_findings`` can move a phantom
+    # breaking finding from ``kept`` into the reconciliation audit bucket,
+    # changing the verdict and exit code. Same shape as
+    # ``pattern_verdicts_enabled`` above.
+    reconcile_build_context_enabled: bool = field(default=False, kw_only=True)
 
     def _effective_kind_sets(
         self,

@@ -1515,3 +1515,52 @@ class TestEnvMatrixAxis:
         assert with_a.env_matrix_source_sha256.startswith("sha256:")
         assert with_a.env_matrix_source_sha256 == with_a_again.env_matrix_source_sha256
         assert with_a.env_matrix_source_sha256 != with_b.env_matrix_source_sha256
+
+
+class TestReconcileBuildContextAxis:
+    """Codex review, PR #803, fresh evidence: --reconcile-build-context
+    (compare(..., reconcile_build_context=...)) can move a phantom
+    breaking finding from `kept` into the reconciliation audit bucket,
+    changing the verdict and exit code, but was previously unrepresented
+    in the digest."""
+
+    def test_flag_changes_the_baseline_digest(self):
+        off = _result(reconcile_build_context_enabled=False)
+        on = _result(reconcile_build_context_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.reconcile_build_context"] == "False"
+        assert f2["policy.reconcile_build_context"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_flag_changes_the_rich_tier_digest(self):
+        config = _minimal_evaluation_config()
+        off = _result(evaluation_config=config, reconcile_build_context_enabled=False)
+        on = _result(evaluation_config=config, reconcile_build_context_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.reconcile_build_context"] != f2["policy.reconcile_build_context"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_stamps_the_flag(self):
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1"}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        off = compare(old_snap, new_snap, reconcile_build_context=False)
+        on = compare(old_snap, new_snap, reconcile_build_context=True)
+        assert off.reconcile_build_context_enabled is False
+        assert on.reconcile_build_context_enabled is True
