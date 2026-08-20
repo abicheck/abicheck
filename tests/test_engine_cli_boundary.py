@@ -240,6 +240,61 @@ def test_symbol_named_like_cli_module_is_not_flagged(
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
+def test_package_attribute_shadowing_same_named_submodule_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package whose own `__init__.py` binds `cli` to an ordinary
+    attribute (a function here) shadows a same-named `cli.py` submodule
+    sitting alongside it — `from .pkg import cli` resolves to the
+    already-executed package's own attribute, not the submodule, since
+    Python checks the package object for the name before ever attempting
+    to import a same-named submodule. Must not be flagged even though a
+    real `pkg/cli.py` file exists on disk."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg"
+    engine_pkg.mkdir()
+    (engine_pkg / "__init__.py").write_text("def cli() -> None:\n    pass\n")
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
+def test_genuine_nested_cli_adapter_alias_still_flagged_with_init_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The attribute-shadowing guard must not blind the gate to a genuine
+    submodule import just because the package happens to carry an
+    `__init__.py` — only an actual same-named top-level binding inside it
+    should suppress the finding."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    compat = pkg / "compat"
+    compat.mkdir()
+    (compat / "__init__.py").write_text("")
+    (compat / "cli.py").write_text("# real CLI adapter\n")
+    (pkg / "scan_engine.py").write_text("from .compat import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_allowlisted_site_is_not_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -157,8 +157,55 @@ def _alias_is_real_submodule(base_dir: Path, alias_name: str) -> bool:
     such directory a valid, importable namespace package, so ``from .
     import cli_tools`` for a directory-only ``abicheck/cli_tools/`` is a
     real CLI-frontend dependency Python would actually resolve, not a
-    false positive to guard against."""
-    return (base_dir / f"{alias_name}.py").is_file() or (base_dir / alias_name).is_dir()
+    false positive to guard against.
+
+    A same-named file/directory on disk is still not sufficient on its own:
+    ``from pkg import name`` resolves to ``pkg``'s own attribute *before*
+    Python ever tries importing ``pkg.name`` as a submodule (the reverse of
+    the namespace-package case above) -- so a package whose own
+    ``__init__.py`` binds ``alias_name`` to an ordinary function/class/value
+    shadows a same-named submodule file that never actually gets imported by
+    this statement. See ``_package_shadows_attribute``."""
+    is_submodule = (base_dir / f"{alias_name}.py").is_file() or (
+        base_dir / alias_name
+    ).is_dir()
+    return is_submodule and not _package_shadows_attribute(base_dir, alias_name)
+
+
+def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
+    """Does *base_dir*'s own ``__init__.py`` bind *alias_name* to an
+    ordinary attribute (a function, class, or plain value) at module scope?
+
+    If so, ``from <base_dir's package> import alias_name`` resolves to that
+    attribute -- Python checks the already-executed package object for the
+    name *before* attempting to import a same-named submodule -- so a
+    same-named ``cli``/``cli_*`` submodule file sitting alongside it is
+    never actually reached by this particular import statement. Restricted
+    to ``Assign``/``AnnAssign``/``FunctionDef``/``ClassDef`` bindings: those
+    unambiguously bind to something other than the submodule itself, unlike
+    e.g. ``from . import cli`` inside ``__init__.py``, which binds the name
+    to the submodule object itself and so isn't a real shadow at all. A
+    namespace package (no ``__init__.py``) can't shadow anything this way."""
+    init_path = base_dir / "__init__.py"
+    if not init_path.is_file():
+        return False
+    try:
+        tree = ast.parse(_read(init_path), filename=str(init_path))
+    except SyntaxError:
+        return False
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == alias_name for t in stmt.targets
+        ):
+            return True
+        if isinstance(stmt, ast.AnnAssign) and (
+            isinstance(stmt.target, ast.Name) and stmt.target.id == alias_name
+        ):
+            return True
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if stmt.name == alias_name:
+                return True
+    return False
 
 
 def _relative_import_base_dir(rel: str, level: int, mod: str) -> Path:
