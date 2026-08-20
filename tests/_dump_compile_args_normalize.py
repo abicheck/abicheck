@@ -174,6 +174,17 @@ def split_compile_args(
             ordered_stream.append(f"{flag}={operand}")
             i += consumed
             continue
+        if tok in ("-D", "-U") and i + 1 < n:
+            # GCC/Clang accept -D/-U with the name as a *separate* argv
+            # token too (`-D FOO=1`, not just `-DFOO=1`) -- canonicalize
+            # to the attached spelling so both forms land in the same
+            # last-wins key, for the identical reason `_match_pair_flag`
+            # canonicalizes attached vs. separate include flags.
+            combined = tok + args[i + 1]
+            macro_name = combined[2:].split("=", 1)[0]
+            last_wins[f"macro:{macro_name}"] = combined
+            i += 2
+            continue
         if tok.startswith(("-D", "-U")) and len(tok) > 2:
             macro_name = tok[2:].split("=", 1)[0]
             last_wins[f"macro:{macro_name}"] = tok

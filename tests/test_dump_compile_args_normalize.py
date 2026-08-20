@@ -87,6 +87,17 @@ class TestLastWinsMacroAndDialectFlags:
         state = split_compile_args(("-DFOO=1", "-UFOO"))[0]
         assert state["macro:FOO"] == "-UFOO"
 
+    def test_separate_and_attached_macro_spelling_normalize_identically(self) -> None:
+        """GCC/Clang accept `-D FOO=1` (separate argv token) as well as
+        `-DFOO=1` (attached) -- the identical attached-vs-separate
+        equivalence the ordered-stream pair flags already need, applied
+        proactively here before a real dumper output exercises it, rather
+        than waiting for a fifth review round to find it the same way the
+        fourth found it for -I."""
+        separate = split_compile_args(("-D", "FOO=1"))
+        attached = split_compile_args(("-DFOO=1",))
+        assert separate[0] == attached[0] == {"macro:FOO": "-DFOO=1"}
+
 
 class TestOrderedStreamPairFlags:
     def test_reordered_include_dirs_are_not_equal(self) -> None:
