@@ -124,7 +124,7 @@ partially-equivalent paths exist today:
    `run_probe_matrix(..., snapshot=True)`, the header-only-library
    compile-and-snapshot driver behind G25/G26-family evidence-tier work)
    also calls `dumper.dump()` directly on each compiled probe object.
-   Deliberately called out separately from the seven user-facing operations
+   Deliberately called out separately from the ten user-facing operations
    above, since it isn't one — see "backend-level exception" below.
 9. L0 export-delta re-extraction: `l0_export_delta.collect_l0_export_delta()`
    — invoked by both native `compare` and scan baseline reconciliation —
@@ -744,11 +744,23 @@ mirroring how `scripts/check_ai_readiness.py`'s `import-cycle-growth` and
 block-everything-immediately):
 
 1. No `scan_engine`, `service_*`, `artifact_*`, or `buildsource` engine
-   module imports `click` or `cli_*`.
+   module imports `click` or `cli_*`. **Implemented**: `scripts/
+   check_ai_readiness.py`'s `engine-cli-boundary` check (allowlist-and-shrink,
+   `ENGINE_CLI_BOUNDARY_ALLOWLIST`; `tests/test_engine_cli_boundary.py`).
+   Known residual gap, not yet closed: the check is AST-based and can only
+   see a real `import`/`from` statement, so it cannot catch
+   `service.py`'s own `importlib.import_module()` escape hatch — used
+   specifically because that dynamic form is invisible to `import-cycle-
+   growth`'s AST walk too (see AGENTS.md's own note on why). Closing that
+   needs either a literal-string-argument scan for `importlib.import_module`
+   calls naming a `cli_*`/`click` target (a real but narrower AST pattern
+   than the static-import case) or removing the dynamic import once Phase 1
+   resolves the cycle it was working around — left as a follow-up rather
+   than attempted as a drive-by widening of this check's first version.
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
    gate, which today only covers `checker.compare`).
-3. Every artifact extraction call site *for the seven user-facing
+3. Every artifact extraction call site *for the ten user-facing
    operations named in Phase 1* routes through the future artifact
    application service. Deliberately excludes `probe_harness.
    _snapshot_object_file()`: it has no CLI/API entry point today (nothing

@@ -2370,6 +2370,143 @@ def check_cli_contract(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: engine/CLI dependency direction (Phase 0 of
+# docs/contribute/plans/duplication-and-convergence-assessment.md)
+# ---------------------------------------------------------------------------
+
+# Engine-layer trees: the shared compare/scan engine, the Tier-2 service
+# layer, and the build-source evidence package. None of these may import
+# ``click`` or a ``cli_*`` sibling module — that's a CLI concept leaking
+# into a layer both the CLI and the typed Python API depend on, which is
+# exactly the inversion `scan_engine.py` importing `click` and raising
+# `click.ClickException` already demonstrates. A frontend (`cli*.py`,
+# `compat/cli.py`) is on the *other* side of this boundary and is
+# deliberately not covered here — it may import engine modules freely.
+_ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset({"scan_engine.py"})
+
+
+def _is_engine_module(rel: str) -> bool:
+    """True if *rel* (posix, relative to repo root) is in the engine layer.
+
+    ``abicheck/scan_engine.py``, every ``abicheck/service*.py``, and every
+    ``abicheck/buildsource/**/*.py`` — see this check's own module-level
+    docstring comment for why these three trees specifically.
+    """
+    if not rel.startswith("abicheck/"):
+        return False
+    tail = rel[len("abicheck/") :]
+    if tail in _ENGINE_MODULE_BASENAMES:
+        return True
+    if "/" not in tail and tail.startswith("service") and tail.endswith(".py"):
+        return True
+    if tail.startswith("buildsource/") and tail.endswith(".py"):
+        return True
+    return False
+
+
+# ``"<rel-path>:<lineno>"`` sites deliberately exempted — a real,
+# already-existing inversion this check's own baseline records rather than
+# hides, per Phase 0's "allowlist-and-shrink" design (mirrors
+# `IMPORT_CYCLE_ALLOWLIST`'s philosophy): the list must only shrink, and a
+# new entry needs the same review bar as extending that allowlist does
+# (CLAUDE.md's "Don't extend IMPORT_CYCLE_ALLOWLIST..." rule applies here
+# identically). See docs/contribute/plans/duplication-and-convergence-
+# assessment.md's "P1 — Dependency direction and CLI leakage" section and
+# its Phase 1 for what closes each of these.
+ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "abicheck/buildsource/evidence_policy.py:28",
+        "abicheck/scan_engine.py:53",
+        "abicheck/scan_engine.py:73",
+        "abicheck/scan_engine.py:74",
+        "abicheck/scan_engine.py:368",
+        "abicheck/service_compare_pipeline.py:398",
+        "abicheck/service_dump_pipeline.py:420",
+        "abicheck/service_input_resolution.py:107",
+        "abicheck/service_input_resolution.py:610",
+        "abicheck/service_input_resolution.py:613",
+        "abicheck/service_input_resolution.py:680",
+        "abicheck/service_scan.py:1023",
+        "abicheck/service_scan.py:1025",
+        "abicheck/service_scan.py:1141",
+        "abicheck/service_scan.py:1206",
+        "abicheck/service_scan.py:1595",
+    }
+)
+
+
+def _engine_boundary_violation(node: ast.Import | ast.ImportFrom) -> str | None:
+    """Return a human description if *node* imports ``click`` or a ``cli_*``
+    sibling, else ``None``. Checks every scope (module- and function-level —
+    most of these are deliberately lazy imports), matching this check's own
+    "no engine module may import click or cli_*" rule regardless of where in
+    the file the import sits."""
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            top = alias.name.split(".")[0]
+            if top == "click":
+                return f"import {alias.name}"
+        return None
+    # ast.ImportFrom
+    mod = node.module or ""
+    if node.level >= 1:
+        # Relative import: `from .cli_xxx import ...` or `from . import cli_xxx`.
+        if mod and mod.split(".")[0].startswith("cli"):
+            return f"from {'.' * node.level}{mod} import ..."
+        if not mod:
+            for alias in node.names:
+                if alias.name.startswith("cli"):
+                    return f"from {'.' * node.level} import {alias.name}"
+        return None
+    # Absolute import.
+    if mod == "click" or mod.startswith("click."):
+        return f"from {mod} import ..."
+    if "abicheck" in mod.split(".") and mod.split(".")[-1].startswith("cli"):
+        return f"from {mod} import ..."
+    return None
+
+
+def check_engine_cli_boundary(f: Findings) -> None:
+    """ERROR if an engine-layer module (`scan_engine.py`, `service*.py`,
+    `buildsource/**/*.py`) imports `click` or a `cli_*` sibling module.
+
+    The CLI is a frontend adapter over the engine/service layer, not the
+    other way around — an engine module that imports `click` or a `cli_*`
+    helper has inverted that dependency, which is exactly what let
+    `scan_engine.py` accumulate `click.ClickException`/`click.echo` calls
+    the typed Python API path can't use either. New violations are rejected
+    outright; the pre-existing ones are recorded in
+    `ENGINE_CLI_BOUNDARY_ALLOWLIST` (Phase 0 of the duplication-and-
+    convergence-assessment plan) rather than silently passing.
+    """
+    for path in sorted(PKG.rglob("*.py")):
+        rel = _rel(path)
+        if not _is_engine_module(rel):
+            continue
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            desc = _engine_boundary_violation(node)
+            if desc is None:
+                continue
+            site = f"{rel}:{node.lineno}"
+            if site in ENGINE_CLI_BOUNDARY_ALLOWLIST:
+                continue
+            f.err(
+                "engine-cli-boundary",
+                f"{site}: engine module `{desc}` — engine/service/buildsource "
+                "modules may not import click or a cli_* sibling (the CLI is "
+                "a frontend adapter over the engine, not the reverse); see "
+                "docs/contribute/plans/duplication-and-convergence-"
+                "assessment.md's Phase 0/P1",
+            )
+
+
+# ---------------------------------------------------------------------------
 # Check: test assertion density (coverage-honesty guard)
 # ---------------------------------------------------------------------------
 
@@ -2533,6 +2670,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
+    "engine-cli-boundary": check_engine_cli_boundary,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
 }
