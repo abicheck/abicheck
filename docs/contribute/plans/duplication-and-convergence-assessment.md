@@ -556,9 +556,13 @@ from shared *helper functions* to a shared *parsed object*:
 
 ```python
 class CompileAction(Enum):
-    OBJECT = "object"        # -c (or no compile-stop flag): source -> object file
+    OBJECT = "object"        # -c: source -> object file, compile stops here
     ASSEMBLE = "assemble"    # -S: source -> assembly text file
     PREPROCESS = "preprocess"  # -E: source -> preprocessed text (file or stdout)
+    LINK = "link"             # no stop flag: compile straight through and
+    # link -- the source's own intermediate object is an internal,
+    # unnamed temporary the compiler manages itself, never a file this
+    # model names; the invocation's own `output` field is the real result
 
 
 @dataclass(frozen=True)
@@ -683,9 +687,19 @@ foo.c` (also confirmed) writes preprocessed text to **stdout** when no
 `-o` is given at all — `CompileAction.PREPROCESS` with `effective_output
 = None` in that shape, since there is no default *file* target the way
 `-c`/`-S` have one; an explicit `gcc -E foo.c -o foo.i` still resolves to
-`foo.i`. A model that always assigned an `.o`-shaped default output
-regardless of `-S`/`-E` would silently mismatch what the invocation
-actually produces.
+`foo.i`. `gcc foo.c -o app` — no `-c`/`-S`/`-E` at all — is a fourth,
+distinct shape: GCC's own `-c` documentation is explicit that it means
+"compile and assemble, but do not link", so its *absence* compiles
+straight through the assembler and linker in one invocation, producing
+the linked `app` directly, never a persisted `foo.o` a build system could
+name. `CompileAction.LINK` models this: the source's own intermediate
+object is the compiler's internal, unnamed temporary (its exact path is
+implementation-defined and not stable across compiler versions), so
+`effective_output` is `None` here too — the real result lives on
+`CompilerInvocation.output` (the invocation-level artifact `output`
+already models for a link-shaped command). A model that always assigned
+an `.o`-shaped default output regardless of `-S`/`-E`/no-stop-flag would
+silently mismatch what the invocation actually produces.
 
 `recorded_directory` is the compile-database entry's own `directory` field
 (or the equivalent for a live build-adapter query) — not optional, since a
