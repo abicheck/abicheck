@@ -2454,63 +2454,80 @@ ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
+def _is_cli_component(name: str) -> bool:
+    """Is *name* — one dotted-path component, or an imported alias's own
+    name — a CLI-frontend module spelling? Matches both the top-level
+    ``cli_*.py`` sibling family (``cli_dump_helpers``, ...) and a bare
+    ``cli`` component, which catches a *nested* CLI adapter package like
+    ``abicheck/compat/cli.py`` (imported as `.compat.cli`/`abicheck.compat
+    .cli`/`from .compat import cli`) that the top-level-only ``cli_*``
+    pattern would otherwise miss entirely."""
+    return name == "cli" or name.startswith("cli_")
+
+
 def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
     """Return one human description per prohibited alias *node* imports
-    (``click`` or a ``cli_*`` sibling), possibly more than one — an import
-    statement can name several targets on one line (`import click,
-    abicheck.cli_new`; `from abicheck import cli_a, cli_b`), and each
-    prohibited one is its own violation; returning only the first would let
-    a second, added alias ride along unflagged forever, silently absorbed
-    into whichever description the allowlist already recognizes. Checks
-    every scope (module- and function-level — most of these are
-    deliberately lazy imports), matching this check's own "no engine module
-    may import click or cli_*" rule regardless of where in the file the
-    import sits."""
+    (``click`` or a ``cli``/``cli_*`` sibling — top-level or nested, e.g.
+    ``abicheck.compat.cli``), possibly more than one — an import statement
+    can name several targets on one line (`import click, abicheck.cli_new`;
+    `from abicheck import cli_a, cli_b`), and each prohibited one is its own
+    violation; returning only the first would let a second, added alias
+    ride along unflagged forever, silently absorbed into whichever
+    description the allowlist already recognizes. Checks every scope
+    (module- and function-level — most of these are deliberately lazy
+    imports), matching this check's own "no engine module may import click
+    or a CLI frontend" rule regardless of where in the file the import
+    sits, and regardless of how deep the CLI module is nested (a
+    ``cli_*.py`` sibling of ``cli.py``, or a ``cli.py`` living inside a
+    sub-package like ``compat/``)."""
     if isinstance(node, ast.Import):
         found = []
         for alias in node.names:
             parts = alias.name.split(".")
             if parts[0] == "click":
                 found.append(f"import {alias.name}")
-            # `import abicheck.cli_dump_helpers` (also catches a bare
-            # `import abicheck.cli_dump_helpers as X`, which still binds the
-            # whole dotted path).
-            elif (
-                parts[0] == "abicheck"
-                and len(parts) >= 2
-                and parts[1].startswith("cli")
+            # `import abicheck.cli_dump_helpers` / `import
+            # abicheck.compat.cli` (also catches a bare `... as X`, which
+            # still binds the whole dotted path). Any component after
+            # `abicheck`, not just the first, since a nested CLI adapter's
+            # own cli-ness can show up several segments deep.
+            elif parts[0] == "abicheck" and any(
+                _is_cli_component(p) for p in parts[1:]
             ):
                 found.append(f"import {alias.name}")
         return found
     # ast.ImportFrom
     mod = node.module or ""
+    mod_components = mod.split(".") if mod else []
     if node.level >= 1:
-        # Relative import: `from .cli_xxx import ...` or `from . import cli_xxx`.
-        if mod and mod.split(".")[0].startswith("cli"):
+        # Relative import: `from .cli_xxx import ...`, `from .compat.cli
+        # import ...`, `from . import cli_xxx`, or `from .compat import
+        # cli` (a nested adapter reached via an imported alias, not a
+        # dotted `mod` component).
+        if any(_is_cli_component(c) for c in mod_components):
             return [f"from {'.' * node.level}{mod} import ..."]
-        if not mod:
-            return [
-                f"from {'.' * node.level} import {alias.name}"
-                for alias in node.names
-                if alias.name.startswith("cli")
-            ]
-        return []
+        return [
+            f"from {'.' * node.level}{mod} import {alias.name}"
+            for alias in node.names
+            if _is_cli_component(alias.name)
+        ]
     # Absolute import.
     if mod == "click" or mod.startswith("click."):
         return [f"from {mod} import ..."]
-    # `from abicheck import cli_dump_helpers [as X]` — the submodule name is
-    # an imported *alias*, not part of `mod`, so it isn't caught by the
-    # `mod.split(".")[-1]` check below.
-    if mod == "abicheck":
+    if "abicheck" in mod_components:
+        # `from abicheck.compat.cli import main` / `from abicheck import
+        # cli_dump_helpers` — a dotted component naming the CLI module, or
+        # (when `mod` itself has no such component, e.g. `from
+        # abicheck.compat import cli`) an imported alias naming it instead.
+        if any(_is_cli_component(c) for c in mod_components if c != "abicheck"):
+            return [f"from {mod} import ..."]
         found = [
             f"from {mod} import {alias.name}"
             for alias in node.names
-            if alias.name.startswith("cli")
+            if _is_cli_component(alias.name)
         ]
         if found:
             return found
-    if "abicheck" in mod.split(".") and mod.split(".")[-1].startswith("cli"):
-        return [f"from {mod} import ..."]
     return []
 
 

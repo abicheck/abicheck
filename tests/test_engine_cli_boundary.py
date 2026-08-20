@@ -130,6 +130,31 @@ _ENGINE_VIOLATION_CASES: list[pytest.ParameterSet] = [
         "import click\n",
         id="artifact-module-import-click",
     ),
+    pytest.param(
+        "scan_engine.py",
+        "from .compat import cli\n",
+        id="scan_engine-nested-cli-adapter-relative-alias",
+    ),
+    pytest.param(
+        "scan_engine.py",
+        "from .compat.cli import compat_group\n",
+        id="scan_engine-nested-cli-adapter-relative-submodule",
+    ),
+    pytest.param(
+        "scan_engine.py",
+        "import abicheck.compat.cli\n",
+        id="scan_engine-nested-cli-adapter-absolute-dotted",
+    ),
+    pytest.param(
+        "service_widget.py",
+        "from abicheck.compat import cli\n",
+        id="service-nested-cli-adapter-absolute-alias",
+    ),
+    pytest.param(
+        "service_widget.py",
+        "from abicheck.compat.cli import compat_group\n",
+        id="service-nested-cli-adapter-absolute-submodule",
+    ),
 ]
 
 
