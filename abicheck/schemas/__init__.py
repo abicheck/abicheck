@@ -572,7 +572,26 @@ from typing import Any
 #:       renderer must actually gate a ``"notice"`` entry on instead of the
 #:       level alone; it is always ``True`` for ``"error"``/``"warning"``.
 #:       Additive key on an existing array item.
-REPORT_SCHEMA_VERSION = "2.44"
+#: 2.45 -- CLI cleanup phase two, PR B: two new top-level keys,
+#:       ``effective_config_digest`` (a ``sha256:...`` fingerprint) and
+#:       ``effective_config_fields`` (the field dict it was hashed from, so
+#:       a mismatch can be attributed to a specific field rather than read
+#:       as an opaque hash -- mirrors the existing ``profile_fingerprint``/
+#:       ``scope_fingerprint`` precedent in ``comparability.py``). Computed
+#:       by ``effective_config_digest.effective_config_fields`` from
+#:       whichever tier of resolved configuration this comparison actually
+#:       has (a full ``CompatibilityEvaluationConfig`` under ``--contract``/
+#:       ``--pack``, else the policy/gate fields every comparison resolves
+#:       regardless -- see that module's own docstring). Identical
+#:       computation for `compare` and the directory/package release
+#:       fan-out (both funnel through ``reporter_contract_blocks.
+#:       add_contract_context``) and for `scan --against` (schema 1.19,
+#:       below) -- "one effective configuration ... with the same
+#:       effective-config digest recorded in every report" (the plan's own
+#:       still-open PR B goal). Unconditional, like ``exit`` conceptually
+#:       is: every comparison has a resolved configuration to fingerprint.
+#:       Additive keys.
+REPORT_SCHEMA_VERSION = "2.45"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -863,7 +882,15 @@ REPORT_SCHEMA_VERSION = "2.44"
 #:        contributions)`` invariant -- Codex review). Additive key, absent
 #:        only for the same NOT_COMPARABLE/audit-only shapes
 #:        ``analysis_assurance`` itself is.
-SCAN_SCHEMA_VERSION = "1.18"
+#: 1.19 -- CLI cleanup phase two, PR B: the ``diff`` block gains
+#:        ``effective_config_digest``/``effective_config_fields`` --
+#:        `compare`'s report_schema_version 2.45 counterpart, computed by
+#:        the identical ``effective_config_digest.effective_config_fields``
+#:        call with this comparison's own ``sev_config``/``exit_scheme``
+#:        (the same pair the ``exit`` block immediately above was resolved
+#:        from). Additive keys, absent only for the same NOT_COMPARABLE/
+#:        audit-only shapes ``exit``/``analysis_assurance`` themselves are.
+SCAN_SCHEMA_VERSION = "1.19"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

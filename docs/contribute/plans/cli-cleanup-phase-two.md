@@ -1557,6 +1557,73 @@ report.
 > replacing the now-stale `test_a_gate_pack_is_rejected_by_scan_which_has_
 > no_gate`.
 >
+> **Slice 4 landed: the effective-config digest, closing PR B's second
+> still-open goal in full.** `effective_config_digest.py` is a new leaf
+> module computing a `sha256:...` fingerprint (plus the named field dict it
+> was hashed from, for attribution -- the same `profile_fields`/
+> `scope_fields` precedent `comparability.py` already established) over the
+> resolved gate/policy/surface/contract configuration a comparison actually
+> ran under. Two tiers, both real and both honest about their own scope
+> (there is still no single object holding *every* configuration axis for
+> *every* run -- see the module's own docstring): a rich tier reading the
+> full `CompatibilityEvaluationConfig` off `DiffResult.contract_context`
+> when the run passed `--contract`/`--pack` (real pack identities included),
+> and a baseline tier built from the policy/gate fields every comparison
+> resolves regardless (`DiffResult.policy`/`policy_file`, the resolved
+> `SeverityConfig`/`exit_code_scheme` pair). One function,
+> `effective_config_fields`, picks the tier; `compare` (via
+> `reporter_contract_blocks.add_contract_context`), the directory/package
+> release fan-out (the same call -- release reports funnel through the
+> identical function, so no separate release-side computation exists to
+> drift), and `scan --against` (`cli_scan_baseline._run_baseline_compare`,
+> reusing the exact `sev_config`/`exit_scheme` pair its own `exit` block was
+> just resolved from) all call it through one shared helper,
+> `reporter_contract_blocks.add_effective_config_digest` -- so "the same
+> effective-config digest recorded in every report" is now literally one
+> function, not three approximations of one shape. `report_schema_version`
+> 2.45 / `scan_schema_version` 1.19 (additive keys:
+> `effective_config_digest`/`effective_config_fields`). Tests:
+> `tests/test_effective_config_digest.py` (both tiers directly, plus
+> cross-report parity: two reports resolving the identical configuration
+> produce the identical digest regardless of findings/library name, and a
+> policy override changes it).
+>
+> **What remains open, deliberately not attempted in this slice, and why:**
+> the *first* still-open goal from the note above -- one shared
+> `GateOptions`-*typed* object the release fan-out's own severity/exit-
+> code-scheme resolution is built from, replacing its six-raw-string
+> threading through `_resolve_release_severity_config`/
+> `_compute_release_severity_exit_code`/`_fold_release_global_severity`/the
+> per-library JSON write -- is still open. Investigated in this same pass:
+> `apply_to_compare_config` (`pack_application.py`) already operates
+> structurally on any object exposing `severity`/`severity_active`/
+> `exit_code_scheme` (typed `Any`, not a nominal `GateOptions` class), which
+> is why `compare` and `scan` already share one real resolved object
+> (`ResolvedCompareConfig`) through it with zero duplication -- the
+> unification these two front ends needed was already done before this PR.
+> The release fan-out is different in kind, not just missing a cast: its
+> `severity_config: SeverityConfig | None` (`None` meaning "legacy scheme,
+> nothing to score") has no `ResolvedCompareConfig`-shaped counterpart to
+> fold onto, by design (see `apply_release_gate_pack`'s own docstring,
+> unchanged by this slice) -- and its `SeverityConfig` is deliberately
+> *lossy* relative to the raw preset/category strings each of those three
+> downstream functions independently re-resolves from (a `SeverityConfig`
+> has no `preset` field to decompose back to). Building a real `GateOptions`
+> object *and* migrating those four call sites off raw-string re-derivation
+> is a genuine rewrite of exit-code-computation logic in the single most
+> reviewed area of this whole plan -- the `--exit-code-scheme`/severity
+> section a few pages down lists five independently-Codex-caught bugs in
+> this exact function family, and PR G2 (the ADR-gated gate-algorithm
+> unification) has not landed yet either, so redesigning the release
+> fan-out's internal representation now risks colliding with that PR's own
+> design rather than simplifying ahead of it. Per this repo's own "known
+> gaps over risky reactive patches" convention, left for PR G2 (or its own
+> dedicated follow-up) to fold in as part of that rewrite, rather than
+> attempted reactively here. The digest slice above does not depend on it:
+> it reads already-resolved values from whichever shape each front end
+> currently produces them in, so it is correct today and stays correct
+> once the release fan-out's internals eventually change shape.
+>
 > **Follow-up fix, same day (Codex review on #801, fresh evidence, real
 > reproduction): the initial slice 3 had a real D8-precedence bug, not just
 > an incomplete receipt.** `_resolve_scan_evaluation_config` built the
