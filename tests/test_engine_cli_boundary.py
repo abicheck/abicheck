@@ -448,6 +448,93 @@ def test_importfrom_reexport_through_sibling_package_still_flagged(
     assert "scan_engine.py" in errors[0]
 
 
+def test_absolute_import_alias_of_the_real_submodule_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`import abicheck.engine_pkg16.cli as cli` is a plain `ast.Import`,
+    but with an explicit `asname` whose dotted source resolves to the exact
+    real submodule file being checked — Python binds `cli` directly to that
+    submodule object, the same as `from . import cli` would. Must still be
+    flagged, not treated as an unconditional shadow."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg16"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    (engine_pkg / "__init__.py").write_text("import abicheck.engine_pkg16.cli as cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg16 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
+def test_absolute_import_alias_of_an_unrelated_module_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`import abicheck.engine_pkg17.other as cli` has an explicit `asname`
+    too, but its dotted source resolves to a *different* file (`other.py`,
+    not `cli.py`) — a genuine shadow, unlike the self-reference case above.
+    Must NOT be flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg17"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (engine_pkg / "other.py").write_text("# an unrelated engine submodule\n")
+    (engine_pkg / "__init__.py").write_text(
+        "import abicheck.engine_pkg17.other as cli\n"
+    )
+    (pkg / "scan_engine.py").write_text("from .engine_pkg17 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
+def test_importfrom_reexport_through_sibling_direct_from_submodule_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`engine_pkg18/__init__.py` does `from .frontend import cli`, where
+    `frontend.py` itself does `from .cli import main as cli` — importing
+    directly FROM the real submodule (not re-exporting a name bound to it).
+    Python must load/execute `cli.py` to resolve `main` out of it, so this
+    reaches the real submodule too, one hop removed. Must still be
+    flagged — the sibling chase must recognize a direct-from-submodule
+    import at each hop, not only a bare `from . import cli`-shaped one."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg18"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("def main() -> None:\n    pass\n")
+    (engine_pkg / "frontend.py").write_text("from .cli import main as cli\n")
+    (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg18 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_importfrom_directly_from_the_real_submodule_still_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -209,15 +209,20 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     conservatively still treated as shadowing, per this module's
     false-negative-over-false-positive default for the boundary gate.
 
-    A plain ``ast.Import`` (``import X [as alias_name]``) is always a
-    shadow, unconditionally: it carries no relative-import level, so it can
-    never spell the ``from . import alias_name`` self-reference and always
-    binds the name to some other module. This includes the unaliased dotted
-    form ``import alias_name.submodule`` -- Python binds only the *first*
-    dotted component (``alias_name``) in that case, not the full dotted
-    path, so the bound name is derived from ``alias.name.split(".")[0]``
-    when there is no ``asname``, exactly mirroring Python's own dotted
-    ``import`` binding rule. An absolute ``ImportFrom`` gets
+    A plain ``ast.Import`` (``import X [as alias_name]``) is *usually* a
+    shadow: it carries no relative-import level, so it can never spell the
+    relative ``from . import alias_name`` self-reference. This includes the
+    unaliased dotted form ``import alias_name.submodule`` -- Python binds
+    only the *first* dotted component (``alias_name``) in that case, not
+    the full dotted path, so the bound name is derived from
+    ``alias.name.split(".")[0]`` when there is no ``asname``, exactly
+    mirroring Python's own dotted ``import`` binding rule. One exception:
+    an *absolute* self-reference is still possible with an explicit
+    ``asname`` -- ``import <path.to.base_dir>.alias_name as alias_name``
+    binds the name directly to the real submodule object itself, the same
+    as the absolute ``ImportFrom`` exception just below, just spelled with
+    a plain ``import`` statement instead of a ``from`` import. An absolute
+    ``ImportFrom`` gets
     the identical two self-reference exceptions as the relative form --
     ``from <path.to.base_dir> import alias_name [as X]`` and
     ``from <path.to.base_dir>.alias_name import anything [as X]`` -- since
@@ -263,8 +268,19 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                 # (`cli`), not the full dotted string -- Python's own
                 # dotted-import binding rule.
                 bound_name = alias.asname or alias.name.split(".")[0]
-                if bound_name == alias_name:
-                    return True
+                if bound_name != alias_name:
+                    continue
+                if "." in alias.name:
+                    # An *absolute* self-reference is still possible even
+                    # though a relative one isn't: `import <path.to.
+                    # base_dir>.alias_name as alias_name` binds alias_name
+                    # directly to the real submodule object itself --
+                    # mirroring the identical absolute-ImportFrom exception
+                    # below, just spelled with a plain `import` statement.
+                    resolved = ROOT.joinpath(*alias.name.split("."))
+                    if resolved == base_dir / alias_name:
+                        continue
+                return True
         if isinstance(stmt, ast.ImportFrom):
             for alias in stmt.names:
                 if (alias.asname or alias.name) != alias_name:
@@ -342,11 +358,17 @@ def _sibling_reexports_submodule(
     the whole chase, since only an import literally spelling ``from .
     import original_alias_name`` -- at any hop, under any amount of
     intermediate renaming -- actually resolves to that specific submodule
-    file. A hop that imports a *different* real submodule under the name
-    being chased (``from . import othername as target``) correctly does
-    not count: it shadows ``original_alias_name`` with a different file,
-    the same as ``_package_shadows_attribute``'s own Assign-based exception
-    already distinguishes.
+    file. Also recognized: a hop that imports directly *from* the real
+    submodule (``from .original_alias_name import anything [as target]``,
+    e.g. ``from .cli import main as cli`` inside a re-export facade) --
+    Python must load/execute that submodule to resolve any name out of it,
+    so this reaches it too, independent of which symbol is pulled, the
+    same reasoning ``_package_shadows_attribute``'s own direct-from-
+    submodule exception uses. A hop that imports a *different* real
+    submodule under the name being chased (``from . import othername as
+    target``) correctly does not count: it shadows ``original_alias_name``
+    with a different file, the same as ``_package_shadows_attribute``'s own
+    Assign-based exception already distinguishes.
 
     *sibling_stem* may name either a plain module file (``base_dir/X.py``)
     or a subpackage (``base_dir/X/__init__.py``) -- a package facade
@@ -395,6 +417,17 @@ def _sibling_reexports_submodule(
                 # Imports a *different* real submodule of base_dir under
                 # this local name -- not the one we're chasing.
                 continue
+            if stmt.module == original_alias_name:
+                # `from .original_alias_name import anything [as target]`
+                # -- imports directly FROM the real submodule itself, one
+                # hop removed from `__init__.py`. Python must load/execute
+                # that submodule to resolve *any* name out of it, so this
+                # already reaches it regardless of which symbol is pulled
+                # -- the same reasoning `_package_shadows_attribute`'s own
+                # direct-from-submodule exception uses, mirrored here so a
+                # re-export facade importing FROM the real submodule (not
+                # re-exporting a name bound TO it) is recognized too.
+                return True
             if stmt.module and "." not in stmt.module:
                 if _sibling_reexports_submodule(
                     base_dir, stmt.module, alias.name, original_alias_name, depth + 1
