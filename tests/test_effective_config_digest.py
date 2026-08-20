@@ -957,3 +957,74 @@ class TestRichTierPrefersContractContextMergedConfig:
             result, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields["contract.overlays"] == '["api::v3"]'
+
+
+class TestBaselineExplicitScope:
+    """Codex review, PR #803, fresh evidence: an ordinary comparison with
+    neither --contract nor --pack can still resolve a forced-public symbol
+    set from --public-symbols-list/.abicheck.yml's scope.public_symbols,
+    which changes which findings are retained -- the baseline tier
+    previously hard-coded surface.explicit_scope empty regardless."""
+
+    def test_no_explicit_scope_is_empty_string(self):
+        result = _result()
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["surface.explicit_scope"] == ""
+
+    def test_different_forced_public_scopes_hash_differently(self):
+        f1 = effective_config_fields(
+            _result(explicit_scope_source_sha256="sha256:aaa"),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        f2 = effective_config_fields(
+            _result(explicit_scope_source_sha256="sha256:bbb"),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        assert f1["surface.explicit_scope"] != f2["surface.explicit_scope"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_computes_a_real_content_digest(self):
+        """End-to-end through the real compare() entry point, not just the
+        internal field helper -- confirms the digest is actually populated
+        from force_public_symbols and is a stable content hash."""
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        no_scope = compare(old_snap, new_snap)
+        assert no_scope.explicit_scope_source_sha256 is None
+
+        scoped = compare(old_snap, new_snap, force_public_symbols={"pub_a"})
+        assert scoped.explicit_scope_source_sha256 is not None
+        assert scoped.explicit_scope_source_sha256.startswith("sha256:")
+
+        scoped_again = compare(old_snap, new_snap, force_public_symbols={"pub_a"})
+        assert (
+            scoped.explicit_scope_source_sha256
+            == scoped_again.explicit_scope_source_sha256
+        )
+
+        scoped_different = compare(
+            old_snap, new_snap, force_public_symbols={"pub_b"}
+        )
+        assert (
+            scoped.explicit_scope_source_sha256
+            != scoped_different.explicit_scope_source_sha256
+        )

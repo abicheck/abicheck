@@ -568,9 +568,15 @@ class DiffResult:
     # positional caller's later arguments. Typed ``object`` for the same
     # circular-import reason as ``contract_context``/``analysis_assurance``
     # above. Read by ``effective_config_digest.effective_config_fields``,
-    # which prefers this over ``contract_context``'s own nested resolved
-    # config when both are present (they are always the same object when
-    # both are set, since both are stamped from the identical resolution).
+    # which prefers ``contract_context``'s own nested resolved config over
+    # this one whenever a ``PersistedContractContext`` exists (Codex
+    # review, PR #803, fresh evidence: ``contract_context.with_resolved_
+    # config`` merges *observed* overlay evidence -- e.g. a
+    # ``--post-manifest`` overlay no front-end input model describes --
+    # into a *new* config object, so the two are not always the same
+    # object even though both are stamped from the same D7 resolution),
+    # falling back to this field only when no context exists at all (the
+    # ``--pack``-only case this field exists for).
     evaluation_config: object | None = field(default=None, kw_only=True)
     # CLI cleanup phase two, PR B (Codex review, PR #803): the resolved
     # --suppress file's own content digest (``SuppressionList.source_
@@ -583,6 +589,18 @@ class DiffResult:
     # suppression file was given, distinct from ``suppression_file_
     # provided``'s bool (this field is the content, not just presence).
     suppression_source_sha256: str | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # a canonical content digest of the resolved forced-public-symbol set
+    # (``compare(..., force_public_symbols=...)``, itself resolved from
+    # ``--public-symbols-list``/``.abicheck.yml``'s ``scope.public_
+    # symbols`` one layer above ``compare()``), for the identical reason
+    # ``suppression_source_sha256`` above exists: an ordinary comparison
+    # with neither ``--contract`` nor ``--pack`` never resolves a
+    # ``CompatibilityEvaluationConfig``, so the baseline tier had no way to
+    # detect that two runs selecting different forced-public roots (which
+    # can retain different findings) resolved genuinely different
+    # configuration. ``None`` when no explicit scope was forced at all.
+    explicit_scope_source_sha256: str | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,

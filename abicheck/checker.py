@@ -1151,6 +1151,25 @@ def compare(
         _suppression_config.sha256 if _suppression_config is not None else None
     )
 
+    # Canonical content digest of the resolved forced-public-symbol set
+    # (Codex review, PR #803, fresh evidence): `force_public_symbols` is
+    # already resolved by the caller (from `--public-symbols-list`/
+    # `.abicheck.yml`'s `scope.public_symbols`, one layer above this
+    # function) into a plain `set[str]` by the time it reaches here, so a
+    # digest of its own sorted content -- not a second read of whatever
+    # file it came from -- is what's available and sufficient to answer
+    # "did the explicit scope change" for `effective_config_digest`'s
+    # baseline tier.
+    import hashlib
+
+    explicit_scope_source_sha256 = (
+        "sha256:" + hashlib.sha256(
+            "\x00".join(sorted(force_public_symbols)).encode("utf-8")
+        ).hexdigest()
+        if force_public_symbols
+        else None
+    )
+
     result = DiffResult(
         old_version=old.version,
         new_version=new.version,
@@ -1161,6 +1180,7 @@ def compare(
         suppressed_changes=suppressed,
         suppression_file_provided=suppression is not None,
         suppression_source_sha256=suppression_source_sha256,
+        explicit_scope_source_sha256=explicit_scope_source_sha256,
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

@@ -33,4 +33,10 @@
   describes) over the unmerged `evaluation_config` copy whenever both
   exist; and `policy.reclassify` no longer sorts its encoded rules, since
   `reclassify` is first-match-wins in policy-file order and two
-  order-swapped, overlapping rules can select a different verdict.
+  order-swapped, overlapping rules can select a different verdict. A new
+  `DiffResult.explicit_scope_source_sha256` field (populated by
+  `checker.compare()` from `force_public_symbols`'s own content) lets the
+  baseline tier's `surface.explicit_scope` distinguish two ordinary
+  comparisons (neither `--contract` nor `--pack`) that resolve different
+  `--public-symbols-list`/`.abicheck.yml` `scope.public_symbols` roots,
+  which was previously hard-coded empty.

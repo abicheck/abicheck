@@ -450,6 +450,13 @@ def effective_config_fields_from_diff_result(
     *require_complete_analysis* mirrors the identically-named CLI/API flag,
     same as the rich tier's own field (see
     :func:`effective_config_fields_from_full_config`'s docstring).
+    ``surface.explicit_scope`` reads ``result.explicit_scope_source_
+    sha256`` (Codex review, PR #803, fresh evidence: an ordinary run with
+    neither ``--contract`` nor ``--pack`` can still resolve a forced-public
+    symbol set from ``--public-symbols-list``/``.abicheck.yml``'s
+    ``scope.public_symbols``, which changes which findings are retained --
+    an earlier revision hard-coded this field empty for the baseline tier,
+    so two such runs selecting different forced-public roots collided).
     """
     policy_file = getattr(result, "policy_file", None)
     return {
@@ -463,7 +470,9 @@ def effective_config_fields_from_diff_result(
         "surface.internal_namespaces": _namespaces_str(
             getattr(policy_file, "internal_namespaces", ())
         ),
-        "surface.explicit_scope": "",
+        "surface.explicit_scope": str(
+            getattr(result, "explicit_scope_source_sha256", "") or ""
+        ),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
         ),
