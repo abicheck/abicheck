@@ -224,6 +224,25 @@ class TestRunnerTreatment:
             "native-binary-compatibility-review"
         ]
 
+    def test_an_unrelated_dev_skill_is_never_a_treatment_conflict(self):
+        """`.claude/skills/` also holds `grill-with-docs`, an unrelated
+        hand-authored developer skill with nothing to do with the abicheck
+        portfolio. Both arms share it identically, so it must never be
+        treated as a conflicting treatment — `_published_skill_names()`
+        reads `skills-src/` (the abicheck portfolio's own source of truth),
+        not `PUBLISHED_SKILLS` (`.claude/skills/`, which mixes the two).
+        """
+        assert "grill-with-docs" not in runner._published_skill_names()
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["grill-with-docs", "pdf"],
+            }
+        ]
+        assert runner.visible_native_skills(events) == []
+        assert runner.check_treatment("baseline", SCENARIO_BREAKING, []) is None
+
     def test_the_final_answer_comes_from_the_result_event(self):
         events = [
             {

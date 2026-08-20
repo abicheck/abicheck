@@ -46,13 +46,15 @@ positive:
       built) rather than something the surviving skill claims.
 
   - prompt: "Will this old application work with the new library?"
-    expected_skill: null
-    unclaimed_reason: >-
-      Previously claimed by `native-consumer-compatibility`, removed from
-      the published portfolio by ADR-058's 2026-08-20 portfolio-reset
-      amendment. Named-consumer scoping is a candidate for future scope
-      inside `review-native-library-change` (not yet done) rather than
-      something currently claimed.
+    # Previously claimed by `native-consumer-compatibility`, removed from the
+    # published portfolio by ADR-058's 2026-08-20 portfolio-reset amendment.
+    # Named-consumer scoping was absorbed by review-native-library-change
+    # (Step 3, `--used-by`/`--required-symbol`, citing shared/
+    # consumer-scoping.md) rather than dropped, so this prompt is claimed by
+    # the surviving skill, not left unclaimed.
+    expected_skill: review-native-library-change
+    description_keywords:
+      - already-compiled applications
 
   - prompt: "Why did this compatibility check suddenly report dozens of breaks?"
     # ADR-058 folds this into the review skill's root-cause step rather than

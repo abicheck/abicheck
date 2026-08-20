@@ -68,6 +68,19 @@ from graders import claim as claim_mod  # noqa: E402
 
 SHIM = EVAL_DIR / "shim" / "abicheck"
 PUBLISHED_SKILLS = ROOT / ".claude" / "skills"
+
+#: Source of truth for which skill directories are *abicheck's own*, as
+#: opposed to everything else `.claude/skills/` (`PUBLISHED_SKILLS`) happens
+#: to contain — e.g. `grill-with-docs`, an unrelated hand-authored developer
+#: skill this repo also ships that has nothing to do with the abicheck
+#: portfolio. `_published_skill_names()` reads directory names from here, not
+#: from `PUBLISHED_SKILLS` itself: `.claude/skills/` is a real install path
+#: Claude Code reads from and reports skills out of regardless of who
+#: authored them, so treating everything under it as a conflicting
+#: "treatment" skill would reject a baseline run for seeing `grill-with-docs`
+#: — a skill both arms share identically and that has no bearing on the A/B
+#: comparison this harness measures.
+SKILLS_SRC = ROOT / "skills-src"
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
 ARMS = ("skill", "baseline")
@@ -479,7 +492,7 @@ _RETIRED_SKILL_NAMES = frozenset(
 
 
 def _published_skill_names() -> set[str]:
-    """The skill directories actually published under `PUBLISHED_SKILLS`.
+    """The abicheck skill directories currently published, per `SKILLS_SRC`.
 
     Not a `native-`-prefix heuristic: `review-native-library-change`
     (renamed from `native-binary-compatibility-review` by ADR-058's
@@ -489,10 +502,25 @@ def _published_skill_names() -> set[str]:
     that genuinely had the skill installed, and rejected it. Reading the real
     published directory names is correct regardless of what any current or
     future skill happens to be called.
+
+    Reads `SKILLS_SRC` (`skills-src/`), not `PUBLISHED_SKILLS`
+    (`.claude/skills/`) — the latter also holds unrelated hand-authored
+    developer skills (e.g. `grill-with-docs`) that are not part of the
+    abicheck portfolio this harness measures, and treating one of those as a
+    conflicting "treatment" skill would reject a run for seeing a skill both
+    arms share identically. `skills-src/` is the one hand-authored source
+    (`skills-src/CLAUDE.md`) every generated tree, `PUBLISHED_SKILLS`
+    included, derives from — every name here is guaranteed to actually be
+    generated into `PUBLISHED_SKILLS` too, since `scripts/gen_agent_skills.py
+    --check` (part of the `pr` verification profile) fails otherwise.
     """
-    if not PUBLISHED_SKILLS.is_dir():
+    if not SKILLS_SRC.is_dir():
         return set()
-    return {p.name for p in PUBLISHED_SKILLS.iterdir() if (p / "SKILL.md").is_file()}
+    return {
+        p.name
+        for p in SKILLS_SRC.iterdir()
+        if p.is_dir() and p.name != "shared" and (p / "SKILL.md").is_file()
+    }
 
 
 def visible_native_skills(events: list[dict]) -> list[str] | None:

@@ -263,14 +263,20 @@ without knowing the tool exists:
 7. "How do I keep ABI compatibility across compiler/client profiles?"
 
 abicheck should appear inside the resulting workflow as a deterministic
-verification engine, not as the user-facing job. Phrasings 1–4 map directly
-onto the four P0 skills (Decision → Public skill taxonomy, below); 5 is
-folded into `native-binary-compatibility-review`'s root-cause step; 6 and 7
-are P1 candidates (Decision → Skill admission criteria) — real jobs, not yet
-admitted for lack of validated usage evidence. This list is the source both
-`SKILL.md` `description` fields (Decision → Skill content model) and the
-trigger-test positive corpus (Testing and evaluation architecture, and
-G36's P0.8) are built from.
+verification engine, not as the user-facing job. At the time these seven
+phrasings were written, 1–4 mapped directly onto the four P0 skills
+(Decision → Public skill taxonomy, below) and 5 was folded into
+`native-binary-compatibility-review`'s root-cause step; 6 and 7 remain P1
+candidates (Decision → Skill admission criteria) — real jobs, not yet
+admitted for lack of validated usage evidence. **Since the 2026-08-20
+portfolio-reset amendment above**, phrasings 1, 4, and 5 are all claimed by
+the sole surviving skill, `review-native-library-change` (4's
+named-consumer scoping was absorbed via `--used-by`/`--required-symbol`,
+not dropped — see that amendment); 2 and 3 are currently unclaimed, tracked
+as future scope for that same skill and for a distinct future second skill
+respectively. This list is the source both `SKILL.md` `description` fields
+(Decision → Skill content model) and the trigger-test positive corpus
+(Testing and evaluation architecture, and G36's P0.8) are built from.
 
 ## Ecosystem validation (informs Decision, not repeated there)
 

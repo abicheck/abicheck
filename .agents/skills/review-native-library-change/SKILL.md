@@ -1,6 +1,6 @@
 ---
 name: review-native-library-change
-description: Review a diff, branch, commit, or pull request in a C/C++ (or other compiled native) library for binary and source compatibility with existing consumers. Use when asked to review a PR for binary compatibility, to check whether a change will break existing consumers or already-compiled applications, whether a change is ABI-safe, or to investigate why a compatibility check suddenly reported dozens of breaks. Produces a verdict with a root-cause explanation, backed by deterministic analysis rather than reading the diff alone.
+description: Review a diff, branch, commit, or pull request in a C/C++ (or other compiled native) library for binary and source compatibility with existing consumers. Use when asked to review a PR for binary compatibility, to check whether a change will break existing consumers or already-compiled applications, whether an existing application, plugin, or host will still work against a new library build, whether a change is ABI-safe, or to investigate why a compatibility check suddenly reported dozens of breaks. Produces a verdict with a root-cause explanation, backed by deterministic analysis rather than reading the diff alone.
 license: Apache-2.0
 metadata:
   abicheck-version-range: ">=0.6.0,<0.7.0"
