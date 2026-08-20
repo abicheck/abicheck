@@ -18,6 +18,7 @@
       "compiler": "",
       "defines": {},
       "directory": "",
+      "explicit_absolute_include_paths": [],
       "id": "tu0",
       "include_paths": [],
       "input_files": [],

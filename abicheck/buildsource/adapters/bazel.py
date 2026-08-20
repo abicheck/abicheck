@@ -338,6 +338,9 @@ class BazelAdapter:
             system_include_paths=[
                 self.redaction.path(str(p)) for p in ctx.system_includes
             ],
+            explicit_absolute_include_paths=[
+                self.redaction.path(str(p)) for p in ctx.explicit_absolute_paths()
+            ],
             input_files=(
                 [
                     self.redaction.path(p)

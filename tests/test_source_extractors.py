@@ -1046,6 +1046,55 @@ def test_parse_root_maps_castxml_xml_without_running_castxml() -> None:
     assert any("Widget" in e.qualified_name for e in surface.reachable_types)
 
 
+def test_parse_root_read_files_resolved_against_effective_env_chdir_directory() -> None:
+    """Round 30 Finding 3 (Codex review, fresh evidence): a RELATIVE castxml
+    ``<File name="include/api.h">`` dependency must resolve against the
+    EFFECTIVE (``env -C``-composed) directory the real castxml subprocess
+    actually ran from -- not the raw, un-chdir'd ``compile_unit.directory``
+    -- or the real dependency is omitted from the per-TU cache fingerprint
+    entirely."""
+    import os
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="include/api.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(root, "Function", id="fn1", name="add", returns="t_int", location="loc1")
+
+    extractor = CastxmlSourceExtractor()
+    cu = _cu(
+        directory="/work",
+        argv=["env", "-C", "build", "gcc", "-Iinclude", "-c", "x.c"],
+    )
+    tu = extractor._parse_root(
+        root, cu, public_header_roots=["include/api.h"], target_id="target://libfoo"
+    )
+    assert os.path.normpath("/work/build/include/api.h") in tu.read_files
+    assert os.path.normpath("/work/include/api.h") not in tu.read_files
+
+
+def test_parse_root_read_files_negative_control_no_env_chdir_unaffected() -> None:
+    """Negative control: with no ``env -C`` prefix at all, the effective
+    directory is the raw ``compile_unit.directory`` -- the pre-existing,
+    already-correct behavior is unchanged."""
+    import os
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="include/api.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(root, "Function", id="fn1", name="add", returns="t_int", location="loc1")
+
+    extractor = CastxmlSourceExtractor()
+    cu = _cu(directory="/work", argv=["gcc", "-Iinclude", "-c", "x.c"])
+    tu = extractor._parse_root(
+        root, cu, public_header_roots=["include/api.h"], target_id="target://libfoo"
+    )
+    assert os.path.normpath("/work/include/api.h") in tu.read_files
+
+
 def test_parse_root_marks_generated_public_header_as_generated() -> None:
     # A header that is both public and generated must keep the GENERATED marker
     # so a generated public type change is caught by diff_source_abi's

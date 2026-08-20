@@ -28,9 +28,13 @@ PATH". Concretely: ``strip_launchers(["env", "-i", "cc", ...])`` correctly
 returns the bare, unresolved token ``"cc"`` -- but nothing stopped a
 downstream consumer from then resolving that bare ``"cc"`` against
 abicheck's OWN inherited ``PATH``, which the real recorded command --
-genuinely PATH-less under ``env -i`` -- could never have done (with no
-``PATH`` at all, ``execvp`` cannot find a bare command name by search, only
-an absolute/relative path resolves).
+genuinely PATH-less under ``env -i`` -- could never have done that way (with
+no inherited ``PATH``, a real PATH-less ``execvp`` still searches the
+platform's PATH-absent default search path -- ``confstr(_CS_PATH)`` on
+POSIX, modeled here by :data:`os.defpath` -- round 29 follow-up corrected
+this module's resolution to search THAT instead of returning outright
+unresolvable; it just can never search abicheck's own, unrelated inherited
+``PATH``, which is the one thing this round's fix actually closes).
 """
 
 from __future__ import annotations

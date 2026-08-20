@@ -26,6 +26,7 @@ support hermetic CI, the adapter also accepts **pre-captured** tool output:
 pass ``compdb`` / ``graph`` as JSON/DOT text or a file path instead of letting
 it shell out.
 """
+
 from __future__ import annotations
 
 import json
@@ -124,7 +125,11 @@ class NinjaAdapter:
         try:
             # A query of an existing build (ADR-028 D6) — never a build action.
             proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-                cmd, capture_output=True, text=True, timeout=120, check=False,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             ev.diagnostics.append(f"ninja: {' '.join(tool_args)} failed: {exc}")
@@ -161,13 +166,23 @@ class NinjaAdapter:
             argv=red_argv,
             language=effective_language(argv, source),
             standard=ctx.language_standard or "",
-            defines={k: self.redaction.define_value(k, v or "") for k, v in ctx.defines.items()},
+            defines={
+                k: self.redaction.define_value(k, v or "")
+                for k, v in ctx.defines.items()
+            },
             undefines=sorted(ctx.undefines),
             include_paths=[self.redaction.path(str(p)) for p in ctx.include_paths],
-            system_include_paths=[self.redaction.path(str(p)) for p in ctx.system_includes],
+            system_include_paths=[
+                self.redaction.path(str(p)) for p in ctx.system_includes
+            ],
+            explicit_absolute_include_paths=[
+                self.redaction.path(str(p)) for p in ctx.explicit_absolute_paths()
+            ],
             sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
             target_triple=ctx.target_triple or "",
-            abi_relevant_flags=[self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)],
+            abi_relevant_flags=[
+                self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)
+            ],
         )
 
 

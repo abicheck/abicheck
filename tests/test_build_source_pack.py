@@ -475,6 +475,43 @@ def test_glibcxx_abi_define_is_abi_relevant(tmp_path):
     assert "define:_GLIBCXX_USE_CXX11_ABI" in keys
 
 
+def test_compile_db_records_explicit_absolute_include_provenance(tmp_path):
+    """Round 30 Finding 2 (Codex review, fresh evidence): the real
+    ``CompileDbAdapter`` pipeline (not a hand-built ``CompileUnit``) must
+    itself populate ``CompileUnit.explicit_absolute_include_paths`` with
+    exactly the ``-I``/``-isystem`` operands that were already absolute as
+    originally written, and leave a relative operand that merely RESOLVED
+    to the same absolute location (by being joined onto ``directory``) out
+    of that set."""
+    cdb = _write_cdb(
+        tmp_path,
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "arguments": [
+                    "c++",
+                    f"-I{tmp_path}/vendor",  # explicit absolute
+                    "-Ilocal",  # relative -- resolves to <tmp_path>/local
+                    "-isystem",
+                    f"{tmp_path}/sysvendor",  # explicit absolute, separate-token form
+                    "-c",
+                    "a.cpp",
+                ],
+            },
+        ],
+    )
+    ev = CompileDbAdapter(cdb).collect()
+    cu = ev.compile_units[0]
+    assert f"{tmp_path}/vendor" in cu.explicit_absolute_include_paths
+    assert f"{tmp_path}/sysvendor" in cu.explicit_absolute_include_paths
+    assert f"{tmp_path}/local" not in cu.explicit_absolute_include_paths
+    # Both still resolve to their correct absolute value in the plain lists.
+    assert f"{tmp_path}/vendor" in cu.include_paths
+    assert f"{tmp_path}/local" in cu.include_paths
+    assert f"{tmp_path}/sysvendor" in cu.system_include_paths
+
+
 # ── Ninja adapter (ADR-029 D5) ───────────────────────────────────────────────
 
 

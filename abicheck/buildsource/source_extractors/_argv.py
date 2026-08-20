@@ -46,6 +46,7 @@ from ...header_utils import (
 from ..build_evidence import CompileUnit
 from ._argv_shortopts import (
     is_short_flag_cluster,
+    looks_like_source_file_operand as _looks_like_source_file_operand,
     resolve_bare_token_with_default_path as resolve_bare_token_with_default_path,
 )
 
@@ -594,8 +595,17 @@ def _expand_env_split_string(value: str) -> list[str]:
     -- what a hand-written or generated ``env -S '...'`` invocation
     realistically looks like -- is handled correctly today; only the
     backslash-escape grammar specifically is the gap.
+
+    **Degrades to whitespace splitting on malformed input rather than
+    raising (round 30 Finding CR4, CodeRabbit review).**
+    ``shlex.split()`` raises ``ValueError`` on e.g. an unbalanced quote --
+    a persisted, untrusted ``-S`` value must not abort collection for
+    every other compile unit. A ``.split()`` fallback never crashes.
     """
-    return shlex.split(value)
+    try:
+        return shlex.split(value)
+    except ValueError:
+        return value.split()
 
 
 def is_absolute_path_token(token: str) -> bool:
@@ -832,13 +842,24 @@ def _skip_env_prefix(
             i += 1
             continue
         if arg == "--":
-            # GNU `env`'s option-parsing terminator: everything after `--`
-            # is the command and its arguments, even if it looks like a
-            # flag or a `NAME=VALUE` assignment (Codex review, Finding 6,
-            # fresh evidence, confirmed against a real installed `env
-            # --help`). Consume the terminator itself and stop scanning --
-            # the next token is unconditionally the command.
+            # GNU `env`'s `--` ends OPTION parsing only, NOT the
+            # `NAME=VALUE...` list before the command (round 30 Finding 1:
+            # `env -- FOO=bar clang-cl -c x.cc` was mistaking `"FOO=bar"`
+            # for the driver). Consume `--`, keep consuming `NAME=VALUE`
+            # tokens (still tracking `PATH=`) without reinterpreting any
+            # as an env OPTION -- the first non-assignment token is the
+            # real command.
             i += 1
+            while i < len(argv):
+                nxt = argv[i]
+                if nxt.startswith(_ENV_PATH_ASSIGNMENT_PREFIX):
+                    env_path = nxt.removeprefix(_ENV_PATH_ASSIGNMENT_PREFIX)
+                    i += 1
+                    continue
+                if _LAUNCHER_CONFIG_OVERRIDE_RE.match(nxt):
+                    i += 1
+                    continue
+                break
             break
         if arg in _ENV_NO_OPERAND_FLAGS:
             if arg in _ENV_IGNORE_ENV_FLAGS:
@@ -1460,37 +1481,13 @@ _CHDIR_FOLD_SEPARATE_PATH_FLAGS = frozenset(
     }
 )
 #: SEPARATE-form value-taking flags whose value is confirmed NOT a path --
-#: the general form of the macro-flag exemption Finding 11 established,
-#: extended to every other such flag this module can positively confirm
-#: (Codex review round 25, Finding 2, fresh evidence). The old scan treated
-#: ANY non-flag-shaped token as a positional path operand, which corrupts a
-#: value like ``-x c++`` into ``-x build/c++`` -- ``c++`` is a language
-#: name, not a path, exactly the same failure shape Finding 11 already
-#: fixed for ``-D``/``-U`` macro values, just for a different flag family
-#: that scan never accounted for.
-#:
-#: * ``-x`` -- GCC/Clang's ``-x <language>`` (``c``, ``c++``, ``assembler``,
-#:   ``none``, …), never a filesystem path.
-#: * ``-target`` -- Clang's bare (non-``=``, non-``--target``) driver-level
-#:   target-triple spelling (``-target x86_64-linux-gnu``); the triple
-#:   string, not a path. Deliberately narrower than
-#:   :data:`STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`'s own ``-target`` handling
-#:   (a *different* concern, in a different function, dropping an
-#:   already-structured survivor from ``abi_relevant_flags`` entirely) --
-#:   this set only stops the VALUE from being misread as a path here.
-#: * ``-arch`` -- Apple's universal-build architecture selector
-#:   (``-arch x86_64``/``-arch arm64``), an architecture name, not a path.
-#: * ``-Xclang`` -- forwards its own following token verbatim to ``-cc1``;
-#:   the forwarded token is itself an arbitrary cc1 flag/value, not
-#:   generally a path (and folding it here would be independently wrong for
-#:   the ``-Xclang -target-abi -Xclang aapcs`` shape :data:`SPLIT_OPERAND_
-#:   ABI_FLAGS` already handles through a completely different mechanism).
-#:
-#: Every other, unrecognized value-taking flag is left exactly as before --
-#: the same conservative, no-worse-than-before default this module already
-#: documents for item 7 below; this set only grows for a flag positively
-#: confirmed non-path, mirroring the macro-flag precedent rather than
-#: attempting to enumerate every possible flag.
+#: ``-x`` (language name), ``-target`` (bare driver-level triple), ``-arch``
+#: (architecture name), ``-Xclang`` (forwards an arbitrary cc1 value
+#: verbatim) (Codex review round 25, Finding 2). Superseded as the primary
+#: defense by round 30 Finding 4's general fix below
+#: (:func:`_looks_like_source_file_operand` flips the default so an
+#: unrecognized flag's value is safe without being named here) -- kept as
+#: belt-and-suspenders for these four flags.
 _CHDIR_FOLD_NON_PATH_VALUE_FLAGS = frozenset({"-x", "-target", "-arch", "-Xclang"})
 
 
@@ -1589,7 +1586,10 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
        (its value) is resolved regardless of its own shape.
     7. A response-file token (``@args.rsp``, Codex round 29): ``@``
        preserved, only its payload resolved.
-    8. A bare, non-flag positional token -- resolved unconditionally.
+    8. A bare, non-flag positional token recognizable as a source/header
+       operand by its suffix (:func:`_looks_like_source_file_operand`,
+       round 30 Finding 4) -- resolved. Anything else bare -- an
+       unrecognized flag's own non-path VALUE included -- falls to (9).
     9. Anything else -- unchanged.
     """
     if not chdir:
@@ -1639,7 +1639,7 @@ def _fold_chdir_into_operands(tokens: list[str], chdir: str | None) -> list[str]
             out.append("@" + _fold_chdir_path_value(tok[1:], chdir))
             i += 1
             continue
-        if not tok.startswith(("-", "/")):
+        if not tok.startswith(("-", "/")) and _looks_like_source_file_operand(tok):
             out.append(_fold_chdir_path_value(tok, chdir))
             i += 1
             continue

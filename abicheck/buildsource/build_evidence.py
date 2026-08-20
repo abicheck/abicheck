@@ -174,6 +174,21 @@ class CompileUnit:
     undefines: list[str] = field(default_factory=list)
     include_paths: list[str] = field(default_factory=list)
     system_include_paths: list[str] = field(default_factory=list)
+    #: The subset of ``include_paths``/``system_include_paths`` VALUES (by
+    #: string identity, not position -- both lists share one namespace here)
+    #: that were already absolute exactly as recorded in the real build's
+    #: ``-I``/``-isystem`` operand, as opposed to a relative operand this
+    #: pipeline resolved by joining it onto ``directory`` (round 30 Finding
+    #: 2, Codex review, fresh evidence). A consumer that needs to rebase a
+    #: *derived* (relative-then-joined) structured path onto a different
+    #: effective directory -- e.g. once a leading ``env -C DIR`` prefix is
+    #: accounted for -- but must never rebase a path that was genuinely
+    #: absolute in the source command reads this set; an entry absent here
+    #: (including on any pre-this-field persisted snapshot, where the field
+    #: is always empty) is conservatively treated as "unknown provenance,
+    #: derived" -- the same pre-existing rebase behavior every path had
+    #: before this field existed.
+    explicit_absolute_include_paths: list[str] = field(default_factory=list)
     input_files: list[str] = field(default_factory=list)
     sysroot: str | None = None
     target_triple: str = ""
@@ -195,6 +210,9 @@ class CompileUnit:
             "undefines": list(self.undefines),
             "include_paths": list(self.include_paths),
             "system_include_paths": list(self.system_include_paths),
+            "explicit_absolute_include_paths": list(
+                self.explicit_absolute_include_paths
+            ),
             "input_files": list(self.input_files),
             "sysroot": self.sysroot,
             "target_triple": self.target_triple,
@@ -218,6 +236,9 @@ class CompileUnit:
             undefines=list(d.get("undefines", [])),
             include_paths=list(d.get("include_paths", [])),
             system_include_paths=list(d.get("system_include_paths", [])),
+            explicit_absolute_include_paths=list(
+                d.get("explicit_absolute_include_paths", [])
+            ),
             input_files=list(d.get("input_files", [])),
             sysroot=d.get("sysroot"),
             target_triple=str(d.get("target_triple", "")),

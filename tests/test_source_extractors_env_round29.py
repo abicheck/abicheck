@@ -225,6 +225,29 @@ def test_resolve_bare_token_with_default_path_returns_none_when_absent() -> None
     )
 
 
+def test_resolve_bare_token_with_default_path_never_searches_cwd(
+    tmp_path, monkeypatch
+) -> None:
+    """Round 30 Finding CR1 (CodeRabbit review, fresh evidence): a token
+    that exists ONLY in the process's own current working directory --
+    never on any real :data:`os.defpath` entry -- must NOT resolve. A real
+    ``env -i``/``env -u PATH`` launch does not search the cwd either,
+    so resolving here via the process's own cwd would silently pick up an
+    unrelated, unintended binary. ``os.defpath`` is deliberately set to
+    include a literal ``.`` component (POSIX-spelled here for a portable
+    repro; real Windows :data:`os.defpath` genuinely starts with ``.``) plus
+    one real, but empty, directory -- proving the ``.`` component itself is
+    filtered rather than merely absent from this particular ``os.defpath``
+    value."""
+    cwd_only = _make_executable(tmp_path / "cwd-only-tool")
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "defpath", os.pathsep.join([".", str(empty_dir)]))
+    resolved = resolve_bare_token_with_default_path(cwd_only.stem)
+    assert resolved is None
+
+
 def test_pick_compiler_binary_resolves_default_path_driver_under_env_dash_i(
     tmp_path, monkeypatch
 ) -> None:

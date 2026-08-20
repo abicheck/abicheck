@@ -45,6 +45,8 @@ import stat
 import sys
 from pathlib import Path
 
+import pytest
+
 from abicheck.buildsource.source_extractors._argv import strip_launchers
 
 
@@ -349,6 +351,33 @@ def test_strip_launchers_env_split_string_respects_quoting() -> None:
     space must survive as one token."""
     result = strip_launchers(["env", "-S", "clang-cl -DFOO='a b' /c x.cc"])
     assert result == ["clang-cl", "-DFOO=a b", "/c", "x.cc"]
+
+
+def test_strip_launchers_env_split_string_malformed_quote_degrades_gracefully() -> None:
+    """Round 30 Finding CR4 (CodeRabbit review, fresh evidence): a
+    malformed ``-S`` value (here, an unbalanced quote -- a persisted,
+    untrusted ``compile_unit.argv`` may carry exactly this) must not raise
+    ``ValueError`` up through the shared traversal and abort the whole
+    adapter's collection for every OTHER compile unit alongside it.
+    Falls back to plain whitespace splitting rather than crashing."""
+    result = strip_launchers(["env", "-S", "clang-cl -DFOO='a /c x.cc"])
+    # No exception; best-effort whitespace split of the malformed string.
+    assert result == ["clang-cl", "-DFOO='a", "/c", "x.cc"]
+
+
+def test_msvc_driver_scan_malformed_env_split_string_does_not_raise() -> None:
+    """The same malformed ``-S`` value must not raise through the real
+    ``adapters.base._msvc_driver_scan`` chokepoint either -- not merely
+    through ``strip_launchers`` in isolation."""
+    from abicheck.buildsource.adapters.base import _msvc_driver_scan
+
+    argv = ["env", "-S", "clang-cl -DFOO='a /c x.cc"]
+    # Must not raise; degrades to a best-effort scan over the whitespace-
+    # split fallback tokens instead, still correctly recognizing the
+    # MSVC-dialect driver from the malformed-but-recoverable split.
+    is_msvc, driver_token = _msvc_driver_scan(argv)
+    assert is_msvc is True
+    assert driver_token == "clang-cl"
 
 
 def test_strip_launchers_env_split_string_with_launcher_after() -> None:
@@ -762,6 +791,53 @@ def test_skip_env_prefix_dash_negative_control_real_flag_unaffected() -> None:
     unaffected by the new ``-``/``--`` handling."""
     result = strip_launchers(["env", "-i", "clang-cl", "-c", "x.cc"])
     assert result == ["clang-cl", "-c", "x.cc"]
+
+
+# -- Round 30, Finding 1 (Codex): ``env --`` still consumes NAME=VALUE -----
+# assignments that follow it -- ``--`` only terminates OPTION parsing, not
+# the assignment list, per real GNU env's own documented grammar.
+
+
+def test_skip_env_prefix_double_dash_still_consumes_trailing_assignment() -> None:
+    """``env -- FOO=bar clang-cl -c x.cc`` -- real GNU ``env``'s ``--``
+    terminates OPTION parsing only; the ``NAME=VALUE`` assignment that
+    follows is still consumed before the real command is found. A first
+    revision of this fix broke out of the whole scan on ``--`` and treated
+    the literal ``"FOO=bar"`` token as the driver, losing ``clang-cl`` and
+    everything after it entirely."""
+    result = strip_launchers(["env", "--", "FOO=bar", "clang-cl", "-c", "x.cc"])
+    assert result == ["clang-cl", "-c", "x.cc"]
+
+
+def test_skip_env_prefix_double_dash_still_tracks_path_assignment(
+    tmp_path: Path,
+) -> None:
+    """``env -- PATH=/tmp/tool clang-cl ...`` -- a ``PATH=`` assignment
+    after ``--`` must still update tracked PATH state (not merely be
+    consumed as an opaque token), the same as a ``PATH=`` assignment
+    appearing before ``--`` already does."""
+    driver = tmp_path / "clang-cl"
+    driver = _make_executable(driver)
+    result = strip_launchers(
+        ["env", "--", f"PATH={tmp_path}", "clang-cl", "-c", "x.cc"]
+    )
+    _assert_resolved_driver(result[0], driver)
+    assert result[1:] == ["-c", "x.cc"]
+
+
+def test_skip_env_prefix_double_dash_assignment_negative_control_option_literal() -> (
+    None
+):
+    """Negative control proving ``--`` genuinely still suppresses env-OPTION
+    reinterpretation after the assignment list: a token that looks like an
+    env flag (``-i``) appearing after ``--`` and its assignments is treated
+    as the literal command/argument it actually is, NEVER as env's own
+    ``-i`` (which would otherwise incorrectly clear tracked PATH state and
+    consume the token instead of surfacing it as the driver)."""
+    result = strip_launchers(["env", "--", "FOO=bar", "-i", "-c", "x.cc"])
+    # `-i` is not itself a NAME=VALUE-shaped token, so it is the first
+    # non-assignment token after `--` -- i.e. the literal command.
+    assert result == ["-i", "-c", "x.cc"]
 
 
 # -- Round 23, Finding 7 (Codex): chained ``env -C`` prefixes compose ------
@@ -1195,23 +1271,93 @@ def test_strip_launchers_chdir_still_folds_genuine_path_operand_of_include_flag(
     ]
 
 
-def test_strip_launchers_chdir_unrecognized_flag_operand_still_folds_as_before() -> (
-    None
-):
-    """Negative control confirming the documented, pre-existing
-    conservative fallback: a flag this module cannot positively classify
-    still leaves its own possible operand to be classified purely by
-    positional shape (unchanged from before this fix) -- this is a known,
-    documented limitation (item 8 of :func:`_fold_chdir_into_operands`'s
-    own docstring), not a new regression."""
+def test_strip_launchers_chdir_unrecognized_flag_operand_no_longer_folded() -> None:
+    """Round 30 Finding 4 (Codex review, fresh evidence): a flag this module
+    cannot positively classify no longer has its own possible non-path
+    operand folded by default -- ``value.txt`` (an unrecognized flag's
+    genuine operand, not a source/header file) is left completely
+    unchanged, while the trailing genuine source-file operand (``x.cc``)
+    still folds. This REPLACES the old "folds by default" behavior a
+    previous revision of this test pinned as a known, documented
+    limitation -- that default was exactly what let a real non-path value
+    like ``-meabi gnu`` get corrupted into ``build/gnu`` (see the sibling
+    test below for that exact repro)."""
     result = strip_launchers(
         ["env", "-C", "build", "clang", "-some-unknown-flag", "value.txt", "x.cc"]
     )
     assert result == [
         "clang",
         "-some-unknown-flag",
-        os.path.normpath(os.path.join("build", "value.txt")),
+        "value.txt",
         os.path.normpath(os.path.join("build", "x.cc")),
+    ]
+
+
+def test_strip_launchers_chdir_meabi_value_not_folded() -> None:
+    """Round 30 Finding 4 (Codex review, fresh evidence): ``env -C build
+    clang -target armv7-none-eabi -meabi gnu -c x.c`` must not fold
+    ``gnu`` (the value of ``-meabi``, confirmed via a real ``clang
+    --help``: ``-meabi <value>`` sets the EABI type, not a path) into
+    ``build/gnu``. Rather than adding ``-meabi`` as a 5th individually
+    enumerated flag to :data:`_CHDIR_FOLD_NON_PATH_VALUE_FLAGS` (the
+    unsustainable, whack-a-mole shape of fix Codex explicitly flagged),
+    the general fix makes an unrecognized flag's non-path-suffixed operand
+    safe by default -- see :func:`_looks_like_source_file_operand`."""
+    result = strip_launchers(
+        [
+            "env",
+            "-C",
+            "build",
+            "clang",
+            "-target",
+            "armv7-none-eabi",
+            "-meabi",
+            "gnu",
+            "-c",
+            "x.c",
+        ]
+    )
+    assert result == [
+        "clang",
+        "-target",
+        "armv7-none-eabi",
+        "-meabi",
+        "gnu",
+        "-c",
+        os.path.normpath(os.path.join("build", "x.c")),
+    ]
+
+
+@pytest.mark.parametrize(
+    "unknown_flag,value",
+    [
+        ("-meabi", "gnu"),
+        ("-mfoo-mode", "fast"),
+        ("-some-future-flag", "widget"),
+        ("--another-unknown-option", "on"),
+        ("-Wfuture-warning-name", "enable"),
+    ],
+)
+def test_strip_launchers_chdir_various_unrecognized_flag_values_never_folded(
+    unknown_flag: str, value: str
+) -> None:
+    """Round 30 Finding 4 (Codex review, fresh evidence), generalized: this
+    is a property of the DEFAULT, not a fact about ``-meabi`` specifically
+    -- an arbitrary, never-before-seen flag's non-path-suffixed value is
+    always left unresolved, without that flag ever being named in this
+    module's source. The whole point of the fix is "any non-listed flag
+    operand is safe by default," not "here is one more name we thought
+    of" -- this test would keep passing for a 6th, 7th, ... Nth
+    hypothetical flag with no further code changes."""
+    result = strip_launchers(
+        ["env", "-C", "build", "clang", unknown_flag, value, "-c", "x.c"]
+    )
+    assert result == [
+        "clang",
+        unknown_flag,
+        value,
+        "-c",
+        os.path.normpath(os.path.join("build", "x.c")),
     ]
 
 

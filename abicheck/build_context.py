@@ -661,6 +661,23 @@ class BuildContext:
     undefines: set[str] = field(default_factory=set)
     include_paths: list[Path] = field(default_factory=list)
     system_includes: list[Path] = field(default_factory=list)
+    #: Parallel to ``include_paths``/``system_includes`` (same index),
+    #: recording whether each entry's ORIGINAL, as-written ``-I``/``-isystem``
+    #: operand was already absolute -- as opposed to a relative operand this
+    #: module resolved by joining it onto *directory* (round 30 Finding 2,
+    #: Codex review, fresh evidence). ``_resolve_path`` below deliberately
+    #: never rewrites a genuinely-absolute operand (an absolute path is
+    #: absolute regardless of *directory*), but by the time that operand
+    #: reaches ``include_paths``/``system_includes`` as a plain ``Path`` it
+    #: is indistinguishable from a relative operand that HAPPENED to resolve
+    #: to the exact same absolute location once joined onto *directory* --
+    #: a downstream consumer that needs to rebase a *derived* path onto a
+    #: different effective directory (e.g. once a leading ``env -C DIR``
+    #: prefix is accounted for) but must NEVER rebase a path that was
+    #: genuinely absolute in the source command needs this provenance
+    #: captured at the one point it is still available: before the join.
+    include_paths_explicit: list[bool] = field(default_factory=list)
+    system_includes_explicit: list[bool] = field(default_factory=list)
     language_standard: str | None = None
     target_triple: str | None = None
     sysroot: Path | None = None
@@ -710,6 +727,27 @@ class BuildContext:
     def has_conflicts(self) -> bool:
         """Return True if define or standard conflicts were detected."""
         return bool(self.define_conflicts) or len(self.standard_variants) > 1
+
+    def explicit_absolute_paths(self) -> list[Path]:
+        """Return every ``include_paths``/``system_includes`` entry whose
+        ORIGINAL ``-I``/``-isystem`` operand was already absolute (round 30
+        Finding 2, Codex review, fresh evidence) -- see
+        ``include_paths_explicit``'s own docstring. Callers building a
+        :class:`~abicheck.buildsource.build_evidence.CompileUnit` from this
+        context pass the (redacted) string form of this list as
+        ``CompileUnit.explicit_absolute_include_paths``.
+        """
+        out: list[Path] = [
+            p
+            for p, explicit in zip(self.include_paths, self.include_paths_explicit)
+            if explicit
+        ]
+        out += [
+            p
+            for p, explicit in zip(self.system_includes, self.system_includes_explicit)
+            if explicit
+        ]
+        return out
 
 
 def _entry_matches_filter(entry: CompileEntry, pattern: str) -> bool:
@@ -856,9 +894,11 @@ def _try_consume_include(
     m = _INCLUDE_RE.match(arg)
     if m:
         ctx.include_paths.append(_resolve_path(m.group(1), directory))
+        ctx.include_paths_explicit.append(Path(m.group(1)).is_absolute())
         return i + 1
     if arg == "-I" and i + 1 < len(arguments):
         ctx.include_paths.append(_resolve_path(arguments[i + 1], directory))
+        ctx.include_paths_explicit.append(Path(arguments[i + 1]).is_absolute())
         return i + 2
     return i  # no match — caller must advance
 
@@ -870,9 +910,11 @@ def _try_consume_isystem(
     m = _ISYSTEM_RE.match(arg)
     if m:
         ctx.system_includes.append(_resolve_path(m.group(1), directory))
+        ctx.system_includes_explicit.append(Path(m.group(1)).is_absolute())
         return i + 1
     if arg == "-isystem" and i + 1 < len(arguments):
         ctx.system_includes.append(_resolve_path(arguments[i + 1], directory))
+        ctx.system_includes_explicit.append(Path(arguments[i + 1]).is_absolute())
         return i + 2
     return i  # no match — caller must advance
 

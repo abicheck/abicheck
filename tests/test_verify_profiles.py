@@ -66,12 +66,18 @@ def test_importing_verify_does_not_reconfigure_stdout_or_stderr() -> None:
     under test is already cached in-process by the time this test runs."""
     script = (
         "import sys\n"
-        "calls = []\n"
-        "orig = sys.stdout.reconfigure\n"
-        "def spy(*a, **k):\n"
-        "    calls.append((a, k))\n"
-        "    return orig(*a, **k)\n"
-        "sys.stdout.reconfigure = spy\n"
+        "out_calls = []\n"
+        "err_calls = []\n"
+        "orig_out = sys.stdout.reconfigure\n"
+        "orig_err = sys.stderr.reconfigure\n"
+        "def out_spy(*a, **k):\n"
+        "    out_calls.append((a, k))\n"
+        "    return orig_out(*a, **k)\n"
+        "def err_spy(*a, **k):\n"
+        "    err_calls.append((a, k))\n"
+        "    return orig_err(*a, **k)\n"
+        "sys.stdout.reconfigure = out_spy\n"
+        "sys.stderr.reconfigure = err_spy\n"
         "import importlib.util\n"
         "spec = importlib.util.spec_from_file_location(\n"
         "    'abicheck_scripts_verify_import_check', 'scripts/verify.py'\n"
@@ -79,7 +85,8 @@ def test_importing_verify_does_not_reconfigure_stdout_or_stderr() -> None:
         "mod = importlib.util.module_from_spec(spec)\n"
         "sys.modules[spec.name] = mod\n"
         "spec.loader.exec_module(mod)\n"
-        "print(len(calls))\n"
+        "print(len(out_calls))\n"
+        "print(len(err_calls))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -88,7 +95,11 @@ def test_importing_verify_does_not_reconfigure_stdout_or_stderr() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().splitlines()[-1] == "0"
+    # Round 30 Finding CR3 (CodeRabbit review, fresh evidence): the original
+    # spy only covered stdout, so a stderr-only import-time side effect
+    # would have slipped through undetected despite this test's own name.
+    lines = result.stdout.strip().splitlines()
+    assert lines[-2:] == ["0", "0"]
 
 
 def _pytest_marker_expr(step: Any) -> str:

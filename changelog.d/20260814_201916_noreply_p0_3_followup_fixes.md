@@ -1312,3 +1312,92 @@
   derived from the production `join_path_token()` grammar directly, so
   no further host-specific literal remains to diverge from a real
   Windows runner's output.
+
+- **Round 30: four remaining Codex review findings on this same PR, plus
+  four CodeRabbit findings on the same commit, closed together.**
+  1. `_skip_env_prefix()`'s `--` handling (round 23 Finding 6) broke out of
+     the whole scan on `--`, treating the very next token as the driver
+     unconditionally -- but real GNU `env`'s `--` only terminates OPTION
+     parsing, not the `NAME=VALUE...` assignment list that still precedes
+     the command. `env -- FOO=bar clang-cl -c x.cc` was mistaking
+     `"FOO=bar"` for the compiler and losing `clang-cl` and everything
+     after it entirely. Fixed by continuing to consume `NAME=VALUE`-shaped
+     tokens (still tracking a `PATH=` assignment) after `--`, without
+     re-entering any OPTION-shaped branch -- a token that looks like an
+     env flag after `--` stays a literal argument, proving `--` genuinely
+     still suppresses option-reinterpretation.
+  2. `_rebase_structured_path()` (round 29 Finding E) could not distinguish
+     an explicitly absolute `-I/work/include` operand from a relative
+     `-Iinclude` operand an adapter had already resolved to the same
+     absolute string by joining it onto `compile_unit.directory` -- both
+     looked identical (an absolute string starting with the compile
+     unit's directory), so an explicit absolute include incorrectly moved
+     under `env -C`. Fixed with new provenance threaded from the point
+     it's still known: `BuildContext.include_paths_explicit`/
+     `system_includes_explicit` (parallel to `include_paths`/
+     `system_includes`, populated in `_try_consume_include`/
+     `_try_consume_isystem` before the relative-to-absolute join), a new
+     `explicit_absolute_paths()` accessor, and a new
+     `CompileUnit.explicit_absolute_include_paths` field populated by all
+     four adapters that route through `_extract_flags`
+     (`CompileDbAdapter`, `NinjaAdapter`, the Make and Bazel adapters).
+     `_rebase_structured_path()` gains an `explicit_absolute` keyword that
+     short-circuits the rebase; `clang.py`'s two call sites pass it from a
+     `set(compile_unit.explicit_absolute_include_paths)` membership check.
+  3. Both castxml's `_parse_root()` and clang's AST/macro dependency paths
+     resolved `resolve_read_files()` against the raw, un-chdir'd
+     `compile_unit.directory` instead of the EFFECTIVE (chdir-composed)
+     directory the real subprocess actually ran from under `env -C` (round
+     26 Finding 10's `effective_directory()` helper already threads
+     correctly into the subprocess `cwd=`, just not into this dependency
+     resolution). A relative dependency file name reported by the tool
+     therefore resolved to the wrong absolute path in the per-TU cache
+     fingerprint, silently omitting the real dependency and risking a
+     stale cache hit after the real header changes. Fixed by resolving
+     against `effective_directory(compile_unit.argv, compile_unit.directory)`
+     in all three call sites (castxml's `_parse_root`, clang's
+     `source_abi_from_clang_ast`, and clang's `_attach_macros`).
+  4. `_fold_chdir_into_operands()`'s chdir-folding scan treated ANY bare,
+     non-flag-shaped token as a foldable positional path by default,
+     protected only by an ever-growing denylist of individually-enumerated
+     non-path-taking flags (`_CHDIR_FOLD_NON_PATH_VALUE_FLAGS`) -- so
+     `env -C build clang -target armv7-none-eabi -meabi gnu -c x.c`
+     corrupted `-meabi`'s real value `gnu` into `build/gnu`, since
+     `-meabi` (confirmed via `clang --help`) wasn't yet in that list. Fixed
+     by inverting the default rather than adding a fifth flag: a new
+     `_looks_like_source_file_operand()` helper (in `_argv_shortopts.py`,
+     moved there to keep `_argv.py` under the 2000-line hard cap) folds a
+     bare token only when it is independently recognizable as a genuine
+     source/header operand by suffix; every other bare token -- an
+     unrecognized flag's own non-path value included, whichever flag it
+     followed -- is now safe by default without needing to be named
+     anywhere in this module. Verified with a parametrized regression test
+     covering several hypothetical never-before-seen flags, proving the
+     fix is a property of the default and not another one-off addition.
+  5. (CodeRabbit) `resolve_bare_token_with_default_path()` relied on
+     `shutil.which(token, path=os.defpath)`, but on Windows `os.defpath`
+     itself starts with `.` and `shutil.which`'s own implementation can
+     still silently prepend the process's current working directory to
+     the search regardless of an explicit `path=` argument (confirmed
+     across CPython 3.10-3.13 source and the underlying
+     `NeedCurrentDirectoryForExePathW` Windows API behavior) -- letting a
+     PATH-cleared (`env -i`/`env -u PATH`) resolution pick up an unrelated
+     binary from abicheck's own cwd, which a real PATH-less `execvp` never
+     would. Fixed by filtering `.`/empty components out of `os.defpath`
+     and checking each remaining directory directly (a new
+     `_windows_candidate_names()` PATHEXT-aware helper plus a manual
+     `os.path.isfile`/`os.access` check), bypassing `shutil.which` and its
+     cwd-prepending behavior entirely.
+  6. (CodeRabbit) `_expand_env_split_string()`'s `shlex.split()` call
+     raised `ValueError` on a malformed `-S` value (e.g. an unbalanced
+     quote in persisted, untrusted `compile_unit.argv`), which could abort
+     an entire adapter's collection for every other compile unit alongside
+     it. Fixed by catching `ValueError` and degrading to a best-effort
+     `value.split()` rather than crashing.
+  7. (CodeRabbit, minor) A stale test docstring claimed a PATH-less lookup
+     "cannot" search at all; corrected to state it searches
+     `os.defpath`, just never abicheck's own inherited `PATH`. Also
+     (CodeRabbit, minor) `test_importing_verify_does_not_reconfigure_stdout_or_stderr`
+     only spied on `sys.stdout.reconfigure`, matching neither its own name
+     nor guarding against a stderr-only import-time side effect; now spies
+     and asserts on both streams.

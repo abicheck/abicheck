@@ -87,6 +87,85 @@ def test_build_clang_command_rebases_multiple_nested_include_paths() -> None:
     assert cmd[cmd.index("-I") + 1] == "/work/build/include/nested/deep"
 
 
+def test_build_clang_command_explicit_absolute_include_not_rebased_under_env_chdir() -> (
+    None
+):
+    """Round 30 Finding 2 (Codex review, fresh evidence): an EXPLICITLY
+    absolute ``-I/work/include`` operand must NOT move under ``env -C
+    build`` -- an absolute path is absolute regardless of cwd -- even
+    though it string-prefix-matches ``compile_unit.directory`` exactly the
+    same way a relative ``-Iinclude`` operand the adapter already resolved
+    to that same absolute string would. Without
+    ``explicit_absolute_include_paths`` recording which is which, both look
+    identical to ``_rebase_structured_path`` and the explicit path was
+    incorrectly rewritten to ``/work/build/include`` -- the exact
+    corruption this field exists to prevent."""
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory="/work",
+        output="x.o",
+        argv=["env", "-C", "build", "clang", "-I/work/include", "-c", "x.cc"],
+        include_paths=["/work/include"],
+        explicit_absolute_include_paths=["/work/include"],
+    )
+    cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
+    assert cmd[cmd.index("-I") + 1] == "/work/include"
+
+
+def test_build_clang_command_relative_include_still_rebased_under_env_chdir() -> None:
+    """Regression guard for the round-29 fix itself: a genuinely RELATIVE
+    ``-Iinclude`` operand (nothing recorded in
+    ``explicit_absolute_include_paths``) is still correctly rebased onto
+    the effective ``env -C`` directory, unaffected by Finding 2's fix."""
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory="/work",
+        output="x.o",
+        argv=["env", "-C", "build", "clang", "-Iinclude", "-c", "x.cc"],
+        include_paths=["/work/include"],
+        explicit_absolute_include_paths=[],
+    )
+    cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
+    assert cmd[cmd.index("-I") + 1] == "/work/build/include"
+
+
+def test_build_clang_command_mixed_explicit_and_relative_includes_resolve_independently() -> (
+    None
+):
+    """A single compile unit carrying BOTH an explicitly absolute include
+    and a relative-then-joined one (same absolute prefix, so both would
+    string-match ``old_base`` identically) must resolve each independently
+    -- the explicit one stays put, the derived one rebases."""
+    cu = CompileUnit(
+        id="cu://x.cc",
+        source="x.cc",
+        language="CXX",
+        directory="/work",
+        output="x.o",
+        argv=[
+            "env",
+            "-C",
+            "build",
+            "clang",
+            "-I/work/vendor",
+            "-Ilocal",
+            "-c",
+            "x.cc",
+        ],
+        include_paths=["/work/vendor", "/work/local"],
+        explicit_absolute_include_paths=["/work/vendor"],
+    )
+    cmd = build_clang_command(cu, Path("/work/x.cc"), clang_bin="clang")
+    idxs = [i for i, tok in enumerate(cmd) if tok == "-I"]
+    values = [cmd[i + 1] for i in idxs]
+    assert "/work/vendor" in values  # explicit -- unmoved
+    assert "/work/build/local" in values  # relative -- rebased
+
+
 def test_build_clang_command_negative_control_no_env_chdir_unaffected() -> None:
     """Negative control: with NO ``env -C`` prefix at all, the structured
     include path is emitted completely unchanged -- confirming this fix

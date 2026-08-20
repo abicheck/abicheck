@@ -565,9 +565,21 @@ class CastxmlSourceExtractor:
         # included header, not just the configured public roots (Codex #339, P1).
         # Resolve to absolute against the build directory so the cache (run in a
         # different CWD) can read a relative castxml <File> path (Codex P2).
+        #
+        # Round 30 Finding 3 (Codex review, fresh evidence): for an `env -C
+        # build` compile unit, castxml's own subprocess actually ran from the
+        # EFFECTIVE (chdir-composed) directory -- `effective_directory()`, the
+        # same helper round 26 Finding 10 already threads into the subprocess
+        # `cwd=` above -- not the raw, un-chdir'd `compile_unit.directory`. A
+        # RELATIVE `<File name="include/api.h">` castxml reports must resolve
+        # against that same effective directory, or the real dependency the
+        # subprocess actually read (`<build_dir>/include/api.h`) is omitted
+        # from the cache fingerprint entirely -- a stale cache hit risk after
+        # the real header changes, since the fingerprint would never see it.
         tu.read_files = resolve_read_files(
             {name for el in root.findall(".//File") if (name := el.get("name"))},
-            compile_unit.directory,
+            effective_directory(compile_unit.argv, compile_unit.directory)
+            or compile_unit.directory,
         )
         self._stamp_fact_set_and_coverage(tu, compile_unit)
         return tu
