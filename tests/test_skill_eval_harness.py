@@ -193,6 +193,37 @@ class TestRunnerTreatment:
         assert runner.visible_native_skills(events) == ["review-native-library-change"]
         assert runner.visible_native_skills([]) is None
 
+    def test_a_retired_skill_installed_at_user_scope_is_not_hidden(self):
+        """A stale/retired skill must surface, never be filtered out.
+
+        `_published_skill_names()` only reads the *current* checkout's
+        published directories — a machine that still has one of the three
+        skills removed by ADR-058's 2026-08-20 portfolio-reset amendment (or
+        the pre-rename `native-binary-compatibility-review`) installed at
+        user scope reports it in the real init event too. Silently dropping
+        it here would let `check_treatment()` accept a contaminated
+        baseline/skill-arm run as clean evidence instead of rejecting it.
+        """
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["pdf", "native-api-evolution"],
+            }
+        ]
+        assert runner.visible_native_skills(events) == ["native-api-evolution"]
+
+        old_name_events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["native-binary-compatibility-review"],
+            }
+        ]
+        assert runner.visible_native_skills(old_name_events) == [
+            "native-binary-compatibility-review"
+        ]
+
     def test_the_final_answer_comes_from_the_result_event(self):
         events = [
             {
