@@ -2059,12 +2059,18 @@ Once a root command genuinely clears the bar above, pick the right home:
   `tests/test_dump_cli_typed_api_parity.py`'s
   `test_scan_against_real_dump_baseline_is_comparable` parametrizes over
   several real build-evidence shapes (plain, an added macro, this
-  extra-include-dir shape) and `xfail(strict=True)`s exactly the
-  known-divergent one — so a future fix that closes this gap turns the
-  xfail into an unexpected pass and fails loudly, forcing this note and
-  the test to be updated together, and a future regression that widens
-  the gap to a *previously-passing* shape fails immediately instead of
-  needing a third field report. The sibling
+  extra-include-dir shape). Rather than a bare `xfail(strict=True)` (three
+  Codex review rounds on this test found real gaps in cruder versions of
+  this idea — see the test module's own comments for the full history),
+  the known-divergent shape is checked against the *exact* diagnosed
+  failure signature (`NOT_COMPARABLE` naming `include_sequence`) before
+  being treated as expected via a conditional `pytest.xfail()`; anything
+  else for that shape — including the gap closing entirely — fails the
+  test outright, forcing this note and `_SCAN_KNOWN_DIVERGENT_SHAPES` to
+  be updated deliberately rather than the test quietly going green. A
+  future regression that widens the gap to a *previously-passing* shape
+  fails immediately too, since only the shape explicitly listed gets any
+  tolerance at all. The sibling
   `test_dump_cli_and_typed_api_agree_on_resolved_compile_context` in the
   same module separately pins the narrower invariant that *does* already
   hold across all three shapes today (`dump`'s CLI path and the typed

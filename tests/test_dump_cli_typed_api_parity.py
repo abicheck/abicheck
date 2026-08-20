@@ -73,6 +73,13 @@ import sys
 from pathlib import Path
 
 import pytest
+
+# Non-test-prefixed sibling helper (mirrors `_strict_process.py`/
+# `_workflow_exec.py` -- see `tests/CLAUDE.md`'s "Helpers" section),
+# imported plainly rather than relatively since `tests/` carries no
+# `__init__.py` (same pattern every other such helper import in this
+# suite uses).
+from _dump_compile_args_normalize import split_compile_args
 from click.testing import CliRunner
 
 from abicheck.api_types import DumpRequest, InputSpec
@@ -243,49 +250,15 @@ _BUILD_SHAPES: dict[str, dict[str, object]] = {
 }
 
 
-# Include-search flags (-I/-isystem/-iquote/-idirafter) are NOT idempotent
-# under reordering or duplication the way a value flag (-std=/-D) is: which
-# directory a real compiler resolves a colliding header basename from
-# depends on first-match-wins search order within each of these buckets
-# (see AGENTS.md's own `_split_include_tokens`/bucket-ordering findings).
-# A plain `set()` comparison would silently accept a reordered or
-# dropped-then-reintroduced include directory as long as the same
-# *directories* appeared somewhere -- exactly the kind of divergence this
-# whole parity test exists to catch (Codex review). So these are compared
-# as an exact, order- and multiplicity-preserving sequence of (flag, dir)
-# pairs, never collapsed into a set.
-_INCLUDE_SEARCH_FLAGS = ("-I", "-isystem", "-iquote", "-idirafter")
-
-
-def _split_compile_args(
-    args: tuple[str, ...],
-) -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
-    """Split a real ``ast_compile_args`` sequence into (value-flag set,
-    ordered include-search pairs).
-
-    Value flags (``-std=``, ``-D...``) are idempotent when repeated with an
-    identical value -- appending a second, identical ``-std=c++17`` has no
-    functional effect, which is exactly what the CLI dump path's own
-    (separately-tracked, benign) duplication does -- so comparing those as
-    a *set* tolerates that harmless asymmetry while still catching a
-    genuinely *conflicting* value between the two paths, since a differing
-    value is a differing string and still shows up as a set difference.
-    Include-search flags get no such tolerance -- see the module-level
-    comment above this function.
-    """
-    value_flags: list[str] = []
-    include_pairs: list[tuple[str, str]] = []
-    i = 0
-    n = len(args)
-    while i < n:
-        tok = args[i]
-        if tok in _INCLUDE_SEARCH_FLAGS and i + 1 < n:
-            include_pairs.append((tok, args[i + 1]))
-            i += 2
-            continue
-        value_flags.append(tok)
-        i += 1
-    return frozenset(value_flags), tuple(include_pairs)
+# Comparing `ast_compile_args` for real semantic equivalence (not literal
+# list/set equality) needs to know which flags are last-wins,
+# order-sensitive, or genuinely inert under reordering/duplication -- see
+# `_dump_compile_args_normalize.py`'s own module docstring for the full
+# reasoning (two Codex review rounds: a plain `set()` first missed
+# include-search ordering, then still missed -D/-std last-wins
+# conflicts). `test_dump_compile_args_normalize.py` pins that helper's
+# normalization rules directly, with synthetic inputs, independent of any
+# real compiler.
 
 
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
@@ -313,25 +286,46 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
     )
     # Both paths were given the identical real -std=/macros/-I evidence, so
     # every ABI-relevant flag reaching the typed path's parse must also
-    # reach the CLI path's.
-    cli_values, cli_includes = _split_compile_args(tuple(cli_snap["ast_compile_args"]))
-    typed_values, typed_includes = _split_compile_args(
+    # reach the CLI path's -- compared per `split_compile_args`'s own
+    # semantics-preserving normalization, not literal set/list equality
+    # (see that module's docstring: a plain set would miss a -D/-std
+    # last-wins conflict, and a plain sequence would reject the CLI path's
+    # own separately-tracked, harmless flag duplication).
+    cli_last_wins, cli_presence, cli_includes = split_compile_args(
+        tuple(cli_snap["ast_compile_args"])
+    )
+    typed_last_wins, typed_presence, typed_includes = split_compile_args(
         tuple(typed_snap["ast_compile_args"])
     )
-    assert cli_values, "the CLI dump path resolved no compile flags at all"
-    assert typed_values, "the typed-API dump path resolved no compile flags at all"
-    missing_from_cli = typed_values - cli_values
-    missing_from_typed = cli_values - typed_values
+    assert cli_last_wins or cli_presence, "the CLI dump path resolved no compile flags"
+    assert typed_last_wins or typed_presence, (
+        "the typed-API dump path resolved no compile flags"
+    )
+    # Last-wins state (-D/-U/-std=): exact dict equality -- this is the one
+    # that catches a *conflicting* value reached via a different order on
+    # each path (e.g. one path's effective -DFOO ends up "1", the other's
+    # "2"), which a plain set of tokens cannot distinguish from an
+    # identical, merely-reordered pair.
+    assert cli_last_wins == typed_last_wins, (
+        shape_name,
+        cli_last_wins,
+        typed_last_wins,
+    )
+    # Presence-only flags (-fPIC and the like): genuinely order- and
+    # repeat-count-insensitive, so a set comparison is the correct
+    # semantics here, not merely a convenient one.
+    missing_from_cli = typed_presence - cli_presence
+    missing_from_typed = cli_presence - typed_presence
     assert not missing_from_cli, (
-        f"{shape_name}: typed-API path resolved value flag(s) {missing_from_cli} "
+        f"{shape_name}: typed-API path resolved flag(s) {missing_from_cli} "
         "the CLI dump path did not"
     )
     assert not missing_from_typed, (
-        f"{shape_name}: CLI dump path resolved value flag(s) {missing_from_typed} "
+        f"{shape_name}: CLI dump path resolved flag(s) {missing_from_typed} "
         "the typed-API path did not"
     )
     # Include-search flags: exact sequence, order and multiplicity both
-    # significant -- see `_split_compile_args`'s own docstring.
+    # significant -- see `split_compile_args`'s own docstring.
     assert cli_includes == typed_includes, (
         shape_name,
         cli_includes,
@@ -400,10 +394,21 @@ def _dump_via_cli_to_file(
 # (`NOT_COMPARABLE` naming `include_sequence`) is treated as expected via
 # an explicit, conditional `pytest.xfail()` call made *after* confirming
 # that signature -- so a different scan failure surfaces as a genuine,
-# uncaught test failure, and a fix that makes the signature stop
-# reproducing falls through to the real assertions below, which then pass
-# normally (no `strict=True` bookkeeping needed: a plain PASS is itself
-# the loud signal that this note and the xfail list need updating).
+# uncaught test failure.
+#
+# A quiet PASS for a listed shape is *not* an acceptable third outcome
+# (Codex review, second round): if the diagnosed signature stops
+# reproducing -- because the gap closed, or because it changed shape --
+# this must still fail loudly, forcing `_SCAN_KNOWN_DIVERGENT_SHAPES` and
+# AGENTS.md's known-gap note to be updated deliberately, rather than
+# silently going stale behind an ordinary green test nobody has reason to
+# look at twice. So for a listed shape there are exactly two outcomes:
+# the exact known signature reproduces (expected `xfail`), or the test
+# fails outright -- covering both "the gap closed" and "a different
+# failure occurred" with one loud signal, matching the `strict`-xfail
+# spirit without pytest's own `strict=True` bookkeeping (which an
+# imperative, signature-gated `pytest.xfail()` call cannot combine with,
+# per the previous review round).
 _SCAN_KNOWN_DIVERGENT_SHAPES = frozenset({"extra-include-dir"})
 
 
@@ -452,10 +457,16 @@ def test_scan_against_real_dump_baseline_is_comparable(
                 "seeding divergence (see this module's own comment above "
                 "this test)"
             )
-        # Anything else -- including the gap closing entirely -- falls
-        # through to the ordinary assertions below: a fix makes them pass
-        # normally, and any *other* failure surfaces as itself rather than
-        # being mistaken for the diagnosed gap.
+        pytest.fail(
+            f"{shape_name} is listed in _SCAN_KNOWN_DIVERGENT_SHAPES, but "
+            "the previously-diagnosed failure signature (NOT_COMPARABLE "
+            "naming include_sequence) did not reproduce. Either the "
+            "underlying gap has closed -- remove this shape from "
+            "_SCAN_KNOWN_DIVERGENT_SHAPES and update AGENTS.md's "
+            "known-gap note for it -- or a different failure occurred "
+            "and needs its own investigation. "
+            f"exit_code={scan_result.exit_code!r} output={scan_result.output!r}"
+        )
 
     assert "NOT_COMPARABLE" not in scan_result.output, (shape_name, scan_result.output)
     assert scan_result.exit_code == 0, (shape_name, scan_result.output)
