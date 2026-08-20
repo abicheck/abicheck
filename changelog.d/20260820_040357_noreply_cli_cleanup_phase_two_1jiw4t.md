@@ -63,4 +63,12 @@
   hashing now reuses the shared `contract_evidence_collect.content_digest`
   primitive instead of a second hand-rolled convention, and a tautological
   test assertion (`a != b or (c != d)`, which never fails on its own) was
-  tightened to assert the specific field it claimed to check.
+  tightened to assert the specific field it claimed to check. The field set
+  also now covers ADR-027 A4 pattern-aware verdict modulation
+  (`policy.pattern_verdicts`, a new `DiffResult.pattern_verdicts_enabled`
+  field): `--pattern-verdicts`/`--explain-patterns` can modulate a
+  finding's verdict and the process exit but was previously unrepresented,
+  so two otherwise-identical runs differing only in this flag collided on
+  the digest whenever no idiom/antipattern happened to match (the
+  applied-modulation ledger alone is indistinguishable from the flag never
+  having been set).

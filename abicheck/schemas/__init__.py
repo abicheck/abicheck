@@ -635,7 +635,27 @@ from typing import Any
 #:       where a ``--pack``-only ``scan --against`` recorded its digest
 #:       from ``resolve_scan_config``'s deliberately gate-blanked config
 #:       instead of the run's real ``--severity-preset``/
-#:       ``--exit-code-scheme``.
+#:       ``--exit-code-scheme``. Three more fixes landed in further review
+#:       rounds under this same still-unreleased version: ``surface.
+#:       explicit_scope`` now folds in ``--post-manifest``'s resolved
+#:       ``public_surface_allowlist`` (a second, independent explicit-scope
+#:       axis alongside ``--public-symbols-list``, keyed separately so
+#:       neither can collide with the other), gated on ``is not None``
+#:       rather than truthiness (an empty ``--post-manifest`` allowlist is
+#:       a real, distinct, active scope, not the absence of one); the rich
+#:       tier *merges* that same result-level scope digest with
+#:       ``resolved_config.surface.explicit_scope`` rather than falling
+#:       back to only one, since ``force_public_symbols`` is threaded into
+#:       ``compare()`` unconditionally and a single ``--pack``-only run
+#:       combining ``--public-symbols-list`` and ``--post-manifest`` can
+#:       populate both sources at once; and ``effective_config_fields``
+#:       gains ``policy.pattern_verdicts`` (ADR-027 A4's ``--pattern-
+#:       verdicts``/``--explain-patterns``, which can modulate a finding's
+#:       verdict and the process exit but was previously unrepresented --
+#:       two otherwise-identical runs differing only in this flag collided
+#:       on the digest whenever no idiom/antipattern happened to match,
+#:       since the applied-modulation ledger alone is indistinguishable
+#:       from the flag never having been set).
 REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
@@ -945,7 +965,13 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        ``resolve_scan_config`` deliberately blanks that config's own
 #:        gate fields, and a ``--pack``-only ``scan --against`` previously
 #:        recorded the digest from that blanked copy instead of the run's
-#:        real gate. Additive keys.
+#:        real gate. Additive keys. Three more fixes landed under this same
+#:        still-unreleased version, sharing the identical
+#:        ``effective_config_digest`` call `compare`'s report_schema_version
+#:        2.46 entry describes in full: ``surface.explicit_scope`` now also
+#:        covers ``--post-manifest``'s ``public_surface_allowlist`` and
+#:        merges rather than falls back between the two explicit-scope
+#:        sources; ``policy.pattern_verdicts`` was added.
 SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

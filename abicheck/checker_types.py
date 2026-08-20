@@ -604,6 +604,24 @@ class DiffResult:
     # different configuration. ``None`` when neither source was active at
     # all.
     explicit_scope_source_sha256: str | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # whether ADR-027 A4 pattern-aware verdict modulation
+    # (``compare(..., pattern_verdicts=...)``, opt-in via
+    # ``--pattern-verdicts``/``--explain-patterns``) was requested for this
+    # comparison. ``pattern_modulations`` (elsewhere on this dataclass)
+    # records the *ledger of applied* modulations, which is empty whenever
+    # no idiom/antipattern happened to match -- indistinguishable from the
+    # flag never having been set at all, even though the *configuration*
+    # genuinely differed
+    # (a policy demotion/raise can change ``kept``/``verdict``/the exit
+    # code the moment a matching idiom appears, per ``checker.py``'s own
+    # ``_apply_pattern_verdicts_step``). Recorded directly on ``result``
+    # rather than nested under any D7 namespace, since it isn't a D7
+    # ``CompatibilityEvaluationConfig`` concept at all -- there is no
+    # external, user-authored "patterns" config to content-digest, only
+    # abicheck's own built-in idiom/antipattern detection gated on this one
+    # boolean, the same shape as ``scope_to_public_surface`` above.
+    pattern_verdicts_enabled: bool = field(default=False, kw_only=True)
 
     def _effective_kind_sets(
         self,

@@ -1211,6 +1211,7 @@ def compare(
         suppression_file_provided=suppression is not None,
         suppression_source_sha256=suppression_source_sha256,
         explicit_scope_source_sha256=explicit_scope_source_sha256,
+        pattern_verdicts_enabled=bool(pattern_verdicts),
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,

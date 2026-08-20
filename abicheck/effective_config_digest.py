@@ -104,6 +104,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "policy.overrides",
     "policy.reclassify",
     "policy.frozen_namespaces",
+    "policy.pattern_verdicts",
     "surface.internal_namespaces",
     "surface.explicit_scope",
     "surface.scope_to_public_surface",
@@ -448,6 +449,9 @@ def effective_config_fields_from_full_config(
         "policy.frozen_namespaces": _namespaces_str(
             getattr(policy_file, "frozen_namespaces", ())
         ),
+        "policy.pattern_verdicts": str(
+            bool(getattr(result, "pattern_verdicts_enabled", False))
+        ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(surface, "internal_namespaces", ())
         ),
@@ -513,6 +517,9 @@ def effective_config_fields_from_diff_result(
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
         "policy.frozen_namespaces": _namespaces_str(
             getattr(policy_file, "frozen_namespaces", ())
+        ),
+        "policy.pattern_verdicts": str(
+            bool(getattr(result, "pattern_verdicts_enabled", False))
         ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(policy_file, "internal_namespaces", ())

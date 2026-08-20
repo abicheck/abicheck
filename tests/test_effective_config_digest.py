@@ -1274,3 +1274,71 @@ class TestRichTierMergesResultExplicitScope:
         )
         assert fields_a["surface.explicit_scope"] != fields_b["surface.explicit_scope"]
         assert effective_config_digest(fields_a) != effective_config_digest(fields_b)
+
+
+class TestPatternVerdictsAxis:
+    """Codex review, PR #803, fresh evidence: ADR-027 A4 pattern-aware
+    verdict modulation (`--pattern-verdicts`/`--explain-patterns`) can
+    modulate a finding's verdict and the process exit
+    (`checker.py`'s `_apply_pattern_verdicts_step`), but was previously
+    unrepresented in the digest -- two otherwise-identical runs differing
+    only in this flag collided whenever no idiom/antipattern happened to
+    match (the applied-modulation ledger alone is indistinguishable from
+    the flag never having been set at all)."""
+
+    def test_flag_changes_the_baseline_digest(self):
+        off = _result(pattern_verdicts_enabled=False)
+        on = _result(pattern_verdicts_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.pattern_verdicts"] == "False"
+        assert f2["policy.pattern_verdicts"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_flag_changes_the_rich_tier_digest(self):
+        config = _minimal_evaluation_config()
+        off = _result(evaluation_config=config, pattern_verdicts_enabled=False)
+        on = _result(evaluation_config=config, pattern_verdicts_enabled=True)
+        f1 = effective_config_fields(off, severity_config=None, exit_code_scheme="legacy")
+        f2 = effective_config_fields(on, severity_config=None, exit_code_scheme="legacy")
+        assert f1["policy.pattern_verdicts"] == "False"
+        assert f2["policy.pattern_verdicts"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_stamps_the_flag_even_when_nothing_matches(self):
+        """End-to-end through the real compare() entry point: even when no
+        idiom/antipattern actually matches (pattern_modulations stays
+        empty), the flag itself must still be recorded and still change
+        the digest -- that's the whole point of this axis."""
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        def _fn(name, mangled):
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1"}
+        old_snap = AbiSnapshot(
+            version="1.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        new_snap = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+
+        off = compare(old_snap, new_snap, pattern_verdicts=False)
+        on = compare(old_snap, new_snap, pattern_verdicts=True)
+        assert off.pattern_verdicts_enabled is False
+        assert on.pattern_verdicts_enabled is True
+        assert on.pattern_modulations == []  # nothing matched -- ledger stays empty
+
+        f_off = effective_config_fields(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f_on = effective_config_fields(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f_off["policy.pattern_verdicts"] != f_on["policy.pattern_verdicts"]
+        assert effective_config_digest(f_off) != effective_config_digest(f_on)
