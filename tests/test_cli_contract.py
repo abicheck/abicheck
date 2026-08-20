@@ -238,6 +238,46 @@ def test_cli_resolve_own_wrapper_is_exempt(
     assert not any(c == "cli-contract" for c, _ in findings.errors)
 
 
+@pytest.mark.parametrize(
+    "filename, source",
+    [
+        pytest.param(
+            "cli_unrelated_importfrom.py",
+            "from vendor.service import resolve_input\n"
+            "def go(a):\n"
+            "    return resolve_input(a)\n",
+            id="unrelated-importfrom-suffix-collision",
+        ),
+        pytest.param(
+            "cli_unrelated_import.py",
+            "import vendor.service\n"
+            "def go(a):\n"
+            "    return vendor.service.resolve_input(a)\n",
+            id="unrelated-import-suffix-collision",
+        ),
+    ],
+)
+def test_unrelated_module_with_matching_suffix_is_not_flagged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    source: str,
+) -> None:
+    """A third-party module that merely *ends* in a target module's name
+    (``vendor.service``) must not be mistaken for abicheck's own module."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / filename).write_text(source)
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
 def test_cli_resolve_exemption_is_scoped_to_the_wrapper_function(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

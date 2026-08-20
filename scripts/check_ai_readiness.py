@@ -2175,6 +2175,26 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
+def _importfrom_names_module(dotted: str, level: int, module: str) -> bool:
+    """True if an ``ImportFrom(module=dotted, level=level)`` genuinely names
+    abicheck's own top-level ``<module>`` — a relative ``.{module}`` or an
+    absolute ``abicheck.{module}`` — not an unrelated module that merely
+    *ends* in the same name (``from vendor.service import resolve_input``
+    must not be mistaken for abicheck's own ``service`` module).
+    """
+    if level >= 1:
+        return dotted == module
+    return dotted in (module, f"abicheck.{module}")
+
+
+def _import_names_module(dotted: str, module: str) -> bool:
+    """True if a plain ``import <dotted>`` genuinely names abicheck's own
+    top-level ``<module>`` (bare ``<module>`` or absolute
+    ``abicheck.<module>``), for the identical reason as
+    ``_importfrom_names_module`` above."""
+    return dotted in (module, f"abicheck.{module}")
+
+
 def _tier1_func_bindings(
     tree: ast.Module, module: str, funcs: frozenset[str]
 ) -> set[str]:
@@ -2189,7 +2209,7 @@ def _tier1_func_bindings(
         if (
             isinstance(node, ast.ImportFrom)
             and node.module is not None
-            and node.module.split(".")[-1] == module
+            and _importfrom_names_module(node.module, node.level, module)
         ):
             for alias in node.names:
                 if alias.name in funcs:
@@ -2224,14 +2244,15 @@ def _tier1_module_bindings(tree: ast.Module, module: str) -> set[str]:
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            # ``from . import <module>`` (module is None) or ``from abicheck import <module>``.
-            if node.module is None or node.module.split(".")[-1] == "abicheck":
+            # ``from . import <module>`` (module is None) or ``from abicheck import <module>``
+            # — not an unrelated ``from vendor import <module>``-shaped import.
+            if node.module is None or node.module == "abicheck":
                 for alias in node.names:
                     if alias.name == module:
                         names.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[-1] == module:
+                if _import_names_module(alias.name, module):
                     if alias.asname:
                         names.add(alias.asname)
                     else:
