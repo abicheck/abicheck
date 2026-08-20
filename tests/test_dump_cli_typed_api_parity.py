@@ -289,12 +289,12 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
     # reach the CLI path's -- compared per `split_compile_args`'s own
     # semantics-preserving normalization, not literal set/list equality
     # (see that module's docstring for the full reasoning, including why
-    # an *unrecognized* flag defaults to strict, order-preserving
-    # comparison rather than the reverse).
-    cli_last_wins, cli_presence, cli_pairs, cli_unknown = split_compile_args(
+    # every order-sensitive/unrecognized token shares one unified stream
+    # rather than several independently-compared buckets).
+    cli_last_wins, cli_presence, cli_stream = split_compile_args(
         tuple(cli_snap["ast_compile_args"])
     )
-    typed_last_wins, typed_presence, typed_pairs, typed_unknown = split_compile_args(
+    typed_last_wins, typed_presence, typed_stream = split_compile_args(
         tuple(typed_snap["ast_compile_args"])
     )
     assert cli_last_wins or cli_presence, "the CLI dump path resolved no compile flags"
@@ -324,15 +324,12 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
         f"{shape_name}: CLI dump path resolved flag(s) {missing_from_typed} "
         "the typed-API path did not"
     )
-    # Include-search / forced-include flags: exact sequence, order and
-    # multiplicity both significant -- see `split_compile_args`'s own
-    # docstring.
-    assert cli_pairs == typed_pairs, (shape_name, cli_pairs, typed_pairs)
-    # Everything neither path's ast_compile_args composition is known to
-    # emit today, but which this helper has no specific rule for either:
-    # also an exact sequence, by the same "unknown defaults to strict"
-    # reasoning -- not folded into the presence-only set.
-    assert cli_unknown == typed_unknown, (shape_name, cli_unknown, typed_unknown)
+    # Everything else -- include-search/forced-include pairs (attached or
+    # separate spelling, normalized identically) and any unrecognized
+    # token -- shares one unified, order- and multiplicity-preserving
+    # stream: see `split_compile_args`'s own docstring for why this must
+    # be one sequence rather than several independently-compared ones.
+    assert cli_stream == typed_stream, (shape_name, cli_stream, typed_stream)
 
 
 def _dump_via_cli_to_file(

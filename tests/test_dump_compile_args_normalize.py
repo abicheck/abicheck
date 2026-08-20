@@ -24,10 +24,10 @@ Per this repo's own "Primitive-level property tests" convention
 (AGENTS.md): a reusable normalization/comparison primitive gets its
 contract pinned directly, with synthetic inputs, decoupled from any one
 caller's real-compiler scenario -- not only exercised incidentally
-through the integration test that happens to trigger it. Three real
-Codex review rounds on the integration test each found a case a plain
-``set()`` (or an insufficiently-defaulted catch-all bucket) comparison
-would have silently accepted as "the same" when it was not; all three are
+through the integration test that happens to trigger it. Four real Codex
+review rounds on the integration test each found a case a plain ``set()``
+(or an insufficiently-defaulted/insufficiently-unified bucket) comparison
+would have silently accepted as "the same" when it was not; all four are
 pinned here as direct, fast regression cases so a future change to the
 normalization rules cannot reintroduce any of them without this file
 failing.
@@ -59,10 +59,10 @@ class TestLastWinsMacroAndDialectFlags:
         assert b[0]["-std="] == "-std=c++17"
 
     def test_conflicting_target_value_in_different_order_is_not_equal(self) -> None:
-        """The case a third review round found: `--target=` has the
-        identical last-wins shape as `-std=`, and the previous revision's
-        catch-all "everything else is presence-only" default silently
-        treated it as order-insensitive instead."""
+        """A third review round found: `--target=` has the identical
+        last-wins shape as `-std=`, and an earlier revision's catch-all
+        "everything else is presence-only" default silently treated it as
+        order-insensitive instead."""
         a = split_compile_args(("--target=a", "--target=b"))
         b = split_compile_args(("--target=b", "--target=a"))
         assert a[0] != b[0]
@@ -88,7 +88,7 @@ class TestLastWinsMacroAndDialectFlags:
         assert state["macro:FOO"] == "-UFOO"
 
 
-class TestOrderedPairFlags:
+class TestOrderedStreamPairFlags:
     def test_reordered_include_dirs_are_not_equal(self) -> None:
         """The case the *second* `set()`-based comparison (of the whole
         arg list) would have missed: two include-search directories in
@@ -102,11 +102,11 @@ class TestOrderedPairFlags:
         a = split_compile_args(("-I", "/a", "-I", "/a"))
         b = split_compile_args(("-I", "/a"))
         assert a[2] != b[2]
-        assert a[2] == (("-I", "/a"), ("-I", "/a"))
+        assert a[2] == ("-I=/a", "-I=/a")
 
     def test_distinct_include_flag_kinds_are_kept_separate(self) -> None:
-        state = split_compile_args(("-I", "/a", "-isystem", "/a"))[2]
-        assert state == (("-I", "/a"), ("-isystem", "/a"))
+        stream = split_compile_args(("-I", "/a", "-isystem", "/a"))[2]
+        assert stream == ("-I=/a", "-isystem=/a")
 
     def test_reordered_forced_includes_are_not_equal(self) -> None:
         """The third review round's other named example: `-include a.h`
@@ -116,9 +116,26 @@ class TestOrderedPairFlags:
         b = split_compile_args(("-include", "b.h", "-include", "a.h"))
         assert a[2] != b[2]
 
-    def test_include_and_forced_include_pairs_do_not_collide(self) -> None:
-        state = split_compile_args(("-I", "/a", "-include", "/a"))[2]
-        assert state == (("-I", "/a"), ("-include", "/a"))
+    def test_attached_and_separate_spellings_normalize_identically(self) -> None:
+        """A fourth review round's case: `-I/a` (attached, one argv
+        token) and `-I`, `/a` (separate, two argv tokens) name the
+        identical compiler behavior and must compare equal."""
+        attached = split_compile_args(("-I/a",))
+        separate = split_compile_args(("-I", "/a"))
+        assert attached[2] == separate[2] == ("-I=/a",)
+
+    def test_attached_form_keeps_its_real_relative_order(self) -> None:
+        """The fourth round's actual reported bug: before this fix, an
+        attached-form pair and a separate-form pair landed in two
+        independently-compared buckets, so their relative order to each
+        other was invisible -- these two argv sequences search a
+        genuinely different directory *first* and must not compare
+        equal."""
+        a = split_compile_args(("-I/a", "-I", "/b"))
+        b = split_compile_args(("-I", "/b", "-I/a"))
+        assert a[2] != b[2]
+        assert a[2] == ("-I=/a", "-I=/b")
+        assert b[2] == ("-I=/b", "-I=/a")
 
 
 class TestPresenceOnlyFlags:
@@ -131,23 +148,33 @@ class TestPresenceOnlyFlags:
         assert a[1] == b[1] == frozenset({"-fPIC", "-pthread"})
 
 
-class TestUnknownFlagsDefaultToStrictOrdering:
+class TestUnknownTokensShareTheOrderedStream:
     def test_reordered_unrecognized_flags_are_not_equal(self) -> None:
         """The structural fix behind the third review round: a flag this
         module has no specific rule for is *not* silently folded into the
-        presence-only set -- it defaults to an exact, order-preserving
-        sequence, since most unrecognized compiler flags that carry an
-        operand are order-sensitive and treating them as safe-by-default
-        is exactly the shape of gap two earlier rounds already found."""
+        presence-only set -- it shares the same strict, order-preserving
+        stream as the recognized pair flags (see the fourth round's fix,
+        which unified what used to be two separately-compared buckets)."""
         a = split_compile_args(("-Wsomething", "-Wother"))
         b = split_compile_args(("-Wother", "-Wsomething"))
-        assert a[3] != b[3]
-        assert a[3] == ("-Wsomething", "-Wother")
+        assert a[2] != b[2]
+        assert a[2] == ("-Wsomething", "-Wother")
 
     def test_duplicated_unrecognized_flag_is_not_collapsed(self) -> None:
         a = split_compile_args(("-Wsomething", "-Wsomething"))
         b = split_compile_args(("-Wsomething",))
-        assert a[3] != b[3]
+        assert a[2] != b[2]
+
+    def test_unknown_token_and_pair_flag_interleave_in_real_order(self) -> None:
+        """The fourth round's core fix, stated directly: an unrecognized
+        token and a recognized pair flag share one stream, so their
+        relative order to each other is part of the comparison too, not
+        just the internal order within each category separately."""
+        a = split_compile_args(("-Wsomething", "-I", "/a"))
+        b = split_compile_args(("-I", "/a", "-Wsomething"))
+        assert a[2] != b[2]
+        assert a[2] == ("-Wsomething", "-I=/a")
+        assert b[2] == ("-I=/a", "-Wsomething")
 
 
 class TestSplitIsExhaustiveAndPartitioned:
@@ -163,26 +190,23 @@ class TestSplitIsExhaustiveAndPartitioned:
             "/b",
             "-Wsomething",
         )
-        last_wins, presence, pairs, unknown = split_compile_args(args)
+        last_wins, presence, stream = split_compile_args(args)
         assert set(last_wins.values()) == {"-DFOO=1", "-std=c++17", "--target=x86_64"}
         assert presence == frozenset({"-fPIC"})
-        assert pairs == (("-I", "/a"), ("-include", "/b"))
-        assert unknown == ("-Wsomething",)
+        assert stream == ("-I=/a", "-include=/b", "-Wsomething")
 
     def test_empty_input_is_empty_everywhere(self) -> None:
-        last_wins, presence, pairs, unknown = split_compile_args(())
+        last_wins, presence, stream = split_compile_args(())
         assert last_wins == {}
         assert presence == frozenset()
-        assert pairs == ()
-        assert unknown == ()
+        assert stream == ()
 
     def test_trailing_pair_flag_with_no_operand_is_not_dropped(self) -> None:
         """A malformed/truncated arg list (a search or forced-include flag
         as the very last token, with no operand) must not silently
-        vanish -- it's recorded verbatim in the unknown bucket instead of
+        vanish -- it's recorded verbatim in the ordered stream instead of
         being dropped, so a real truncation still shows up as a
         difference rather than disappearing from both sides identically
         by accident."""
-        last_wins, presence, pairs, unknown = split_compile_args(("-I",))
-        assert pairs == ()
-        assert unknown == ("-I",)
+        _last_wins, _presence, stream = split_compile_args(("-I",))
+        assert stream == ("-I",)
