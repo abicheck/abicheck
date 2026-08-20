@@ -326,6 +326,127 @@ def test_importfrom_reexport_of_ordinary_symbol_shadows_real_submodule(
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
+def test_importfrom_reexport_through_sibling_module_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`engine_pkg/__init__.py` does `from .frontend import cli`, where
+    `frontend.py` (a plain sibling module, not the package root) is the one
+    that actually does `from . import cli` — importing the package still
+    transitively reaches the real CLI submodule, one hop removed from
+    `__init__.py` itself, so this must still be flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg6"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    (engine_pkg / "frontend.py").write_text("from . import cli\n")
+    (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg6 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
+def test_importfrom_reexport_through_sibling_under_a_renamed_local_name_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same transitive chase must follow renaming at each hop:
+    `frontend.py` imports the real submodule under a private local name
+    (`from . import cli as _cli`), and `__init__.py` re-exports *that*
+    name as `cli` (`from .frontend import _cli as cli`). The local names
+    differ at every hop, but the chain still terminates at a literal
+    `from . import cli` naming the real submodule, so this must still be
+    flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg7"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    (engine_pkg / "frontend.py").write_text("from . import cli as _cli\n")
+    (engine_pkg / "__init__.py").write_text("from .frontend import _cli as cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg7 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
+def test_importfrom_sibling_reexporting_a_different_submodule_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`frontend.py` re-exports a *different* real submodule
+    (`othername.py`) under the local name `cli` — not the actual `cli.py`
+    submodule sitting alongside it. Must NOT be flagged: the chain
+    terminates at `from . import othername as cli`, whose source name
+    (`othername`) never matches the original `cli` being chased."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg8"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (engine_pkg / "othername.py").write_text("# an unrelated engine submodule\n")
+    (engine_pkg / "frontend.py").write_text("from . import othername as cli\n")
+    (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg8 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
+def test_importfrom_reexport_chain_beyond_max_hops_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A re-export chain longer than `_MAX_REEXPORT_HOPS` is a deliberate,
+    documented gap — conservatively left unflagged rather than chased
+    forever, per this module's false-negative-over-false-positive default.
+    Pins that the depth guard actually bounds the chase (this test would
+    hang or stack-overflow without it on a cyclic/very-deep chain, and
+    would false-positive without the guard on a chain shaped like this
+    one, which genuinely does terminate at the real submodule six hops
+    out — one more than `_MAX_REEXPORT_HOPS` allows)."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg9"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
+    hops = ["hop1", "hop2", "hop3", "hop4", "hop5", "hop6"]
+    (engine_pkg / f"{hops[0]}.py").write_text("from . import cli\n")
+    for prev, cur in zip(hops, hops[1:]):
+        (engine_pkg / f"{cur}.py").write_text(f"from .{prev} import cli\n")
+    (engine_pkg / "__init__.py").write_text(f"from .{hops[-1]} import cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg9 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
 def test_importfrom_aliasing_a_different_submodule_shadows_real_submodule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

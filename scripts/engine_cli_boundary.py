@@ -243,7 +243,87 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                     # `from . import alias_name [as alias_name]` -- binds the
                     # name to the real submodule object itself, not a shadow.
                     continue
+                if (
+                    stmt.level == 1
+                    and stmt.module
+                    and "." not in stmt.module
+                    and _sibling_reexports_submodule(
+                        base_dir, stmt.module, alias.name, alias_name, 1
+                    )
+                ):
+                    # `from .sibling import x [as alias_name]`, where
+                    # sibling.py itself re-exports the real submodule under
+                    # the name `x` -- transitively still the real submodule,
+                    # not a shadow. See _sibling_reexports_submodule.
+                    continue
                 return True
+    return False
+
+
+_MAX_REEXPORT_HOPS = 5
+
+
+def _sibling_reexports_submodule(
+    base_dir: Path, sibling_stem: str, target: str, original_alias_name: str, depth: int
+) -> bool:
+    """Does ``base_dir/{sibling_stem}.py`` bind its own local name *target*
+    to *base_dir*'s real ``{original_alias_name}`` submodule -- directly
+    (``from . import original_alias_name [as target]``), or transitively
+    through a further single-package re-export (``from .other_sibling
+    import y [as target]``, chasing ``y`` the same way), up to
+    ``_MAX_REEXPORT_HOPS``?
+
+    Closes the case ``_package_shadows_attribute`` alone can't: a package
+    whose ``__init__.py`` does ``from .frontend import cli``, where
+    ``frontend.py`` (a plain sibling module, not the package root) is the
+    one that actually does ``from . import cli`` -- importing the package
+    still reaches the real CLI submodule, just one hop removed from
+    ``__init__.py`` itself. *target* is the name being chased in the
+    *current* module and changes at each hop (whatever the previous
+    import's own source name was); *original_alias_name* stays fixed across
+    the whole chase, since only an import literally spelling ``from .
+    import original_alias_name`` -- at any hop, under any amount of
+    intermediate renaming -- actually resolves to that specific submodule
+    file. A hop that imports a *different* real submodule under the name
+    being chased (``from . import othername as target``) correctly does
+    not count: it shadows ``original_alias_name`` with a different file,
+    the same as ``_package_shadows_attribute``'s own Assign-based exception
+    already distinguishes.
+
+    Deliberately bounded, not full symbol resolution: only chases a
+    same-package, dot-free sibling *module file* (``base_dir/X.py``), never
+    a nested subpackage, an absolute import, or a cross-package hop, and
+    only up to ``_MAX_REEXPORT_HOPS`` deep (also guards against a
+    re-export cycle, since each hop consumes one unit of depth regardless
+    of the module graph's own shape) -- true to this checker's own
+    false-negative-over-false-positive default, a chain this doesn't
+    resolve is conservatively left unflagged rather than chased further."""
+    if depth >= _MAX_REEXPORT_HOPS:
+        return False
+    sibling_path = base_dir / f"{sibling_stem}.py"
+    if not sibling_path.is_file():
+        return False
+    try:
+        tree = ast.parse(_read(sibling_path), filename=str(sibling_path))
+    except SyntaxError:
+        return False
+    for stmt in tree.body:
+        if not isinstance(stmt, ast.ImportFrom) or stmt.level != 1:
+            continue
+        for alias in stmt.names:
+            if (alias.asname or alias.name) != target:
+                continue
+            if (stmt.module or "") == "":
+                if alias.name == original_alias_name:
+                    return True
+                # Imports a *different* real submodule of base_dir under
+                # this local name -- not the one we're chasing.
+                continue
+            if stmt.module and "." not in stmt.module:
+                if _sibling_reexports_submodule(
+                    base_dir, stmt.module, alias.name, original_alias_name, depth + 1
+                ):
+                    return True
     return False
 
 
