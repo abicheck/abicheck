@@ -416,8 +416,19 @@ def dimension_6(
     # first would fail the exact worked example the skill's own docs give.
     # Only drop unscoped calls from the reckoning — gaming *within* scoped
     # calls (citing the milder of two differently-scoped runs) still counts.
+    #
+    # The cited scoped call must itself have *reached a verdict* — not merely
+    # carry the scoping flags. Otherwise a claim citing both a successful
+    # unscoped BREAKING report and a scoped call that failed before producing
+    # one (e.g. an invalid consumer path, exit 64) would have `only_scoped`
+    # drop the real unscoped report while the failed scoped call backs
+    # nothing, letting a COMPATIBLE claim through with no scoped verdict
+    # behind it at all (Codex review, PR #808).
     resolved, _dangling = _cited(calls, claim)
-    claim_is_scoped = any(ev.is_consumer_scoped(c) for c in resolved.values())
+    claim_is_scoped = any(
+        ev.is_consumer_scoped(c) and ev.ran_to_a_verdict(c)
+        for c in resolved.values()
+    )
     reported = ev.strongest_reported_verdict(
         run_dir, calls, only_scoped=claim_is_scoped
     )

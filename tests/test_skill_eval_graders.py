@@ -853,6 +853,41 @@ class TestDimensionSix:
         assert result.status == "fail"
         assert any("own report" in r for r in result.reasons)
 
+    def test_a_failed_scoped_call_does_not_exempt_a_cited_unscoped_report(
+        self, tmp_path
+    ):
+        """A claim citing both a successful unscoped BREAKING report and a
+        scoped call that FAILED before producing a verdict (e.g. an invalid
+        consumer path, exit 64) must not get the only_scoped exemption --
+        the scoped call never backed anything, so the real unscoped report
+        must still count (Codex review, PR #808)."""
+        calls = [
+            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
+            {
+                "seq": 1,
+                "call_id": "c1",
+                "argv": [
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--used-by",
+                    "no-such-consumer",
+                ],
+                "exit_code": 64,
+                "stdout_path": "captured/1.out",
+                "outputs": [],
+            },
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0, 1], confident=True),
+            SCENARIO_COMPATIBLE,
+            calls=calls,
+            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
+        )
+        assert result.status == "fail"
+        assert any("own report" in r for r in result.reasons)
+
     def test_citing_call_ids_that_never_happened_fails(self, tmp_path):
         """The shape the first real pilot produced: a baseline run verified its
         answer with `nm` and a runtime test, reached the right verdict, and

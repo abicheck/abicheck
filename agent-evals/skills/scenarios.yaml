@@ -167,7 +167,10 @@ scenarios:
     status: ready
     coverage_note: "plugin loses a symbol its host requires"
     prompt: >-
-      Will our existing plugins still load into the new host build?
+      We're about to ship a new build of our plugin. Our host requires
+      plugin_register and plugin_teardown to load a plugin at all — does the
+      new build still satisfy that, or will it break existing installs of
+      our host?
     fixture: agent-evals/skills/fixtures/plugin-required-symbol-loss
     platforms: [linux]
     invocation:

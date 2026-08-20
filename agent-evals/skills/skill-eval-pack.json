@@ -302,7 +302,7 @@
       ],
       "architectures": [],
       "category": "B",
-      "digest": "sha256:2f8a4a834772652d8f2014ec5172ba8c037cc0cef08da834a4acf9a459466cc6",
+      "digest": "sha256:98521b3dcfcd42ef1e4754ff9630742ad199d097c20053c14e453c741539ba33",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -317,7 +317,7 @@
       "platforms": [
         "linux"
       ],
-      "prompt": "Will our existing plugins still load into the new host build?",
+      "prompt": "We're about to ship a new build of our plugin. Our host requires plugin_register and plugin_teardown to load a plugin at all \u2014 does the new build still satisfy that, or will it break existing installs of our host?",
       "roots": [
         "agent-evals/skills/fixtures/plugin-required-symbol-loss",
         "agent-evals/skills/scenarios.yaml",
@@ -421,7 +421,7 @@
       "affects": [
         "review-native-library-change"
       ],
-      "digest": "sha256:878f2ca826d4dcdbf01df3da46f4de8712bab15d5d3fd6b05fd6ba71d67c532f",
+      "digest": "sha256:e82d634e1a9980eeeb236dd23f7be5402aaf9bc25d5f80f0d6c5f04e4751a9ad",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
