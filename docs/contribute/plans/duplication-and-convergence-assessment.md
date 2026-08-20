@@ -503,9 +503,9 @@ assignments alongside it):
 ```python
 @dataclass(frozen=True)
 class EnvironmentOverlay:
-    clear_inherited: bool                    # env -i / a bare env with no inherited passthrough
-    unset: frozenset[str]                    # env -u NAME (may repeat)
-    assignments: tuple[tuple[str, str], ...] # NAME=VALUE, in argv order
+    clear_inherited: bool                    # a clear occurred somewhere in the prefix chain
+    unset: frozenset[str]                    # names removed AND NOT later reset — final state
+    assignments: tuple[tuple[str, str], ...] # NAME=VALUE surviving to the driver, in argv order
 ```
 
 A plain `{}` (or a single cleared-vs-not sentinel) can't carry this: it
@@ -523,6 +523,23 @@ specifically cleared, for driver-lookup purposes" — is the `"PATH" in
 unset or clear_inherited` case of this broader model) — the parsed model
 should carry what a real `env` invocation can express, not a simplified
 projection of it.
+
+`unset` and `assignments` are **not** independently-collected sets that a
+consumer merges later — nested launchers can make identical raw field
+*contents* describe opposite final environments depending on order (`env
+FOO=x env -u FOO clang ...` ends with `FOO` absent; `env -u FOO env FOO=x
+clang ...` ends with `FOO=x`; both are two real, distinct, legal GNU `env`
+invocations). The single parse must fold the whole launcher-prefix chain
+*in argv order* — the same left-to-right traversal `_argv.py`'s
+`_traverse_env_and_launcher_prefix()` already performs — into one
+normalized final state before populating this dataclass: `assignments`
+holds only the value each name has *after every later operation in the
+chain*, `unset` holds only a name removed and never subsequently
+reassigned, and a later `-i` clears whatever `assignments`/`unset` state
+the fold had accumulated so far, not merely the ones this dataclass would
+otherwise expose. Once folded, the two fields are safe to read
+independently — the ordering risk lives entirely in how they are
+*produced*, not in what they represent once parsing is done.
 
 Raw compiler-command parsing happens once; replay, ambiguity detection,
 build-option drift, and reporting all consume the structured fields instead
