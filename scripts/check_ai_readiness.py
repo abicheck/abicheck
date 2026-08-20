@@ -2119,6 +2119,19 @@ def check_banned_imports(f: Findings) -> None:
 # docs/contribute/plans/duplication-and-convergence-assessment.md — a
 # front-end reaching any of the three bypasses the one shared
 # resolve/execute path the rest of that plan is converging on.
+#
+# Known, pre-existing limitation (not introduced by the extension to three
+# targets — the original single-target ``checker.compare`` check already had
+# this exact shape): binding detection is file-wide and lexically
+# scope-blind. A local parameter or nested function that happens to *shadow*
+# an imported Tier-1 name (e.g. a function parameter literally named
+# ``resolve_input``) and is then called would be misread as the imported
+# Tier-1 function. No real call site in this codebase does this today (the
+# `test_no_tier_skip` real-repo run stays at 0 findings), and doing so would
+# itself already draw a `ruff` shadowing/redefinition warning — a full
+# lexical-scope-aware rewrite of this AST walk is a disproportionate
+# response to a theoretical, not-observed risk and is left as a documented
+# residual gap rather than attempted reactively here.
 _TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
     (
         "checker",
