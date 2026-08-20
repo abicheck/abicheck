@@ -32,16 +32,69 @@ every split follows the established self-contained convention):
 4. Finding F -- ``_skip_env_prefix`` did not recognize GNU short-option
    ATTACHMENT (``-Cbuild``, DIR attached directly to ``-C`` with no space)
    or CLUSTERING (``-iv``, multiple no-operand short flags grouped).
+
+Round-29-follow-up (Codex review, live Windows CI): every expected joined
+path below is now computed through the SAME host-independent
+:func:`~abicheck.buildsource.source_extractors._argv.join_path_token`
+grammar the production code itself uses (via the ``_join`` helper), instead
+of a hardcoded forward-slash literal -- a hardcoded ``"build/x.cc"`` literal
+only ever matches production's actual output on a POSIX host, since
+``join_path_token`` falls back to *host-native* ``os.path.join``/
+``os.path.normpath`` whenever neither operand is unambiguously one grammar
+or the other (the common case here: a bare relative ``chdir`` value like
+``"build"`` composed with a bare relative operand like ``"x.cc"``, neither
+carrying a separator of its own) -- exactly the shape a real Windows CI
+runner reproduces with a backslash, not a forward slash. Computing the
+expected value through the identical helper the production code calls
+keeps this test file correct on every host, not just the one it happened to
+be authored on, and prevents this same bug class from recurring in a future
+round's tests.
+
+Also fixed here: the two ``os.defpath``-dependent tests (Finding B) no
+longer rely on a real POSIX-only system binary (``cat``) being reachable
+through the platform's *actual* default search path -- Windows'
+:data:`os.defpath` is not a populated search path the way POSIX's is, so a
+real ``cat``/``cc`` resolving there is inherently POSIX-only test data, not
+a portable check of the resolution mechanism itself. Each such test now
+builds its own synthetic fixture executable and monkeypatches
+:data:`os.defpath` onto its containing directory instead.
 """
 
 from __future__ import annotations
 
+import os
+import stat
+import sys
+from pathlib import Path
+
 from abicheck.buildsource.source_extractors._argv import (
     env_path_cleared_for_bare_token,
+    join_path_token,
     pick_compiler_binary,
     resolve_bare_token_with_default_path,
     strip_launchers,
 )
+
+
+def _join(base: str, token: str) -> str:
+    """Compute an expected joined-path literal through the SAME
+    :func:`join_path_token` grammar ``_fold_chdir_into_operands`` (the
+    function every test below exercises) actually calls -- see this
+    module's own docstring for why a hardcoded ``"/"``-joined literal is
+    not host-independent."""
+    return join_path_token(base, token)
+
+
+def _make_executable(path: Path) -> Path:
+    """Create an executable fixture at (or near) *path*, returning the
+    actual path created. See ``test_source_extractors_env.py``'s identical
+    helper for the full Windows-``PATHEXT`` rationale."""
+    if sys.platform == "win32" and not path.suffix:
+        path = path.with_suffix(".exe")
+    path.write_text("", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
 
 # -- Finding A: rebase every supported include-option family ---------------
 
@@ -54,7 +107,12 @@ def test_chdir_folds_into_attached_imsvc() -> None:
     result = strip_launchers(
         ["env", "-C", "build", "clang-cl", "/imsvcinclude", "/c", "x.cc"]
     )
-    assert result == ["clang-cl", "/imsvcbuild/include", "/c", "build/x.cc"]
+    assert result == [
+        "clang-cl",
+        "/imsvc" + _join("build", "include"),
+        "/c",
+        _join("build", "x.cc"),
+    ]
 
 
 def test_chdir_folds_into_attached_external_i() -> None:
@@ -62,7 +120,12 @@ def test_chdir_folds_into_attached_external_i() -> None:
     result = strip_launchers(
         ["env", "-C", "build", "clang-cl", "/external:Iinclude", "/c", "x.cc"]
     )
-    assert result == ["clang-cl", "/external:Ibuild/include", "/c", "build/x.cc"]
+    assert result == [
+        "clang-cl",
+        "/external:I" + _join("build", "include"),
+        "/c",
+        _join("build", "x.cc"),
+    ]
 
 
 def test_chdir_folds_into_attached_cxx_isystem() -> None:
@@ -71,7 +134,12 @@ def test_chdir_folds_into_attached_cxx_isystem() -> None:
     result = strip_launchers(
         ["env", "-C", "build", "clang", "-cxx-isysteminclude", "-c", "x.cc"]
     )
-    assert result == ["clang", "-cxx-isystembuild/include", "-c", "build/x.cc"]
+    assert result == [
+        "clang",
+        "-cxx-isystem" + _join("build", "include"),
+        "-c",
+        _join("build", "x.cc"),
+    ]
 
 
 def test_chdir_folds_into_separate_cxx_isystem() -> None:
@@ -81,7 +149,13 @@ def test_chdir_folds_into_separate_cxx_isystem() -> None:
     result = strip_launchers(
         ["env", "-C", "build", "clang", "-cxx-isystem", "include", "-c", "x.cc"]
     )
-    assert result == ["clang", "-cxx-isystem", "build/include", "-c", "build/x.cc"]
+    assert result == [
+        "clang",
+        "-cxx-isystem",
+        _join("build", "include"),
+        "-c",
+        _join("build", "x.cc"),
+    ]
 
 
 def test_chdir_folds_into_separate_imsvc_and_external_i() -> None:
@@ -90,16 +164,22 @@ def test_chdir_folds_into_separate_imsvc_and_external_i() -> None:
     result = strip_launchers(
         ["env", "-C", "build", "clang-cl", "/imsvc", "include", "/c", "x.cc"]
     )
-    assert result == ["clang-cl", "/imsvc", "build/include", "/c", "build/x.cc"]
+    assert result == [
+        "clang-cl",
+        "/imsvc",
+        _join("build", "include"),
+        "/c",
+        _join("build", "x.cc"),
+    ]
     result2 = strip_launchers(
         ["env", "-C", "build", "clang-cl", "/external:I", "include", "/c", "x.cc"]
     )
     assert result2 == [
         "clang-cl",
         "/external:I",
-        "build/include",
+        _join("build", "include"),
         "/c",
-        "build/x.cc",
+        _join("build", "x.cc"),
     ]
 
 
@@ -110,18 +190,31 @@ def test_chdir_does_not_fold_unrelated_flag_starting_with_slash_i() -> None:
     confirmed here via a flag genuinely outside every recognized family,
     which must pass through completely unresolved."""
     result = strip_launchers(["env", "-C", "build", "clang-cl", "/Zi", "/c", "x.cc"])
-    assert result == ["clang-cl", "/Zi", "/c", "build/x.cc"]
+    assert result == ["clang-cl", "/Zi", "/c", _join("build", "x.cc")]
 
 
 # -- Finding B: resolve PATH-less drivers using the platform default -------
 
 
-def test_resolve_bare_token_with_default_path_finds_real_binary() -> None:
-    """A binary genuinely present on :data:`os.defpath` (``/bin``/
-    ``/usr/bin`` on POSIX) resolves to its real absolute path."""
-    resolved = resolve_bare_token_with_default_path("cat")
+def test_resolve_bare_token_with_default_path_finds_real_binary(
+    tmp_path, monkeypatch
+) -> None:
+    """A binary genuinely present on :data:`os.defpath` resolves to its
+    real absolute path.
+
+    Uses a synthetic fixture executable under a directory the test itself
+    monkeypatches onto :data:`os.defpath`, rather than depending on a real
+    POSIX-only binary (``cat``) being reachable through the platform's
+    *actual* default path -- Windows' own :data:`os.defpath` is not a real,
+    populated search path the way POSIX's is (it names no directory any
+    real compiler driver lives in), so relying on a real system binary
+    there is inherently platform-specific test data, not a portable check
+    of the resolution mechanism itself."""
+    driver = _make_executable(tmp_path / "tool")
+    monkeypatch.setattr(os, "defpath", str(tmp_path))
+    resolved = resolve_bare_token_with_default_path(driver.stem)
     assert resolved is not None
-    assert resolved.endswith(("/cat", "\\cat.exe", "\\cat"))
+    assert os.path.normcase(resolved) == os.path.normcase(str(driver))
 
 
 def test_resolve_bare_token_with_default_path_returns_none_when_absent() -> None:
@@ -132,24 +225,28 @@ def test_resolve_bare_token_with_default_path_returns_none_when_absent() -> None
     )
 
 
-def test_pick_compiler_binary_resolves_default_path_driver_under_env_dash_i() -> None:
-    """``env -i cat ...``: a genuinely PATH-less ``execvp`` still searches
-    the platform's own default path -- ``cat`` (present on ``/bin``/
-    ``/usr/bin`` on any POSIX sandbox) resolves to its real absolute path,
-    NOT the language-based ``g++``/``gcc`` fallback."""
+def test_pick_compiler_binary_resolves_default_path_driver_under_env_dash_i(
+    tmp_path, monkeypatch
+) -> None:
+    """``env -i tool ...``: a genuinely PATH-less ``execvp`` still searches
+    the platform's own default path -- resolves to the real absolute path
+    of a synthetic fixture binary placed on a monkeypatched
+    :data:`os.defpath`, NOT the language-based ``g++``/``gcc`` fallback."""
     from abicheck.buildsource.build_evidence import CompileUnit
 
+    driver = _make_executable(tmp_path / "tool")
+    monkeypatch.setattr(os, "defpath", str(tmp_path))
     cu = CompileUnit(
         id="cu://x.cc",
         source="x.cc",
         language="CXX",
         directory="/work",
         output="x.o",
-        argv=["env", "-i", "cat", "-c", "x.cc"],
+        argv=["env", "-i", driver.stem, "-c", "x.cc"],
     )
     result = pick_compiler_binary(cu, override=None)
     assert result != "g++"
-    assert result.endswith(("/cat", "\\cat.exe", "\\cat"))
+    assert os.path.normcase(result) == os.path.normcase(str(driver))
 
 
 def test_pick_compiler_binary_still_falls_back_when_default_path_unresolvable() -> None:
@@ -170,33 +267,36 @@ def test_pick_compiler_binary_still_falls_back_when_default_path_unresolvable() 
     assert pick_compiler_binary(cu, override=None) == "g++"
 
 
-def test_derived_gcc_path_resolves_default_path_driver_under_env_dash_i() -> None:
+def test_derived_gcc_path_resolves_default_path_driver_under_env_dash_i(
+    tmp_path, monkeypatch
+) -> None:
     """The sibling ``header_compile_context._derived_gcc_path`` fix,
     exercised directly: same default-path resolution, not the ``None``
     "not derivable" fallback.
 
     Uses a bare ``/c`` MSVC-dialect marker (rather than a CL-basename
-    driver, which no real ``/bin``/``/usr/bin`` binary on this sandbox is
-    named) alongside the ordinary, non-CL-named ``cat`` -- ``_is_msvc_
-    command`` detects MSVC dialect via EITHER signal, and
-    ``msvc_driver_token`` finding no CL-basename token falls back to
-    ``strip_launchers``'s own driver detection, reaching the identical
-    PATH-cleared/default-path-resolution code path ``pick_compiler_binary``
-    exercises."""
+    driver, which a synthetic fixture binary is not named) alongside the
+    ordinary, non-CL-named driver token -- ``_is_msvc_command`` detects
+    MSVC dialect via EITHER signal, and ``msvc_driver_token`` finding no
+    CL-basename token falls back to ``strip_launchers``'s own driver
+    detection, reaching the identical PATH-cleared/default-path-resolution
+    code path ``pick_compiler_binary`` exercises."""
     from abicheck.buildsource.build_evidence import CompileUnit
     from abicheck.buildsource.header_compile_context import _derived_gcc_path
 
+    driver = _make_executable(tmp_path / "tool")
+    monkeypatch.setattr(os, "defpath", str(tmp_path))
     cu = CompileUnit(
         id="cu://x.cc",
         source="x.cc",
         language="CXX",
         directory="/work",
         output="x.o",
-        argv=["env", "-i", "cat", "/c", "x.cc"],
+        argv=["env", "-i", driver.stem, "/c", "x.cc"],
     )
     result = _derived_gcc_path(cu)
     assert result is not None
-    assert result.endswith(("/cat", "\\cat.exe", "\\cat"))
+    assert os.path.normcase(result) == os.path.normcase(str(driver))
 
 
 def test_derived_gcc_path_none_when_default_path_unresolvable() -> None:
@@ -222,18 +322,19 @@ def test_derived_gcc_path_none_when_default_path_unresolvable() -> None:
 
 def test_chdir_preserves_response_file_sigil() -> None:
     """``env -C build clang @args.rsp``: the leading ``@`` sigil must be
-    preserved and only the PAYLOAD after it rebased -- ``@build/args.rsp``,
-    not ``build/@args.rsp`` (a token no driver/consumer recognizes as a
-    response file, since the sigil is no longer the first character)."""
+    preserved and only the PAYLOAD after it rebased -- ``@`` + the joined
+    path, not the joined path with the sigil buried inside it (a token no
+    driver/consumer recognizes as a response file, since the sigil is no
+    longer the first character)."""
     result = strip_launchers(["env", "-C", "build", "clang", "@args.rsp"])
-    assert result == ["clang", "@build/args.rsp"]
+    assert result == ["clang", "@" + _join("build", "args.rsp")]
 
 
 def test_chdir_preserves_response_file_sigil_nested_path() -> None:
     """The same rebase applies when the response-file payload itself has a
     path separator."""
     result = strip_launchers(["env", "-C", "build", "clang", "@sub/args.rsp"])
-    assert result == ["clang", "@build/sub/args.rsp"]
+    assert result == ["clang", "@" + _join("build", "sub/args.rsp")]
 
 
 def test_chdir_response_file_negative_control_no_chdir() -> None:
@@ -252,7 +353,7 @@ def test_skip_env_prefix_accepts_attached_short_chdir() -> None:
     confirmed via a real installed ``env`` (``env -Ctmp pwd`` chdirs into
     ``/tmp``). The real driver and effective cwd must both survive."""
     result = strip_launchers(["env", "-Cbuild", "clang", "-c", "x.c"])
-    assert result == ["clang", "-c", "build/x.c"]
+    assert result == ["clang", "-c", _join("build", "x.c")]
 
 
 def test_skip_env_prefix_accepts_clustered_no_operand_short_flags() -> None:
@@ -282,7 +383,7 @@ def test_skip_env_prefix_attached_chdir_negative_control_separate_form_unaffecte
     """Negative control: the pre-existing separate-token ``-C DIR`` form is
     completely unaffected by the new attached-form recognition."""
     result = strip_launchers(["env", "-C", "build", "clang", "-c", "x.c"])
-    assert result == ["clang", "-c", "build/x.c"]
+    assert result == ["clang", "-c", _join("build", "x.c")]
 
 
 def test_skip_env_prefix_attached_chdir_negative_control_long_chdir_unaffected() -> (
@@ -292,7 +393,7 @@ def test_skip_env_prefix_attached_chdir_negative_control_long_chdir_unaffected()
     completely unaffected -- the new ``arg.startswith("-C")`` branch
     explicitly excludes any ``--``-prefixed token."""
     result = strip_launchers(["env", "--chdir=build", "clang", "-c", "x.c"])
-    assert result == ["clang", "-c", "build/x.c"]
+    assert result == ["clang", "-c", _join("build", "x.c")]
 
 
 def test_skip_env_prefix_cluster_negative_control_unrecognized_char() -> None:
@@ -320,4 +421,4 @@ def test_skip_env_prefix_attached_chdir_does_not_misfire_on_unrelated_flag() -> 
     with a deeper relative path, proving the branch resolves the DIR
     payload rather than merely detecting the flag."""
     result = strip_launchers(["env", "-Cbuild/sub", "clang", "-c", "x.c"])
-    assert result == ["clang", "-c", "build/sub/x.c"]
+    assert result == ["clang", "-c", _join("build/sub", "x.c")]

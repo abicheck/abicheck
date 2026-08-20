@@ -1257,3 +1257,58 @@
   exactly the 2000-line hard-cap boundary, WARN not ERROR), the full
   env/gcc_path/clang/adapter_base/header_compile_context test family
   (748 tests) passes, full fast suite run locally.
+
+  **Round-29 follow-up (live Windows CI, Codex review): the new
+  `tests/test_source_extractors_env_round29.py` cases from the paragraph
+  above themselves carried the exact bug class several earlier rounds
+  already fixed in *production* code -- a host-native-separator
+  assumption baked into a hardcoded expected literal.** Every rebased-path
+  assertion hardcoded a forward-slash-joined literal (`"build/x.cc"`), but
+  `_fold_chdir_path_value()` composes its result via `join_path_token()`,
+  which falls back to *host-native* `os.path.join`/`os.path.normpath`
+  whenever neither operand is unambiguously Windows- or POSIX-absolute --
+  exactly the shape every one of these fixtures uses (a bare relative
+  `chdir` value like `"build"` composed with a bare relative operand like
+  `"x.cc"`, neither carrying a separator of its own). On a real Windows
+  runner this correctly produces a backslash-joined path, which a
+  hardcoded POSIX literal can never match -- 20 of the 22 new cases failed
+  on live Windows CI this way (the two using a token that already
+  contains a `/` of its own, forcing `join_path_token`'s POSIX-grammar
+  branch regardless of host, were unaffected). Fixed by adding a `_join()`
+  test helper that computes every expected literal through the identical
+  `join_path_token()` the production code itself calls, instead of a
+  hardcoded separator -- structurally immune to this bug class recurring,
+  since the expected value is derived from the same function under test
+  rather than authored by hand.
+
+  The same live run also failed the two `os.defpath`-driven cases
+  (`test_resolve_bare_token_with_default_path_finds_real_binary`/
+  `test_pick_compiler_binary_resolves_default_path_driver_under_env_dash_i`)
+  for an unrelated, genuine cross-platform gap in the TEST DATA, not in
+  Finding B's production fix itself: both relied on a real POSIX system
+  binary (`cat`) being reachable through the platform's *actual*
+  `os.defpath` -- true on any POSIX sandbox (`/bin/cat`), but Windows'
+  own `os.defpath` is not a populated search path the way POSIX's is (it
+  names no directory a real compiler driver lives in), so `cat` never
+  resolved there and both tests' assumption that it would was simply
+  wrong test data for that host. Fixed by building a synthetic fixture
+  executable under a directory each test itself monkeypatches onto
+  `os.defpath` (mirroring `test_source_extractors_env_round26.py`'s own
+  `_make_executable` helper), which portably validates the SAME
+  resolution mechanism (`shutil.which(token, path=os.defpath)`) on any
+  host without depending on what happens to already exist there. The
+  `_derived_gcc_path` sibling case was fixed the identical way. This
+  closes the third failure the coordinator separately flagged as a
+  "genuinely broken test assertion" (`assert 'g++' != 'g++'`) too --
+  it was not a copy-paste bug, it was the exact same `cat`-unresolvable-
+  on-Windows root cause surfacing as `pick_compiler_binary` correctly
+  falling back to the language default, which a hardcoded `!= "g++"`
+  assertion then failed against.
+
+  Re-verified: `ruff check`/`ruff format --check` clean, `mypy abicheck/`
+  0 errors, and the full env/gcc_path/clang/adapter_base test family (138
+  tests across the six affected files) plus the full local fast suite
+  pass. Every expected-value computation in the fixed file is now
+  derived from the production `join_path_token()` grammar directly, so
+  no further host-specific literal remains to diverge from a real
+  Windows runner's output.
