@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,54 @@ def _step(name: str) -> Any:
         if s.name == name:
             return s
     raise AssertionError(f"no such verify.py step: {name!r}")
+
+
+def test_importing_verify_does_not_reconfigure_stdout_or_stderr() -> None:
+    """Finding 5 (CodeRabbit review, fresh evidence): reconfiguring
+    stdout/stderr for line-buffering must be a `main()`-time action (via
+    `_enable_line_buffered_output`), never a module-import-time side
+    effect -- otherwise a test or another script merely importing
+    `scripts.verify` (exactly what this test file's own module-loading
+    block above does) would have ITS OWN stdout/stderr silently
+    reconfigured as an import side effect, violating this repo's script
+    import-side-effect rule. Run in a fresh subprocess, since the module
+    under test is already cached in-process by the time this test runs."""
+    script = (
+        "import sys\n"
+        "out_calls = []\n"
+        "err_calls = []\n"
+        "orig_out = sys.stdout.reconfigure\n"
+        "orig_err = sys.stderr.reconfigure\n"
+        "def out_spy(*a, **k):\n"
+        "    out_calls.append((a, k))\n"
+        "    return orig_out(*a, **k)\n"
+        "def err_spy(*a, **k):\n"
+        "    err_calls.append((a, k))\n"
+        "    return orig_err(*a, **k)\n"
+        "sys.stdout.reconfigure = out_spy\n"
+        "sys.stderr.reconfigure = err_spy\n"
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    'abicheck_scripts_verify_import_check', 'scripts/verify.py'\n"
+        ")\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "sys.modules[spec.name] = mod\n"
+        "spec.loader.exec_module(mod)\n"
+        "print(len(out_calls))\n"
+        "print(len(err_calls))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    # Round 30 Finding CR3 (CodeRabbit review, fresh evidence): the original
+    # spy only covered stdout, so a stderr-only import-time side effect
+    # would have slipped through undetected despite this test's own name.
+    lines = result.stdout.strip().splitlines()
+    assert lines[-2:] == ["0", "0"]
 
 
 def _pytest_marker_expr(step: Any) -> str:
@@ -472,6 +521,14 @@ def test_a_partial_returncode_becomes_a_skip(monkeypatch: pytest.MonkeyPatch) ->
 
     class _Proc:
         returncode = 2
+        # `run_step` now prints the child's captured stdout/stderr BEFORE
+        # the partial-result early return (Finding 6, CodeRabbit review,
+        # fresh evidence -- see `test_partial_result_still_prints_captured_
+        # output` below for the regression this reordering itself covers),
+        # so a stub `subprocess.run` result needs these two attributes
+        # regardless of which branch the test is targeting.
+        stdout = ""
+        stderr = ""
 
     monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
@@ -488,6 +545,8 @@ def test_each_partial_code_reports_its_own_reason(
 
     class _Proc:
         returncode = 3
+        stdout = ""
+        stderr = ""
 
     monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
@@ -495,6 +554,31 @@ def test_each_partial_code_reports_its_own_reason(
     assert result["status"] == "skipped"
     assert "base ref" in str(result["reason"])
     assert "BUGFIX_CONTRACT_BODY_FILE" not in str(result["reason"])
+
+
+def test_partial_result_still_prints_captured_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Finding 6 (CodeRabbit review, fresh evidence): a step that returns a
+    PARTIAL result must still have its own captured stdout/stderr printed --
+    `run_step` used to capture the child's output at `subprocess.run(...)`
+    but only print it AFTER the `step.partial` early return, so a partial
+    step never got its own diagnostic output printed at all, defeating half
+    the purpose of the round-20 diagnostic-visibility fix for exactly the
+    steps most likely to need it."""
+
+    class _Proc:
+        returncode = 2
+        stdout = "some structural-check stdout\n"
+        stderr = "some structural-check stderr\n"
+
+    monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
+    step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")
+    result = verify.run_step(step)
+    assert result["status"] == "skipped"
+    captured = capsys.readouterr()
+    assert "some structural-check stdout" in captured.out
+    assert "some structural-check stderr" in captured.err
 
 
 def test_an_ordinary_failure_is_still_a_failure(
@@ -505,6 +589,15 @@ def test_an_ordinary_failure_is_still_a_failure(
 
     class _Proc:
         returncode = 1
+        # `run_step` (round 20 Part B / round 21) always reads `.stdout`/
+        # `.stderr` off the child result to re-print it, mirroring the real
+        # `subprocess.run(..., capture_output=True, text=True)` contract —
+        # empty strings, not a missing attribute, when a step produced no
+        # output. A bare `_Proc()` without these two would raise
+        # `AttributeError` here before ever reaching the assertion this test
+        # exists to make (P0.3 follow-up round 2 merge, fresh evidence).
+        stdout = ""
+        stderr = ""
 
     monkeypatch.setattr(verify.subprocess, "run", lambda *a, **k: _Proc())
     step = next(s for s in verify.STEPS if s.name == "bugfix-test-contract")

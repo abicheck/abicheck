@@ -67,6 +67,55 @@ ROOT = Path(__file__).resolve().parent.parent
 _MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
 
 
+# Diagnostic instrumentation (round 20, Part B): a CI-only-reproducible
+# failure mode showed `lint-and-types`' `ruff check`/`mypy` steps reporting
+# "failed" with ZERO diagnostic output in the CI log -- no error lines at
+# all, just an instant nonzero exit. GitHub Actions runners capture step
+# output through a redirected, non-tty pipe rather than a pty; Python's
+# default stdout buffering is fully-buffered (not line-buffered) for a
+# pipe, so an unflushed buffer at process exit can genuinely lose real
+# output. Reconfiguring this script's own stdout to line-buffer, on top of
+# always echoing an already-captured subprocess's stdout/stderr in
+# run_step() below (rather than relying on inherited-fd passthrough alone),
+# closes that whole class of "silently lost diagnostic output" regardless
+# of whether it was this specific mystery's root cause -- never silently
+# losing a failing check's own error text is a durable improvement on its
+# own.
+def _enable_line_buffered_output() -> None:
+    """Reconfigure this process's own stdout/stderr to line-buffer.
+
+    Called from the ``if __name__ == "__main__":`` entry point (and
+    :func:`main`, for a caller that invokes it directly), never at module
+    import time (CodeRabbit review, "Move stream reconfiguration out of
+    module import scope", fresh evidence): reconfiguring
+    ``sys.stdout``/``sys.stderr`` is a process-wide side effect that leaks
+    into whatever imports this module -- a test importing
+    ``scripts.verify`` to exercise its step catalog, or another script
+    importing it as a library, would otherwise have ITS OWN stdout/stderr
+    silently reconfigured as a side effect of the import alone, violating
+    this repo's own script import-side-effect rule. See the comment this
+    function's body carries forward for why line-buffering matters at all.
+    """
+    # A round-20 diagnostic-visibility fix: a real CI incident's failure
+    # mode showed `lint-and-types`' `ruff check`/`mypy` steps reporting
+    # "failed" with ZERO diagnostic output in the CI log -- no error lines
+    # at all, just an instant nonzero exit. GitHub Actions runners capture
+    # step output through a redirected, non-tty pipe rather than a pty;
+    # Python's default stdout buffering is fully-buffered (not
+    # line-buffered) for a pipe, so an unflushed buffer at process exit can
+    # genuinely lose real output. Reconfiguring this script's own stdout to
+    # line-buffer, on top of always echoing an already-captured
+    # subprocess's stdout/stderr in run_step() below (rather than relying
+    # on inherited-fd passthrough alone), closes that whole class of
+    # "silently lost diagnostic output" regardless of whether it was this
+    # specific mystery's root cause -- never silently losing a failing
+    # check's own error text is a durable improvement on its own.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(line_buffering=True)
+
+
 def _isolated_module_command(*mod_args: str) -> tuple[str, ...]:
     return (sys.executable, "-I", str(_MODULE_RUNNER), *mod_args)
 
@@ -576,11 +625,40 @@ def run_step(step: Step) -> dict[str, object]:
                 "duration_s": 0.0,
             }
 
-    print(f"\n=== {step.name} === {' '.join(step.cmd)}")
+    print(f"\n=== {step.name} === {' '.join(step.cmd)}", flush=True)
     start = time.time()
     env = {**os.environ, **step.env}
-    proc = subprocess.run(step.cmd, cwd=ROOT, env=env)
+    # Diagnostic instrumentation (round 20, Part B) -- capture_output=True
+    # instead of the previous bare subprocess.run(...) (which relied on the
+    # child inheriting this process's stdout/stderr fds directly). Explicitly
+    # capturing and then unconditionally re-printing the child's own
+    # stdout/stderr here, regardless of exit status, means a failing step's
+    # diagnostic output can never be silently lost to an intermediate
+    # buffering/redirection layer between the child and whatever ultimately
+    # renders this script's output (e.g. a CI runner's non-tty log pipe) --
+    # see this module's own top-of-file comment for the full reasoning. This
+    # also means a caller with `--json` gets the raw text available even when
+    # the terminal itself scrolled it out of view.
+    proc = subprocess.run(step.cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     duration = time.time() - start
+    # Echo the child's captured stdout/stderr BEFORE the partial-result
+    # early return below (CodeRabbit review, fresh evidence): this used to
+    # run only after the `step.partial` check, so a step that returns a
+    # PARTIAL result (see `_BUGFIX_CONTRACT_PARTIAL`) never got its own
+    # diagnostic output printed at all -- defeating half the point of the
+    # round-20 diagnostic-visibility fix (this function's own top comment)
+    # for exactly the steps most likely to need it (a step whose exit code
+    # is ambiguous enough to be classified PARTIAL is also the step whose
+    # own stdout/stderr is most useful for a human to actually see).
+    if proc.stdout:
+        print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n", flush=True)
+    if proc.stderr:
+        print(
+            proc.stderr,
+            end="" if proc.stderr.endswith("\n") else "\n",
+            file=sys.stderr,
+            flush=True,
+        )
     if step.partial is not None and proc.returncode in step.partial:
         reason = step.partial[proc.returncode]
         print(f"=== {step.name}: PARTIAL ({duration:.1f}s) — {reason} ===")
@@ -592,7 +670,7 @@ def run_step(step: Step) -> dict[str, object]:
             "returncode": proc.returncode,
         }
     status = "passed" if proc.returncode == 0 else "failed"
-    print(f"=== {step.name}: {status} ({duration:.1f}s) ===")
+    print(f"=== {step.name}: {status} ({duration:.1f}s) ===", flush=True)
     return {
         "name": step.name,
         "status": status,
@@ -602,6 +680,7 @@ def run_step(step: Step) -> dict[str, object]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _enable_line_buffered_output()
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

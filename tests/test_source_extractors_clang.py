@@ -687,6 +687,61 @@ def test_replay_extra_flags_preserves_repeated_toggle_flags_in_order() -> None:
     assert extra == ["-fno-sycl", "-fsycl", "-fno-sycl"]
 
 
+def test_replay_extra_flags_decodes_split_operand_abi_flag_survivor() -> None:
+    """Codex review finding ("Decode normalized cc1 flags in every replay
+    path"): ``adapters.base.extract_abi_relevant_flags`` normalizes a
+    genuinely split two-token cc1 flag (``-target-abi aapcs``) into one
+    internal ``-target-abi=aapcs`` survivor token in
+    ``CompileUnit.abi_relevant_flags``. Before this fix,
+    ``replay_extra_flags``/``_carry_abi_relevant_flags`` read that survivor
+    unchanged: the bare form was silently DROPPED entirely by the
+    ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` filter (it starts with
+    ``-target``, the same prefix that filter drops as redundant for the
+    unrelated, already-structured ``target_triple``/``sysroot`` survivors),
+    losing the flag outright rather than merely mis-encoding it.
+
+    **Reconstructed as ``-Xclang``-wrapped, not the bare two-token form**
+    (P2 review, "Forward bare cc1 flags through the replay driver", fresh
+    evidence): this bare internal encoding is what a direct ``clang -cc1
+    -target-abi aapcs`` capture produces, but ``replay_extra_flags`` always
+    drives an ordinary Clang *driver*, never ``-cc1`` directly -- and an
+    ordinary driver rejects bare ``-target-abi aapcs`` outright ("unknown
+    argument '-target-abi'; did you mean '-Xclang -target-abi'"), requiring
+    the ``-Xclang``-wrapped four-token form regardless of the original
+    capture shape."""
+    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+    cu = _cu(abi_relevant_flags=["-target-abi=aapcs"])
+    extra = replay_extra_flags(cu, [], "gnu")
+    assert extra == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
+
+
+def test_replay_extra_flags_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> (
+    None
+):
+    """Companion case: the LEGACY ``-Xclang -target-abi=aapcs`` marker
+    encoding -- what a pre-canonicalization revision of
+    ``extract_abi_relevant_flags`` produced for the real-world
+    ``-Xclang``-wrapped spelling (a normal Clang driver invocation always
+    wraps a cc1-only flag like this -- ``-Xclang -target-abi -Xclang
+    aapcs``, never the bare two-token form). Before the original fix it
+    reached the replay command as ONE malformed argv token (Clang would see
+    a single string containing literal spaces/an ``=`` instead of four real
+    tokens) since it does not start with any
+    ``STRUCTURED_TOOLCHAIN_FLAG_PREFIXES`` entry and so was never filtered,
+    but also never decoded. ``extract_abi_relevant_flags`` no longer
+    produces this marker itself (P2 review, "Canonicalize equivalent cc1
+    survivor spellings" -- both capture forms now encode identically to the
+    bare ``-target-abi=aapcs`` form above); this test only pins
+    backward-compatible decoding of the old marker, in case it survives in
+    an evidence pack persisted by an earlier revision."""
+    from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+    cu = _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"])
+    extra = replay_extra_flags(cu, [], "gnu")
+    assert extra == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
+
+
 def test_build_command_respects_final_disabled_sycl_toggle_despite_earlier_enable() -> (
     None
 ):
@@ -2191,6 +2246,35 @@ def test_read_files_resolved_against_build_directory() -> None:
     assert os.path.normpath("/work/proj/include/foo.h") in tu.read_files
 
 
+def test_read_files_resolved_against_effective_env_chdir_directory() -> None:
+    """Round 30 Finding 3 (Codex review, fresh evidence): for an `env -C
+    build` compile unit, clang's own subprocess actually ran from the
+    EFFECTIVE (chdir-composed) directory -- a RELATIVE dependency file must
+    resolve against THAT directory, not the raw, un-chdir'd
+    `compile_unit.directory` -- or the real file the subprocess actually
+    read is omitted from the cache fingerprint entirely."""
+    import os
+
+    cu = _cu(
+        directory="/work",
+        argv=["env", "-C", "build", "clang", "-c", "src/foo.cpp"],
+    )
+    tu = source_abi_from_clang_ast(_ast(), cu, ["include/foo.h"], "t")
+    assert os.path.normpath("/work/build/include/foo.h") in tu.read_files
+    assert os.path.normpath("/work/include/foo.h") not in tu.read_files
+
+
+def test_read_files_negative_control_no_env_chdir_unaffected() -> None:
+    """Negative control: with no `env -C` prefix at all, the effective
+    directory is the raw `compile_unit.directory` -- the pre-existing,
+    already-correct behavior is unchanged."""
+    import os
+
+    cu = _cu(directory="/work/proj", argv=["clang", "-c", "src/foo.cpp"])
+    tu = source_abi_from_clang_ast(_ast(), cu, ["include/foo.h"], "t")
+    assert os.path.normpath("/work/proj/include/foo.h") in tu.read_files
+
+
 def test_constexpr_compound_expression_change_is_detected() -> None:
     # Codex #339 P2: `1 + 2` and `1 + 3` must not collapse to the same "1".
     old = source_abi_from_clang_ast(_constexpr_ast("2"), _cu(), ["include/foo.h"], "t")
@@ -2640,6 +2724,45 @@ def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no
     return extractor
 
 
+def test_extract_macro_pass_read_files_resolved_against_effective_directory(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Round 30 Finding 3 (Codex review, fresh evidence): the macro pass's
+    own `resolve_read_files()` call must resolve a relative dependency
+    against the EFFECTIVE (`env -C`-composed) directory, mirroring the AST
+    pass's identical fix -- not the raw, un-chdir'd `compile_unit.directory`."""
+    import json
+    import os
+
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __clang_major__ 18\n")
+        # macro pass: relative header, mirroring real clang -E -dD output.
+        return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
+
+    extractor = _patch_run(monkeypatch, handler)
+    import abicheck.buildsource.source_extractors.clang as clang_mod
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    cu = _cu(
+        source="foo.cpp",
+        directory="/work",
+        argv=["env", "-C", "build", "clang", "-c", "foo.cpp"],
+    )
+    tu = extractor.extract(cu, public_header_roots=["include/foo.h"], target_id="t")
+    assert os.path.normpath("/work/build/include/foo.h") in tu.read_files
+    assert os.path.normpath("/work/include/foo.h") not in tu.read_files
+
+
 def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import json
 
@@ -2682,6 +2805,88 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     assert any(e.qualified_name == "FOO_SIZE" for e in tu.macros)
     assert tu.fact_set["compiler_version"] == "18.1.3"
     assert tu.fact_set["compiler_family"] == "clang"
+
+
+def test_extract_runs_ast_and_macro_passes_in_env_chdir_effective_directory(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Round 24, Finding 10 (Codex, fresh evidence): a compile unit whose
+    ``argv`` carries a leading ``env -C build ...`` prefix must have BOTH
+    the AST pass and the macro pass run with ``cwd=<directory>/build``,
+    not bare ``directory`` -- real ``env -C`` chdirs the whole invoked
+    process before it execs the real compiler."""
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
+
+    (tmp_path / "build").mkdir()
+    cwds: list[object] = []
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            cwds.append(kw.get("cwd"))
+            return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __clang_major__ 18\n")
+        cwds.append(kw.get("cwd"))
+        return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
+
+    extractor = _patch_run(monkeypatch, handler)
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    extractor.extract(
+        _cu(
+            source="foo.cpp",
+            directory=str(tmp_path),
+            argv=["env", "-C", "build", "clang++", "-c", "foo.cpp"],
+        ),
+        public_header_roots=["include/foo.h"],
+        target_id="t",
+    )
+    assert cwds == [str(tmp_path / "build"), str(tmp_path / "build")]
+
+
+def test_extract_without_env_chdir_negative_control(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Negative control for Finding 10: a compile unit with NO ``env -C``
+    prefix runs from bare ``directory``, unchanged."""
+    import json
+
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
+
+    _clang_compiler_version.cache_clear()
+    _clang_compiler_family.cache_clear()
+
+    cwds: list[object] = []
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            cwds.append(kw.get("cwd"))
+            return _emit_ast(kw, json.dumps(_ast()))
+        if "-dumpversion" in cmd:
+            return _Result(0, "18.1.3\n")
+        if "-dM" in cmd:
+            return _Result(0, "#define __clang_major__ 18\n")
+        cwds.append(kw.get("cwd"))
+        return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
+
+    extractor = _patch_run(monkeypatch, handler)
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    extractor.extract(
+        _cu(
+            source="foo.cpp",
+            directory=str(tmp_path),
+            argv=["clang++", "-c", "foo.cpp"],
+        ),
+        public_header_roots=["include/foo.h"],
+        target_id="t",
+    )
+    assert cwds == [str(tmp_path), str(tmp_path)]
 
 
 @pytest.mark.parametrize(

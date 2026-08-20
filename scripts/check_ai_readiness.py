@@ -1430,6 +1430,14 @@ def check_mypy_baseline(f: Findings) -> None:
         count = int(m.group(1))
 
     if count > MYPY_ERROR_BASELINE:
+        # Round 20, Part B: this check previously parsed and printed only
+        # the summary COUNT, never the individual error lines -- so a real
+        # CI failure here ("mypy reports 4 errors; baseline is 0") gave a
+        # reader no way to see what those 4 errors actually were without
+        # separately reproducing the run. Always echo the raw mypy output
+        # when it drove a hard failure; this is a durable usability fix
+        # independent of any one investigation.
+        print("mypy-baseline: raw mypy output follows —\n" + text, flush=True)
         f.err(
             "mypy-baseline",
             f"mypy reports {count} errors; baseline is {MYPY_ERROR_BASELINE} (CLAUDE.md). "

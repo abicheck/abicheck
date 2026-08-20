@@ -19,6 +19,7 @@ adapter implements; the free functions are the normalization helpers shared
 across adapters (language detection, compile-unit identity, ABI-flag
 extraction). Keeping these here avoids each adapter re-deriving them.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -26,14 +27,30 @@ from typing import Protocol, runtime_checkable
 
 from ...header_utils import is_msvc_driver_stem
 from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
+from ..source_extractors._argv import (
+    _XCLANG_WRAPPED_ABI_FLAG_MARKER,
+    SPLIT_OPERAND_ABI_FLAGS,
+    expand_env_split_prefixes,
+    is_split_operand_abi_flag_survivor,
+    split_operand_survivor as split_operand_survivor,
+    strip_launchers,
+)
 
 # Source-file extension → normalized language token.
 _LANG_BY_EXT: dict[str, str] = {
     ".c": "C",
     ".i": "C",
-    ".cc": "CXX", ".cpp": "CXX", ".cxx": "CXX", ".c++": "CXX", ".cp": "CXX",
-    ".ii": "CXX", ".hpp": "CXX", ".hh": "CXX", ".hxx": "CXX",
-    ".m": "OBJC", ".mm": "OBJCXX",
+    ".cc": "CXX",
+    ".cpp": "CXX",
+    ".cxx": "CXX",
+    ".c++": "CXX",
+    ".cp": "CXX",
+    ".ii": "CXX",
+    ".hpp": "CXX",
+    ".hh": "CXX",
+    ".hxx": "CXX",
+    ".m": "OBJC",
+    ".mm": "OBJCXX",
     ".cu": "CUDA",
 }
 
@@ -84,26 +101,62 @@ _LANG_BY_EXT: dict[str, str] = {
 #: ``BUILD_EVIDENCE_VERSION`` bump and ``build_diff`` wiring -- a schema slice
 #: of its own, not a follow-on to the L2 rendering fix. See ``AGENTS.md``.
 ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
-    "-std=", "/std:", "-stdlib=",
-    "--target=", "-target", "-mabi=", "/arch:", "-m32", "-m64",
+    "-std=",
+    "/std:",
+    "-stdlib=",
+    "--target=",
+    "-target",
+    "-mabi=",
+    "/arch:",
+    "-m32",
+    "-m64",
     # Microarchitecture / float ABI — can change struct alignment (vector ABI)
     # or the hard/soft-float calling convention (ARM), so a flip is a risk.
-    "-march=", "-mtune=", "-mfloat-abi=", "-mfpmath=",
-    "--sysroot", "-isysroot",
-    "-fvisibility", "-fvisibility-inlines-hidden",
-    "-fpack-struct", "/Zp", "-fshort-enums", "-fno-short-enums", "-fshort-wchar",
-    "-fsigned-char", "-funsigned-char",
-    "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
-    "-flto", "-fno-lto", "-fwhole-program-vtables", "-fno-whole-program-vtables",
-    "-ftls-model", "-fextern-tls-init", "-fno-extern-tls-init",
-    "-fno-threadsafe-statics", "-fthreadsafe-statics",
-    "-freg-struct-return", "-fpcc-struct-return",
+    "-march=",
+    "-mtune=",
+    "-mfloat-abi=",
+    "-mfpmath=",
+    "--sysroot",
+    "-isysroot",
+    "-fvisibility",
+    "-fvisibility-inlines-hidden",
+    "-fpack-struct",
+    "/Zp",
+    "-fshort-enums",
+    "-fno-short-enums",
+    "-fshort-wchar",
+    "-fsigned-char",
+    "-funsigned-char",
+    "-fabi-version",
+    "-fno-rtti",
+    "-frtti",
+    "-fno-exceptions",
+    "-fexceptions",
+    "-flto",
+    "-fno-lto",
+    "-fwhole-program-vtables",
+    "-fno-whole-program-vtables",
+    "-ftls-model",
+    "-fextern-tls-init",
+    "-fno-extern-tls-init",
+    "-fno-threadsafe-statics",
+    "-fthreadsafe-statics",
+    "-freg-struct-return",
+    "-fpcc-struct-return",
     # Sanitizers change object layout/instrumentation and the runtime contract.
-    "-fsanitize=", "-fno-sanitize=",
+    "-fsanitize=",
+    "-fno-sanitize=",
     # Position-independence / TLS access model and frame-pointer presence.
-    "-fPIC", "-fpic", "-fPIE", "-fpie",
-    "-fno-pic", "-fno-pie", "-fno-PIC", "-fno-PIE",
-    "-fomit-frame-pointer", "-fno-omit-frame-pointer",
+    "-fPIC",
+    "-fpic",
+    "-fPIE",
+    "-fpie",
+    "-fno-pic",
+    "-fno-pie",
+    "-fno-PIC",
+    "-fno-PIE",
+    "-fomit-frame-pointer",
+    "-fno-omit-frame-pointer",
     # SYCL language mode (icpx/dpcpp -fsycl/-fsycl-*): enables an entirely
     # different parse (implicit SYCL builtins/attributes, kernel-lambda
     # codegen), so its presence/absence is exactly the kind of parse-affecting
@@ -180,8 +233,115 @@ _LANG_QUALIFIED_MODE_KEYS: frozenset[str] = frozenset(
 #: must be explicitly excluded from extraction or the generic option path would
 #: report a standalone tuning flag as ABI_RELEVANT_BUILD_FLAG_CHANGED (Codex).
 _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
-    "-flto-partition=", "-flto-jobs=", "-flto-compression-level=", "-flto-incremental=",
+    "-flto-partition=",
+    "-flto-jobs=",
+    "-flto-compression-level=",
+    "-flto-incremental=",
 )
+
+#: ABI-relevant flags whose value is a *separate*, following argv token
+#: rather than a combined ``=``/immediate-suffix spelling -- confirmed
+#: against a real ``clang -cc1 --help``: ``-target-abi <value>``,
+#: ``-target-cpu <value>``, ``-target-feature <value>``,
+#: ``-target-linker-version <value>`` are all two-token forms (unlike
+#: ``-target-sdk-version=<value>``, already combined). Each shares the
+#: ``-target`` prefix already matched by ``ABI_RELEVANT_FLAG_PREFIXES``, so
+#: without this the naive prefix match below captured only the flag token
+#: itself and silently discarded its operand -- a real, information-losing
+#: bug (P2 review, ``discussion_r3787772666``): two compile units disagreeing
+#: only on e.g. ``-target-abi aapcs`` vs. ``-target-abi aapcs16`` read as
+#: identical once the operand was dropped, and any caller replaying the
+#: bare, valueless survivor got a syntactically incomplete command.
+#:
+#: Deliberately **not** extended to the bare ``-target``/``--sysroot``/
+#: ``-isysroot`` split forms those same three prefixes also match: unlike
+#: the four flags here, each of those already has its own dedicated
+#: structured ``CompileUnit`` field (``target_triple``/``sysroot``) derived
+#: by a separate, correct parse of the same argv (``build_context.py``), so
+#: their raw split-form survivor carries no additional information -- adding
+#: it here would only introduce a new value-bearing list entry
+#: (``derive_build_options``/``source_graph.py`` iterate this list treating
+#: each entry as one independent flag) with nothing to gain.
+#:
+#: Normalized to one internal ``<flag>=<value>`` token, not two separate
+#: list entries -- ``-target-abi=<value>`` is not real clang syntax (unlike
+#: ``-D<KEY>=<VALUE>``, which genuinely is both split- and combined-form
+#: valid, the reason the ``-D``/``-U`` handling below concatenates the raw
+#: tokens directly), it is a purely-internal, round-trippable encoding.
+#: Every other reader of ``CompileUnit.abi_relevant_flags``
+#: (``derive_build_options``, ``crosscheck_coherence.py``,
+#: ``source_graph.py``, ``call_graph.py``'s safe-replay allowlist, which does
+#: not include any of these four prefixes at all) already treats "one list
+#: entry = one flag" -- keeping that invariant means none of them need any
+#: change to stay correct in the presence of this fix, and a genuinely
+#: differing value still makes two units' entries compare unequal for
+#: ambiguity grouping. Both L2 (``header_compile_context._split_operand_
+#: survivor``) and L4 (``source_extractors._argv._carry_abi_relevant_
+#: flags``) replay this back into the literal argv token(s) a real compiler
+#: invocation needs, via the single shared
+#: :func:`~abicheck.buildsource.source_extractors._argv.split_operand_survivor`.
+#:
+#: **Every one of these four is a cc1-only flag, and a normal Clang** *driver*
+#: **invocation never passes one bare -- each is individually wrapped in its
+#: own ``-Xclang``, not just written after a single leading ``-Xclang``**
+#: (P2 review, ``discussion_r3788073752``, fresh evidence): confirmed with the
+#: installed CLI that ``clang -cc1 --help`` documents ``-target-abi <value>``,
+#: while ``clang -target-abi aapcs`` is rejected outright ("unknown argument
+#: '-target-abi'; did you mean '-Xclang -target-abi'"), and the real,
+#: supported spelling is ``-Xclang -target-abi -Xclang aapcs`` -- each token
+#: individually prefixed. :func:`extract_abi_relevant_flags` recognizes this
+#: ``-Xclang <flag> -Xclang <value>`` wrapping explicitly (checked *before*
+#: the bare two-token branch below, since a bare-form match would otherwise
+#: consume the second ``-Xclang`` token itself as the operand and silently
+#: drop the real value one token later).
+#:
+#: **Both real argv shapes normalize to the SAME internal ``<flag>=<value>``
+#: encoding, with no ``-Xclang`` marker** (P2 review, "Canonicalize
+#: equivalent cc1 survivor spellings", fresh evidence). An earlier revision
+#: encoded the ``-Xclang``-wrapped shape as a visually distinct ``-Xclang
+#: <flag>=<value>`` token so :func:`~abicheck.buildsource.
+#: source_extractors._argv.split_operand_survivor` could tell which of the
+#: two real argv shapes (``["-target-abi", "<value>"]`` vs. ``["-Xclang",
+#: "-target-abi", "-Xclang", "<value>"]``) to reconstruct at replay time --
+#: but :func:`split_operand_survivor` reconstructs the identical
+#: ``-Xclang``-wrapped four-token form from *either* encoding regardless
+#: (every replay target is an ordinary Clang driver, which rejects the flag
+#: bare no matter how it was originally captured), so the distinction was
+#: never actually needed downstream of decode. It was actively harmful for
+#: two consumers that compare/key on this raw string *without* going
+#: through :func:`split_operand_survivor` at all --
+#: ``header_compile_context._EffectiveContextSignature`` (ambiguity
+#: grouping) and :func:`derive_build_options` (build-option drift) -- for
+#: which two semantically-identical units capturing the same value through
+#: different argv shapes compared as different signatures/options. A
+#: genuine value difference (``aapcs`` vs. ``aapcs16``) still yields two
+#: distinct encodings either way, since the value stays part of the token
+#: regardless of capture shape.
+#:
+#: Lives in :mod:`~abicheck.buildsource.source_extractors._argv`, not here,
+#: even though :func:`extract_abi_relevant_flags` below is what *produces*
+#: the encoding (P2 review, "Decode normalized cc1 flags in every replay
+#: path", fresh evidence): the decode was originally L2-header-path-specific
+#: (``header_compile_context._split_operand_survivor``), living in this
+#: module. The identical encoding also flows through L4 source replay
+#: (``source_extractors._argv.replay_extra_flags``/
+#: ``_carry_abi_relevant_flags``), which read the raw ``abi_relevant_flags``
+#: survivors verbatim and could not decode them without importing this
+#: predicate/set from here -- but this module already imports
+#: :func:`~abicheck.buildsource.source_extractors._argv.strip_launchers`
+#: from ``_argv`` at its own top level (:func:`_executable_token_positions`),
+#: so a reverse ``_argv -> adapters.base`` import would be a genuine import
+#: cycle, not a runtime-only circularity a deferred import could paper over
+#: (the ai-readiness ``import-cycle-growth`` gate walks the full AST,
+#: function-local imports included). Keeping the encoding's constants and
+#: decode function in ``_argv`` -- the leaf, tool-independent module both
+#: replay paths already depend on -- keeps the dependency a one-way DAG:
+#: this module imports from ``_argv``, never the reverse.
+#: Back-compat alias: the set used to be named with a leading underscore
+#: when it lived in this module. Kept so any existing reader of the old
+#: private name is unaffected by the relocation.
+_SPLIT_OPERAND_ABI_FLAGS = SPLIT_OPERAND_ABI_FLAGS
+
 
 #: Macro defines whose value is ABI-relevant even though they're plain -D flags.
 _ABI_RELEVANT_DEFINES: tuple[str, ...] = (
@@ -208,8 +368,7 @@ class BuildAdapter(Protocol):
 
     name: str
 
-    def collect(self) -> BuildEvidence:
-        ...
+    def collect(self) -> BuildEvidence: ...
 
 
 def detect_language(source: str) -> str:
@@ -225,10 +384,18 @@ def detect_language(source: str) -> str:
 #: earlier ``-x`` and reverts to extension-based detection. Unknown languages
 #: (assembler, ``cuda``, …) leave the forced language unchanged.
 _X_LANG_TO_NORMALIZED: dict[str, str] = {
-    "c": "C", "c-header": "C", "cpp-output": "C",
-    "objective-c": "OBJC", "objective-c-header": "OBJC", "objc-cpp-output": "OBJC",
-    "c++": "CXX", "c++-header": "CXX", "c++-cpp-output": "CXX",
-    "objective-c++": "OBJCXX", "objective-c++-header": "OBJCXX", "objc++-cpp-output": "OBJCXX",
+    "c": "C",
+    "c-header": "C",
+    "cpp-output": "C",
+    "objective-c": "OBJC",
+    "objective-c-header": "OBJC",
+    "objc-cpp-output": "OBJC",
+    "c++": "CXX",
+    "c++-header": "CXX",
+    "c++-cpp-output": "CXX",
+    "objective-c++": "OBJCXX",
+    "objective-c++-header": "OBJCXX",
+    "objc++-cpp-output": "OBJCXX",
 }
 
 
@@ -275,12 +442,29 @@ def effective_language(argv: list[str], source: str) -> str:
 #: Skipping the operand keeps :func:`source_from_argv` from mistaking a forced or
 #: precompiled header for the real source. Combined MSVC forms like
 #: ``/FIconfig.hpp`` are handled by the ``/``-prefix guard.
-SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset({
-    "-include", "-imacros", "-include-pch", "-Xclang", "-x",
-    "-o", "-MF", "-MT", "-MQ", "-MJ",
-    "-I", "-isystem", "-iquote", "-idirafter", "-D", "-U",
-    "/FI", "/FU",
-})
+SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset(
+    {
+        "-include",
+        "-imacros",
+        "-include-pch",
+        "-Xclang",
+        "-x",
+        "-o",
+        "-MF",
+        "-MT",
+        "-MQ",
+        "-MJ",
+        "-I",
+        "-isystem",
+        "-iquote",
+        "-idirafter",
+        "-D",
+        "-U",
+        "/FI",
+        "/FU",
+    }
+)
+
 
 def _is_bare_input(arg: str, msvc: bool) -> bool:
     """Like :func:`_is_source_token` but without the known-extension requirement.
@@ -297,7 +481,9 @@ def _is_bare_input(arg: str, msvc: bool) -> bool:
     return True
 
 
-def sources_from_argv(argv: list[str], *, accept_forced_language: bool = False) -> list[str]:
+def sources_from_argv(
+    argv: list[str], *, accept_forced_language: bool = False
+) -> list[str]:
     """Return **every** argv token that names a compiled translation unit, in order.
 
     A single compiler invocation may build several TUs (``gcc -c a.c b.c``), so a
@@ -387,22 +573,175 @@ _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
 )
 
 
-def _is_msvc_command(argv: list[str]) -> bool:
-    """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
+def _executable_token_positions(
+    argv: list[str], *, directory: str | None = None
+) -> frozenset[int]:
+    """The argv index/indices that can legitimately name the compiler itself.
 
-    Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
-    CL-mode driver basename anywhere in the leading tokens (the driver may be
-    a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's explicit
-    ``--driver-mode=cl`` spelling.
+    ``{0}``, plus the index the real driver sits at once every leading
+    compiler-launcher token (and any per-launcher ``KEY=VALUE`` config
+    override) has been unwrapped -- e.g. ``{1}`` for ``sccache clang-cl
+    ...``, or a later index for a chained/config-override-bearing launcher
+    invocation. Used by :func:`_msvc_driver_scan` to restrict its CL-style
+    driver-name matching to the command's own leading executable/launcher
+    position(s), never a later operand (P2 review, fresh evidence): for a
+    GNU translation unit whose *source* basename happens to end in ``-cl``
+    (e.g. ``foo-cl.cpp``), ``header_utils.is_msvc_driver_stem`` -- a
+    bare, name-only check -- cannot tell that source token apart from a real
+    CL-style driver on name alone. Scanning every argv token (the pre-fix
+    behavior) let such a source file be mistaken for the compiler, wrongly
+    flipping the whole command to MSVC dialect and recording the source path
+    itself as ``gcc_path``.
 
-    Driver-name recognition is ``header_utils.is_msvc_driver_stem`` — the one
-    vocabulary the L4 replay path uses too, so ``dpcpp-cl`` and a
-    version-suffixed ``clang-cl-20`` are recognized here as well. They were
-    not, and a such a command spelled with GNU ``-c`` rather than ``/c`` then
-    read as GNU dialect on this side while L4 replayed it as CL (Codex review).
+    Reuses :func:`~abicheck.buildsource.source_extractors._argv.
+    strip_launchers` (and its :data:`~abicheck.buildsource.source_extractors.
+    _argv.COMPILER_LAUNCHERS` list) rather than an independent, narrower
+    launcher name/position guess (P2 review, "Reuse the complete launcher
+    parser when locating clang-cl", fresh evidence): an earlier revision
+    hard-coded a 3-name list (``sccache``/``ccache``/``distcc``) and a fixed
+    ``{0, 1}`` position pair, which already immediately drifted from
+    ``source_extractors._argv.COMPILER_LAUNCHERS``'s six recognized
+    launchers (also ``icecc``/``icerun``/``buildcache``) and could not
+    locate the driver at all for a chained launcher or one carrying a
+    ccache-style ``KEY=VALUE`` config-override token -- e.g. a plain
+    ``buildcache clang-cl /std:c++20 /c x.cc`` command left ``/std:c++20``
+    unconsumed by any recognized CL-style driver, since
+    :func:`_msvc_driver_scan` never looked past position 1.
+
+    ``strip_launchers`` also unwraps a leading POSIX ``env`` invocation (bare
+    ``env``, its own flags, and any ``NAME=VALUE`` assignments) ahead of a
+    launcher chain (P2 review, "Unwrap environment prefixes before locating
+    clang-cl", fresh evidence) -- e.g. ``{2}`` for ``env SDKROOT=/sdk
+    clang-cl ...`` -- so this function's returned position(s) already reflect
+    that too, with no separate handling needed here.
+
+    Driver-name recognition itself is ``header_utils.is_msvc_driver_stem`` --
+    the one vocabulary the L4 replay path (``source_extractors._argv.
+    is_msvc_mode``) uses too, so ``dpcpp-cl`` and a version-suffixed
+    ``clang-cl-20`` are recognized identically on both sides instead of
+    drifting apart (Codex review).
+
+    **Callers must pass an already-``env -S``-expanded argv (Codex review,
+    Finding 2, fresh evidence).** ``strip_launchers`` internally expands a
+    leading ``env -S``/``--split-string`` prefix's value into real tokens
+    before computing its own returned length -- so subtracting THIS
+    function's own *un-expanded* input length from that expanded-and-
+    stripped result's length silently computes an index into a token
+    stream that was never actually spelled that way. Confirmed with a
+    minimal repro: for ``["env", "-S", "clang-cl /c x.cc"]`` (length 3),
+    ``strip_launchers`` returns the expanded-and-stripped
+    ``["clang-cl", "/c", "x.cc"]`` (also length 3 -- an unlucky
+    coincidence, not correctness), so the old
+    ``len(argv) - len(strip_launchers(argv))`` computed index 0
+    (``argv[0]``, ``"env"``) instead of the real driver position. See
+    :func:`~abicheck.buildsource.source_extractors._argv.
+    expand_env_split_prefixes` for the shared primitive that makes an
+    already-expanded argv available to :func:`_msvc_driver_scan`, this
+    function's one caller, so both sides of the subtraction below always
+    correspond to the SAME token stream.
     """
-    if "/c" in argv:
-        return True
+    if not argv:
+        return frozenset()
+    driver_index = len(argv) - len(strip_launchers(argv, directory=directory))
+    return frozenset({0, driver_index})
+
+
+def _msvc_driver_scan(
+    argv: list[str], *, directory: str | None = None
+) -> tuple[bool, str | None]:
+    """Shared scan behind :func:`_is_msvc_command` and :func:`msvc_driver_token`.
+
+    *directory* (round 26 Finding 2, Codex review, fresh evidence): the
+    compile unit's own ``directory``, threaded through to
+    :func:`_executable_token_positions`/:func:`~abicheck.buildsource.
+    source_extractors._argv.strip_launchers` so a relative ``env``-supplied
+    ``PATH=`` entry resolves against the compile unit's real base directory
+    (composed with any effective ``-C``/``--chdir``) rather than abicheck's
+    own process CWD. ``None`` (the default) for a caller with no compile-unit
+    context to supply, unchanged from the pre-fix behavior for those callers.
+
+    Returns ``(is_msvc, driver_token)``: *is_msvc* is the same True/False
+    :func:`_is_msvc_command` has always returned; *driver_token* is the
+    literal argv token whose basename matched ``header_utils.
+    is_msvc_driver_stem`` (``cl``/``cl.exe``/``clang-cl``/``clang-cl.exe``/
+    ``dpcpp-cl``/``dpcpp-cl.exe``, any version-suffixed spelling, possibly a
+    full path), or ``None`` when MSVC dialect was detected some other way (a
+    bare ``/c`` marker with no such token anywhere in argv, or an explicit
+    ``--driver-mode=cl`` naming no such basename token) -- both of which leave
+    the caller with no more specific token to prefer over ``argv[0]``.
+
+    Split out (P2 review, ``discussion_r3788073756``, fresh evidence) so a
+    caller needing the actual driver *token* -- not merely whether the
+    command is MSVC-dialect -- doesn't have to assume ``argv[0]`` is it: a
+    compiler-cache/launcher wrapper (``sccache``, ``ccache``, ``distcc``, ...)
+    commonly precedes the real driver, e.g. ``sccache clang-cl /std:c++20
+    ...``, where ``argv[0]`` is the launcher, not the compiler.
+
+    The driver-token match itself is not exact-name-only (P2 review,
+    ``discussion_r3788...`` -- launcher-wrapped-alias follow-up, fresh
+    evidence, unified with the L4 replay path's own vocabulary via
+    ``header_utils.is_msvc_driver_stem`` -- Codex review): a versioned
+    ``clang-cl-20``/``clang-cl-20.exe``, or Intel's ``dpcpp-cl``, also marks
+    the command MSVC-dialect and is captured as the driver token. Without
+    this, ``sccache clang-cl-20 /c ...`` or ``sccache dpcpp-cl /c ...``
+    matched neither the exact-name set nor the broader recognition, so this
+    scan returned no driver token at all -- :func:`~abicheck.buildsource.
+    header_compile_context._derived_gcc_path` then fell back to ``argv[0]``
+    (the launcher, ``sccache``), which
+    ``dumper_clang._resolve_clang_bin``/``resolve_source_frontend_clang_bin``
+    reject as not clang-family, silently falling back to plain ``clang++``
+    even though a real, supported CL-style driver was named right there in
+    argv.
+
+    **The CL-style-name match itself is restricted to the command's own
+    leading executable/launcher position(s), not every argv token (P2
+    review, "Limit CL-driver matching to executable tokens" follow-up,
+    fresh evidence).** ``is_msvc_driver_stem`` is a bare, name-only check --
+    applying it to *every* token, including a translation unit's own source
+    argument, could misidentify a GNU source file whose basename happens to
+    match a recognized CL-style stem as a CL-style driver. That would
+    silently flip the whole command to MSVC dialect and, downstream in
+    :func:`~abicheck.buildsource.header_compile_context._derived_gcc_path`,
+    record the *source path itself* as ``gcc_path`` — corrupting ambiguity
+    grouping (multiple otherwise-identical units spuriously disagree) and
+    losing the recorded compiler for a lone unit. See
+    :func:`_executable_token_positions` for exactly which position(s) are
+    scanned.
+
+    **Scans the ``env -S``-EXPANDED argv, not the raw input (Codex review,
+    Finding 2, fresh evidence).** ``env -S``/``--split-string``'s value is
+    itself a further, unexpanded command line (``env -S 'clang-cl /c
+    x.cc'``) -- scanning the raw, three-token input directly would see the
+    literal ``-S``/joined-string pair, never the real ``clang-cl``/``/c``
+    tokens hiding inside it, the same failure shape :func:`~abicheck.
+    buildsource.source_extractors._argv.pick_compiler_binary` already
+    avoids by working from :func:`~abicheck.buildsource.source_extractors.
+    _argv.strip_launchers`'s own internally-expanded result. Expanding once
+    here, via :func:`~abicheck.buildsource.source_extractors._argv.
+    expand_env_split_prefixes`, and scanning/indexing into that SAME
+    expanded list throughout (the ``/c`` marker check, the executable-
+    position scan, the ``&&``/``;``/``--driver-mode`` walk, and the
+    driver-index computation in :func:`_executable_token_positions`) is
+    what keeps every one of those consistent with each other -- computing
+    even one of them from the original, un-expanded argv would silently
+    reintroduce the length-mismatch bug this fix closes.
+    """
+    argv = expand_env_split_prefixes(argv)
+    is_msvc = "/c" in argv
+    driver_token: str | None = None
+    executable_positions = _executable_token_positions(argv, directory=directory)
+    # The token at the *stripped* driver position is taken from
+    # `strip_launchers`'s own return value, not `argv[driver_index]`
+    # directly (P2 review round 19, "Apply env chdir before resolving
+    # relative compiler paths" / "Resolve drivers using the env-supplied
+    # PATH", fresh evidence): `strip_launchers` now folds an `env -C DIR`/
+    # `env PATH=...` prefix's effect into the driver token it returns (see
+    # its own docstring) -- reading the raw, unfolded `argv[driver_index]`
+    # here instead would silently discard that correction for every caller
+    # of `msvc_driver_token`/`_derived_gcc_path`, the exact regression this
+    # fix exists to prevent.
+    stripped = strip_launchers(argv, directory=directory) if argv else []
+    driver_index = len(argv) - len(stripped)
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -413,16 +752,72 @@ def _is_msvc_command(argv: list[str]) -> bool:
             continue
         if arg == "--driver-mode" and i + 1 < len(argv):
             if argv[i + 1].lower() == "cl":
-                return True
+                is_msvc = True
             i += 2
             continue
         if arg.lower() == "--driver-mode=cl":
-            return True
-        base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if is_msvc_driver_stem(base):
-            return True
+            is_msvc = True
+            i += 1
+            continue
+        if i in executable_positions:
+            base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if is_msvc_driver_stem(base):
+                is_msvc = True
+                if driver_token is None:
+                    driver_token = (
+                        stripped[0] if i == driver_index and stripped else arg
+                    )
         i += 1
-    return False
+    return is_msvc, driver_token
+
+
+def _is_msvc_command(argv: list[str], *, directory: str | None = None) -> bool:
+    """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
+
+    Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
+    ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
+    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's
+    explicit ``--driver-mode=cl`` spelling.
+
+    *directory* has no effect on the returned bool (dialect is decided by
+    driver-name/marker matching alone, never by how a relative ``PATH=``
+    entry resolves) -- accepted, and threaded through to
+    :func:`_msvc_driver_scan`, purely so a caller with a
+    :class:`~abicheck.buildsource.build_evidence.CompileUnit` in scope can
+    pass its ``directory`` once and get both this bool and (via
+    :func:`msvc_driver_token`) a correctly-resolved driver token from the
+    same scan, rather than needing two differently-parameterized calls.
+    """
+    return _msvc_driver_scan(argv, directory=directory)[0]
+
+
+def msvc_driver_token(argv: list[str], *, directory: str | None = None) -> str | None:
+    """The literal argv token identified as the MSVC/clang-cl driver, if any.
+
+    ``None`` when *argv* is not MSVC-dialect at all, or when it is (a bare
+    ``/c``/``--driver-mode=cl`` with no ``cl``/``clang-cl``-basename token
+    present) but no single token can be pointed to as "the driver" more
+    specifically than ``argv[0]`` -- see :func:`_msvc_driver_scan`'s own
+    docstring. A caller wanting "the compiler to invoke, if this is an
+    MSVC-dialect command, falling back to ``argv[0]`` when nothing more
+    specific was found" should check :func:`_is_msvc_command` separately,
+    the same pattern :func:`~abicheck.buildsource.header_compile_context.
+    _derived_gcc_path` uses.
+
+    **Pass *directory* (the compile unit's own ``directory``) whenever the
+    caller has one (round 26 Finding 2, Codex review, fresh evidence).**
+    Without it, an ``env -C DIR PATH=... clang-cl ...``-shaped command's
+    relative ``PATH=`` entry is resolved by :func:`_msvc_driver_scan` (via
+    :func:`~abicheck.buildsource.source_extractors._argv.strip_launchers`)
+    against abicheck's own process CWD instead of the compile unit's real
+    base directory + effective ``-C`` chdir -- the identical wrong-CWD
+    failure :func:`~abicheck.buildsource.source_extractors._argv.
+    pick_compiler_binary` already avoids for its own ``env``-unwrapping by
+    passing ``directory`` through. A driver named only via a relative
+    ``env``-supplied ``PATH=`` entry then resolves to nothing (falls back to
+    the bare, unresolved driver basename) instead of the real absolute path.
+    """
+    return _msvc_driver_scan(argv, directory=directory)[1]
 
 
 def _is_source_token(arg: str, msvc: bool) -> bool:
@@ -450,8 +845,14 @@ def _is_msvc_option_token(arg: str) -> bool:
         return True
     if lower.startswith("/w"):
         suffix = lower[2:]
-        return suffix.isdigit() or suffix in {"all", "x"} or (
-            len(suffix) > 1 and suffix[0] in {"d", "e", "o"} and suffix[1:].isdigit()
+        return (
+            suffix.isdigit()
+            or suffix in {"all", "x"}
+            or (
+                len(suffix) > 1
+                and suffix[0] in {"d", "e", "o"}
+                and suffix[1:].isdigit()
+            )
         )
     if lower.startswith("/o"):
         suffix = lower[2:]
@@ -480,6 +881,48 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
     Handles both the combined ``-DKEY=VALUE`` define form and the split
     ``['-D', 'KEY=VALUE']`` form; split ABI macros are normalized to the
     combined token so downstream option derivation parses them uniformly.
+    A genuinely split-operand flag in :data:`_SPLIT_OPERAND_ABI_FLAGS`
+    (``-target-abi``/``-target-cpu``/``-target-feature``/
+    ``-target-linker-version``) is normalized the same way, into one
+    internal ``<flag>=<value>`` token -- see that set's own docstring for
+    why this differs from the ``-D`` combined-form concatenation just below.
+
+    Each of those four is also individually recognized in its real-world
+    ``-Xclang <flag> -Xclang <value>``-wrapped spelling (P2 review,
+    ``discussion_r3788073752`` -- see :data:`_SPLIT_OPERAND_ABI_FLAGS`'s own
+    docstring for why a normal Clang driver invocation always wraps a
+    cc1-only flag like this rather than passing it bare). **Both capture
+    forms converge on the identical internal ``<flag>=<value>`` encoding, with
+    no ``-Xclang`` marker at all** (P2 review, "Canonicalize equivalent cc1
+    survivor spellings", fresh evidence): an earlier revision encoded the
+    ``-Xclang``-wrapped capture as a visually distinct ``-Xclang
+    <flag>=<value>`` token, reasoning that
+    :func:`~abicheck.buildsource.source_extractors._argv.
+    split_operand_survivor` needed the two shapes told apart at decode time.
+    That reasoning no longer applies: :func:`split_operand_survivor` already
+    reconstructs the identical ``-Xclang``-wrapped four-token replay form
+    from *either* encoding (every replay consumer targets an ordinary Clang
+    driver, which rejects the flag bare regardless of how it was originally
+    captured), so nothing downstream of decode needs the capture forms
+    distinguished at the encoding level. But two consumers compare or key on
+    the *raw* encoded string directly, never going through
+    :func:`split_operand_survivor`:
+    :class:`~abicheck.buildsource.header_compile_context.
+    _EffectiveContextSignature` (ambiguity grouping) and
+    :func:`derive_build_options` (build-option drift). Encoding the two
+    capture forms differently made a unit that captured ``-target-abi
+    aapcs`` via a bare ``-cc1`` invocation and a semantically identical unit
+    that captured the same value via an ordinary driver's
+    ``-Xclang``-wrapped spelling compare as two different signatures / two
+    different build-option values for those two consumers, even though they
+    mean exactly the same thing -- the false-ambiguity / false-drift risk
+    this fix eliminates by making both capture forms encode identically. A
+    genuine difference in *value* (``aapcs`` vs. ``aapcs16``) still produces
+    two distinct encodings either way, since the value remains part of the
+    canonical token regardless of which capture form was seen. The
+    ``-Xclang``-wrapped branch is still checked before the bare two-token
+    branch below, which would otherwise consume the second ``-Xclang``
+    token as the operand and silently drop the real value one token later.
     """
     out: list[str] = []
     i = 0
@@ -489,6 +932,39 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
             # LTO backend-tuning flag (not enabling): not ABI-relevant, though it
             # shares the -flto prefix. Skip so it never reaches option derivation.
             pass
+        elif (
+            arg == "-Xclang"
+            and i + 3 < len(argv)
+            and argv[i + 1] in _SPLIT_OPERAND_ABI_FLAGS
+            and argv[i + 2] == "-Xclang"
+        ):
+            # -Xclang-wrapped split two-token cc1 flag pair (`-Xclang
+            # -target-abi -Xclang aapcs`): this branch matches on the
+            # leading `-Xclang` token, one position before the flag itself,
+            # so the bare `arg in _SPLIT_OPERAND_ABI_FLAGS` branch below
+            # never gets a chance to misfire on `-target-abi` here -- without
+            # this branch, the bare one would fire on the *next* iteration
+            # and treat the second `-Xclang` as the operand, dropping the
+            # real value one token later (the bug this branch exists to
+            # fix). Encoded WITHOUT the `-Xclang ` marker -- the same
+            # canonical `<flag>=<value>` token the bare two-token branch
+            # below produces -- so the two equivalent capture forms compare
+            # equal for `_EffectiveContextSignature`/`derive_build_options`,
+            # which read this raw string directly rather than through
+            # `split_operand_survivor` (see this function's own docstring).
+            out.append(f"{argv[i + 1]}={argv[i + 3]}")
+            i += 4
+            continue
+        elif arg in _SPLIT_OPERAND_ABI_FLAGS and i + 1 < len(argv):
+            # Split two-token form (`-target-abi <value>`): must be checked
+            # *before* the generic ABI_RELEVANT_FLAG_PREFIXES prefix match
+            # below, since every one of these flags shares the "-target"
+            # prefix that match already recognizes -- reaching that branch
+            # first would append the bare flag alone and silently drop the
+            # operand (the bug this set exists to fix).
+            out.append(f"{arg}={argv[i + 1]}")
+            i += 2
+            continue
         elif arg.startswith(ABI_RELEVANT_FLAG_PREFIXES):
             out.append(arg)
         elif arg in ("-D", "/D") and i + 1 < len(argv):
@@ -537,7 +1013,34 @@ def _structured_unit_options(cu: CompileUnit) -> list[tuple[str, str, str]]:
 
 
 def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
-    """Classify *flag* as a last-one-wins runtime-mode option: (key, value), or None."""
+    """Classify *flag* as a last-one-wins runtime-mode option: (key, value), or None.
+
+    **Strips a legacy ``-Xclang ``-marked split-operand-ABI-flag survivor
+    BEFORE classification (Codex review round 29, "Normalize legacy
+    target features before mode classification", fresh evidence).** A
+    persisted pack from before the last-wins ``-target-feature=``
+    normalization (this function's own case below) may still carry the
+    pre-canonicalization ``-Xclang -target-feature=+sse2`` marked
+    spelling. Without this strip, ``flag.startswith("-target-feature=")``
+    never matches (the marker is a different leading substring), so this
+    function returns ``None`` for it, and the caller
+    (``derive_build_options``) falls through to
+    ``_add_generic_flag_option`` instead -- which DOES already strip the
+    identical marker for its own dispatch (see its own docstring), so a
+    legacy-marked survivor and a freshly-produced one land in two
+    DIFFERENT ``BuildOption`` shapes for the same effective flag (old:
+    key ``"-target-feature"``/value ``"-target-feature=+sse2"``; new: key
+    ``"target_feature:sse2"``/value ``"+sse2"``) -- a spurious
+    remove+add in ``build_diff`` comparing a legacy-collected pack against
+    a freshly-collected one, despite both recording the identical
+    effective compiler state. Mirrors
+    ``_add_generic_flag_option``'s own established
+    ``is_split_operand_abi_flag_survivor``-gated strip exactly, so both
+    functions agree on which flags are legacy-marked and how the marker
+    is removed -- not a second, independently-drifting implementation.
+    """
+    if is_split_operand_abi_flag_survivor(flag):
+        flag = flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
     if flag in _RUNTIME_MODE_FLAGS:
         base_key, value = _RUNTIME_MODE_FLAGS[flag]
         # exceptions/rtti/threadsafe-statics have language-dependent
@@ -561,7 +1064,7 @@ def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
         # separately from the GNU flag and diffed only when both sides are
         # explicit (build_diff), avoiding a false flip when a VS project
         # merely records its platform default against an omitted side.
-        return "struct_packing_msvc", flag[len("/Zp"):] or "1"
+        return "struct_packing_msvc", flag[len("/Zp") :] or "1"
     if flag.startswith("-fpack-struct"):
         # GNU/Clang struct-packing width (-fpack-struct[=N]). The default
         # is known (disabled → natural packing), so a one-sided add/remove
@@ -591,6 +1094,35 @@ def _mode_flag_option(flag: str, cu: CompileUnit) -> tuple[str, str] | None:
         # ARM. Its default is target-dependent, so build_diff requires
         # both sides explicit before reporting a flip.
         return "float_abi", flag.split("=", 1)[1]
+    if flag.startswith("-target-feature="):
+        # -target-feature +NAME / -target-feature -NAME (round 27 Finding
+        # 3, Codex review, fresh evidence): Clang applies repeated
+        # -target-feature occurrences SEQUENTIALLY, each one enabling or
+        # disabling ONE named feature -- confirmed empirically against a
+        # real clang -cc1 (`-target-feature +sse2 -target-feature -sse2`
+        # leaves `__SSE2__` undefined; the identical pair followed by a
+        # third `-target-feature +sse2` leaves it defined). Before this,
+        # `extract_abi_relevant_flags` canonicalized each occurrence into
+        # its own `-target-feature=<sign><name>` survivor token, and the
+        # generic option path (`_add_generic_flag_option`) recorded each
+        # DISTINCT (key, value) pair independently via `_add_build_option`
+        # -- so `[+sse2, -sse2]` (net: disabled) and `[+sse2, -sse2,
+        # +sse2]` (net: enabled) both reduced to the SAME two-entry SET
+        # (`{"-target-feature=+sse2", "-target-feature=-sse2"}`), silently
+        # losing which one was actually in effect and risking a missed
+        # real ABI-relevant feature-state difference between two compile
+        # units. Keyed per FEATURE NAME (not per whole flag, and not
+        # merely "-target-feature") so this composes correctly with the
+        # existing `mode_values` last-one-wins collapsing this function's
+        # caller (`derive_build_options`) already runs every flag through:
+        # two DIFFERENT features (`+sse2`, `+avx2`) are independent and
+        # must BOTH survive as their own options -- only a later
+        # occurrence of the SAME name overrides an earlier one for that
+        # name, mirroring the real compiler's own per-feature-name
+        # sequential-apply semantics exactly.
+        value = flag[len("-target-feature=") :]
+        name = value[1:] if value[:1] in ("+", "-") else value
+        return f"target_feature:{name}", value
     return None
 
 
@@ -601,28 +1133,58 @@ def _add_generic_flag_option(
     seen: set[tuple[str, str]],
 ) -> None:
     """Record a non-mode ABI-relevant flag (define/std/generic) as a BuildOption."""
-    if flag.startswith(("-D", "/D")):
-        key, _, value = flag[2:].partition("=")
+    # A legacy evidence pack may still carry the pre-canonicalization
+    # ``-Xclang ``-marker survivor spelling for a split-operand cc1 flag
+    # (round 20, CodeRabbit finding 1: ``-Xclang -target-abi=aapcs`` instead
+    # of the canonical, unmarked ``-target-abi=aapcs`` --
+    # ``SPLIT_OPERAND_ABI_FLAGS``'s own docstring, "Canonicalize equivalent
+    # cc1 survivor spellings"). Strip the marker before deriving the key/value
+    # below so the marked and unmarked spellings of the identical flag
+    # produce the SAME ``BuildOption`` -- otherwise ``build_diff`` reads one
+    # side's marked survivor and the other side's canonical survivor as a
+    # false removal + addition. The original token is preserved verbatim in
+    # ``raw`` regardless.
+    key_flag = (
+        flag.removeprefix(_XCLANG_WRAPPED_ABI_FLAG_MARKER)
+        if is_split_operand_abi_flag_survivor(flag)
+        else flag
+    )
+    if key_flag.startswith(("-D", "/D")):
+        key, _, value = key_flag[2:].partition("=")
         _add_build_option(out, seen, f"define:{key}", value, raw=flag)
-    elif flag.startswith(_STD_FLAG_PREFIXES):
+    elif key_flag.startswith(_STD_FLAG_PREFIXES):
         # Language standard. GCC ``-std=`` is already captured via
         # cu.standard above; MSVC ``/std:`` is not parsed into
         # cu.standard, so normalize it into the same std:<lang> option
         # here (only when the structured field didn't already set it).
         if not cu.standard:
-            sep = "=" if "=" in flag else ":"
-            std_val = flag.split(sep, 1)[1] if sep in flag else flag
+            sep = "=" if "=" in key_flag else ":"
+            std_val = key_flag.split(sep, 1)[1] if sep in key_flag else key_flag
             _add_build_option(
-                out, seen, f"std:{cu.language}" if cu.language else "std", std_val, raw=flag
+                out,
+                seen,
+                f"std:{cu.language}" if cu.language else "std",
+                std_val,
+                raw=flag,
             )
-    elif flag.startswith(_TOOLCHAIN_PATH_FLAG_PREFIXES):
+    elif key_flag.startswith(
+        _TOOLCHAIN_PATH_FLAG_PREFIXES
+    ) and not is_split_operand_abi_flag_survivor(key_flag):
         # sysroot/target are already emitted from the normalized
         # structured fields above. Re-adding the raw flag would
         # double-count and make split (``--sysroot /sdk``) vs combined
         # (``--sysroot=/sdk``) spelling look like a change.
+        #
+        # A -target-abi/-target-cpu/-target-feature/-target-linker-version
+        # survivor (P2 review, ``discussion_r3788...`` follow-up) shares the
+        # bare "-target" prefix this filter matches but is NOT represented
+        # by any structured field -- see
+        # ``source_extractors._argv.is_split_operand_abi_flag_survivor``'s
+        # own docstring -- so it must fall through to the generic option
+        # path below instead of being dropped here.
         return
     else:
-        _add_build_option(out, seen, flag.split("=", 1)[0], flag, raw=flag)
+        _add_build_option(out, seen, key_flag.split("=", 1)[0], key_flag, raw=flag)
 
 
 def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
@@ -665,5 +1227,8 @@ _STD_FLAG_PREFIXES: tuple[str, ...] = ("-std=", "/std:")
 #: options, so the raw flag must not also become an option (split vs combined
 #: spelling would otherwise read as a change).
 _TOOLCHAIN_PATH_FLAG_PREFIXES: tuple[str, ...] = (
-    "--sysroot", "-isysroot", "--target", "-target",
+    "--sysroot",
+    "-isysroot",
+    "--target",
+    "-target",
 )

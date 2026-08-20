@@ -79,7 +79,11 @@ from .._compiler_options import explicit_language_standard, split_gcc_options
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import forced_include_operands, iter_directory_headers
-from .adapters.base import _is_msvc_command
+from .adapters.base import (
+    _is_msvc_command,
+    msvc_driver_token,
+    split_operand_survivor,
+)
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
 
 if TYPE_CHECKING:
@@ -260,6 +264,25 @@ class _ExplicitPin:
     standard: bool = False
     target_triple: bool = False
     sysroot: bool = False
+    #: True when the caller's *explicit* context pins the compiler-selector
+    #: dimension via EITHER ``gcc_path`` OR ``gcc_prefix`` (P2 review,
+    #: ``discussion_r3788...`` follow-up, fresh evidence) -- the field name
+    #: is kept as ``gcc_path`` (matching ``_EffectiveContextSignature.
+    #: gcc_path``, the dimension it masks) even though it now also answers
+    #: for ``gcc_prefix``. ``service_input_resolution._merge_l3_compile_
+    #: context`` already treats ``gcc_path``/``gcc_prefix`` as one mutually
+    #: exclusive compiler selector (its own "one logical compiler-selector,
+    #: not two independent ones" comment) -- when a caller supplies only
+    #: ``gcc_prefix`` and matched units name different clang-cl drivers, that
+    #: merge step correctly discards every derived path in favor of the
+    #: explicit prefix, so the ambiguity-signature masking above must treat
+    #: the dimension as already resolved too. Checking only ``gcc_path is
+    #: not None`` left a caller who pinned solely ``gcc_prefix`` with this
+    #: still ``False``, so ``_EffectiveContextSignature.of`` compared the
+    #: matched units' real, differing ``gcc_path`` values and raised
+    #: ``HeaderCompileContextAmbiguousError`` before the merge step ever got
+    #: a chance to apply the caller's already-resolved selection.
+    gcc_path: bool = False
     defines: frozenset[str] = field(default_factory=frozenset)
     undefines: frozenset[str] = field(default_factory=frozenset)
 
@@ -280,15 +303,15 @@ class _ExplicitPin:
                 target_triple = True
             elif tok in ("--sysroot", "-isysroot") or tok.startswith("--sysroot="):
                 sysroot = True
-            elif tok == "-D" and i + 1 < n:
+            elif tok in ("-D", "/D") and i + 1 < n:
                 defines.add(tokens[i + 1].split("=", 1)[0])
                 i += 1
-            elif tok.startswith("-D") and len(tok) > 2:
+            elif tok.startswith(("-D", "/D")) and len(tok) > 2:
                 defines.add(tok[2:].split("=", 1)[0])
-            elif tok == "-U" and i + 1 < n:
+            elif tok in ("-U", "/U") and i + 1 < n:
                 undefines.add(tokens[i + 1])
                 i += 1
-            elif tok.startswith("-U") and len(tok) > 2:
+            elif tok.startswith(("-U", "/U")) and len(tok) > 2:
                 undefines.add(tok[2:])
             i += 1
         return cls(
@@ -298,6 +321,7 @@ class _ExplicitPin:
             is not None,
             target_triple=target_triple,
             sysroot=sysroot,
+            gcc_path=explicit.gcc_path is not None or explicit.gcc_prefix is not None,
             defines=frozenset(defines),
             undefines=frozenset(undefines),
         )
@@ -542,13 +566,29 @@ class _EffectiveContextSignature:
     unpinned dimension still does.
 
     ``abi_relevant_flags`` here is *also* not ``cu.abi_relevant_flags``
-    verbatim, independent of ``pin``: see ``_STRUCTURED_FIELD_FLAG_PREFIXES``
-    and :func:`_mask_pinned_abi_flags` — a raw flag already fully represented
-    by ``target_triple``/``sysroot``/``standard`` is excluded unconditionally,
+    verbatim: see ``_STRUCTURED_FIELD_FLAG_PREFIXES`` and
+    :func:`_mask_pinned_abi_flags` — a raw flag already fully represented by
+    ``target_triple``/``sysroot``/``standard`` is excluded unconditionally,
     so two compile units that agree on the structured value but spell the
     flag that produced it differently (``--target=X`` vs. ``-target X``)
     compare equal here instead of falsely disagreeing, whether or not the
-    caller pinned anything.
+    caller pinned anything. A raw ``-D<macro>``/``/D<macro>`` survivor whose
+    macro *is* pinned (``pin.defines``) is excluded too (Finding 1,
+    ``discussion_r3787772663``) — genuinely conditional on ``pin``, unlike
+    the structured-field exclusion above.
+
+    This tuple compares ``cu.abi_relevant_flags`` entries verbatim as
+    strings, never through :func:`~abicheck.buildsource.source_extractors.
+    _argv.split_operand_survivor` — which is exactly why
+    ``adapters.base.extract_abi_relevant_flags`` must itself encode two
+    argv shapes that mean the same thing identically (P2 review,
+    "Canonicalize equivalent cc1 survivor spellings", fresh evidence): a
+    ``-target-abi``/``-target-cpu``/``-target-feature``/
+    ``-target-linker-version`` survivor captured bare (direct ``-cc1``) vs.
+    ``-Xclang``-wrapped (an ordinary driver invocation) used to encode as
+    two visually different strings for the same value, which made this
+    signature spuriously disagree between two otherwise-identical compile
+    units — see that function's own docstring for the full history.
 
     ``forced_includes`` (plan PR 3B / PR D) compares exactly the tokens
     :func:`_forced_include_flags` would *render*, not the raw argv spellings —
@@ -570,6 +610,7 @@ class _EffectiveContextSignature:
     include_paths: tuple[str, ...]
     system_include_paths: tuple[str, ...]
     abi_relevant_flags: tuple[str, ...]
+    gcc_path: str
     forced_includes: tuple[str, ...] = ()
 
     @classmethod
@@ -596,6 +637,7 @@ class _EffectiveContextSignature:
                     msvc=_is_msvc_command(cu.argv),
                 )
             ),
+            gcc_path="" if pin.gcc_path else (_derived_gcc_path(cu) or ""),
             forced_includes=tuple(_forced_include_flags(cu)),
         )
 
@@ -623,11 +665,21 @@ def _mask_pinned_abi_flags(
     survivors excluded, or it would reopen the exact ambiguity the
     structured-field pin-masking in ``.of()`` was meant to close, is one
     instance of the general rule this function already applies regardless
-    of ``pin``). *pin* is accepted for a symmetrical call signature with the
-    structured-field masking above and is reserved for a future dimension
-    (e.g. a pinned macro spelled only as a raw flag) that genuinely needs
-    per-pin conditioning rather than the unconditional rule; it plays no
-    role in today's target/sysroot/standard exclusion.
+    of ``pin``).
+
+    *pin* additionally gates one genuinely conditional exclusion (P2 review,
+    ``discussion_r3787772663``): a raw ``-D<macro>[=value]``/``/D<macro>``
+    survivor whose macro name the caller already pinned via *pin.defines*
+    (Finding 1). Unlike the structured target/sysroot/standard fields above,
+    a pinned *macro* has no dedicated structured field of its own to compare
+    by instead -- ``.of()`` already drops the pinned key out of ``cu.defines``
+    itself (the dict comprehension filters ``k not in pin.defines``), but
+    this function used to leave the *raw* survivor untouched, so two units
+    disagreeing only on a macro the caller explicitly pinned (e.g.
+    ``-D_GLIBCXX_USE_CXX11_ABI=0`` vs. ``=1``, both pinned to ``=1`` via an
+    explicit ``--gcc-options``) still raised
+    ``HeaderCompileContextAmbiguousError`` despite the documented override.
+    See :func:`_pinned_define_macro`.
 
     ``cu_standard`` (``cu.standard`` itself, not merely its truthiness, for
     the compile unit *flags* came from) is passed straight through to
@@ -653,7 +705,25 @@ def _mask_pinned_abi_flags(
         f
         for f in flags
         if not _is_structured_field_flag(f, cu_standard=cu_standard, msvc=msvc)
+        and _pinned_define_macro(f) not in pin.defines
     ]
+
+
+def _pinned_define_macro(flag: str) -> str | None:
+    """The macro name *flag* defines, if it is a ``-D``/``/D`` token.
+
+    ``None`` for every other flag shape -- including a bare ``-D``/``/D``
+    with no macro name (``len(flag) <= 2``), which is not a real token
+    :func:`~abicheck.buildsource.adapters.base.extract_abi_relevant_flags`
+    ever emits on its own. Mirrors the identical ``-D``/``/D`` recognition
+    :meth:`_ExplicitPin.of` already uses when scanning *explicit*'s own
+    tokens for a pinned macro name, so a flag this function names is
+    recognized as "the same macro" the caller pinned regardless of which of
+    the two spellings (or which value) it carries.
+    """
+    if flag.startswith(("-D", "/D")) and len(flag) > 2:
+        return flag[2:].split("=", 1)[0]
+    return None
 
 
 #: ``CompileUnit.standard``'s two language families, as returned by
@@ -1048,8 +1118,42 @@ def _context_flags(
     paths, other ABI-relevant flags) is untouched by *forced_language* --
     only the one field whose family can actually conflict with a forced
     language is ever omitted.
+
+    **Preserve an explicit ``--driver-mode=cl`` (P2 review, "Preserve
+    explicit CL driver mode during replay", fresh evidence).** A compile
+    unit can select MSVC/CL dialect via ``--driver-mode=cl`` on a
+    *generically-named* driver (``clang --driver-mode=cl /std:c++20 /c
+    t.cpp``) rather than via a CL-style binary name
+    (``clang-cl``/``dpcpp-cl``) -- :func:`_derived_gcc_path` then has no
+    ``clang-cl``-shaped token to record (:func:`~abicheck.buildsource.
+    adapters.base.msvc_driver_token` falls back to the bare ``argv[0]``,
+    ``"clang"``), and neither header command builder
+    (``dumper_ast_config._build_castxml_command``/
+    ``_build_clang_header_command``) infers CL mode from a plain ``clang``
+    binary name the way it does from ``clang-cl``'s own self-selecting
+    basename. Without ``--driver-mode=cl`` carried into the rendered
+    tokens, the reconstructed command invokes GNU-mode clang with the
+    retained ``/std:c++20`` survivor -- which GNU-mode clang treats as a
+    missing input file, not a language flag (confirmed empirically: the
+    original CL-mode command succeeds, the reconstructed GNU-mode one
+    fails). Mirrors the identical, already-established precedent in L4
+    replay's own command builder (``source_extractors.clang.
+    _clang_context_args``: ``if msvc: cmd.append("--driver-mode=cl")``) --
+    unconditional whenever the
+    compile unit is MSVC/clang-cl-dialect
+    (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`),
+    regardless of whether the resolved driver token's own basename already
+    implies CL mode. Harmless when it does (a real ``clang-cl`` invocation
+    already defaults to CL mode from its own basename; explicitly
+    reasserting ``--driver-mode=cl`` on top is a no-op), and load-bearing
+    exactly when it doesn't -- so this is emitted regardless of what
+    :func:`_derived_gcc_path` resolves for *cu*, not conditioned on its
+    result.
     """
     flags: list[str] = []
+    msvc = _is_msvc_command(cu.argv)
+    if msvc:
+        flags.append("--driver-mode=cl")
     if cu.standard and not _standard_conflicts_with_forced_language(
         cu.standard, forced_language
     ):
@@ -1078,13 +1182,10 @@ def _context_flags(
         flags.extend(
             ["-isystem", _resolve_cu_relative_path(inc, cu.directory).as_posix()]
         )
-    flags.extend(
-        f
-        for f in cu.abi_relevant_flags
-        if not _is_structured_field_flag(
-            f, cu_standard=cu.standard, msvc=_is_msvc_command(cu.argv)
-        )
-    )
+    for f in cu.abi_relevant_flags:
+        if _is_structured_field_flag(f, cu_standard=cu.standard, msvc=msvc):
+            continue
+        flags.extend(_split_operand_survivor(f))
     # Last, so a forced header resolves through the include search this
     # function just rendered above it. Order within the group is the build's
     # own: forced includes are cumulative, never last-one-wins, so none of
@@ -1093,6 +1194,17 @@ def _context_flags(
         _forced_include_flags(cu, explicit_forced_includes=explicit_forced_includes)
     )
     return flags
+
+
+#: Re-export: the decode used to live here, L2-header-path-specific. It is
+#: now shared with L4 source replay (``source_extractors._argv.
+#: _carry_abi_relevant_flags``) and lives in ``adapters.base`` -- the module
+#: that *produces* the internal encoding in the first place (P2 review,
+#: "Decode normalized cc1 flags in every replay path", fresh evidence). Kept
+#: as a private alias here rather than updating every call site in this
+#: module (and this module's own test suite, which imports the private name
+#: directly) to the new public location.
+_split_operand_survivor = split_operand_survivor
 
 
 @dataclass(frozen=True)
@@ -1198,12 +1310,41 @@ def resolve_header_compile_context(
     *explicit* is the caller's own, already-supplied L2 context (``evidence.
     compile`` on the service_input_resolution path) — when given, any
     ABI-relevant dimension it already pins (an explicit ``-std=``/
-    ``--target=``/``--sysroot=``/``-isysroot`` or a specific ``-D``/``-U``
-    macro; see :class:`_ExplicitPin`) is excluded from the multi-unit
-    ambiguity comparison below, since the caller's own value wins that
-    dimension regardless of what the matched compile units say (Finding 3).
-    Per-field, not per-request: a genuine disagreement on any *other*,
-    unpinned dimension still fails closed.
+    ``--target=``/``--sysroot=``/``-isysroot`` or a specific ``-D``/``/D``/
+    ``-U``/``/U`` macro; see :class:`_ExplicitPin`) is excluded from the
+    multi-unit ambiguity comparison below, since the caller's own value wins
+    that dimension regardless of what the matched compile units say
+    (Finding 3). Per-field, not per-request: a genuine disagreement on any
+    *other*, unpinned dimension still fails closed.
+
+    ``/D``/``/U`` (P2 review, ``discussion_r3788...`` follow-up, fresh
+    evidence): :class:`_ExplicitPin`'s own macro-pin scan used to recognize
+    only GCC/Clang's ``-D``/``-U`` spelling, even though the raw-flag masking
+    it feeds (:func:`_mask_pinned_abi_flags`, via :func:`_pinned_define_macro`)
+    already recognized MSVC/clang-cl's ``/D``/``/U`` spelling too -- so a
+    clang-cl caller pinning an ABI macro via ``/D_GLIBCXX_USE_CXX11_ABI=1``
+    left ``pin.defines`` empty, and two matched units disagreeing only on
+    that macro's value stayed spuriously ambiguous despite the documented
+    override. ``clang-cl /?`` documents ``/D <macro[=value]>`` as the
+    supported define form, mirrored here the same way :class:`_ExplicitPin`
+    itself already scans ``-D``/``-U`` for the GCC/Clang spelling.
+
+    ``gcc_path`` (P2 review, ``discussion_r3788...`` follow-up, fresh
+    evidence) folds in :func:`_derived_gcc_path`'s own resolved driver
+    selector: the compiler itself supplies ABI-relevant built-in macros,
+    default include paths, and target defaults, so two otherwise-identical
+    grouped units that resolve to *different* clang-cl/MSVC drivers must not
+    silently collapse into one signature and pick the first unit's driver --
+    that would let the compile-database's own iteration order (unrelated to
+    any ABI-relevant fact) change the generated L2 snapshot. Masked to a
+    shared placeholder exactly like ``standard``/``target_triple``/
+    ``sysroot`` above when the caller's own *explicit* context already pins
+    a ``--gcc-path`` OR a ``--gcc-prefix`` (``pin.gcc_path``, which answers
+    for either explicit selector field -- see that field's own docstring):
+    the caller's own value wins that dimension regardless of what the
+    matched units resolve to, so a driver-only disagreement the caller
+    already resolved -- via either spelling -- must not raise
+    ``HeaderCompileContextAmbiguousError``.
 
     Raises :class:`~abicheck.errors.HeaderCompileContextAmbiguousError` when
     two or more of the matched ``CompileUnit``s disagree on an ABI-relevant
@@ -1244,13 +1385,290 @@ def resolve_header_compile_context(
         )
 
     ((_sig, units),) = by_signature.items()
+    sample = units[0]
     flags = _context_flags(
-        units[0],
+        sample,
         forced_language=forced_language,
         explicit_forced_includes=explicit_forced_include_keys(explicit),
     )
-    context = CompileContext(gcc_option_tokens=tuple(flags))
+    context = CompileContext(
+        gcc_option_tokens=tuple(flags),
+        gcc_path=_derived_gcc_path(sample),
+    )
     return HeaderCompileContextResolution(context=context, matched_units=tuple(matched))
+
+
+def _derived_gcc_path(cu: CompileUnit) -> str | None:
+    """The compiler binary to replay *cu*'s derived flags through, if any
+    (P1 review, ``discussion_r3787772668``, Finding 3).
+
+    A resolved :class:`CompileContext` previously carried only option
+    tokens, never which compiler understands them -- for an MSVC/clang-cl
+    compile unit this silently broke the very ``/std:`` survivor
+    ``_context_flags``/``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES`` are
+    already careful to retain (see that set's own docstring): with no
+    ``gcc_path`` selected alongside it, the direct-clang L2 backend defaults
+    to plain ``clang++`` (``dumper_clang._resolve_clang_bin``'s own
+    fallback), and a real ``clang++`` reads ``/std:c++20`` as a missing
+    source file, not a language flag (confirmed empirically) -- turning an
+    otherwise-working header parse into a hard failure for evidence that
+    was, until this point, resolved and applied correctly.
+
+    Returns the driver token this compile unit was itself invoked with --
+    only when *cu* is genuinely MSVC/clang-cl-dialect
+    (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`). ``None``
+    otherwise -- a complete no-op for every non-MSVC unit, unchanged from
+    this module's pre-Finding-3 behavior.
+
+    **Not unconditionally ``cu.argv[0]`` (P2 review,
+    ``discussion_r3788073756``, fresh evidence): a compiler-cache/launcher
+    wrapper commonly precedes the real driver.** For ``sccache clang-cl
+    /std:c++20 ...``, ``_is_msvc_command`` correctly recognizes ``clang-cl``
+    later in the leading tokens, but ``argv[0]`` is ``sccache`` -- not a
+    clang-family binary, so ``dumper_clang._resolve_clang_bin`` rejects it
+    and falls back to plain ``clang++``, which cannot parse the retained
+    ``/std:`` survivor at all (the exact failure this whole function exists
+    to prevent). Uses :func:`~abicheck.buildsource.adapters.base.
+    msvc_driver_token` -- the same scan ``_is_msvc_command`` runs, refactored
+    to also report which token it matched -- to locate the actual
+    ``cl``/``clang-cl``-basename token wherever it sits in argv, falling back
+    to ``cu.argv[0]`` (the pre-fix behavior) only for the narrower case where
+    MSVC-dialect was detected some other way (a bare ``/c`` marker or an
+    explicit ``--driver-mode=cl`` naming no such token) and no more specific
+    token exists to prefer.
+
+    Deliberately unconditional on any caller-supplied ``explicit`` context
+    -- mirrors ``_context_flags`` itself, which always renders *cu*'s own
+    fields regardless of *pin*/*explicit* and leaves "the caller's own
+    explicit value wins" to the merge step. ``resolve_header_compile_
+    context`` returns only the *derived* half of the context (``derive_l2_
+    compile_context``'s own docstring); its one caller,
+    ``service_input_resolution._seeded_includes_and_compile_context`` (via
+    ``buildsource.l2_seed.seed_includes_and_fold_compile_context``), folds
+    it against the caller's own explicit context via
+    ``l2_seed._merge_l3_compile_context``, which now performs the identical
+    "derived leads, explicit wins"
+    arbitration for ``gcc_path``/``gcc_prefix`` that it already performs for
+    ``sysroot``/``gcc_options`` -- so an explicit ``--gcc-path`` a caller
+    already set is never overridden, without this function needing to know
+    about *explicit* at all.
+
+    Deliberately does **not** attempt to validate that ``cu.argv[0]`` is
+    itself a clang-family binary (``clang-cl`` vs. a real, literal
+    ``cl.exe``) -- ``dumper_clang._resolve_clang_bin``/
+    ``resolve_source_frontend_clang_bin`` already gate a ``gcc_path``
+    override on exactly that (``_is_clang_family_binary``), falling back to
+    their own existing default otherwise. Handing them a real ``cl.exe``
+    path here is therefore safe (ignored, same as today) rather than
+    harmful; only a genuinely clang-family unit (``clang-cl``, Intel's
+    ``dpcpp-cl``, ...) is actually honored downstream, which is exactly the
+    case this fix closes. A literal ``cl.exe`` compile unit stays an
+    inherent, pre-existing limitation of the clang-only L2 header backends
+    (neither can shell out to real MSVC to produce a Clang AST) --
+    unrelated to, and not widened by, this fix.
+
+    Also does not force ``frontend``/``--ast-frontend`` to ``"clang"``: this
+    module's contract is "resolve a CompileContext", not "choose which L2
+    backend runs it" -- ``"auto"`` never falls back from castxml on its own
+    (``dumper._resolve_header_backend``), so this value only takes effect
+    once a caller (explicitly, or via ``ABICHECK_AST_FRONTEND``) already
+    selected the clang backend -- exactly the scenario this finding's own
+    repro describes (a caller already on the direct-clang path, whose
+    resolved compiler was the ONLY missing piece). Forcing the frontend too
+    would mean auditing frontend precedence across ``cli.py``/
+    ``service_compare_evidence.py``/``cli_resolve.py``/``api_types.py`` this
+    PR's prior nine rounds never touched, *and* separately fixing
+    ``dumper_ast_config._resolve_compiler_binary``'s own castxml dialect
+    detection (which recognizes literal ``cl``/``cl.exe`` but not
+    ``clang-cl`` as MSVC-dialect, so an ``"auto"`` resolution landing on
+    castxml for this same evidence would still mis-emulate it as a GNU
+    compiler) -- out of scope for this pass; see AGENTS.md's "Known gaps"
+    entry on this finding for the full reasoning and what a complete fix
+    needs.
+    """
+    if not cu.argv or not _is_msvc_command(cu.argv, directory=cu.directory):
+        return None
+    driver = msvc_driver_token(cu.argv, directory=cu.directory)
+    if driver is None:
+        # No CL-style-basename token was found anywhere in the leading
+        # executable/launcher position(s) -- MSVC dialect was detected some
+        # other way (a bare `/c` marker, or `--driver-mode=cl`). The
+        # pre-fix behavior fell back to raw `cu.argv[0]` unconditionally,
+        # which is wrong whenever a compiler-cache/distribution launcher
+        # (or an `env` prefix) precedes a GENERIC (non-CL-named) driver --
+        # e.g. `sccache /opt/llvm/bin/clang --driver-mode=cl /c x.cc`:
+        # `argv[0]` is `sccache`, not the real compiler, so
+        # `dumper_clang._resolve_clang_bin` rejects it as not clang-family
+        # and silently substitutes plain `clang++` (Codex review, Finding
+        # 5, fresh evidence) -- the exact failure class this whole function
+        # exists to prevent. `strip_launchers` unwraps the same
+        # `env`/compiler-launcher prefix `msvc_driver_token` already looks
+        # past for a CL-named driver; reusing it here for the fallback case
+        # too means a launcher-wrapped generic driver is found the same way
+        # a launcher-wrapped CL-named one already is, rather than only the
+        # narrower CL-named case being fixed.
+        from .source_extractors._argv import strip_launchers
+
+        stripped = strip_launchers(cu.argv, directory=cu.directory)
+        driver = stripped[0] if stripped and not stripped[0].startswith("-") else None
+    token = driver if driver is not None else cu.argv[0]
+    # round 27 Finding 1 (Codex review, fresh evidence): a bare driver name
+    # (no path separator) found under a recorded `env -i`/`env -u PATH`
+    # prefix could never have been resolved via a real PATH search by the
+    # actual build -- `execvp` has nothing to search with no PATH at all.
+    # Trusting it here would let a downstream `shutil.which`-style lookup
+    # (`dumper_clang._resolve_clang_bin`, or the eventual subprocess spawn)
+    # resolve it against abicheck's OWN inherited PATH instead, silently
+    # substituting an unrelated compiler that merely shares the recorded
+    # name. See `env_path_cleared_for_bare_token`'s own docstring. `None`
+    # here degrades exactly like "no CL-style token found anywhere and no
+    # generic fallback either" -- this function's own pre-existing
+    # not-derivable outcome. Round 29 follow-up (Codex review, fresh
+    # evidence): a genuinely PATH-less `execvp` still searches the
+    # platform's own default path (`os.defpath`) rather than failing
+    # outright -- `resolve_bare_token_with_default_path` is tried before
+    # giving up, mirroring `pick_compiler_binary`'s identical fix.
+    from .source_extractors._argv import (
+        env_path_cleared_for_bare_token,
+        resolve_bare_token_with_default_path,
+    )
+
+    if env_path_cleared_for_bare_token(cu.argv, token):
+        return resolve_bare_token_with_default_path(token)
+    return _resolve_driver_token(token, cu.directory)
+
+
+def _resolve_driver_token(token: str, directory: str) -> str:
+    """Expand ``~`` and resolve a path-bearing driver *token* against
+    *directory* (P2 review, ``discussion_r3788...`` follow-up, fresh
+    evidence).
+
+    Mirrors :func:`_resolve_cu_relative_path`'s treatment of every other
+    redacted/relative ``CompileUnit`` path field: a compile command naming
+    its compiler with a relative path (``../llvm/bin/clang-cl``) or a
+    home-redacted one (``~/llvm/bin/clang-cl``, ADR-032 D7) is only
+    meaningful relative to the compile unit's own ``directory`` -- not
+    abicheck's own current working directory, which is what a bare
+    ``shutil.which(token)``/subprocess call in
+    ``dumper_clang._resolve_clang_bin`` would otherwise use. Without this,
+    such a token was returned verbatim, so a genuinely executable compiler
+    (from the real build's own working directory) was reported missing.
+
+    A **bare** PATH name (``clang-cl``, no path separator at all) is left
+    unchanged -- resolving it against *directory* would be wrong, since a
+    bare name is looked up on ``PATH``, not relative to any directory.
+
+    **Foreign absolute paths (Codex review, "Recognize foreign absolute
+    driver paths", fresh evidence): a Windows-shaped absolute path parsed
+    on POSIX (or vice versa) is not recognized as absolute by host-native
+    ``Path.is_absolute()``, so it was wrongly treated as relative and
+    joined onto *directory*.** L3 build evidence is not always collected on
+    the same OS it is later analyzed on (a Windows compile database
+    inspected from a Linux CI runner, or the reverse) -- a driver token
+    such as ``C:\\LLVM\\bin\\clang-cl.exe`` contains a path separator, so it
+    is not the bare-name case above, but on a POSIX host
+    ``pathlib.Path(...).is_absolute()`` returns ``False`` for it (POSIX
+    ``Path`` only recognizes a leading ``/`` as absolute), so it was
+    prefixed with the compile unit's own ``directory`` -- corrupting
+    ``gcc_path`` into a nonexistent joined path and, worse, letting two
+    otherwise-identical units whose ``directory`` differs acquire different
+    ``gcc_path`` signatures and spuriously raise
+    ``HeaderCompileContextAmbiguousError``. The symmetric case (a POSIX
+    absolute path such as ``/opt/llvm/bin/clang-cl`` analyzed on a Windows
+    host, where native ``PureWindowsPath.is_absolute()`` requires a drive
+    letter or UNC root and returns ``False`` for it) has the identical
+    failure shape. Both are detected with host-*independent* path grammars
+    -- ``PureWindowsPath(...).is_absolute()`` (drive-letter and UNC forms)
+    checked first, then ``PurePosixPath(...).is_absolute()`` (a leading
+    ``/``) -- ahead of the host-native fallback below, and normalized with
+    the matching grammar's own ``normpath`` (``ntpath``/``posixpath``)
+    rather than the host-native one, which would silently corrupt the
+    other OS's separator convention. Deliberately **not** a blanket
+    ``ntpath.isabs()`` check on every token: ``ntpath.isabs("/opt/llvm/bin/
+    clang-cl")`` is also ``True`` (``ntpath`` accepts a bare ``/`` root as
+    absolute, drive-less), which would take this branch for a genuine POSIX
+    absolute path too and normalize it with backslash-flavored ``ntpath.
+    normpath`` -- corrupting it. Checking the *POSIX* grammar as its own,
+    second, independent branch (not "not Windows-absolute, so must be
+    POSIX-absolute") is what keeps a real POSIX path routed through
+    ``posixpath.normpath`` instead.
+
+    **Normalized before returning (P2 review, "Normalize resolved driver
+    paths before grouping", fresh evidence).** Two matched units in
+    different build subdirectories can spell the *same* executable through
+    a relative path containing ``..`` -- e.g.
+    ``/project/build/a/../../tool/clang-cl`` and
+    ``/project/build/b/../../tool/clang-cl`` both name
+    ``/project/tool/clang-cl`` once ``..`` segments are collapsed, but
+    joining each token onto its own unit ``directory`` alone (the fix this
+    function already applied for a prior finding) leaves the two joined
+    strings textually different -- resolving *only* the base directory does
+    not, by itself, provide a canonical comparison key. Since
+    :meth:`_EffectiveContextSignature.of` compares ``gcc_path`` by plain
+    string equality, the two textually-different-but-equivalent paths
+    grouped into two distinct signatures, raising a spurious
+    ``HeaderCompileContextAmbiguousError`` for units that in fact agree on
+    every ABI-relevant dimension. ``os.path.normpath`` (not ``Path.resolve()``)
+    matches this module's own existing precedent: every other path
+    normalization here (:func:`_resolve_cu_relative_path`,
+    :func:`_context_flags`'s ``-I``/``-isystem``/``--sysroot`` rendering)
+    is a lexical, symlink-blind join -- ``CompileUnit`` path fields are
+    already-redacted/relative labels for *display* and *replay-command*
+    purposes (a home-rooted path redacted to ``~/...``, ADR-032 D7), not
+    guaranteed to exist on abicheck's own filesystem at all (a persisted
+    build pack collected on a different machine), so resolving symlinks
+    against a path that may not even be present locally would raise or
+    silently produce nonsense -- a purely lexical normalization is safe
+    either way and is exactly what this signature comparison needs (collapse
+    equivalent *spellings*, not resolve real symlink targets).
+    **Foreign RELATIVE driver paths (round 27 Finding 2, Codex review,
+    fresh evidence).** The absolute-path fix above closes the cross-OS
+    mismatch for an already-absolute foreign token, but a *relative*
+    foreign-grammar token joined onto ``directory`` still used host-native
+    ``pathlib.Path``/``os.path.normpath``, unchanged. That is wrong the
+    identical way: for a Windows compile-unit ``directory``
+    (``C:\\work\\build``) and a Windows-style relative driver token
+    (``..\\llvm\\bin\\clang-cl.exe``), analyzed on a POSIX host,
+    host-native ``PosixPath`` recognizes neither string's backslashes as
+    separators at all -- both are treated as ONE opaque path component, so
+    joining them produced the corrupted, unnormalized
+    ``C:\\work\\build/..\\llvm\\bin\\clang-cl.exe`` instead of the correct
+    ``C:\\work\\llvm\\bin\\clang-cl.exe``. Delegates to
+    :func:`~abicheck.buildsource.source_extractors._argv.join_path_token`
+    instead -- the SAME helper the ``env -C``/``PATH=`` composition already
+    uses (see that module's own docstring): it chooses the join grammar
+    from *directory* itself when unambiguous (``PureWindowsPath``/
+    ``PurePosixPath`` are host-INDEPENDENT, unlike host-native
+    ``pathlib.Path``), so a Windows ``directory`` always composes with
+    ``ntpath`` and a POSIX one with ``posixpath``, regardless of which
+    host is doing the analysis -- closing this the same general way the
+    absolute case was closed, not with a second, narrower one-off check.
+    """
+    import os as _os
+
+    from .source_extractors._argv import (
+        is_absolute_path_token,
+        join_path_token,
+        normalize_path_token,
+    )
+
+    expanded = _os.path.expanduser(token)
+    if "/" not in expanded and "\\" not in expanded:
+        return expanded
+    if is_absolute_path_token(expanded):
+        # A token already absolute in ITS OWN grammar (Windows drive/UNC,
+        # or POSIX-rooted) must never be joined onto `directory` a second
+        # time, and must be normalized with that same grammar rather than
+        # the host's -- see `is_absolute_path_token`/`normalize_path_token`
+        # docstrings (Codex review, "Recognize foreign absolute driver
+        # paths", fresh evidence).
+        return normalize_path_token(expanded)
+    # A genuinely *relative* token: join it onto `directory` (when present)
+    # using THAT PAIR's own grammar, not the host's -- see this function's
+    # own "Foreign RELATIVE driver paths" note above (round 27 Finding 2).
+    if not directory:
+        return _os.path.normpath(expanded)
+    return join_path_token(_os.path.expanduser(directory), expanded)
 
 
 def _ambiguity_message(
@@ -1262,12 +1680,13 @@ def _ambiguity_message(
         f"Public header(s) [{header_names}] are compiled under "
         f"{len(by_signature)} materially different, ABI-relevant compile "
         "contexts across the available L3 build evidence (differing "
-        "-std=/target/defines/include-search-order/sysroot/forced-includes/"
-        "ABI-relevant flags); abicheck cannot pick one context over another "
-        "without guessing. Narrow the input (--compile-db-filter / a project "
-        "compile: block / --compiler-option pinning the ambiguous field(s)) or "
-        "compare a header per contract at a time. Conflicting translation "
-        "units:",
+        "-std=/target/defines/include-search-order/sysroot/compiler-driver/"
+        "forced-includes/ABI-relevant flags); abicheck cannot pick one "
+        "context over another without guessing. Narrow the input "
+        "(--compile-db-filter / a project compile: block / "
+        "--gcc-options/--gcc-path/--compiler-option pinning the ambiguous "
+        "field(s)) or compare a header per contract at a time. Conflicting "
+        "translation units:",
     ]
     # Only shown when some signature actually has one, so the common
     # (forced-include-free) message is unchanged -- but shown for *every*
@@ -1280,6 +1699,7 @@ def _ambiguity_message(
         lines.append(
             f"  - {sample.source or sample.id!r}: std={sig.standard or '(default)'} "
             f"target={sig.target_triple or '(default)'} "
+            f"gcc_path={sig.gcc_path or '(default)'} "
             f"abi_flags={list(sig.abi_relevant_flags)}{forced}"
         )
     return "\n".join(lines)

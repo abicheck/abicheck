@@ -174,11 +174,90 @@ class CompileUnit:
     undefines: list[str] = field(default_factory=list)
     include_paths: list[str] = field(default_factory=list)
     system_include_paths: list[str] = field(default_factory=list)
+    #: Parallel to ``include_paths``/``system_include_paths`` respectively
+    #: (same index, own list per structured field -- deliberately NOT a
+    #: shared value-identity set), recording whether each entry's ORIGINAL,
+    #: as-written ``-I``/``-isystem`` operand was already absolute exactly
+    #: as recorded in the real build, as opposed to a relative operand this
+    #: pipeline resolved by joining it onto ``directory`` (round 30 Finding
+    #: 2; round 31 Finding 1, Codex review, fresh evidence). A value-keyed
+    #: ``set[str]`` of "explicitly absolute strings" cannot distinguish two
+    #: *occurrences* that normalize to the identical final string -- e.g. a
+    #: unit recording both ``-Iinclude`` (relative, resolves to
+    #: ``directory/include``) and ``-I<directory>/include`` (already
+    #: explicitly absolute) has both ``include_paths`` entries end up as the
+    #: exact same string, and a value-based set would then treat BOTH as
+    #: explicit. Position-aligned per-entry booleans keep each occurrence's
+    #: own provenance independent, so one can be rebased under a leading
+    #: ``env -C DIR`` prefix while the other correctly is not.
+    #:
+    #: A pack persisted by a version of abicheck that predates this field
+    #: has both position-aligned lists absent (empty). That is
+    #: indistinguishable, by list length alone, from a caller who simply
+    #: never populated per-entry provenance for a directly-constructed
+    #: ``CompileUnit`` (every pre-round-31 test in this repo, for one) --
+    #: and those two cases need OPPOSITE defaults: a direct construction's
+    #: omitted field should degrade to "derived" (rebase), the pre-
+    #: round-30 behavior every existing caller already assumed, while a
+    #: genuinely legacy PERSISTED pack must degrade to "unknown, do not
+    #: rebase" (round 31 Finding 3, Codex review, fresh evidence) -- the
+    #: pre-round-30 pipeline never rebased a structured include path at
+    #: all, so an old, previously-correct persisted pack must not have its
+    #: replay semantics silently changed by a rebase it was never subject
+    #: to. ``include_provenance_known`` is the explicit signal that tells
+    #: :meth:`explicit_or_unknown` which of the two defaults applies --
+    #: ``True`` (the ordinary default, for every direct construction and
+    #: every adapter-produced unit) trusts the paired lists at face value
+    #: (falling back to "derived" only for a length mismatch, which should
+    #: not occur on a real adapter-produced unit); ``False`` (set only by
+    #: :meth:`from_dict` when loading a dict that has neither
+    #: ``include_paths_explicit`` nor ``system_include_paths_explicit`` --
+    #: the actual legacy-schema signal) forces "unknown, do not rebase"
+    #: regardless of what the (necessarily empty) lists contain.
+    include_provenance_known: bool = field(default=True, kw_only=True)
+    #: ``kw_only=True`` (CodeRabbit review, fresh evidence): these fields
+    #: were inserted after ``system_include_paths`` rather than appended at
+    #: the end of the dataclass. Every in-repo caller already uses keyword
+    #: arguments, but ``CompileUnit`` carries no explicit ``__init__`` and
+    #: nothing stops an external positional caller from existing --
+    #: per-field ``kw_only`` (the same convention already established by
+    #: ``AbiSnapshot``/``Change`` in ``model.py``/``checker_types.py``) means
+    #: a field inserted anywhere in the list can never silently shift what
+    #: a positional caller's later arguments bind to.
+    include_paths_explicit: list[bool] = field(default_factory=list, kw_only=True)
+    system_include_paths_explicit: list[bool] = field(
+        default_factory=list, kw_only=True
+    )
     input_files: list[str] = field(default_factory=list)
     sysroot: str | None = None
     target_triple: str = ""
     abi_relevant_flags: list[str] = field(default_factory=list)
     raw_ref: str = ""  # content-addressed path under raw/
+
+    def explicit_or_unknown(self, *, system: bool) -> list[bool]:
+        """Per-entry "treat as explicitly absolute, do not rebase" flags for
+        ``include_paths`` (``system=False``) or ``system_include_paths``
+        (``system=True``).
+
+        A genuinely legacy pack (``include_provenance_known`` is ``False``
+        -- see its own docstring) degrades every entry to "do not rebase",
+        regardless of list contents. Otherwise a length mismatch between
+        the provenance list and its path list (a direct construction that
+        never populated per-entry provenance at all) degrades every entry
+        to "derived" (rebase), the pre-round-30 default every existing
+        caller already assumed.
+        """
+        paths = self.system_include_paths if system else self.include_paths
+        if not self.include_provenance_known:
+            return [True] * len(paths)
+        explicit = (
+            self.system_include_paths_explicit
+            if system
+            else self.include_paths_explicit
+        )
+        if len(explicit) != len(paths):
+            return [False] * len(paths)
+        return list(explicit)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -195,6 +274,9 @@ class CompileUnit:
             "undefines": list(self.undefines),
             "include_paths": list(self.include_paths),
             "system_include_paths": list(self.system_include_paths),
+            "include_provenance_known": self.include_provenance_known,
+            "include_paths_explicit": list(self.include_paths_explicit),
+            "system_include_paths_explicit": list(self.system_include_paths_explicit),
             "input_files": list(self.input_files),
             "sysroot": self.sysroot,
             "target_triple": self.target_triple,
@@ -218,6 +300,26 @@ class CompileUnit:
             undefines=list(d.get("undefines", [])),
             include_paths=list(d.get("include_paths", [])),
             system_include_paths=list(d.get("system_include_paths", [])),
+            # A legacy pack (persisted before round 30/31) has NEITHER key
+            # at all -- the real "this pack predates per-entry include
+            # provenance" signal (round 31 Finding 3) -- as opposed to a
+            # modern pack that legitimately has no includes to record
+            # provenance for. Falls back to deriving the flag from key
+            # PRESENCE only when the pack itself predates
+            # ``include_provenance_known`` too (every pack this PR
+            # produces sets it explicitly, so this fallback only matters
+            # for a hypothetical intermediate schema between the two).
+            include_provenance_known=bool(
+                d.get(
+                    "include_provenance_known",
+                    "include_paths_explicit" in d
+                    or "system_include_paths_explicit" in d,
+                )
+            ),
+            include_paths_explicit=list(d.get("include_paths_explicit", [])),
+            system_include_paths_explicit=list(
+                d.get("system_include_paths_explicit", [])
+            ),
             input_files=list(d.get("input_files", [])),
             sysroot=d.get("sysroot"),
             target_triple=str(d.get("target_triple", "")),

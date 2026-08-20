@@ -10,6 +10,8 @@
       "directory": "",
       "id": "tu0",
       "include_paths": [],
+      "include_paths_explicit": [],
+      "include_provenance_known": true,
       "input_files": [],
       "language": "CXX",
       "output": "",
@@ -18,6 +20,7 @@
       "standard": "",
       "sysroot": null,
       "system_include_paths": [],
+      "system_include_paths_explicit": [],
       "target_id": "",
       "target_triple": "",
       "undefines": []

@@ -73,6 +73,7 @@ from ..source_abi import (
     default_fact_set,
 )
 from ._argv import (
+    effective_directory,
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
@@ -80,6 +81,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._argv_shortopts import rebase_structured_path as _rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 from .clang_nodes import (
@@ -369,10 +371,63 @@ def _clang_context_args(
     for undef in compile_unit.undefines:
         cmd.append(f"{undef_opt}{undef}")
     inc_opt = "/I" if msvc else "-I"
-    for inc in compile_unit.include_paths:
-        cmd += [inc_opt, inc]
-    for inc in compile_unit.system_include_paths:
-        cmd += ["/I", inc] if msvc else ["-isystem", inc]
+    # Round 29 follow-up (Codex review, "Apply env chdir before resolving
+    # structured include paths", fresh evidence): `CompileUnit.include_paths`/
+    # `system_include_paths` are already STRUCTURED, absolute paths, resolved
+    # by the producing adapter against the compile unit's own recorded
+    # `directory` -- before any leading `env -C DIR` prefix in `argv` is
+    # considered. `extract()`'s own `run_directory` (the effective directory
+    # the real compiler process ran from) already accounts for that -- but
+    # only for the REPLAY subprocess's own cwd, and `replay_extra_flags()`'s
+    # raw, unresolved flag values, not for these two already-absolute
+    # structured fields. So `env -C build clang -Iinclude ...` recorded in
+    # `directory=/work` resolves `include_paths` to `/work/include` at
+    # adapter-construction time, and this function -- without the rebase
+    # below -- would still emit `-I /work/include`, even though the real
+    # compiler searched `/work/build/include`. Rebase each structured path
+    # from its old base (`compile_unit.directory`) onto the real effective
+    # one, via a literal string-prefix substitution (not a lexical
+    # posixpath/ntpath join+normalize like `join_path_token` elsewhere in
+    # this PR series) -- each path here was itself already constructed by
+    # simply joining the SAME `compile_unit.directory` string onto a
+    # relative operand, so undoing that exact prefix and re-joining the
+    # effective directory in its place reproduces precisely what the
+    # adapter would have produced had it known the effective directory to
+    # begin with, without needing to guess the join grammar a second time.
+    # A path outside `compile_unit.directory` entirely (e.g. an absolute
+    # `-Isysroot/include` operand the real build recorded verbatim) has no
+    # matching prefix and is therefore left unchanged, exactly as it must
+    # be -- it was never relative to the pre-chdir directory in the first
+    # place.
+    run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
+    # Round 31 Finding 1 (Codex review, fresh evidence): provenance is
+    # tracked per LIST POSITION, not by value -- two occurrences that
+    # normalize to the identical final string (one relative-then-joined,
+    # one genuinely explicit) must not collapse onto one shared answer.
+    # `explicit_or_unknown()` also degrades a legacy/absent-field pack to
+    # "do not rebase" rather than "derived" (round 31 Finding 3).
+    include_explicit = compile_unit.explicit_or_unknown(system=False)
+    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
+    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
+        cmd += [
+            inc_opt,
+            _rebase_structured_path(
+                inc,
+                compile_unit.directory,
+                run_directory,
+                explicit_absolute=is_explicit,
+            ),
+        ]
+    for inc, is_explicit in zip(
+        compile_unit.system_include_paths, system_include_explicit
+    ):
+        rebased = _rebase_structured_path(
+            inc,
+            compile_unit.directory,
+            run_directory,
+            explicit_absolute=is_explicit,
+        )
+        cmd += ["/I", rebased] if msvc else ["-isystem", rebased]
     if compile_unit.sysroot and not msvc:
         cmd.append(f"--sysroot={compile_unit.sysroot}")
     if compile_unit.target_triple and not msvc:
@@ -721,7 +776,18 @@ def source_abi_from_clang_ast(
     # against the TU's build directory: clang emits *relative* paths for headers
     # found via relative -I, which the cache (running in a different CWD) could
     # not otherwise read, silently dropping the dependency (Codex review, P2).
-    tu.read_files = resolve_read_files(_collect_files(ast_root), compile_unit.directory)
+    #
+    # Round 30 Finding 3 (Codex review, fresh evidence): for an `env -C build`
+    # compile unit, clang's own subprocess actually ran from the EFFECTIVE
+    # (chdir-composed) directory, not the raw `compile_unit.directory` -- a
+    # relative dependency path must resolve against that same effective
+    # directory or the real dependency is omitted from the cache fingerprint
+    # entirely. Mirrors the identical fix in castxml.py's `_parse_root`.
+    tu.read_files = resolve_read_files(
+        _collect_files(ast_root),
+        effective_directory(compile_unit.argv, compile_unit.directory)
+        or compile_unit.directory,
+    )
     return tu
 
 
@@ -1528,6 +1594,17 @@ class ClangSourceExtractor:
         source = Path(unredact_home(compile_unit.source))
         if not source.is_absolute() and directory:
             source = Path(directory) / source
+        # The EFFECTIVE directory the subprocess actually runs from -- distinct
+        # from `directory` above, which stays the raw, un-chdir'd compile-unit
+        # directory the `source`/compile-database `file` pair is genuinely
+        # anchored to (Codex review, Finding 10, fresh evidence). A leading
+        # `env -C DIR` prefix in `compile_unit.argv` means the real build's
+        # compiler process ran from `<directory>/DIR`, not bare `directory` --
+        # `replay_extra_flags()` (see its own docstring) carries raw, unmodified
+        # relative flag values (`-iquote ../include`) straight from
+        # `compile_unit.argv`, which only resolve correctly when THIS
+        # subprocess's own cwd matches that same effective directory.
+        run_directory = effective_directory(compile_unit.argv, directory) or directory
 
         ast_cmd = build_clang_command(
             compile_unit,
@@ -1541,7 +1618,7 @@ class ClangSourceExtractor:
         # keep their AST payloads on disk (not heap) until each parses, so the
         # GIL-serialized thread pool stops stacking N giant strings (the UXL OOM).
         ast_path, ast_stderr, ast_rc = self._run_ast_to_file(
-            ast_cmd, directory, compile_unit.source
+            ast_cmd, run_directory, compile_unit.source
         )
         try:
             if ast_path.stat().st_size == 0:
@@ -1615,7 +1692,9 @@ class ClangSourceExtractor:
         # Drop the large AST tree before the macro pass spawns another subprocess,
         # so its memory is reclaimed and doesn't stack with the macro pass.
         del ast_root
-        self._attach_macros(tu, compile_unit, source, directory, effective_public_roots)
+        self._attach_macros(
+            tu, compile_unit, source, run_directory, effective_public_roots
+        )
         self._stamp_fact_set_and_coverage(tu)
         return tu
 
@@ -1785,5 +1864,16 @@ class ClangSourceExtractor:
         # A header that only defines macros contributes no AST node, so add its
         # path (resolved against the build directory) to the cache dependency set
         # or a macro-only edit would be a stale hit (Codex review #339, P1/P2).
-        resolved = resolve_read_files(set(macro_files), compile_unit.directory)
+        #
+        # Round 30 Finding 3 (Codex review, fresh evidence): resolve against
+        # the EFFECTIVE (chdir-composed) directory, mirroring the AST pass
+        # above and castxml.py's identical fix -- the macro pass's own
+        # subprocess ran from the same effective cwd, not the raw
+        # `compile_unit.directory`, when a leading `env -C DIR` prefix was
+        # recorded.
+        resolved = resolve_read_files(
+            set(macro_files),
+            effective_directory(compile_unit.argv, compile_unit.directory)
+            or compile_unit.directory,
+        )
         tu.read_files = sorted(set(tu.read_files) | set(resolved))

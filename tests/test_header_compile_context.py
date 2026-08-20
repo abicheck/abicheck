@@ -767,6 +767,44 @@ def test_resolve_explicit_define_resolves_macro_only_disagreement(
     assert result.matched is True
 
 
+def test_resolve_explicit_define_pin_also_excuses_raw_abi_flag_survivor_disagreement(
+    tmp_path: Path,
+) -> None:
+    """P2 review finding (``discussion_r3787772663``): an ABI-relevant
+    macro like ``_GLIBCXX_USE_CXX11_ABI`` is captured TWICE by a real
+    adapter -- once into the structured ``cu.defines`` dict (already
+    filtered by the pin, per the sibling test above) and once as a raw
+    ``-D_GLIBCXX_USE_CXX11_ABI=<value>`` survivor in
+    ``cu.abi_relevant_flags`` (``adapters.base.extract_abi_relevant_flags``'s
+    ``_ABI_RELEVANT_DEFINES`` handling). Before the fix, only the structured
+    copy was pin-masked -- the raw survivor still differed across the two
+    units, so an explicit ``-D_GLIBCXX_USE_CXX11_ABI=1`` pin failed to
+    excuse the disagreement and ``HeaderCompileContextAmbiguousError`` was
+    still raised despite the documented override."""
+    header = tmp_path / "widget.h"
+    header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    src_a = tmp_path / "a.cpp"
+    src_a.write_text('#include "widget.h"\n', encoding="utf-8")
+    src_b = tmp_path / "b.cpp"
+    src_b.write_text('#include "widget.h"\n', encoding="utf-8")
+    unit_a = _cu(
+        source=str(src_a),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "0"},
+        abi_relevant_flags=["-D_GLIBCXX_USE_CXX11_ABI=0"],
+    )
+    unit_b = _cu(
+        source=str(src_b),
+        directory=str(tmp_path),
+        defines={"_GLIBCXX_USE_CXX11_ABI": "1"},
+        abi_relevant_flags=["-D_GLIBCXX_USE_CXX11_ABI=1"],
+    )
+    ev = BuildEvidence(compile_units=[unit_a, unit_b])
+    explicit = CompileContext(gcc_option_tokens=("-D_GLIBCXX_USE_CXX11_ABI=1",))
+    result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    assert result.matched is True
+
+
 def test_resolve_agreeing_structured_fields_with_different_raw_flag_spellings_not_ambiguous(
     tmp_path: Path,
 ) -> None:
@@ -1378,138 +1416,10 @@ def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
 # branch coverage" section.
 
 
-# ---------------------------------------------------------------------------
-# 3. service_input_resolution wiring
-# ---------------------------------------------------------------------------
-
-
-def test_merge_l3_compile_context_derived_leads_explicit_wins() -> None:
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-DFOO=1", "-fPIC"))
-    explicit = CompileContext(gcc_option_tokens=("-DFOO=2",), sysroot=Path("/x"))
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    # Finding 2: explicit's structured `sysroot` is folded into a trailing
-    # token (and the structured field cleared) so it lands strictly after
-    # every derived token in the actually-rendered command, not before it.
-    assert merged.gcc_option_tokens == (
-        "-DFOO=1",
-        "-fPIC",
-        "--sysroot=/x",
-        "-DFOO=2",
-    )
-    assert merged.sysroot is None
-
-
-def test_merge_l3_compile_context_explicit_gcc_options_string_folded_after_derived() -> (
-    None
-):
-    """Finding 2: the free-form ``gcc_options`` string channel, not just
-    ``sysroot``, must also land after every derived token."""
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-DFOO=1",))
-    explicit = CompileContext(gcc_options="-DFOO=2 -DBAR=3")
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    assert merged.gcc_option_tokens == ("-DFOO=1", "-DFOO=2", "-DBAR=3")
-    assert merged.gcc_options is None
-
-
-def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_command(
-    tmp_path: Path,
-) -> None:
-    """End-to-end-shaped: build the actual castxml command from a merged
-    context carrying a derived AND an explicit, conflicting sysroot, and
-    assert the *last* --sysroot= token (the one that wins under real
-    compiler last-flag-wins semantics) is the explicit one."""
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-    from abicheck.dumper_ast_config import _build_castxml_command
-
-    derived = CompileContext(gcc_option_tokens=("--sysroot=/derived",))
-    explicit = CompileContext(sysroot=Path("/explicit"))
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    cmd = _build_castxml_command(
-        "g++",
-        "gnu",
-        [],
-        tmp_path / "out.xml",
-        tmp_path / "agg.h",
-        sysroot=merged.sysroot,
-        gcc_options=merged.gcc_options,
-        gcc_option_tokens=merged.gcc_option_tokens,
-        force_cpp=True,
-    )
-    sysroot_tokens = [tok for tok in cmd if tok.startswith("--sysroot=")]
-    assert sysroot_tokens == ["--sysroot=/derived", "--sysroot=/explicit"]
-    assert sysroot_tokens[-1] == "--sysroot=/explicit"  # last-flag-wins: explicit
-
-
-def test_merge_l3_compile_context_explicit_include_search_wins_first_match() -> None:
-    """Codex review, PR #782: unlike a macro/std/sysroot switch (last-flag-
-    wins), an include search path is first-match-wins -- so an explicit
-    -I/-isystem must search *before* a derived one, the opposite order from
-    every other token this function merges."""
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-
-    derived = CompileContext(
-        gcc_option_tokens=("-DFOO=1", "-I", "/build/inc", "-isystem", "/build/sys")
-    )
-    explicit = CompileContext(gcc_option_tokens=("-I", "/user/inc"))
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    assert merged.gcc_option_tokens == (
-        "-DFOO=1",  # a non-include derived token: unaffected, still leads
-        "-I",
-        "/user/inc",  # explicit's own -I: now searches before derived's
-        "-I",
-        "/build/inc",
-        "-isystem",
-        "/build/sys",
-    )
-
-
-def test_merge_l3_compile_context_attached_include_form_stays_paired() -> None:
-    """The attached spelling (-Idir, no space) is self-contained -- must not
-    consume a following, unrelated token as if it were a spaced operand."""
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-I/build/inc", "-DFOO=1"))
-    explicit = CompileContext()
-    merged = _merge_l3_compile_context(explicit, derived)
-    assert merged is not None
-    # -DFOO=1 is not an include token and must not be swept into the
-    # include group merely for following an attached -I entry.
-    assert merged.gcc_option_tokens == ("-DFOO=1", "-I/build/inc")
-
-
-def test_include_operand_dirs_extracts_spaced_and_attached_forms() -> None:
-    """Codex review, PR #782: the AST cache key's extra_hash_dirs channel
-    needs real directory Paths, not token strings, to stat -- covers both
-    the spaced (-I dir) and attached (-Idir) spellings, and a non-include
-    token contributes nothing."""
-    from abicheck.buildsource.l2_seed import _include_operand_dirs
-
-    dirs = _include_operand_dirs(
-        ("-DFOO=1", "-I", "/build/inc", "-isystem/build/sys", "-fPIC")
-    )
-    assert dirs == (Path("/build/inc"), Path("/build/sys"))
-
-
-def test_merge_l3_compile_context_none_derived_is_noop() -> None:
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-
-    explicit = CompileContext(gcc_options="-DX=1")
-    assert _merge_l3_compile_context(explicit, None) is explicit
-
-
-def test_merge_l3_compile_context_none_explicit_uses_derived() -> None:
-    from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-
-    derived = CompileContext(gcc_option_tokens=("-std=c++20",))
-    assert _merge_l3_compile_context(None, derived) is derived
+# section 3 (service_input_resolution / buildsource.l2_seed._merge_l3_compile_context
+# wiring) moved to tests/test_header_compile_context_merge.py -- split out
+# during the P0.3 follow-up round 2 merge against main to keep this file
+# under the 2000-line hard cap.
 
 
 def test_seeded_compile_context_noop_without_sources(tmp_path: Path) -> None:

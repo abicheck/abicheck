@@ -42,6 +42,7 @@ from ... import deadline
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
 from ._argv import (
+    effective_directory,
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
@@ -49,6 +50,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._argv_shortopts import rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
 
@@ -253,6 +255,15 @@ def build_castxml_command(
     Mirrors the compile unit's language standard, defines/undefines, include and
     system-include paths, sysroot, and target triple, so source replay sees the
     headers the compiler actually saw under the flags it actually used.
+
+    Round 31 CodeRabbit Finding C (fresh evidence): rebases the structured
+    ``include_paths``/``system_include_paths`` fields onto the compile
+    unit's real EFFECTIVE (``env -C``-composed) directory, the identical
+    fix ``clang.py``'s ``_clang_context_args()`` already applies -- setting
+    the castxml subprocess's own ``cwd`` to the effective directory (an
+    earlier round) does not by itself fix a WRONG include path already
+    baked into the argv; ``-I/work/include`` is still ``-I/work/include``
+    regardless of which directory castxml is launched from.
     """
     cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
     cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
@@ -263,10 +274,31 @@ def build_castxml_command(
         cmd.append(f"-D{key}={value}" if value else f"-D{key}")
     for undef in compile_unit.undefines:
         cmd.append(f"-U{undef}")
-    for inc in compile_unit.include_paths:
-        cmd += ["-I", inc]
-    for inc in compile_unit.system_include_paths:
-        cmd += ["-isystem", inc]
+    run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
+    include_explicit = compile_unit.explicit_or_unknown(system=False)
+    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
+    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
+        cmd += [
+            "-I",
+            rebase_structured_path(
+                inc,
+                compile_unit.directory,
+                run_directory,
+                explicit_absolute=is_explicit,
+            ),
+        ]
+    for inc, is_explicit in zip(
+        compile_unit.system_include_paths, system_include_explicit
+    ):
+        cmd += [
+            "-isystem",
+            rebase_structured_path(
+                inc,
+                compile_unit.directory,
+                run_directory,
+                explicit_absolute=is_explicit,
+            ),
+        ]
     if compile_unit.sysroot:
         cmd.append(f"--sysroot={compile_unit.sysroot}")
     if compile_unit.target_triple and cc_id != "msvc":
@@ -377,16 +409,27 @@ class CastxmlSourceExtractor:
             # being expanded is the accepted tradeoff for replaying redacted
             # home-path macros correctly.
             cmd = [_unredact_home(tok) for tok in cmd]
-            # Run in the compile unit's directory so relative -I/-isystem and
-            # forced-include paths resolve exactly as the real build did
-            # (compile_commands.json `directory`). Bound by min(self.timeout,
-            # active --budget deadline) — run_bounded() alone would honor a
-            # generous outer deadline verbatim instead of this call's own cap
-            # — and process-group-safe on timeout (P0 follow-up; Codex review,
-            # PR #591, round 7). Both a local timeout and a scan-deadline
-            # overflow fold into the same SourceExtractionError contract as
-            # an ordinary failure — this extractor's errors already degrade
-            # to partial per-TU coverage rather than aborting the scan.
+            # Run in the compile unit's EFFECTIVE directory so relative
+            # -I/-isystem and forced-include paths resolve exactly as the
+            # real build did (compile_commands.json `directory`) --
+            # `effective_directory()` composes `directory` with any leading
+            # `env -C DIR`/`--chdir` prefix recorded in `compile_unit.argv`
+            # (Codex review, Finding 10, fresh evidence): real `env -C`
+            # genuinely chdirs the whole invoked process before it execs
+            # the compiler, so `replay_extra_flags()`'s own raw,
+            # unmodified `-iquote ../include`-style survivors (scanned
+            # straight from `compile_unit.argv` -- see that function's own
+            # docstring) only resolve correctly when THIS subprocess's cwd
+            # matches the real chdir'd directory too; bare `directory`
+            # alone left them resolving one (or more) levels off. Bound by
+            # min(self.timeout, active --budget deadline) — run_bounded()
+            # alone would honor a generous outer deadline verbatim instead
+            # of this call's own cap — and process-group-safe on timeout
+            # (P0 follow-up; Codex review, PR #591, round 7). Both a local
+            # timeout and a scan-deadline overflow fold into the same
+            # SourceExtractionError contract as an ordinary failure — this
+            # extractor's errors already degrade to partial per-TU
+            # coverage rather than aborting the scan.
             result = run_bounded_for_extraction(
                 cmd,
                 timeout=self.timeout,
@@ -394,7 +437,7 @@ class CastxmlSourceExtractor:
                 unit_label=compile_unit.source,
                 capture_output=True,
                 text=True,
-                cwd=directory or None,
+                cwd=effective_directory(compile_unit.argv, directory) or None,
             )
             if (
                 result.returncode != 0
@@ -553,9 +596,21 @@ class CastxmlSourceExtractor:
         # included header, not just the configured public roots (Codex #339, P1).
         # Resolve to absolute against the build directory so the cache (run in a
         # different CWD) can read a relative castxml <File> path (Codex P2).
+        #
+        # Round 30 Finding 3 (Codex review, fresh evidence): for an `env -C
+        # build` compile unit, castxml's own subprocess actually ran from the
+        # EFFECTIVE (chdir-composed) directory -- `effective_directory()`, the
+        # same helper round 26 Finding 10 already threads into the subprocess
+        # `cwd=` above -- not the raw, un-chdir'd `compile_unit.directory`. A
+        # RELATIVE `<File name="include/api.h">` castxml reports must resolve
+        # against that same effective directory, or the real dependency the
+        # subprocess actually read (`<build_dir>/include/api.h`) is omitted
+        # from the cache fingerprint entirely -- a stale cache hit risk after
+        # the real header changes, since the fingerprint would never see it.
         tu.read_files = resolve_read_files(
             {name for el in root.findall(".//File") if (name := el.get("name"))},
-            compile_unit.directory,
+            effective_directory(compile_unit.argv, compile_unit.directory)
+            or compile_unit.directory,
         )
         self._stamp_fact_set_and_coverage(tu, compile_unit)
         return tu

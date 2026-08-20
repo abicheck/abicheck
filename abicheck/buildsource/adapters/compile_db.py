@@ -19,6 +19,7 @@ The universal low-friction L3 input. Reuses the ADR-020a parser in
 ``directory``-relative resolution, and ABI-flag extraction) and projects each
 entry into a normalized :class:`CompileUnit`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -66,10 +67,17 @@ class CompileDbAdapter:
                 argv=red_argv,
                 language=effective_language(argv, source),
                 standard=ctx.language_standard or "",
-                defines={k: self.redaction.define_value(k, v or "") for k, v in ctx.defines.items()},
+                defines={
+                    k: self.redaction.define_value(k, v or "")
+                    for k, v in ctx.defines.items()
+                },
                 undefines=sorted(ctx.undefines),
                 include_paths=[self.redaction.path(str(p)) for p in ctx.include_paths],
-                system_include_paths=[self.redaction.path(str(p)) for p in ctx.system_includes],
+                system_include_paths=[
+                    self.redaction.path(str(p)) for p in ctx.system_includes
+                ],
+                include_paths_explicit=list(ctx.include_paths_explicit),
+                system_include_paths_explicit=list(ctx.system_includes_explicit),
                 sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
                 target_triple=ctx.target_triple or "",
                 abi_relevant_flags=[self.redaction.arg(f) for f in abi_flags],

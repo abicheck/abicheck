@@ -512,6 +512,44 @@ def _merge_l3_compile_context(
     appends them *after* explicit instead, so explicit's own ``-I``/
     ``-isystem`` (wherever it came from) always searches first, while every
     other derived token keeps its original leading, overridable position.
+
+    Finding 3 (P1 review, ``discussion_r3787772668``, P0.3 follow-up round
+    2): ``derived.gcc_path`` (``header_compile_context._derived_gcc_path`` —
+    the matched compile unit's own compiler, set when it is genuinely
+    MSVC/clang-cl-dialect) was never read here at all, only ``derived``'s
+    option-token fields — so even once ``resolve_header_compile_context``
+    started returning a real ``gcc_path``, this merge silently discarded it,
+    and the L2 header parse still defaulted to a plain ``clang++`` that
+    cannot parse the retained ``/std:`` survivor. Unlike ``sysroot``/
+    ``gcc_options`` (foldable, "derived leads, explicit wins" via
+    trailing-token order), ``gcc_path``/``gcc_prefix`` each select a single
+    compiler and cannot be folded the same way — the natural per-field rule
+    mirrors this module's other explicit-pin precedents instead:
+    ``explicit.gcc_path`` (or ``gcc_prefix``) wins outright when the caller
+    already set one, and ``derived``'s value is used only when the caller
+    left it unset (the default). A caller's own explicit ``--gcc-path`` was
+    always going to be the correct choice regardless of what the matched
+    compile unit used, so this can only ever fill in a gap, never override
+    an explicit choice.
+
+    **``gcc_path``/``gcc_prefix`` are one logical compiler-selector, not two
+    independent fields (P2 review, ``discussion_r3788073754``, fresh
+    evidence).** ``dumper_clang._resolve_clang_bin`` always checks
+    ``gcc_path`` before ``gcc_prefix`` (a resolvable ``gcc_path`` wins
+    outright; ``gcc_prefix`` is only ever consulted when ``gcc_path`` is
+    absent or not clang-family) — so treating the two fields as
+    independently "derived fills an unset explicit field" broke a caller who
+    explicitly set *only* ``gcc_prefix`` (meaning "use this prefix, no
+    literal-path override"): a *different* ``derived.gcc_path`` from the
+    matched compile unit would still get merged in for the unset
+    ``explicit.gcc_path`` slot, and since ``_resolve_clang_bin`` checks
+    ``gcc_path`` first, the caller's actual intent (the explicit prefix) was
+    silently overridden by the derived path instead of winning. Fixed by
+    resolving both fields together as a single unit: if the caller
+    explicitly set *either* one, neither is inherited from ``derived`` (even
+    when the caller's own other field is unset) — only when the caller set
+    *neither* is ``derived``'s own ``(gcc_path, gcc_prefix)`` pair adopted,
+    together, from the same source.
     """
     if derived is None:
         return explicit
@@ -555,6 +593,15 @@ def _merge_l3_compile_context(
             derived_includes, explicit_tail + list(explicit.gcc_option_tokens)
         )
     )
+    explicit_selector_set = (
+        explicit.gcc_path is not None or explicit.gcc_prefix is not None
+    )
+    if explicit_selector_set:
+        gcc_path = explicit.gcc_path
+        gcc_prefix = explicit.gcc_prefix
+    else:
+        gcc_path = derived.gcc_path
+        gcc_prefix = derived.gcc_prefix
     return dataclasses.replace(
         explicit,
         sysroot=None,
@@ -565,6 +612,8 @@ def _merge_l3_compile_context(
             *explicit.gcc_option_tokens,
             *derived_includes,
         ),
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
     )
 
 

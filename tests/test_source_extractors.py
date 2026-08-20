@@ -311,6 +311,57 @@ def test_build_command_drops_split_sysroot_flag_carried_without_operand() -> Non
     assert cmd[cmd.index("-o") + 1] == "o.xml"
 
 
+def test_build_command_decodes_split_operand_abi_flag_survivor() -> None:
+    # Codex review finding ("Decode normalized cc1 flags in every replay
+    # path"): adapters.base.extract_abi_relevant_flags normalizes a
+    # genuinely split two-token cc1 flag (`-target-abi aapcs`) into one
+    # internal `-target-abi=aapcs` survivor token in
+    # CompileUnit.abi_relevant_flags. The L4 replay path
+    # (source_extractors._argv.replay_extra_flags /
+    # _carry_abi_relevant_flags, reached here via build_castxml_command)
+    # must decode it back into its real, separate argv tokens -- not append
+    # the internal encoding as one malformed token that castxml would
+    # reject -- and must not let it be silently dropped by the (unrelated)
+    # STRUCTURED_TOOLCHAIN_FLAG_PREFIXES filter just because it shares the
+    # "-target" prefix with the already-structured target-triple survivor.
+    #
+    # Reconstructed as -Xclang-wrapped, not the bare two-token form (P2
+    # review, "Forward bare cc1 flags through the replay driver", fresh
+    # evidence): this bare internal encoding is what a direct `clang -cc1
+    # -target-abi aapcs` capture produces, but replay always drives an
+    # ordinary Clang driver, never -cc1 directly -- which rejects the bare
+    # two-token form outright.
+    cmd = build_castxml_command(
+        _cu(abi_relevant_flags=["-target-abi=aapcs"]),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    idx = cmd.index("-Xclang")
+    assert cmd[idx : idx + 4] == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
+
+
+def test_build_command_decodes_xclang_wrapped_split_operand_abi_flag_survivor() -> None:
+    # Companion case: the LEGACY `-Xclang -target-abi=aapcs` marker
+    # encoding -- what a pre-canonicalization revision of
+    # `extract_abi_relevant_flags` used to produce for the real-world
+    # -Xclang-wrapped spelling (`-Xclang -target-abi -Xclang aapcs`), and
+    # what could still appear in an evidence pack persisted by that earlier
+    # revision -- must still decode back into the full four real argv
+    # tokens rather than reaching castxml as one malformed `-Xclang
+    # -target-abi=aapcs` token. `extract_abi_relevant_flags` no longer
+    # produces this marker itself (P2 review, "Canonicalize equivalent cc1
+    # survivor spellings" -- see the sibling `-target-abi=aapcs` case above,
+    # which is what it now emits for both capture forms); this test only
+    # pins backward-compatible decoding of the old marker.
+    cmd = build_castxml_command(
+        _cu(abi_relevant_flags=["-Xclang -target-abi=aapcs"]),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    idx = cmd.index("-Xclang")
+    assert cmd[idx : idx + 4] == ["-Xclang", "-target-abi", "-Xclang", "aapcs"]
+
+
 def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # Mock castxml so we can assert the subprocess runs with cwd=directory and
     # exercise the extract() success path without the tool installed.
@@ -338,6 +389,82 @@ def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> 
     tu = extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
     assert captured["cwd"] == str(tmp_path)
     assert tu.extractor["name"] == "castxml-source"
+
+
+def test_extract_runs_in_env_chdir_effective_directory(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Round 24, Finding 10 (Codex, fresh evidence): ``env -C DIR`` chdirs
+    the WHOLE invoked process before it execs the real command, so a
+    compile unit recorded with an ``env -C build ...`` prefix in its
+    ``argv`` must actually run this subprocess from
+    ``<directory>/build``, not bare ``directory`` -- otherwise a raw,
+    unmodified relative flag (``-iquote ../include``) that
+    ``replay_extra_flags()`` carries straight from ``compile_unit.argv``
+    resolves against the wrong directory."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:  # the --version compiler-identity probe
+            return _Result()
+        captured["cwd"] = kw.get("cwd")
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    (tmp_path / "build").mkdir()
+    cu = _cu(
+        source="src/foo.cpp",
+        directory=str(tmp_path),
+        argv=["env", "-C", "build", "castxml", "-c", "src/foo.cpp"],
+    )
+    extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
+    assert captured["cwd"] == str(tmp_path / "build")
+
+
+def test_extract_without_env_chdir_negative_control(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Negative control for Finding 10: a compile unit with NO ``env -C``
+    prefix in its ``argv`` runs from bare ``directory``, unchanged -- the
+    common case for every non-``env`` compile unit."""
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        if "-o" not in cmd:
+            return _Result()
+        captured["cwd"] = kw.get("cwd")
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    cu = _cu(
+        source="src/foo.cpp",
+        directory=str(tmp_path),
+        argv=["castxml", "-c", "src/foo.cpp"],
+    )
+    extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
+    assert captured["cwd"] == str(tmp_path)
 
 
 def test_extract_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
@@ -917,6 +1044,55 @@ def test_parse_root_maps_castxml_xml_without_running_castxml() -> None:
     surface = link_source_abi([tu], target_id="target://libfoo")
     assert any("add" in e.qualified_name for e in surface.reachable_declarations)
     assert any("Widget" in e.qualified_name for e in surface.reachable_types)
+
+
+def test_parse_root_read_files_resolved_against_effective_env_chdir_directory() -> None:
+    """Round 30 Finding 3 (Codex review, fresh evidence): a RELATIVE castxml
+    ``<File name="include/api.h">`` dependency must resolve against the
+    EFFECTIVE (``env -C``-composed) directory the real castxml subprocess
+    actually ran from -- not the raw, un-chdir'd ``compile_unit.directory``
+    -- or the real dependency is omitted from the per-TU cache fingerprint
+    entirely."""
+    import os
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="include/api.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(root, "Function", id="fn1", name="add", returns="t_int", location="loc1")
+
+    extractor = CastxmlSourceExtractor()
+    cu = _cu(
+        directory="/work",
+        argv=["env", "-C", "build", "gcc", "-Iinclude", "-c", "x.c"],
+    )
+    tu = extractor._parse_root(
+        root, cu, public_header_roots=["include/api.h"], target_id="target://libfoo"
+    )
+    assert os.path.normpath("/work/build/include/api.h") in tu.read_files
+    assert os.path.normpath("/work/include/api.h") not in tu.read_files
+
+
+def test_parse_root_read_files_negative_control_no_env_chdir_unaffected() -> None:
+    """Negative control: with no ``env -C`` prefix at all, the effective
+    directory is the raw ``compile_unit.directory`` -- the pre-existing,
+    already-correct behavior is unchanged."""
+    import os
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="include/api.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    SubElement(root, "Function", id="fn1", name="add", returns="t_int", location="loc1")
+
+    extractor = CastxmlSourceExtractor()
+    cu = _cu(directory="/work", argv=["gcc", "-Iinclude", "-c", "x.c"])
+    tu = extractor._parse_root(
+        root, cu, public_header_roots=["include/api.h"], target_id="target://libfoo"
+    )
+    assert os.path.normpath("/work/include/api.h") in tu.read_files
 
 
 def test_parse_root_marks_generated_public_header_as_generated() -> None:
@@ -1585,7 +1761,9 @@ def test_strip_launchers_drops_bare_launcher() -> None:
     from abicheck.buildsource.source_extractors._argv import strip_launchers
 
     assert strip_launchers(["ccache", "clang++", "-c", "foo.cpp"]) == [
-        "clang++", "-c", "foo.cpp",
+        "clang++",
+        "-c",
+        "foo.cpp",
     ]
 
 
@@ -1628,6 +1806,116 @@ def test_strip_launchers_no_config_overrides_for_non_launcher_command() -> None:
     assert strip_launchers(argv) == argv
 
 
+# -- strip_launchers: leading `env` prefix (Codex review, round 18) ----------
+#
+# For a compile unit recorded as `env SDKROOT=... /opt/llvm/bin/clang-cl /c
+# ...`, POSIX `env` syntax is `env [-i] [-u NAME]... [NAME=VALUE]... command
+# [args]` -- the driver follows the leading `env` token, its own flags, and
+# any environment assignments. strip_launchers must unwrap that prefix before
+# (or interleaved with) recognizing a compiler-cache/distribution launcher.
+
+
+def test_strip_launchers_unwraps_bare_env_with_assignment() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(
+        ["env", "SDKROOT=/opt/sdk", "/opt/llvm/bin/clang-cl", "/c", "x.cc"]
+    ) == ["/opt/llvm/bin/clang-cl", "/c", "x.cc"]
+
+
+def test_strip_launchers_bare_env_with_no_command_at_all() -> None:
+    # Degenerate case: `env` names no command whatsoever -- the scan runs off
+    # the end of argv without matching any flag/assignment shape, leaving
+    # nothing behind (there is no compiler token to find).
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env"]) == []
+
+
+def test_strip_launchers_unwraps_env_with_multiple_assignments() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "FOO=1", "BAR=2", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+
+
+def test_strip_launchers_unwraps_env_with_no_operand_flags() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "-i", "FOO=1", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+
+
+def test_strip_launchers_unwraps_env_with_unset_flag() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "-u", "LD_PRELOAD", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+    assert strip_launchers(["env", "--unset=LD_PRELOAD", "gcc", "-c", "foo.c"]) == [
+        "gcc",
+        "-c",
+        "foo.c",
+    ]
+
+
+def test_strip_launchers_env_chained_with_compiler_cache_launcher() -> None:
+    # `env FOO=1 sccache clang-cl ...` — env's own prefix precedes a
+    # compiler-cache launcher, which in turn precedes the real driver; both
+    # kinds must be unwrapped together.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "FOO=1", "sccache", "clang-cl", "/c", "x.cc"]) == [
+        "clang-cl",
+        "/c",
+        "x.cc",
+    ]
+
+
+def test_strip_launchers_bare_env_with_no_assignments() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["env", "gcc", "-c", "foo.c"]) == ["gcc", "-c", "foo.c"]
+
+
+def test_strip_launchers_env_exe_variant() -> None:
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(
+        [r"C:\Windows\System32\env.exe", "FOO=1", "cl.exe", "/c", "x.cc"]
+    ) == ["cl.exe", "/c", "x.cc"]
+
+
+def test_strip_launchers_ordinary_command_unaffected_by_env_handling() -> None:
+    # No `env` prefix at all — ordinary non-env-prefixed commands, with or
+    # without a launcher, must behave exactly as before.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    assert strip_launchers(["gcc", "-c", "foo.c"]) == ["gcc", "-c", "foo.c"]
+    assert strip_launchers(["sccache", "clang-cl", "/c", "x.cc"]) == [
+        "clang-cl",
+        "/c",
+        "x.cc",
+    ]
+
+
+def test_strip_launchers_env_looking_token_not_named_env_is_untouched() -> None:
+    # A real compiler/source token that merely contains "env" as a substring
+    # (not its own basename) must never be mistaken for the env wrapper.
+    from abicheck.buildsource.source_extractors._argv import strip_launchers
+
+    argv = ["envoy-cc", "-c", "foo.c"]
+    assert strip_launchers(argv) == argv
+
+
 # -- strip_launchers property test (generalizes past the hand-picked cases) --
 #
 # Per AGENTS.md's own guidance on reusable primitives: a fixed example list
@@ -1647,13 +1935,22 @@ _OVERRIDE_TOKEN = st.builds(
     st.text(alphabet=st.characters(blacklist_characters="\x00"), max_size=8),
 )
 _LAUNCHER_NAME = st.sampled_from(sorted(_LAUNCHERS))
-#: A plain token that can never be confused for a launcher name or a
-#: KEY=VALUE override (no ``=`` at all, so the override regex can't match).
+#: A plain token that can never be confused for a launcher name, an ``env``
+#: invocation, or a KEY=VALUE override (no ``=`` at all, so the override
+#: regex can't match).
 _PLAIN_TOKEN = st.text(
-    alphabet=st.characters(min_codepoint=33, max_codepoint=126, blacklist_characters="="),
+    alphabet=st.characters(
+        min_codepoint=33, max_codepoint=126, blacklist_characters="="
+    ),
     min_size=1,
     max_size=10,
-).filter(lambda t: t.lower().removesuffix(".exe") not in _LAUNCHERS)
+).filter(
+    lambda t: (
+        t.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+        not in _LAUNCHERS
+        and t.replace("\\", "/").rsplit("/", 1)[-1].lower() not in ("env", "env.exe")
+    )
+)
 
 
 @given(
