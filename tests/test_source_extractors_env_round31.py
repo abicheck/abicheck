@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 
 from abicheck.buildsource.source_extractors._argv import strip_launchers
+from abicheck.buildsource.source_extractors._argv_shortopts import join_path_token
 
 
 def test_strip_launchers_chdir_rebases_extensionless_source_after_dash_x() -> None:
@@ -49,7 +50,7 @@ def test_strip_launchers_chdir_rebases_extensionless_source_after_dash_x() -> No
         "-x",
         "c++",
         os.path.normpath(os.path.join("build", "generated")),
-        "-Ibuild/include",
+        "-I" + join_path_token("build", "include"),
     ]
 
 
