@@ -888,6 +888,172 @@ class TestDimensionSix:
         assert result.status == "fail"
         assert any("own report" in r for r in result.reasons)
 
+    def test_scoping_to_the_wrong_consumer_fails(self, tmp_path):
+        """A scenario declaring `invocation.used_by: [renderer]` is testing
+        whether the run scoped to *that* consumer specifically -- a call
+        scoped to an unrelated one satisfies `is_consumer_scoped()` but never
+        answered the actual question (Codex review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "unrelated"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "fail"
+        assert any("declared" in r for r in result.reasons)
+
+    def test_scoping_to_the_declared_consumer_passes(self, tmp_path):
+        """The positive control for the check above."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "pass", result.reasons
+
+    def test_required_symbol_scoping_is_recognized_too(self, tmp_path):
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"required_symbols": ["plugin_teardown"]},
+            "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0,
+                argv=[
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--required-symbol",
+                    "plugin_teardown",
+                ],
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="BREAKING",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
+        )
+        assert result.status == "pass", result.reasons
+
+    def test_a_scenario_with_no_declared_target_is_unaffected(self, tmp_path):
+        """A plain (non-consumer-scoped) scenario declares no `invocation`, so
+        this check must not fire at all -- confirming it is additive, not a
+        universal new requirement."""
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
+            SCENARIO_COMPATIBLE,
+            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+        )
+        assert result.status == "pass", result.reasons
+
+    def test_missing_full_verdict_fails_when_the_scenario_declares_one(self, tmp_path):
+        """Nothing previously graded `full_verdict` at all -- an agent could
+        omit the library-wide result entirely and still pass on the scoped
+        verdict alone (Codex review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "fail"
+        assert any("expected a full_verdict" in r for r in result.reasons)
+
+    def test_a_greener_full_verdict_than_the_truth_fails(self, tmp_path):
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="COMPATIBLE",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "fail"
+        assert any("full_verdict" in r and "safer" in r for r in result.reasons)
+
     def test_citing_call_ids_that_never_happened_fails(self, tmp_path):
         """The shape the first real pilot produced: a baseline run verified its
         answer with `nm` and a runtime test, reached the right verdict, and

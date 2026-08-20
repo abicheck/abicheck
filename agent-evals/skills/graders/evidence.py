@@ -453,6 +453,35 @@ def is_consumer_scoped(call: dict) -> bool:
     return False
 
 
+def consumer_scope_targets(call: dict) -> frozenset[str]:
+    """The literal consumer/symbol values this call passed to a scoping dial.
+
+    Only `--used-by`/`--required-symbol`, each repeatable and each carrying
+    its value as a plain string operand, are recoverable this way.
+    `--required-symbols FILE` names a *file*, not the symbols themselves, so a
+    call using it contributes nothing here — there is no way to tell from
+    argv alone whether the file's contents match a scenario's declared
+    targets, and the false-negative-over-false-positive default this module
+    uses throughout applies: silently under-matching is preferable to
+    fabricating a match.
+    """
+    argv = call.get("argv", [])
+    targets: set[str] = set()
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token in ("--used-by", "--required-symbol") and i + 1 < len(argv):
+            targets.add(argv[i + 1])
+            i += 2
+            continue
+        for flag in ("--used-by", "--required-symbol"):
+            if token.startswith(f"{flag}="):
+                targets.add(token[len(flag) + 1 :])
+                break
+        i += 1
+    return frozenset(targets)
+
+
 def _artifact_texts(run_dir: Path, call: dict) -> list[str]:
     """Everything this call produced that could carry a verdict."""
     texts: list[str] = []

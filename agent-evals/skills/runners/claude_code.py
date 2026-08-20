@@ -131,6 +131,12 @@ If `confident` is false, add an `"uncertainty"` object with `"reason"` (one of
 `not_comparable`, `evidence_too_shallow`, `matrix_target_unrun`,
 `contract_coverage_incomplete`) and `"unresolved"` naming what specifically is
 unresolved. Give exactly one such block.
+
+If you scoped a comparison to a named consumer or plugin host (e.g. with
+`--used-by` or `--required-symbol`/`--required-symbols`), also add
+`"full_verdict"` with that same run's library-wide verdict (the same
+vocabulary as `verdict`) — the two answer different questions and can
+legitimately differ. Omit `full_verdict` entirely for an unscoped comparison.
 """
 
 #: `python -m abicheck ...` is a documented, supported entry point

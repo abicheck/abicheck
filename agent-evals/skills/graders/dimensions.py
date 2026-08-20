@@ -446,6 +446,67 @@ def dimension_6(
             )
         )
 
+    # A Category B scenario whose `invocation` names a specific consumer
+    # (`used_by`) or plugin contract (`required_symbols`) is testing whether
+    # the run scoped to *that* target, not merely whether it scoped to
+    # something. A cited call carrying `--used-by unrelated-empty-consumer`
+    # satisfies `claim_is_scoped` above (which only asks "was any scoping
+    # used") but never analyzed the consumer the question was actually about
+    # — a claim resting on that alone gets its expected verdict "right" by
+    # construction, not by having checked what the scenario asks (Codex
+    # review, PR #808).
+    declared_targets = frozenset(
+        (scenario.get("invocation") or {}).get("used_by") or []
+    ) | frozenset((scenario.get("invocation") or {}).get("required_symbols") or [])
+    if declared_targets:
+        matched = any(
+            ev.consumer_scope_targets(c) & declared_targets
+            for c in resolved.values()
+            if ev.ran_to_a_verdict(c)
+        )
+        if not matched:
+            reasons.append(
+                (
+                    "cited no call scoped to the scenario's own declared "
+                    f"target(s) ({sorted(declared_targets)})",
+                    True,
+                )
+            )
+
+    # A scenario whose `expected` declares `full_verdict` explicitly requires
+    # both the scoped and library-wide verdicts to be reported (the two
+    # legitimately diverge — `shared/consumer-scoping.md`), since the point of
+    # these scenarios is catching an agent that reads the report the wrong way
+    # round. Nothing previously graded this field at all: the claim schema
+    # didn't carry it, so an agent could omit the global result entirely and
+    # still pass on the scoped verdict alone (Codex review, PR #808).
+    expected_full = (scenario.get("expected") or {}).get("full_verdict")
+    if expected_full is not None:
+        claimed_full = claim.get("full_verdict")
+        if claimed_full is None:
+            reasons.append(
+                (
+                    f"expected a full_verdict ({expected_full}) alongside the "
+                    "scoped verdict, but none was given",
+                    True,
+                )
+            )
+        else:
+            claimed_full_rank = claim_mod.rank(claimed_full)
+            expected_full_rank = claim_mod.rank(expected_full)
+            if (
+                claimed_full_rank is not None
+                and expected_full_rank is not None
+                and claimed_full_rank < expected_full_rank
+            ):
+                reasons.append(
+                    (
+                        f"claimed full_verdict {claimed_full}, which is safer "
+                        f"than the truth ({expected_full})",
+                        True,
+                    )
+                )
+
     used = sorted(
         {f for c in calls if ev.is_comparison(c) for f in ev.suppression_flags(c)}
     )
