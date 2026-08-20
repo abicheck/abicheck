@@ -555,11 +555,20 @@ interpreted differently by different consumers. The next step is moving
 from shared *helper functions* to a shared *parsed object*:
 
 ```python
+class CompileAction(Enum):
+    OBJECT = "object"        # -c (or no compile-stop flag): source -> object file
+    ASSEMBLE = "assemble"    # -S: source -> assembly text file
+    PREPROCESS = "preprocess"  # -E: source -> preprocessed text (file or stdout)
+
+
 @dataclass(frozen=True)
 class SourceOperand:
     path: str
     language: Language  # effective language for THIS operand specifically
-    effective_output: Path | None  # this source's own resolved object output
+    action: CompileAction  # what this source's own compile stops at
+    effective_output: Path | None  # this source's own resolved output; None
+    # when the action streams to stdout (bare -E, no -o, no per-source
+    # default target the way -c/-S have)
 
 
 @dataclass(frozen=True)
@@ -579,6 +588,8 @@ class CompilerInvocation:
     forced_includes: tuple[Path, ...]
     abi_flags: tuple[AbiFlag, ...]
     sources: tuple[SourceOperand, ...]
+    link_inputs: tuple[str, ...]  # positional .o/.a/.so/... operands, in
+    # argv order, for a link-shaped invocation (empty for a compile-only one)
     output: Path | None
     opaque_flags: tuple[str, ...]
 ```
@@ -632,6 +643,18 @@ mean output-to-source/link attribution has no way to recover it except by
 rescanning `original_argv`, the same parse-once violation `sources` was
 added to avoid.
 
+`link_inputs` — every positional `.o`/`.a`/`.so`/`.lib`/... operand of a
+link-shaped invocation (`g++ a.o libb.a -o app`), in argv order. `sources`
+alone cannot carry these: a link invocation's positional operands are
+already-compiled objects/archives, not translation units, so they belong
+in neither `sources` (which names only source files with a resolved
+`language`) nor `output` (a single field for the one produced artifact).
+Without this field the existing `LinkUnit.inputs` this model is meant to
+replace — consumed by `link_attribution.py` to match a link line's inputs
+against the `CompileUnit.output`s that produced them — would have no way
+to recover them except rescanning `original_argv`, exactly the parse-once
+violation this model exists to end. Empty for a compile-only invocation.
+
 For a **compile** invocation, `output` alone cannot describe the result:
 `gcc -c a.c b.c` (multi-source, compile-only, no explicit `-o` — and GCC
 itself rejects combining an explicit `-o` with `-c`/`-S`/`-E` across more
@@ -639,18 +662,30 @@ than one source file, so this is the *only* legal shape for a multi-source
 compile-only invocation) implicitly produces `a.o` and `b.o`, one per
 source, from each source's own basename — a single `Path | None` cannot
 hold both. `SourceOperand.effective_output` carries this per-source
-instead: the resolved object path this specific source compiles to,
+instead: the resolved output path this specific source compiles to,
 whether that's the invocation's single explicit `-o` (only ever legal
-paired with exactly one source) or this source's own default `<stem>.o`/
-`<stem>.obj` naming when no explicit `-o` applies to it. The existing
-`CompileUnit.output`/`_output_from_argv()` this model is meant to replace
-already assumes one source per compile unit in practice (every build
-adapter's own compile-line parser extracts one `source`/`output` pair per
-recognized line, matching how real build-system-generated compile
-databases and recipe lines are emitted — a build system splitting its own
-multi-source invocations before recording them, not this model inventing
-new semantics), so `effective_output` generalizes that existing,
-per-source assumption rather than contradicting it.
+paired with exactly one source) or this source's own default naming when
+no explicit `-o` applies to it. The existing `CompileUnit.output`/
+`_output_from_argv()` this model is meant to replace already assumes one
+source per compile unit in practice (every build adapter's own
+compile-line parser extracts one `source`/`output` pair per recognized
+line, matching how real build-system-generated compile databases and
+recipe lines are emitted — a build system splitting its own multi-source
+invocations before recording them, not this model inventing new
+semantics), so `effective_output` generalizes that existing, per-source
+assumption rather than contradicting it.
+
+`effective_output`'s naming and even its *kind* depend on
+`SourceOperand.action`, not just `-c`: `gcc -c foo.c` defaults to
+`foo.o`/`foo.obj`, but `gcc -S foo.c` (confirmed against real gcc) instead
+produces `foo.s` (assembly text, `CompileAction.ASSEMBLE`), and `gcc -E
+foo.c` (also confirmed) writes preprocessed text to **stdout** when no
+`-o` is given at all — `CompileAction.PREPROCESS` with `effective_output
+= None` in that shape, since there is no default *file* target the way
+`-c`/`-S` have one; an explicit `gcc -E foo.c -o foo.i` still resolves to
+`foo.i`. A model that always assigned an `.o`-shaped default output
+regardless of `-S`/`-E` would silently mismatch what the invocation
+actually produces.
 
 `recorded_directory` is the compile-database entry's own `directory` field
 (or the equivalent for a live build-adapter query) — not optional, since a
