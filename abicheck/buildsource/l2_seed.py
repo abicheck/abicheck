@@ -531,6 +531,30 @@ def _merge_l3_compile_context(
             # than silently dropped.
             explicit_tail.append(explicit.gcc_options)
     derived_rest, derived_includes = _split_include_tokens(derived.gcc_option_tokens)
+    # Drop a derived include-search pair whose directory is already covered
+    # by *explicit*'s own include-search entries -- both the structured
+    # ``--sysroot=``/``gcc_options`` string just folded into `explicit_tail`
+    # and `explicit.gcc_option_tokens` itself can independently carry an
+    # ``-I``/``-isystem`` for the same directory `derived` resolves too (the
+    # legacy ``-p``/``--compile-db`` matcher and this P0.3 fold both derive
+    # from the *same* compile database when a caller's ``--build-info``
+    # doubles as both). Left undeduped, the merged `gcc_option_tokens`
+    # carries the identical include-search flag twice -- confirmed via a
+    # minimal, castxml-free repro (AGENTS.md's L3->L2-fold "nineteenth
+    # finding") -- and `_context_flags`'s own separate include-path
+    # rendering plus this legacy string can jointly produce an
+    # `include_sequence` a `scan --against` candidate resolution (whose
+    # single-pass fold never double-derives the same directory) never
+    # reproduces for the identical project. "Explicit wins, searches
+    # first" is unaffected: only the later, redundant `derived` copy is
+    # dropped, never the earlier explicit one.
+    from ..header_utils import drop_include_tokens_duplicating_paths
+
+    derived_includes = tuple(
+        drop_include_tokens_duplicating_paths(
+            derived_includes, explicit_tail + list(explicit.gcc_option_tokens)
+        )
+    )
     return dataclasses.replace(
         explicit,
         sysroot=None,

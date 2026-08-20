@@ -1871,6 +1871,109 @@ Once a root command genuinely clears the bar above, pick the right home:
   that a fresh `scan --against` still can't cleanly compare to, the same
   problem this diagnostic exists to catch, not fix.
 
+  **Two real mechanisms found and fixed by actually inspecting the
+  differing `include_sequence` token values, using a minimal, castxml-free
+  local repro (a `g++`-compiled one-header library + a hand-written
+  `compile_commands.json`, `--ast-frontend clang`) rather than a live
+  Bazel/castxml run — the repro this whole footnote's own "not fixed here"
+  note said was the missing prerequisite.** Both are real instances of
+  candidate (b) above (a duplicated `-I`/`-isystem` entry), reached from
+  two different composition points, neither previously identified:
+  (1) `perform_elf_dump`'s own `extra_includes=eff_includes + inc_extra`
+  (and `service_header_scoped._try_header_scoped_dump`'s identical
+  `eff_includes += inc_extra`) concatenate two independently-derived
+  include-dir lists with no dedup — fixed with a new
+  `header_utils.dedup_paths_preserve_order()`, applied at both composition
+  sites. (2) The load-bearing one for this specific repro:
+  `l2_seed._merge_l3_compile_context`'s `derived_includes` (the P0.3 fold's
+  own derived compile-unit include dirs) and the caller's own *explicit*
+  `gcc_options`/`gcc_option_tokens` can independently carry an `-I` for the
+  identical directory — concretely, a `--build-info` compile database is
+  matched *both* by this fold's own resolver *and* by the pre-existing
+  legacy `-p`/`--compile-db` auto-match mechanism that populates
+  `perform_elf_dump`'s `effective_gcc_options` string before the fold ever
+  runs, so the same directory reaches the merged `gcc_option_tokens` twice:
+  once via `explicit_tail` (the split `gcc_options` string) and once via
+  `derived_includes`. Confirmed via direct inspection of both
+  `CompileContext` objects the merge receives (`explicit.gcc_options`
+  literally contained `"-I <dir>"`, `derived.gcc_option_tokens` literally
+  contained `("-I", "<dir>", ...)`  for the same `<dir>`) — not
+  reconstructed from `diff.reason` alone, closing exactly the evidentiary
+  gap the "Two further Codex review rounds" paragraph above says was still
+  missing. Fixed with a new `header_utils.drop_include_tokens_duplicating_
+  paths()`, which drops a `derived_includes` pair whose directory already
+  appears among `explicit_tail + explicit.gcc_option_tokens`'s own
+  include-search operands — "explicit wins, searches first" is unaffected,
+  since only the later, redundant `derived` copy is ever dropped. Verified
+  end to end: the real compiler argv `dump` sends to clang no longer
+  repeats `-I <dir>`, and a fresh `dump` baseline's `ast_compile_args` now
+  matches a `scan --against` candidate's own (both carry exactly one `-I
+  <dir>` for the matched project directory) — see
+  `tests/test_build_context_completeness.py`'s
+  `TestDedupIncludeDirsAcrossCompositionSites`/
+  `TestMergeL3CompileContextDropsDuplicateExplicitInclude`.
+
+  **A Codex review round on the same PR found the first version of this
+  fix class-blind, and it was fixed before merge.** `drop_include_tokens_
+  duplicating_paths()`'s first cut matched purely on resolved directory,
+  ignoring which include-search *class* (`-I`/`-isystem`/`-iquote`/
+  `-idirafter`) each entry belonged to — but a real compiler consults
+  those as distinct search buckets in a fixed order regardless of argv
+  position (the identical class-blindness `_split_include_tokens`'s own
+  docstring already documents as a known gap one function over), so
+  dropping an `-isystem <dir>` merely because an unrelated `-I <dir>`
+  existed elsewhere could change which bucket that directory is searched
+  from for a colliding header basename — concretely, `-I A -I B -isystem
+  A` resolves a colliding name from `B`, while the class-blind rewrite
+  `-I A -I B` resolves it from `A` instead. Fixed by making the dedup key
+  `(flag-class, resolved directory)` rather than the directory alone, via
+  a new `_include_class_path_pairs()` shared by both the "already
+  covered" side and the token walk being filtered — see
+  `TestDedupIncludeDirsAcrossCompositionSites::
+  test_drop_include_tokens_duplicating_paths_is_class_sensitive`. Both
+  call sites' "already covered" argument changed shape accordingly (raw
+  tokens, not bare `Path`s) so the class of an *already-emitted* entry is
+  never lost either.
+
+  **Not fully closed — a third, deeper mechanism survives and still
+  reproduces `NOT_COMPARABLE` on `include_sequence` for the identical
+  repro, confirmed by direct inspection after the two fixes above.** Even
+  with both duplicate-`-I` bugs fixed, `dump`'s baseline and `scan`'s
+  candidate still disagree, because the matched directory reaches
+  `declared_includes` (the sole source `dumper_contract.
+  _attach_extraction_contract` builds `include_sequence`'s slots from) via
+  **structurally different channels on the two paths** rather than merely
+  differing in count: on `dump`, the legacy `-p`/`--compile-db` match
+  supplies the directory as part of `effective_gcc_options` *before* the
+  L2 seed ever runs, and `seed_l2_includes`'s own suppression rule
+  (correctly) declines to seed a directory when explicit context already
+  supplies one — so the directory reaches the parse only through
+  `gcc_option_tokens`, and `eff_includes`/`declared_includes` stays empty
+  for it. `scan_engine._build_new_snapshot` has no equivalent legacy `-p`
+  step at all — nothing pre-populates `effective_gcc_options` before its
+  own fold runs, so the identical directory reaches the *same* fold's L2
+  seed unsuppressed, landing in `eff_includes`/`declared_includes` instead.
+  Two structurally different `declared_includes` — empty vs. one entry —
+  for the same real include root is exactly what `include_sequence` is
+  built to detect, so it correctly (if unhelpfully) still fires. **Not
+  fixed here**: closing it needs a design decision this pass did not have
+  standing to make on its own — either `dump`'s CLI stops running the
+  legacy `-p`/`--compile-db` auto-match whenever `--build-info` already
+  feeds the new P0.3 fold (the two have overlapped, silently, since the
+  fold was introduced — this pass is the first evidence either mechanism's
+  *placement choice* for a resolved directory is externally observable,
+  not just its content), or `scan`'s candidate resolution gains an
+  equivalent legacy-match step so both paths agree on *which* channel
+  supplies a matched directory, not merely that they supply the same one.
+  Either is a real, cross-cutting change to which of two established
+  mechanisms wins for a `dump`-only surface `scan` has no counterpart to
+  — not a mechanical follow-up to either dedup fix above. Confirmed via
+  the same local repro: after both fixes, `dump`'s `ast_compile_args`
+  still carries `-I <dir>` (via `gcc_option_tokens`) while `declared_
+  includes` is empty; `scan`'s candidate carries the identical `-I <dir>`
+  via `declared_includes` instead — same effective compiler argv, still a
+  real `profile_fingerprint`/`include_sequence` disagreement.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
