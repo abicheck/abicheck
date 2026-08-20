@@ -220,7 +220,23 @@ def _gate_scope_str(result: Any) -> str:
     ``result.required_symbols``'s ``required_entrypoints``) the renderer
     itself already serializes -- not a second traversal of the underlying
     ``AppCompatResult``/``PluginHostContractResult`` objects. ``""`` when no
-    scoping was requested at all, the common case."""
+    scoping was requested at all, the common case.
+
+    **Known, deliberate limitation** (Codex review, PR #803, fresh
+    evidence): for ``used_by``, ``targets`` identifies each consumer only
+    by its ``app`` *path*, not its content -- if the binary at that path is
+    rebuilt in place between two runs, ``scope_diff_to_app`` can select a
+    genuinely different set of findings while this field (and the digest)
+    stay identical. Not fixed here: closing it would mean this
+    file-content-free fingerprint module reading and hashing an arbitrary
+    consumer binary at digest-computation time -- a real I/O/cost decision
+    (every report generation would hash every ``--used-by`` app, however
+    large) and a real design question (a full-file hash, or a narrower
+    identity of only the imports/symbols this scoping actually reads) that
+    ``AppCompatResult``/``_app_compat_summary`` don't carry any answer for
+    today. Left as a known gap rather than a reactive file-hashing patch,
+    per this repo's own "known gaps over risky reactive patches"
+    convention (AGENTS.md)."""
     gate_scope = getattr(result, "gate_scope", None)
     if gate_scope is None:
         return ""
