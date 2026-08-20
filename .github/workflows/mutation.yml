@@ -283,6 +283,7 @@ jobs:
           name: mutmut-results
           path: |
             mutmut-real-parser-pytest.txt
+            mutmut-run-output.txt
             mutmut-results.txt
             mutation-receipt.json
             mutation-baseline.json

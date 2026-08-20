@@ -851,8 +851,12 @@ def test_an_aborted_mutmut_run_fails_even_with_readable_results(
         return (_TWO_MODULES, 0)  # a perfectly readable stale database
 
     monkeypatch.setattr(gate, "_run_mutmut", fake)
+    monkeypatch.chdir(tmp_path)
     assert gate.main(["--run", "--baseline", "99"]) == 1
-    assert "the run aborted" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "the run aborted" in output
+    assert "saved full mutmut run output" in output
+    assert (tmp_path / "mutmut-run-output.txt").read_text() == "config error: nothing to mutate"
 
 
 def test_a_successful_run_with_survivors_is_still_measured(

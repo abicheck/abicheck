@@ -461,6 +461,17 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
         tail = "\n".join(run_out.splitlines()[-5:])
         print(f"mutation-score: mutmut run tail:\n{tail}")
         if run_rc != 0:
+            # The tail makes routine CI output compact, but it often omits the
+            # pytest node and traceback which made mutmut's clean-test pass
+            # abort. Keep the complete diagnostic for the workflow artifact;
+            # do not try to score its partial/stale results below.
+            diagnostic = Path("mutmut-run-output.txt")
+            try:
+                diagnostic.write_text(run_out, encoding="utf-8")
+            except OSError as e:
+                print(f"WARNING: could not save mutmut run output: {e}")
+            else:
+                print(f"mutation-score: saved full mutmut run output to {diagnostic}")
             # Fail here rather than reading results: with a restored cache the
             # results on disk may be a previous commit's, and they would look
             # perfectly complete.
