@@ -287,14 +287,38 @@ already found and fixed once (a re-derived scheme let a severity-only gate
 pack silently override an explicit `--exit-code-scheme legacy`). Both
 fields feed the digest.
 
-consumed directly by `compare`, `scan`, the release fan-out, and bundle/
-matrix findings alike, with the resolver remaining the *only* place D7's
-precedence order (`explicit_cli/api_request > legacy_alias > run_recipe >
-run_profile > project_config > built_in_default`) is decided. The digest
-becomes a real parity key: same normalized request + same effective-config
-digest ⇒ same policy/gate interpretation, everywhere. (The reporter's
-existing effective-configuration digest, landed for PR B, is a real,
-narrower precursor to this — see "Relationship to in-flight work" below.)
+This object is consumed directly by `compare`, `scan`, the release
+fan-out, and bundle/matrix findings alike, with the resolver remaining the
+*only* place D7's precedence order (`explicit_cli/api_request >
+legacy_alias > run_recipe > run_profile > project_config >
+built_in_default`) is decided. The digest becomes a real parity key: same
+normalized request + same effective-config digest ⇒ same policy/gate
+interpretation, everywhere. (The reporter's existing effective-configuration
+digest, landed for PR B, is a real, narrower precursor to this — see
+"Relationship to in-flight work" below.)
+
+"Bundle findings alike" is not aspirational here — it names a real,
+already-documented gap this phase has to close, not just avoid repeating.
+AGENTS.md's own "Known gaps" entry ("Bundle-level (cross-library) findings
+on a directory/package `compare` never respect any policy override")
+records that `bundle.compare_bundle()` computes `BundleDiffResult.
+bundle_verdict` via `checker_policy.compute_verdict(changes)` with no
+`policy=` argument at all — always the hardcoded `strict_abi` default —
+while `_run_bundle_analysis`/`_collect_bundle_result`
+(`cli_compare_release_helpers.py`) have no policy/`PolicyFile` parameter
+either. So a release-wide `--policy`, `--policy-file`, or a `kind: policy`
+pack overriding a `BUNDLE_*` kind reaches every *per-library* finding
+correctly but silently leaves bundle-level findings (`bundle_library_
+removed`, `bundle_intra_dep_removed`, ...) governed by the built-in policy —
+a bundle finding can keep a release's worst-of verdict at `BREAKING` even
+after the same kind was demoted or ignored everywhere else. Phase 2 closes
+this specifically by having `compare_bundle`/`_run_bundle_analysis`/
+`_collect_bundle_result` accept and classify against the same
+`EffectiveEvaluationConfig` every per-library comparison already uses,
+rather than a bundle-specific policy parameter threaded through in
+isolation — with test coverage asserting policy parity between a release's
+per-library and bundle-level verdicts for the same run, which is the gap
+the AGENTS.md entry names as still open.
 
 ### P0 — Exit and gate decisions
 
@@ -833,16 +857,22 @@ paths, or resource lifetime differently from everything else.
 
 **Comparison equivalence.** For one comparison, native `compare`, `scan
 --against`'s own nested baseline comparison, release per-library compare,
-the Python API, `appcompat.check_appcompat()`'s pre-scope
-`compare_snapshots()` call (before its own `scope_diff_to_app()` step
-applies app-usage narrowing), each dependency pair's `_run_abi_diff()`
-inside `deps compare`, and `compat`'s ABICC adapter's own comparison
-*before* its intentional strict/source-only/new-symbol-warning
-transformations (`compat/_helpers.py`'s `_apply_strict()` and siblings)
-apply must produce identical: canonical finding IDs
-(`finding_identity.py`); effective verdicts; configuration digest; contract
-decisions; assurance decisions; compatibility exit contribution. Naming
-appcompat, `deps compare`, and ABICC's pre-transformation comparison here
+release's own global probe-matrix comparison (when `compare-release`
+receives `--probe-matrix-old`/`--probe-matrix-new`,
+`cli_compare_release._collect_matrix_result()` separately loads
+suppression/policy/pack state and calls `compare_snapshots()` over
+synthetic snapshots carrying `extra_changes` — a comparison distinct from
+every per-library one this same command also runs), the Python API,
+`appcompat.check_appcompat()`'s pre-scope `compare_snapshots()` call
+(before its own `scope_diff_to_app()` step applies app-usage narrowing),
+each dependency pair's `_run_abi_diff()` inside `deps compare`, and
+`compat`'s ABICC adapter's own comparison *before* its intentional
+strict/source-only/new-symbol-warning transformations
+(`compat/_helpers.py`'s `_apply_strict()` and siblings) apply must produce
+identical: canonical finding IDs (`finding_identity.py`); effective
+verdicts; configuration digest; contract decisions; assurance decisions;
+compatibility exit contribution. Naming appcompat, `deps compare`,
+release's matrix comparison, and ABICC's pre-transformation comparison here
 matters independently of Phase 1's own migration list — that phase, and
 Phase 5's ABICC migration, only guarantee their *extraction* moves onto the
 shared pipeline; without this equivalence test also covering their
