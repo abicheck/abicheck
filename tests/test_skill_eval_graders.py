@@ -444,6 +444,49 @@ class TestEvidenceReading:
         )
         assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
 
+    def test_only_scoped_drops_unscoped_calls_from_the_reckoning(self, tmp_path):
+        """An unscoped compare answers a different question than a `--used-by`
+        one — `only_scoped` must not let its report dominate the scoped
+        answer, even though it is the more severe of the two."""
+        calls = [
+            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
+            a_breaking_call(
+                1, argv=["compare", "old.so", "new.so", "--used-by", "app"]
+            ),
+        ]
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                ),
+            },
+        )
+        assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
+        assert (
+            ev.strongest_reported_verdict(run, calls, only_scoped=True)
+            == "COMPATIBLE"
+        )
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compare", "old.so", "new.so", "--used-by", "app"],
+            ["compare", "old.so", "new.so", "--required-symbol", "sym"],
+            ["compare", "old.so", "new.so", "--required-symbols", "syms.txt"],
+        ],
+    )
+    def test_is_consumer_scoped_recognizes_every_dial(self, argv):
+        assert ev.is_consumer_scoped({"argv": argv})
+
+    def test_is_consumer_scoped_false_for_an_unscoped_call(self):
+        assert not ev.is_consumer_scoped(
+            {"argv": ["compare", "old.so", "new.so"]}
+        )
+
 
 class TestDimensionOne:
     def test_dumping_both_sides_is_not_choosing_the_workflow(self, tmp_path):
@@ -761,6 +804,50 @@ class TestDimensionSix:
             tmp_path,
             envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
             SCENARIO_COMPATIBLE,
+            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
+        )
+        assert result.status == "fail"
+        assert any("own report" in r for r in result.reasons)
+
+    def test_a_scoped_claim_is_not_held_to_an_earlier_unscoped_report(self, tmp_path):
+        """The skill's own worked example: run the global comparison, then
+        narrow via `--used-by`, and report the *scoped* answer. An earlier,
+        more severe unscoped report of the same pair must not fail a claim
+        that correctly cites the scoped call — that is a different question,
+        not a milder report of the same one (Codex review, PR #808)."""
+        calls = [
+            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
+            a_breaking_call(
+                1, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            ),
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[1], confident=True),
+            SCENARIO_COMPATIBLE,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                ),
+            },
+        )
+        assert result.status == "pass", result.reasons
+
+    def test_a_scoped_claim_is_still_held_to_its_own_scoped_report(self, tmp_path):
+        """Restricting the reckoning to scoped calls must not exempt a claim
+        from the severity of the scoped call it actually cites."""
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
+            SCENARIO_COMPATIBLE,
+            calls=calls,
             artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
         )
         assert result.status == "fail"

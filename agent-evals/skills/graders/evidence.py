@@ -436,6 +436,23 @@ def suppression_flags(call: dict) -> list[str]:
     return sorted(set(used))
 
 
+#: The dials `shared/consumer-scoping.md` documents. A call carrying any of
+#: these answers a *different* question from an unscoped comparison of the
+#: same pair — "does it break this consumer", not "does it break someone" —
+#: and per that doc the two verdicts "legitimately diverge in both
+#: directions", so neither is a filtered view of the other.
+CONSUMER_SCOPE_FLAGS = ("--used-by", "--required-symbol", "--required-symbols")
+
+
+def is_consumer_scoped(call: dict) -> bool:
+    """Whether this call named a consumer/host, narrowing the question asked."""
+    for token in call.get("argv", []):
+        for flag in CONSUMER_SCOPE_FLAGS:
+            if token == flag or token.startswith(f"{flag}="):
+                return True
+    return False
+
+
 def _artifact_texts(run_dir: Path, call: dict) -> list[str]:
     """Everything this call produced that could carry a verdict."""
     texts: list[str] = []
@@ -477,11 +494,26 @@ def reported_verdict(run_dir: Path, call: dict) -> str | None:
     return None if severest is None else VERDICT_ORDER[severest]
 
 
-def strongest_reported_verdict(run_dir: Path, calls: list[dict]) -> str | None:
-    """The most severe verdict any real comparison in this run produced."""
+def strongest_reported_verdict(
+    run_dir: Path, calls: list[dict], *, only_scoped: bool = False
+) -> str | None:
+    """The most severe verdict any real comparison in this run produced.
+
+    `only_scoped` restricts the reckoning to consumer-scoped calls
+    (`is_consumer_scoped`) — for a claim that answers a scoped question, an
+    earlier *unscoped* comparison of the same pair is not a milder report of
+    the same fact to be held against it, it is the answer to a different
+    question (`shared/consumer-scoping.md`: "Neither direction is a filtered
+    view of the other"). Suppression-style gaming *within* the scoped calls
+    themselves — running two differently-scoped calls and citing the milder
+    one — is unaffected: this only drops unscoped calls from consideration,
+    never a scoped one.
+    """
     severest: int | None = None
     for call in calls:
         if not ran_to_a_verdict(call):
+            continue
+        if only_scoped and not is_consumer_scoped(call):
             continue
         verdict = reported_verdict(run_dir, call)
         if verdict is None:

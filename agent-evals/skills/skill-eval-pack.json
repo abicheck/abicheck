@@ -275,7 +275,7 @@
       ],
       "architectures": [],
       "category": "B",
-      "digest": "sha256:56cfcc88fa0d1bbd808afc7ab699017d2e4657e92b9709e9ca2d366d1ee3609c",
+      "digest": "sha256:83d83c38e4794f273b7736b6fbec834e530acd61eb829059ddfa07567620c9ea",
       "expected": {
         "uncertainty": "not_comparable",
         "verdict": null
@@ -421,7 +421,7 @@
       "affects": [
         "review-native-library-change"
       ],
-      "digest": "sha256:682964bc9e353475da5cea3bbb51a4ee4a3c8150479c9ee3088cd80944cc7816",
+      "digest": "sha256:878f2ca826d4dcdbf01df3da46f4de8712bab15d5d3fd6b05fd6ba71d67c532f",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",

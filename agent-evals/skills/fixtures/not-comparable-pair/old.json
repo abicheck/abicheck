@@ -221,7 +221,6 @@
   "build_source": {
     "manifest": {
       "build_source_pack_version": 1,
-      "abicheck_version": "",
       "created_at": "",
       "source_root": {
         "path_redacted": true,

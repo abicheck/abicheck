@@ -408,7 +408,19 @@ def dimension_6(
             (f"claimed {claimed}, which is safer than the truth ({expected})", True)
         )
 
-    reported = ev.strongest_reported_verdict(run_dir, calls)
+    # A claim resting on a consumer-scoped call (`--used-by`/`--required-
+    # symbol(s)`) answers a narrower question than an unscoped comparison of
+    # the same pair, and the two verdicts legitimately diverge in either
+    # direction (`shared/consumer-scoping.md`). Holding a correctly-scoped
+    # claim to the severity of an earlier, unscoped compare the workflow ran
+    # first would fail the exact worked example the skill's own docs give.
+    # Only drop unscoped calls from the reckoning — gaming *within* scoped
+    # calls (citing the milder of two differently-scoped runs) still counts.
+    resolved, _dangling = _cited(calls, claim)
+    claim_is_scoped = any(ev.is_consumer_scoped(c) for c in resolved.values())
+    reported = ev.strongest_reported_verdict(
+        run_dir, calls, only_scoped=claim_is_scoped
+    )
     reported_rank = claim_mod.rank(reported)
     if (
         claimed_rank is not None

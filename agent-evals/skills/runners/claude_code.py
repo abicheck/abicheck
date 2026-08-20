@@ -326,7 +326,23 @@ _LEAK = re.compile("|".join(re.escape(t) for t in _LEAK_TERMS), re.IGNORECASE)
 
 #: Text this scan can read. A compiled artifact or an image is not answer-
 #: bearing prose, and decoding one as text produces noise rather than findings.
-_SCANNED_SUFFIXES = (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".md", ".txt")
+#: `.json` is included because a Category B fixture can ship a pre-dumped
+#: snapshot (`not-comparable-pair/{old,new}.json`) that lands in the
+#: workspace verbatim — and a real `AbiSnapshot`'s own field names (e.g.
+#: `build_source.manifest.abicheck_version`) name the tool even when the
+#: value is blank, since it is the *key* the scan is looking for.
+_SCANNED_SUFFIXES = (
+    ".c",
+    ".h",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".hpp",
+    ".hh",
+    ".md",
+    ".txt",
+    ".json",
+)
 
 #: Translation units whose comments are stripped on the way into a workspace.
 SOURCE_SUFFIXES = (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh")
