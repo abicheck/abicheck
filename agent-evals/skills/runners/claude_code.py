@@ -451,6 +451,33 @@ def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
         )
 
 
+#: Skill directory names this repo has published and then retired.
+#:
+#: A machine running this harness can still have one of these installed at
+#: user scope (e.g. a checkout from before ADR-058's 2026-08-20
+#: portfolio-reset amendment, or a stale `~/.claude/skills/` copy) even
+#: though its directory no longer exists in the *current* checkout. Reading
+#: only the checkout's live `skills-src/`-derived directories would silently
+#: drop such a skill from `visible_native_skills`'s filter — an `init` event
+#: naming it would simply disappear, and `check_treatment` would then accept
+#: a baseline run that could actually see a (retired) treatment skill, or a
+#: skill run whose visible skill list looks like exactly `[scenario["skill"]]`
+#: while a second, retired skill was also visible and silently filtered out.
+#: Either way the isolation this harness exists to prove would be
+#: contaminated without any visible sign of it. Keeping the retired names
+#: here — alongside the dynamically discovered current ones — means a
+#: leftover installation is *never* hidden, only ever surfaced (and then
+#: correctly rejected by `check_treatment`).
+_RETIRED_SKILL_NAMES = frozenset(
+    {
+        "native-binary-compatibility-review",  # renamed -> review-native-library-change
+        "native-api-evolution",
+        "native-consumer-compatibility",
+        "native-release-compatibility",
+    }
+)
+
+
 def _published_skill_names() -> set[str]:
     """The skill directories actually published under `PUBLISHED_SKILLS`.
 
@@ -469,16 +496,20 @@ def _published_skill_names() -> set[str]:
 
 
 def visible_native_skills(events: list[dict]) -> list[str] | None:
-    """The published skills the CLI reported seeing, or None if it never said.
+    """The published or formerly-published skills the CLI reported seeing.
 
     `None` and `[]` are different answers and must not collapse: an absent
     `init` event means the treatment is unverified, while an empty list is
     positive evidence that the baseline arm saw nothing.
+
+    Filters against `_published_skill_names() | _RETIRED_SKILL_NAMES`, not
+    the current checkout's published names alone — see `_RETIRED_SKILL_NAMES`
+    for why a retired name must never be silently dropped from this list.
     """
-    published = _published_skill_names()
+    conflicting = _published_skill_names() | _RETIRED_SKILL_NAMES
     for event in events:
         if event.get("type") == "system" and event.get("subtype") == "init":
-            return sorted(s for s in event.get("skills", []) if s in published)
+            return sorted(s for s in event.get("skills", []) if s in conflicting)
     return None
 
 
