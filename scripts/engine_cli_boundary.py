@@ -330,6 +330,29 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                         continue
                     if resolved == base_dir / alias_name:
                         continue
+                    # A different genuine first-party module -- not
+                    # base_dir's own submodule -- can still itself be a
+                    # real CLI-frontend module (`from abicheck.cli import
+                    # main as cli`, or a nested adapter like
+                    # `abicheck.compat.cli`): importing it already
+                    # constitutes the dependency this check exists to
+                    # catch, independent of whether it also happens to
+                    # shadow base_dir's own same-named submodule. Treated
+                    # as NOT a shadow (falls through, same as the two
+                    # self-reference cases above) rather than as a real
+                    # break in the shadow chain, so the caller's own
+                    # on-disk existence check for base_dir's literal
+                    # alias_name submodule still gates the final verdict.
+                    # Only counts when the resolved path is itself a real,
+                    # on-disk module -- an unresolvable/hypothetical path
+                    # can't be proven CLI-touching from syntax alone.
+                    mod_components = stmt.module.split(".")
+                    if (
+                        mod_components[0] == "abicheck"
+                        and any(_is_cli_component(c) for c in mod_components[1:])
+                        and (resolved.with_suffix(".py").is_file() or resolved.is_dir())
+                    ):
+                        continue
                 return True
     return False
 

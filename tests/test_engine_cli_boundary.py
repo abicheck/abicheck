@@ -535,6 +535,39 @@ def test_importfrom_reexport_through_sibling_direct_from_submodule_still_flagged
     assert "scan_engine.py" in errors[0]
 
 
+def test_absolute_reexport_of_a_different_real_cli_module_still_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`engine_pkg19/__init__.py` does `from abicheck.cli import main as
+    cli` — an absolute import of a *different* genuine first-party CLI
+    module (the top-level `abicheck/cli.py`), not `engine_pkg19`'s own
+    `cli.py` submodule. `engine_pkg19` also happens to have its own,
+    unrelated `cli.py` file on disk, so `from .engine_pkg19 import cli`
+    resolves to the real `abicheck/cli.py` module (shadowing
+    `engine_pkg19`'s own submodule) — still a genuine engine->CLI-frontend
+    dependency, just reached through a different real module than the one
+    literally named `engine_pkg19/cli.py`. Must still be flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli.py").write_text("def main() -> None:\n    pass\n")
+    engine_pkg = pkg / "engine_pkg19"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# unrelated, never actually reached\n")
+    (engine_pkg / "__init__.py").write_text("from abicheck.cli import main as cli\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg19 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    assert len(errors) == 1
+    assert "scan_engine.py" in errors[0]
+
+
 def test_importfrom_directly_from_the_real_submodule_still_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
