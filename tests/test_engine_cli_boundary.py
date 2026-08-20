@@ -75,11 +75,9 @@ def test_allowlist_entries_are_real_sites() -> None:
             tree = gate.ast.parse(gate._read(path), filename=rel)
         except SyntaxError:
             continue
-        for node in gate.ast.walk(tree):
-            if not isinstance(node, (gate.ast.Import, gate.ast.ImportFrom)):
-                continue
-            if gate._engine_boundary_violation(node) is not None:
-                seen.add(f"{rel}:{node.lineno}")
+        seen.update(
+            key for key, _lineno, _desc in gate._engine_boundary_sites(tree, rel)
+        )
     stale = ENGINE_CLI_BOUNDARY_ALLOWLIST - seen
     assert stale == set(), f"Stale allowlist entries (no longer violate): {stale}"
 
@@ -116,6 +114,21 @@ _ENGINE_VIOLATION_CASES: list[pytest.ParameterSet] = [
         "scan_engine.py",
         "from abicheck.cli_buildsource import embed_build_source\n",
         id="scan_engine-absolute-cli-submodule",
+    ),
+    pytest.param(
+        "scan_engine.py",
+        "import abicheck.cli_dump_helpers\n",
+        id="scan_engine-absolute-import-dotted",
+    ),
+    pytest.param(
+        "service_widget.py",
+        "from abicheck import cli_dump_helpers\n",
+        id="service-from-abicheck-import-cli-name",
+    ),
+    pytest.param(
+        "artifact_plan.py",
+        "import click\n",
+        id="artifact-module-import-click",
     ),
 ]
 
@@ -156,7 +169,9 @@ def test_allowlisted_site_is_not_flagged(
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(
-        gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset({"abicheck/scan_engine.py:1"})
+        gate,
+        "ENGINE_CLI_BOUNDARY_ALLOWLIST",
+        frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
 
     findings = gate.Findings()
@@ -167,8 +182,9 @@ def test_allowlisted_site_is_not_flagged(
 def test_new_violation_in_an_allowlisted_file_is_still_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The allowlist is line-scoped, not file-scoped — a *second*, unlisted
-    import in an otherwise-allowlisted file must still fail."""
+    """The allowlist is occurrence-scoped, not file-scoped — a *second*,
+    unlisted identically-shaped import in an otherwise-allowlisted file must
+    still fail (only the first `import click` is allowlisted)."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
@@ -177,7 +193,9 @@ def test_new_violation_in_an_allowlisted_file_is_still_flagged(
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(
-        gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset({"abicheck/scan_engine.py:1"})
+        gate,
+        "ENGINE_CLI_BOUNDARY_ALLOWLIST",
+        frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
 
     findings = gate.Findings()
@@ -185,6 +203,36 @@ def test_new_violation_in_an_allowlisted_file_is_still_flagged(
     errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
     assert len(errors) == 1
     assert ":2:" in errors[0]
+
+
+def test_allowlist_key_is_stable_across_an_unrelated_edit_above_the_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point of occurrence-based keys: an edit that shifts the
+    import's line number (a new docstring, a blank line, an unrelated
+    function added above it) must NOT require rewriting the allowlist."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    key = "abicheck/scan_engine.py::import click::1"
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset({key}))
+
+    (pkg / "scan_engine.py").write_text("import click\n")
+    findings = gate.Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+    # Ten unrelated lines inserted above the import — a line-number key
+    # would now point at nothing (or a different node) and this would fail.
+    (pkg / "scan_engine.py").write_text(
+        '"""A new module docstring."""\n\n' + "\n" * 8 + "import click\n"
+    )
+    findings = gate.Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
 
 # ── Out of scope: frontends and non-engine modules are never flagged ────────
@@ -245,6 +293,7 @@ def test_engine_module_importing_service_is_not_flagged(
         ("abicheck/service_scan.py", True),
         ("abicheck/buildsource/inline.py", True),
         ("abicheck/buildsource/source_extractors/clang.py", True),
+        ("abicheck/artifact_plan.py", True),
         ("abicheck/cli.py", False),
         ("abicheck/cli_dump_helpers.py", False),
         ("abicheck/appcompat.py", False),
