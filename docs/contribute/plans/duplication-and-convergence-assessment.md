@@ -93,7 +93,9 @@ from independently reconstructing a subtly different one.
 ### P0 — Artifact extraction and evidence resolution
 
 The largest duplication and correctness risk. At least eleven
-partially-equivalent paths exist today:
+partially-equivalent paths exist today — ten user-facing operations (1–7,
+9–11) plus one internal, backend-level exception (8, the probe harness,
+called out below as not itself a user-facing operation):
 
 1. Typed dump: `DumpRequest → resolve_dump_request() → execute_dump_request()`
    (`service_dump_pipeline.py`)
@@ -124,8 +126,9 @@ partially-equivalent paths exist today:
    `run_probe_matrix(..., snapshot=True)`, the header-only-library
    compile-and-snapshot driver behind G25/G26-family evidence-tier work)
    also calls `dumper.dump()` directly on each compiled probe object.
-   Deliberately called out separately from the eleven user-facing operations
-   above, since it isn't one — see "backend-level exception" below.
+   Deliberately called out separately from the ten user-facing operations
+   above (paths 1–7, 9–11), since it isn't one — see "backend-level
+   exception" below.
 9. L0 export-delta re-extraction: `l0_export_delta.collect_l0_export_delta()`
    — invoked by both native `compare` and scan baseline reconciliation —
    independently calls `service.resolve_input()` twice with
@@ -764,8 +767,9 @@ mirroring how `scripts/check_ai_readiness.py`'s `import-cycle-growth` and
 `cli-contract` checks already work (baseline-and-shrink, not
 block-everything-immediately):
 
-1. No `scan_engine`, `service_*`, `artifact_*`, or `buildsource` engine
-   module imports `click` or `cli_*`. **Implemented**: `scripts/
+1. No `scan_engine`, `service*.py` (including bare `service.py`),
+   `artifact_*`, or `buildsource` engine module imports `click` or `cli_*`.
+   **Implemented**: `scripts/
    check_ai_readiness.py`'s `engine-cli-boundary` check (allowlist-and-shrink,
    `ENGINE_CLI_BOUNDARY_ALLOWLIST`; `tests/test_engine_cli_boundary.py`).
    Known residual gap, not yet closed: the check is AST-based and can only
@@ -781,7 +785,7 @@ block-everything-immediately):
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
    gate, which today only covers `checker.compare`).
-3. Every artifact extraction call site *for the eleven user-facing
+3. Every artifact extraction call site *for the ten user-facing
    operations named in Phase 1* routes through the future artifact
    application service. Deliberately excludes `probe_harness.
    _snapshot_object_file()`: it has no CLI/API entry point today (nothing
@@ -903,10 +907,18 @@ performance duplication (redundant inferred build queries).
 2. Move `compare` to consuming it directly.
 3. Move `scan` to the same object.
 4. Move the release fan-out off its six raw gate/severity strings.
-5. Include the effective-config digest in every report and every
+5. Move `appcompat.check_appcompat()`'s and `check_plugin_host_contract()`'s
+   own direct `compare_snapshots()` calls, and `deps compare`'s
+   `stack_checker._run_abi_diff()`'s direct `checker.compare()` call, onto
+   `EffectiveEvaluationConfig` too — without this step, the Comparison
+   equivalence acceptance test's requirement that these three paths produce
+   identical configuration digests, contract/assurance decisions, and exit
+   contributions stays unimplementable even after every other Phase 2 item
+   lands, since none of the other items touch these three call sites.
+6. Include the effective-config digest in every report and every
    aggregate input (building on the reporter's existing digest work from
    CLI-cleanup-phase-two's PR B).
-6. Keep compatibility wrappers only at public API boundaries (the typed
+7. Keep compatibility wrappers only at public API boundaries (the typed
    Python API's existing dataclasses stay stable; only their internal
    plumbing changes).
 
@@ -948,23 +960,40 @@ example-specific regression tests — this is what a token/AST-based clone
 detector cannot catch, since the class of bug this plan targets is
 different code intentionally computing the same thing.
 
-**Artifact-resolution equivalence.** For one artifact and equivalent
-options, `dump`, compare-side resolution, scan candidate resolution, ABICC
-descriptor resolution, `appcompat.check_appcompat()`'s own per-side
-resolution, `deps compare`'s per-dependency-pair resolution, release's own
-per-library extraction, `l0_export_delta.collect_l0_export_delta()`'s
-`symbols_only=True` supplementary re-extraction (invoked by both native
-`compare` and scan baseline reconciliation, independent of either side's
-primary resolution), and `scan_engine._load_exports_for_poi()`'s own
-`symbols_only=True` prepass (a third independent `resolve_input()` call
-site scan makes ahead of the primary candidate/baseline extraction, when
-export-delta POI tracking applies) must produce identical: snapshot
-semantic fingerprint;
+**Artifact-resolution equivalence.** Two tiers, since a `symbols_only=True`
+call genuinely skips work a full resolution does (`service.resolve_input()`
+guards its header-graph attach and debug-info resolution behind `and not
+symbols_only`) — comparing both against the full field list would be
+comparing a supplementary, header-free L0/L1 extraction against a
+full-resolution result, which are not expected to agree on fields neither
+one has any way to have populated identically.
+
+*Full-resolution paths* — for one artifact and equivalent options, `dump`,
+compare-side resolution, scan candidate resolution, ABICC descriptor
+resolution, `appcompat.check_appcompat()`'s own per-side resolution, `deps
+compare`'s per-dependency-pair resolution, and release's own per-library
+extraction — must produce identical: snapshot semantic fingerprint;
 extraction-contract fingerprint; effective evidence depth; effective
 compile-context digest; public-surface scope fingerprint; dependency
-scope; build/source coverage; cache-relevant directory set. Release
-belongs here specifically because its adapter does real, release-only work
-ahead of the shared resolution step:
+scope; build/source coverage; cache-relevant directory set.
+
+*`symbols_only=True` paths* — `l0_export_delta.collect_l0_export_delta()`'s
+supplementary re-extraction (invoked by both native `compare` and scan
+baseline reconciliation, independent of either side's primary resolution)
+and `scan_engine._load_exports_for_poi()`'s own prepass (a third
+independent `resolve_input()` call site scan makes ahead of the primary
+candidate/baseline extraction, when export-delta POI tracking applies) —
+must produce identical exported-symbol projections against each other and
+against the corresponding full resolution's own export set, plus the
+subset of the full-resolution fields a symbols-only call actually
+populates: effective evidence depth, resource lifetime/session handling,
+and configuration digest. Fields that require header/L2 evidence
+(extraction-contract fingerprint, effective compile-context digest,
+public-surface scope fingerprint) are not claimed for this tier, since a
+`symbols_only=True` call never computes them.
+
+Release belongs here specifically because its adapter does real,
+release-only work ahead of the shared resolution step:
 `cli_compare_release._run_compare_pair()` follows GNU ld linker scripts and
 applies its own per-library header/include mapping before ever calling
 `service.run_compare()` — the target shape's promise to "serve... release

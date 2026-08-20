@@ -14,17 +14,19 @@
 # limitations under the License.
 
 """Unit-test mirror of the ``engine-cli-boundary`` AI-readiness check
-(``scripts/check_ai_readiness.py``) — Phase 0 of
+(``scripts/engine_cli_boundary.py``, registered by
+``scripts/check_ai_readiness.py``) — Phase 0 of
 ``docs/contribute/plans/duplication-and-convergence-assessment.md``.
 
 The check ERRORs if an engine-layer module (``scan_engine.py``,
-``service*.py``, ``buildsource/**/*.py``) imports ``click`` or a ``cli_*``
-sibling module — the CLI is a frontend adapter over the engine, not the
-reverse. Pre-existing violations are recorded in
-``ENGINE_CLI_BOUNDARY_ALLOWLIST`` (allowlist-and-shrink, mirroring
-``IMPORT_CYCLE_ALLOWLIST``'s own design); this file both pins that the real
-repository has no *unlisted* violation and that the detection logic itself
-actually catches every way an engine module can cross the boundary.
+``service*.py``, ``artifact_*.py``, ``buildsource/**/*.py``) imports
+``click`` or a ``cli``/``cli_*`` sibling module — the CLI is a frontend
+adapter over the engine, not the reverse. Pre-existing violations are
+recorded in ``ENGINE_CLI_BOUNDARY_ALLOWLIST`` (allowlist-and-shrink,
+mirroring ``IMPORT_CYCLE_ALLOWLIST``'s own design); this file both pins
+that the real repository has no *unlisted* violation and that the
+detection logic itself actually catches every way an engine module can
+cross the boundary.
 """
 
 from __future__ import annotations
@@ -38,9 +40,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.check_ai_readiness import (  # noqa: E402
+from scripts.check_ai_readiness import Findings  # noqa: E402
+from scripts.engine_cli_boundary import (  # noqa: E402
     ENGINE_CLI_BOUNDARY_ALLOWLIST,
-    Findings,
     check_engine_cli_boundary,
 )
 
@@ -64,7 +66,9 @@ def test_allowlist_entries_are_real_sites() -> None:
     """Every ``ENGINE_CLI_BOUNDARY_ALLOWLIST`` entry must still name a real
     violation — an entry that no longer matches anything is dead weight the
     allowlist should have shrunk, not a permanent grandfather clause."""
-    import scripts.check_ai_readiness as gate
+    import ast
+
+    import scripts.engine_cli_boundary as gate
 
     seen: set[str] = set()
     for path in sorted(gate.PKG.rglob("*.py")):
@@ -72,7 +76,7 @@ def test_allowlist_entries_are_real_sites() -> None:
         if not gate._is_engine_module(rel):
             continue
         try:
-            tree = gate.ast.parse(gate._read(path), filename=rel)
+            tree = ast.parse(gate._read(path), filename=rel)
         except SyntaxError:
             continue
         seen.update(
@@ -185,7 +189,7 @@ def test_gate_flags_violation(
     extra_files: dict[str, str],
 ) -> None:
     """The gate is not a no-op: each way of crossing the boundary is caught."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -198,7 +202,7 @@ def test_gate_flags_violation(
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
     assert len(errors) == 1
@@ -213,7 +217,7 @@ def test_symbol_named_like_cli_module_is_not_flagged(
     unrelated, non-CLI module — is not a real submodule on disk and must
     not be flagged; only a genuine CLI-module import creates the
     engine-to-CLI-frontend dependency this check exists to catch."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -223,7 +227,7 @@ def test_symbol_named_like_cli_module_is_not_flagged(
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
@@ -232,7 +236,7 @@ def test_allowlisted_site_is_not_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A site named in the allowlist is silently accepted (Phase-0 baseline)."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -245,7 +249,7 @@ def test_allowlisted_site_is_not_flagged(
         frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
@@ -256,7 +260,7 @@ def test_new_violation_in_an_allowlisted_file_is_still_flagged(
     """The allowlist is occurrence-scoped, not file-scoped — a *second*,
     unlisted identically-shaped import in an otherwise-allowlisted file must
     still fail (only the first `import click` is allowlisted)."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -269,7 +273,7 @@ def test_new_violation_in_an_allowlisted_file_is_still_flagged(
         frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
     assert len(errors) == 1
@@ -284,7 +288,7 @@ def test_multi_alias_import_flags_every_prohibited_alias(
     by the first — each is its own violation, so an allowlisted `import
     click` cannot silently absorb a later-added `cli_*` import riding on the
     same statement."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -297,7 +301,7 @@ def test_multi_alias_import_flags_every_prohibited_alias(
         frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
     # "import click" is allowlisted; "import abicheck.cli_new" is not, and
@@ -313,7 +317,7 @@ def test_allowlist_key_is_stable_across_an_unrelated_edit_above_the_import(
     """The whole point of occurrence-based keys: an edit that shifts the
     import's line number (a new docstring, a blank line, an unrelated
     function added above it) must NOT require rewriting the allowlist."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -323,7 +327,7 @@ def test_allowlist_key_is_stable_across_an_unrelated_edit_above_the_import(
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset({key}))
 
     (pkg / "scan_engine.py").write_text("import click\n")
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
@@ -332,7 +336,7 @@ def test_allowlist_key_is_stable_across_an_unrelated_edit_above_the_import(
     (pkg / "scan_engine.py").write_text(
         '"""A new module docstring."""\n\n' + "\n" * 8 + "import click\n"
     )
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
@@ -346,7 +350,7 @@ def test_cli_module_importing_click_is_not_flagged(
     """A real frontend (``cli*.py``) is on the *other* side of this boundary
     and may import ``click``/``cli_*`` freely — only engine modules are
     covered."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -357,7 +361,7 @@ def test_cli_module_importing_click_is_not_flagged(
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
@@ -367,7 +371,7 @@ def test_engine_module_importing_service_is_not_flagged(
 ) -> None:
     """An engine module importing another engine/service module (not
     ``click``/``cli_*``) is ordinary, legal composition."""
-    import scripts.check_ai_readiness as gate
+    import scripts.engine_cli_boundary as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
@@ -379,7 +383,7 @@ def test_engine_module_importing_service_is_not_flagged(
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
 
-    findings = gate.Findings()
+    findings = Findings()
     gate.check_engine_cli_boundary(findings)
     assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
 
@@ -404,6 +408,6 @@ def test_engine_module_importing_service_is_not_flagged(
     ],
 )
 def test_is_engine_module_scope(rel: str, expected: bool) -> None:
-    from scripts.check_ai_readiness import _is_engine_module
+    from scripts.engine_cli_boundary import _is_engine_module
 
     assert _is_engine_module(rel) is expected
