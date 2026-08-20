@@ -793,14 +793,29 @@ block-everything-immediately):
    drive-by addition to this guardrail's allowlist.
 4. Every *completed-operation exit of a modeled compatibility-analysis
    command* — one of the operations `ExitDecision`'s axes actually cover
-   (`compare`, `scan`, release, aggregate, `compat check`, appcompat, `deps
+   (`compare`, `scan`, release, aggregate, `compat check`, `deps
    compare`) — derives from an `ExitDecision` (Phase 3). Named as `compat
    check` specifically, not bare `compat`: the group has a second
    subcommand, `compat dump`, which only creates an ABI snapshot and has no
    evaluated compatibility result — the same fabricated-state problem the
    next sentence already rules out for native `dump`, so it gets the
    identical treatment rather than being silently swept in under the
-   group's name. `dump` (native) is deliberately excluded from this list,
+   group's name. Standalone `appcompat` is deliberately excluded from this
+   *command*-exit list, not merely unmentioned: `appcompat.check_appcompat()`
+   has no registered CLI command or process exit of its own to derive one
+   from (`cli_options_contract.py`'s `VERDICT_EMITTING_COMMANDS` records that
+   it was folded into `compare --used-by` per ADR-043, and
+   `check_appcompat()` is a Python helper returning `AppCompatResult`, not an
+   exit-code-bearing command) — a caller reaching it through `compare
+   --used-by` is already covered by `compare`'s own `ExitDecision`, and a
+   direct Python-API caller of `check_appcompat()` wants a *result-shape*
+   guarantee (does the comparison `check_appcompat()` runs agree with every
+   other comparison path), not a process-exit guarantee this guardrail
+   models. That is a distinct, API-level requirement, already tracked
+   separately below under "Comparison equivalence" (which names
+   `appcompat.check_appcompat()`'s and `check_plugin_host_contract()`'s own
+   pre-scope comparisons explicitly) — not folded into this command-exit
+   list. `dump` (native) is deliberately excluded from this list,
    not merely unmentioned: a plain `dump` performs no compatibility
    evaluation at all — its own target
    pipeline (P0's artifact-resolution section above) ends at
