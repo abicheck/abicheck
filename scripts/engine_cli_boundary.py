@@ -76,7 +76,7 @@ def _is_engine_module(rel: str) -> bool:
         return True
     if "/" not in tail and tail.endswith(".py"):
         basename = tail[: -len(".py")]
-        if basename.startswith("service") or basename.startswith("artifact"):
+        if basename.startswith("service") or basename.startswith("artifact_"):
             return True
     if tail.startswith("buildsource/") and tail.endswith(".py"):
         return True

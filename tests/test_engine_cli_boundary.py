@@ -400,6 +400,11 @@ def test_engine_module_importing_service_is_not_flagged(
         ("abicheck/buildsource/inline.py", True),
         ("abicheck/buildsource/source_extractors/clang.py", True),
         ("abicheck/artifact_plan.py", True),
+        # `artifact_*.py` is the documented family — unlike `service*.py`
+        # (which intentionally also matches bare `service.py`), a bare
+        # `artifact.py`/`artifacts.py` is NOT an engine module.
+        ("abicheck/artifact.py", False),
+        ("abicheck/artifacts.py", False),
         ("abicheck/cli.py", False),
         ("abicheck/cli_dump_helpers.py", False),
         ("abicheck/appcompat.py", False),

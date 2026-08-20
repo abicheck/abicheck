@@ -92,9 +92,9 @@ from independently reconstructing a subtly different one.
 
 ### P0 — Artifact extraction and evidence resolution
 
-The largest duplication and correctness risk. At least eleven
-partially-equivalent paths exist today — ten user-facing operations (1–7,
-9–11) plus one internal, backend-level exception (8, the probe harness,
+The largest duplication and correctness risk. At least ten
+partially-equivalent paths exist today — nine user-facing operations (1–7,
+9–10) plus one internal, backend-level exception (8, the probe harness,
 called out below as not itself a user-facing operation):
 
 1. Typed dump: `DumpRequest → resolve_dump_request() → execute_dump_request()`
@@ -126,8 +126,8 @@ called out below as not itself a user-facing operation):
    `run_probe_matrix(..., snapshot=True)`, the header-only-library
    compile-and-snapshot driver behind G25/G26-family evidence-tier work)
    also calls `dumper.dump()` directly on each compiled probe object.
-   Deliberately called out separately from the ten user-facing operations
-   above (paths 1–7, 9–11), since it isn't one — see "backend-level
+   Deliberately called out separately from the nine user-facing operations
+   above (paths 1–7, 9–10), since it isn't one — see "backend-level
    exception" below.
 9. L0 export-delta re-extraction: `l0_export_delta.collect_l0_export_delta()`
    — invoked by both native `compare` and scan baseline reconciliation —
@@ -137,11 +137,7 @@ called out below as not itself a user-facing operation):
    `compare`/`scan`'s primary-side equivalence tests pass while this
    secondary path still misses the centralized lifetime, fingerprint, and
    post-processing behavior.
-10. The plugin-host API: `appcompat.check_plugin_host_contract()` — the
-    plugin-host counterpart to `check_appcompat()` (path 6 above) — also
-    calls `compare_snapshots()` directly rather than through a typed
-    comparison request, for the identical reason path 6 is listed.
-11. Scan's POI (point-of-interest) export prepass:
+10. Scan's POI (point-of-interest) export prepass:
     `scan_engine._load_exports_for_poi()` — a separate, best-effort
     `service.resolve_input(..., symbols_only=True)` call `scan_engine.py`
     makes for both baseline and candidate ahead of the primary extraction,
@@ -151,6 +147,16 @@ called out below as not itself a user-facing operation):
     covers. Missing it the same way path 9 would be missed: routing
     `_build_new_snapshot()` and the native baseline says nothing about this
     prepass, since it resolves on its own, ahead of either.
+
+`appcompat.check_plugin_host_contract()` — the plugin-host counterpart to
+`check_appcompat()` (path 6 above) — is deliberately **not** listed here:
+unlike `check_appcompat()`, it takes two already-built `AbiSnapshot`
+objects as its own parameters and does no extraction of its own — it
+calls `compare_snapshots()` directly and then scopes the result, nothing
+more. It belongs to this plan's *comparison*-path duplication instead (see
+Phase 2 item 5 and the "Comparison equivalence" acceptance test below,
+both of which already name its own pre-scope `compare_snapshots()` call),
+not the artifact-extraction list this section enumerates.
 
 `service_dump_pipeline.py` documents directly that native dump behavior
 historically lived around `resolve_input()` in CLI code, forcing non-CLI
@@ -829,7 +835,7 @@ block-everything-immediately):
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
    gate, which today only covers `checker.compare`).
-3. Every artifact extraction call site *for the ten user-facing
+3. Every artifact extraction call site *for the nine user-facing
    operations named in Phase 1* routes through the future artifact
    application service. Deliberately excludes `probe_harness.
    _snapshot_object_file()`: it has no CLI/API entry point today (nothing
@@ -1055,7 +1061,7 @@ deliberately keeps PE/Mach-O's own backend-specific extraction path
 ELF-only fixture can satisfy every assertion above while a PE or Mach-O
 caller still resolves depth, compile context, scope, or cache inputs
 differently — exactly the class of divergence this gate exists to catch.
-Not every one of the eleven paths above has a PE/Mach-O caller today (e.g.
+Not every one of the ten paths above has a PE/Mach-O caller today (e.g.
 `deps compare`'s `stack_checker._run_abi_diff()` and the L0/POI supplementary
 re-extractions are ELF-specific in practice), so the backend axis applies
 wherever a path is genuinely reachable on more than one platform — `dump`,
