@@ -1385,3 +1385,235 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     assert embed_captured["build_config"] is None
     assert embed_captured["build_query"] is None
     assert embed_captured["build_compile_db"] == "build/compile_commands.json"
+
+
+class TestSharedPipelineReachesADR039BuildContextCollector:
+    """PR C (CLI cleanup phase two, typed dump/scan convergence): the ADR-039
+    build-context collector (``header_conditionals.attach_build_context``)
+    used to be reachable only from the ELF ``dump`` CLI's own
+    ``perform_elf_dump`` (one call site). ``_resolve_side_snapshot_impl`` --
+    shared by ``compare``'s implicit-dump operand and ``dump``'s typed
+    ``run_dump_request`` API -- now reaches the identical collector. These
+    tests exercise the real collector (not mocked), only ``service.
+    resolve_input`` is stubbed to avoid a real castxml/clang invocation."""
+
+    def _compile_db(self, tmp_path: Path, src: Path, *extra_flags: str) -> Path:
+        import json
+
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": str(src),
+                        "arguments": [
+                            "c++",
+                            "-c",
+                            str(src),
+                            "-o",
+                            "out.o",
+                            *extra_flags,
+                        ],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return db
+
+    def test_collector_populates_defines_and_conditional_fields(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text(
+            "struct Widget {\n"
+            "  int x;\n"
+            "#ifdef GUARD\n"
+            "  int guarded;\n"
+            "#endif\n"
+            "};\n",
+            encoding="utf-8",
+        )
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        db = self._compile_db(tmp_path, src, "-DGUARD=1")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+        )
+
+        side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,), build_info=db)
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        resolution = sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert "GUARD" in resolution.snapshot.build_context_defines
+        assert "Widget" in resolution.snapshot.conditional_fields
+        assert "guarded" in resolution.snapshot.conditional_fields["Widget"]
+
+    def test_collector_never_sees_folded_derived_tokens_only_pre_fold_explicit(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Mirrors ``test_perform_elf_dump_keeps_l3_derived_flags_out_of_
+        build_context_collector`` (tests/test_non_elf_dump_l2_seed.py) for
+        the shared pipeline: the ADR-039 collector's ``extra_flags`` must be
+        this side's own pre-fold ``InputSpec.compile`` tokens only, never the
+        P0.3 L3->L2-folded ``CompileContext`` this function also resolves
+        internally -- else a build-derived define would be unioned
+        snapshot-wide (the ninth finding in AGENTS.md's L3->L2-fold entry)."""
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        db = self._compile_db(tmp_path, src, "-DL3ONLY=1")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+        )
+        # Simulate the L3->L2 fold resolving a CompileContext carrying the
+        # database's own -DL3ONLY=1 -- this must never reach the collector.
+        monkeypatch.setattr(
+            sir,
+            "_seeded_includes_and_compile_context",
+            lambda *a, **k: (
+                [],
+                CompileContext(gcc_option_tokens=("-DL3ONLY=1",)),
+                True,
+                [],
+            ),
+        )
+
+        captured: dict[str, object] = {}
+        real_attach = sir.attach_build_context
+
+        def _spy_attach(snap, compile_db_arg, headers, extra_flags, **kw):
+            captured["extra_flags"] = list(extra_flags)
+            return real_attach(snap, compile_db_arg, headers, extra_flags, **kw)
+
+        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+
+        side = InputSpec(
+            path=tmp_path / "lib.so",
+            headers=(hdr,),
+            build_info=db,
+            compile=CompileContext(gcc_option_tokens=("-DUSERONLY=1",)),
+        )
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert captured["extra_flags"] == ["-DUSERONLY=1"]
+        assert "-DL3ONLY=1" not in captured["extra_flags"]
+
+    def test_collector_honors_compile_db_filter(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        db = self._compile_db(tmp_path, src, "-DGUARD=1")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+        )
+
+        captured: dict[str, object] = {}
+        real_attach = sir.attach_build_context
+
+        def _spy_attach(snap, compile_db_arg, headers, extra_flags, **kw):
+            captured["source_filter"] = kw.get("source_filter")
+            return real_attach(snap, compile_db_arg, headers, extra_flags, **kw)
+
+        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+
+        side = InputSpec(
+            path=tmp_path / "lib.so",
+            headers=(hdr,),
+            build_info=db,
+            compile_db_filter="*/widget.cpp",
+        )
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert captured["source_filter"] == "*/widget.cpp"
+
+    def test_collector_skipped_when_no_compile_db_resolvable(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """No ``build_info`` at all: the collector must not run (and must not
+        raise) -- a plain context-free dump is still the common case."""
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+        )
+        called = {"attach": False}
+
+        def _spy_attach(*a, **k):
+            called["attach"] = True
+
+        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+
+        side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,))
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        resolution = sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert called["attach"] is False
+        assert resolution.snapshot.build_context_defines == set()

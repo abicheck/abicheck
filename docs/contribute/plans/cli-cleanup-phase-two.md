@@ -1270,6 +1270,68 @@ pipelines a fourth time.
   > "must not be unioned snapshot-wide" invariant (AGENTS.md's L3→L2-fold
   > entry, ninth finding) that any new call site would have to re-verify
   > against. Not attempted here. Blockers 5 and 6 are unchanged.
+  >
+  > **Blocker 4 closed for the shared pipeline (2026-08-20).** The "new
+  > typed-API surface" this note called for is now real:
+  > `InputSpec.compile_db_filter` (mirrors `--compile-db-filter`) plus a call
+  > to the ADR-039 collector inside `_resolve_side_snapshot_impl`, gated
+  > exactly the way `perform_elf_dump` gates its own call (a compile-DB path
+  > resolvable from `side.build_info`, real headers, `snap.from_headers`).
+  > `attach_build_context`/`user_define_flags`/`compile_db_from_build_info`
+  > moved from `cli_dump_helpers.py` (CLI-presentation layer, not importable
+  > from a service module) to `header_conditionals.py` — already a
+  > dependency-free leaf module and the collector's own home — with
+  > `cli_dump_helpers.py` keeping the original private names as thin
+  > re-exports, so `perform_elf_dump` and every existing test are unchanged.
+  > The "must not be unioned snapshot-wide" invariant is preserved the same
+  > way `perform_elf_dump` preserves it: only `side.compile` (this side's
+  > pre-fold, caller-supplied `CompileContext`) feeds the collector's
+  > `extra_flags`, never `compile_ctx` (the P0.3-folded result also computed
+  > in this function). `perform_elf_dump` itself is **not** migrated to call
+  > through this shared path — it keeps its own direct call — so this closes
+  > the *capability* gap (compare's implicit-dump operand and `dump`'s typed
+  > `run_dump_request` API can now reach the collector too), not blocker 5
+  > (making `dump_cmd` build a real `DumpRequest` in the first place, which
+  > is what would let the real ELF `dump` CLI path route through here).
+  > Verified with four new direct tests on `_resolve_side_snapshot_impl`
+  > (`tests/test_typed_dump_request.py::
+  > TestSharedPipelineReachesADR039BuildContextCollector`) — collector fires
+  > and populates `build_context_defines`/`conditional_fields`; folded/
+  > derived tokens never reach `extra_flags`; `compile_db_filter` is honored;
+  > the collector is skipped (not raised) with no `build_info` at all — each
+  > confirmed to fail against the pre-fix code (no `attach_build_context`
+  > attribute on the module). Full fast unit suite green, `mypy abicheck/`
+  > clean, `ruff check` clean.
+  >
+  > **The `scan_engine._build_new_snapshot` `allow_build_query` gating
+  > "unreconciled" framing (this section's own opening paragraph, and PR
+  > 3A's summary in "Ordering") is investigated and found to be a
+  > non-issue, not left open.** Tracing `build_config`'s origin
+  > (`run_scan_core` → `cli_scan_helpers.resolve_effective_allow_query`)
+  > shows its docstring already states the trust rule: *"Trusted = an
+  > explicit --config path (build_config is not None here; an
+  > auto-discovered source-tree config is resolved later in
+  > embed_build_source and never reaches this gate)"* — by the time
+  > `build_config` reaches `_build_new_snapshot`, its mere presence already
+  > encodes the trust decision, matching `_resolve_l2_seed_pack_args`'s own
+  > internal rule (`build_config_trusted_for_query=(build_config is not
+  > None or build_query is not None)`). Passing it ungated to the seed call
+  > is therefore correct, not drift; applying `_gated_build_query_inputs`-
+  > style re-gating on top would be a **regression** — `effective_allow_
+  > query` can be `False` for reasons unrelated to trust (e.g.
+  > `collect_mode == "off"`), which would wrongly suppress an
+  > already-vetted `--config`'s `build.query` from reaching the seed.
+  > `build_query`/`build_compile_db` being hardcoded `None`/`None` in the
+  > same call is confirmed fully dead code today (`scan` has no
+  > `--build-query`/`--build-compile-db` CLI flags, `run_scan_core` has no
+  > such parameters, and `_build_new_snapshot`'s one call site never passes
+  > non-default values) — adding live parameters/gating for a capability
+  > nothing can reach yet would be speculative, untested plumbing, not a
+  > fix for an observed defect. Not implemented; recorded as investigated
+  > and closed rather than left as an open reconciliation item. A future
+  > `scan --build-query` flag, if ever added, needs its own trust-gate
+  > design at that point (mirroring `dump`'s), not a preemptive parameter
+  > added now.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from

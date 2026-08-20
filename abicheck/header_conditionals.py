@@ -65,8 +65,12 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ._compiler_options import split_gcc_options
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+
+    from .model import AbiSnapshot
 
 # ── active-define extraction ─────────────────────────────────────────────────
 
@@ -904,3 +908,123 @@ def collect_build_context(
                     entry["ambiguous"] = True
             registry.setdefault(rec, {}).update(fields)
     return defines, registry
+
+
+# ── shared entry points (CLI dump and the typed input-resolution pipeline) ──
+#
+# `user_define_flags`/`attach_build_context` used to be private to
+# `cli_dump_helpers.py` (the ELF `dump` CLI's own `perform_elf_dump`). PR C
+# (CLI cleanup phase two, typed dump/scan convergence) moved them here, a
+# dependency-free leaf module already owning `collect_build_context`, so
+# `service_input_resolution._resolve_side_snapshot_impl` (the typed pipeline
+# `compare`'s implicit-dump operand and `dump`'s typed `run_dump_request` API
+# share) can reach the identical ADR-039 collection logic without importing
+# `cli_dump_helpers.py` (a CLI-presentation-layer module, and an import a
+# service module must not take). `cli_dump_helpers.py` keeps calling these
+# under their original names via a re-export, so `perform_elf_dump` and every
+# existing test needed no changes.
+
+
+def user_define_flags(
+    gcc_option_tokens: tuple[str, ...], user_gcc_options: str | None
+) -> list[str]:
+    """The user's *global* define-affecting flags for the ADR-039 collector.
+
+    Combines the ``-D``/``-U`` in the ``--gcc-options`` string with the repeatable
+    ``--compiler-option`` tokens, **in the same order the real dump applies them** —
+    ``dumper._castxml_cmd`` appends ``gcc_options`` first, then
+    ``gcc_option_tokens`` (see ``dumper.py``), so the collector must too (Codex
+    review #498). Order is significant because ``defines_from_flags`` honours
+    ``-D``/``-U`` sequence: a composed ``-DKEEP`` followed by ``--compiler-option=-UKEEP`` must leave
+    ``KEEP`` *inactive* on both the parse and the harvest, else the reconciler
+    would add back a field the real parse pruned. These flags are applied on top
+    of the compile-DB intersection, so a user ``-UKEEP`` also overrides a database
+    ``-DKEEP``. **The auto-derived / L3→L2-folded build context is deliberately
+    excluded (it must not be unioned snapshot-wide)** — a caller must pass only
+    its own pre-fold, explicitly-given flags here, never a resolved
+    ``CompileContext``'s derived tokens (see the ninth finding in the root
+    ``AGENTS.md``'s L3→L2-fold entry for why: unioning would mark one TU's
+    ``-D`` active for every scanned header).
+
+    A malformed ``--gcc-options`` (e.g. an unbalanced quote) must not abort the
+    dump — ``split_gcc_options`` errors are swallowed and only the tokens are
+    used (CodeRabbit review). ``split_gcc_options`` (not a bare
+    ``shlex.split``) so this collector tokenizes ``user_gcc_options``
+    identically to the real header-AST parse on every platform — a plain
+    POSIX ``shlex.split`` would silently disagree with the Windows tokenizer
+    on an unquoted Windows path (e.g. combining ``-IC:\\sdk\\ -UKEEP`` into
+    one token instead of two), which could make the harvested define set
+    diverge from what the real parse actually saw (Codex review, PR #774
+    follow-up)."""
+    flags: list[str] = []
+    if user_gcc_options:
+        try:
+            flags += split_gcc_options(user_gcc_options)
+        except ValueError:
+            pass  # bad optional define flags are skipped, not fatal
+    flags += list(gcc_option_tokens)
+    return flags
+
+
+def compile_db_from_build_info(
+    build_info: Path | None,
+    headers: tuple[Path, ...],
+) -> Path | None:
+    """The L2 compile database ``--build-info`` names, when it names one.
+
+    ``--build-info``'s operand is "a build dir, a compile_commands.json, or a
+    pre-captured pack" -- the first two are exactly what the removed
+    ``-p/--build-dir`` (and its ``--compile-db`` alias) took, so the database
+    that drives deterministic header parsing is read back off the one
+    remaining build-context flag rather than a second spelling of the same
+    path.
+
+    ``None`` without headers: a compile database only feeds the header AST,
+    and a headerless ``--build-info`` run is an ordinary L3-only dump, not the
+    usage error the dedicated flag used to raise ("requires -H/--header").
+
+    ``None`` for a *file* that is not a compile database, too. ``--build-info``
+    also accepts a Bazel aquery/cquery jsonproto, which
+    ``buildsource.inline._maybe_collect_bazel_build_info`` routes through the
+    Bazel adapter -- but only if it gets that far. Returning any file here
+    handed such a run to ``load_compile_db()``, which rejects a JSON object
+    with "compile_commands.json must be a JSON array" long before the adapter
+    is reached, so `--build-info aquery.json -H api.h` failed outright
+    (Codex review). ``sniff_build_info_format`` is the same content-based
+    classifier that dispatch uses, so the two cannot disagree about what a
+    given file is.
+    """
+    from .buildsource.inline import sniff_build_info_format
+
+    if build_info is None or not headers:
+        return None
+    if build_info.is_file():
+        return build_info if sniff_build_info_format(build_info) == "compile_db" else None
+    db = build_info / "compile_commands.json"
+    # Sniffed for the same reason: a build directory holding a non-array
+    # compile_commands.json is the identical mis-route one level down.
+    return db if db.is_file() and sniff_build_info_format(db) == "compile_db" else None
+
+
+def attach_build_context(
+    snap: AbiSnapshot,
+    compile_db: str | Path,
+    headers: list[Path],
+    extra_flags: list[str],
+    source_filter: str | None = None,
+) -> None:
+    """ADR-039 collection layer: harvest the build's active ``-D`` set and scan the
+    public headers for ``#ifdef``-guarded record fields, attaching both to *snap*.
+
+    Best-effort and additive — a plain context-free dump (no compile DB) never
+    reaches here, and an empty harvest leaves the snapshot's defaults untouched, so
+    the pass is a safe no-op unless real build evidence is found. *source_filter*
+    (``--compile-db-filter``) selects the same compile-DB entries the header parse
+    used."""
+    bc_defines, bc_conditional = collect_build_context(
+        headers, compile_db, extra_flags=extra_flags, source_filter=source_filter
+    )
+    if bc_defines:
+        snap.build_context_defines = bc_defines
+    if bc_conditional:
+        snap.conditional_fields = bc_conditional

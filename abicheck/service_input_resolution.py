@@ -46,6 +46,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
+from .header_conditionals import (
+    attach_build_context,
+    compile_db_from_build_info,
+    user_define_flags as _user_define_flags,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -531,6 +536,37 @@ def _resolve_side_snapshot_impl(
         # ignored them) must not claim their parse used real build context.
         if context_applied and snap.from_headers:
             snap.parsed_with_build_context = True
+        # PR C (typed dump/scan convergence): the ADR-039 build-context
+        # collector, previously reachable only from the ELF `dump` CLI's own
+        # `perform_elf_dump` (one call site) -- now available to every caller
+        # of this shared primitive (compare's implicit-dump operand, dump's
+        # typed `run_dump_request` API). Gated exactly the way
+        # `perform_elf_dump` gates its own call: a compile-DB path must be
+        # resolvable from `side.build_info`, real headers were actually
+        # parsed (`evidence.headers`), and the parse reached them
+        # (`snap.from_headers` -- e.g. not a `--dwarf-only` run that ignored
+        # them). `side.compile` is this side's *pre-fold*, caller-supplied
+        # `CompileContext` (the ADR-055 D1 per-side override resolved before
+        # `_seeded_includes_and_compile_context`'s L3->L2 fold ran above) --
+        # only its own explicit `gcc_options`/`gcc_option_tokens` are passed
+        # to the collector, never `compile_ctx` (the folded/derived result),
+        # preserving the "must not be unioned snapshot-wide" invariant
+        # `user_define_flags`'s own docstring states (see the ninth finding
+        # in the root AGENTS.md's L3->L2-fold entry for why).
+        compile_db_path = compile_db_from_build_info(
+            side.build_info, tuple(evidence.headers)
+        )
+        if compile_db_path is not None and evidence.headers and snap.from_headers:
+            attach_build_context(
+                snap,
+                compile_db_path,
+                list(evidence.headers),
+                _user_define_flags(
+                    side.compile.gcc_option_tokens if side.compile else (),
+                    side.compile.gcc_options if side.compile else None,
+                ),
+                source_filter=side.compile_db_filter,
+            )
         if side.sources or side.build_info:
             # Known, accepted limitation (Codex review, fresh evidence, not
             # fixed here): when a trusted build_query was authorized and

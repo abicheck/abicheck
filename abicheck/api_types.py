@@ -170,6 +170,15 @@ class InputSpec:
     # (D4) would have silently dropped that guard, so it is request surface,
     # not an MCP-local wrapper concern.
     follow_linker_scripts: bool = True
+    # PR C (CLI cleanup phase two, typed dump/scan convergence): mirrors
+    # `dump --compile-db-filter` -- a glob narrowing which entries of the
+    # compile database resolved from `build_info` the ADR-039 build-context
+    # collector (`header_conditionals.collect_build_context`, reached via
+    # `service_input_resolution._resolve_side_snapshot_impl`) scans. `None`
+    # (the default) means "no filter", matching every pre-existing caller
+    # that never set this. This field only ever feeds the ADR-039 collector,
+    # never the header-AST parse itself.
+    compile_db_filter: str | None = None
 
     @classmethod
     def of(
@@ -189,6 +198,7 @@ class InputSpec:
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
         follow_linker_scripts: bool = True,
+        compile_db_filter: str | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -206,6 +216,7 @@ class InputSpec:
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),
             follow_linker_scripts=follow_linker_scripts,
+            compile_db_filter=compile_db_filter,
         )
 
 
