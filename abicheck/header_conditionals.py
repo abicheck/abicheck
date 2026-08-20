@@ -1006,6 +1006,51 @@ def compile_db_from_build_info(
     return db if db.is_file() and sniff_build_info_format(db) == "compile_db" else None
 
 
+def compile_db_filter_scope_error(
+    compile_db_filter: str | None,
+    compile_db_path: Path | None,
+    collect_mode: str,
+) -> str | None:
+    """Refuse a filter that would scope L2 but silently not L3.
+
+    ``--compile-db-filter`` parameterizes the **header parse** only: the
+    filtered subset is what ``_resolve_build_context_flags`` proves a match
+    against and what the AST is built from. L3 collection reads the database
+    through ``embed_build_source``'s own adapter, which has no filter of its
+    own -- so on a monorepo database the embedded build facts cover every
+    translation unit while the headers cover the requested subset, and the
+    resulting snapshot carries unrelated build evidence that can produce
+    false differences.
+
+    The removed ``-p``/``--compile-db`` spelling refused exactly this: its
+    ``resolve_compile_db_l3_reuse`` declined to promote the header database
+    to L3 whenever a filter was active, and said so. Folding the operand into
+    ``--build-info`` removed that decision -- ``--build-info`` *is* the L3
+    selector now, so there is nothing left to decline -- which turned a loud
+    refusal into a silent unfiltered collection (Codex review). This restores
+    the refusal as a usage error, since the honest alternative (threading the
+    filter through ``embed_build_source`` into the compile-DB adapter) is a
+    change to ``buildsource/`` with its own evidence gates, not something to
+    infer from one review round.
+
+    ``None`` when the combination cannot arise: no filter, a ``--build-info``
+    that is not a compile database (a pack or Bazel jsonproto routes through
+    a different adapter), or ``collect_mode == "off"``, where no build
+    evidence is embedded for the filter to be inconsistent with.
+    """
+    if not compile_db_filter or compile_db_path is None or collect_mode == "off":
+        return None
+    return (
+        "--compile-db-filter scopes the L2 header parse only; the L3 build "
+        "evidence embedded from the same --build-info compilation database is "
+        "collected unfiltered, so the snapshot would carry build facts for "
+        "translation units the filter excludes. Pass a pre-filtered "
+        "compile_commands.json as --build-info (then --compile-db-filter is "
+        "unnecessary), or drop --compile-db-filter to accept the whole "
+        "database on both layers."
+    )
+
+
 def attach_build_context(
     snap: AbiSnapshot,
     compile_db: str | Path,

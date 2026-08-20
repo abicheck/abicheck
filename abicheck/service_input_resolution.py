@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING
 from .errors import SnapshotError, ValidationError
 from .header_conditionals import (
     attach_build_context,
+    compile_db_filter_scope_error,
     compile_db_from_build_info,
     user_define_flags as _user_define_flags,
 )
@@ -545,48 +546,100 @@ def _resolve_side_snapshot_impl(
         # resolvable from `side.build_info`, real headers were actually
         # parsed (`evidence.headers`), and the parse reached them
         # (`snap.from_headers` -- e.g. not a `--dwarf-only` run that ignored
-        # them). `side.compile` is this side's *pre-fold*, caller-supplied
-        # `CompileContext` (the ADR-055 D1 per-side override resolved before
-        # `_seeded_includes_and_compile_context`'s L3->L2 fold ran above) --
-        # only its own explicit `gcc_options`/`gcc_option_tokens` are passed
-        # to the collector, never `compile_ctx` (the folded/derived result),
-        # preserving the "must not be unioned snapshot-wide" invariant
-        # `user_define_flags`'s own docstring states (see the ninth finding
-        # in the root AGENTS.md's L3->L2-fold entry for why).
-        #
-        # `evidence.headers` may still contain a directory entry -- exactly
-        # what `service.resolve_input`/`_dump_elf` itself expands internally
-        # (via this identical `expand_header_inputs`) before parsing, so
-        # `snap` above was already built from the expanded set. The collector
-        # scans each entry with `Path(path).read_text(...)`, which raises
-        # `OSError` for a directory and is silently skipped -- passing the
-        # raw, unexpanded list here would leave `conditional_fields` empty
-        # for the common directory-header-input case even though headers
-        # were genuinely parsed (Codex review, PR #809). Expanding a second
-        # time is safe and cheap: `resolve_input` already proved every path
-        # here is valid (it would have raised otherwise), so this is a pure
-        # directory walk, no new I/O risk -- mirrors `perform_elf_dump`'s own
-        # `resolved_headers = expand_header_inputs(...)` computed once and
-        # reused for both its primary parse and this identical collector call.
-        from .service_scan import expand_header_inputs
+        # them). **`fmt == "elf"` too (Codex review, PR #809)**: the ADR-039
+        # collector is an established ELF-only mechanism -- `handle_non_elf_dump`
+        # (PE/Mach-O) never calls it (see the root AGENTS.md's tenth finding
+        # on the L3->L2-fold entry) -- so this shared pipeline must not attach
+        # build-context evidence to a PE/Mach-O snapshot a typed dump/compare
+        # produces, or it would silently disagree with the native PE/Mach-O
+        # dump path and let build-context reconciliation suppress a real,
+        # non-ELF finding. `side.compile` is this side's *pre-fold*,
+        # caller-supplied `CompileContext` (the ADR-055 D1 per-side override
+        # resolved before `_seeded_includes_and_compile_context`'s L3->L2
+        # fold ran above) -- only its own explicit `gcc_options`/
+        # `gcc_option_tokens` are passed to the collector, never `compile_ctx`
+        # (the folded/derived result), preserving the "must not be unioned
+        # snapshot-wide" invariant `user_define_flags`'s own docstring states
+        # (see the ninth finding in the root AGENTS.md's L3->L2-fold entry for
+        # why).
+        if fmt == "elf":
+            # `evidence.headers` may still contain a directory entry -- exactly
+            # what `service.resolve_input`/`_dump_elf` expands internally (via
+            # `service_scan.expand_header_inputs`) before parsing, for the
+            # native-binary dispatch. The collector scans each entry with
+            # `Path(path).read_text(...)`, which raises `OSError` for a
+            # directory and is silently skipped -- passing the raw, unexpanded
+            # list here would leave `conditional_fields` empty for the common
+            # directory-header-input case even though headers were genuinely
+            # parsed (Codex review, PR #809).
+            #
+            # `expand_header_inputs` itself is the *wrong* tool to reuse here,
+            # unlike `perform_elf_dump`'s identically-shaped
+            # `resolved_headers = expand_header_inputs(...)` call: that call
+            # sees the ELF `dump` CLI's own headers, always meant for a live
+            # header-AST parse. `resolve_input`'s dispatch is *not* always the
+            # native-binary path this reasoning assumes -- a saved-JSON-
+            # snapshot side (loaded straight from disk, `side.headers` carried
+            # only for provenance tagging and never touching disk) never calls
+            # `expand_header_inputs` internally at all, so re-deriving
+            # "resolve_input already proved every path is valid" is false in
+            # general. Calling the strict (raising) expander unconditionally
+            # here regressed exactly that case (confirmed: `ValidationError`
+            # reproduced against a real snapshot-file compare with header
+            # entries that never exist on disk). Use a local, best-effort
+            # expansion instead -- never raises, mirroring
+            # `collect_build_context`'s own "an unreadable header is skipped,
+            # never abort the dump" contract -- so a side whose headers were
+            # never meant to be read from disk degrades to "nothing to
+            # collect" rather than aborting the whole comparison.
+            from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+            from .header_utils import iter_directory_headers
 
-        collector_headers = (
-            expand_header_inputs(list(evidence.headers)) if evidence.headers else []
-        )
-        compile_db_path = compile_db_from_build_info(
-            side.build_info, tuple(collector_headers)
-        )
-        if compile_db_path is not None and collector_headers and snap.from_headers:
-            attach_build_context(
-                snap,
-                compile_db_path,
-                collector_headers,
-                _user_define_flags(
-                    side.compile.gcc_option_tokens if side.compile else (),
-                    side.compile.gcc_options if side.compile else None,
-                ),
-                source_filter=side.compile_db_filter,
+            collector_headers: list[Path] = []
+            for _h in evidence.headers:
+                if _h.is_file():
+                    collector_headers.append(_h)
+                elif _h.is_dir():
+                    collector_headers.extend(
+                        iter_directory_headers(_h, PRUNED_HEADER_DIR_SEGMENTS)
+                    )
+                # else: neither a file nor a directory on this filesystem
+                # (e.g. a saved-snapshot side's headers, carried for
+                # provenance only) -- skipped, not raised.
+
+            compile_db_path = compile_db_from_build_info(
+                side.build_info, tuple(collector_headers)
             )
+            # `--compile-db-filter`'s typed-API equivalent: the native `dump`
+            # CLI refuses this same combination as a usage error
+            # (`compile_db_filter_scope_error`) rather than silently letting
+            # the L2 collector scope to the filtered subset while the L3
+            # embed below (`embed_side_build_source`) reads the whole,
+            # unfiltered database -- a snapshot whose layers would then cover
+            # different translation units (Codex review, PR #809). Reused
+            # here unchanged, raising the Tier-2 `ValidationError` this API's
+            # contract uses in place of the CLI's `click.UsageError`.
+            if (
+                _filter_scope_msg := compile_db_filter_scope_error(
+                    side.compile_db_filter, compile_db_path, evidence.collect_mode
+                )
+            ) is not None:
+                raise ValidationError(_filter_scope_msg)
+            if (
+                compile_db_path is not None
+                and collector_headers
+                and snap.from_headers
+            ):
+                attach_build_context(
+                    snap,
+                    compile_db_path,
+                    collector_headers,
+                    _user_define_flags(
+                        side.compile.gcc_option_tokens if side.compile else (),
+                        side.compile.gcc_options if side.compile else None,
+                    ),
+                    source_filter=side.compile_db_filter,
+                )
         if side.sources or side.build_info:
             # Known, accepted limitation (Codex review, fresh evidence, not
             # fixed here): when a trusted build_query was authorized and

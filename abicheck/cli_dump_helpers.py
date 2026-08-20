@@ -29,6 +29,7 @@ from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_
 from .errors import AbicheckError
 from .header_conditionals import (
     attach_build_context as _attach_build_context,
+    compile_db_filter_scope_error as compile_db_filter_scope_error,
     compile_db_from_build_info as compile_db_from_build_info,
     user_define_flags as _user_define_flags,
 )
@@ -1063,51 +1064,6 @@ def render_dump_dry_run(
 # cleanup phase two) alongside `attach_build_context`/`user_define_flags` --
 # imported above under its original name; every existing caller/test is
 # unchanged. See that module for the derivation logic.
-
-def compile_db_filter_scope_error(
-    compile_db_filter: str | None,
-    compile_db_path: Path | None,
-    collect_mode: str,
-) -> str | None:
-    """Refuse a filter that would scope L2 but silently not L3.
-
-    ``--compile-db-filter`` parameterizes the **header parse** only: the
-    filtered subset is what ``_resolve_build_context_flags`` proves a match
-    against and what the AST is built from. L3 collection reads the database
-    through ``embed_build_source``'s own adapter, which has no filter of its
-    own -- so on a monorepo database the embedded build facts cover every
-    translation unit while the headers cover the requested subset, and the
-    resulting snapshot carries unrelated build evidence that can produce
-    false differences.
-
-    The removed ``-p``/``--compile-db`` spelling refused exactly this: its
-    ``resolve_compile_db_l3_reuse`` declined to promote the header database
-    to L3 whenever a filter was active, and said so. Folding the operand into
-    ``--build-info`` removed that decision -- ``--build-info`` *is* the L3
-    selector now, so there is nothing left to decline -- which turned a loud
-    refusal into a silent unfiltered collection (Codex review). This restores
-    the refusal as a usage error, since the honest alternative (threading the
-    filter through ``embed_build_source`` into the compile-DB adapter) is a
-    change to ``buildsource/`` with its own evidence gates, not something to
-    infer from one review round.
-
-    ``None`` when the combination cannot arise: no filter, a ``--build-info``
-    that is not a compile database (a pack or Bazel jsonproto routes through
-    a different adapter), or ``collect_mode == "off"``, where no build
-    evidence is embedded for the filter to be inconsistent with.
-    """
-    if not compile_db_filter or compile_db_path is None or collect_mode == "off":
-        return None
-    return (
-        "--compile-db-filter scopes the L2 header parse only; the L3 build "
-        "evidence embedded from the same --build-info compilation database is "
-        "collected unfiltered, so the snapshot would carry build facts for "
-        "translation units the filter excludes. Pass a pre-filtered "
-        "compile_commands.json as --build-info (then --compile-db-filter is "
-        "unnecessary), or drop --compile-db-filter to accept the whole "
-        "database on both layers."
-    )
-
 
 def handle_non_elf_dump(
     so_path: Path,
