@@ -576,7 +576,26 @@ def _resolve_side_snapshot_impl(
         # `dumper.dump()` for every real ELF parse, regardless of whether the
         # original path was a direct `.so` or a followed linker script), so
         # it can't go stale the way a pre-computed `fmt` string can.
-        if snap.elf is not None:
+        #
+        # `snap.elf is not None` alone is *not* sufficient, though (Codex
+        # review, PR #809, fresh evidence): the identical post-resolution
+        # signal is also populated on a *loaded* JSON snapshot whose original
+        # library happened to be ELF (`resolve_input`'s own `fmt == "json"`
+        # branch returns `load_snapshot(path)` verbatim -- no live parse at
+        # all -- and a real, previously-captured `AbiSnapshot` round-trips
+        # its `elf`/`from_headers` fields exactly as they were when saved).
+        # Running the collector there would scan `evidence.headers`/
+        # `side.build_info` off the *current* filesystem and overwrite the
+        # loaded snapshot's own recorded `build_context_defines`/
+        # `conditional_fields` with evidence unrelated to what was actually
+        # captured -- silently corrupting a loaded baseline rather than
+        # reconciling a live parse. `service.sniff_text_format` is the exact
+        # predicate `resolve_input` itself uses to take that branch (handles
+        # a compressed `.json.gz`/`.zst` snapshot too, per ADR-059), so
+        # re-running it here on `side.path` distinguishes "genuinely no live
+        # ELF parse happened" from "parse happened, only `fmt` went stale"
+        # without needing a new return value threaded out of `resolve_input`.
+        if snap.elf is not None and service.sniff_text_format(side.path) != "json":
             # `evidence.headers` may still contain a directory entry -- exactly
             # what `service.resolve_input`/`_dump_elf` expands internally (via
             # `service_scan.expand_header_inputs`) before parsing, for the

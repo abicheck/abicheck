@@ -1786,3 +1786,58 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
             public_header_dirs=[],
         )
         assert captured["source_filter"] is None
+
+    def test_collector_skipped_for_a_loaded_json_snapshot(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #809, fresh evidence: ``snap.elf is not None``
+        alone doesn't prove a live ELF parse happened -- a *loaded* JSON
+        snapshot (``resolve_input``'s own ``fmt == "json"`` branch, which
+        returns ``load_snapshot(path)`` verbatim with no parse at all) round
+        -trips its original ``elf``/``from_headers`` fields exactly as saved,
+        so the identical signal fires. Running the collector there would
+        scan the *current* filesystem's headers/compile-db and overwrite the
+        loaded snapshot's own recorded build-context evidence with
+        unrelated data -- ``side.path`` here is a JSON file, not an ELF
+        binary or a followed linker script, so the collector must not run."""
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        db = self._compile_db(tmp_path, src, "-DGUARD=1")
+
+        snapshot_path = tmp_path / "baseline.abicheck.json"
+        snapshot_path.write_text('{"schema_version": 25}\n', encoding="utf-8")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(
+                library="lib", version="1", from_headers=True, elf=ElfMetadata()
+            ),
+        )
+        called = {"attach": False}
+
+        def _spy_attach(*a, **k):
+            called["attach"] = True
+
+        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+
+        side = InputSpec(path=snapshot_path, headers=(hdr,), build_info=db)
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        resolution = sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt=None,
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+        assert called["attach"] is False
+        assert resolution.snapshot.build_context_defines == set()

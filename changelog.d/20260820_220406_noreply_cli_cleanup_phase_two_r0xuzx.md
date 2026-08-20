@@ -35,7 +35,18 @@
   to its real ELF target), matching the established ELF-only scope of the
   ADR-039 collector (a PE/Mach-O typed dump/compare no longer silently
   disagrees with the native PE/Mach-O dump path, which never calls this
-  collector). `InputSpec` deliberately does **not** gain a
+  collector). `snap.elf is not None` alone proved insufficient on its own
+  (Codex review, fresh evidence): a *loaded* JSON snapshot
+  (`resolve_input`'s own `fmt == "json"` branch, `load_snapshot(path)`
+  verbatim with no live parse at all) round-trips its original `elf`/
+  `from_headers` fields exactly as saved, so the identical post-resolution
+  signal fires for a side that never touched the header parser — running
+  the collector there would scan the *current* filesystem's headers/
+  compile-db and overwrite the loaded snapshot's own recorded build-context
+  evidence with unrelated data. Now also requires
+  `service.sniff_text_format(side.path) != "json"` (the exact predicate
+  `resolve_input` itself uses to take that branch) before the collector
+  runs. `InputSpec` deliberately does **not** gain a
   `compile_db_filter` field mirroring `--compile-db-filter` (an earlier
   version of this change added one, and Codex review found it had no
   successful execution path where it narrowed anything: this shared

@@ -1272,11 +1272,20 @@ pipelines a fourth time.
   > against. Not attempted here. Blockers 5 and 6 are unchanged.
   >
   > **Blocker 4 closed for the shared pipeline (2026-08-20).** The "new
-  > typed-API surface" this note called for is now real:
-  > `InputSpec.compile_db_filter` (mirrors `--compile-db-filter`) plus a call
-  > to the ADR-039 collector inside `_resolve_side_snapshot_impl`, gated
-  > exactly the way `perform_elf_dump` gates its own call (a compile-DB path
-  > resolvable from `side.build_info`, real headers, `snap.from_headers`).
+  > typed-API surface" this note called for is now real: a call to the
+  > ADR-039 collector inside `_resolve_side_snapshot_impl`, gated exactly the
+  > way `perform_elf_dump` gates its own call (a compile-DB path resolvable
+  > from `side.build_info`, real headers, `snap.from_headers`).
+  > `InputSpec` deliberately does **not** gain a `compile_db_filter` field
+  > mirroring `--compile-db-filter` — an earlier revision of this change
+  > added one, and Codex review found it had no successful execution path
+  > where it narrowed anything (this shared pipeline's own L2 header-AST
+  > context always resolves from the whole, unfiltered compile database
+  > regardless of collect mode, so the field could only ever be combined
+  > with a resolvable database by raising, never by actually narrowing the
+  > collector's scan); removed rather than half-implemented — see the field's
+  > replacement comment in `api_types.py` for why threading the filter
+  > through is a separate, larger feature.
   > `attach_build_context`/`user_define_flags`/`compile_db_from_build_info`
   > moved from `cli_dump_helpers.py` (CLI-presentation layer, not importable
   > from a service module) to `header_conditionals.py` — already a
@@ -1293,15 +1302,48 @@ pipelines a fourth time.
   > `run_dump_request` API can now reach the collector too), not blocker 5
   > (making `dump_cmd` build a real `DumpRequest` in the first place, which
   > is what would let the real ELF `dump` CLI path route through here).
-  > Verified with four new direct tests on `_resolve_side_snapshot_impl`
+  > Verified with direct tests on `_resolve_side_snapshot_impl`
   > (`tests/test_typed_dump_request.py::
   > TestSharedPipelineReachesADR039BuildContextCollector`) — collector fires
   > and populates `build_context_defines`/`conditional_fields`; folded/
-  > derived tokens never reach `extra_flags`; `compile_db_filter` is honored;
-  > the collector is skipped (not raised) with no `build_info` at all — each
-  > confirmed to fail against the pre-fix code (no `attach_build_context`
-  > attribute on the module). Full fast unit suite green, `mypy abicheck/`
-  > clean, `ruff check` clean.
+  > derived tokens never reach `extra_flags`; the collector is skipped (not
+  > raised) with no `build_info` at all — each confirmed to fail against the
+  > pre-fix code (no `attach_build_context` attribute on the module). Full
+  > fast unit suite green, `mypy abicheck/` clean, `ruff check` clean.
+  >
+  > **Three more Codex-review rounds on this same change (2026-08-20),
+  > each confirmed and fixed, none requiring a design change.** (1) A PE/
+  > Mach-O typed dump/compare with headers + a compile-database `build_info`
+  > silently attached ELF-only ADR-039 evidence — gated the whole block on
+  > `fmt == "elf"` too. (2) A followed GNU ld linker script (`fmt` reads
+  > `None` pre-resolution, `resolve_input`'s own `follow_linker_scripts`
+  > default follows it to a real ELF target) silently skipped the collector
+  > — regated on `snap.elf is not None`, the model's own post-resolution
+  > signal, instead of the stale pre-resolution `fmt`. (3) `snap.elf is not
+  > None` alone proved insufficient on its own: a *loaded* JSON snapshot
+  > (`resolve_input`'s `fmt == "json"` branch, `load_snapshot(path)`
+  > verbatim, no live parse) round-trips its original `elf`/`from_headers`
+  > fields exactly as saved, so the identical signal fires for a side that
+  > never touched the header parser at all — running the collector there
+  > would scan the *current* filesystem's headers/compile-db and overwrite
+  > the loaded snapshot's own recorded build-context evidence with
+  > unrelated data. Fixed by also requiring
+  > `service.sniff_text_format(side.path) != "json"` (the exact predicate
+  > `resolve_input` itself uses to take that branch, so the two can't
+  > disagree). Each of the three confirmed to fail against the pre-fix code
+  > via a dedicated regression test in the same test class.
+  >
+  > **A separate, unrelated Codex finding on `cli_dump_helpers.py`'s own
+  > re-export of the moved helpers, also fixed the same round.**
+  > `compile_db_from_build_info`/`compile_db_filter_scope_error` (re-exported
+  > only for `cli.py`/test back-compat, never called internally by this
+  > module) now go through the lazy module-level `__getattr__` shim this
+  > repo's own moved-helper convention requires, mirroring
+  > `cli_buildsource.py`'s identical shim.  `_attach_build_context`/
+  > `_user_define_flags` stay a normal static import, since `perform_elf_dump`
+  > calls them directly — that edge to `header_conditionals.py` (a verified
+  > true leaf module) is structurally required either way, so it isn't the
+  > pattern the convention targets.
   >
   > **The `scan_engine._build_new_snapshot` `allow_build_query` gating
   > "unreconciled" framing (this section's own opening paragraph, and PR
