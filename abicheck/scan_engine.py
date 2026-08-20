@@ -389,25 +389,45 @@ def _build_new_snapshot(
                 exclude_cl_style=False,
             ),
             changed_paths=changed_paths,
-            # Raw pass-through, matching service_input_resolution.
-            # embed_side_build_source's own construction (PR C, dump/scan
-            # resolver convergence) rather than this function's own,
-            # independently-derived one: embed_build_source's
-            # public_header_roots (both tuples get unioned into one set --
-            # cli_buildsource.embed_build_source) is split back into file
-            # vs. directory roots by source_extractors._argv.
-            # split_public_roots, which already recognizes a directory
-            # (`os.path.isdir`) regardless of which of the two arguments it
-            # arrived in -- so expanding a directory into its individual
-            # header files first (as this call used to, via
-            # _expand_public_headers) adds redundant exact-file entries a
-            # dir_root already covers via prefix/segment matching
-            # (_ClassifyContext.classify), without changing which
-            # declarations classify as public. _expand_public_headers stays
-            # in use above for the S2 preprocessor pre-scan, which genuinely
-            # needs individual files (each header becomes its own `clang -E`
-            # TU) -- a different consumer with a different contract.
-            public_headers=tuple(str(p) for p in (public_headers or ())),
+            # Kept expanded (individual header files), NOT the simpler raw
+            # pass-through service_input_resolution.embed_side_build_source
+            # uses -- an earlier revision of this call switched to that
+            # simpler shape on the theory that `source_extractors._argv.
+            # split_public_roots`/`_ClassifyContext` already classify a
+            # directory root correctly via prefix/segment matching, making
+            # the expansion redundant. That reasoning holds for *that one*
+            # consumer, but a *second*, differently-shaped consumer of this
+            # same `public_header_roots` list --
+            # `clang_public_roots._equivalent_public_roots_for_unit`, the
+            # install-tree-vs-build-tree "mirror detection" heuristic L4
+            # replay uses when `-H`/`--public-header-dir` names an installed
+            # package tree physically different from the build's own include
+            # dir -- is genuinely sensitive to this shape (Codex review,
+            # confirmed by direct reproduction): a *file* root promotes an
+            # equivalent build-tree header on a single sample match, while a
+            # *directory* root needs >= 2 sampled matches
+            # (`_PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES`) before promoting the
+            # whole directory -- so a build include dir that happens to
+            # mirror only one header out of a larger public root (a small
+            # per-module local include directory against a larger installed
+            # SDK tree, say) loses that mirror-promotion entirely once the
+            # directory stops being pre-expanded into its individual files.
+            # `embed_side_build_source`'s own raw pass-through carries the
+            # identical weakness already (unverified whether it's been hit
+            # in practice) -- not fixed here, since unifying onto either
+            # shape changes real classification behavior for a real
+            # consumer either way, and reconciling the two needs its own
+            # scoped decision (harden `_equivalent_public_roots_for_unit`'s
+            # directory-root threshold, or thread real expansion into the
+            # shared primitive too), not a same-PR revert-and-redo. Keeping
+            # this call's own proven-safe expanded shape is the
+            # conservative choice for now.
+            public_headers=tuple(
+                str(p)
+                for p in _expand_public_headers(
+                    [*list(public_headers or ()), *list(public_header_dirs or ())]
+                )
+            ),
             public_header_dirs=tuple(str(p) for p in (public_header_dirs or ())),
             defer_cleanup=defer_cleanup,
         )

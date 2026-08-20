@@ -1162,36 +1162,54 @@ pipelines a fourth time.
   > keyword argument 'symbols_only'`).
   >
   > (3) The `public_headers`/`public_header_dirs` construction divergence:
-  > investigated by reading the actual consumer, not just diffing the two
-  > call sites. `embed_build_source`'s `public_header_roots` (the union of
-  > both tuples, `cli_buildsource.py:233`) is split back into file vs.
-  > directory roots by `source_extractors._argv.split_public_roots`, which
-  > already recognizes a directory via `os.path.isdir()` regardless of
-  > which of the two input tuples it arrived in — and
-  > `_ClassifyContext.classify()` (`source_extractors/clang.py`, mirrored
-  > in `castxml.py`) matches a directory root via *segment/prefix*
-  > matching (`classify_origin` against `dir_segs`), so a file under that
-  > directory already classifies as public without needing to also appear
-  > as an individual exact-match entry. `_build_new_snapshot`'s
-  > `_expand_public_headers`-based construction (walking every directory
-  > into its individual header files, then adding *those* to `public_
-  > headers` on top of the still-unexpanded `public_header_dirs`) therefore
-  > added only redundant exact-file entries a directory root already
-  > covered — not a correctness difference, just wasted directory-walk
-  > work and a needlessly divergent call shape from
-  > `embed_side_build_source`'s simpler, canonical raw pass-through.
-  > `_expand_public_headers` itself is not wrong or removed — it stays in
-  > use a few lines above this call site, for the S2 preprocessor pre-scan,
-  > which genuinely needs individual files (each header becomes its own
-  > `clang -E` translation unit, a different contract from the L4
-  > classification roots this call feeds). Reconciled onto the canonical
-  > shape: `_build_new_snapshot` now passes `public_headers`/
-  > `public_header_dirs` unexpanded, exactly matching
-  > `embed_side_build_source`. Regression test:
-  > `tests/test_scan_l2_cleanup_ordering.py::
-  > test_scan_candidate_passes_public_headers_unexpanded_to_embed`
-  > (confirmed to fail against the pre-fix code — the directory-derived
-  > extra file entry showed up in the captured `public_headers` tuple).
+  > **investigated, a fix attempted and merged, then reverted the same day
+  > after a real regression was caught by review — recorded in full since
+  > the reasoning that looked right the first time was genuinely
+  > incomplete, not merely under-tested.** The first pass read one consumer
+  > of `embed_build_source`'s `public_header_roots`
+  > (`source_extractors._argv.split_public_roots`/`_ClassifyContext.
+  > classify()`, `source_extractors/clang.py`) and confirmed a directory
+  > root already classifies every file under it via segment/prefix
+  > matching — so `_build_new_snapshot`'s `_expand_public_headers`-based
+  > expansion looked purely redundant against *that* consumer, and the fix
+  > switched the call to the simpler, unexpanded raw pass-through
+  > `embed_side_build_source` already uses. That reasoning missed a
+  > **second, differently-shaped consumer of the identical
+  > `public_header_roots` list**: `clang_public_roots.
+  > _equivalent_public_roots_for_unit`, the install-tree-vs-build-tree
+  > "mirror detection" heuristic L4 replay uses when a public root names a
+  > physically different tree from the build's own include dir (a common
+  > shape for release/package validation, per that module's own
+  > docstring). Its promotion rule is asymmetric by root shape: a *file*
+  > root promotes an equivalent build-tree header on a single sampled
+  > match; a *directory* root needs `>= _PUBLIC_ROOT_WHOLE_DIR_MIN_MATCHES`
+  > (2) sampled matches before promoting the whole directory. So a build
+  > include directory that happens to mirror only ONE header out of a
+  > larger public root (a small per-module local include directory against
+  > a larger installed SDK tree) loses that mirror-promotion entirely once
+  > the directory stops being pre-expanded into individual files — proven
+  > by direct reproduction against `_equivalent_public_roots_for_unit`
+  > itself (three installed headers, one mirrored in the build tree: the
+  > expanded-file-roots call promotes the mirrored header; the single
+  > directory-root call promotes nothing). `embed_side_build_source`'s own
+  > raw pass-through (already shipped, used by `compare`/`dump`) carries
+  > the identical weakness — not fixed here, since unifying either
+  > direction changes real classification behavior for a real consumer,
+  > and deciding which needs its own scoped design (harden
+  > `_equivalent_public_roots_for_unit`'s directory threshold, or thread
+  > real expansion into the shared primitive instead), not a same-PR
+  > revert-and-redo. **Reverted `_build_new_snapshot`'s call back to the
+  > expanded shape** — the one proven not to regress this heuristic — and
+  > pinned two regression tests: the reverted call's own shape
+  > (`tests/test_scan_l2_cleanup_ordering.py::
+  > test_scan_candidate_expands_public_header_dirs_before_embed`) and, more
+  > importantly, the underlying asymmetry itself, directly against
+  > `_equivalent_public_roots_for_unit`
+  > (`tests/test_clang_public_roots_coverage.py::
+  > test_equivalent_public_roots_promotes_on_single_match_only_for_file_roots`)
+  > so a future "simplify this like the other primitive" pass doesn't
+  > silently reintroduce the same regression by generalizing from only the
+  > first consumer again.
   >
   > **What this slice does not close**: `_build_new_snapshot` still calls
   > `service.resolve_input`/`embed_build_source` directly rather than
