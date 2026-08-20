@@ -224,6 +224,23 @@ class TestRunnerTreatment:
             "native-binary-compatibility-review"
         ]
 
+        # The intermediate name, not just the original and the current one:
+        # a host that installed the skill between the two renames (or never
+        # updated a user-scope checkout after the second) still has it
+        # visible under review-native-library-change specifically — Codex
+        # review, PR #811, caught this dropped from the retired-name set
+        # when the rename-to-check-abi-compatibility change first landed.
+        intermediate_name_events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["review-native-library-change"],
+            }
+        ]
+        assert runner.visible_native_skills(intermediate_name_events) == [
+            "review-native-library-change"
+        ]
+
     def test_an_unrelated_dev_skill_is_never_a_treatment_conflict(self):
         """`.claude/skills/` also holds `grill-with-docs`, an unrelated
         hand-authored developer skill with nothing to do with the abicheck

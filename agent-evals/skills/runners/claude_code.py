@@ -483,7 +483,8 @@ def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
 #: correctly rejected by `check_treatment`).
 _RETIRED_SKILL_NAMES = frozenset(
     {
-        "native-binary-compatibility-review",  # renamed -> check-abi-compatibility
+        "native-binary-compatibility-review",  # renamed -> review-native-library-change
+        "review-native-library-change",  # renamed -> check-abi-compatibility
         "native-api-evolution",
         "native-consumer-compatibility",
         "native-release-compatibility",
