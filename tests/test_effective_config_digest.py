@@ -28,14 +28,47 @@ import json
 
 from abicheck.change_registry_types import Verdict
 from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.compatibility_evaluation_config import (
+    AssuranceConfig,
+    CompatibilityEvaluationConfig,
+    CompatibilityPolicyConfig,
+    ContractConfig,
+    DigestedItems,
+    EvidenceConfig,
+    GateConfig,
+    ImmutableIdentity,
+    SuppressionConfig,
+    SurfaceConfig,
+)
+from abicheck.contract_relevance_types import ContractMode
 from abicheck.effective_config_digest import (
     EFFECTIVE_CONFIG_FIELD_KEYS,
     effective_config_digest,
     effective_config_fields,
 )
 from abicheck.policy_file import PolicyFile
+from abicheck.reclassify import ReclassifyRule
 from abicheck.reporter import to_json
 from abicheck.severity import resolve_severity_config
+
+
+def _identity(
+    identity_id: str, version: int = 1, sha256: str = "digest"
+) -> ImmutableIdentity:
+    return ImmutableIdentity(id=identity_id, version=version, sha256=sha256)
+
+
+def _minimal_evaluation_config(**overrides) -> CompatibilityEvaluationConfig:
+    fields = dict(
+        contract=ContractConfig(mode=ContractMode.PUBLIC),
+        evidence=EvidenceConfig(),
+        surface=SurfaceConfig(),
+        assurance=AssuranceConfig(),
+        policy=CompatibilityPolicyConfig(base=_identity("strict_abi")),
+        gate=GateConfig(),
+    )
+    fields.update(overrides)
+    return CompatibilityEvaluationConfig(**fields)
 
 
 def _result(**overrides) -> DiffResult:
@@ -184,3 +217,144 @@ class TestScanReportCarriesTheSameDigestAsCompare:
         assert effective_config_digest(compare_fields) == effective_config_digest(
             scan_fields
         )
+
+
+class TestRichTierFromEvaluationConfig:
+    """`DiffResult.evaluation_config` (Codex review, PR #803): a `--pack`-only
+    run resolves a real `CompatibilityEvaluationConfig` even without
+    `--contract`, and the digest must use it -- not just fall back to
+    `contract_context`, which stays unset in that case."""
+
+    def test_pack_only_run_reaches_the_rich_tier(self):
+        config = _minimal_evaluation_config(
+            policy=CompatibilityPolicyConfig(
+                base=_identity("strict_abi"), packs=(_identity("my_pack", version=2),)
+            )
+        )
+        result = _result(evaluation_config=config)
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["_tier"] == "contract"
+        assert "my_pack@2:digest" in fields["packs"]
+
+    def test_a_hand_built_stand_in_does_not_fool_the_rich_tier(self):
+        # A test double that merely sets an `evaluation_config` attribute to
+        # something that isn't a real `CompatibilityEvaluationConfig` must
+        # not be read as one.
+        result = _result(evaluation_config="not-a-real-config")
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["_tier"] == "baseline"
+
+    def test_pack_identity_change_changes_the_digest(self):
+        base = _result(
+            evaluation_config=_minimal_evaluation_config(
+                policy=CompatibilityPolicyConfig(
+                    base=_identity("strict_abi"), packs=(_identity("p", version=1),)
+                )
+            )
+        )
+        bumped = _result(
+            evaluation_config=_minimal_evaluation_config(
+                policy=CompatibilityPolicyConfig(
+                    base=_identity("strict_abi"), packs=(_identity("p", version=2),)
+                )
+            )
+        )
+        f1 = effective_config_fields(
+            base, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            bumped, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+
+class TestAdditionalAxes:
+    """Codex/CodeRabbit review, PR #803: axes the first cut of this module
+    omitted, each capable of changing what a comparison actually scores
+    while leaving the digest unchanged."""
+
+    def test_scope_to_public_surface_changes_the_baseline_digest(self):
+        unscoped = _result(scope_to_public_surface=False)
+        scoped = _result(scope_to_public_surface=True)
+        f1 = effective_config_fields(
+            unscoped, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            scoped, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["surface.scope_to_public_surface"] == "False"
+        assert f2["surface.scope_to_public_surface"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_active_reclassify_rule_changes_the_baseline_digest(self):
+        plain = _result()
+        rule = ReclassifyRule(to_verdict=Verdict.COMPATIBLE_WITH_RISK, symbol="foo")
+        reclassified = _result(policy_file=PolicyFile(reclassify=[rule]))
+        f1 = effective_config_fields(
+            plain, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            reclassified, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["policy.reclassify"] == ""
+        assert f2["policy.reclassify"] != ""
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_suppressions_digest_changes_the_rich_tier_digest(self):
+        no_suppressions = _result(
+            evaluation_config=_minimal_evaluation_config(suppressions=None)
+        )
+        with_suppressions = _result(
+            evaluation_config=_minimal_evaluation_config(
+                suppressions=SuppressionConfig(sha256="suppress-digest")
+            )
+        )
+        f1 = effective_config_fields(
+            no_suppressions, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            with_suppressions, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["suppressions"] == ""
+        assert f2["suppressions"] == "suppress-digest"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_explicit_scope_digest_changes_the_rich_tier_digest(self):
+        no_scope = _result(evaluation_config=_minimal_evaluation_config())
+        with_scope = _result(
+            evaluation_config=_minimal_evaluation_config(
+                surface=SurfaceConfig(
+                    explicit_scope=DigestedItems(items=(), sha256="scope-digest")
+                )
+            )
+        )
+        f1 = effective_config_fields(
+            no_scope, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            with_scope, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["surface.explicit_scope"] == ""
+        assert f2["surface.explicit_scope"] == "scope-digest"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_contract_overlays_change_the_rich_tier_digest(self):
+        no_overlays = _result(evaluation_config=_minimal_evaluation_config())
+        with_overlays = _result(
+            evaluation_config=_minimal_evaluation_config(
+                contract=ContractConfig(mode=ContractMode.PUBLIC, overlays=("api::v2",))
+            )
+        )
+        f1 = effective_config_fields(
+            no_overlays, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            with_overlays, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["contract.overlays"] == ""
+        assert f2["contract.overlays"] == "api::v2"
+        assert effective_config_digest(f1) != effective_config_digest(f2)

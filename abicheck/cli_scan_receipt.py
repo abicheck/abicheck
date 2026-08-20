@@ -292,6 +292,16 @@ def record_resolved_config(result: Any, config: Any) -> None:
     arise once this receipt's severity fields are wired to the resolution
     that actually scores the run.
     """
+    if config is None:
+        return
+    # CLI cleanup phase two, PR B (Codex review, PR #803): stamped
+    # unconditionally, mirroring `cli_compare_receipt.record_resolved_
+    # config`'s identical fix -- a `--pack`-only `scan --against` (no
+    # `--contract`) never builds a `PersistedContractContext` either, so
+    # `effective_config_digest`'s rich tier needs this regardless of the
+    # branch below.
+    result.evaluation_config = config
+
     from .contract_evidence import PersistedContractContext
 
     ctx = getattr(result, "contract_context", None)

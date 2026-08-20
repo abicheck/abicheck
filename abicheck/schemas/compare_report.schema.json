@@ -1215,16 +1215,51 @@
     },
     "effective_config_fields": {
       "type": "object",
-      "description": "schema 2.45: the named field dict effective_config_digest was hashed from, so a mismatch between two runs' digests can be attributed to a specific field instead of read as an opaque hash -- mirrors the profile_fields/scope_fields precedent in comparability.py. _tier is \"contract\" (a full CompatibilityEvaluationConfig was resolved, under --contract/--pack) or \"baseline\" (the policy/gate fields every comparison resolves regardless); the two tiers are not cross-comparable, since the contract tier also covers axes (contract.mode, real pack identities) a baseline-tier run never resolved.",
+      "description": "schema 2.45: the named field dict effective_config_digest was hashed from, so a mismatch between two runs' digests can be attributed to a specific field instead of read as an opaque hash -- mirrors the profile_fields/scope_fields precedent in comparability.py. _tier is \"contract\" (a full CompatibilityEvaluationConfig was resolved, under --contract/--pack) or \"baseline\" (the policy/gate fields every comparison resolves regardless); the two tiers are not cross-comparable, since the contract tier also covers axes (contract.mode, real pack identities) a baseline-tier run never resolved. Every key effective_config_digest.EFFECTIVE_CONFIG_FIELD_KEYS names is always present (as an empty string when the active tier does not resolve that axis), so a reader can rely on the full key set rather than only _tier.",
       "required": [
-        "_tier"
+        "_tier",
+        "policy.base",
+        "policy.overrides",
+        "policy.reclassify",
+        "surface.internal_namespaces",
+        "surface.explicit_scope",
+        "surface.scope_to_public_surface",
+        "contract.mode",
+        "contract.unresolved",
+        "contract.overlays",
+        "gate.exit_code_scheme",
+        "gate.severity.abi_breaking",
+        "gate.severity.potential_breaking",
+        "gate.severity.quality_issues",
+        "gate.severity.addition",
+        "assurance.require_evidence",
+        "suppressions",
+        "packs"
       ],
       "properties": {
         "_tier": {
           "type": "string",
           "enum": ["contract", "baseline"]
-        }
-      }
+        },
+        "policy.base": { "type": "string" },
+        "policy.overrides": { "type": "string" },
+        "policy.reclassify": { "type": "string" },
+        "surface.internal_namespaces": { "type": "string" },
+        "surface.explicit_scope": { "type": "string" },
+        "surface.scope_to_public_surface": { "type": "string" },
+        "contract.mode": { "type": "string" },
+        "contract.unresolved": { "type": "string" },
+        "contract.overlays": { "type": "string" },
+        "gate.exit_code_scheme": { "type": "string" },
+        "gate.severity.abi_breaking": { "type": "string" },
+        "gate.severity.potential_breaking": { "type": "string" },
+        "gate.severity.quality_issues": { "type": "string" },
+        "gate.severity.addition": { "type": "string" },
+        "assurance.require_evidence": { "type": "string" },
+        "suppressions": { "type": "string" },
+        "packs": { "type": "string" }
+      },
+      "additionalProperties": true
     },
     "analysis_assurance": {
       "type": "object",

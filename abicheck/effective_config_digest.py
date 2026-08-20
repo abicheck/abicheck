@@ -26,16 +26,21 @@ of :mod:`abicheck.pack_application` and ADR-049 Phase 1-6 for why that
 object is deliberately opt-in rather than universal. This module is
 therefore honest about two tiers rather than pretending one:
 
-* **Rich tier** -- when the comparison ran under ``--contract``/``--pack``,
-  :class:`~abicheck.checker_types.DiffResult.contract_context` carries a
-  full, already-resolved ``CompatibilityEvaluationConfig`` (``evaluation_
-  context.resolved_config``), including real pack identities
-  (``ImmutableIdentity(id, version, sha256)``). :func:`effective_config_
-  fields` reads it directly.
+* **Rich tier** -- when the comparison resolved one at all,
+  :class:`~abicheck.checker_types.DiffResult.evaluation_config` carries a
+  full, already-resolved ``CompatibilityEvaluationConfig`` (which happens
+  whenever ``--pack`` selected a pack, *not only* under ``--contract`` --
+  see that field's own docstring), including real pack identities
+  (``ImmutableIdentity(id, version, sha256)``), suppression/explicit-scope
+  content digests, and contract overlays. :func:`effective_config_fields`
+  reads it directly (falling back to the older ``contract_context.
+  evaluation_context.resolved_config`` for a caller that only populated
+  that block).
 * **Baseline tier** -- otherwise, the digest is built from the fields every
   comparison *does* resolve regardless: the active policy name and its
-  overrides/internal-namespaces (``DiffResult.policy``/``policy_file``),
-  and the resolved severity/exit-code-scheme gate (the same ``SeverityConfig``
+  overrides/reclassify-rules/internal-namespaces/public-surface-scoping
+  (``DiffResult.policy``/``policy_file``/``scope_to_public_surface``), and
+  the resolved severity/exit-code-scheme gate (the same ``SeverityConfig``
   /``exit_code_scheme`` pair :mod:`abicheck.reporter_contract_blocks`
   already threads through ``add_contract_context`` for the ``exit`` block).
 
@@ -72,15 +77,20 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "_tier",
     "policy.base",
     "policy.overrides",
+    "policy.reclassify",
     "surface.internal_namespaces",
+    "surface.explicit_scope",
+    "surface.scope_to_public_surface",
     "contract.mode",
     "contract.unresolved",
+    "contract.overlays",
     "gate.exit_code_scheme",
     "gate.severity.abi_breaking",
     "gate.severity.potential_breaking",
     "gate.severity.quality_issues",
     "gate.severity.addition",
     "assurance.require_evidence",
+    "suppressions",
     "packs",
 )
 
@@ -123,6 +133,38 @@ def _packs_str(*pack_groups: Any) -> str:
     return ";".join(sorted(identities))
 
 
+def _digested_items_str(items: Any) -> str:
+    """The stored ``sha256`` of a ``DigestedItems``/``SuppressionConfig``-
+    shaped object, or ``""`` when no source was selected at all (``None``,
+    per each field's own docstring) -- the content digest already answers
+    "did the source change" for whatever selected it, so this reads that
+    digest rather than re-hashing the (possibly large) item list itself."""
+    if items is None:
+        return ""
+    return str(getattr(items, "sha256", "") or "")
+
+
+def _reclassify_str(rules: Any) -> str:
+    """Stable, order-independent encoding of the *active* (non-expired)
+    subset of a ``PolicyFile.reclassify`` rule set
+    (``ReclassifyRule.to_report_dict()``, the same shared audit encoding
+    ``reporter.py``/``sarif.py`` already render, filtered through the same
+    ``active_reclassify_rules`` every other renderer disclosing this set
+    already uses), so two runs differing only in an active selector-scoped
+    reclassification rule -- which can change a finding's classification
+    the same way a plain ``policy.overrides`` entry does -- produce
+    different digests. An expired rule never matches, so it is excluded
+    here too, matching what every other renderer already discloses."""
+    from .reclassify import active_reclassify_rules
+
+    active = active_reclassify_rules(list(rules or ()))
+    encoded = sorted(
+        ";".join(f"{k}={v}" for k, v in sorted(rule.to_report_dict().items()))
+        for rule in active
+    )
+    return "|".join(encoded)
+
+
 def _enum_value(value: Any) -> str:
     """``value.value`` for an ``Enum`` member, ``str(value)`` for anything
     else, ``""`` for ``None`` -- avoids ``str(SomeEnum.MEMBER)`` returning
@@ -139,14 +181,21 @@ def _severity_field(severity: SeverityConfig | None, category: str) -> str:
     return getattr(level, "value", str(level)) if level is not None else ""
 
 
-def effective_config_fields_from_full_config(resolved_config: Any) -> dict[str, str]:
+def effective_config_fields_from_full_config(
+    resolved_config: Any, *, policy_file: Any = None
+) -> dict[str, str]:
     """Rich-tier fields from a real ``CompatibilityEvaluationConfig``.
 
-    *resolved_config* is ``DiffResult.contract_context.evaluation_context.
-    resolved_config`` -- only reachable when the comparison ran with
-    ``contract_evaluation=True`` (``--contract``/``--pack``). Reads every
-    field straight off the six namespaces D7 already resolved; nothing here
-    re-derives a value D7 precedence already decided.
+    *resolved_config* is either ``DiffResult.evaluation_config`` (whenever
+    ``--pack``/``--contract`` resolved one -- see that field's own
+    docstring) or, for a caller that only ever populated the older
+    ``contract_context`` block, ``contract_context.evaluation_context.
+    resolved_config``. Reads every field straight off the six namespaces D7
+    already resolved; nothing here re-derives a value D7 precedence already
+    decided. *policy_file* is *result.policy_file* (the actual ``PolicyFile``
+    the run scored with) -- ``reclassify`` rules are a checker-level
+    ``PolicyFile`` concept with no ``CompatibilityEvaluationConfig``
+    namespace of their own, so they are read from there regardless of tier.
     """
     policy = getattr(resolved_config, "policy", None)
     surface = getattr(resolved_config, "surface", None)
@@ -154,21 +203,29 @@ def effective_config_fields_from_full_config(resolved_config: Any) -> dict[str, 
     gate = getattr(resolved_config, "gate", None)
     severity = getattr(gate, "severity", None)
     assurance = getattr(resolved_config, "assurance", None)
+    evidence = getattr(resolved_config, "evidence", None)
     pack_groups = (
         getattr(policy, "packs", ()),
         getattr(gate, "packs", ()),
         getattr(contract, "packs", ()),
         getattr(surface, "packs", ()),
+        getattr(evidence, "packs", ()),
     )
     return {
         "_tier": "contract",
         "policy.base": str(getattr(getattr(policy, "base", None), "id", "") or ""),
         "policy.overrides": _overrides_str(getattr(policy, "overrides", {})),
+        "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
         "surface.internal_namespaces": _namespaces_str(
             getattr(surface, "internal_namespaces", ())
         ),
+        "surface.explicit_scope": _digested_items_str(
+            getattr(surface, "explicit_scope", None)
+        ),
+        "surface.scope_to_public_surface": "",
         "contract.mode": _enum_value(getattr(contract, "mode", None)),
         "contract.unresolved": str(getattr(contract, "unresolved", "") or ""),
+        "contract.overlays": _namespaces_str(getattr(contract, "overlays", ())),
         "gate.exit_code_scheme": str(getattr(gate, "exit_code_scheme", "") or ""),
         "gate.severity.abi_breaking": _severity_field(severity, "abi_breaking"),
         "gate.severity.potential_breaking": _severity_field(
@@ -178,6 +235,9 @@ def effective_config_fields_from_full_config(resolved_config: Any) -> dict[str, 
         "gate.severity.addition": _severity_field(severity, "addition"),
         "assurance.require_evidence": str(
             bool(getattr(assurance, "require_evidence", True))
+        ),
+        "suppressions": _digested_items_str(
+            getattr(resolved_config, "suppressions", None)
         ),
         "packs": _packs_str(*pack_groups),
     }
@@ -202,11 +262,17 @@ def effective_config_fields_from_diff_result(
         "_tier": "baseline",
         "policy.base": str(getattr(result, "policy", "") or ""),
         "policy.overrides": _overrides_str(getattr(policy_file, "overrides", {})),
+        "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
         "surface.internal_namespaces": _namespaces_str(
             getattr(policy_file, "internal_namespaces", ())
         ),
+        "surface.explicit_scope": "",
+        "surface.scope_to_public_surface": str(
+            bool(getattr(result, "scope_to_public_surface", False))
+        ),
         "contract.mode": "",
         "contract.unresolved": "",
+        "contract.overlays": "",
         "gate.exit_code_scheme": str(exit_code_scheme or ""),
         "gate.severity.abi_breaking": _severity_field(severity_config, "abi_breaking"),
         "gate.severity.potential_breaking": _severity_field(
@@ -217,6 +283,7 @@ def effective_config_fields_from_diff_result(
         ),
         "gate.severity.addition": _severity_field(severity_config, "addition"),
         "assurance.require_evidence": "",
+        "suppressions": "",
         "packs": "",
     }
 
@@ -229,21 +296,37 @@ def effective_config_fields(
 ) -> dict[str, str]:
     """The digest field dict for *result*, picking the richest available tier.
 
-    Reads ``result.contract_context.evaluation_context.resolved_config``
-    when present (a real ``CompatibilityEvaluationConfig``, isinstance-
-    checked so a stand-in/test double never fools this into the rich tier);
-    falls back to the baseline tier otherwise. This is the single function
+    Prefers ``result.evaluation_config`` (a real ``CompatibilityEvaluationConfig``,
+    isinstance-checked so a stand-in/test double never fools this into the
+    rich tier) when present -- populated whenever ``--pack``/``--contract``
+    resolved one, *not only* under ``--contract`` (Codex review, PR #803:
+    an earlier revision read this only off ``contract_context``, which
+    stays unset without ``--contract``, so a ``--pack``-only run's real
+    pack identities were silently unreachable at report time even though
+    they were genuinely resolved). Falls back to ``result.contract_context.
+    evaluation_context.resolved_config`` for a caller that only populated
+    the older block, then to the baseline tier. This is the single function
     every front end (``compare``, the release fan-out, ``scan --against``)
     should call -- it is what makes "one digest algorithm" true rather than
     each front end approximating the same shape independently.
     """
+    from .compatibility_evaluation_config import CompatibilityEvaluationConfig
+
+    policy_file = getattr(result, "policy_file", None)
+    evaluation_config = getattr(result, "evaluation_config", None)
+    if isinstance(evaluation_config, CompatibilityEvaluationConfig):
+        return effective_config_fields_from_full_config(
+            evaluation_config, policy_file=policy_file
+        )
     ctx = getattr(result, "contract_context", None)
     if ctx is not None:
         from .contract_evidence import PersistedContractContext
 
         if isinstance(ctx, PersistedContractContext):
             resolved_config = ctx.evaluation_context.resolved_config
-            return effective_config_fields_from_full_config(resolved_config)
+            return effective_config_fields_from_full_config(
+                resolved_config, policy_file=policy_file
+            )
     return effective_config_fields_from_diff_result(
         result, severity_config=severity_config, exit_code_scheme=exit_code_scheme
     )

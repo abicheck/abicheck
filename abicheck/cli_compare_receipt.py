@@ -656,6 +656,15 @@ def record_resolved_config(
     """
     if config is None:
         return
+    # CLI cleanup phase two, PR B (Codex review, PR #803): stamped
+    # unconditionally, *before* the contract_context-only branch below --
+    # a `--pack`-only run (no `--contract`) never builds a
+    # `PersistedContractContext` at all, so `effective_config_digest`'s
+    # rich tier would otherwise be silently unreachable for it even though
+    # `config` (this same object) is a real, fully-resolved
+    # `CompatibilityEvaluationConfig` with real pack identities.
+    result.evaluation_config = config
+
     from .contract_evidence import PersistedContractContext
 
     ctx = getattr(result, "contract_context", None)

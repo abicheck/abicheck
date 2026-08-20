@@ -28,15 +28,30 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+        old,
+        new,
+        collect_mode,
+        extra_changes,
+        *args,
+        **kwargs,  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
     def fake_compare_snapshots(
-        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
-        extra_changes, scope_to_public_surface, force_public_symbols=None,
-        pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
-        contract_evaluation=False, contract_mode=None,
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
+        collapse_versioned_symbols=False,
+        contract_evaluation=False,
+        contract_mode=None,
     ):  # noqa: ANN001
         calls.append(
             {
@@ -106,26 +121,45 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
     }
 
 
-def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch) -> None:
+def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(
+    monkeypatch,
+) -> None:
     """Only explicit hard L0 removals are preserved; crosschecks stay advisory."""
 
     old_snap = SimpleNamespace(build_source=None)
     new_snap = SimpleNamespace(build_source=None)
-    advisory = SimpleNamespace(kind=SimpleNamespace(value="header_build_context_mismatch"))
+    advisory = SimpleNamespace(
+        kind=SimpleNamespace(value="header_build_context_mismatch")
+    )
 
     def fake_resolve_input(*args, **kwargs):  # noqa: ANN002, ANN003
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+        old,
+        new,
+        collect_mode,
+        extra_changes,
+        *args,
+        **kwargs,  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
     def fake_compare_snapshots(
-        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
-        extra_changes, scope_to_public_surface, force_public_symbols=None,
-        pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
-        contract_evaluation=False, contract_mode=None,
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
+        collapse_versioned_symbols=False,
+        contract_evaluation=False,
+        contract_mode=None,
     ):  # noqa: ANN001
         if not scope_to_public_surface:
             return SimpleNamespace(
@@ -152,7 +186,16 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
     )
 
     verdict, exit_code, summary = _run_baseline_compare(
-        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+        Path("old.so"),
+        Path("new.so"),
+        new_snap,
+        [],
+        "c++",
+        "graph-full",
+        [],
+        [],
+        [],
+        [],
     )
 
     assert verdict == "NO_CHANGE"
@@ -161,6 +204,13 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
     # consumers that only ever read the four counts) -- `exit` (CLI cleanup
     # phase two, PR E) is unconditional, unlike `findings`, since every real
     # comparison has a compatibility contribution to report.
+    #
+    # `effective_config_digest`/`effective_config_fields` (CLI cleanup phase
+    # two, PR B) are asserted separately below rather than folded into this
+    # literal: a hardcoded hash here would break on every unrelated field
+    # this repo's own digest ever grows (see effective_config_digest.py).
+    digest = summary.pop("effective_config_digest")
+    fields = summary.pop("effective_config_fields")
     assert summary == {
         "breaking": 0,
         "api_break": 0,
@@ -176,6 +226,9 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
         },
     }
     assert "findings" not in summary
+    assert digest.startswith("sha256:")
+    assert fields["_tier"] == "baseline"
+    assert fields["gate.exit_code_scheme"] == "legacy"
 
 
 def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> None:
@@ -198,15 +251,30 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+        old,
+        new,
+        collect_mode,
+        extra_changes,
+        *args,
+        **kwargs,  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
     def fake_compare_snapshots(
-        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
-        extra_changes, scope_to_public_surface, force_public_symbols=None,
-        pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
-        contract_evaluation=False, contract_mode=None,
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
+        collapse_versioned_symbols=False,
+        contract_evaluation=False,
+        contract_mode=None,
     ):  # noqa: ANN001
         return SimpleNamespace(
             breaking=many_breaks,
@@ -224,7 +292,16 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
     )
 
     _, _, summary = _run_baseline_compare(
-        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+        Path("old.so"),
+        Path("new.so"),
+        new_snap,
+        [],
+        "c++",
+        "graph-full",
+        [],
+        [],
+        [],
+        [],
     )
 
     assert summary["breaking"] == len(many_breaks)
@@ -253,15 +330,30 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+        old,
+        new,
+        collect_mode,
+        extra_changes,
+        *args,
+        **kwargs,  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
     def fake_compare_snapshots(
-        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
-        extra_changes, scope_to_public_surface, force_public_symbols=None,
-        pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
-        contract_evaluation=False, contract_mode=None,
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
+        collapse_versioned_symbols=False,
+        contract_evaluation=False,
+        contract_mode=None,
     ):  # noqa: ANN001
         return SimpleNamespace(
             breaking=[],
@@ -280,7 +372,16 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
     )
 
     _, _, summary = _run_baseline_compare(
-        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+        Path("old.so"),
+        Path("new.so"),
+        new_snap,
+        [],
+        "c++",
+        "graph-full",
+        [],
+        [],
+        [],
+        [],
     )
 
     assert summary["suppressed_count"] == len(many_suppressed)
@@ -310,18 +411,36 @@ def test_scan_baseline_compare_filters_dependency_scope_by_default(monkeypatch) 
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+        old,
+        new,
+        collect_mode,
+        extra_changes,
+        *args,
+        **kwargs,  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
     def fake_compare_snapshots(
-        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
-        extra_changes, scope_to_public_surface, force_public_symbols=None,
-        pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
-        contract_evaluation=False, contract_mode=None,
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
+        collapse_versioned_symbols=False,
+        contract_evaluation=False,
+        contract_mode=None,
     ):  # noqa: ANN001
         return SimpleNamespace(
-            breaking=[], source_breaks=[], risk=[], compatible=[],
+            breaking=[],
+            source_breaks=[],
+            risk=[],
+            compatible=[],
             verdict=_Verdict("NO_CHANGE"),
         )
 
@@ -333,7 +452,16 @@ def test_scan_baseline_compare_filters_dependency_scope_by_default(monkeypatch) 
     )
 
     _run_baseline_compare(
-        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+        Path("old.so"),
+        Path("new.so"),
+        new_snap,
+        [],
+        "c++",
+        "graph-full",
+        [],
+        [],
+        [],
+        [],
     )
 
     # The first resolve_input() call is the baseline (`old_snap`); the

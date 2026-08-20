@@ -552,6 +552,26 @@ class DiffResult:
     # gate, or an exit code, because an unattributed finding is an absence of
     # proof, not proof the finding is harmless.
     use_case_impact: object | None = None
+    # CLI cleanup phase two, PR B (Codex review, PR #803): the resolved
+    # ``CompatibilityEvaluationConfig`` this comparison was configured with,
+    # when one was resolved at all -- unlike ``contract_context`` above,
+    # this is populated whenever ``--pack`` selected a pack, *not only*
+    # under ``--contract`` (``resolve_and_apply``/``resolve_cli_config``
+    # already resolve one for a pack-only run; it was previously only
+    # attached to the report through ``contract_context``, which stays
+    # unset without ``--contract``, so a pack-only run's real pack
+    # identities were unreachable at report time). ``field(kw_only=True)``,
+    # appended at the true end, per this file's own established
+    # positional-field-safety convention (see ``vtable_covers_unverifiable_
+    # layout_gap``/``symbol_binding`` above) -- inserting an ordinary
+    # positional field here would silently reinterpret every existing
+    # positional caller's later arguments. Typed ``object`` for the same
+    # circular-import reason as ``contract_context``/``analysis_assurance``
+    # above. Read by ``effective_config_digest.effective_config_fields``,
+    # which prefers this over ``contract_context``'s own nested resolved
+    # config when both are present (they are always the same object when
+    # both are set, since both are stamped from the identical resolution).
+    evaluation_config: object | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,
