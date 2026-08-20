@@ -40,11 +40,13 @@ symptom (``ast_resolved_standard``/``ast_compile_args`` empty on the
 ``dump`` side, ``NOT_COMPARABLE`` on the ``scan`` side) does not reproduce
 on the current fold, rather than trusting the mocked unit coverage alone.
 
-Deliberately *not* marked ``integration`` (that marker's Linux gate
-requires castxml) -- ``--ast-frontend clang`` is used explicitly, mirroring
-``test_clang_header_backend_integration.py``'s own self-skipping
-convention, since the point is a real clang + g++ toolchain, not castxml
-specifically.
+Marked ``integration`` (real compiler-backed, so it must stay out of the
+default fast lane -- CLAUDE.md's "Default fast command excludes all
+external-tool markers"). ``--ast-frontend clang`` is used explicitly
+rather than the default castxml backend purely so this module's own
+development/verification didn't require a castxml install; the Linux
+``integration`` CI lane installs both clang and castxml/gcc/g++
+(``.github/workflows/ci.yml``), so this runs there regardless.
 """
 
 from __future__ import annotations
@@ -60,10 +62,13 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+    ),
+]
 
 _HAVE_GXX = shutil.which("g++") is not None
 _HAVE_CLANG = shutil.which("clang") is not None
