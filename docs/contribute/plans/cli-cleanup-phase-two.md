@@ -1215,6 +1215,43 @@ pipelines a fourth time.
   > hooks), 5 (`dump_cmd` building a real `DumpRequest`), and 6 (a
   > pair-aware scan-baseline primitive) remain fully open, unchanged from
   > the notes above.
+  >
+  > **Blocker 4 narrowed by re-reading `service.py`'s own ELF `run_dump`
+  > tail against `perform_elf_dump`'s three named post-processing passes,
+  > one at a time, rather than assuming all three are equally missing
+  > (2026-08-20, no code change).** Two of the three already run on the
+  > shared `resolve_side_snapshot`/`resolve_input` path — `service.
+  > resolve_input`'s native-binary dispatch calls `run_dump`, and
+  > `run_dump`'s ELF branch already calls `_attach_header_graph` (the G31
+  > header-graph second pass) and `attach_clang_layout` (the G28 clang-
+  > layout-tool attach) unconditionally, the identical two functions
+  > `perform_elf_dump` calls by name. So `_resolve_side_snapshot_impl`
+  > (and therefore `compare`'s implicit-dump path and `dump`'s typed
+  > `run_dump_request`) already gets both — blocker 4's "no equivalent
+  > hook" framing was accurate for the ADR-039 pass alone, not for all
+  > three. **The ADR-039 build-context collector (`_attach_build_context`,
+  > `cli_dump_helpers.py`) is confirmed, by grep, to have exactly one call
+  > site in the whole codebase — `perform_elf_dump` itself.** Not `handle_
+  > non_elf_dump` (PE/Mach-O `dump`), not `service.py`'s `run_dump`/`_dump_
+  > elf`/`_dump_pe`/`_dump_macho`, not `scan_engine._build_new_snapshot`.
+  > It is ELF-`dump`-CLI-only today, and this is a materially different
+  > kind of gap than "the shared primitive is missing a hook to call an
+  > existing, portable step": `_attach_build_context` is driven entirely by
+  > CLI-only inputs (`-p`/`--compile-db`, `--compile-db-filter`,
+  > `effective_compile_db` — a raw, unfiltered compile-database path plus a
+  > source-glob filter, resolved by `cli.py`'s own flag parsing) that have
+  > no representation anywhere in `CompileContext`, `InputSpec`, or
+  > `DumpRequest` — there is no typed-API field to route through a hook
+  > even once one exists. Closing this needs *new* typed-API surface (an
+  > `InputSpec`/`DumpRequest` field carrying a compile-DB path + filter,
+  > threaded through `_resolve_side_snapshot_impl` to a new call to
+  > `_attach_build_context` or an equivalent), not merely wiring an
+  > existing portable step into an existing hook — a real, separate,
+  > additive feature addition on its own, out of proportion to a
+  > same-session follow-up given `_attach_build_context`'s own documented
+  > "must not be unioned snapshot-wide" invariant (AGENTS.md's L3→L2-fold
+  > entry, ninth finding) that any new call site would have to re-verify
+  > against. Not attempted here. Blockers 5 and 6 are unchanged.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
