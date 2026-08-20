@@ -572,6 +572,17 @@ class DiffResult:
     # config when both are present (they are always the same object when
     # both are set, since both are stamped from the identical resolution).
     evaluation_config: object | None = field(default=None, kw_only=True)
+    # CLI cleanup phase two, PR B (Codex review, PR #803): the resolved
+    # --suppress file's own content digest (``SuppressionList.source_
+    # sha256``), when one was given -- for an ordinary comparison with
+    # neither ``--contract`` nor ``--pack``, no ``CompatibilityEvaluation
+    # Config`` is ever resolved, so ``effective_config_digest``'s baseline
+    # tier had no way to detect that two runs differing only in which
+    # suppression file they loaded (each removing different findings)
+    # resolved genuinely different configuration. ``None`` when no
+    # suppression file was given, distinct from ``suppression_file_
+    # provided``'s bool (this field is the content, not just presence).
+    suppression_source_sha256: str | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,

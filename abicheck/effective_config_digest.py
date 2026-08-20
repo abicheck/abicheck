@@ -59,6 +59,30 @@ configuration change", mirroring the existing ``profile_fingerprint``/
 field values themselves are also recorded (verbatim, not just hashed) so a
 mismatch can be attributed to a specific field rather than read as an
 opaque hash.
+
+**Known, documented gap: the directory/package release fan-out's own
+*per-library* digests stay at the baseline tier even under ``--pack``**
+(Codex review, PR #803, fresh evidence). ``cli_compare_release_helpers.
+_run_compare_pair`` forwards only ``PackApplication.policy_overrides``/
+``internal_namespaces`` to ``service.run_compare`` for each library -- it
+never stamps the resolved ``CompatibilityEvaluationConfig`` onto that
+library's own ``DiffResult`` the way ``cli_compare_receipt.
+record_resolved_config`` does for single-pair ``compare``. So a release run
+under two different pack *revisions* that happen to project the same
+policy/severity assignments produces the same per-library digest, even
+though the rich tier's whole point is real, versioned pack identities.
+Closing this needs the release fan-out's per-library resolution to gain an
+equivalent stamp -- deliberately deferred alongside this plan's other
+release-fan-out-internals gap (see the plan doc's PR B section, "the
+GateOptions unification"), since both touch the same delicate,
+already-heavily-reviewed severity/pack resolution code the release engine
+runs per library. The release-level *summary* digest
+(``cli_compare_release_helpers._format_release_json``) is a separate,
+narrower computation -- it only ever resolves the baseline tier (no
+`CompatibilityEvaluationConfig` object exists at that scope at all), so it
+was never subject to this same gap; it captures the release's own resolved
+severity/exit-code-scheme (which a gate pack's contribution already folds
+into, per ``apply_release_gate_pack``), not pack identity.
 """
 
 from __future__ import annotations
@@ -182,7 +206,7 @@ def _severity_field(severity: SeverityConfig | None, category: str) -> str:
 
 
 def effective_config_fields_from_full_config(
-    resolved_config: Any, *, policy_file: Any = None
+    resolved_config: Any, *, result: Any = None, policy_file: Any = None
 ) -> dict[str, str]:
     """Rich-tier fields from a real ``CompatibilityEvaluationConfig``.
 
@@ -196,6 +220,11 @@ def effective_config_fields_from_full_config(
     the run scored with) -- ``reclassify`` rules are a checker-level
     ``PolicyFile`` concept with no ``CompatibilityEvaluationConfig``
     namespace of their own, so they are read from there regardless of tier.
+    *result* is the ``DiffResult`` itself -- ``scope_to_public_surface`` is
+    likewise a checker-level fact with no D7 namespace of its own (Codex
+    review, PR #803: an earlier revision hard-coded this field empty for
+    the rich tier, so two ``--contract`` runs differing only in
+    ``--scope-public-headers`` collided).
     """
     policy = getattr(resolved_config, "policy", None)
     surface = getattr(resolved_config, "surface", None)
@@ -222,7 +251,9 @@ def effective_config_fields_from_full_config(
         "surface.explicit_scope": _digested_items_str(
             getattr(surface, "explicit_scope", None)
         ),
-        "surface.scope_to_public_surface": "",
+        "surface.scope_to_public_surface": str(
+            bool(getattr(result, "scope_to_public_surface", False))
+        ),
         "contract.mode": _enum_value(getattr(contract, "mode", None)),
         "contract.unresolved": str(getattr(contract, "unresolved", "") or ""),
         "contract.overlays": _namespaces_str(getattr(contract, "overlays", ())),
@@ -238,7 +269,8 @@ def effective_config_fields_from_full_config(
         ),
         "suppressions": _digested_items_str(
             getattr(resolved_config, "suppressions", None)
-        ),
+        )
+        or str(getattr(result, "suppression_source_sha256", "") or ""),
         "packs": _packs_str(*pack_groups),
     }
 
@@ -283,7 +315,7 @@ def effective_config_fields_from_diff_result(
         ),
         "gate.severity.addition": _severity_field(severity_config, "addition"),
         "assurance.require_evidence": "",
-        "suppressions": "",
+        "suppressions": str(getattr(result, "suppression_source_sha256", "") or ""),
         "packs": "",
     }
 
@@ -316,7 +348,7 @@ def effective_config_fields(
     evaluation_config = getattr(result, "evaluation_config", None)
     if isinstance(evaluation_config, CompatibilityEvaluationConfig):
         return effective_config_fields_from_full_config(
-            evaluation_config, policy_file=policy_file
+            evaluation_config, result=result, policy_file=policy_file
         )
     ctx = getattr(result, "contract_context", None)
     if ctx is not None:
@@ -325,7 +357,7 @@ def effective_config_fields(
         if isinstance(ctx, PersistedContractContext):
             resolved_config = ctx.evaluation_context.resolved_config
             return effective_config_fields_from_full_config(
-                resolved_config, policy_file=policy_file
+                resolved_config, result=result, policy_file=policy_file
             )
     return effective_config_fields_from_diff_result(
         result, severity_config=severity_config, exit_code_scheme=exit_code_scheme

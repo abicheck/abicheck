@@ -29,6 +29,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import click
@@ -863,6 +864,31 @@ def _format_release_json(
             }
             for c in matrix_result.changes
         ]
+    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
+    # the release-level *summary* JSON -- the primary release report, and
+    # what `--output-dir`'s own `summary.json` writes -- never called
+    # `add_contract_context`/emitted either effective-config field at all;
+    # only the optional per-library `to_json` sidecar files did, so the
+    # advertised release-fan-out parity was silently absent from the report
+    # a release consumer actually reads. Computed here from a lightweight
+    # stand-in carrying only what this function actually has in scope
+    # (`severity_config`) -- narrower than the per-library sidecar's own
+    # digest (no policy/pack/contract axes at this release-summary level;
+    # see effective_config_digest.py's own module docstring for the two
+    # tiers), but real: two releases resolving different severity
+    # configuration no longer collide on this field.
+    from .effective_config_digest import (
+        effective_config_digest,
+        effective_config_fields,
+    )
+
+    _ec_result = SimpleNamespace()
+    _ec_scheme = "severity" if severity_config is not None else "legacy"
+    _ec_fields = effective_config_fields(
+        _ec_result, severity_config=severity_config, exit_code_scheme=_ec_scheme
+    )
+    summary["effective_config_digest"] = effective_config_digest(_ec_fields)
+    summary["effective_config_fields"] = _ec_fields
     return json.dumps(summary, indent=2)
 
 

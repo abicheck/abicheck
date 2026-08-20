@@ -25,6 +25,7 @@ the same field via the same function -- the "one effective configuration
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from abicheck.change_registry_types import Verdict
 from abicheck.checker import Change, ChangeKind, DiffResult
@@ -358,3 +359,78 @@ class TestAdditionalAxes:
         assert f1["contract.overlays"] == ""
         assert f2["contract.overlays"] == "api::v2"
         assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_scope_to_public_surface_changes_the_rich_tier_digest(self):
+        """Codex review, PR #803, fresh evidence: an earlier revision hard-
+        coded this field empty for the rich tier, so two --contract runs
+        differing only in --scope-public-headers collided."""
+        unscoped = _result(
+            evaluation_config=_minimal_evaluation_config(),
+            scope_to_public_surface=False,
+        )
+        scoped = _result(
+            evaluation_config=_minimal_evaluation_config(),
+            scope_to_public_surface=True,
+        )
+        f1 = effective_config_fields(
+            unscoped, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            scoped, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["surface.scope_to_public_surface"] == "False"
+        assert f2["surface.scope_to_public_surface"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_suppress_file_changes_the_baseline_digest(self):
+        """Codex review, PR #803, fresh evidence: an ordinary `compare
+        --suppress FILE` (no --contract, no --pack) resolves no
+        CompatibilityEvaluationConfig, so the baseline tier's `suppressions`
+        field must read DiffResult.suppression_source_sha256 directly."""
+        no_suppress = _result()
+        with_suppress = _result(suppression_source_sha256="sha256:abc123")
+        f1 = effective_config_fields(
+            no_suppress, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields(
+            with_suppress, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert f1["suppressions"] == ""
+        assert f2["suppressions"] == "sha256:abc123"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+
+class TestReleaseSummaryCarriesDigest:
+    """Codex review, PR #803, fresh evidence: the release-level *summary*
+    JSON (the primary release report, and what `--output-dir` writes) never
+    emitted either effective-config field at all -- only the optional
+    per-library sidecar files did."""
+
+    def _release_json(self, **kwargs):
+        from abicheck.cli_compare_release_helpers import _format_release_json
+
+        out = _format_release_json(
+            "NO_CHANGE",
+            Path("/o"),
+            Path("/n"),
+            [],
+            [],
+            [],
+            {},
+            {},
+            [],
+            None,
+            None,
+            **kwargs,
+        )
+        return json.loads(out)
+
+    def test_release_summary_carries_digest(self):
+        data = self._release_json()
+        assert data["effective_config_digest"].startswith("sha256:")
+        assert data["effective_config_fields"]["_tier"] == "baseline"
+
+    def test_severity_config_changes_the_release_summary_digest(self):
+        plain = self._release_json()
+        severity = self._release_json(severity_config=resolve_severity_config("strict"))
+        assert plain["effective_config_digest"] != severity["effective_config_digest"]

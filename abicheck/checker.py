@@ -1147,6 +1147,7 @@ def compare(
         suppressed_count=len(suppressed),
         suppressed_changes=suppressed,
         suppression_file_provided=suppression is not None,
+        suppression_source_sha256=getattr(suppression, "source_sha256", None),
         detector_results=detector_results,
         policy=effective_policy,
         policy_file=policy_file,
