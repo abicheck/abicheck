@@ -553,14 +553,34 @@ def _resolve_side_snapshot_impl(
         # preserving the "must not be unioned snapshot-wide" invariant
         # `user_define_flags`'s own docstring states (see the ninth finding
         # in the root AGENTS.md's L3->L2-fold entry for why).
-        compile_db_path = compile_db_from_build_info(
-            side.build_info, tuple(evidence.headers)
+        #
+        # `evidence.headers` may still contain a directory entry -- exactly
+        # what `service.resolve_input`/`_dump_elf` itself expands internally
+        # (via this identical `expand_header_inputs`) before parsing, so
+        # `snap` above was already built from the expanded set. The collector
+        # scans each entry with `Path(path).read_text(...)`, which raises
+        # `OSError` for a directory and is silently skipped -- passing the
+        # raw, unexpanded list here would leave `conditional_fields` empty
+        # for the common directory-header-input case even though headers
+        # were genuinely parsed (Codex review, PR #809). Expanding a second
+        # time is safe and cheap: `resolve_input` already proved every path
+        # here is valid (it would have raised otherwise), so this is a pure
+        # directory walk, no new I/O risk -- mirrors `perform_elf_dump`'s own
+        # `resolved_headers = expand_header_inputs(...)` computed once and
+        # reused for both its primary parse and this identical collector call.
+        from .service_scan import expand_header_inputs
+
+        collector_headers = (
+            expand_header_inputs(list(evidence.headers)) if evidence.headers else []
         )
-        if compile_db_path is not None and evidence.headers and snap.from_headers:
+        compile_db_path = compile_db_from_build_info(
+            side.build_info, tuple(collector_headers)
+        )
+        if compile_db_path is not None and collector_headers and snap.from_headers:
             attach_build_context(
                 snap,
                 compile_db_path,
-                list(evidence.headers),
+                collector_headers,
                 _user_define_flags(
                     side.compile.gcc_option_tokens if side.compile else (),
                     side.compile.gcc_options if side.compile else None,

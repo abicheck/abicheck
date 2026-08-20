@@ -18,5 +18,10 @@
   existing caller/test are unchanged. `perform_elf_dump` itself is not
   migrated to call through the shared path in this change — only the
   pipeline's own capability gap is closed, so `compare`'s implicit dump and
-  `dump`'s typed API can now attach build-context evidence too.
+  `dump`'s typed API can now attach build-context evidence too. The
+  collector now also expands a directory `InputSpec.headers` entry the same
+  way `service.resolve_input` does before scanning it for `#ifdef`-guarded
+  fields, matching `perform_elf_dump`'s own behavior — without this, the
+  common directory-`-H` input case left `conditional_fields` silently empty
+  even though the headers under it were genuinely parsed.
 

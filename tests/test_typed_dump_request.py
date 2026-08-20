@@ -1465,6 +1465,60 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         assert "Widget" in resolution.snapshot.conditional_fields
         assert "guarded" in resolution.snapshot.conditional_fields["Widget"]
 
+    def test_collector_expands_a_header_directory_before_scanning(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #809: ``InputSpec.headers`` may name a directory
+        (``service.resolve_input``/``_dump_elf`` expand it internally via
+        ``expand_header_inputs`` before parsing) -- the collector must scan
+        the same expanded file set, not the raw, unexpanded directory entry
+        (``Path(dir).read_text()`` raises ``OSError``, silently caught and
+        skipped by ``collect_build_context``, leaving ``conditional_fields``
+        empty for the common directory-``-H`` case)."""
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        include_dir = tmp_path / "include"
+        include_dir.mkdir()
+        hdr = include_dir / "widget.h"
+        hdr.write_text(
+            "struct Widget {\n"
+            "  int x;\n"
+            "#ifdef GUARD\n"
+            "  int guarded;\n"
+            "#endif\n"
+            "};\n",
+            encoding="utf-8",
+        )
+        src = tmp_path / "widget.cpp"
+        src.write_text('#include "widget.h"\n', encoding="utf-8")
+        db = self._compile_db(tmp_path, src, "-DGUARD=1")
+
+        monkeypatch.setattr(
+            service,
+            "resolve_input",
+            lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
+        )
+
+        side = InputSpec(
+            path=tmp_path / "lib.so", headers=(include_dir,), build_info=db
+        )
+        evidence = SideEvidence(
+            headers=[include_dir], compile=None, collect_mode="off", dump_manifest=None
+        )
+        resolution = sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[include_dir],
+            public_header_dirs=[],
+        )
+        assert "GUARD" in resolution.snapshot.build_context_defines
+        assert "Widget" in resolution.snapshot.conditional_fields
+        assert "guarded" in resolution.snapshot.conditional_fields["Widget"]
+
     def test_collector_never_sees_folded_derived_tokens_only_pre_fold_explicit(
         self, monkeypatch, tmp_path: Path
     ) -> None:
