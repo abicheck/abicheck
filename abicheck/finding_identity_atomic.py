@@ -47,11 +47,11 @@ def canonicalize_atomic_slot(value: str, other: str) -> str:
     identity discriminator, given the *other* (opposite) side's raw
     spelling for comparison.
 
-    ``dumper_castxml.py`` cannot model C11 ``_Atomic`` -- it emits a bare
-    ``Unimplemented`` node with no reference to the wrapped type, so its
-    ``_type_name()`` spells the qualifier's *inner content* as the literal,
-    lossy sentinel ``"_Atomic"``. The direct-clang backend retains the real
-    wrapped spelling (e.g. ``"_Atomic(struct Foo *)"``). Plain
+    Some legacy CastXML C11 ``_Atomic`` nodes omit the reference to the
+    wrapped type, so ``dumper_castxml.py`` spells them as the lossy sentinel
+    ``"_Atomic"``. Nodes that retain the reference and the direct-clang
+    backend preserve the wrapped spelling (e.g. ``"_Atomic(struct Foo *)"``).
+    Plain
     :func:`canonicalize_type_name` has no notion these name the same
     qualified type, so without this helper CastXML's sentinel and Clang's
     concrete spelling never hash to the same canonical id.
