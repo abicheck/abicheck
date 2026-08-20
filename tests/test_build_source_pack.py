@@ -47,6 +47,7 @@ from abicheck.buildsource.build_evidence import (
     Toolchain,
 )
 from abicheck.buildsource.model import CoverageStatus, DataLayer
+from abicheck.buildsource.redaction import DEFAULT_REDACTION
 from abicheck.checker_policy import (
     BREAKING_KINDS,
     COMPATIBLE_KINDS,
@@ -483,6 +484,14 @@ def test_compile_db_records_explicit_absolute_include_provenance(tmp_path):
     originally written, and leave a relative operand that merely RESOLVED
     to the same absolute location (by being joined onto ``directory``) out
     of that set."""
+    # Use proper path joining (not string concatenation with a literal "/")
+    # so the expected value matches ``Path``'s native separator on every
+    # platform -- Windows renders a mixed-separator input like
+    # ``f"{tmp_path}/vendor"`` back out with backslashes throughout once it
+    # round-trips through ``_resolve_path``'s ``Path(raw)`` construction.
+    vendor_path = str(tmp_path / "vendor")
+    local_path = str(tmp_path / "local")
+    sysvendor_path = str(tmp_path / "sysvendor")
     cdb = _write_cdb(
         tmp_path,
         [
@@ -491,10 +500,10 @@ def test_compile_db_records_explicit_absolute_include_provenance(tmp_path):
                 "file": "a.cpp",
                 "arguments": [
                     "c++",
-                    f"-I{tmp_path}/vendor",  # explicit absolute
+                    f"-I{vendor_path}",  # explicit absolute
                     "-Ilocal",  # relative -- resolves to <tmp_path>/local
                     "-isystem",
-                    f"{tmp_path}/sysvendor",  # explicit absolute, separate-token form
+                    sysvendor_path,  # explicit absolute, separate-token form
                     "-c",
                     "a.cpp",
                 ],
@@ -503,13 +512,23 @@ def test_compile_db_records_explicit_absolute_include_provenance(tmp_path):
     )
     ev = CompileDbAdapter(cdb).collect()
     cu = ev.compile_units[0]
-    assert f"{tmp_path}/vendor" in cu.explicit_absolute_include_paths
-    assert f"{tmp_path}/sysvendor" in cu.explicit_absolute_include_paths
-    assert f"{tmp_path}/local" not in cu.explicit_absolute_include_paths
+    # CompileDbAdapter redacts every persisted path through the same
+    # RedactionPolicy production uses (ADR-032 D7) -- when tmp_path happens
+    # to fall under the user's home directory (e.g. Windows CI's
+    # ``C:\Users\<user>\AppData\Local\Temp\...``), the home prefix is
+    # replaced with ``~``. Compute the expected values through the identical
+    # policy so this test holds regardless of where tmp_path resolves.
+    redaction = DEFAULT_REDACTION
+    expected_vendor = redaction.path(vendor_path)
+    expected_local = redaction.path(local_path)
+    expected_sysvendor = redaction.path(sysvendor_path)
+    assert expected_vendor in cu.explicit_absolute_include_paths
+    assert expected_sysvendor in cu.explicit_absolute_include_paths
+    assert expected_local not in cu.explicit_absolute_include_paths
     # Both still resolve to their correct absolute value in the plain lists.
-    assert f"{tmp_path}/vendor" in cu.include_paths
-    assert f"{tmp_path}/local" in cu.include_paths
-    assert f"{tmp_path}/sysvendor" in cu.system_include_paths
+    assert expected_vendor in cu.include_paths
+    assert expected_local in cu.include_paths
+    assert expected_sysvendor in cu.system_include_paths
 
 
 # ── Ninja adapter (ADR-029 D5) ───────────────────────────────────────────────
