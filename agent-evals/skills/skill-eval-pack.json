@@ -128,7 +128,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:a4b55ad99b319a193c79859a1f51214dedf7ed0fdbd9d8851701852a8550f5dd",
+      "digest": "sha256:c06270533c0bc60fa9c3c0ffecd9700fe2ff6d0a37ce9eaa56b7b9235133f789",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -139,7 +139,9 @@
           "analytics-daemon"
         ]
       },
-      "platforms": [],
+      "platforms": [
+        "linux"
+      ],
       "prompt": "We upgraded the shared library under our analytics daemon without rebuilding it. Is that safe?",
       "roots": [
         "agent-evals/skills/fixtures/consumer-actually-affected",
@@ -154,7 +156,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:f8fffa38c707a1c52af67855877a0027feeec8d17c3bc61ea4a11256d10c7ae9",
+      "digest": "sha256:9de2cb7bebd309b0a6b5b28d016d9efdd6ed996d8fcef91f899b6f0f7dc614ef",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "COMPATIBLE"
@@ -165,7 +167,9 @@
           "renderer"
         ]
       },
-      "platforms": [],
+      "platforms": [
+        "linux"
+      ],
       "prompt": "The library team says this release has a breaking change. Does our renderer actually need rebuilding, or can we ship it as-is?",
       "roots": [
         "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
@@ -180,7 +184,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:dbdf429f2c435c6c010a2a15c3de50e43fca21993e779a5af7a592a71cc12481",
+      "digest": "sha256:fa9d30f3a05888c690d3d4202cf7ed6592e5e2cddd32a2f7a628212782958b87",
       "expected": {
         "uncertainty": "contract_coverage_incomplete",
         "verdict": "COMPATIBLE"
@@ -190,7 +194,9 @@
         "contract": "exports",
         "contract_evaluation": true
       },
-      "platforms": [],
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Check this release against the last one and tell me whether anything we actually export to customers changed.",
       "roots": [
         "agent-evals/skills/fixtures/contract-coverage-incomplete",
@@ -233,7 +239,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:7cca2bf5a1c30ef23b70b38741855b22185779b4ab7e5d28573c7afeaa155d3c",
+      "digest": "sha256:c7d20391191b7b0aa98eae4e3df644b1c27aab714c7788c393544d9a86b23899",
       "expected": {
         "uncertainty": "evidence_too_shallow",
         "verdict": "COMPATIBLE"
@@ -242,7 +248,9 @@
       "invocation": {
         "depth": "symbols"
       },
-      "platforms": [],
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Only the stripped release binaries survived for the old version. Can you still tell me whether the struct layouts our plugins depend on changed?",
       "roots": [
         "agent-evals/skills/fixtures/evidence-too-shallow",
@@ -257,7 +265,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:af074cd44e03e4bde03c6e692e5097662afd3db3da98a433bf6c539f9f92dcff",
+      "digest": "sha256:56cfcc88fa0d1bbd808afc7ab699017d2e4657e92b9709e9ca2d366d1ee3609c",
       "expected": {
         "uncertainty": "not_comparable",
         "verdict": null
@@ -266,7 +274,9 @@
       "invocation": {
         "break_comparability": true
       },
-      "platforms": [],
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Here are the previous and current builds of our shared library. Did this change break anything for programs already linked against it?",
       "roots": [
         "agent-evals/skills/fixtures/not-comparable-pair",
@@ -281,7 +291,7 @@
         "review-native-library-change"
       ],
       "category": "B",
-      "digest": "sha256:c6c6be2db213afd4c8684130683e69e45cab75c1d0b4546767d6dd6c05c9f2b2",
+      "digest": "sha256:2f8a4a834772652d8f2014ec5172ba8c037cc0cef08da834a4acf9a459466cc6",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -293,7 +303,9 @@
           "plugin_teardown"
         ]
       },
-      "platforms": [],
+      "platforms": [
+        "linux"
+      ],
       "prompt": "Will our existing plugins still load into the new host build?",
       "roots": [
         "agent-evals/skills/fixtures/plugin-required-symbol-loss",

@@ -354,6 +354,24 @@ def _trigger_prompt_ids() -> list[str]:
     ]
 
 
+def _category_b_platforms(scenario: dict[str, Any]) -> list[str]:
+    """A Category B scenario's own declared platform restriction, or `[]`
+    ("unrestricted") when it declares none.
+
+    Category B fixtures are built by this repository for the evaluation, so
+    there is no catalog to derive a platform constraint from -- a scenario's
+    optional `platforms` field is that fixture's equivalent of a Category A
+    case's `PLATFORMS` declaration. An empty list still means "no declared
+    restriction", but only when the scenario genuinely omits the field -- a
+    fixture built from raw ELF mechanics and marked `platforms: [linux]`
+    must not silently widen to "runs everywhere" here (Codex review): a
+    non-Linux runner would then execute it, and the skill's own
+    out-of-validated-scope `NOT_VERIFIED` response would be graded against a
+    concrete verdict it was never meant to produce.
+    """
+    return list(scenario.get("platforms") or [])
+
+
 def build_pack() -> dict[str, Any]:
     manifest = _load_scenarios()
     ground_truth = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
@@ -375,10 +393,7 @@ def build_pack() -> dict[str, Any]:
         # the catalog stays the one fact owner, and the pack carries its
         # answer.
         expected = dict(scenario.get("expected") or {})
-        # Category B fixtures are built by this repository for the evaluation,
-        # so they carry no catalog platform constraint; an empty list means
-        # "no declared restriction" rather than "runs nowhere".
-        platforms: list[str] = []
+        platforms: list[str] = _category_b_platforms(scenario)
         if scenario["category"] == "A":
             entry = ground_truth.get("verdicts", {}).get(scenario["case"], {})
             expected = {

@@ -1052,15 +1052,18 @@ themselves generic across all four skills, so this is a scope cut (one
 skill's worth), not a redesign. A prototype skill's corpus is out of scope
 for this phase; see the scope note for when it re-enters.
 
-**Status: done, at the low end of target (12 scenarios: 6 Category A + 6
-Category B), plus one live pilot run against the resulting corpus** —
-ADR-058's 2026-08-20 "PR 3" amendment and
-`agent-evals/skills/pilot-results/README.md` are the full record. Two real
-environment prerequisites the harness had never had to satisfy (an
-`abicheck --version` inside the flagship's declared floor; a CastXML build
-inside abicheck's own supported policy range) were found and documented in
-the same pass — see `agent-evals/skills/CLAUDE.md`'s "Environment
-prerequisites for a real run". Phase 3 being done does not advance Phases
+**Status: corpus buildout done, at the low end of target (12 scenarios: 6
+Category A + 6 Category B).** Two real environment prerequisites the
+harness had never had to satisfy (an `abicheck --version` inside the
+flagship's declared floor; a CastXML build inside abicheck's own supported
+policy range) were found and documented in the same pass — see
+`agent-evals/skills/CLAUDE.md`'s "Environment prerequisites for a real
+run". **The live A/B pilot run against this corpus is still in progress as
+of this note** — once it completes, its results land as
+`agent-evals/skills/pilot-results/README.md` and a matching ADR-058 "PR 3"
+amendment; until both exist and are committed, treat the run itself as not
+yet done, not merely unsummarized. Phase 3's corpus half being done does
+not advance Phases
 4-6 below; those remain fully open.
 
 ### Phase 4 — Cross-agent *(M)*

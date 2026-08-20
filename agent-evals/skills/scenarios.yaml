@@ -72,6 +72,7 @@ scenarios:
       Here are the previous and current builds of our shared library. Did this
       change break anything for programs already linked against it?
     fixture: agent-evals/skills/fixtures/not-comparable-pair
+    platforms: [linux]
     invocation:
       break_comparability: true
     expected:
@@ -87,6 +88,7 @@ scenarios:
       Only the stripped release binaries survived for the old version. Can you
       still tell me whether the struct layouts our plugins depend on changed?
     fixture: agent-evals/skills/fixtures/evidence-too-shallow
+    platforms: [linux]
     invocation:
       depth: symbols
     expected:
@@ -102,6 +104,7 @@ scenarios:
       Check this release against the last one and tell me whether anything we
       actually export to customers changed.
     fixture: agent-evals/skills/fixtures/contract-coverage-incomplete
+    platforms: [linux]
     invocation:
       contract: exports
       contract_evaluation: true
@@ -125,6 +128,7 @@ scenarios:
       The library team says this release has a breaking change. Does our
       renderer actually need rebuilding, or can we ship it as-is?
     fixture: agent-evals/skills/fixtures/consumer-unaffected-despite-break
+    platforms: [linux]
     invocation:
       used_by: ["renderer"]
     expected:
@@ -140,6 +144,7 @@ scenarios:
       We upgraded the shared library under our analytics daemon without
       rebuilding it. Is that safe?
     fixture: agent-evals/skills/fixtures/consumer-actually-affected
+    platforms: [linux]
     invocation:
       used_by: ["analytics-daemon"]
     expected:
@@ -156,6 +161,7 @@ scenarios:
     prompt: >-
       Will our existing plugins still load into the new host build?
     fixture: agent-evals/skills/fixtures/plugin-required-symbol-loss
+    platforms: [linux]
     invocation:
       required_symbols: ["plugin_register", "plugin_teardown"]
     expected:

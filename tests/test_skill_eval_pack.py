@@ -123,6 +123,47 @@ def test_category_a_expectations_are_resolved_into_the_pack(
         }, scenario_id
 
 
+def test_category_b_platform_restrictions_are_honored_not_widened(
+    pack: dict[str, Any],
+) -> None:
+    """A Category B scenario's own `platforms` declaration must survive into
+    the pack exactly, the same way a Category A case's `PLATFORMS` does —
+    never silently widened back to "no restriction".
+
+    Regression: the generator used to hardcode `platforms: []` for every
+    Category B entry regardless of what `scenarios.yaml` declared, on the
+    since-invalidated assumption that no Category B fixture had
+    platform-specific mechanics. A non-Linux CI runner would then execute a
+    genuinely Linux-only (raw ELF) fixture, the skill would correctly report
+    `NOT_VERIFIED` for the out-of-scope platform, and the grader would score
+    that correct refusal as a wrong-verdict failure.
+    """
+    manifest = yaml.safe_load(
+        (REPO / "agent-evals" / "skills" / "scenarios.yaml").read_text(encoding="utf-8")
+    )
+    declared = {
+        s["id"]: s["platforms"] for s in manifest["scenarios"] if "platforms" in s
+    }
+    # Not vacuous: at least one Category B scenario actually declares a
+    # restriction today.
+    assert declared, "no scenario declares platforms — test would pass vacuously"
+    for scenario_id, platforms in declared.items():
+        assert pack["scenarios"][scenario_id]["category"] == "B", scenario_id
+        assert pack["scenarios"][scenario_id]["platforms"] == platforms, scenario_id
+
+    # Negative control, against the generator's own helper directly: every
+    # current Category B scenario in this corpus happens to declare
+    # `platforms` today, so there is no real undeclared example to check
+    # against the committed pack — the fix changes what a *declared*
+    # restriction means, not the default, and that default is checked here
+    # regardless of corpus composition.
+    assert gen._category_b_platforms({"category": "B", "id": "x"}) == []
+    assert gen._category_b_platforms({"category": "B", "platforms": []}) == []
+    assert gen._category_b_platforms(
+        {"category": "B", "platforms": ["linux"]}
+    ) == ["linux"]
+
+
 def test_pack_carries_the_gating_contract(pack: dict[str, Any]) -> None:
     """`k` and each dimension's gating mode are what a consumer grades with."""
     rubric = pack["rubric"]
