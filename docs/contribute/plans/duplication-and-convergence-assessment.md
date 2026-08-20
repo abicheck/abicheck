@@ -533,6 +533,12 @@ from shared *helper functions* to a shared *parsed object*:
 
 ```python
 @dataclass(frozen=True)
+class SourceOperand:
+    path: str
+    language: Language  # effective language for THIS operand specifically
+
+
+@dataclass(frozen=True)
 class CompilerInvocation:
     original_argv: tuple[str, ...]
     recorded_directory: Path
@@ -549,7 +555,8 @@ class CompilerInvocation:
     include_search: tuple[IncludeSearchEntry, ...]
     forced_includes: tuple[Path, ...]
     abi_flags: tuple[AbiFlag, ...]
-    sources: tuple[str, ...]
+    sources: tuple[SourceOperand, ...]
+    output: Path | None
     opaque_flags: tuple[str, ...]
 ```
 
@@ -564,7 +571,30 @@ operand. Without a dedicated field, an L2/L4 replay or build-attribution
 consumer would have no way to recover which TU(s) an invocation actually
 compiled without rescanning `original_argv` itself — exactly the
 "parse once" contract this model exists to establish, and the omission
-this field closes.
+this field closes. Each entry carries its own resolved `language`, not
+just a path: a single invocation can force a different `-x <language>`
+between sources (`gcc -c -x c first -x c++ second` validly compiles
+`first` as C and `second` as C++ — confirmed against real `gcc --help`,
+which documents `-x` as applying to the input files that follow it), so
+the top-level `language` field alone can't describe every entry. This is
+a genuine improvement over the existing `effective_language()` helper,
+not merely a restatement of it: that helper is documented as correct only
+"for a single-source TU" — it returns the *last* forcing token seen
+anywhere in `argv`, not the one that was actually in effect at a given
+source's position, so a naive per-invocation reuse of it already gets a
+multi-source case like this one wrong today. `SourceOperand.language`
+must be resolved positionally (tracking `-x` state as it walks `argv`,
+the way `sources_from_argv()`'s own forced-language tracking already
+does) rather than by calling `effective_language()` once per source.
+
+`output` — the resolved `-o <file>` operand (or `None` when absent, e.g.
+a compile-only invocation relying on the default `<source>.o` naming).
+Real build attribution already needs and stores this today
+(`CompileUnit.output`, populated by `_output_from_argv()` in every build
+adapter and consumed by the source graph) — omitting it from the parsed
+model would mean output-to-source/link attribution has no way to recover
+it except by rescanning `original_argv`, the same parse-once violation
+`sources` was added to avoid.
 
 `recorded_directory` is the compile-database entry's own `directory` field
 (or the equivalent for a live build-adapter query) — not optional, since a
