@@ -100,8 +100,11 @@ def _envelopes(text: str) -> tuple[list[Any], list[Any]]:
     return candidates, [c for c in candidates if "confident" in c]
 
 
-#: `native-release-compatibility`'s five per-cell states, as `claim.schema.json`
-#: publishes them. Kept as a literal rather than read off the schema at import
+#: The five per-cell matrix-qualification states, originally defined for the
+#: now-unpublished `native-release-compatibility` skill (ADR-058's 2026-08-20
+#: portfolio-reset amendment) and kept as reserved vocabulary for its eventual
+#: second-skill successor, as `claim.schema.json` publishes them. Kept as a
+#: literal rather than read off the schema at import
 #: time, with `tests/test_skill_eval_graders.py` pinning the two together — the
 #: graders stay file-I/O-free at import, and drift fails loudly instead of
 #: silently widening what a zero-tolerance rule accepts.

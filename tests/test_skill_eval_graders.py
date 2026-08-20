@@ -40,11 +40,11 @@ from graders import (  # noqa: E402
 )
 
 SCENARIO_BREAKING = {
-    "skill": "native-binary-compatibility-review",
+    "skill": "review-native-library-change",
     "expected": {"verdict": "BREAKING"},
 }
 SCENARIO_COMPATIBLE = {
-    "skill": "native-binary-compatibility-review",
+    "skill": "review-native-library-change",
     "expected": {"verdict": "COMPATIBLE"},
 }
 
@@ -456,7 +456,13 @@ class TestDimensionOne:
         assert result.status == "fail"
         assert "no comparison was run" in result.reasons[0]
 
-    def test_activating_the_wrong_skill_fails(self, tmp_path):
+    def test_activating_the_wrong_skill_fails(self, tmp_path, monkeypatch):
+        """With only one skill published (ADR-058's 2026-08-20 portfolio-reset
+        amendment), there is no second *real* known skill left to mistakenly
+        activate instead — `KNOWN_SKILLS` is patched with a synthetic second
+        entry so this exercises the same "activated, but not the scenario's
+        own skill" branch a second real skill would."""
+        monkeypatch.setattr(dim, "KNOWN_SKILLS", (*dim.KNOWN_SKILLS, "other-skill"))
         events = [
             {
                 "type": "assistant",
@@ -465,7 +471,7 @@ class TestDimensionOne:
                         {
                             "type": "tool_use",
                             "name": "Skill",
-                            "input": {"command": "native-release-compatibility"},
+                            "input": {"command": "other-skill"},
                         }
                     ]
                 },
@@ -488,7 +494,7 @@ class TestDimensionOne:
                             "name": "Read",
                             "input": {
                                 "file_path": ".claude/skills/"
-                                "native-binary-compatibility-review/SKILL.md"
+                                "review-native-library-change/SKILL.md"
                             },
                         }
                     ]
@@ -991,7 +997,7 @@ class TestGradeRunEndToEnd:
         nothing scores clean by naming the outcome it was going to be graded
         against."""
         scenario = {
-            "skill": "native-binary-compatibility-review",
+            "skill": "review-native-library-change",
             "expected": {"verdict": None, "uncertainty": "not_comparable"},
         }
         run = build_run(tmp_path, final=a_not_comparable_answer(evidence=[]), calls=[])
@@ -1016,7 +1022,7 @@ class TestPublishedContractsAgree:
         """ "A cell is missing" is not the finding; "the Windows cell is missing"
         is — and the schema requires `id` for exactly that reason."""
         scenario = {
-            "skill": "native-release-compatibility",
+            "skill": "other-skill",
             "expected": {"verdict": "COMPATIBLE", "uncertainty": "matrix_target_unrun"},
         }
         text = envelope(
@@ -1142,7 +1148,7 @@ class TestVerdictRanking:
             calls=[a_breaking_call()],
         )
         scenario = {
-            "skill": "native-binary-compatibility-review",
+            "skill": "review-native-library-change",
             "expected": {"verdict": "BROKEN"},
         }
         grade = dim.grade_run(run, scenario)

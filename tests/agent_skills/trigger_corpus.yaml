@@ -21,37 +21,43 @@ schema_version: 1
 
 positive:
   - prompt: "Review this PR for binary compatibility."
-    expected_skill: native-binary-compatibility-review
+    expected_skill: review-native-library-change
     description_keywords:
       - pull request
       - binary
       - compatibility
 
   - prompt: "Can I make this public C++ API change without breaking old consumers?"
-    expected_skill: native-api-evolution
-    description_keywords:
-      - api change
-      - without breaking
-      - existing consumers
+    expected_skill: null
+    unclaimed_reason: >-
+      Previously claimed by `native-api-evolution`, removed from the
+      published portfolio by ADR-058's 2026-08-20 portfolio-reset amendment.
+      No published skill claims API-evolution/design-time guidance today;
+      this is a candidate for future scope inside `review-native-library-
+      change` (not yet done) rather than something currently claimed.
 
   - prompt: "Can we release this as a minor version?"
-    expected_skill: native-release-compatibility
-    description_keywords:
-      - release
-      - minor
-      - version
+    expected_skill: null
+    unclaimed_reason: >-
+      Previously claimed by `native-release-compatibility`, removed from the
+      published portfolio by ADR-058's 2026-08-20 portfolio-reset amendment.
+      Whole-release-matrix qualification remains a distinct future
+      second-skill candidate (`qualify-native-library-release`, not yet
+      built) rather than something the surviving skill claims.
 
   - prompt: "Will this old application work with the new library?"
-    expected_skill: native-consumer-compatibility
-    description_keywords:
-      - application
-      - still work
-      - library
+    expected_skill: null
+    unclaimed_reason: >-
+      Previously claimed by `native-consumer-compatibility`, removed from
+      the published portfolio by ADR-058's 2026-08-20 portfolio-reset
+      amendment. Named-consumer scoping is a candidate for future scope
+      inside `review-native-library-change` (not yet done) rather than
+      something currently claimed.
 
   - prompt: "Why did this compatibility check suddenly report dozens of breaks?"
     # ADR-058 folds this into the review skill's root-cause step rather than
-    # admitting a fifth "compatibility debugging" skill.
-    expected_skill: native-binary-compatibility-review
+    # admitting a separate "compatibility debugging" skill.
+    expected_skill: review-native-library-change
     description_keywords:
       - suddenly reported dozens of breaks
 

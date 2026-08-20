@@ -408,9 +408,9 @@ def check_bundle(
 
     # Completeness is per *bundle*, not per pack. Asking only whether a path
     # routes to some hash somewhere in the pack lets a bundle read an input it
-    # never hashed — a review-flagged case: a binary-review bundle reading
-    # `native-api-evolution/SKILL.md` routes fine, but records only its own
-    # skill-tree hash, so editing the evolution skill leaves it "fresh". The
+    # never hashed — a review-flagged case: a bundle reading a *different*
+    # scenario's fixture routes fine, but records only the scenario hash it
+    # actually named, so editing the other scenario leaves it "fresh". The
     # question is whether *this* evidence can be invalidated by *this* input.
     for observed in bundle.get("observed_inputs", []):
         # Hand-rolled validation (stdlib-only) has to survive shapes JSON

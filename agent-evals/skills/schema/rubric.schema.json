@@ -235,7 +235,6 @@
                 "required": [
                   "not_comparable",
                   "evidence_too_shallow",
-                  "matrix_target_unrun",
                   "contract_coverage_incomplete"
                 ]
               }
@@ -245,7 +244,7 @@
               "uncertainty_rules"
             ]
           },
-          "description": "Dimension 2 states a rule for each of the four uncertainty kinds; a missing or misspelled key would leave that kind gating on nothing."
+          "description": "Dimension 2 states a rule for each currently-scenario-backed uncertainty kind; a missing or misspelled key would leave that kind gating on nothing. `matrix_target_unrun` is deliberately absent — see rubric.yaml's own dimension-2 note (ADR-058's 2026-08-20 portfolio-reset amendment)."
         }
       ]
     }

@@ -85,15 +85,11 @@ def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in core.group(1).split("."))
 
 
-def test_four_p0_skills_are_present():
-    """ADR-058's admission bar caps the portfolio: a fifth public skill needs
-    all five criteria re-applied, not a drive-by directory."""
-    assert [d.name for d in SKILL_DIRS] == [
-        "native-api-evolution",
-        "native-binary-compatibility-review",
-        "native-consumer-compatibility",
-        "native-release-compatibility",
-    ]
+def test_one_candidate_skill_is_present():
+    """ADR-058's 2026-08-20 portfolio-reset amendment: the published surface
+    is one internal candidate skill. A second public skill needs all five of
+    ADR-058's admission criteria re-applied, not a drive-by directory."""
+    assert [d.name for d in SKILL_DIRS] == ["review-native-library-change"]
 
 
 @pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)

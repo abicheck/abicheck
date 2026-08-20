@@ -30,11 +30,12 @@ the tool in the prompt would hand the baseline arm the same answer.
 
 **The workspace must live outside this repository, and that is enforced rather
 than documented.** Claude Code discovers skills from the project the working
-directory belongs to, and this repository's own root carries all four published
-trees in `.claude/skills/`. A workspace anywhere beneath it therefore hands the
+directory belongs to, and this repository's own root carries every published
+tree in `.claude/skills/`. A workspace anywhere beneath it therefore hands the
 *baseline* arm every skill it is defined by not having — verified against the
-real CLI, which reported all four visible from an in-repo directory and exactly
-the one installed from a workspace outside it. That is not a degraded
+real CLI, which reported every published skill visible from an in-repo
+directory and exactly the one installed from a workspace outside it. That is
+not a degraded
 measurement, it is the absence of one: both arms would be skill arms and the
 comparison would read as "the skill changes nothing".
 
@@ -72,20 +73,17 @@ PACK = EVAL_DIR / "skill-eval-pack.json"
 ARMS = ("skill", "baseline")
 
 #: G37's 2026-08-11 scope note (docs/contribute/plans/
-#: g37-agent-skill-quality-evaluation.md) and ADR-058's same-dated amendment:
-#: `native-binary-compatibility-review` is the sole flagship subject for every
-#: phase, and the other three shipped skills are prototype status — not an
-#: L2/L3 evaluation target until the flagship experiment shows measurable
-#: lift. `scenarios.yaml` still carries `status: ready` entries for
-#: `native-api-evolution` and `native-release-compatibility` (declared before
-#: the freeze; not yet re-scoped to `status: planned` there — see that file's
-#: own status-field contract before repurposing it for this), so the default,
-#: unscoped "every ready scenario" selection below would otherwise run
-#: prototype-skill scenarios and mix their results into a nominally
-#: flagship-only experiment. Filtered here rather than in the pack so a
-#: prototype skill's already-authored scenarios stay intact for when it
-#: re-enters scope, one skill at a time, rather than needing to be re-added.
-FLAGSHIP_SKILL = "native-binary-compatibility-review"
+#: g37-agent-skill-quality-evaluation.md) named
+#: `native-binary-compatibility-review` (renamed `review-native-library-
+#: change`) as the sole flagship subject for every phase. ADR-058's
+#: 2026-08-20 portfolio-reset amendment went further and removed the other
+#: three shipped skills from the published portfolio entirely, so this
+#: filter is now a no-op in practice — every scenario in `scenarios.yaml`
+#: already names this one skill — but is kept rather than removed: it is
+#: what re-scopes a future second skill's scenarios out of a
+#: still-flagship-only run the moment one is added, without needing this
+#: filter re-introduced from scratch.
+FLAGSHIP_SKILL = "review-native-library-change"
 
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
@@ -453,6 +451,23 @@ def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
         )
 
 
+def _published_skill_names() -> set[str]:
+    """The skill directories actually published under `PUBLISHED_SKILLS`.
+
+    Not a `native-`-prefix heuristic: `review-native-library-change`
+    (renamed from `native-binary-compatibility-review` by ADR-058's
+    2026-08-20 portfolio-reset amendment) does not start with `native-`, and
+    a prefix check silently dropped it from every visibility read — the
+    treatment check then saw an empty visible-skill list for a skill-arm run
+    that genuinely had the skill installed, and rejected it. Reading the real
+    published directory names is correct regardless of what any current or
+    future skill happens to be called.
+    """
+    if not PUBLISHED_SKILLS.is_dir():
+        return set()
+    return {p.name for p in PUBLISHED_SKILLS.iterdir() if (p / "SKILL.md").is_file()}
+
+
 def visible_native_skills(events: list[dict]) -> list[str] | None:
     """The published skills the CLI reported seeing, or None if it never said.
 
@@ -460,9 +475,10 @@ def visible_native_skills(events: list[dict]) -> list[str] | None:
     `init` event means the treatment is unverified, while an empty list is
     positive evidence that the baseline arm saw nothing.
     """
+    published = _published_skill_names()
     for event in events:
         if event.get("type") == "system" and event.get("subtype") == "init":
-            return sorted(s for s in event.get("skills", []) if s.startswith("native-"))
+            return sorted(s for s in event.get("skills", []) if s in published)
     return None
 
 

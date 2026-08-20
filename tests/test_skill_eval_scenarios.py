@@ -187,7 +187,14 @@ def test_consumer_scoped_scenarios_state_both_verdicts(scenarios: list[dict]) ->
     cannot distinguish a correct scoped answer from an agent reading the report
     the wrong way round — the inversion the skill explicitly warns against."""
     scoped = _scoped(scenarios)
-    assert scoped, "expected at least one consumer-scoped scenario"
+    if not scoped:
+        # ADR-058's 2026-08-20 portfolio-reset amendment removed
+        # `native-consumer-compatibility` (the only skill whose scenarios used
+        # `--used-by`/`--required-symbol`) from the published portfolio, so no
+        # scenario is currently consumer-scoped. Not a weakened assertion —
+        # the rule below still applies in full the moment a scoped scenario
+        # exists again.
+        pytest.skip("no consumer-scoped skill is currently published")
     for scenario in scoped:
         assert "full_verdict" in scenario["expected"], (
             f"{scenario['id']} is consumer-scoped but states no full_verdict"
@@ -198,10 +205,12 @@ def test_at_least_one_scoped_scenario_diverges(scenarios: list[dict]) -> None:
     """The divergent case is the whole reason consumer scoping exists. If every
     scoped scenario had `verdict == full_verdict`, an agent that always reported
     the library-wide result would pass all of them."""
+    scoped = _scoped(scenarios)
+    if not scoped:
+        # See test_consumer_scoped_scenarios_state_both_verdicts above.
+        pytest.skip("no consumer-scoped skill is currently published")
     diverging = [
-        s
-        for s in _scoped(scenarios)
-        if s["expected"]["verdict"] != s["expected"]["full_verdict"]
+        s for s in scoped if s["expected"]["verdict"] != s["expected"]["full_verdict"]
     ]
     assert diverging, "no scoped scenario has verdict != full_verdict"
 

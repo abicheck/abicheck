@@ -117,7 +117,7 @@ def test_every_corpus_target_is_a_real_skill():
         assert target in DESCRIPTIONS, f"{target!r} is not a published skill"
 
 
-def test_all_four_p0_skills_are_claimed_by_the_positive_set():
+def test_every_published_skill_is_claimed_by_the_positive_set():
     """A skill nobody's prompt routes to has no validated discovery query —
     ADR-058 admission criterion 4."""
     claimed = {e["expected_skill"] for e in POSITIVE if e["expected_skill"]}

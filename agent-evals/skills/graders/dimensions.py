@@ -39,14 +39,12 @@ from pathlib import Path
 
 from . import claim as claim_mod, evidence as ev
 
-#: The four published skills, so an activation record can be recognized
-#: whatever key the agent CLI happens to carry it under.
-KNOWN_SKILLS = (
-    "native-binary-compatibility-review",
-    "native-api-evolution",
-    "native-release-compatibility",
-    "native-consumer-compatibility",
-)
+#: The published skill(s), so an activation record can be recognized whatever
+#: key the agent CLI happens to carry it under. ADR-058's 2026-08-20
+#: portfolio-reset amendment reduced the portfolio from four skills to one
+#: (`native-binary-compatibility-review` renamed to
+#: `review-native-library-change`); the other three are no longer published.
+KNOWN_SKILLS = ("review-native-library-change",)
 
 
 @dataclass

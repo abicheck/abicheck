@@ -31,10 +31,7 @@
         },
         "skill": {
           "enum": [
-            "native-binary-compatibility-review",
-            "native-api-evolution",
-            "native-release-compatibility",
-            "native-consumer-compatibility"
+            "review-native-library-change"
           ]
         },
         "status": {
@@ -91,7 +88,6 @@
               "enum": [
                 "not_comparable",
                 "evidence_too_shallow",
-                "matrix_target_unrun",
                 "contract_coverage_incomplete"
               ],
               "description": "The D4 dimension-2 uncertainty kind this scenario exercises, if any. A scenario carrying one is what makes that zero-tolerance rule gated rather than notional."
