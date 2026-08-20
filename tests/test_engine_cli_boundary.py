@@ -205,6 +205,37 @@ def test_new_violation_in_an_allowlisted_file_is_still_flagged(
     assert ":2:" in errors[0]
 
 
+def test_multi_alias_import_flags_every_prohibited_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single ``import`` statement naming more than one prohibited alias
+    (`import click, abicheck.cli_new`) must not have the second alias masked
+    by the first — each is its own violation, so an allowlisted `import
+    click` cannot silently absorb a later-added `cli_*` import riding on the
+    same statement."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "scan_engine.py").write_text("import click, abicheck.cli_new\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        gate,
+        "ENGINE_CLI_BOUNDARY_ALLOWLIST",
+        frozenset({"abicheck/scan_engine.py::import click::1"}),
+    )
+
+    findings = gate.Findings()
+    gate.check_engine_cli_boundary(findings)
+    errors = [m for c, m in findings.errors if c == "engine-cli-boundary"]
+    # "import click" is allowlisted; "import abicheck.cli_new" is not, and
+    # must still be flagged even though it shares an AST node with the
+    # allowlisted alias.
+    assert len(errors) == 1
+    assert "abicheck.cli_new" in errors[0]
+
+
 def test_allowlist_key_is_stable_across_an_unrelated_edit_above_the_import(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

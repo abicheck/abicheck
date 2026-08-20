@@ -2454,51 +2454,64 @@ ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
-def _engine_boundary_violation(node: ast.Import | ast.ImportFrom) -> str | None:
-    """Return a human description if *node* imports ``click`` or a ``cli_*``
-    sibling, else ``None``. Checks every scope (module- and function-level —
-    most of these are deliberately lazy imports), matching this check's own
-    "no engine module may import click or cli_*" rule regardless of where in
-    the file the import sits."""
+def _engine_boundary_violations(node: ast.Import | ast.ImportFrom) -> list[str]:
+    """Return one human description per prohibited alias *node* imports
+    (``click`` or a ``cli_*`` sibling), possibly more than one — an import
+    statement can name several targets on one line (`import click,
+    abicheck.cli_new`; `from abicheck import cli_a, cli_b`), and each
+    prohibited one is its own violation; returning only the first would let
+    a second, added alias ride along unflagged forever, silently absorbed
+    into whichever description the allowlist already recognizes. Checks
+    every scope (module- and function-level — most of these are
+    deliberately lazy imports), matching this check's own "no engine module
+    may import click or cli_*" rule regardless of where in the file the
+    import sits."""
     if isinstance(node, ast.Import):
+        found = []
         for alias in node.names:
             parts = alias.name.split(".")
             if parts[0] == "click":
-                return f"import {alias.name}"
+                found.append(f"import {alias.name}")
             # `import abicheck.cli_dump_helpers` (also catches a bare
             # `import abicheck.cli_dump_helpers as X`, which still binds the
             # whole dotted path).
-            if (
+            elif (
                 parts[0] == "abicheck"
                 and len(parts) >= 2
                 and parts[1].startswith("cli")
             ):
-                return f"import {alias.name}"
-        return None
+                found.append(f"import {alias.name}")
+        return found
     # ast.ImportFrom
     mod = node.module or ""
     if node.level >= 1:
         # Relative import: `from .cli_xxx import ...` or `from . import cli_xxx`.
         if mod and mod.split(".")[0].startswith("cli"):
-            return f"from {'.' * node.level}{mod} import ..."
+            return [f"from {'.' * node.level}{mod} import ..."]
         if not mod:
-            for alias in node.names:
-                if alias.name.startswith("cli"):
-                    return f"from {'.' * node.level} import {alias.name}"
-        return None
+            return [
+                f"from {'.' * node.level} import {alias.name}"
+                for alias in node.names
+                if alias.name.startswith("cli")
+            ]
+        return []
     # Absolute import.
     if mod == "click" or mod.startswith("click."):
-        return f"from {mod} import ..."
+        return [f"from {mod} import ..."]
     # `from abicheck import cli_dump_helpers [as X]` — the submodule name is
     # an imported *alias*, not part of `mod`, so it isn't caught by the
     # `mod.split(".")[-1]` check below.
     if mod == "abicheck":
-        for alias in node.names:
-            if alias.name.startswith("cli"):
-                return f"from {mod} import {alias.name}"
+        found = [
+            f"from {mod} import {alias.name}"
+            for alias in node.names
+            if alias.name.startswith("cli")
+        ]
+        if found:
+            return found
     if "abicheck" in mod.split(".") and mod.split(".")[-1].startswith("cli"):
-        return f"from {mod} import ..."
-    return None
+        return [f"from {mod} import ..."]
+    return []
 
 
 def _engine_boundary_sites(tree: ast.Module, rel: str) -> list[tuple[str, int, str]]:
@@ -2515,8 +2528,7 @@ def _engine_boundary_sites(tree: ast.Module, rel: str) -> list[tuple[str, int, s
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
-        desc = _engine_boundary_violation(node)
-        if desc is not None:
+        for desc in _engine_boundary_violations(node):
             matches.append((node.lineno, desc))
     matches.sort(key=lambda m: m[0])
     occurrence: dict[str, int] = {}
