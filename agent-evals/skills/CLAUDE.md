@@ -69,15 +69,29 @@ actual cause is that neither arm had a workable toolchain.
    loosening the skill's declared range** — the range is a real fact about
    which release contains which CLI surface, not a knob to tune per
    environment. Instead, for an evaluation environment only, make
-   `abicheck --version` report truthfully what the checkout can already do:
-   patch the installed distribution's own `dist-info/METADATA` `Version:`
-   field to the floor version (e.g. `sed -i 's/^Version: 0.5.0/Version:
-   0.6.0/' $(python -c "import abicheck,os;print(os.path.dirname(abicheck.__file__))")-0.5.0.dist-info/METADATA`
-   or the equivalent for the actual installed distribution path) —
-   never edit `pyproject.toml`'s own `version` field to do this, since that
-   is a real release decision, not an evaluation convenience. This is local,
-   ephemeral, outside version control, and must never be treated as
-   evidence the version was actually released.
+   `abicheck --version` report truthfully what the checkout can already do.
+   **Two independent metadata sources can both answer this, and
+   `importlib.metadata` (what the CLI's own `--version` reads) picks
+   whichever it finds first — patching only one is not enough on a plain
+   editable install (`pip install -e .`), confirmed by patching each in
+   turn and re-checking `abicheck --version` after each:**
+   ```bash
+   # 1. the editable install's own egg-info (this repo's checkout root) —
+   #    found to take precedence over (2) on a plain `pip install -e .`
+   sed -i 's/^Version: 0\.5\.0/Version: 0.6.0/' abicheck.egg-info/PKG-INFO
+   # 2. the site-packages dist-info the editable install also registers —
+   #    patch this too so a resolution order that prefers it still works
+   D=$(python3 -c "import importlib.metadata as m; print(next(str(d._path) for d in m.distributions() if d.metadata['Name']=='abicheck'))")
+   sed -i 's/^Version: 0\.5\.0/Version: 0.6.0/' "$D/METADATA"
+   ```
+   Verify with `python3 -c "from importlib.metadata import version;
+   print(version('abicheck'))"` and `abicheck --version` — both must report
+   `0.6.0` before a skill-arm run's preflight will pass. Both edits are
+   local, ephemeral (a fresh container/checkout reverts them), outside
+   version control, and must never be treated as evidence the version was
+   actually released; never edit `pyproject.toml`'s own `version` field to
+   do this, since that is a real release decision, not an evaluation
+   convenience.
 2. **`abicheck compare --depth headers`/`dump` need a header-AST frontend
    this host can satisfy.** `abicheck`'s default is CastXML, policy-gated to
    `>=0.6.11,<0.8.0` (`castxml_policy.py`); a plain `apt install castxml` on
