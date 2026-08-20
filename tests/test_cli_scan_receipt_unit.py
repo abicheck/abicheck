@@ -18,8 +18,11 @@
 `tests/test_scan_compare_parity.py` drives this module end to end through
 `scan --against` and the Python API — the assertions that matter. These
 cover the guards those paths never reach: a caller forwarding a partial
-parameter mapping, a run with no persisted context, and the gate-blanking
-rule in isolation.
+parameter mapping, a run with no persisted context, and the receipt's
+project-config severity/exit-code-scheme resolution in isolation (CLI
+cleanup phase two, "PR B" -- this used to be blanked by a
+`_without_gate_settings` helper, removed once the module docstring's own
+"PR B" note established both resolvers read it identically for `scan`).
 """
 
 from __future__ import annotations
@@ -60,11 +63,17 @@ class TestParamsContract:
         assert config.contract.mode is not None
 
 
-class TestGateBlanking:
-    def test_a_project_gate_is_not_claimed_by_a_scan(self, tmp_path: Path) -> None:
-        """A scan's exit follows its verdict and never reads these keys, so
-        recording them would make the receipt describe a gate the run did
-        not use."""
+class TestGateConfigReceipt:
+    def test_a_project_gate_is_now_claimed_by_a_scan(self, tmp_path: Path) -> None:
+        """CLI cleanup phase two, "PR B": a scan's exit code has honored
+        `.abicheck.yml`'s severity/exit-code-scheme config since the fix
+        that closed the "scan never consults severity" gap, and
+        `resolve_compare_config` (the resolver that actually scores the
+        run) reads the identical `project_cfg` object this receipt resolver
+        now also reads directly -- so the receipt claiming this value is no
+        longer a guess (see the module docstring's own "PR B" note for why
+        this is safe specifically for `scan`, which has no `--profile`
+        tier)."""
         from abicheck.buildsource.inline import load_build_config
 
         cfg = tmp_path / ".abicheck.yml"
@@ -79,13 +88,30 @@ class TestGateBlanking:
             project_path=cfg,
         )
         gate = config.gate
-        assert gate.exit_code_scheme == "legacy"
+        assert gate.exit_code_scheme == "severity"
         prov = config.provenance["gate.exit_code_scheme"]
-        assert prov.layer.value == "built_in_default"
+        assert prov.layer.value == "project_config"
+
+    def test_an_explicit_cli_severity_preset_is_claimed_too(
+        self, tmp_path: Path
+    ) -> None:
+        """The explicit-CLI tier of the same fix (Codex review on #801): a
+        real `--severity-preset`/`--exit-code-scheme` must resolve at
+        `explicit_cli`, not merely "not stated" -- that provenance is what
+        lets a selected gate pack's own precedence check
+        (`pack_application._pack_supplied`) decline to override it."""
+        config = resolve_scan_config(
+            _params(severity_preset="strict", exit_code_scheme="severity"),
+            typed={"severity_preset", "exit_code_scheme"},
+        )
+        assert config.gate.exit_code_scheme == "severity"
+        prov = config.provenance["gate.exit_code_scheme"]
+        assert prov.layer.value == "explicit_cli"
 
     def test_a_project_scope_setting_is_still_honored(self, tmp_path: Path) -> None:
-        """Only the *gate* fields are blanked. A project's scope choice is
-        real configuration the scan does apply, so it must survive."""
+        """A project's scope choice is real configuration the scan does
+        apply, and must keep resolving correctly alongside the now-unblanked
+        gate fields."""
         from abicheck.buildsource.inline import load_build_config
 
         cfg = tmp_path / ".abicheck.yml"
@@ -119,12 +145,13 @@ class TestInstallation:
 
 
 class TestNoProjectConfig:
-    def test_blanking_a_missing_project_config_yields_nothing(self) -> None:
+    def test_a_missing_project_config_resolves_with_no_project_tier(self) -> None:
         """The common case: a scan with no `.abicheck.yml` has no project
-        inputs to blank, and must not fabricate an empty one."""
-        from abicheck.cli_scan_receipt import _without_gate_settings
-
-        assert _without_gate_settings(None) is None
+        inputs at all, and must not fabricate one -- every field resolves
+        below `project_config`."""
+        config = resolve_scan_config(_params(), typed=set())
+        prov = config.provenance["gate.exit_code_scheme"]
+        assert prov.layer.value == "built_in_default"
 
 
 class TestResolverErrorsAreUsageErrors:

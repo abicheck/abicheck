@@ -287,8 +287,15 @@ Core pipeline (in order of data flow):
      (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
      empty — each is a pack recorded as active configuration that changes
      nothing, which is the single failure all of these guard. `compare`
-     takes all three kinds; `scan --against` takes policy/contract and
-     rejects a gate pack, having no gate of its own. The directory/package
+     takes all three kinds; `scan --against` now takes all three too (CLI
+     cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's
+     `gate.exit_code_scheme`/`gate.severity.*` fold onto the real
+     `ResolvedCompareConfig` `resolve_compare_config` already produces
+     (`pack_application.apply_to_compare_config`, the identical function
+     single-pair `compare` uses, called from `cli_scan._resolve_scan_
+     evaluation_config`), since `scan`'s exit code has honored the resolved
+     severity/exit-code-scheme config since the fix that closed the "scan
+     never consults severity" gap below. The directory/package
      release fan-out (`cli_compare_release.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — it has no `GateOptions`-
      shaped object of its own, so a `kind: gate` pack's `gate.exit_code_
@@ -840,7 +847,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding is not yet extended to `scan` — pass severity settings directly.
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes
@@ -4176,6 +4183,87 @@ Once a root command genuinely clears the bar above, pick the right home:
   `test_header_compile_context.py`/`test_clang_header_backend_integration.py`
   suites (unchanged, still green), the full fast unit suite, and
   `mypy`/`ruff` clean on both touched files.
+
+  **Re-investigated (2026-08-19): the dry-run migration (blocker 1) is
+  larger than "wire the renderer to `resolve_dump_request()`" —
+  `dump_cmd` has no `DumpRequest` to resolve in the first place, on
+  either branch.** Read `cli.py`'s `dump_cmd` in full, not assumed: it
+  never constructs a `DumpRequest` object anywhere (confirmed by grep —
+  no `DumpRequest(` call site exists in `cli.py` or `cli_dump_helpers.py`
+  today). Its real resolution path is two CLI-only helpers,
+  `resolve_dump_collect_context`/`resolve_dump_compile_context`
+  (`cli_dump_helpers.py`), computing `collect_mode`/`header_backend`/
+  `includes`/`gcc_option_tokens` directly off raw Click parameters,
+  entirely independent of `service_input_resolution`/
+  `service_dump_pipeline.resolve_dump_request` — and this is not a
+  dry-run-only path: those same locals feed the real `dump()` call a few
+  hundred lines later in the same function, on the non-dry-run branch.
+  So migrating `render_dump_dry_run` to build from a real
+  `ResolvedDumpRequest` is not an isolated renderer change: it requires
+  first constructing a `DumpRequest` from `dump_cmd`'s ~30 CLI
+  parameters (matching Click's own parsing precisely — including the
+  `_resolved_compile_context`/`_resolved_collect_mode`/`_resolved_
+  include_labels`/`_resolved_lang_explicit` private hooks `compare`'s own
+  `ctx.invoke` already threads through this same command for its
+  implicit-dump operand), and doing so for *both* branches at once, so
+  the preview and the real run cannot silently diverge the moment only
+  one of them migrates. That is blocker 2 restated from the other
+  direction: the real run cannot move to `execute_dump_request()`
+  without the post-processing hooks blocker 2 already names, and the
+  dry-run preview cannot honestly move to `resolve_dump_request()` alone
+  while the real run it previews keeps using a wholly different resolver
+  — a preview built from one resolver describing an execution built from
+  another would be strictly worse than today's "two independent
+  implementations, kept in sync by hand," since it would *look*
+  authoritative without being connected to what actually runs. Not
+  attempted here, for the same reason blockers 2/3 were not: a real,
+  cross-cutting redesign of `dump_cmd`'s ~250-line resolution section
+  (`cli_dump_helpers.py` is already at its 2000-line AI-readiness hard
+  cap, so any new shared surface needs a sibling module, not an inline
+  addition), not a follow-up to the already-landed `resolve_dump_request`/
+  `execute_dump_request` split — that split remains real, additive
+  progress in its own right, just not yet consumed by `dump_cmd`.
+
+  **Slice landed (2026-08-19, same session): `service_input_resolution.
+  SideResolution`/`_resolve_side_snapshot_impl`, plus two newly-found,
+  narrower blockers on the next step.** `_resolve_side_snapshot_impl`
+  (the real implementation behind `resolve_side_snapshot`, now a one-line
+  wrapper) returns the P0.3 fold's own effective `includes`/
+  `CompileContext` — previously computed inside `resolve_side_snapshot`
+  and discarded after use — as a new `SideResolution` object;
+  `service_dump_pipeline.DumpResult` surfaces the same two fields,
+  populated by `execute_dump_request`. Purely additive, zero behavior
+  change for every existing caller, fully tested
+  (`tests/test_typed_dump_request.py`). This is real progress toward "one
+  shared primitive," but attempting the next step — routing
+  `perform_elf_dump`'s primary parse through it — found the two are not
+  simply duplicate callers of one function: `perform_elf_dump` receives an
+  *already-resolved* `debug_info_path` from its caller (`dump_cmd`, via
+  `_resolve_debug_artifact`), while `service._dump_elf` (which
+  `_resolve_side_snapshot_impl` reaches through `service.resolve_input`)
+  has no such parameter at all and independently *re-derives* the
+  identical fact from raw `debug_roots`/`enable_debuginfod`/
+  `debuginfod_url`. Merging the two needs the two debug-artifact
+  resolutions confirmed equivalent first — a real, separate investigation,
+  not a follow-up edit. A parallel check of `scan_engine._build_new_
+  snapshot` (which already calls `service.resolve_input` directly, so it
+  doesn't share this particular ELF-pipeline divergence) found two
+  different, narrower blockers instead: it passes `symbols_only`/
+  `debug_presence_only` to `resolve_input`, which `_resolve_side_snapshot_
+  impl` never threads through yet (a straightforward additive gap); and
+  its `embed_build_source` call constructs `public_headers` differently
+  from `embed_side_build_source`'s own construction (`_expand_public_
+  headers` over the combined headers+dirs list, vs. the shared wrapper's
+  separate, unexpanded treatment) — a genuine behavioral difference
+  needing reconciliation, not just a naming one. Neither was attempted
+  this session, per this file's own "known gaps over risky reactive
+  patches" convention, given this exact code area's extensive prior
+  history of exactly this shape of subtle divergence (18+ numbered
+  findings on the L3→L2-fold entry above). **PR 3A's full convergence
+  remains open; PR 3C (the "PR F" removal of `dump --build-query`/
+  `dump --build-compile-db`) stays blocked on it**, per the plan doc's own
+  explicit ordering requirement — see `docs/contribute/plans/cli-cleanup-
+  phase-two.md`'s PR 3A section for the equivalent, fuller account.
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode

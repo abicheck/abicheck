@@ -1160,6 +1160,16 @@ def _scan_request_config(req: ScanRequest) -> Any:
                 # letting the key resolve as "not stated" by omission (which
                 # is what the declared-params guard exists to prevent).
                 "pack_paths": (),
+                # A `ScanRequest` has no severity-preset/exit-code-scheme
+                # field either (CLI cleanup phase two, "PR B" -- these two
+                # keys joined `SCAN_CONFIG_PARAMS` so a selected gate pack
+                # cannot override an *explicit* `--severity-preset`/
+                # `--exit-code-scheme` on the CLI path); the API path has no
+                # such CLI flag to be explicit about, so both resolve as
+                # "not stated" here, same as every other field this request
+                # shape does not carry.
+                "severity_preset": None,
+                "exit_code_scheme": None,
             },
             typed={"policy", "scope_public_headers"},
             policy_file=req.policy_file,

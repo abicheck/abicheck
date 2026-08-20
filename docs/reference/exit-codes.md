@@ -405,10 +405,10 @@ to `1` would otherwise be indistinguishable. See
 the scheme label, the per-category severity levels, and that scheme's exit
 codes — so the preview matches the run it is predicting.
 
-This is CLI/config-level parity only — a gate pack (`--pack`)
-does not yet fold a `gate.*` assignment into a scan's severity the way it
-does for `compare`; pass `--severity-*`/`--exit-code-scheme` directly
-instead. Every flag in this family is a comparison-only flag (rejected as a
+A gate pack (`--pack`) folds a `gate.*` assignment into a scan's severity
+the same way it does for `compare`, and cannot override a value that was
+actually stated — by an explicit `--severity-*`/`--exit-code-scheme` flag,
+or by `.abicheck.yml`. Every flag in this family is a comparison-only flag (rejected as a
 usage error without `--against`, exit `64`) — see the table above. The
 budget (`5`), `NOT_COMPARABLE` (`6`), and evidence-contract-error exit codes
 are unaffected: they are returned before the baseline comparison — and

@@ -802,7 +802,11 @@ def test_scan_true_counts_floors_at_zero_when_evidence_subtraction_underflows():
     model = build_model(report)
     assert model.counts == (0, 0, 0)
     body = render_comment(model, sha="abc1234", detail="standard")
-    assert "-2" not in body
+    # A bare "-2" substring check is date-fragile: the comment footer's own
+    # timestamp can legitimately contain "-2" (e.g. "2026-08-20" on the 20th
+    # of a month) with no relation to a floored count at all. Check the
+    # specific phrase the original bug actually produced instead.
+    assert "-2 needs review" not in body
 
 
 def test_scan_severity_gate_reads_from_diff_not_top_level():

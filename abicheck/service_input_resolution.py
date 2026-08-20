@@ -42,6 +42,7 @@ function-local import also keeps this module out of ``service``'s import cycle
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
@@ -56,12 +57,48 @@ if TYPE_CHECKING:
     from .service_compare_evidence import SideEvidence
 
 __all__ = [
+    "SideResolution",
     "embed_side_build_source",
     "enforce_requested_depth",
     "is_raw_source_tree",
     "reject_hybrid_source_frontend",
     "resolve_side_snapshot",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class SideResolution:
+    """One resolved input side, plus the L2/P0.3 fold's own effective values.
+
+    PR 3A (dump/scan resolver convergence, CLI cleanup phase two). Everything
+    :func:`resolve_side_snapshot` already computed internally -- the seeded
+    ``includes`` and the folded :class:`CompileContext`, both discarded after
+    use -- but callers with a post-resolution hook that must agree with the
+    primary parse (``perform_elf_dump``'s ADR-039 build-context collector and
+    header-graph second pass; ``scan_engine``'s pair-aware baseline-context
+    reuse decision) need these values themselves, not just the snapshot. See
+    :func:`_resolve_side_snapshot_impl`.
+
+    **Lifetime caveat (Codex review, fresh evidence)**: when the fold ran a
+    trusted, zero-config *inferred* build-system query (no existing compile
+    database), the temporary build directory ``effective_includes``/
+    ``effective_compile_context`` were seeded from is already deleted by the
+    time this object is returned -- ``_resolve_side_snapshot_impl``'s own
+    ``finally`` drains that cleanup right after the primary parse has
+    consumed it, deliberately, to release its exclusive lock before a
+    sibling collection (e.g. ``embed_build_source``'s own inferred query)
+    can run. Safe for *identity/comparison* (e.g. ``scan_engine``'s own
+    pair-aware baseline-context-reuse decision, which only compares these
+    values against another side's resolved header/include sets, never reads
+    a file under them) -- **not** safe for a caller intending to re-read a
+    file under one of these paths after this call returns. Closing that for
+    real needs the pair-aware/lifetime redesign PR 3A's "Known gaps" entry
+    already scopes as a dedicated follow-up, not merely exposing the values.
+    """
+
+    snapshot: AbiSnapshot
+    effective_includes: tuple[Path, ...]
+    effective_compile_context: CompileContext | None
 
 
 def is_raw_source_tree(path: Path | None) -> bool:
@@ -102,12 +139,53 @@ def reject_hybrid_source_frontend(
             )
 
 
+def _gated_build_query_inputs(
+    build_config: Path | None,
+    build_query: str | None,
+    *,
+    allow_build_query: bool,
+) -> tuple[Path | None, str | None]:
+    """The real trust gate on *build_config*/*build_query* -- shared by both
+    the L2 seed and the L3-L5 embed step so a caller's permission decision is
+    computed once and applied identically everywhere (Codex review, fresh
+    evidence, two rounds).
+
+    ``build_query`` is a trusted **executable command** (``build.query`` in
+    ``.abicheck.yml``, or ``--build-query`` on the CLI); ``build_config`` is a
+    path to a ``.abicheck.yml`` that may itself carry a ``build.query`` key,
+    so it carries the identical execution risk by proxy -- both are forced to
+    ``None`` unless *allow_build_query* is exactly ``True``, regardless of
+    what the caller passed. **``build_compile_db`` is deliberately not
+    gated by this function** (see its own call sites) -- it is a bare path/
+    glob naming an *existing* ``compile_commands.json``, a pure data read
+    with "no such restriction" (matching this repo's own established
+    ``dump --build-compile-db`` vs. ``--build-query`` distinction, and
+    ``embed_build_source``'s own pre-existing behavior). Gating it the same
+    way as the executable inputs would silently degrade a caller's real
+    include paths/defines/dialect for supplying data that was never a
+    permission question in the first place.
+
+    Relying on ``seed_includes_and_fold_compile_context``'s/
+    ``collect_inline_pack``'s own identically-named ``allow_build_query``
+    parameter would be wrong here -- it is a documented, deprecated no-op
+    (``buildsource/inline.py``'s ``collect_inline_pack`` docstring). This
+    function is the one place that decision is actually enforced.
+    """
+    if allow_build_query is not True:
+        return None, None
+    return build_config, build_query
+
+
 def _seeded_includes_and_compile_context(
     side: InputSpec,
     evidence: SideEvidence,
     *,
     lang: str = "c++",
     lang_explicit: bool = False,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    allow_build_query: bool = False,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -168,6 +246,43 @@ def _seeded_includes_and_compile_context(
     forwarded into a parse that would reject it (e.g. a matched C compile
     unit's ``-std=c17`` forwarded into an explicitly-forced C++ parse).
 
+    *build_config*/*build_query*/*build_compile_db* (PR 3A, dump/scan
+    resolver convergence): optional pass-throughs to
+    :func:`~abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context`,
+    defaulted to ``None`` so every existing caller (``compare``'s typed
+    pipeline, ``dump``'s ``execute_dump_request``) is unaffected. These exist
+    only so a caller resolving a side that still carries the CLI's live
+    ``--build-query``/``--build-compile-db``/``--config`` flags (``dump``'s
+    ELF path, until PR 3C removes them) can route through this one shared
+    primitive instead of a second, independent call to the same underlying
+    function.
+
+    **Enforced here, not merely forwarded (Codex review, fresh evidence, two
+    rounds)**: *allow_build_query* gates whether *build_config*/*build_query*
+    — the two potentially-*executable* inputs — are forwarded at all, via the
+    shared :func:`_gated_build_query_inputs` (also used by
+    :func:`_resolve_side_snapshot_impl`'s embed step, so a caller's
+    permission decision is computed once and applied identically to both the
+    seed and the L3-L5 embed). *build_compile_db* is deliberately **not**
+    gated — see that helper's own docstring for why a bare data path/glob
+    naming an existing compile database is not the same risk as a trusted
+    command. This function's own real trust decision does not rest on
+    ``collect_inline_pack``'s identically-named parameter, which is a
+    documented, deprecated no-op (``buildsource/inline.py``'s own
+    ``collect_inline_pack`` docstring: "``allow_build_query`` is accepted
+    only for backward compatibility and is ignored"). Threading
+    *build_config*/*build_query* through without this local gate would let
+    any caller of this Tier-2 primitive execute an operator-supplied
+    ``build.query`` command merely by supplying a path, with no separate
+    consent step — exactly the "surprise a library caller cannot see coming"
+    this function's own docstring already warns against for the *inferred*
+    query below; explicit ``build.query`` needs the identical discipline.
+    The CLI's own gating (``dump_cmd`` only resolves a non-``None``
+    ``build_config``/``build_query`` when ``--config``/``--build-query`` was
+    genuinely typed) is a different, CLI-side act of consent that this
+    parameter existing lets that one call site assert explicitly, rather than
+    this function inferring consent from mere presence.
+
     Returns ``(includes, context, applied, cleanups)`` — ``includes`` is
     *side.includes* augmented with any build-derived seed dirs; ``applied``
     is True only when a real L3 context was found and folded in, which is
@@ -185,6 +300,12 @@ def _seeded_includes_and_compile_context(
         return list(side.includes), evidence.compile, False, []
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
+    # See _gated_build_query_inputs's own docstring: build_compile_db is a
+    # data path, not gated -- only the two potentially-executable inputs are.
+    build_config, build_query = _gated_build_query_inputs(
+        build_config, build_query, allow_build_query=allow_build_query
+    )
+
     ctx = evidence.compile
     cleanups: list[Callable[[], None]] = []
     effective_ctx: CompileContext | None
@@ -194,9 +315,9 @@ def _seeded_includes_and_compile_context(
             includes=side.includes,
             sources=side.sources,
             build_info=side.build_info,
-            build_config=None,
-            build_query=None,
-            build_compile_db=None,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=side.build_targets,
             collect_mode="off",
             gcc_path=ctx.gcc_path if ctx is not None else None,
@@ -256,6 +377,70 @@ def resolve_side_snapshot(
     :attr:`abicheck.api_types.CompareRequest.lang_explicit` /
     :attr:`abicheck.api_types.DumpRequest.lang_explicit`. Forwarded to
     :func:`abicheck.service.resolve_input` unchanged.
+
+    A thin wrapper over :func:`_resolve_side_snapshot_impl` (PR 3A, dump/scan
+    resolver convergence) — identical signature, identical behavior, for every
+    existing caller. Use the impl function directly when the caller also
+    needs the fold's effective ``includes``/``CompileContext`` back.
+    """
+    return _resolve_side_snapshot_impl(
+        side,
+        evidence,
+        lang=lang,
+        lang_explicit=lang_explicit,
+        header_backend=header_backend,
+        fmt=fmt,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
+        dwarf_only=dwarf_only,
+        debug_format=debug_format,
+        include_labels=include_labels,
+        notify=notify,
+    ).snapshot
+
+
+def _resolve_side_snapshot_impl(
+    side: InputSpec,
+    evidence: SideEvidence,
+    *,
+    lang: str,
+    lang_explicit: bool = False,
+    header_backend: str,
+    fmt: str | None,
+    public_headers: list[Path],
+    public_header_dirs: list[Path],
+    enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
+    dwarf_only: bool = False,
+    debug_format: str | None = None,
+    include_labels: dict[Path, str] | None = None,
+    notify: Callable[[str], None] | None = None,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    changed_paths: tuple[str, ...] = (),
+    allow_build_query: bool | None = None,
+) -> SideResolution:
+    """The real implementation behind :func:`resolve_side_snapshot`.
+
+    PR 3A (dump/scan resolver convergence, CLI cleanup phase two): everything
+    :func:`resolve_side_snapshot` already did, plus returning the fold's own
+    effective ``includes``/:class:`CompileContext` (see :class:`SideResolution`)
+    and two extra optional pass-throughs (*changed_paths*, *allow_build_query*)
+    that only ``scan``'s candidate-side resolution needs — every other caller
+    leaves them at their no-op defaults, so this is a strict superset of the
+    prior behavior, not a new decision point. *build_config*/*build_query*/
+    *build_compile_db* are the equivalent pass-through for ``dump``'s ELF
+    path, which still has live ``--build-query``/``--build-compile-db``/
+    ``--config`` CLI flags until PR 3C removes them.
+
+    ``allow_build_query=None`` keeps this Tier-2 primitive's existing
+    "never execute a build system as a side effect" default (``False``,
+    matching every pre-existing caller) — only a caller that explicitly
+    passes ``True`` (the CLI, once its own trust gate has already decided
+    the query is authorized) opts into running one.
     """
     from . import service
 
@@ -269,11 +454,27 @@ def resolve_side_snapshot(
     # returning -- it drains its own cleanups internally on
     # HeaderCompileContextAmbiguousError (see its docstring), so an empty
     # list here is correct, not a leak.
+    # Computed once, shared by the seed below and the embed step further
+    # down, so both apply the identical permission decision (Codex review,
+    # fresh evidence) rather than each independently gating build_config/
+    # build_query -- see _gated_build_query_inputs's own docstring.
+    # build_compile_db is deliberately not part of this gate (a data path,
+    # not an executable command) and is forwarded to both call sites as-is.
+    _gated_build_config, _gated_build_query = _gated_build_query_inputs(
+        build_config, build_query, allow_build_query=bool(allow_build_query)
+    )
     cleanups: list[Callable[[], None]] = []
     try:
         includes, compile_ctx, context_applied, cleanups = (
             _seeded_includes_and_compile_context(
-                side, evidence, lang=lang, lang_explicit=lang_explicit
+                side,
+                evidence,
+                lang=lang,
+                lang_explicit=lang_explicit,
+                build_config=_gated_build_config,
+                build_query=_gated_build_query,
+                build_compile_db=build_compile_db,
+                allow_build_query=bool(allow_build_query),
             )
         )
         snap = service.resolve_input(
@@ -311,6 +512,27 @@ def resolve_side_snapshot(
         if context_applied and snap.from_headers:
             snap.parsed_with_build_context = True
         if side.sources or side.build_info:
+            # Known, accepted limitation (Codex review, fresh evidence, not
+            # fixed here): when a trusted build_query was authorized and
+            # headers were present, the seed above (_seeded_includes_and_
+            # compile_context) has already run it once via
+            # seed_includes_and_fold_compile_context. Forwarding the same
+            # build_query here means embed_build_source's own, independent
+            # collect_inline_pack call can run it a *second* time -- an
+            # already-authorized command re-executed, not a new privilege,
+            # but real, avoidable duplicated work for an expensive/stateful
+            # query, and a theoretical risk of the two collections observing
+            # a build that changed between the two runs. This mirrors an
+            # already-accepted characteristic of this same pipeline for the
+            # build_config-driven *inferred* query case (see this module's
+            # `_seeded_includes_and_compile_context` docstring and
+            # `_l2_local_cleanups`' own comment below: "embed_build_source()
+            # below runs its own inferred query in the same function").
+            # Closing this for real needs the seed and this embed call to
+            # share one collect_inline_pack result across their two
+            # different layer scopes (L3-only vs. L3+L4+L5) -- a genuine,
+            # separate refactor, not a same-session patch; see
+            # docs/contribute/plans/cli-cleanup-phase-two.md's PR 3A section.
             embed_side_build_source(
                 snap,
                 side,
@@ -318,6 +540,11 @@ def resolve_side_snapshot(
                 header_backend,
                 public_headers,
                 public_header_dirs,
+                changed_paths=changed_paths,
+                allow_build_query=bool(allow_build_query),
+                build_config=_gated_build_config,
+                build_query=_gated_build_query,
+                build_compile_db=build_compile_db,
             )
     finally:
         # Only after the L2 parse (and any embed) has consumed the seeded dirs:
@@ -327,7 +554,11 @@ def resolve_side_snapshot(
             from .buildsource.inline import _run_cleanups
 
             _run_cleanups(cleanups)
-    return snap
+    return SideResolution(
+        snapshot=snap,
+        effective_includes=tuple(includes),
+        effective_compile_context=compile_ctx,
+    )
 
 
 def embed_side_build_source(
@@ -337,6 +568,12 @@ def embed_side_build_source(
     header_backend: str,
     public_headers: list[Path],
     public_header_dirs: list[Path],
+    *,
+    changed_paths: tuple[str, ...] = (),
+    allow_build_query: bool = False,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Embed one side's inline L3-L5 build/source evidence into *snap*.
 
@@ -349,6 +586,26 @@ def embed_side_build_source(
     ``embed_build_source`` — no place in this Tier-2 API's
     ``ValidationError``/``SnapshotError`` contract, so it is translated here
     (Codex review).
+
+    *changed_paths*/*allow_build_query* (PR 3A, dump/scan resolver
+    convergence): optional pass-throughs to ``embed_build_source``, defaulted
+    to their existing no-op values so every pre-existing caller (``compare``,
+    ``dump``'s typed pipeline) is unaffected — only ``scan``'s candidate-side
+    resolution passes non-default values, for its POI-focused L4 replay
+    scoping and its CLI-resolved trusted-build-query permission.
+
+    *build_config*/*build_query*/*build_compile_db* (Codex review, fresh
+    evidence): the identical build inputs the caller already resolved for
+    the L2 seed (:func:`_resolve_side_snapshot_impl` forwards its own
+    already-gated values here — see :func:`_gated_build_query_inputs`, the
+    single place *build_config*/*build_query* are actually authorized).
+    Without this, the L2 header-AST parse and the L3-L5 embed could resolve
+    *different* build configurations for the same input — the L2 seed using
+    the caller's explicit config while this embed step fell back to
+    auto-discovery — so the snapshot's own evidence layers could silently
+    describe two different builds, and an explicitly requested depth could
+    fail to be satisfied despite the caller having supplied exactly what it
+    needed.
     """
     import click
 
@@ -363,8 +620,13 @@ def embed_side_build_source(
             snap,
             build_info=side.build_info,
             sources=side.sources,
+            build_config=build_config,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
+            changed_paths=changed_paths,
+            allow_build_query=allow_build_query,
             extractor=_sce.effective_frontend(evidence.compile, header_backend),
             # L4 source-ABI replay must invoke the compiler this input's own L2
             # header AST was pointed at (`gcc_path`/`gcc_prefix`), not

@@ -520,6 +520,11 @@ class ProjectCompatibilityInputs:
     public_symbols: tuple[str, ...] = ()
     #: ``exit_code_scheme:`` (``"auto"``/``None`` = unset).
     exit_code_scheme: str | None = None
+    #: Whether the project literally wrote ``exit_code_scheme:`` -- lets a
+    #: stated ``auto`` outrank a lower-precedence gate pack instead of
+    #: reading as unstated (``BuildConfig.exit_code_scheme`` alone can't
+    #: tell an explicit ``auto`` apart from an absent key).
+    exit_code_scheme_explicit: bool = False
     severity_preset: str | None = None
     severity_abi_breaking: str | None = None
     severity_potential_breaking: str | None = None
@@ -557,6 +562,7 @@ class ProjectCompatibilityInputs:
             scope_public=cfg.scope_public,
             public_symbols=tuple(cfg.public_symbols),
             exit_code_scheme=cfg.exit_code_scheme,
+            exit_code_scheme_explicit=cfg.exit_code_scheme_explicit,
             severity_preset=cfg.severity_preset,
             severity_abi_breaking=cfg.severity_abi_breaking,
             severity_potential_breaking=cfg.severity_potential_breaking,
@@ -996,10 +1002,11 @@ def resolve_compatibility_evaluation_config(
     really state it, though: an explicit ``--exit-code-scheme auto``
     contributes a candidate carrying that decision's answer and outranks a
     lower layer's concrete scheme, matching
-    ``cli_helpers_compare.resolve_compare_config``. Only a project config's
-    ``auto`` contributes nothing, because ``BuildConfig``'s own default for
-    that key *is* the string ``"auto"``, making a stated one
-    indistinguishable from an absent one.
+    ``cli_helpers_compare.resolve_compare_config``. A project config's
+    ``auto`` contributes the same way, but only when
+    :attr:`ProjectCompatibilityInputs.exit_code_scheme_explicit` says the
+    key was literally written -- ``BuildConfig``'s own default for that key
+    *is* ``"auto"``, otherwise indistinguishable from an absent one.
 
     Raises :class:`~abicheck.compatibility_evaluation_resolver.FieldResolutionError`
     (D7 usage errors), :class:`~abicheck.compatibility_evaluation_resolver.PackConflictError`
@@ -1058,7 +1065,16 @@ def resolve_compatibility_evaluation_config(
         or (profile is not None and profile.exit_code_scheme is not None)
         or (
             project is not None
-            and _stated_exit_code_scheme(project.exit_code_scheme) is not None
+            and (
+                _stated_exit_code_scheme(project.exit_code_scheme) is not None
+                # An explicit project-config `auto` is also a real statement
+                # (see `project_scheme`'s own derivation below) -- without
+                # this, two conflicting gate packs assigning
+                # `gate.exit_code_scheme` were never flagged as conflicting
+                # when the project had explicitly pinned `auto`, since this
+                # check alone couldn't see that pin either.
+                or project.exit_code_scheme_explicit
+            )
         )
     ):
         pinned_gate[EXIT_CODE_SCHEME_FIELD] = _STATED_ELSEWHERE
@@ -1446,12 +1462,14 @@ def resolve_compatibility_evaluation_config(
                 reference=profile.name if profile is not None else None,
             )
         )
-    # A project config's own `exit_code_scheme:` defaults to the *string*
-    # "auto" when the key is absent (`BuildConfig.exit_code_scheme`), so
-    # unlike the CLI flag, "auto" there is indistinguishable from unset and
-    # contributes nothing -- which resolves to the same answer anyway.
+    # `BuildConfig.exit_code_scheme` defaults to the *string* "auto" when
+    # absent, so unlike the CLI flag, a bare `"auto"` is only a real
+    # statement when `exit_code_scheme_explicit` confirms the key was
+    # actually written -- mirroring the explicit-CLI branch above.
     project_scheme = (
-        _stated_exit_code_scheme(project.exit_code_scheme) if project else None
+        _stated_exit_code_scheme(project.exit_code_scheme) or auto_scheme
+        if project is not None and project.exit_code_scheme_explicit
+        else (_stated_exit_code_scheme(project.exit_code_scheme) if project else None)
     )
     if project_scheme is not None:
         scheme_candidates.append(

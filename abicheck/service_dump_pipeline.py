@@ -49,10 +49,10 @@ from typing import TYPE_CHECKING
 
 from .errors import AstContextMissingError, ValidationError
 from .service_input_resolution import (
+    _resolve_side_snapshot_impl,
     enforce_requested_depth,
     is_raw_source_tree,
     reject_hybrid_source_frontend,
-    resolve_side_snapshot,
 )
 
 if TYPE_CHECKING:
@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .api_types import DumpRequest
+    from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
 
@@ -174,11 +175,49 @@ class DumpResult:
     Storage (writing the snapshot to disk) is deliberately not part of this
     object — see this module's own docstring, "Not in scope, deliberately":
     that is CLI presentation/provenance layer, not resolution or execution.
+
+    ``effective_includes``/``effective_compile_context`` (PR 3A, dump/scan
+    resolver convergence) are the P0.3 L3→L2 fold's own resolved values —
+    computed inside :func:`execute_dump_request`'s call to
+    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`
+    but, before this addition, never surfaced. A CLI-side caller with a
+    post-processing hook that must agree with the primary parse (the ELF
+    ``dump`` path's ADR-039 build-context collector and header-graph second
+    pass) needs these, rather than re-deriving them via a second, independent
+    call to the same underlying fold.
+
+    Defaulted to ``()``/``None`` (Codex review, fresh evidence) —
+    :class:`DumpResult` is exported, documented Tier-2 API surface, so
+    appending *required* fields would break an external caller already
+    constructing the previous three-field shape, not just callers inside
+    this repo (which are already updated). The defaults never surface in
+    practice: :func:`execute_dump_request` — the only real constructor —
+    always supplies both explicitly.
+
+    **Lifetime caveat, not yet relevant to any caller in this repo (Codex
+    review, fresh evidence)**: when the fold ran a trusted, zero-config
+    *inferred* build-system query (no existing compile database), the
+    temporary build directory it seeded ``effective_includes``/
+    ``effective_compile_context`` from is deleted by the time this object is
+    returned — cleanup runs, deliberately, right after the primary parse has
+    consumed it (see
+    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`'s
+    own docstring). These fields are therefore safe to use for *identity or
+    comparison* (exactly how ``scan_engine``'s own, pre-existing pair-aware
+    baseline-context-reuse decision already uses its equivalent locals — see
+    ``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR 3A section), but
+    a caller intending to re-read a file under one of these paths (the
+    post-processing-hook use case named above) cannot yet do so safely — that
+    is exactly the sort of pair-aware/lifetime redesign PR 3A's "Known gaps"
+    entry already scopes as its own follow-up, not settled by exposing these
+    fields alone.
     """
 
     resolved: ResolvedDumpRequest
     snapshot: AbiSnapshot
     effective_depth: str
+    effective_includes: tuple[Path, ...] = ()
+    effective_compile_context: CompileContext | None = None
 
 
 def _reject_unsupported_frontends(
@@ -348,6 +387,11 @@ def execute_dump_request(
     resolved: ResolvedDumpRequest,
     *,
     notify: Callable[[str], None] | None = None,
+    build_config: Path | None = None,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
+    changed_paths: tuple[str, ...] = (),
+    allow_build_query: bool | None = None,
 ) -> DumpResult:
     """Execute a :class:`ResolvedDumpRequest` — steps 3-5 of
     :func:`run_dump_request`'s own docstring (``resolve_input``, the
@@ -356,6 +400,17 @@ def execute_dump_request(
     *notify* is forwarded to :func:`abicheck.service.resolve_input` for
     user-facing progress notes ("following a linker script"); ``None`` logs
     them instead.
+
+    *build_config*/*build_query*/*build_compile_db*/*changed_paths*/
+    *allow_build_query* (PR 3A, dump/scan resolver convergence): optional
+    pass-throughs to
+    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`,
+    all defaulted to their existing no-op values so :func:`run_dump_request`
+    and every other pre-existing caller is unaffected. These exist only for
+    the ELF ``dump`` CLI path's still-live ``--build-query``/
+    ``--build-compile-db``/``--config`` flags (until PR 3C removes them) to
+    route through this one shared primitive instead of a second, independent
+    call to the same underlying fold.
 
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
@@ -368,7 +423,7 @@ def execute_dump_request(
     request = resolved.request
     side = request.input
 
-    snap = resolve_side_snapshot(
+    resolution = _resolve_side_snapshot_impl(
         side,
         resolved.evidence,
         lang=resolved.lang,
@@ -395,7 +450,13 @@ def execute_dump_request(
         debug_format=resolved.debug_format,
         include_labels=dict(request.include_labels) or None,
         notify=notify,
+        build_config=build_config,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
+        changed_paths=changed_paths,
+        allow_build_query=allow_build_query,
     )
+    snap = resolution.snapshot
 
     if request.follow_dependencies:
         populate_side_dependency_info(
@@ -418,4 +479,10 @@ def execute_dump_request(
         effective_depth = _gated_source_label(snap.build_source, snap)
     except (TypeError, ValueError, OverflowError):
         effective_depth = "headers" if snap.from_headers else "binary"
-    return DumpResult(resolved=resolved, snapshot=snap, effective_depth=effective_depth)
+    return DumpResult(
+        resolved=resolved,
+        snapshot=snap,
+        effective_depth=effective_depth,
+        effective_includes=resolution.effective_includes,
+        effective_compile_context=resolution.effective_compile_context,
+    )

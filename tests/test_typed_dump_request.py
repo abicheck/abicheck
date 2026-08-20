@@ -575,6 +575,41 @@ class TestResolveExecuteDumpRequestSplit:
 
         assert "storage" not in {f.name for f in fields(DumpResult)}
 
+    def test_dump_result_still_accepts_three_argument_construction(
+        self, snap_path: Path
+    ):
+        """Codex review, fresh evidence: DumpResult is exported Tier-2 API,
+        so appending effective_includes/effective_compile_context as
+        *required* fields would TypeError on an external caller already
+        constructing the previous three-field shape. Both must default."""
+        from abicheck.service_dump_pipeline import DumpResult, resolve_dump_request
+
+        resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
+        result = DumpResult(
+            resolved=resolved, snapshot=_snapshot(), effective_depth="headers"
+        )
+        assert result.effective_includes == ()
+        assert result.effective_compile_context is None
+
+    def test_dump_result_carries_effective_includes_and_compile_context(
+        self, snap_path: Path
+    ):
+        """PR 3A (dump/scan resolver convergence): DumpResult surfaces the
+        P0.3 L3->L2 fold's own effective includes/compile-context, computed
+        inside execute_dump_request's resolution call but previously
+        discarded after use. No sources/build_info here, so the fold is a
+        no-op -- includes is whatever the request supplied (empty), and the
+        compile context is None (unchanged from the request's own None)."""
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        result = execute_dump_request(resolve_dump_request(request))
+        assert result.effective_includes == ()
+        assert result.effective_compile_context is None
+
     def test_effective_header_backend_honors_compile_context_override(
         self, snap_path: Path
     ):
@@ -678,13 +713,13 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.effective_header_backend == "clang"
 
         captured: dict[str, object] = {}
-        original = service_dump_pipeline.resolve_side_snapshot
+        original = service_dump_pipeline._resolve_side_snapshot_impl
 
         def _spy(*args, **kwargs):
             captured["header_backend"] = kwargs.get("header_backend")
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(service_dump_pipeline, "resolve_side_snapshot", _spy)
+        monkeypatch.setattr(service_dump_pipeline, "_resolve_side_snapshot_impl", _spy)
         execute_dump_request(resolved)
         # ...but execution still receives the bare, unresolved value -- the
         # same "auto" service.py's own eff_backend computation independently
@@ -1212,3 +1247,141 @@ class TestPerInputFrontendIsValidated:
     def test_a_valid_per_input_frontend_still_passes(self, snap_path: Path):
         spec = InputSpec(path=snap_path, compile=CompileContext(frontend="castxml"))
         assert DumpRequest(input=spec).validation_errors() == []
+
+
+def test_seeded_includes_never_forwards_build_query_without_explicit_permission(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, real reproduction, two rounds. First round: `collect_
+    inline_pack`'s own `allow_build_query` parameter is a documented,
+    deprecated no-op (see its docstring), so a caller supplying
+    `build_config`/`build_query` without ALSO passing `allow_build_query=
+    True` must never reach `seed_includes_and_fold_compile_context` with
+    those values live -- confirmed to fail against the pre-fix code
+    (build_config/build_query reached the fold unconditionally). Second
+    round: `build_compile_db` is a bare data path/glob naming an existing
+    compile database, not an executable command, and must NOT be gated the
+    same way -- an earlier fix over-gated it, silently degrading a caller's
+    real include paths/defines/dialect for supplying data that was never a
+    permission question. Lives here rather than in test_header_compile_
+    context.py (which sits at its 2000-line hard cap)."""
+    from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+
+    captured: dict[str, object] = {}
+
+    def _fake_seed(*, pending_cleanups, **kwargs):
+        captured.update(kwargs)
+        return [], False, CompileContext(), ()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        _fake_seed,
+    )
+
+    header = tmp_path / "h.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    side = InputSpec(path=tmp_path / "lib.so", sources=tmp_path, headers=(header,))
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="off", dump_manifest=None
+    )
+    trusted_config = tmp_path / "trusted.abicheck.yml"
+
+    # allow_build_query omitted (defaults False) -- the operator-supplied
+    # build_config/build_query (both potentially executable) must NOT reach
+    # the fold, but build_compile_db (a bare data path) must still reach it.
+    _seeded_includes_and_compile_context(
+        side,
+        evidence,
+        build_config=trusted_config,
+        build_query="cmake -S . -B build",
+        build_compile_db="build/compile_commands.json",
+    )
+    assert captured["build_config"] is None
+    assert captured["build_query"] is None
+    assert captured["build_compile_db"] == "build/compile_commands.json"
+
+    # allow_build_query=True -- now build_config/build_query reach the fold
+    # as given too.
+    captured.clear()
+    _seeded_includes_and_compile_context(
+        side,
+        evidence,
+        build_config=trusted_config,
+        build_query="cmake -S . -B build",
+        build_compile_db="build/compile_commands.json",
+        allow_build_query=True,
+    )
+    assert captured["build_config"] == trusted_config
+    assert captured["build_query"] == "cmake -S . -B build"
+    assert captured["build_compile_db"] == "build/compile_commands.json"
+
+
+def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: the L2 seed and the L3-L5 embed step
+    must agree on the same build_config/build_query/build_compile_db, or the
+    snapshot's own evidence layers could silently describe two different
+    builds. _resolve_side_snapshot_impl computes the allow_build_query gate
+    once and forwards the identical (gated) values to both."""
+    from abicheck import service, service_input_resolution as sir
+    from abicheck.model import AbiSnapshot
+    from abicheck.service_compare_evidence import SideEvidence
+
+    header = tmp_path / "h.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    side = InputSpec(path=tmp_path / "lib.so", sources=tmp_path, headers=(header,))
+    evidence = SideEvidence(
+        headers=[header], compile=None, collect_mode="build", dump_manifest=None
+    )
+    trusted_config = tmp_path / "trusted.abicheck.yml"
+
+    monkeypatch.setattr(
+        sir, "_seeded_includes_and_compile_context", lambda *a, **k: ([], None, False, [])
+    )
+    monkeypatch.setattr(
+        service, "resolve_input", lambda *a, **k: AbiSnapshot(library="x", version="1")
+    )
+
+    embed_captured: dict[str, object] = {}
+
+    def _fake_embed(*args, **kwargs):
+        embed_captured.update(kwargs)
+
+    monkeypatch.setattr(sir, "embed_side_build_source", _fake_embed)
+
+    sir._resolve_side_snapshot_impl(
+        side,
+        evidence,
+        lang="c++",
+        header_backend="auto",
+        fmt="elf",
+        public_headers=[],
+        public_header_dirs=[],
+        build_config=trusted_config,
+        build_query="cmake -S . -B build",
+        build_compile_db="build/compile_commands.json",
+        allow_build_query=True,
+    )
+    assert embed_captured["build_config"] == trusted_config
+    assert embed_captured["build_query"] == "cmake -S . -B build"
+    assert embed_captured["build_compile_db"] == "build/compile_commands.json"
+
+    embed_captured.clear()
+    sir._resolve_side_snapshot_impl(
+        side,
+        evidence,
+        lang="c++",
+        header_backend="auto",
+        fmt="elf",
+        public_headers=[],
+        public_header_dirs=[],
+        build_config=trusted_config,
+        build_query="cmake -S . -B build",
+        build_compile_db="build/compile_commands.json",
+        allow_build_query=False,
+    )
+    assert embed_captured["build_config"] is None
+    assert embed_captured["build_query"] is None
+    assert embed_captured["build_compile_db"] == "build/compile_commands.json"

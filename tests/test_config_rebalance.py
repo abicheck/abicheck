@@ -210,7 +210,7 @@ class TestConfigRoundtrip:
             source_method="s5",
             debug_format="dwarf", debug_dwarf_only=True, debug_debuginfod=True,
             debug_debuginfod_url="https://dbginfo.example",
-            exit_code_scheme="severity", version=2,
+            exit_code_scheme="severity", exit_code_scheme_explicit=True, version=2,
         )
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
@@ -236,7 +236,8 @@ class TestConfigRoundtrip:
     def test_yaml_file_roundtrip(self, tmp_path: Path) -> None:
         cfg = BuildConfig(
             severity_preset="strict", scope_public=False,
-            suppression_strict=True, exit_code_scheme="legacy", version=1,
+            suppression_strict=True, exit_code_scheme="legacy",
+            exit_code_scheme_explicit=True, version=1,
         )
         p = tmp_path / ".abicheck.yml"
         p.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
@@ -244,6 +245,19 @@ class TestConfigRoundtrip:
 
     def test_empty_roundtrip(self) -> None:
         cfg = BuildConfig()
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+        assert cfg.exit_code_scheme_explicit is False
+
+    def test_explicit_exit_code_scheme_auto_is_tracked_and_roundtrips(self) -> None:
+        # Codex review, fresh evidence: `exit_code_scheme: auto` written
+        # literally must be distinguishable from an absent key -- both parse
+        # to the same string, but only the former is a real, stated
+        # selection (see compatibility_evaluation_frontend.py's
+        # `project_scheme` resolution).
+        cfg = BuildConfig.from_dict({"exit_code_scheme": "auto"})
+        assert cfg.exit_code_scheme == "auto"
+        assert cfg.exit_code_scheme_explicit is True
+        assert BuildConfig.from_dict({}).exit_code_scheme_explicit is False
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
     def test_invalid_severity_level_rejected(self) -> None:

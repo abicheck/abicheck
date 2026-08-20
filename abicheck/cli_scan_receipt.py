@@ -49,17 +49,36 @@ resolve from real flags with real D7 layers.
 "scan never consults severity" gap documented in AGENTS.md's "Known gaps"),
 and those flags really do drive a severity-scheme run's exit code -- see
 :func:`abicheck.cli_scan_baseline._run_baseline_compare`. This ADR-049
-receipt is a **separate, narrower resolution** from the one that actually
-scores the run (``cli_scan.scan_cmd``'s own ``resolve_compare_config`` call),
-the same split ``compare`` avoids via one combined ``resolve_and_apply``
-call. Unifying the two here needs the same combined-resolution machinery
-``compare`` has, not a drive-by field addition that risks a receipt silently
-diverging from what actually scored the run -- so this receipt still
-deliberately blanks the severity/exit-code-scheme fields to their built-in
-defaults (:func:`_without_gate_settings`) rather than guess. That is an
-honest under-claim, not a claim that the flags don't exist; it is the same
-shape the MCP receipt documents for its own missing parameters: nothing
-*this resolver* was fed, so it records nothing.
+receipt is still a **separate, narrower resolution** from the one that
+actually scores the run (``cli_scan.scan_cmd``'s own ``resolve_compare_
+config`` call), the same split ``compare`` avoids via one combined
+``resolve_and_apply`` call -- unifying the two here needs the same
+combined-resolution machinery ``compare`` has, not attempted in this module.
+``severity_preset``/``exit_code_scheme`` **are** now in
+:data:`SCAN_CONFIG_PARAMS`, and the project-config tier of the same two
+fields (plus the four per-category ``severity_abi_breaking``/etc.) is no
+longer blanked either (CLI cleanup phase two, "PR B" -- see
+:func:`abicheck.pack_application.apply_to_compare_config`'s docstring for
+why this matters: a ``kind: gate`` pack folded onto the real
+``resolved_cfg`` must not override a value an explicit ``--severity-
+preset``/``--exit-code-scheme`` or ``.abicheck.yml`` already stated, and
+this resolver's D7 precedence is where "was it stated" is answered --
+without these fields reaching it, every gate pack looked unopposed here
+regardless of what the CLI or project config actually said, which is a
+real precedence bug, not just an inaccurate receipt: Codex review on #801
+reproduced the explicit-CLI case (a removed export with ``--severity-
+preset strict`` and a ``gate.severity.abi_breaking: warning`` pack wrongly
+exited 0), and the identical mechanism applies to a project-config-sourced
+value). Both tiers are safe to include for ``scan`` specifically: unlike
+``compare``, ``scan`` has no ``--profile`` option, so nothing sits between
+"explicit CLI" and "project config" here that this resolver's simpler
+precedence chain could miss, and both `ProjectCompatibilityInputs.
+from_build_config` and `resolve_compare_config` read the identical six
+fields off the identical ``project_cfg``/``cfg`` object -- so this
+resolver's answer to "was severity/exit-code-scheme stated, and by what"
+cannot disagree with what actually scores the run, and this is the
+"leftover" reason for the `_without_gate_settings` history note further
+down this module.
 
 A **leaf**, like its two siblings: it imports nothing from ``cli_scan`` or
 ``cli_scan_baseline``, so no cycle forms. "Which flags did the user really
@@ -86,6 +105,15 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     "scope_public_headers",
     "contract_mode",
     "pack_paths",
+    # CLI cleanup phase two, "PR B": needed so this resolver's D7 precedence
+    # can tell an explicit --severity-preset/--exit-code-scheme apart from
+    # "nothing stated" -- without them a selected gate pack looked unopposed
+    # here regardless of what the CLI actually gave, which let
+    # `pack_application.apply_to_compare_config` override an explicit value
+    # (see this module's own docstring for the reproduced repro and why
+    # this is safe for `scan` specifically).
+    "severity_preset",
+    "exit_code_scheme",
 )
 
 #: How a :class:`~abicheck.service_scan.ScanRequest` spells the inputs whose
@@ -183,12 +211,30 @@ def resolve_scan_config(
     suppression_source = SuppressionSource.from_loaded(suppression, suppress_path)
     project = None
     if project_cfg is not None:
-        project = _without_gate_settings(
-            ProjectCompatibilityInputs.from_build_config(
-                project_cfg,
-                path=str(project_path) if project_path is not None else None,
-                sha256=project_sha256,
-            )
+        # No longer blanked (CLI cleanup phase two, "PR B" -- see this
+        # function's own former `_without_gate_settings` note, kept below as
+        # a comment rather than a dead function): `ProjectCompatibilityInputs.
+        # from_build_config` and `cli_helpers_compare.resolve_compare_config`
+        # -- the function that actually scores a scan's gate -- both read the
+        # identical six fields off the identical `project_cfg`/`cfg` object
+        # with the identical `explicit CLI > project config > built-in
+        # default` precedence, and `scan` has no `--profile` option (unlike
+        # `compare`) to introduce a tier the other resolver doesn't know
+        # about. So, for `scan` specifically, these two resolutions cannot
+        # disagree on a project-config-sourced severity/exit-code-scheme the
+        # way blanking here was written to guard against -- and leaving them
+        # blanked here left a real precedence bug in the *pack* fold: a
+        # selected gate pack folded onto the real `resolved_cfg`
+        # (`pack_application.apply_to_compare_config`, called from
+        # `cli_scan._resolve_scan_evaluation_config`) saw a project-config
+        # value as merely "unstated" and silently overrode it (the same class
+        # of bug Codex review found for the explicit-CLI tier on #801,
+        # reproduced here for the project-config tier by the identical
+        # mechanism).
+        project = ProjectCompatibilityInputs.from_build_config(
+            project_cfg,
+            path=str(project_path) if project_path is not None else None,
+            sha256=project_sha256,
         )
     resolved_front_end = front_end if front_end is not None else FrontEnd.CLI
     return resolve_compatibility_evaluation_config(
@@ -207,45 +253,28 @@ def resolve_scan_config(
     )
 
 
-def _without_gate_settings(project: Any) -> Any:
-    """*project* with its gate fields blanked, for a resolver that ignores them.
-
-    ``scan --against`` now has real severity/exit-code-scheme flags and a
-    real config-driven gate (module docstring above) -- but *this specific
-    resolver* (:func:`resolve_scan_config`'s ADR-049 receipt path) is not the
-    one that scores the run; ``cli_scan.scan_cmd``'s own
-    ``resolve_compare_config`` call is. Passing this project's gate fields
-    through here would make the persisted receipt claim a value this
-    resolver never actually applied to anything -- e.g. it could record an
-    ``info-only`` preset from ``.abicheck.yml`` while the scan that produced
-    this very report exited 4 on a breaking diff, if the two resolutions
-    ever disagreed (Codex review; the original version of this fix predates
-    scan having severity flags at all, when the two resolutions could not
-    yet disagree because neither one used the config's gate fields).
-
-    Blanked rather than left out of the receipt entirely: the fields still
-    resolve, to their built-in defaults, which is the true statement about
-    *this resolver* -- nothing selected them here. That is the same answer
-    the MCP receipt gives for the parameters ``abi_compare`` does not have.
-    A future change threading one combined resolution through both the
-    scoring path and this receipt (the way ``compare``'s own
-    ``resolve_and_apply`` does) could record the real values instead; until
-    then, an honest "not stated here" beats a value that might not match
-    what actually scored the run.
-    """
-    if project is None:
-        return None
-    from dataclasses import replace
-
-    return replace(
-        project,
-        exit_code_scheme=None,
-        severity_preset=None,
-        severity_abi_breaking=None,
-        severity_potential_breaking=None,
-        severity_quality_issues=None,
-        severity_addition=None,
-    )
+#: History note, not a live function: this module used to run every
+#: `ProjectCompatibilityInputs` through a `_without_gate_settings` helper
+#: that blanked its six severity/exit-code-scheme fields, because this
+#: receipt resolver (:func:`resolve_scan_config`) was not the one that
+#: scored a scan's gate -- ``cli_scan.scan_cmd``'s own ``resolve_compare_
+#: config`` call was, and the two could in principle disagree. CLI cleanup
+#: phase two, "PR B" removed the blanking: `ProjectCompatibilityInputs.
+#: from_build_config` and `resolve_compare_config` read the identical six
+#: fields off the identical `project_cfg`/`cfg` object with the identical
+#: `explicit CLI > project config > built-in default` precedence, and
+#: `scan` has no `--profile` option (unlike `compare`) to introduce a tier
+#: the other resolver doesn't know about -- so, for `scan` specifically,
+#: the two resolutions cannot actually disagree on a project-config-sourced
+#: value, and blanking it left a real precedence bug: a selected gate pack
+#: folded onto the real `resolved_cfg` (`pack_application.
+#: apply_to_compare_config`, called from `cli_scan._resolve_scan_
+#: evaluation_config`) saw a project-config value as merely "unstated" and
+#: silently overrode it -- the same class of bug Codex review found for the
+#: explicit-CLI tier on #801, reproduced here for the project-config tier
+#: by the identical mechanism. `severity_preset`/`exit_code_scheme` also
+#: joined `SCAN_CONFIG_PARAMS` in the same change, closing the
+#: explicit-CLI tier of the identical bug.
 
 
 def record_resolved_config(result: Any, config: Any) -> None:
