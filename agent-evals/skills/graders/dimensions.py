@@ -496,6 +496,35 @@ def dimension_6(
                 )
             )
 
+    # A Category B scenario whose `invocation` declares `contract_evaluation`
+    # is testing whether the run actually engaged `--contract`, not merely
+    # whether it produced a verdict that happens to match the truth — a plain
+    # unscoped `compare` reporting COMPATIBLE, wrapped in `confident: false`
+    # and a `contract_coverage_incomplete` uncertainty, would otherwise pass
+    # every deterministic dimension without the tool ever having computed
+    # coverage at all (coverage is identically 0 without `--contract` —
+    # ADR-049 Phase 7). Mirrors the declared-target check above: a mode
+    # named in `invocation.contract` must be matched exactly, not merely
+    # "some --contract was used" (Codex review, PR #808).
+    if (scenario.get("invocation") or {}).get("contract_evaluation"):
+        declared_mode = (scenario.get("invocation") or {}).get("contract")
+        contract_covered = any(
+            ev.ran_to_a_verdict(c)
+            and not ev.compares_one_side_against_itself(c)
+            and ev.contract_mode(c) is not None
+            and (declared_mode is None or ev.contract_mode(c) == declared_mode)
+            for c in resolved.values()
+        )
+        if not contract_covered:
+            reasons.append(
+                (
+                    "cited no call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", which the scenario's own invocation requires",
+                    True,
+                )
+            )
+
     # A scenario whose `expected` declares `full_verdict` explicitly requires
     # both the scoped and library-wide verdicts to be reported (the two
     # legitimately diverge — `shared/consumer-scoping.md`), since the point of
@@ -529,6 +558,46 @@ def dimension_6(
                         True,
                     )
                 )
+
+            # The check above compares against the scenario's ground truth;
+            # this compares against what the claim's own cited report
+            # actually said. A claim can state the truth's own value "by
+            # construction" while citing a call whose own JSON report said
+            # something else entirely — e.g. citing a scoped call reporting
+            # `{"verdict": "COMPATIBLE", "full_verdict": "COMPATIBLE"}`
+            # while claiming `full_verdict: BREAKING` (which happens to
+            # match the truth). The rank-based "safer than" comparison above
+            # cannot catch this in either direction — it only ever fails a
+            # claim that understates severity, never one that overstates it
+            # relative to what was actually observed — but a full_verdict
+            # this dimension's own title asks to be evidenced must equal
+            # what the cited report said, not merely land on the correct
+            # answer by a route the report never supports (Codex review,
+            # PR #808). Exact-match, not a rank comparison: unlike the
+            # primary `verdict` field (where overstating severity is an
+            # accepted, unpunished direction throughout this module),
+            # `full_verdict` exists specifically to test whether an agent
+            # read its own scoped-vs-global report correctly, so a value
+            # that diverges from what the citation actually shows is wrong
+            # regardless of which direction it diverges. Restricted to the
+            # claim's own cited calls, not the whole run — the point is
+            # whether the claim faithfully reports what its own evidence
+            # said, not what some other, uncited call reported. A cited
+            # report with no full_verdict field at all, or cited reports
+            # that disagree with each other (which one would the claim be
+            # measured against?), contribute nothing — the false-negative-
+            # over-false-positive default this module uses throughout.
+            reported_fulls = ev.reported_full_verdicts(run_dir, resolved.values())
+            if len(reported_fulls) == 1:
+                (reported_full,) = reported_fulls
+                if claimed_full != reported_full:
+                    reasons.append(
+                        (
+                            f"claimed full_verdict {claimed_full}, but the "
+                            f"cited report's own full_verdict was {reported_full}",
+                            True,
+                        )
+                    )
 
     used = sorted(
         {f for c in calls if ev.is_comparison(c) for f in ev.suppression_flags(c)}

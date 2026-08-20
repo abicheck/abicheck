@@ -542,6 +542,17 @@ class TestEvidenceReading:
         targets = ev.consumer_scope_targets(call)
         assert {"plugin_register", "plugin_teardown"} <= targets
 
+    def test_contract_mode_extracts_the_declared_domain(self):
+        assert (
+            ev.contract_mode({"argv": ["compare", "a", "b", "--contract", "exports"]})
+            == "exports"
+        )
+        assert (
+            ev.contract_mode({"argv": ["compare", "a", "b", "--contract=public"]})
+            == "public"
+        )
+        assert ev.contract_mode({"argv": ["compare", "a", "b"]}) is None
+
     def test_required_symbols_file_missing_or_unresolvable_is_a_silent_no_op(
         self, tmp_path
     ):
@@ -1282,6 +1293,77 @@ class TestDimensionSix:
         )
         assert result.status == "pass", result.reasons
 
+    def test_a_scenario_requiring_contract_evaluation_needs_a_matching_call(
+        self, tmp_path
+    ):
+        """A plain unscoped compare reporting COMPATIBLE, wrapped in a
+        contract_coverage_incomplete caveat, must not pass a scenario whose
+        invocation declares `contract_evaluation` unless a cited call
+        actually used `--contract` -- coverage is identically 0 without it
+        (ADR-049 Phase 7), so there is nothing for the caveat to describe
+        (Codex review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"contract": "exports", "contract_evaluation": True},
+            "expected": {
+                "verdict": "COMPATIBLE",
+                "uncertainty": "contract_coverage_incomplete",
+            },
+        }
+        calls = [a_breaking_call(0, argv=["compare", "old.so", "new.so"])]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            ),
+            scenario,
+            calls=calls,
+            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+        )
+        assert result.status == "fail"
+        assert any("--contract" in r for r in result.reasons)
+
+    def test_a_matching_contract_mode_call_satisfies_the_declared_requirement(
+        self, tmp_path
+    ):
+        """The positive control: a cited call using the exact declared
+        `--contract` mode passes."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"contract": "exports", "contract_evaluation": True},
+            "expected": {
+                "verdict": "COMPATIBLE",
+                "uncertainty": "contract_coverage_incomplete",
+            },
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--contract", "exports"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            ),
+            scenario,
+            calls=calls,
+            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+        )
+        assert result.status == "pass", result.reasons
+
     def test_a_scenario_with_no_declared_target_is_unaffected(self, tmp_path):
         """A plain (non-consumer-scoped) scenario declares no `invocation`, so
         this check must not fire at all -- confirming it is additive, not a
@@ -1351,6 +1433,113 @@ class TestDimensionSix:
         )
         assert result.status == "fail"
         assert any("full_verdict" in r and "safer" in r for r in result.reasons)
+
+    def test_a_full_verdict_matching_truth_but_not_the_cited_report_fails(
+        self, tmp_path
+    ):
+        """A claim can state the scenario's own truth value "by construction"
+        while citing a call whose own JSON report said something else
+        entirely -- the rank-based "safer than" checks cannot catch this,
+        since claiming BREAKING is never "safer than" a BREAKING truth, but
+        the claim is still not backed by what its own citation actually
+        showed (Codex review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "COMPATIBLE"}
+                )
+            },
+        )
+        assert result.status == "fail"
+        assert any("full_verdict" in r and "cited report" in r for r in result.reasons)
+
+    def test_a_full_verdict_matching_the_cited_report_passes(self, tmp_path):
+        """The positive control: a claim whose full_verdict matches what its
+        own cited report actually said passes."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "pass", result.reasons
+
+    def test_disagreeing_cited_reports_do_not_fabricate_a_mismatch(self, tmp_path):
+        """Two cited calls whose own reports disagree on full_verdict leave
+        no single value to check the claim against -- degrades to no check
+        rather than guessing which one is authoritative."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            ),
+            a_breaking_call(
+                1, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            ),
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0, 1],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                ),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "COMPATIBLE"}
+                ),
+            },
+        )
+        assert result.status == "pass", result.reasons
 
     def test_citing_call_ids_that_never_happened_fails(self, tmp_path):
         """The shape the first real pilot produced: a baseline run verified its

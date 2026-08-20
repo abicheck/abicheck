@@ -30,6 +30,7 @@ from __future__ import annotations
 import functools
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -602,6 +603,27 @@ def reported_verdict(run_dir: Path, call: dict) -> str | None:
     return None if severest is None else VERDICT_ORDER[severest]
 
 
+def contract_mode(call: dict) -> str | None:
+    """The `--contract` value this call passed, if any.
+
+    Distinct from `is_consumer_scoped`/`CONSUMER_SCOPE_FLAGS`: a contract
+    domain (`public`/`exports`/`all`/`auto`) narrows *which evidence the
+    tool consults*, not which consumer the question is about, and a
+    scenario can declare one (`invocation.contract`) without also declaring
+    a consumer. `--contract` alone (bare boolean-shaped, no value) never
+    happens on the real CLI — it always takes a mode — so a bare flag with
+    nothing following it is not matched, matching the false-negative
+    default this module uses throughout.
+    """
+    argv = call.get("argv", [])
+    for index, token in enumerate(argv):
+        if token == "--contract" and index + 1 < len(argv):
+            return argv[index + 1]
+        if token.startswith("--contract="):
+            return token[len("--contract=") :]
+    return None
+
+
 def strongest_reported_verdict(
     run_dir: Path, calls: list[dict], *, only_scoped: bool = False
 ) -> str | None:
@@ -629,3 +651,42 @@ def strongest_reported_verdict(
         index = VERDICT_ORDER.index(verdict)
         severest = index if severest is None else max(severest, index)
     return None if severest is None else VERDICT_ORDER[severest]
+
+
+def reported_full_verdict(run_dir: Path, call: dict) -> str | None:
+    """The library-wide `full_verdict` this call's own JSON report stated.
+
+    JSON only, unlike `reported_verdict` — `full_verdict` has no established
+    Markdown "field" text this module already scans for, and inventing a
+    regex for one on the strength of a single report shape risks a false
+    match on unrelated prose. A JSON-only cited call that carries the field
+    is still checked; a Markdown-only one degrades to "nothing to check
+    against" rather than guessing — the same false-negative-over-false-
+    positive default this module uses throughout.
+    """
+    for text in _artifact_texts(run_dir, call):
+        try:
+            parsed: Any = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and parsed.get("full_verdict") in VERDICT_ORDER:
+            value: str = parsed["full_verdict"]
+            return value
+    return None
+
+
+def reported_full_verdicts(run_dir: Path, calls: Iterable[dict]) -> frozenset[str]:
+    """Every distinct `full_verdict` these calls' own reports stated.
+
+    Deliberately takes whatever iterable of calls the caller already
+    resolved as *cited* (`_cited(calls, claim)`'s `resolved.values()`) —
+    `full_verdict` is being checked against the specific report(s) a claim
+    rested its own `full_verdict` on, not against every report the run
+    happened to produce. A caller wanting an *unambiguous* grounding check
+    treats more than one distinct value as "can't tell which one the claim
+    should match" rather than picking one — the same false-negative-over-
+    false-positive default this module uses throughout.
+    """
+    return frozenset(
+        v for c in calls if (v := reported_full_verdict(run_dir, c)) is not None
+    )

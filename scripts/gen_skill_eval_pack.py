@@ -103,8 +103,15 @@ EXAMPLES = ROOT / "examples"
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
 #: Bumped when the pack's own shape changes, so a consumer reading an older
-#: shape fails loudly rather than misreading a field.
-PACK_VERSION = 1
+#: shape fails loudly rather than misreading a field. Bumped to 2 when
+#: Category B scenarios gained an `architectures` restriction field
+#: alongside the existing `platforms` one (Codex review, PR #808) — a
+#: version-1 consumer has no way to know the new axis exists, and silently
+#: ignoring it would run an architecture-restricted fixture (e.g. the
+#: prebuilt x86_64-only `evidence-too-shallow` binary) on an unsupported
+#: host, exactly the corrupted comparison the restriction exists to
+#: prevent.
+PACK_VERSION = 2
 
 #: Everything that determines the installed checker's behaviour, for the
 #: publication-grade digest. Defined by inclusion so the committed evidence
