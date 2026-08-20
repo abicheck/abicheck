@@ -27,8 +27,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from abicheck.change_registry_types import Verdict
-from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.checker import Change, ChangeKind, DiffResult, compare
 from abicheck.compatibility_evaluation_config import (
     AssuranceConfig,
     CompatibilityEvaluationConfig,
@@ -106,7 +108,7 @@ class TestEffectiveConfigFields:
             result, severity_config=severity, exit_code_scheme="severity"
         )
         assert fields["_tier"] == "baseline"
-        assert fields["policy.base"] == "strict_abi"
+        assert fields["policy.base"].startswith("strict_abi@")
         assert fields["policy.overrides"] == "func_removed=API_BREAK"
         assert fields["surface.internal_namespaces"] == '["detail","impl"]'
         assert fields["gate.exit_code_scheme"] == "severity"
@@ -612,3 +614,116 @@ class TestReleaseOutputDirSummaryCarriesDigest:
             output_dir_data["effective_config_fields"]
             == primary_data["effective_config_fields"]
         )
+
+
+class TestBaselineTierBuiltinPolicyIdentity:
+    """Codex review, PR #803, fresh evidence: the baseline tier recorded
+    only the bare policy name, not builtin_policy_identity()'s full
+    id@version:sha256 -- so two baseline reports from different abicheck
+    versions could both read policy.base="strict_abi" and hash identically
+    despite the built-in base's effective ChangeKind sets (what the
+    identity actually hashes) having genuinely changed."""
+
+    def test_recognized_builtin_policy_carries_full_identity(self):
+        from abicheck.compatibility_evaluation_frontend import (
+            builtin_policy_identity,
+        )
+
+        result = _result(policy="strict_abi")
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        identity = builtin_policy_identity("strict_abi")
+        assert fields["policy.base"] == f"strict_abi@{identity.version}:{identity.sha256}"
+
+    def test_different_builtin_policies_hash_differently(self):
+        f1 = effective_config_fields(
+            _result(policy="strict_abi"),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        f2 = effective_config_fields(
+            _result(policy="sdk_vendor"),
+            severity_config=None,
+            exit_code_scheme="legacy",
+        )
+        assert f1["policy.base"] != f2["policy.base"]
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_unrecognized_policy_name_degrades_to_bare_name_rather_than_raising(self):
+        """A receipt must never turn a completed comparison into a failure
+        over an unrecognized policy name (see
+        compatibility_evaluation_frontend.stated_policy_base's own
+        docstring for the precedent)."""
+        result = _result(policy="totally_unknown_policy")
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["policy.base"] == "totally_unknown_policy"
+
+    def test_empty_policy_name_is_empty_string(self):
+        result = _result(policy="")
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["policy.base"] == ""
+
+
+class TestCompatReportOmitsTheDigest:
+    """Codex review, PR #803, fresh evidence: compat/cli.py's own `compat
+    check --report-format json` reuses reporter.to_json with
+    include_exit_decision=False (its real process exit follows a different,
+    ABICC-style 0/1/2 scheme) -- but this digest's gate axes describe only
+    the *native* legacy/severity scheme and carry no representation of
+    compat-only transform options (-strict, -source/-binary, ...), so two
+    behaviorally different compat reports could carry the identical digest.
+    Mirrors the `exit` block's own existing include_exit_decision gate."""
+
+    def test_include_exit_decision_false_omits_the_digest(self):
+        result = _result()
+        report = json.loads(to_json(result, include_exit_decision=False))
+        assert "effective_config_digest" not in report
+        assert "effective_config_fields" not in report
+        # Every other field this function always writes stays present.
+        assert report["verdict"] == "NO_CHANGE"
+
+    def test_default_still_includes_the_digest(self):
+        result = _result()
+        report = json.loads(to_json(result))
+        assert report["effective_config_digest"].startswith("sha256:")
+
+    def test_include_exit_decision_false_still_validates_against_schema(self):
+        """Mirrors test_exit_decision.py's identically-named test for the
+        `exit` block -- both fields are schema-optional for the same
+        reason, so a compat report omitting them still validates against
+        its own advertised report_schema_version. Uses a real compare()
+        result (not the hand-built _result() helper) so every other
+        required field is genuinely populated the way to_json's real
+        callers produce it."""
+        pytest.importorskip("jsonschema")
+        import jsonschema
+
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.schemas import load_compare_report_schema
+
+        def _fn(name: str, mangled: str) -> Function:
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old = AbiSnapshot(
+            version="1.0",
+            functions=[_fn("pub_a", "_Z5pub_av"), _fn("pub_b", "_Z5pub_bv")],
+            **common,
+        )
+        new = AbiSnapshot(
+            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
+        )
+        result = compare(old, new)
+        report = json.loads(to_json(result, include_exit_decision=False))
+        assert "effective_config_digest" not in report
+        jsonschema.validate(report, load_compare_report_schema())

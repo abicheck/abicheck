@@ -45,9 +45,7 @@
           "evidence_tiers",
           "analysis_assurance",
           "analysis_assurance_exit_contribution",
-          "annotations",
-          "effective_config_digest",
-          "effective_config_fields"
+          "annotations"
         ]
       }
     },
@@ -1211,11 +1209,11 @@
     "effective_config_digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "CLI cleanup phase two, PR B (schema 2.45): a SHA-256 fingerprint of the resolved gate/policy/surface/contract configuration this comparison actually ran under, so two reports (or a report replayed later) can be compared for \"did the resolved configuration change\" without a byte-for-byte diff. Identical computation for compare, the directory/package release fan-out, and scan --against (see effective_config_fields below and effective_config_digest.py's own module docstring for the two resolution tiers it picks between)."
+      "description": "CLI cleanup phase two, PR B (schema 2.45): a SHA-256 fingerprint of the resolved gate/policy/surface/contract configuration this comparison actually ran under, so two reports (or a report replayed later) can be compared for \"did the resolved configuration change\" without a byte-for-byte diff. Identical computation for compare, the directory/package release fan-out, and scan --against (see effective_config_fields below and effective_config_digest.py's own module docstring for the two resolution tiers it picks between). Schema-optional, like exit: absent from compat/cli.py's compat check --report-format json output, whose own transform options (-strict, -source/-binary, ...) this digest's native legacy/severity gate axes don't represent."
     },
     "effective_config_fields": {
       "type": "object",
-      "description": "schema 2.45: the named field dict effective_config_digest was hashed from, so a mismatch between two runs' digests can be attributed to a specific field instead of read as an opaque hash -- mirrors the profile_fields/scope_fields precedent in comparability.py. _tier is \"contract\" (a full CompatibilityEvaluationConfig was resolved, under --contract/--pack) or \"baseline\" (the policy/gate fields every comparison resolves regardless); the two tiers are not cross-comparable, since the contract tier also covers axes (contract.mode, real pack identities) a baseline-tier run never resolved. Every key effective_config_digest.EFFECTIVE_CONFIG_FIELD_KEYS names is always present (as an empty string when the active tier does not resolve that axis), so a reader can rely on the full key set rather than only _tier.",
+      "description": "schema 2.45: the named field dict effective_config_digest was hashed from, so a mismatch between two runs' digests can be attributed to a specific field instead of read as an opaque hash -- mirrors the profile_fields/scope_fields precedent in comparability.py. _tier is \"contract\" (a full CompatibilityEvaluationConfig was resolved, under --contract/--pack) or \"baseline\" (the policy/gate fields every comparison resolves regardless); the two tiers are not cross-comparable, since the contract tier also covers axes (contract.mode, real pack identities) a baseline-tier run never resolved. Every key effective_config_digest.EFFECTIVE_CONFIG_FIELD_KEYS names is always present (as an empty string when the active tier does not resolve that axis), so a reader can rely on the full key set rather than only _tier. Schema-optional -- see effective_config_digest above.",
       "required": [
         "_tier",
         "policy.base",

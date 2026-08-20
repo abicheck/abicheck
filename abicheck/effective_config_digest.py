@@ -174,6 +174,34 @@ def _identity_str(identity: Any) -> str:
     )
 
 
+def _builtin_policy_base_str(name: Any) -> str:
+    """``policy.base`` for the baseline tier: the full built-in identity
+    (``id@version:sha256``, matching the rich tier's own :func:`_identity_str`
+    encoding) when *name* is a recognized built-in base, else the bare name
+    unchanged. Codex review, PR #803, fresh evidence: an ordinary comparison
+    (no ``--contract``/``--pack``) recorded only the policy *name* here, so
+    two baseline reports from different abicheck versions could both read
+    ``policy.base="strict_abi"`` and hash identically despite
+    ``builtin_policy_identity()``'s own effective-``ChangeKind``-set digest
+    (the same one the rich tier now carries) having genuinely changed.
+    Falls back to the bare name rather than raising for a name outside
+    ``VALID_BASE_POLICIES`` -- an unrecognized/typo'd policy name is a real,
+    pre-existing possibility on this tier (see ``compatibility_evaluation_
+    frontend.stated_policy_base``'s own docstring for why a receipt must
+    never turn a completed comparison into a failure over this), so this
+    degrades to the same bare-string behavior every other tier's unresolved
+    field already uses rather than crashing report generation."""
+    name_str = str(name or "")
+    if not name_str:
+        return ""
+    try:
+        from .compatibility_evaluation_frontend import builtin_policy_identity
+
+        return _identity_str(builtin_policy_identity(name_str))
+    except ValueError:
+        return name_str
+
+
 def _packs_str(*pack_groups: Any) -> str:
     """``id@version:sha256`` for every pack identity across *pack_groups*,
     canonical-JSON-encoded (see :func:`_json_list`) -- a pack id/version/
@@ -339,7 +367,7 @@ def effective_config_fields_from_diff_result(
     policy_file = getattr(result, "policy_file", None)
     return {
         "_tier": "baseline",
-        "policy.base": str(getattr(result, "policy", "") or ""),
+        "policy.base": _builtin_policy_base_str(getattr(result, "policy", "")),
         "policy.overrides": _overrides_str(getattr(policy_file, "overrides", {})),
         "policy.reclassify": _reclassify_str(getattr(policy_file, "reclassify", ())),
         "policy.frozen_namespaces": _namespaces_str(

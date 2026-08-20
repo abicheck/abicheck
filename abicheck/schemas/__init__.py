@@ -607,7 +607,20 @@ from typing import Any
 #:       optional per-library sidecar files did, so this write path alone
 #:       was silently missing the "same digest in every report" invariant.
 #:       Additive key/keys, on an existing report shape shared by every
-#:       front end.
+#:       front end. Two more fixes landed under this same still-unreleased
+#:       version: the baseline tier's ``policy.base`` now carries a
+#:       recognized built-in policy's full ``id@version:sha256`` identity
+#:       (matching the rich tier's own fix, one review round earlier) rather
+#:       than the bare name; and ``effective_config_digest``/
+#:       ``effective_config_fields`` are now schema-optional (removed from
+#:       the real-verdict branch's ``then.required``) and omitted from
+#:       ``compat check --report-format json`` output (``include_exit_
+#:       decision=False``), mirroring the pre-existing ``exit`` block's own
+#:       optional status -- this digest's gate axes describe only the
+#:       native legacy/severity scheme and don't represent compat's own
+#:       transform options (``-strict``, ``-source``/``-binary``, ...), so
+#:       emitting it there would let two behaviorally different compat
+#:       reports claim an identical effective configuration.
 REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

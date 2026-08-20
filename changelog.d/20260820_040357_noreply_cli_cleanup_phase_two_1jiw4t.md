@@ -13,4 +13,9 @@
   `--require-complete-analysis` (`gate.require_complete_analysis`), and the
   directory/package release fan-out's `--output-dir` sibling summary
   document (`summary.json`) carries both effective-config fields too, not
-  just the primary release JSON.
+  just the primary release JSON. The baseline tier's `policy.base` now
+  records a recognized built-in policy's full `id@version:sha256` identity
+  (not just its bare name), matching the rich tier. Both fields are omitted
+  (schema-optional, like `exit`) from `compat check --report-format json`
+  output, since that front end's own transform options (`-strict`,
+  `-source`/`-binary`, ...) aren't represented by this digest.

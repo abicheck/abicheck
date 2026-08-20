@@ -111,13 +111,26 @@ def add_contract_context(
         ).to_dict()
     add_annotations(d, result, severity_config=severity_config)
     add_use_case_impact(d, result, displayed)
-    add_effective_config_digest(
-        d,
-        result,
-        severity_config=severity_config,
-        exit_code_scheme=scheme,
-        require_complete_analysis=require_complete_analysis,
-    )
+    # Same `include_exit_decision` gate as the `exit` block above, for the
+    # identical reason (Codex review, PR #803, fresh evidence): the digest's
+    # `gate.exit_code_scheme`/`gate.severity.*` axes describe the *native*
+    # legacy/severity scheme, and carry no representation of `compat
+    # check`'s own transform/gate options (`-strict`, `-source`/`-binary`,
+    # `-warn-newsym`, ...) -- which are a materially different option
+    # vocabulary belonging to a different front end (`compat/cli.py`), not a
+    # gap in this digest's own field set to widen. Emitting it anyway would
+    # let two `compat check --report-format json` reports that differ only
+    # by `-strict` (a real verdict-changing transform) carry the identical
+    # digest, silently claiming "same effective configuration" the same way
+    # the `exit` block would if it weren't already skipped here.
+    if include_exit_decision:
+        add_effective_config_digest(
+            d,
+            result,
+            severity_config=severity_config,
+            exit_code_scheme=scheme,
+            require_complete_analysis=require_complete_analysis,
+        )
 
     ctx = result.contract_context
     if ctx is None:
@@ -176,9 +189,17 @@ def add_effective_config_digest(
     :func:`~abicheck.effective_config_digest.effective_config_fields` itself
     picks the richest tier this comparison actually resolved (a full
     ``CompatibilityEvaluationConfig`` under ``--contract``/``--pack``, else
-    the policy/gate fields every comparison resolves regardless).
-    Unconditional, like the ``exit`` block conceptually is -- every
-    comparison has a resolved configuration to fingerprint.
+    the policy/gate fields every comparison resolves regardless). The
+    caller (:func:`add_contract_context`) gates this the same way it gates
+    the ``exit`` block -- skipped when ``include_exit_decision=False``
+    (``compat/cli.py``'s ``compat check --report-format json``, Codex
+    review, PR #803, fresh evidence): the digest's gate axes describe the
+    *native* legacy/severity scheme and carry no representation of
+    ``compat check``'s own transform options (``-strict``, ``-source``/
+    ``-binary``, ...), so emitting it there would let two behaviorally
+    different compat reports claim the identical effective configuration.
+    Both fields are schema-optional for exactly this reason, mirroring
+    ``exit``'s own optional status.
 
     *exit_code_scheme*, when given, is the caller's own already-resolved
     scheme (e.g. `scan --against`'s ``exit_scheme``, which additionally
