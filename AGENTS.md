@@ -1984,6 +1984,42 @@ Once a root command genuinely clears the bar above, pick the right home:
   via `declared_includes` instead — same effective compiler argv, still a
   real `profile_fingerprint`/`include_sequence` disagreement.
 
+  **Re-verified end to end (2026-08-20) against the literal bug report this
+  whole entry was originally opened from** (a `dump --sources --build-info
+  --depth source` baseline compared against an unchanged codebase via
+  `scan --against`, reported carrying empty `ast_resolved_standard`/
+  `ast_compile_args` and failing as `NOT_COMPARABLE`): the reported
+  symptom does **not** reproduce on current `main` for a plain,
+  single-compilation-unit `compile_commands.json` (real `g++ -std=c++17`
+  build, real `clang` L2 frontend, no `-p`/`--compile-db` involved) — the
+  `dump` baseline's `ast_resolved_standard`/`ast_compile_args` are
+  correctly populated and the follow-up `scan --against` resolves
+  `NO_CHANGE`, not `NOT_COMPARABLE`. This confirms the accumulated fixes
+  above (the L3->L2 fold itself, the include-dir dedup fixes, the
+  class-sensitive dedup fix) already close the reported case for real —
+  the pinned commit the report was filed against
+  (`abicheck/abicheck@891bd9d7`) predates essentially all of them. Added
+  as a real, non-mocked end-to-end regression:
+  `tests/test_dump_scan_l3_comparability.py` (a real `g++`-compiled
+  library + `compile_commands.json`, driven through the actual `dump`/
+  `scan` CLI commands via `CliRunner`, not a stubbed `dump()` call the way
+  the existing unit coverage in `tests/test_cli_dump_helpers_coverage.py`
+  is) — closing the gap this entry's own earlier text noted between "the
+  mechanism is unit-tested" and "the reported end-to-end symptom is
+  verified gone." **The residual, narrower gap immediately above this
+  note — the legacy `-p`/`--compile-db` auto-match (`dump`-only) landing a
+  matched directory through a structurally different channel than the
+  P0.3 fold's own seeded `declared_includes`, reproduced against real
+  Bazel `aquery`/`cquery` evidence in `napetrov/abicheck-bazel-lab`'s own
+  PR #14 — is unaffected by this re-verification and remains genuinely
+  open** for a `--build-info` combined with an explicit `-p`/
+  `--compile-db`, or for real multi-target Bazel `aquery` graphs this
+  environment cannot reproduce (no live Bazel/castxml toolchain
+  available). A user hitting `NOT_COMPARABLE` after this date should
+  check first whether their invocation combines `-p`/`--compile-db` with
+  `--build-info`, or is a genuine multi-TU Bazel build — the plain,
+  single-compile-unit case this note re-verifies is not the culprit.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
