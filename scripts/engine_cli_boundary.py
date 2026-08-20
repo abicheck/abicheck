@@ -181,8 +181,10 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     name *before* attempting to import a same-named submodule -- so a
     same-named ``cli``/``cli_*`` submodule file sitting alongside it is
     never actually reached by this particular import statement. Recognizes
-    ``Assign``/``AnnAssign`` (with a value)/``FunctionDef``/``ClassDef``
-    bindings and an ``ImportFrom`` re-exporting an ordinary symbol under
+    ``Assign`` (including a name bound via tuple/list destructuring, e.g.
+    ``cli, other = values`` -- see ``_assign_target_binds_name``)/
+    ``AnnAssign`` (with a value)/``FunctionDef``/``ClassDef`` bindings and
+    an ``ImportFrom`` re-exporting an ordinary symbol under
     this name from elsewhere (``from .api import cli``, or a *different*
     submodule aliased to this name, ``from . import othername as cli``):
     those unambiguously bind to something other than the real submodule,
@@ -240,7 +242,7 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
     submodule_aliases = _names_bound_to_submodule(tree, alias_name)
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == alias_name for t in stmt.targets
+            _assign_target_binds_name(t, alias_name) for t in stmt.targets
         ):
             if _value_is_submodule_alias(stmt.value, submodule_aliases):
                 continue
@@ -475,6 +477,24 @@ def _names_bound_to_submodule(tree: ast.Module, alias_name: str) -> set[str]:
                 if alias.name == alias_name:
                     names.add(alias.asname or alias.name)
     return names
+
+
+def _assign_target_binds_name(target: ast.expr, name: str) -> bool:
+    """Does *target* (one element of an ``ast.Assign``'s ``targets`` list)
+    bind *name* -- recursing into tuple/list destructuring (``cli, other =
+    values``) and a starred target (``cli, *rest = values``)? Python
+    creates an ordinary attribute for a destructured name exactly the same
+    way a plain ``cli = value`` assignment does, so a same-named ``cli.py``
+    submodule sitting alongside it is shadowed identically either way --
+    checking only a top-level ``ast.Name`` target would miss this and
+    incorrectly treat the alias as still reaching the real submodule."""
+    if isinstance(target, ast.Name):
+        return target.id == name
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_assign_target_binds_name(elt, name) for elt in target.elts)
+    if isinstance(target, ast.Starred):
+        return _assign_target_binds_name(target.value, name)
+    return False
 
 
 def _value_is_submodule_alias(value: ast.expr, submodule_aliases: set[str]) -> bool:

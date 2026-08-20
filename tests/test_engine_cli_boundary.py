@@ -568,6 +568,33 @@ def test_absolute_reexport_of_a_different_real_cli_module_still_flagged(
     assert "scan_engine.py" in errors[0]
 
 
+def test_destructuring_assignment_shadows_real_submodule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cli, other = values` (tuple destructuring) inside `__init__.py`
+    binds `cli` to an ordinary attribute of `values`, exactly the same as
+    a plain `cli = value` assignment would — Python doesn't treat a
+    destructured name any differently from a directly-assigned one. A
+    real, unrelated `cli.py` submodule sitting alongside it is shadowed
+    the same way. Must NOT be flagged."""
+    import scripts.engine_cli_boundary as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    engine_pkg = pkg / "engine_pkg20"
+    engine_pkg.mkdir()
+    (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
+    (engine_pkg / "__init__.py").write_text("cli, other = get_two_things()\n")
+    (pkg / "scan_engine.py").write_text("from .engine_pkg20 import cli\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+
+    findings = Findings()
+    gate.check_engine_cli_boundary(findings)
+    assert not any(c == "engine-cli-boundary" for c, _ in findings.errors)
+
+
 def test_importfrom_directly_from_the_real_submodule_still_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
