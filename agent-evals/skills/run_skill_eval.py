@@ -52,7 +52,7 @@ PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 #: second, independent place the freeze must be enforced — without it, an
 #: old or explicitly-opted-in prototype-skill row would silently fold into a
 #: nominally flagship-only aggregate.
-FLAGSHIP_SKILL = "review-native-library-change"
+FLAGSHIP_SKILL = "check-abi-compatibility"
 
 
 def _model_label(row: dict) -> str | None:

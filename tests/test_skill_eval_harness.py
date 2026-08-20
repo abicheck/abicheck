@@ -52,7 +52,7 @@ shim = _load_script(EVAL_DIR / "shim" / "abicheck", "skill_eval_shim")
 runner = _load_script(EVAL_DIR / "runners" / "claude_code.py", "skill_eval_runner")
 
 SCENARIO_BREAKING = {
-    "skill": "review-native-library-change",
+    "skill": "check-abi-compatibility",
     "expected": {"verdict": "BREAKING"},
 }
 
@@ -187,10 +187,10 @@ class TestRunnerTreatment:
             {
                 "type": "system",
                 "subtype": "init",
-                "skills": ["pdf", "review-native-library-change"],
+                "skills": ["pdf", "check-abi-compatibility"],
             }
         ]
-        assert runner.visible_native_skills(events) == ["review-native-library-change"]
+        assert runner.visible_native_skills(events) == ["check-abi-compatibility"]
         assert runner.visible_native_skills([]) is None
 
     def test_a_retired_skill_installed_at_user_scope_is_not_hidden(self):

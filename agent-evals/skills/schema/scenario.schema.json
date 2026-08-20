@@ -31,7 +31,7 @@
         },
         "skill": {
           "enum": [
-            "review-native-library-change"
+            "check-abi-compatibility"
           ]
         },
         "status": {
