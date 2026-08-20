@@ -1126,6 +1126,95 @@ pipelines a fourth time.
   > `execute_dump_request` split. That split remains real, additive
   > progress in its own right (§2 above) — it is the primitive a future
   > `dump_cmd` migration would build on, just not yet consumed by one.
+  >
+  > **Slice landed (2026-08-20): both of the "two newly-found blockers"
+  > above closed, plus the debug-artifact-resolution question confirmed.**
+  > (1) The debug-artifact divergence: read both resolutions in full rather
+  > than assumed equivalent. `perform_elf_dump`'s only caller is `dump_cmd`
+  > (confirmed by grep — no second call site exists), and `dump_cmd` never
+  > sets `symbols_only`/`debug_presence_only` at all (`dump` has no such
+  > flags — only `scan`/`compare` do), so `_dump_elf`'s extra `not
+  > symbols_only and not debug_presence_only` gate is vacuously true for
+  > every input `perform_elf_dump` can actually receive. The remaining
+  > differences (`debug_roots=debug_roots` vs. `list(debug_roots) or
+  > None`; `click.echo` vs. `notify`/`_logger`; `if artifact:` vs. `if
+  > artifact is not None`) are all behaviorally inert — `BuildIdTreeResolver`/
+  > `PathMirrorResolver` etc. already do `list(debug_roots or [])`
+  > internally, a `DebugArtifact` dataclass instance is always truthy, and
+  > the messaging difference is cosmetic. **Confirmed equivalent for the
+  > real call shape — no code change needed here**, closing this question
+  > without the "reconciling two independently written implementations"
+  > investigation this note flagged as still open.
+  >
+  > (2) `symbols_only`/`debug_presence_only` now thread through
+  > `resolve_side_snapshot`/`_resolve_side_snapshot_impl` into
+  > `service.resolve_input`, both defaulting `False` (matching
+  > `resolve_input`'s own defaults) so every pre-existing caller is
+  > unaffected — a strict superset of the prior behavior, the same shape
+  > as this primitive's existing `changed_paths`/`allow_build_query`
+  > pass-throughs. `scan_engine._build_new_snapshot` does not consume this
+  > yet (it still calls `service.resolve_input` directly, not through this
+  > shared primitive — see below), so this closes the *primitive's*
+  > capability gap, not yet the caller-side migration. Regression test:
+  > `tests/test_header_compile_context.py::
+  > test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only`
+  > (confirmed to fail against the pre-fix code with `TypeError: unexpected
+  > keyword argument 'symbols_only'`).
+  >
+  > (3) The `public_headers`/`public_header_dirs` construction divergence:
+  > investigated by reading the actual consumer, not just diffing the two
+  > call sites. `embed_build_source`'s `public_header_roots` (the union of
+  > both tuples, `cli_buildsource.py:233`) is split back into file vs.
+  > directory roots by `source_extractors._argv.split_public_roots`, which
+  > already recognizes a directory via `os.path.isdir()` regardless of
+  > which of the two input tuples it arrived in — and
+  > `_ClassifyContext.classify()` (`source_extractors/clang.py`, mirrored
+  > in `castxml.py`) matches a directory root via *segment/prefix*
+  > matching (`classify_origin` against `dir_segs`), so a file under that
+  > directory already classifies as public without needing to also appear
+  > as an individual exact-match entry. `_build_new_snapshot`'s
+  > `_expand_public_headers`-based construction (walking every directory
+  > into its individual header files, then adding *those* to `public_
+  > headers` on top of the still-unexpanded `public_header_dirs`) therefore
+  > added only redundant exact-file entries a directory root already
+  > covered — not a correctness difference, just wasted directory-walk
+  > work and a needlessly divergent call shape from
+  > `embed_side_build_source`'s simpler, canonical raw pass-through.
+  > `_expand_public_headers` itself is not wrong or removed — it stays in
+  > use a few lines above this call site, for the S2 preprocessor pre-scan,
+  > which genuinely needs individual files (each header becomes its own
+  > `clang -E` translation unit, a different contract from the L4
+  > classification roots this call feeds). Reconciled onto the canonical
+  > shape: `_build_new_snapshot` now passes `public_headers`/
+  > `public_header_dirs` unexpanded, exactly matching
+  > `embed_side_build_source`. Regression test:
+  > `tests/test_scan_l2_cleanup_ordering.py::
+  > test_scan_candidate_passes_public_headers_unexpanded_to_embed`
+  > (confirmed to fail against the pre-fix code — the directory-derived
+  > extra file entry showed up in the captured `public_headers` tuple).
+  >
+  > **What this slice does not close**: `_build_new_snapshot` still calls
+  > `service.resolve_input`/`embed_build_source` directly rather than
+  > routing through `_resolve_side_snapshot_impl`/`SideResolution` — the
+  > two additive fixes above make that future migration *safe*, they don't
+  > perform it. Investigating the migration itself surfaced one more
+  > wrinkle beyond what this section had already named: `_build_new_
+  > snapshot`'s own `allow_build_query` parameter gates only its
+  > `embed_build_source` call (whether the *inferred/auto-discovered* build
+  > query may run) and is never threaded into its `seed_includes_and_
+  > fold_compile_context` call at all (that call always passes `build_
+  > query=None, build_compile_db=None` — `scan` has no `--build-query`/
+  > `--build-compile-db` CLI flags to begin with, unlike `dump`) — whereas
+  > `_resolve_side_snapshot_impl`'s `_gated_build_query_inputs` gates both
+  > the seed and the embed step from one shared decision. Reconciling this
+  > correctly needs confirming what `_build_new_snapshot`'s `allow_build_
+  > query` is actually meant to authorize today (the auto-discovery-vs-
+  > seed distinction, not just the embed step) before the two functions'
+  > gating can be safely unified — a real, separate investigation, not a
+  > follow-up to this slice's two closed items. Blockers 4 (post-processing
+  > hooks), 5 (`dump_cmd` building a real `DumpRequest`), and 6 (a
+  > pair-aware scan-baseline primitive) remain fully open, unchanged from
+  > the notes above.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from

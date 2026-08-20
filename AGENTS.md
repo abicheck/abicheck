@@ -4265,6 +4265,64 @@ Once a root command genuinely clears the bar above, pick the right home:
   explicit ordering requirement — see `docs/contribute/plans/cli-cleanup-
   phase-two.md`'s PR 3A section for the equivalent, fuller account.
 
+  **Slice landed (2026-08-20): both "narrower blockers" above closed, plus
+  the debug-artifact-resolution question this entry raised confirmed
+  equivalent — no code change needed for that half.** `perform_elf_dump`
+  has exactly one caller (`dump_cmd`, confirmed by grep), and `dump_cmd`
+  never sets `symbols_only`/`debug_presence_only` (`dump` has no such
+  flags at all — only `scan`/`compare` do), so `_dump_elf`'s extra `not
+  symbols_only and not debug_presence_only` gate around its debug-artifact
+  resolution is vacuously true for every input `perform_elf_dump` can
+  actually pass it; the remaining textual differences (`debug_roots` vs.
+  `list(debug_roots) or None`, `click.echo` vs. `notify`, `if artifact:`
+  vs. `if artifact is not None`) are all behaviorally inert (the resolver
+  backends already do `list(debug_roots or [])` internally, and a
+  `DebugArtifact` instance is always truthy). `symbols_only`/
+  `debug_presence_only` now thread through `resolve_side_snapshot`/
+  `_resolve_side_snapshot_impl` into `service.resolve_input`, both
+  defaulting `False` so every pre-existing caller is unaffected — the same
+  additive shape as the existing `changed_paths`/`allow_build_query`
+  pass-throughs (`tests/test_header_compile_context.py::
+  test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only`,
+  confirmed to fail pre-fix with `TypeError: unexpected keyword argument
+  'symbols_only'`). The `public_headers` construction divergence:
+  investigated the actual consumer rather than just diffing the two call
+  sites — `embed_build_source`'s `public_header_roots` (the union of both
+  tuples) is split back into file vs. directory roots by
+  `source_extractors._argv.split_public_roots`, which already recognizes a
+  directory via `os.path.isdir()` regardless of which tuple it arrived in,
+  and `_ClassifyContext.classify()` matches a directory root by
+  segment/prefix — so a file under a public directory already classifies
+  as public without also needing to appear as an individual exact-match
+  entry. `_build_new_snapshot`'s `_expand_public_headers`-based
+  construction was therefore redundant, not more correct — it added exact
+  file entries a directory root already covered, at the cost of an extra
+  directory walk and a needlessly divergent call shape from
+  `embed_side_build_source`'s simpler raw pass-through.
+  `_expand_public_headers` itself is unchanged and still correctly used a
+  few lines above this call site, for the S2 preprocessor pre-scan (a
+  genuinely different contract — each header becomes its own `clang -E`
+  TU there). Reconciled onto the canonical shape (`tests/
+  test_scan_l2_cleanup_ordering.py::
+  test_scan_candidate_passes_public_headers_unexpanded_to_embed`,
+  confirmed to fail pre-fix — the directory-derived extra file entry
+  showed up in the captured tuple). **Neither fix routes
+  `_build_new_snapshot` through `_resolve_side_snapshot_impl` itself** —
+  they make that future migration safe, they don't perform it.
+  Investigating the migration surfaced one more wrinkle this entry hadn't
+  named: `_build_new_snapshot`'s own `allow_build_query` gates only its
+  `embed_build_source` call, never its `seed_includes_and_fold_compile_
+  context` call (which always passes `build_query=None, build_compile_
+  db=None` — `scan` has no such CLI flags to begin with), whereas
+  `_resolve_side_snapshot_impl`'s `_gated_build_query_inputs` gates both
+  from one shared decision; reconciling that needs confirming what
+  `_build_new_snapshot`'s `allow_build_query` is actually meant to
+  authorize today, before the two functions' gating can be safely
+  unified. Blockers 4 (post-processing hooks) and 5/6 (`dump_cmd` building
+  a real `DumpRequest`; a pair-aware scan-baseline primitive) remain fully
+  open, unchanged from the notes above — see the plan doc's own PR 3A
+  section for the identical, fuller account.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

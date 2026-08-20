@@ -389,12 +389,25 @@ def _build_new_snapshot(
                 exclude_cl_style=False,
             ),
             changed_paths=changed_paths,
-            public_headers=tuple(
-                str(p)
-                for p in _expand_public_headers(
-                    [*list(public_headers or ()), *list(public_header_dirs or ())]
-                )
-            ),
+            # Raw pass-through, matching service_input_resolution.
+            # embed_side_build_source's own construction (PR C, dump/scan
+            # resolver convergence) rather than this function's own,
+            # independently-derived one: embed_build_source's
+            # public_header_roots (both tuples get unioned into one set --
+            # cli_buildsource.embed_build_source) is split back into file
+            # vs. directory roots by source_extractors._argv.
+            # split_public_roots, which already recognizes a directory
+            # (`os.path.isdir`) regardless of which of the two arguments it
+            # arrived in -- so expanding a directory into its individual
+            # header files first (as this call used to, via
+            # _expand_public_headers) adds redundant exact-file entries a
+            # dir_root already covers via prefix/segment matching
+            # (_ClassifyContext.classify), without changing which
+            # declarations classify as public. _expand_public_headers stays
+            # in use above for the S2 preprocessor pre-scan, which genuinely
+            # needs individual files (each header becomes its own `clang -E`
+            # TU) -- a different consumer with a different contract.
+            public_headers=tuple(str(p) for p in (public_headers or ())),
             public_header_dirs=tuple(str(p) for p in (public_header_dirs or ())),
             defer_cleanup=defer_cleanup,
         )

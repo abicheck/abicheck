@@ -266,6 +266,56 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     assert seeded in eff_includes  # effective includes carry the seed for the baseline
 
 
+def test_scan_candidate_passes_public_headers_unexpanded_to_embed(monkeypatch, tmp_path):
+    """PR C (dump/scan resolver convergence): the ``embed_build_source`` call's
+    ``public_headers``/``public_header_dirs`` must be the raw pass-through
+    ``service_input_resolution.embed_side_build_source`` already uses, not a
+    directory-expanded-to-individual-files rewrite.
+
+    ``embed_build_source``'s own ``public_header_roots`` (the union of both
+    tuples) is split back into file vs. directory roots by
+    ``source_extractors._argv.split_public_roots``, which already recognizes a
+    directory via ``os.path.isdir`` regardless of which of the two arguments
+    it arrived in — so pre-expanding a directory into its individual header
+    files (as this call used to, via ``_expand_public_headers``) only adds
+    redundant exact-file entries a directory root already covers through
+    prefix/segment matching, without changing which declarations classify as
+    public. ``_expand_public_headers`` stays in use for the *separate* S2
+    preprocessor pre-scan a few lines above, which genuinely needs individual
+    files (each header becomes its own ``clang -E`` translation unit).
+    """
+    pub_dir = tmp_path / "include"
+    pub_dir.mkdir()
+    pub_file = tmp_path / "api.h"
+
+    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: object())
+
+    embed_kwargs: dict = {}
+
+    def fake_embed(*args, **kwargs):
+        embed_kwargs.update(kwargs)
+
+    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="build",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+        public_headers=[pub_file],
+        public_header_dirs=[pub_dir],
+    )
+
+    # Unexpanded: the directory stays a directory, the file stays exactly the
+    # one file given -- neither tuple gains extra, individually-walked entries.
+    assert embed_kwargs["public_headers"] == (str(pub_file),)
+    assert embed_kwargs["public_header_dirs"] == (str(pub_dir),)
+
+
 def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_path):
     # The flock must be released on the error path too (finally), so a failed L2
     # parse still can't wedge a later inferred query.
