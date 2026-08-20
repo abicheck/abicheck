@@ -664,6 +664,12 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 0, result.output
         assert "exit-code scheme: severity" in result.output
         assert "abi_breaking=warning" in result.output
+        # Codex review, fresh evidence: by the time this preview is
+        # rendered, the pack has already been folded into resolved_cfg (the
+        # values just asserted above ARE the pack-adjusted ones) -- claiming
+        # "a selected --pack may adjust it" here would self-contradict the
+        # very label it's attached to.
+        assert "may adjust it" not in result.output
 
     def test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -720,6 +726,43 @@ class TestOnlyAppliedFieldsAreAccepted:
             ],
         )
         assert result.exit_code == 4, result.output
+        summary = json.loads(result.output)
+        assert summary["verdict"] == "BREAKING"
+
+    def test_a_gate_pack_cannot_override_an_explicit_project_auto_scheme(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """A project's explicit `exit_code_scheme: auto` is a real, stated
+        selection -- it must outrank a gate pack's concrete scheme, not read
+        as "unstated" purely because `BuildConfig.exit_code_scheme` also
+        defaults an absent key to the string ``"auto"`` (Codex review, fresh
+        evidence). ``severity.preset: info-only`` activates the severity
+        scheme (auto -> severity) with every category at `info`, so a
+        removed export exits 0 under it -- while the pack's `legacy` scheme
+        would exit 4 for the same BREAKING verdict, which is exactly the
+        divergence this precedence protects against.
+        """
+        old, new = pair
+        gate = _pack(
+            tmp_path,
+            "legacy.yml",
+            "id: legacy_scheme\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.exit_code_scheme: legacy\n",
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "exit_code_scheme: auto\nseverity:\n  preset: info-only\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new), "--against", str(old),
+                "--config", str(cfg),
+                "--format", "json", "--pack", str(gate),
+            ],
+        )
+        assert result.exit_code == 0, result.output
         summary = json.loads(result.output)
         assert summary["verdict"] == "BREAKING"
 

@@ -512,6 +512,27 @@ def _resolve_side_snapshot_impl(
         if context_applied and snap.from_headers:
             snap.parsed_with_build_context = True
         if side.sources or side.build_info:
+            # Known, accepted limitation (Codex review, fresh evidence, not
+            # fixed here): when a trusted build_query was authorized and
+            # headers were present, the seed above (_seeded_includes_and_
+            # compile_context) has already run it once via
+            # seed_includes_and_fold_compile_context. Forwarding the same
+            # build_query here means embed_build_source's own, independent
+            # collect_inline_pack call can run it a *second* time -- an
+            # already-authorized command re-executed, not a new privilege,
+            # but real, avoidable duplicated work for an expensive/stateful
+            # query, and a theoretical risk of the two collections observing
+            # a build that changed between the two runs. This mirrors an
+            # already-accepted characteristic of this same pipeline for the
+            # build_config-driven *inferred* query case (see this module's
+            # `_seeded_includes_and_compile_context` docstring and
+            # `_l2_local_cleanups`' own comment below: "embed_build_source()
+            # below runs its own inferred query in the same function").
+            # Closing this for real needs the seed and this embed call to
+            # share one collect_inline_pack result across their two
+            # different layer scopes (L3-only vs. L3+L4+L5) -- a genuine,
+            # separate refactor, not a same-session patch; see
+            # docs/contribute/plans/cli-cleanup-phase-two.md's PR 3A section.
             embed_side_build_source(
                 snap,
                 side,
