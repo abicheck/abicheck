@@ -8,5 +8,9 @@
   attributed to a specific field rather than read as an opaque hash — the
   same `profile_fingerprint`/`scope_fingerprint` precedent already used
   elsewhere). Computed once, identically, for all three front ends (CLI
-  cleanup phase two, "PR B"). `report_schema_version` 2.45,
-  `scan_schema_version` 1.19.
+  cleanup phase two, "PR B"). `report_schema_version` 2.46,
+  `scan_schema_version` 1.20. The field set also now covers
+  `--require-complete-analysis` (`gate.require_complete_analysis`), and the
+  directory/package release fan-out's `--output-dir` sibling summary
+  document (`summary.json`) carries both effective-config fields too, not
+  just the primary release JSON.

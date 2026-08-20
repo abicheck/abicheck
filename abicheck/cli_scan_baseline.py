@@ -1269,7 +1269,11 @@ def _run_baseline_compare(
     from .reporter_contract_blocks import add_effective_config_digest
 
     add_effective_config_digest(
-        summary, diff, severity_config=sev_config, exit_code_scheme=exit_scheme
+        summary,
+        diff,
+        severity_config=sev_config,
+        exit_code_scheme=exit_scheme,
+        require_complete_analysis=require_complete_analysis,
     )
 
     from .cli_compare_helpers import _verdict_exit_code

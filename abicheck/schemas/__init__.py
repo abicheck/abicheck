@@ -591,7 +591,24 @@ from typing import Any
 #:       still-open PR B goal). Unconditional, like ``exit`` conceptually
 #:       is: every comparison has a resolved configuration to fingerprint.
 #:       Additive keys.
-REPORT_SCHEMA_VERSION = "2.45"
+#: 2.46 -- ``effective_config_fields`` (2.45, above) gains
+#:       ``gate.require_complete_analysis`` (Codex review, PR #803, fresh
+#:       evidence): ``--require-complete-analysis`` genuinely changes gating
+#:       behavior for an otherwise-identical incomplete-evidence result (its
+#:       ``analysis_assurance_exit_contribution`` floors to 1 vs. 0) but is
+#:       not a D7 ``CompatibilityEvaluationConfig`` namespace field, so two
+#:       reports differing only in this flag previously collided on the
+#:       digest. Threaded through the same way ``severity_config``/
+#:       ``exit_code_scheme`` already are. Also: the directory/package
+#:       release fan-out's ``--output-dir`` sibling document
+#:       (``summary.json``, written by ``cli_compare_release.
+#:       _write_release_summary_file``) now carries both effective-config
+#:       fields too -- previously only the primary release JSON and the
+#:       optional per-library sidecar files did, so this write path alone
+#:       was silently missing the "same digest in every report" invariant.
+#:       Additive key/keys, on an existing report shape shared by every
+#:       front end.
+REPORT_SCHEMA_VERSION = "2.46"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -890,7 +907,11 @@ REPORT_SCHEMA_VERSION = "2.45"
 #:        (the same pair the ``exit`` block immediately above was resolved
 #:        from). Additive keys, absent only for the same NOT_COMPARABLE/
 #:        audit-only shapes ``exit``/``analysis_assurance`` themselves are.
-SCAN_SCHEMA_VERSION = "1.19"
+#: 1.20 -- ``effective_config_fields`` (1.19, above) gains
+#:        ``gate.require_complete_analysis`` -- `compare`'s
+#:        report_schema_version 2.46 counterpart, same field, same reason
+#:        (see that version's own entry). Additive key.
+SCAN_SCHEMA_VERSION = "1.20"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

@@ -665,15 +665,17 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.45",
+  "report_schema_version": "2.46",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
 ```
 
-> **`effective_config_digest`/`effective_config_fields` (schema 2.45).**
+> **`effective_config_digest`/`effective_config_fields` (schema 2.45; the
+> field set itself grew again in 2.46 -- see below).**
 > Every `compare`/`compare-release` JSON report, and every `scan --against`
-> report's `diff` block (`scan_schema_version` 1.19), carries a
+> report's `diff` block (`scan_schema_version` 1.19, field-set update 1.20),
+> carries a
 > `sha256:...` fingerprint of the resolved gate/policy/surface/contract
 > configuration the comparison actually ran under, alongside the named
 > field dict it was hashed from — so two reports (or a report replayed

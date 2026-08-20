@@ -111,6 +111,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "contract.unresolved",
     "contract.overlays",
     "gate.exit_code_scheme",
+    "gate.require_complete_analysis",
     "gate.severity.abi_breaking",
     "gate.severity.potential_breaking",
     "gate.severity.quality_issues",
@@ -232,7 +233,11 @@ def _severity_field(severity: SeverityConfig | None, category: str) -> str:
 
 
 def effective_config_fields_from_full_config(
-    resolved_config: Any, *, result: Any = None, policy_file: Any = None
+    resolved_config: Any,
+    *,
+    result: Any = None,
+    policy_file: Any = None,
+    require_complete_analysis: bool = False,
 ) -> dict[str, str]:
     """Rich-tier fields from a real ``CompatibilityEvaluationConfig``.
 
@@ -250,7 +255,15 @@ def effective_config_fields_from_full_config(
     likewise a checker-level fact with no D7 namespace of its own (Codex
     review, PR #803: an earlier revision hard-coded this field empty for
     the rich tier, so two ``--contract`` runs differing only in
-    ``--scope-public-headers`` collided).
+    ``--scope-public-headers`` collided). *require_complete_analysis*
+    mirrors the identically-named CLI/API flag (P0.4's analysis-
+    completeness gate): it is not a D7 configuration namespace at all --
+    ``compatibility_evaluation_config.py`` has no field for it -- but it
+    genuinely changes gating behavior the same way a severity setting
+    does (an otherwise-identical incomplete-evidence result exits 0 vs. 1
+    depending on it, Codex review, PR #803), so it is threaded here as an
+    independent parameter exactly like *severity_config*/*exit_code_scheme*
+    already are, rather than pretended to live inside *resolved_config*.
     """
     policy = getattr(resolved_config, "policy", None)
     surface = getattr(resolved_config, "surface", None)
@@ -287,6 +300,7 @@ def effective_config_fields_from_full_config(
         "contract.unresolved": str(getattr(contract, "unresolved", "") or ""),
         "contract.overlays": _namespaces_str(getattr(contract, "overlays", ())),
         "gate.exit_code_scheme": str(getattr(gate, "exit_code_scheme", "") or ""),
+        "gate.require_complete_analysis": str(bool(require_complete_analysis)),
         "gate.severity.abi_breaking": _severity_field(severity, "abi_breaking"),
         "gate.severity.potential_breaking": _severity_field(
             severity, "potential_breaking"
@@ -309,6 +323,7 @@ def effective_config_fields_from_diff_result(
     *,
     severity_config: SeverityConfig | None,
     exit_code_scheme: str,
+    require_complete_analysis: bool = False,
 ) -> dict[str, str]:
     """Baseline-tier fields, resolved from an ordinary comparison.
 
@@ -317,6 +332,9 @@ def effective_config_fields_from_diff_result(
     :mod:`abicheck.reporter_contract_blocks`'s ``add_contract_context``
     already receives for the ``exit`` block (``None``/``"legacy"`` when no
     severity setting is in effect) -- read here, never re-derived.
+    *require_complete_analysis* mirrors the identically-named CLI/API flag,
+    same as the rich tier's own field (see
+    :func:`effective_config_fields_from_full_config`'s docstring).
     """
     policy_file = getattr(result, "policy_file", None)
     return {
@@ -338,6 +356,7 @@ def effective_config_fields_from_diff_result(
         "contract.unresolved": "",
         "contract.overlays": "",
         "gate.exit_code_scheme": str(exit_code_scheme or ""),
+        "gate.require_complete_analysis": str(bool(require_complete_analysis)),
         "gate.severity.abi_breaking": _severity_field(severity_config, "abi_breaking"),
         "gate.severity.potential_breaking": _severity_field(
             severity_config, "potential_breaking"
@@ -357,6 +376,7 @@ def effective_config_fields(
     *,
     severity_config: SeverityConfig | None,
     exit_code_scheme: str,
+    require_complete_analysis: bool = False,
 ) -> dict[str, str]:
     """The digest field dict for *result*, picking the richest available tier.
 
@@ -380,7 +400,10 @@ def effective_config_fields(
     evaluation_config = getattr(result, "evaluation_config", None)
     if isinstance(evaluation_config, CompatibilityEvaluationConfig):
         return effective_config_fields_from_full_config(
-            evaluation_config, result=result, policy_file=policy_file
+            evaluation_config,
+            result=result,
+            policy_file=policy_file,
+            require_complete_analysis=require_complete_analysis,
         )
     ctx = getattr(result, "contract_context", None)
     if ctx is not None:
@@ -389,8 +412,14 @@ def effective_config_fields(
         if isinstance(ctx, PersistedContractContext):
             resolved_config = ctx.evaluation_context.resolved_config
             return effective_config_fields_from_full_config(
-                resolved_config, result=result, policy_file=policy_file
+                resolved_config,
+                result=result,
+                policy_file=policy_file,
+                require_complete_analysis=require_complete_analysis,
             )
     return effective_config_fields_from_diff_result(
-        result, severity_config=severity_config, exit_code_scheme=exit_code_scheme
+        result,
+        severity_config=severity_config,
+        exit_code_scheme=exit_code_scheme,
+        require_complete_analysis=require_complete_analysis,
     )

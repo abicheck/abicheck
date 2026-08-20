@@ -219,7 +219,7 @@ def to_stat_json(
             result, require_complete=require_complete_analysis
         )
     from .reporter_contract_blocks import add_effective_config_digest
-    add_effective_config_digest(d, result, severity_config=severity_config)
+    add_effective_config_digest(d, result, severity_config=severity_config, require_complete_analysis=require_complete_analysis)
     # Deliberately NOT `add_use_case_impact` here, unlike the full JSON path
     # (`reporter_contract_blocks`): this function's contract is the summary
     # object alone, and a per-finding attribution block is the opposite of a

@@ -493,3 +493,122 @@ class TestPolicyFrozenNamespaces:
         assert f1["policy.frozen_namespaces"] == "[]"
         assert f2["policy.frozen_namespaces"] == '["detail::impl"]'
         assert effective_config_digest(f1) != effective_config_digest(f2)
+
+
+class TestRequireCompleteAnalysisAxis:
+    """Codex review, PR #803, fresh evidence: --require-complete-analysis
+    changes the exit block/process status for an otherwise-identical
+    incomplete-evidence result (0 vs. 1), but is not a D7
+    CompatibilityEvaluationConfig namespace field -- it must be threaded
+    through as an independent parameter, same as severity_config/
+    exit_code_scheme, or two such reports collide on the digest."""
+
+    def test_require_complete_analysis_changes_the_baseline_digest(self):
+        result = _result()
+        f1 = effective_config_fields(
+            result,
+            severity_config=None,
+            exit_code_scheme="legacy",
+            require_complete_analysis=False,
+        )
+        f2 = effective_config_fields(
+            result,
+            severity_config=None,
+            exit_code_scheme="legacy",
+            require_complete_analysis=True,
+        )
+        assert f1["gate.require_complete_analysis"] == "False"
+        assert f2["gate.require_complete_analysis"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_require_complete_analysis_changes_the_rich_tier_digest(self):
+        result = _result(evaluation_config=_minimal_evaluation_config())
+        f1 = effective_config_fields(
+            result,
+            severity_config=None,
+            exit_code_scheme="legacy",
+            require_complete_analysis=False,
+        )
+        f2 = effective_config_fields(
+            result,
+            severity_config=None,
+            exit_code_scheme="legacy",
+            require_complete_analysis=True,
+        )
+        assert f1["gate.require_complete_analysis"] == "False"
+        assert f2["gate.require_complete_analysis"] == "True"
+        assert effective_config_digest(f1) != effective_config_digest(f2)
+
+    def test_compare_report_threads_require_complete_analysis_into_digest(self):
+        """End-to-end through the real compare-report entry point, not just
+        the internal helper -- add_contract_context (via to_json) must
+        forward its own require_complete_analysis parameter."""
+        plain = _result()
+        plain_report = json.loads(to_json(plain, require_complete_analysis=False))
+        strict_report = json.loads(to_json(plain, require_complete_analysis=True))
+        assert (
+            plain_report["effective_config_fields"]["gate.require_complete_analysis"]
+            == "False"
+        )
+        assert (
+            strict_report["effective_config_fields"]["gate.require_complete_analysis"]
+            == "True"
+        )
+        assert (
+            plain_report["effective_config_digest"]
+            != strict_report["effective_config_digest"]
+        )
+
+
+class TestReleaseOutputDirSummaryCarriesDigest:
+    """Codex review, PR #803, fresh evidence: `_write_release_summary_file`
+    (the `--output-dir` sibling of `_format_release_json`'s primary release
+    report) built its own summary.json dict independently and never called
+    the effective-config digest helper at all -- so that document carried
+    neither field, unlike the primary release JSON."""
+
+    def test_output_dir_summary_carries_digest(self, tmp_path):
+        from abicheck.cli_compare_release import _write_release_summary_file
+
+        _write_release_summary_file(
+            tmp_path, "NO_CHANGE", [], [], [], {}, {}
+        )
+        data = json.loads((tmp_path / "summary.json").read_text())
+        assert data["effective_config_digest"].startswith("sha256:")
+        assert data["effective_config_fields"]["_tier"] == "baseline"
+
+    def test_output_dir_summary_digest_matches_primary_release_json(self, tmp_path):
+        """The two release-level summary documents must never independently
+        drift -- both route through the same shared helper."""
+        from abicheck.cli_compare_release import _write_release_summary_file
+        from abicheck.cli_compare_release_helpers import _format_release_json
+
+        severity = resolve_severity_config("strict")
+        _write_release_summary_file(
+            tmp_path, "NO_CHANGE", [], [], [], {}, {}, severity_config=severity
+        )
+        output_dir_data = json.loads((tmp_path / "summary.json").read_text())
+        primary_data = json.loads(
+            _format_release_json(
+                "NO_CHANGE",
+                Path("/o"),
+                Path("/n"),
+                [],
+                [],
+                [],
+                {},
+                {},
+                [],
+                None,
+                None,
+                severity_config=severity,
+            )
+        )
+        assert (
+            output_dir_data["effective_config_digest"]
+            == primary_data["effective_config_digest"]
+        )
+        assert (
+            output_dir_data["effective_config_fields"]
+            == primary_data["effective_config_fields"]
+        )

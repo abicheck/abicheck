@@ -112,7 +112,11 @@ def add_contract_context(
     add_annotations(d, result, severity_config=severity_config)
     add_use_case_impact(d, result, displayed)
     add_effective_config_digest(
-        d, result, severity_config=severity_config, exit_code_scheme=scheme
+        d,
+        result,
+        severity_config=severity_config,
+        exit_code_scheme=scheme,
+        require_complete_analysis=require_complete_analysis,
     )
 
     ctx = result.contract_context
@@ -160,6 +164,7 @@ def add_effective_config_digest(
     *,
     severity_config: SeverityConfig | None = None,
     exit_code_scheme: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> None:
     """CLI cleanup phase two, PR B: the effective-configuration digest --
     "one effective configuration ... with the same effective-config digest
@@ -183,6 +188,15 @@ def add_effective_config_digest(
     default (``None``) reproduces the same ``"severity" if severity_config
     is not None else "legacy"`` derivation :func:`add_contract_context`
     already uses for that block.
+
+    *require_complete_analysis* mirrors the identically-named CLI/API flag
+    (P0.4's analysis-completeness gate, `--require-complete-analysis`) --
+    it genuinely changes gating behavior (an otherwise-identical
+    incomplete-evidence result exits 0 vs. 1 depending on it) but is not a
+    D7 ``CompatibilityEvaluationConfig`` namespace field, so it is threaded
+    here the same way *severity_config*/*exit_code_scheme* already are
+    rather than silently absent from the fingerprint (Codex review,
+    PR #803, fresh evidence).
     """
     from .effective_config_digest import (
         effective_config_digest,
@@ -193,7 +207,10 @@ def add_effective_config_digest(
         "severity" if severity_config is not None else "legacy"
     )
     ec_fields = effective_config_fields(
-        result, severity_config=severity_config, exit_code_scheme=scheme
+        result,
+        severity_config=severity_config,
+        exit_code_scheme=scheme,
+        require_complete_analysis=require_complete_analysis,
     )
     d["effective_config_digest"] = effective_config_digest(ec_fields)
     d["effective_config_fields"] = ec_fields

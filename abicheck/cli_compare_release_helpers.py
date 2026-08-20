@@ -864,32 +864,46 @@ def _format_release_json(
             }
             for c in matrix_result.changes
         ]
-    # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
-    # the release-level *summary* JSON -- the primary release report, and
-    # what `--output-dir`'s own `summary.json` writes -- never called
-    # `add_contract_context`/emitted either effective-config field at all;
-    # only the optional per-library `to_json` sidecar files did, so the
-    # advertised release-fan-out parity was silently absent from the report
-    # a release consumer actually reads. Computed here from a lightweight
-    # stand-in carrying only what this function actually has in scope
-    # (`severity_config`) -- narrower than the per-library sidecar's own
-    # digest (no policy/pack/contract axes at this release-summary level;
-    # see effective_config_digest.py's own module docstring for the two
-    # tiers), but real: two releases resolving different severity
-    # configuration no longer collide on this field.
+    # CLI cleanup phase two, PR B (Codex review, PR #803): the release-level
+    # *summary* JSON is a separate computation from the optional per-library
+    # `to_json` sidecar files, which reach `add_contract_context` on their
+    # own -- so the release-fan-out parity this digest exists to provide
+    # needs its own, explicit stamp here too. `_release_summary_effective_
+    # config_block` is the one shared helper both this function and
+    # `_write_release_summary_file` (`cli_compare_release.py`, the
+    # `--output-dir` sibling of this same primary-report gap) call, so the
+    # two release-level summary documents can never independently drift.
+    digest, fields = _release_summary_effective_config_block(severity_config)
+    summary["effective_config_digest"] = digest
+    summary["effective_config_fields"] = fields
+    return json.dumps(summary, indent=2)
+
+
+def _release_summary_effective_config_block(
+    severity_config: SeverityConfig | None,
+) -> tuple[str, dict[str, str]]:
+    """The ``(digest, fields)`` pair for a release-level *summary* document
+    (the primary release JSON and ``--output-dir``'s ``summary.json``
+    alike) -- narrower than a per-library sidecar's own digest, since no
+    ``CompatibilityEvaluationConfig``/``PolicyFile``/suppression object
+    exists at release-summary scope at all (see
+    ``effective_config_digest.py``'s own module docstring for the two
+    tiers and this known, documented gap), but real: two releases
+    resolving different severity configuration no longer collide on this
+    field. Computed from a lightweight stand-in (`SimpleNamespace`)
+    carrying only what this scope actually has -- *severity_config*.
+    """
     from .effective_config_digest import (
         effective_config_digest,
         effective_config_fields,
     )
 
-    _ec_result = SimpleNamespace()
-    _ec_scheme = "severity" if severity_config is not None else "legacy"
-    _ec_fields = effective_config_fields(
-        _ec_result, severity_config=severity_config, exit_code_scheme=_ec_scheme
+    ec_result = SimpleNamespace()
+    ec_scheme = "severity" if severity_config is not None else "legacy"
+    ec_fields = effective_config_fields(
+        ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
     )
-    summary["effective_config_digest"] = effective_config_digest(_ec_fields)
-    summary["effective_config_fields"] = _ec_fields
-    return json.dumps(summary, indent=2)
+    return effective_config_digest(ec_fields), ec_fields
 
 
 def _release_json_scope(scoped_libs: list[dict[str, object]]) -> dict[str, object]:
