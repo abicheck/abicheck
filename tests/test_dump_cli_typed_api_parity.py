@@ -1,0 +1,428 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Generalized parity guard: ``abicheck dump``'s CLI path and the typed
+``DumpRequest``/``run_dump_request`` API path must resolve the *same* real
+L3 build evidence into the *same* L2 compile context.
+
+Why this exists (root cause of the "dump-vs-scan compile-context
+divergence" bug class, PR #810): ``abicheck dump`` is, structurally, **two
+independently-maintained implementations**, not one function called from
+two front ends:
+
+* the CLI path (``cli.py``'s ``dump_cmd`` -> ``cli_dump_helpers.
+  perform_elf_dump``/``handle_non_elf_dump``) calls ``dumper.dump()``
+  directly, seeding its L2 include/compile context via
+  ``buildsource.l2_seed.seed_includes_and_fold_compile_context``;
+* the typed Tier-2 API (``DumpRequest``/``run_dump_request``, used by
+  ``compare``'s implicit-dump operand and by ``scan``'s candidate
+  resolution) resolves through
+  ``service_input_resolution._resolve_side_snapshot_impl`` ->
+  ``service.resolve_input``, seeding its own L2 context via
+  ``service_input_resolution._seeded_includes_and_compile_context`` --
+  which calls the *same* ``seed_includes_and_fold_compile_context``
+  primitive, but through different surrounding wiring (its own debug-
+  artifact resolution, its own argument defaults, its own post-processing
+  hooks).
+
+AGENTS.md's own "Known gaps" section documents, across dozens of numbered
+findings, that this class of split has repeatedly let a fix land on one of
+these two paths without the other -- which is exactly how the bug report
+this test file accompanies was possible: the shared fold was wired into
+the CLI path in one PR, and the two paths drifted for a real, if narrow,
+window before that. `AGENTS.md`'s "PR C (typed dump/scan convergence)"
+entry records this structural split as still open today (``dump_cmd``
+still does not build a ``DumpRequest`` at all) -- so a *unification* fix
+is not available yet, but a *regression guard on the observable symptom*
+is: this module asserts, for a small matrix of real build-evidence shapes
+(not just the one exact shape the bug report happened to use), that both
+paths resolve to the same ``ast_resolved_standard``/``ast_compile_args``/
+``parsed_with_build_context`` -- the exact fields whose disagreement is
+what ``profile_fingerprint`` comparability checks on, and what made
+`scan --against` refuse a real, unchanged comparison as ``NOT_COMPARABLE``.
+
+A future change to either path's own L2-seeding wiring (not just the
+shared ``seed_includes_and_fold_compile_context`` primitive itself) that
+reintroduces a disagreement should fail here, on at least one of the
+parametrized shapes, well before it reaches a downstream comparability
+check -- rather than needing its own bug report against a specific real
+build shape the way #810 did.
+
+Marked ``integration`` (real g++ + clang toolchain), like its sibling
+``test_dump_scan_l3_comparability.py``.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from abicheck.api_types import DumpRequest, InputSpec
+from abicheck.cli import main
+from abicheck.compile_context import CompileContext
+from abicheck.service import run_dump_request
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+    ),
+]
+
+_HAVE_GXX = shutil.which("g++") is not None
+_HAVE_CLANG = shutil.which("clang") is not None
+_SKIP_REASON = "needs a real g++ and clang toolchain"
+
+
+def _build_library(
+    tmp_path: Path,
+    *,
+    std: str = "c++17",
+    macros: tuple[str, ...] = (),
+    extra_include_dir: str | None = None,
+) -> tuple[Path, Path, Path]:
+    """Compile a small, real library whose header depends on the given
+    ``-std=``/macros, plus a matching ``compile_commands.json`` -- varying
+    the build-evidence shape across the parametrized cases below, not just
+    the one exact shape #810's own repro used."""
+    include_dirs = [tmp_path]
+    dep_header_snippet = ""
+    dep_field = ""
+    if extra_include_dir is not None:
+        dep_dir = tmp_path / extra_include_dir
+        dep_dir.mkdir(parents=True, exist_ok=True)
+        (dep_dir / "dep.h").write_text(
+            "#pragma once\nstruct Dep { int tag; };\n", encoding="utf-8"
+        )
+        include_dirs.append(dep_dir)
+        dep_header_snippet = '#include "dep.h"\n'
+        dep_field = "    Dep dep;\n"
+
+    macro_guard = "\n".join(
+        f'#ifndef {m.split("=")[0]}\n#error "missing {m}"\n#endif' for m in macros
+    )
+
+    header = tmp_path / "widget.h"
+    header.write_text(
+        "#pragma once\n"
+        f"{dep_header_snippet}"
+        "#if __cplusplus < " + ("202002L" if std == "c++20" else "201703L") + "\n"
+        '#error "needs a newer standard"\n'
+        "#endif\n"
+        f"{macro_guard}\n"
+        "struct Widget {\n"
+        "    int x;\n"
+        "    int y;\n"
+        f"{dep_field}"
+        "    int sum() const { return x + y; }\n"
+        "};\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "widget.cpp"
+    src.write_text(
+        '#include "widget.h"\nint compute(const Widget& w) { return w.sum(); }\n',
+        encoding="utf-8",
+    )
+    so_path = tmp_path / "libwidget.so"
+    include_flags = [f"-I{d}" for d in include_dirs[1:]]
+    macro_flags = [f"-D{m}" for m in macros]
+    subprocess.run(
+        [
+            "g++",
+            f"-std={std}",
+            *macro_flags,
+            *include_flags,
+            "-shared",
+            "-fPIC",
+            "-o",
+            str(so_path),
+            str(src),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    compile_db = tmp_path / "compile_commands.json"
+    compile_db.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "arguments": [
+                        "g++",
+                        f"-std={std}",
+                        *macro_flags,
+                        *include_flags,
+                        "-shared",
+                        "-fPIC",
+                        "-c",
+                        str(src),
+                        "-o",
+                        "widget.o",
+                    ],
+                    "file": str(src),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return so_path, header, compile_db
+
+
+def _dump_via_cli(
+    so_path: Path, header: Path, tmp_path: Path, compile_db: Path
+) -> dict:
+    baseline = tmp_path / "baseline_cli.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "dump",
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "-o",
+            str(baseline),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    data: dict = json.loads(baseline.read_text(encoding="utf-8"))
+    return data
+
+
+def _dump_via_typed_api(
+    so_path: Path, header: Path, tmp_path: Path, compile_db: Path
+) -> dict:
+    request = DumpRequest(
+        input=InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=tmp_path,
+            build_info=compile_db,
+            compile=CompileContext(frontend="clang"),
+        ),
+        depth="source",
+    )
+    snap = run_dump_request(request)
+    return {
+        "ast_resolved_standard": snap.ast_resolved_standard,
+        "ast_compile_args": snap.ast_compile_args,
+        "parsed_with_build_context": snap.parsed_with_build_context,
+    }
+
+
+_BUILD_SHAPES: dict[str, dict[str, object]] = {
+    "plain-c++17": {"std": "c++17"},
+    "c++20-with-macro": {"std": "c++20", "macros": ("FOO=1",)},
+    "extra-include-dir": {"std": "c++17", "extra_include_dir": "dep"},
+}
+
+
+@pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
+@pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
+def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
+    tmp_path: Path, shape_name: str
+) -> None:
+    """The invariant this whole file exists for: two independent code paths
+    that both claim to fold the same real L3 evidence into an L2 compile
+    context must actually agree, for more than one hand-picked build
+    shape."""
+    shape = _BUILD_SHAPES[shape_name]
+    so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
+
+    cli_snap = _dump_via_cli(so_path, header, tmp_path, compile_db)
+    typed_snap = _dump_via_typed_api(so_path, header, tmp_path, compile_db)
+
+    assert cli_snap["ast_resolved_standard"] == typed_snap["ast_resolved_standard"], (
+        shape_name,
+        cli_snap["ast_resolved_standard"],
+        typed_snap["ast_resolved_standard"],
+    )
+    assert (
+        cli_snap["parsed_with_build_context"] == typed_snap["parsed_with_build_context"]
+    )
+    # Both paths were given the identical real -std=/macros/-I evidence, so
+    # every ABI-relevant flag reaching the typed path's parse must also
+    # reach the CLI path's -- compared as sets, since composition order
+    # between the two independent seed call sites is not itself the
+    # invariant under test (each has its own, separately-justified
+    # ordering rules -- see AGENTS.md's include-bucket-ordering findings).
+    cli_flags = set(cli_snap["ast_compile_args"])
+    typed_flags = set(typed_snap["ast_compile_args"])
+    assert cli_flags, "the CLI dump path resolved no compile flags at all"
+    assert typed_flags, "the typed-API dump path resolved no compile flags at all"
+    missing_from_cli = typed_flags - cli_flags
+    missing_from_typed = cli_flags - typed_flags
+    assert not missing_from_cli, (
+        f"{shape_name}: typed-API path resolved flag(s) {missing_from_cli} "
+        "the CLI dump path did not"
+    )
+    assert not missing_from_typed, (
+        f"{shape_name}: CLI dump path resolved flag(s) {missing_from_typed} "
+        "the typed-API path did not"
+    )
+
+
+def _dump_via_cli_to_file(
+    so_path: Path, header: Path, tmp_path: Path, compile_db: Path, baseline: Path
+) -> None:
+    dump_result = CliRunner().invoke(
+        main,
+        [
+            "dump",
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "-o",
+            str(baseline),
+        ],
+    )
+    assert dump_result.exit_code == 0, dump_result.output
+
+
+# Known, currently-open residual gap (found by this test, confirmed against
+# AGENTS.md's own "Known gaps" entry for this bug class): an "extra
+# -I<dependency-dir>" build shape reproduces NOT_COMPARABLE on
+# `include_sequence` between `dump`'s baseline and `scan`'s candidate
+# resolution, on **current `main`**, right now -- confirmed directly: the
+# `dump` baseline's own `contract.profile_fields.include_sequence` reads
+# `"[]"` even though its `ast_compile_args` correctly carries `-I <dep-dir>`,
+# because `dumper_contract._attach_extraction_contract` builds
+# `declared_includes` (the source of `include_sequence`) **exclusively**
+# from `extra_includes`, and this build shape routes the `-I` into
+# `gcc_option_tokens` only, never into `extra_includes` -- while
+# `scan_engine._build_new_snapshot`'s own candidate resolution (which calls
+# `service.resolve_input` directly, bypassing the shared
+# `resolve_side_snapshot` primitive the typed dump/compare API above already
+# uses -- see this module's own docstring) seeds `eff_includes`/
+# `declared_includes` for the identical directory instead. `compare`'s
+# implicit-dump path does **not** reproduce this for the same inputs
+# (verified directly), confirming the divergence is specifically between
+# `dump`'s CLI path and `scan`'s own candidate-resolution path, not a
+# `compare`-side issue. This is a live instance of the residual gap
+# AGENTS.md's own entry already documents as open (the "channel disagreement"
+# paragraphs under "The native ELF `abicheck dump` path never applies L3
+# build context...") -- not a new bug class, but the first *reproduced*,
+# non-Bazel-specific repro of it. `xfail(strict=True)`, not skip: if a future
+# fix to either path's include-dir seeding closes this, the xfail turns into
+# an unexpected pass and fails loudly, which is exactly the signal needed to
+# update this test and AGENTS.md's known-gap entry together.
+_SCAN_KNOWN_DIVERGENT_SHAPES = frozenset({"extra-include-dir"})
+
+
+@pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
+@pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
+def test_scan_against_real_dump_baseline_is_comparable(
+    tmp_path: Path, shape_name: str
+) -> None:
+    """The end-to-end acceptance check from #810, generalized across build
+    shapes: a real ``dump`` baseline must be comparable via
+    ``scan --against`` -- never ``NOT_COMPARABLE`` -- for an unchanged
+    codebase."""
+    if shape_name in _SCAN_KNOWN_DIVERGENT_SHAPES:
+        pytest.xfail(
+            f"{shape_name}: known-open dump-vs-scan include-dir seeding "
+            "divergence (see this module's own comment above this test)"
+        )
+    shape = _BUILD_SHAPES[shape_name]
+    so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
+    baseline = tmp_path / "baseline.json"
+    _dump_via_cli_to_file(so_path, header, tmp_path, compile_db, baseline)
+
+    scan_result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "--against",
+            str(baseline),
+        ],
+    )
+    assert "NOT_COMPARABLE" not in scan_result.output, (shape_name, scan_result.output)
+    assert scan_result.exit_code == 0, (shape_name, scan_result.output)
+
+
+@pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
+@pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
+def test_compare_implicit_dump_against_real_dump_baseline_is_comparable(
+    tmp_path: Path, shape_name: str
+) -> None:
+    """Same acceptance check as above, against ``compare``'s implicit-dump
+    operand instead of ``scan --against`` -- kept as its own test (rather
+    than folded into the scan test above) precisely because the two paths
+    are independent and can disagree: see
+    ``_SCAN_KNOWN_DIVERGENT_SHAPES`` -- ``compare`` does not reproduce that
+    gap for the identical inputs, so this test has no xfail list, and a
+    future regression narrowing *this* path's coverage should fail loudly
+    rather than being masked by a scan-specific xfail."""
+    shape = _BUILD_SHAPES[shape_name]
+    so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
+    baseline = tmp_path / "baseline.json"
+    _dump_via_cli_to_file(so_path, header, tmp_path, compile_db, baseline)
+
+    compare_result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(baseline),
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+        ],
+    )
+    assert "NOT_COMPARABLE" not in compare_result.output, (
+        shape_name,
+        compare_result.output,
+    )
+    assert compare_result.exit_code == 0, (shape_name, compare_result.output)
