@@ -123,6 +123,7 @@ A fully-specified snapshot-extraction request — the input to ``run_dump_reques
 | `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
 | `lang_explicit` | `bool` | `False` |
+| `resolved_collect_mode` | `str \| None` | `None` |
 
 ## `InputSpec`
 

@@ -395,45 +395,45 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
 # `NOT_COMPARABLE`.
 #
 # Measured, not assumed (2026-08-21, CLI cleanup phase two PR 3A
-# investigation): both entries below were reproduced field-by-field against
-# a real g++ build + clang L2 parse, and both trace to ONE root cause --
-# the `dump` CLI runs the legacy `-p`/`--compile-db` auto-match
+# investigation): two shapes diverged field-by-field against a real g++
+# build + clang L2 parse, and both traced to ONE root cause -- the `dump`
+# CLI ran the legacy `-p`/`--compile-db` auto-match
 # (`cli_helpers_compare._resolve_build_context_flags`, folded into
 # `effective_gcc_options`) *in addition to* the P0.3 L3->L2 fold, when both
 # are fed by the same `--build-info` compile database, while every other
 # resolver runs the fold alone:
 #
-#   * `macro_ops` -- the CLI records `[["D","FOO=1"],["D","FOO=1"]]` where
-#     the typed path records one entry: the same `-D` arrives twice, once
+#   * `macro_ops` -- the CLI recorded `[["D","FOO=1"],["D","FOO=1"]]` where
+#     the typed path records one entry: the same `-D` arrived twice, once
 #     derived by the fold and once by the legacy match.
-#   * `include_sequence` -- the CLI records `[]` where the typed path
-#     records one slot: the legacy match puts `-I<dep>` into
-#     `effective_gcc_options` *before* the L2 seed runs, and
-#     `seed_l2_includes` then (correctly) declines to seed a directory
-#     explicit context already supplies -- so the dir reaches the parse via
-#     `gcc_option_tokens` and never becomes a `declared_includes` slot,
+#   * `include_sequence` -- the CLI recorded `[]` where the typed path
+#     records one slot: the legacy match put `-I<dep>` into
+#     `effective_gcc_options` *before* the L2 seed ran, and
+#     `seed_l2_includes` then (correctly) declined to seed a directory
+#     explicit context already supplies -- so the dir reached the parse via
+#     `gcc_option_tokens` and never became a `declared_includes` slot,
 #     which is the sole source `include_sequence` tokenizes.
 #
-# Both are the `dump`-side half of the divergence AGENTS.md's L3->L2-fold
-# "Known gaps" entry already records for `scan` (its "third, deeper
-# mechanism" note), reached here between `dump` and the *typed* pipeline.
-# Closing them means choosing which of the two mechanisms owns a matched
-# directory -- and dropping the legacy match would make `dump
-# --compile-db-filter` inert, since the shared fold has no filter concept
-# (see `InputSpec`'s own comment on why a `compile_db_filter` field was
-# added and then removed). That ordering -- filter into the shared fold
-# first, migration second -- is what the plan's PR 3A section records.
+# **Both are closed** (same session, PR 3A): the fold is now the sole source
+# of compile-database-derived context whenever it resolves one for these
+# headers, and the legacy match's own derived flags are unfolded rather than
+# stacked on top of it -- see `cli_dump_helpers.perform_elf_dump`'s
+# `legacy_build_context_flags` parameter and its own docstring paragraph.
+# `--compile-db-filter` does not go inert with it (the concern the plan's PR
+# 3A section recorded as the blocker): the filter reaches the shared fold
+# too, since PR "3A slice 1" threaded `source_filter` through
+# `seed_includes_and_fold_compile_context`/`resolve_header_compile_context`.
+# The legacy match still runs -- and still applies -- whenever the fold does
+# not (no `--build-info`, or a header no compile unit matches), so the only
+# thing dropped is the overlap.
 #
-# Encoded the same way `_SCAN_KNOWN_DIVERGENT_SHAPES` below is, and for the
-# same reason: a listed (shape, field) pair has exactly two acceptable
-# outcomes -- the exact known signature reproduces (expected `xfail`), or
-# the test fails outright. "The gap closed" fails just as loudly as "a new
-# field diverged", so this note and the mapping must be updated
-# deliberately rather than going quietly stale.
-_CONTRACT_KNOWN_DIVERGENT_FIELDS: dict[str, str] = {
-    "c++20-with-macro": "macro_ops",
-    "extra-include-dir": "include_sequence",
-}
+# The mapping stays (empty) rather than being deleted, because the mechanism
+# it encodes is the right one for the *next* divergence found here: a listed
+# (shape, field) pair has exactly two acceptable outcomes -- the exact known
+# signature reproduces (expected `xfail`), or the test fails outright. "The
+# gap closed" fails just as loudly as "a new field diverged", so a mapping
+# must be updated deliberately rather than going quietly stale.
+_CONTRACT_KNOWN_DIVERGENT_FIELDS: dict[str, str] = {}
 
 
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
@@ -511,11 +511,25 @@ def _dump_via_cli_to_file(
     assert dump_result.exit_code == 0, dump_result.output
 
 
-# Known, currently-open residual gap (found by this test, confirmed against
-# AGENTS.md's own "Known gaps" entry for this bug class): an "extra
-# -I<dependency-dir>" build shape reproduces NOT_COMPARABLE on
-# `include_sequence` between `dump`'s baseline and `scan`'s candidate
-# resolution, on **current `main`**, right now -- confirmed directly: the
+# **Closed** (CLI cleanup phase two, PR 3A): the "extra -I<dependency-dir>"
+# shape below used to reproduce `NOT_COMPARABLE` on `include_sequence`
+# between `dump`'s baseline and `scan`'s candidate resolution -- verified
+# both before (exit 6, `differing fields: include_sequence`) and after
+# (exit 0) against a real `g++` build and a real clang L2 parse. The cause
+# was not `scan`'s side at all: `dump`'s CLI ran the legacy
+# `-p`/`--compile-db` auto-match alongside the P0.3 L3->L2 fold, so its own
+# `-I<dep>` reached the parse as *explicit* context and never became a
+# `declared_includes` slot, while every other resolver (`scan`'s candidate,
+# `compare`'s implicit dump, the typed `DumpRequest` API) ran the fold alone
+# and seeded the identical directory. Now that the fold is the sole source
+# of compile-database-derived context when it resolves one, all four agree.
+# See `_CONTRACT_KNOWN_DIVERGENT_FIELDS` above for the same closure from the
+# contract-field side. The historical diagnosis is kept below because the
+# *mechanism* it describes is still the one to check first if a new shape
+# ever diverges here.
+#
+# Original note (the gap as it stood before the fix): the
+# `dump` baseline's own `contract.profile_fields.include_sequence` reads
 # `dump` baseline's own `contract.profile_fields.include_sequence` reads
 # `"[]"` even though its `ast_compile_args` correctly carries `-I <dep-dir>`,
 # because `dumper_contract._attach_extraction_contract` builds
@@ -562,7 +576,7 @@ def _dump_via_cli_to_file(
 # spirit without pytest's own `strict=True` bookkeeping (which an
 # imperative, signature-gated `pytest.xfail()` call cannot combine with,
 # per the previous review round).
-_SCAN_KNOWN_DIVERGENT_SHAPES = frozenset({"extra-include-dir"})
+_SCAN_KNOWN_DIVERGENT_SHAPES: frozenset[str] = frozenset()
 
 
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)

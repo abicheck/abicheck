@@ -877,6 +877,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         include_labels=_resolved_include_labels,
         include_dependencies=include_dependencies,
         snapshot_compression=snapshot_compression,
+        # CLI cleanup phase two, PR 3A: the legacy -p/--compile-db auto-match's
+        # own derived flags, already folded into effective_gcc_options above --
+        # forwarded so perform_elf_dump can unfold them when the P0.3 L3->L2
+        # fold resolves a context from the same --build-info database (the two
+        # would otherwise both apply, recording the same evidence twice).
+        legacy_build_context_flags=tuple(build_context_flags),
     )
 
 

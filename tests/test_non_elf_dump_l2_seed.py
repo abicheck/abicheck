@@ -493,3 +493,113 @@ def test_seed_and_fold_corrupt_pack_degrades_to_empty(tmp_path):
 
     _incs, applied, _ctx, dirs = _seed_and_fold(headers=[header], sources=pack_dir)
     assert (applied, dirs) == (False, ())
+
+
+# --- The legacy `-p`/`--compile-db` auto-match must not stack on the P0.3 fold ---
+#
+# CLI cleanup phase two, PR 3A. Both mechanisms are fed by the *same*
+# `--build-info` compile database, so when the fold resolves a context for
+# these headers, presenting the legacy match's own derived flags to it as
+# though they were an explicit user choice records the same evidence twice --
+# measured end to end as `macro_ops` == `[["D","FOO=1"],["D","FOO=1"]]` and
+# `include_sequence` == `[]` where every other resolver records one entry and
+# one slot, i.e. a `profile_fingerprint` a `scan --against` correctly refuses
+# as NOT_COMPARABLE. These two pin the *decision* at the seam it is made,
+# rather than only through a real toolchain (the end-to-end lens is
+# `tests/test_dump_cli_typed_api_parity.py`, which is `integration`-marked and
+# so cannot gate this in the default lane).
+
+
+def _perform_elf_dump_capturing_fold_options(
+    tmp_path, monkeypatch, *, legacy_flags: tuple[str, ...]
+) -> dict:
+    """Run ``perform_elf_dump`` with a stubbed fold and return its kwargs."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    captured: dict = {}
+
+    def fake_seed_and_fold(**kwargs):
+        captured["kwargs"] = kwargs
+        explicit = CompileContext(
+            gcc_path=kwargs["gcc_path"],
+            gcc_prefix=kwargs["gcc_prefix"],
+            gcc_options=kwargs["gcc_options"],
+            gcc_option_tokens=kwargs["gcc_option_tokens"],
+            sysroot=kwargs["sysroot"],
+            nostdinc=kwargs["nostdinc"],
+            frontend=kwargs["frontend"],
+            frontend_context=kwargs["frontend_context"],
+        )
+        return list(kwargs["includes"]), False, explicit, ()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
+    monkeypatch.setattr(
+        "abicheck.cli_dump_helpers.dump",
+        lambda **_kw: AbiSnapshot(library="lib.so", version="1.0", from_headers=True),
+    )
+    monkeypatch.setattr(
+        "abicheck.service._attach_header_graph", lambda snap, *_a, **_k: snap
+    )
+    monkeypatch.setattr(
+        "abicheck.header_conditionals.attach_build_context",
+        lambda *_a, **_k: None,
+    )
+
+    # `-DFOO=1` is the legacy match's own derived flag, already folded into
+    # `effective_gcc_options` by `dump_cmd`'s `_merge_gcc_options`; `-DUSER=1`
+    # is the caller's own `--gcc-options` string.
+    effective = " ".join((*legacy_flags, "-DUSER=1")) if legacy_flags else "-DUSER=1"
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None, effective,
+        (),
+        None, False,
+        False, None,
+        (), (),
+        None,
+        False, (), "", None, None, False, None,
+        None,
+        tmp_path,
+        None, False,
+        "source-target",
+        lambda inputs: list(inputs),
+        lambda *a, **k: None,
+        lambda *a, **k: None,
+        lambda *a, **k: None,
+        user_gcc_options="-DUSER=1",
+        legacy_build_context_flags=legacy_flags,
+    )
+    assert "kwargs" in captured, "the L2 seed/fold was never invoked"
+    return captured["kwargs"]
+
+
+def test_perform_elf_dump_keeps_legacy_compile_db_flags_out_of_the_l3_fold(
+    tmp_path, monkeypatch
+):
+    """When the legacy `-p`/`--compile-db` auto-match derived flags from the
+    same compile database the P0.3 fold reads, the fold must merge over the
+    caller's OWN explicit options only -- otherwise the identical `-D` is
+    recorded twice and a derived `-I` suppresses the L2 include seed that
+    every other resolver relies on."""
+    kwargs = _perform_elf_dump_capturing_fold_options(
+        tmp_path, monkeypatch, legacy_flags=("-DFOO=1", "-I/dep/include")
+    )
+    assert kwargs["gcc_options"] == "-DUSER=1", (
+        "the legacy auto-match's derived flags were presented to the P0.3 fold "
+        "as explicit caller context"
+    )
+
+
+def test_perform_elf_dump_still_applies_legacy_flags_when_no_fold_ran(
+    tmp_path, monkeypatch
+):
+    """The complement, so the fix cannot be read as "the legacy match is
+    gone": with no legacy flags derived at all, the fold sees exactly the
+    caller's merged options, bit-for-bit as before."""
+    kwargs = _perform_elf_dump_capturing_fold_options(
+        tmp_path, monkeypatch, legacy_flags=()
+    )
+    assert kwargs["gcc_options"] == "-DUSER=1"
