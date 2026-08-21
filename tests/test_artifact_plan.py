@@ -174,3 +174,53 @@ def test_cleanup_registered_during_the_drain_itself_still_runs() -> None:
     plan.add_cleanup(_discovers_another_resource)
     plan.run_cleanups()
     assert calls == ["outer", "discovered-mid-drain"]
+
+
+def test_default_construction_leaves_resolved_facts_none() -> None:
+    """Milestone B's new keyword-only fields must not disturb the existing
+    no-arg construction the three Milestone A call sites already use."""
+    plan = ResolvedArtifactPlan()
+    assert plan.binary_format is None
+    assert plan.lang is None
+    assert plan.header_backend is None
+    assert plan.effective_header_backend is None
+    assert plan.requested_depth is None
+    assert plan.collect_mode is None
+    assert plan.public_headers == ()
+    assert plan.public_header_dirs == ()
+    assert plan.pending_cleanups == []
+
+
+def test_resolved_facts_are_stored_verbatim() -> None:
+    from pathlib import Path
+
+    plan = ResolvedArtifactPlan(
+        binary_format="elf",
+        lang="c++",
+        header_backend="auto",
+        effective_header_backend="clang",
+        requested_depth="source",
+        collect_mode="build",
+        public_headers=(Path("a.h"),),
+        public_header_dirs=(Path("include"),),
+    )
+    assert plan.binary_format == "elf"
+    assert plan.lang == "c++"
+    assert plan.header_backend == "auto"
+    assert plan.effective_header_backend == "clang"
+    assert plan.requested_depth == "source"
+    assert plan.collect_mode == "build"
+    assert plan.public_headers == (Path("a.h"),)
+    assert plan.public_header_dirs == (Path("include"),)
+    # Resolved-fact fields never imply an allocated resource -- a plan
+    # carrying them still starts with nothing to clean up.
+    assert plan.pending_cleanups == []
+
+
+def test_resolved_facts_do_not_interfere_with_cleanup_ownership() -> None:
+    """A plan constructed with resolved facts is still a fully functional
+    cleanup-owning session -- Milestone B is additive, not a parallel type."""
+    calls: list[str] = []
+    with ResolvedArtifactPlan(binary_format="elf") as plan:
+        plan.pending_cleanups.append(lambda: calls.append("a"))
+    assert calls == ["a"]

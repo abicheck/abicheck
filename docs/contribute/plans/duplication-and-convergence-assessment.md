@@ -1122,15 +1122,75 @@ sign-off, not a routine PR).
    passed unmodified. All three call sites the plan's own earlier audit
    named now share this one primitive.
 
-   **Not yet done, and deliberately out of scope for this slice**: this is
-   not yet "resolve_artifact_request() onward" as item 1's own text above
-   describes — there is no `resolve_artifact_request()`/
-   `execute_artifact_plan()` split yet, `dump --dry-run` still doesn't build
-   from or render a `ResolvedArtifactPlan` (`render_dump_dry_run()` is still
-   its own independent resolution, per the "PR C" entry in AGENTS.md's
-   "Known gaps"), and none of items 2–10 below have been attempted. See
-   item 1's own original text (kept below) for the shape a full
-   implementation still needs to reach.
+   **Milestone B (this slice): investigated item 1's "full shape" against
+   the real code before writing anything, and found a real conflict with an
+   already-documented, deliberate design decision — not an oversight to
+   fix.** Item 1's own text (kept below) asks `ResolvedArtifactPlan` to own
+   any resource resolution allocates "from `resolve_artifact_request()`
+   onward," and to carry the resolved-fact fields the target-architecture
+   section lists. Two of those fields — *effective include search* and
+   *effective compile context* — are only known once the L3→L2
+   compile-context fold runs
+   (`buildsource.l2_seed.seed_includes_and_fold_compile_context`), and that fold is the one step
+   in this whole pipeline that can allocate the inferred-build temp
+   directory this session type exists to own. `service_dump_pipeline.py`'s
+   own `resolve_dump_request()`/`execute_dump_request()` split (G33 Phase 5,
+   already landed, independent of this plan) already answers where that
+   fold runs today: deliberately inside `execute_dump_request`, never
+   `resolve_dump_request` — `ResolvedDumpRequest`'s own docstring states why
+   verbatim: `dump --dry-run`'s existing contract is to never raise on
+   anything but a usage error, and the fold can raise
+   `HeaderCompileContextAmbiguousError` on genuinely ambiguous build
+   evidence. Moving the fold into resolution to satisfy item 1's literal
+   text would mean either breaking that already-reasoned dry-run guarantee,
+   or redesigning it to tolerate a raise — a real behavior change to
+   already-shipped, already-reviewed code, not a clean generalization.
+
+   **What was safe to land, and did:** the fields item 1's target shape
+   names that genuinely *are* knowable without the fold — normalized
+   binary format, language, requested/effective header-AST backend,
+   requested depth, effective collect mode, public-header scope — are
+   exactly the facts `resolve_dump_request()` already computes for
+   `ResolvedDumpRequest`. `abicheck/artifact_plan.py`'s `ResolvedArtifactPlan`
+   (Milestone A's cleanup-owning session type) now also carries these as
+   optional, keyword-only fields, all defaulting to `None`/`()` so the three
+   existing Milestone A call sites' bare `ResolvedArtifactPlan()`
+   construction is completely unaffected. `resolve_dump_request()` attaches
+   one, populated verbatim from the same values it already returns on
+   `ResolvedDumpRequest` — a new, additive `artifact_plan` field on that
+   dataclass (defaulted, so no existing caller breaks), built with an empty
+   `pending_cleanups` (resolution allocates nothing today, so that is an
+   honest report, not a placeholder). This is genuinely inert data today —
+   nothing yet reads `resolved.artifact_plan` — but it means a future
+   consumer of the general shape (the eventual `render_dump_dry_run()`
+   migration named in AGENTS.md's "PR C" entry, most concretely) has one
+   object to build from instead of `ResolvedDumpRequest`'s own dump-specific
+   one, without this dataclass's field surface changing again when that
+   lands. Regression coverage: `tests/test_artifact_plan.py` (default
+   construction unaffected; resolved facts stored verbatim; a plan carrying
+   resolved facts is still a fully functional cleanup session) and
+   `tests/test_typed_dump_request.py::TestResolveExecuteDumpRequestSplit::test_resolve_attaches_a_matching_artifact_plan`
+   (the attached plan's
+   fields never independently drift from `ResolvedDumpRequest`'s own —
+   confirmed to fail against the pre-change code).
+
+   **Still not done, and now understood to be blocked on a real design
+   decision rather than merely unattempted**: there is still no
+   `resolve_artifact_request()`/`execute_artifact_plan()` *function* pair
+   (only `resolve_dump_request()`/`execute_dump_request()`, dump-specific);
+   `dump --dry-run` still doesn't build from or render a
+   `ResolvedArtifactPlan`; and none of items 2–10 below have been
+   attempted. Closing the resource-lifetime half of item 1 for real needs
+   one of: (a) redesigning dry-run's own contract to tolerate the fold's
+   possible raise (a considered, documented behavior change, not a
+   generalization); or (b) accepting that the fold's resource lifetime
+   stays scoped to execution only, and treating item 1's own "from
+   resolve_artifact_request() onward" language as applying to the
+   resolved-*fact* fields (now done) rather than to every resource a
+   pipeline might ever allocate. Neither was decided here — recorded as an
+   open design question for whoever picks up item 1's remaining resource-
+   lifetime half, rather than guessed at under continued session pressure,
+   per this plan's own "known gaps over risky reactive patches" convention.
 
 1. (Full shape, not yet reached) Introduce `ResolvedArtifactPlan` as a
    context-managed session that owns any resource resolution itself

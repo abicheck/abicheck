@@ -12,45 +12,75 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``ResolvedArtifactPlan`` — Phase 1 (Milestone A) of the
-duplication-and-convergence plan's "Finish artifact-resolution convergence"
-work (``docs/contribute/plans/duplication-and-convergence-assessment.md``).
+"""``ResolvedArtifactPlan`` — Phase 1 of the duplication-and-convergence
+plan's "Finish artifact-resolution convergence" work
+(``docs/contribute/plans/duplication-and-convergence-assessment.md``).
 
-**Scope of this module.** The plan's Phase 1 item 1 asks for a
+**Milestone A (done).** The plan's Phase 1 item 1 asks for a
 context-managed session that owns any resource an artifact-resolution
 attempt allocates (an inferred-build temp directory, most concretely) from
 resolution onward — spanning through whichever of execution or dry-run
-inspection follows, not scoped to either alone. Today, every call site that
+inspection follows, not scoped to either alone. Every call site that
 allocates such a resource (``service_input_resolution._resolve_side_snapshot_impl``,
-``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``) threads a
-plain ``list[Callable[[], None]]`` accumulator by hand and drains it in its
-own ``finally``, strictly before returning anything to its caller — there is
-no reusable, tested primitive. This module is that primitive, generalized
-just enough to replace all three known hand-rolled accumulators
-(``cli_dump_helpers.perform_elf_dump``, ``handle_non_elf_dump``, and
-``service_input_resolution._resolve_side_snapshot_impl``, each still its own
-separate ``ResolvedArtifactPlan`` instance — the three call sites are never
-invoked concurrently against the same instance, so nothing here makes them
-share a session) with a single, reviewed implementation. Migrating
-everything downstream of a real resolve/execute split (Phase 1 items 2–10 —
-routing native ``dump``, ``scan``, PE/Mach-O, ``appcompat``, `deps compare`,
-and the two ``symbols_only=True`` supplementary paths through a typed
-artifact pipeline, and making dry-run render the resolved plan) is
-deliberately out of scope for this slice — see the plan doc's own Phase 1
-section for the full, still-open list.
+``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``) now shares
+this one reviewed session type instead of its own hand-rolled
+``list[Callable[[], None]]`` accumulator plus a manual ``finally`` drain —
+each still its own separate instance (the three call sites are never
+invoked concurrently against the same one, so nothing here makes them share
+a session).
+
+**Milestone B (this slice).** Item 1's "full shape" also asks
+``ResolvedArtifactPlan`` to carry the resolved-fact fields the plan's
+target-architecture section lists (normalized input type and binary
+format, requested/effective depth, selected frontend, headers and
+public-header scope, ...), not just own cleanup. Investigating that against
+the real code found a real conflict with an already-documented, deliberate
+design decision, not an oversight to fix: two of the listed fields —
+*effective include search* and *effective compile context* — are only
+known after the L3→L2 compile-context fold runs
+(``buildsource.l2_seed.seed_includes_and_fold_compile_context``), and that
+fold is the one step in this whole pipeline that can allocate the
+inferred-build temp directory this session type exists to own. Moving the
+fold from execution into resolution — which is what "own the resource from
+resolution onward" would require for *this* resource — would also move it
+ahead of ``dump --dry-run``'s own resolve-only preview
+(``service_dump_pipeline.ResolvedDumpRequest``), whose own docstring
+already states a considered, deliberate guarantee: dry-run must never raise
+on anything but a usage error, and the fold can raise
+``HeaderCompileContextAmbiguousError`` on genuinely ambiguous build
+evidence. Folding the resource-lifetime scope into resolution would break
+that guarantee, not merely widen it — so this slice does **not** move the
+fold. The fields below are exactly the ones ``resolve_dump_request()``
+already knows *without* running it: everything the target shape names other
+than "effective include search"/"effective compile context". A plan built
+from them therefore always starts with empty ``pending_cleanups`` today
+(nothing is allocated during resolution yet) — that is an honest report of
+today's architecture, not a placeholder; the two deferred fields, and
+whatever resource lifetime moving them would introduce, are correctly
+scoped to a future slice, once a design closes the dry-run-contract
+conflict above (see the plan doc's own Phase 1 item 1 entry for this
+finding in full).
+
+Migrating everything downstream of a real resolve/execute split (Phase 1
+items 2–10 — routing native ``dump``, ``scan``, PE/Mach-O, ``appcompat``,
+`deps compare`, and the two ``symbols_only=True`` supplementary paths
+through a typed artifact pipeline, and making dry-run render the resolved
+plan) is deliberately out of scope for this slice too — see the plan doc's
+own Phase 1 section for the full, still-open list.
 
 Deliberately a leaf, engine-layer module: no ``click``/``cli_*`` import (the
-``engine-cli-boundary`` AI-readiness gate would reject one). Depended on by
-``service_input_resolution.py`` and ``cli_dump_helpers.py`` (not the
-reverse) — this module itself has no dependency on either, or on
-``service_dump_pipeline.py``, which keeps its own existing dataclasses
-unchanged in this pass.
+``engine-cli-boundary`` AI-readiness gate would reject one), and no
+dependency on ``service_input_resolution.py``, ``cli_dump_helpers.py``, or
+``service_dump_pipeline.py`` — each of those depends on this module, not
+the reverse, so a new resolved-fact field added here must stay plain data
+(``str``/``Path``/tuples), never a type those modules themselves own.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from types import TracebackType
 
 logger = logging.getLogger(__name__)
@@ -113,11 +143,47 @@ class ResolvedArtifactPlan:
     still drains everything collected up to that point, because
     ``pending_cleanups`` is mutated in place rather than being handed over
     only at the end.
+
+    **Resolved-fact fields (Milestone B).** The keyword-only fields below
+    (all optional, all defaulting to ``None``/``()``) are the subset of the
+    plan's own target-architecture "carries" list that is knowable *without*
+    running the L3→L2 compile-context fold — see this module's own
+    docstring for exactly which two fields that excludes, and why. A plan
+    constructed with none of them (the three Milestone A call sites'
+    existing usage, unchanged) still behaves exactly as before: a pure
+    cleanup-owning session with no resolved facts attached. A caller that
+    does know these facts at resolve time (``service_dump_pipeline.
+    resolve_dump_request``, so far) can attach them here instead of
+    threading them through a separate return value, so a single object
+    carries both what execution needs to clean up *and* what a future
+    dry-run render would show.
     """
 
-    __slots__ = ("pending_cleanups", "_drained_count")
+    __slots__ = (
+        "pending_cleanups",
+        "_drained_count",
+        "binary_format",
+        "lang",
+        "header_backend",
+        "effective_header_backend",
+        "requested_depth",
+        "collect_mode",
+        "public_headers",
+        "public_header_dirs",
+    )
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        binary_format: str | None = None,
+        lang: str | None = None,
+        header_backend: str | None = None,
+        effective_header_backend: str | None = None,
+        requested_depth: str | None = None,
+        collect_mode: str | None = None,
+        public_headers: tuple[Path, ...] = (),
+        public_header_dirs: tuple[Path, ...] = (),
+    ) -> None:
         #: Handed directly to a callee that expects the existing bare
         #: ``pending_cleanups: list[Callable[[], None]]`` parameter shape
         #: (``seed_includes_and_fold_compile_context``, ``collect_inline_pack``'s
@@ -130,6 +196,36 @@ class ResolvedArtifactPlan:
         #: still reachable by the *next* drain instead of being silently
         #: skipped by an unconditional "already closed" flag.
         self._drained_count = 0
+        #: The detected binary format of the artifact being resolved (e.g.
+        #: ``"elf"``/``"pe"``/``"macho"``) -- mirrors ``ResolvedDumpRequest.fmt``.
+        self.binary_format = binary_format
+        #: The normalized source language (``service_dump_pipeline.
+        #: resolve_dump_request``'s own case-lowered ``request.lang``).
+        self.lang = lang
+        #: The requested header-AST backend (``"auto"``/``"castxml"``/
+        #: ``"clang"``/...), before resolution to a concrete choice.
+        self.header_backend = header_backend
+        #: A *reporting-only* projection of which concrete header-AST
+        #: backend resolution currently favors -- see
+        #: ``ResolvedDumpRequest.effective_header_backend``'s own docstring
+        #: for why this can, in principle, disagree with what execution
+        #: ends up doing (an unpinned "auto" re-resolving, or the
+        #: environment changing between resolve and execute).
+        self.effective_header_backend = effective_header_backend
+        #: The caller's own requested evidence depth (``None`` when
+        #: unspecified) -- an input, known up front, not an achieved value.
+        self.requested_depth = requested_depth
+        #: The effective build/source evidence level *requested_depth*
+        #: resolves to (``SideEvidence.collect_mode``) -- still knowable
+        #: without running the L3->L2 fold, unlike the fold's own output.
+        self.collect_mode = collect_mode
+        #: The resolved public-header file set (directories excluded; see
+        #: *public_header_dirs*).
+        self.public_headers = public_headers
+        #: The resolved public-header directory set, unioned from both the
+        #: caller's explicit directories and any directory entries split out
+        #: of the raw header list.
+        self.public_header_dirs = public_header_dirs
 
     def add_cleanup(self, cleanup: Callable[[], None]) -> None:
         """Register a cleanup discovered after construction (e.g. during

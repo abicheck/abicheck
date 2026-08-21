@@ -460,6 +460,32 @@ class TestResolveExecuteDumpRequestSplit:
                 DumpRequest(input=InputSpec(path=snap_path), lang="rust")
             )
 
+    def test_resolve_attaches_a_matching_artifact_plan(self, snap_path: Path):
+        """Dedup-and-convergence plan, Phase 1 item 1 'Milestone B': the
+        resolved-fact fields resolve_dump_request already computes must also
+        land on the general ResolvedArtifactPlan it attaches, verbatim --
+        not a second, independently-derived copy that could drift."""
+        from abicheck.artifact_plan import ResolvedArtifactPlan
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        resolved = resolve_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path, headers=()))
+        )
+        plan = resolved.artifact_plan
+        assert isinstance(plan, ResolvedArtifactPlan)
+        assert plan.binary_format == resolved.fmt
+        assert plan.lang == resolved.lang
+        assert plan.header_backend == resolved.header_backend
+        assert plan.effective_header_backend == resolved.effective_header_backend
+        assert plan.requested_depth == resolved.requested_depth
+        assert plan.collect_mode == resolved.collect_mode
+        assert plan.public_headers == resolved.public_headers
+        assert plan.public_header_dirs == resolved.public_header_dirs
+        # Resolution allocates no resource today (the L3->L2 fold stays
+        # inside execute -- see artifact_plan.py's own module docstring),
+        # so the attached plan must start with nothing to clean up.
+        assert plan.pending_cleanups == []
+
     def test_execute_produces_the_same_snapshot_as_run_dump_request(
         self, snap_path: Path
     ):
@@ -900,9 +926,7 @@ class TestBuildDerivedIncludeSeeding:
         monkeypatch.setattr(service, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
-                input=InputSpec(
-                    path=snap_path, headers=(header,), build_info=tmp_path
-                )
+                input=InputSpec(path=snap_path, headers=(header,), build_info=tmp_path)
             )
         )
         assert captured["includes"] == [seeded]
@@ -917,8 +941,7 @@ class TestBuildDerivedIncludeSeeding:
 
         def _boom(**kwargs):  # pragma: no cover - must never run
             raise AssertionError(
-                "seed_includes_and_fold_compile_context reached without "
-                "build evidence"
+                "seed_includes_and_fold_compile_context reached without build evidence"
             )
 
         monkeypatch.setattr(
@@ -956,9 +979,7 @@ class TestBuildDerivedIncludeSeeding:
         monkeypatch.setattr(service, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
-                input=InputSpec(
-                    path=snap_path, headers=(header,), build_info=tmp_path
-                )
+                input=InputSpec(path=snap_path, headers=(header,), build_info=tmp_path)
             )
         )
         assert order == ["resolve", "cleanup"]
@@ -1339,7 +1360,9 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     trusted_config = tmp_path / "trusted.abicheck.yml"
 
     monkeypatch.setattr(
-        sir, "_seeded_includes_and_compile_context", lambda *a, **k: ([], None, False, [])
+        sir,
+        "_seeded_includes_and_compile_context",
+        lambda *a, **k: ([], None, False, []),
     )
     monkeypatch.setattr(
         service, "resolve_input", lambda *a, **k: AbiSnapshot(library="x", version="1")
@@ -1431,12 +1454,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
 
         hdr = tmp_path / "widget.h"
         hdr.write_text(
-            "struct Widget {\n"
-            "  int x;\n"
-            "#ifdef GUARD\n"
-            "  int guarded;\n"
-            "#endif\n"
-            "};\n",
+            "struct Widget {\n  int x;\n#ifdef GUARD\n  int guarded;\n#endif\n};\n",
             encoding="utf-8",
         )
         src = tmp_path / "widget.cpp"
@@ -1488,12 +1506,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
 
         hdr = tmp_path / "widget.h"
         hdr.write_text(
-            "struct Widget {\n"
-            "  int x;\n"
-            "#ifdef GUARD\n"
-            "  int guarded;\n"
-            "#endif\n"
-            "};\n",
+            "struct Widget {\n  int x;\n#ifdef GUARD\n  int guarded;\n#endif\n};\n",
             encoding="utf-8",
         )
         src = tmp_path / "widget.cpp"
@@ -1541,12 +1554,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         include_dir.mkdir()
         hdr = include_dir / "widget.h"
         hdr.write_text(
-            "struct Widget {\n"
-            "  int x;\n"
-            "#ifdef GUARD\n"
-            "  int guarded;\n"
-            "#endif\n"
-            "};\n",
+            "struct Widget {\n  int x;\n#ifdef GUARD\n  int guarded;\n#endif\n};\n",
             encoding="utf-8",
         )
         src = tmp_path / "widget.cpp"
