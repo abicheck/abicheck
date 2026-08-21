@@ -71,22 +71,29 @@
   MSVC-dialect parse, neither of which either command builder pins). That
   fix in turn broke the upgrade-corroboration carve-out itself: it only
   recognized an empty-string-to-`"probed:..."` transition, but the forced
-  standard produces three shapes it had never seen — an unpinned, no-`--lang`
-  baseline moving to the bare `"gnu11"` literal (no `"probed:"` marker at
-  all), and an explicit-`--lang` baseline moving from a *bare* `"c"`/`"c++"`
-  tag (not an empty string) to `"c:gnu11"`/`"c++:probed:..."`. Generalized
-  the carve-out (`_newly_resolved_standard_remainder`) to recognize every
-  pre-upgrade "nothing resolved yet" spelling (`""`, `"c"`, `"c++"`) against
-  a same-lang-tagged, newly-populated successor (the forced literal or a
-  probed value), in either comparison direction. The carve-out's own
-  `compiler_family`/`compiler_version` corroboration also now checks
-  `AbiSnapshot.ast_toolchain`'s `compiler_sha256` (the resolved compiler
-  binary's own content hash) when both sides carry one: a compiler wrapper
-  replaced at the same path can report an identical family/version string
-  — text a wrapper's own `--version` output controls — while actually
-  selecting a different default dialect. Falls back to the family/version-only
-  check when either side lacks the hash (an older snapshot, or a side whose
-  compiler resolution itself failed).
+  standard produces shapes it had never seen — an explicit-`--lang` baseline
+  moving from a *bare* `"c"`/`"c++"` tag (not an empty string) to
+  `"c:gnu11"`/`"c++:probed:..."`. Generalized the carve-out
+  (`_newly_resolved_standard_remainder`) to recognize a pre-upgrade bare
+  `"c"`/`"c++"` tag against a same-lang-tagged, newly-populated successor
+  (the forced literal or a probed value), in either comparison direction.
+  The carve-out's own `compiler_family`/`compiler_version` corroboration
+  also now checks `AbiSnapshot.ast_toolchain`'s `compiler_sha256` (the
+  resolved compiler binary's own content hash) when both sides carry one: a
+  compiler wrapper replaced at the same path can report an identical
+  family/version string — text a wrapper's own `--version` output controls
+  — while actually selecting a different default dialect. Falls back to the
+  family/version-only check when either side lacks the hash (an older
+  snapshot, or a side whose compiler resolution itself failed). A bare
+  *empty* `language_standard` (no `--lang` given at all, pure content-based
+  auto-detection) is deliberately **not** eligible for this carve-out,
+  unlike an earlier version of it: it carries no signal about which
+  language mode the pre-upgrade dump actually resolved to, so a header that
+  later gains enough C++-only syntax to flip that decision — a real
+  language-mode change, not an upgrade artifact — would otherwise be
+  indistinguishable from the case this carve-out exists to waive, and a
+  matching compiler says nothing about which mode either side's headers
+  actually resolved to.
 - Known, narrower residuals, documented rather than fixed:
   - A cache/memo *hit* for a header that previously self-healed C→C++
     still reports the pre-retry language mode, since neither backend's AST

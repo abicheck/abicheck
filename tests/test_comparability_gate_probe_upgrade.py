@@ -16,15 +16,23 @@
 existing unpinned snapshot baselines".
 
 A baseline persisted before ``dumper_toolchain._probe_default_language_
-standard`` existed recorded an empty ``language_standard`` for any unpinned
-(no explicit ``-std=``, no forced-C++20-heuristic) dump. A freshly re-dumped
-snapshot of the identical input under the identical toolchain now records a
-real ``"probed:..."`` value there instead, purely because the tool was
-upgraded. That must not, by itself, make the pair ``NOT_COMPARABLE`` --
+standard`` existed, given an explicit ``--lang``, recorded a bare ``"c"``/
+``"c++"`` ``language_standard`` (no resolved standard existed yet). A
+freshly re-dumped snapshot of the identical input under the identical
+toolchain now records a real, lang-tagged ``"c:gnu11"``/``"c++:probed:..."``
+value there instead, purely because the tool was upgraded. That must not, by
+itself, make the pair ``NOT_COMPARABLE`` --
 ``comparability._language_standard_probe_upgrade_corroborated`` is the
 carve-out closing that gap, tested here directly against the gate (split out
 of ``test_comparability_gate.py``, which sits at the AI-readiness file-size
 hard cap, rather than appended there).
+
+A *bare empty* ``language_standard`` (no ``--lang`` given at all -- pure
+content-based auto-detection) is deliberately **not** eligible for this
+carve-out (Codex review, fresh evidence: it carries no signal about which
+language mode the pre-upgrade dump actually resolved to, so it cannot be
+safely distinguished from a genuine language-mode change) -- several tests
+below pin that it still raises even with an otherwise-matching compiler.
 """
 
 from __future__ import annotations
@@ -66,10 +74,18 @@ def test_probed_standard_prefix_constants_stay_in_sync():
     )
 
 
-def test_gate_empty_vs_probed_language_standard_waived_when_compiler_unchanged():
-    """The exact scenario the reviewer flagged: an old (pre-probe) baseline
-    and a freshly re-dumped snapshot of the identical input under the
-    identical resolved compiler must stay comparable."""
+def test_gate_bare_empty_language_standard_still_raises_even_with_compiler_unchanged():
+    """Codex review, fresh evidence: a bare empty ``language_standard`` (no
+    ``--lang`` given at all) carries *no* signal about which language mode
+    the pre-upgrade dump actually resolved to -- ``_resolve_force_cpp``'s
+    decision is a function of the header content, which this carve-out has
+    no access to. A header that later gains enough C++-only syntax to flip
+    that decision (a real language-mode change) is indistinguishable, from
+    the profile fields alone, from the pure upgrade-artifact case this
+    carve-out exists to waive -- so an unchanged compiler_family/
+    compiler_version is *not* sufficient corroboration for this shape, and
+    this must still raise, unlike an earlier version of this carve-out that
+    waived it."""
     old = _snap(
         compute_extraction_contract(
             l2_frontend_ran=True,
@@ -86,7 +102,8 @@ def test_gate_empty_vs_probed_language_standard_waived_when_compiler_unchanged()
             language_standard="probed:__cplusplus=201703L",
         )
     )
-    check_contracts_comparable(old, new)  # must not raise
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
 def test_gate_empty_vs_probed_language_standard_still_raises_when_compiler_family_differs():
@@ -152,13 +169,11 @@ def test_gate_empty_vs_probed_language_standard_not_waived_without_compiler_evid
         check_contracts_comparable(old, new)
 
 
-def test_gate_empty_vs_probed_language_standard_waived_when_lang_qualified():
-    """CodeRabbit review, fresh evidence: when an explicit ``--lang`` was
-    given, ``language_standard_field`` prefixes the probed value with the
-    resolved mode (``"c++:probed:..."``/``"c:probed:..."``), not the bare
-    ``"probed:..."`` form the other tests above use -- the carve-out must
-    still recognize the transition and waive it, not treat the lang prefix
-    as an unrelated profile difference."""
+def test_gate_bare_empty_language_standard_vs_lang_qualified_probed_still_raises():
+    """The lang-qualified counterpart of the test above: a lang tag on the
+    *new* side alone does not rescue a bare-empty *old* side -- the old side
+    still carries no evidence of which mode it actually resolved to, so this
+    must still raise (unlike an earlier version of this carve-out)."""
     old = _snap(
         compute_extraction_contract(
             l2_frontend_ran=True,
@@ -175,16 +190,15 @@ def test_gate_empty_vs_probed_language_standard_waived_when_lang_qualified():
             language_standard="c++:probed:__cplusplus=201703L",
         )
     )
-    check_contracts_comparable(old, new)  # must not raise
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
-def test_gate_empty_vs_forced_gnu11_waived_when_compiler_unchanged():
-    """Codex review, fresh evidence: an unpinned C/gnu-dialect parse no
-    longer probes at all -- it reports the forced ``"gnu11"`` standard
-    directly (see ``dumper_toolchain._FORCED_C_STANDARD``), which carries no
-    ``"probed:"`` marker. The carve-out must still recognize this as the
-    identical class of upgrade-only transition, not just the probed-value
-    shape."""
+def test_gate_bare_empty_language_standard_vs_forced_gnu11_still_raises():
+    """The forced-``gnu11`` counterpart of the two tests above: a bare empty
+    *old* side still raises against a newly-forced ``"gnu11"`` *new* side,
+    for the identical reason -- ``"gnu11"`` carries no more information
+    about the *old* side's actual mode than a ``"probed:..."`` value does."""
     old = _snap(
         compute_extraction_contract(
             l2_frontend_ran=True,
@@ -201,7 +215,8 @@ def test_gate_empty_vs_forced_gnu11_waived_when_compiler_unchanged():
             language_standard="gnu11",
         )
     )
-    check_contracts_comparable(old, new)  # must not raise
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
 def test_gate_bare_lang_c_vs_lang_qualified_gnu11_waived():
@@ -276,19 +291,21 @@ def test_gate_bare_lang_c_vs_different_lang_still_raises():
         check_contracts_comparable(old, new)
 
 
-def test_gate_empty_vs_gnu11_still_raises_when_compiler_sha256_differs():
+def test_gate_bare_lang_c_vs_gnu11_still_raises_when_compiler_sha256_differs():
     """Codex review, fresh evidence: a compiler wrapper replaced at the same
     path can report an identical compiler_family/compiler_version string
     while actually selecting a different default dialect --
     compiler_sha256 (the resolved binary's own content hash), when present
     on both sides, must be checked too, not just the two text fields a
-    wrapper's own --version output controls."""
+    wrapper's own --version output controls. Uses the lang-tagged (safe)
+    old-side shape, not a bare empty string -- see the bare-empty-string
+    tests above for why that shape never waives at all now."""
     old = _snap(
         compute_extraction_contract(
             l2_frontend_ran=True,
             compiler_family="gnu",
             compiler_version="11.4.0",
-            language_standard="",
+            language_standard="c",
         ),
         ast_toolchain={"compiler_sha256": "a" * 64},
     )
@@ -297,7 +314,7 @@ def test_gate_empty_vs_gnu11_still_raises_when_compiler_sha256_differs():
             l2_frontend_ran=True,
             compiler_family="gnu",
             compiler_version="11.4.0",
-            language_standard="gnu11",
+            language_standard="c:gnu11",
         ),
         ast_toolchain={"compiler_sha256": "b" * 64},
     )
@@ -305,7 +322,7 @@ def test_gate_empty_vs_gnu11_still_raises_when_compiler_sha256_differs():
         check_contracts_comparable(old, new)
 
 
-def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_matches():
+def test_gate_bare_lang_c_vs_gnu11_waived_when_compiler_sha256_matches():
     """The positive counterpart: an unchanged compiler_sha256 on both sides
     (alongside the existing family/version match) still waives, same as
     before this corroboration was added."""
@@ -314,7 +331,7 @@ def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_matches():
             l2_frontend_ran=True,
             compiler_family="gnu",
             compiler_version="11.4.0",
-            language_standard="",
+            language_standard="c",
         ),
         ast_toolchain={"compiler_sha256": "a" * 64},
     )
@@ -323,14 +340,14 @@ def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_matches():
             l2_frontend_ran=True,
             compiler_family="gnu",
             compiler_version="11.4.0",
-            language_standard="gnu11",
+            language_standard="c:gnu11",
         ),
         ast_toolchain={"compiler_sha256": "a" * 64},
     )
     check_contracts_comparable(old, new)  # must not raise
 
 
-def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_absent_on_one_side():
+def test_gate_bare_lang_c_vs_gnu11_waived_when_compiler_sha256_absent_on_one_side():
     """A legacy/older snapshot on one side (no compiler_sha256 recorded at
     all) must fall back to the family/version check rather than fail closed
     on evidence it was never in a position to carry."""
@@ -339,7 +356,7 @@ def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_absent_on_one_side():
             l2_frontend_ran=True,
             compiler_family="gnu",
             compiler_version="11.4.0",
-            language_standard="",
+            language_standard="c",
         ),
         ast_toolchain={},
     )
@@ -348,7 +365,7 @@ def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_absent_on_one_side():
             l2_frontend_ran=True,
             compiler_family="gnu",
             compiler_version="11.4.0",
-            language_standard="gnu11",
+            language_standard="c:gnu11",
         ),
         ast_toolchain={"compiler_sha256": "a" * 64},
     )

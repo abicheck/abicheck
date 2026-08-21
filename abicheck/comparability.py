@@ -703,34 +703,51 @@ _FORCED_C_STANDARD = "gnu11"
 
 #: Every ``language_standard_field`` spelling an *unpinned, no-resolved-
 #: standard* dump could have produced before either the probe or the
-#: forced-``gnu11`` report existed: no lang given at all (``""``), or an
-#: explicit ``--lang`` with nothing else resolved (bare ``"c"``/``"c++"``).
-_UNRESOLVED_STANDARD_SPELLINGS = ("", "c", "c++")
+#: forced-``gnu11`` report existed, that this carve-out can still safely
+#: corroborate: an explicit ``--lang`` with nothing else resolved (bare
+#: ``"c"``/``"c++"``). Deliberately excludes the bare empty string (no
+#: ``--lang`` given at all, pure content-based auto-detection) -- see
+#: :func:`_newly_resolved_standard_remainder`'s own docstring for why
+#: (Codex review, fresh evidence).
+_UNRESOLVED_STANDARD_SPELLINGS = ("c", "c++")
 
 
 def _newly_resolved_standard_remainder(
     old_std: str, new_std: str
 ) -> str | None:
     """If *old_std* is one of :data:`_UNRESOLVED_STANDARD_SPELLINGS` and
-    *new_std* carries the identical lang tag (if any) plus something newly
-    resolved, return that "something" (the part after the tag); otherwise
-    ``None``.
+    *new_std* carries the identical lang tag plus something newly resolved,
+    return that "something" (the part after the tag); otherwise ``None``.
 
     Split out of :func:`_language_standard_probe_upgrade_corroborated` so
     the "same lang tag, newly populated" structural check has one
     definition, checked in both directions there (Codex review, fresh
     evidence: an explicit-``--lang`` baseline moves from a bare ``"c"``/
     ``"c++"`` to ``"c:gnu11"``/``"c++:probed:..."``, not from an empty
-    string, which the previous version of this check could not recognize).
+    string, which an earlier version of this check could not recognize).
+
+    Deliberately does **not** accept a bare empty *old_std* (no ``--lang``
+    given at all) the way an earlier version of this function did (Codex
+    review, fresh evidence): an empty ``language_standard`` carries *no*
+    signal about which language mode a pre-upgrade, pure-auto-detection
+    dump actually resolved to (:func:`_resolve_force_cpp`'s decision is a
+    function of the header *content*, which this carve-out has no access
+    to) -- so a header that later gains enough C++-only syntax to flip
+    ``_resolve_force_cpp``'s decision (a real language-mode change, not an
+    upgrade artifact) would otherwise be indistinguishable from the
+    upgrade-only case this carve-out exists to waive, and a matching
+    ``compiler_family``/``compiler_version``/``compiler_sha256`` says
+    nothing about which mode either side's *headers* actually resolved to.
+    An explicit ``--lang`` has no such ambiguity: :func:`_resolve_force_cpp`
+    returns that mode unconditionally regardless of header content, so the
+    lang-tag-equality check above is sufficient corroboration on its own.
     """
     if old_std not in _UNRESOLVED_STANDARD_SPELLINGS:
         return None
-    if old_std:
-        prefix = f"{old_std}:"
-        if not new_std.startswith(prefix):
-            return None
-        return new_std[len(prefix) :]
-    return new_std
+    prefix = f"{old_std}:"
+    if not new_std.startswith(prefix):
+        return None
+    return new_std[len(prefix) :]
 
 
 def _language_standard_probe_upgrade_corroborated(
@@ -745,20 +762,23 @@ def _language_standard_probe_upgrade_corroborated(
     fresh evidence).
 
     A baseline persisted before ``dumper_toolchain._probe_default_language_
-    standard``/the forced-C-standard report existed recorded one of
-    :data:`_UNRESOLVED_STANDARD_SPELLINGS` for any unpinned (no explicit
-    ``-std=``, no forced-C++20-heuristic) dump -- that was the only value
-    this field could ever take for that shape of input, whether or not
-    ``--lang`` was also given. A freshly re-dumped snapshot of the identical
-    input under the identical toolchain now records a real, newly-resolved
-    value there instead (:data:`_FORCED_C_STANDARD` for an unpinned C/gnu
-    parse, or a ``"probed:..."`` value for an unpinned C++ parse or an
-    MSVC-dialect C parse), purely because the tool was upgraded -- comparing
-    the two would otherwise raise ``ProfileMismatchError`` on every such
-    baseline, solely from the upgrade itself, not from anything about the
-    library changing. :func:`_newly_resolved_standard_remainder` checks both
-    directions share the same lang tag (if any) and isolates the
-    newly-resolved remainder for the check below.
+    standard``/the forced-C-standard report existed recorded a bare
+    ``"c"``/``"c++"`` (:data:`_UNRESOLVED_STANDARD_SPELLINGS`) for an
+    unpinned (no explicit ``-std=``, no forced-C++20-heuristic) dump given
+    an explicit ``--lang`` -- that was the only value this field could ever
+    take for that shape of input. A freshly re-dumped snapshot of the
+    identical input under the identical toolchain now records a real,
+    newly-resolved value there instead (:data:`_FORCED_C_STANDARD` for an
+    unpinned C/gnu parse, or a ``"probed:..."`` value for an unpinned C++
+    parse or an MSVC-dialect C parse), purely because the tool was upgraded
+    -- comparing the two would otherwise raise ``ProfileMismatchError`` on
+    every such baseline, solely from the upgrade itself, not from anything
+    about the library changing. :func:`_newly_resolved_standard_remainder`
+    checks both directions share the same lang tag and isolates the
+    newly-resolved remainder for the check below -- see that function's own
+    docstring for why a bare *empty* ``language_standard`` (no ``--lang`` at
+    all) is deliberately **not** eligible here, unlike an earlier version of
+    this carve-out.
 
     Waived only when independently corroborated by an EXACT, non-empty
     ``compiler_family``/``compiler_version`` match on both sides: the
