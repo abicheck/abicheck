@@ -411,6 +411,7 @@ def derive_l2_compile_context(
     explicit: CompileContext | None = None,
     lang: str | None = None,
     lang_explicit: bool = False,
+    source_filter: str | None = None,
 ) -> tuple[CompileContext | None, list[Callable[[], None]]]:
     """Best-effort L2 :class:`CompileContext` derived from the build's L3
     ``CompileUnit`` facts (P0.3).
@@ -504,6 +505,7 @@ def derive_l2_compile_context(
             explicit=explicit,
             lang=lang,
             lang_explicit=lang_explicit,
+            source_filter=source_filter,
         )
         if resolution.context is None:
             _run_cleanups(cleanups)
@@ -765,6 +767,7 @@ def seed_includes_and_fold_compile_context(
     lang: str,
     lang_explicit: bool,
     pending_cleanups: list[Callable[[], None]],
+    source_filter: str | None = None,
 ) -> tuple[list[Path], bool, CompileContext, tuple[Path, ...]]:
     """The L2 include-dir seed and the P0.3 L3->L2 compile-context fold,
     combined into one L3 collection (Codex review, PR #782).
@@ -818,7 +821,10 @@ def seed_includes_and_fold_compile_context(
     """
     from ..errors import HeaderCompileContextAmbiguousError
     from ..header_utils import _context_tokens, _has_include_build_context
-    from .header_compile_context import resolve_header_compile_context
+    from .header_compile_context import (
+        filter_units_by_source,
+        resolve_header_compile_context,
+    )
 
     explicit_ctx = CompileContext(
         gcc_path=gcc_path,
@@ -875,7 +881,10 @@ def seed_includes_and_fold_compile_context(
             defer_cleanup=cleanups,
         )
         build_evidence = pack.build_evidence if pack is not None else None
-        units = build_evidence.compile_units if build_evidence is not None else []
+        units = filter_units_by_source(
+            build_evidence.compile_units if build_evidence is not None else [],
+            source_filter,
+        )
 
         # Resolve *before* seeding, so the seed can be restricted to the
         # compile unit(s) that actually compile these headers (plan PR 3B /
@@ -888,6 +897,7 @@ def seed_includes_and_fold_compile_context(
             explicit=explicit_ctx,
             lang=lang,
             lang_explicit=lang_explicit,
+            source_filter=source_filter,
         )
 
         if want_seed:

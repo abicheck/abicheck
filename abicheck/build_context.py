@@ -732,26 +732,53 @@ class BuildContext:
         return bool(self.define_conflicts) or len(self.standard_variants) > 1
 
 
+def source_matches_filter(
+    file: str | Path, directory: str | Path | None, pattern: str
+) -> bool:
+    """Whether a translation unit's *file* matches a ``source_filter`` glob.
+
+    The one definition of what ``--compile-db-filter`` means, shared by every
+    layer that narrows a compile database by it — this module's own
+    :class:`CompileEntry` scan, ``header_conditionals``' raw-dict scan for the
+    ADR-039 collector, and ``buildsource.header_compile_context``'s
+    :class:`~abicheck.buildsource.adapters.base.CompileUnit` scan for the P0.3
+    L3→L2 fold. Three layers had (or would have had) their own copy of this
+    predicate; the same shape has already drifted silently once in this
+    codebase (the MSVC-driver vocabulary, third finding on the root
+    ``AGENTS.md``'s forced-include entry), and a filter that selects different
+    translation units in the L2 fold than in the collector is exactly the kind
+    of disagreement that produces a snapshot describing two builds at once.
+
+    A **relative** *file* is resolved against *directory* first (matching how
+    :class:`CompileEntry` stores ``directory / file``), then the pattern is
+    tested against the absolute path, the directory-relative path, and the
+    CWD-relative path — so an absolute filter matches a relative-``file``
+    entry and a relative ``src/libfoo/**`` filter matches an absolute-``file``
+    entry.
+    """
+    path = Path(file)
+    if not path.is_absolute() and directory is not None:
+        path = Path(directory) / path
+    if fnmatch(str(path), pattern):
+        return True
+    if directory is not None:
+        try:
+            return fnmatch(str(path.relative_to(directory)), pattern)
+        except ValueError:
+            pass  # file is not under directory — fall through to CWD-relative
+    try:
+        return fnmatch(str(path.relative_to(Path.cwd())), pattern)
+    except ValueError:
+        return False
+
+
 def _entry_matches_filter(entry: CompileEntry, pattern: str) -> bool:
     """Test if a compile entry matches a source_filter glob pattern.
 
-    Tests the pattern against the absolute path and also against the
-    path relative to the entry's compilation directory, so that relative
-    patterns like ``src/libfoo/**`` work as documented.
+    A thin caller of :func:`source_matches_filter` — see that function for the
+    matching rules and for why they live in one place.
     """
-    abs_str = str(entry.file)
-    if fnmatch(abs_str, pattern):
-        return True
-    # Also test against relative path (from the entry's build directory)
-    try:
-        rel_str = str(entry.file.relative_to(entry.directory))
-    except ValueError:
-        # file is not under directory — try CWD-relative too
-        try:
-            rel_str = str(entry.file.relative_to(Path.cwd()))
-        except ValueError:
-            return False
-    return fnmatch(rel_str, pattern)
+    return source_matches_filter(entry.file, entry.directory, pattern)
 
 
 def load_compile_db(path: Path) -> list[CompileEntry]:

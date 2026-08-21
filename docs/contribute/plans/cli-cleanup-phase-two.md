@@ -1684,6 +1684,35 @@ pipelines a fourth time.
   > legacy-match removal, and only then migrate the real run.** Three
   > slices, not one.
   >
+  > **The first of the three landed in this session, and it is a user-facing
+  > bug fix on its own terms, not only migration plumbing.**
+  > `resolve_header_compile_context` fails closed when one public header is
+  > compiled under two ABI-relevant contexts, and its message names
+  > `--compile-db-filter` as a way to narrow the input — but the filter
+  > reached only the legacy match, so the fold still saw every unit and a
+  > user who followed that advice got the identical error back, with no
+  > remedy short of hand-writing a pre-filtered `compile_commands.json`.
+  > Reproduced end to end (`dump --depth headers -H api.h --build-info
+  > db.json --compile-db-filter a.cpp`, two TUs disagreeing on an
+  > ABI-relevant `-D`) and fixed: `resolve_header_compile_context` takes a
+  > `source_filter`, `l2_seed` forwards it, and `perform_elf_dump` threads
+  > the CLI's own flag through. The matching rules are consolidated into one
+  > `build_context.source_matches_filter`, so the fold, the legacy match and
+  > the ADR-039 collector cannot select different translation units for one
+  > filter; a filter matching nothing keeps every unit, the conservative
+  > fallback the other two layers already applied. Tests:
+  > `tests/test_compile_db_filter_scope.py` — the primitive's contract as
+  > invariants, the three layers agreeing, the resolver, and a real
+  > `g++`+clang `dump` asserting the guarded field is parsed in or out
+  > according to *which* TU the filter names (the end-to-end cases confirmed
+  > to fail pre-fix). Still open in this slice: the typed half —
+  > `InputSpec.compile_db_filter` plus the CLI's own
+  > L2-filtered/L3-unfiltered refusal
+  > (`header_conditionals.compile_db_filter_scope_error`) mirrored into
+  > `resolve_dump_request`, the only place that knows the resolved collect
+  > mode. That is one clearly-specified step; see the field's replacement
+  > comment in `api_types.py`.
+  >
   > One environmental fact that independently rules out doing it in that
   > session: **the default header backend is castxml, and no working
   > castxml was obtainable there.** A conda-forge 0.7.0 build was assembled
@@ -1858,7 +1887,9 @@ pipelines a fourth time.
   > which is strictly worse than the ordering rule already forbids. Item 1
   > additionally now has a stated sub-ordering: thread `--compile-db-filter`
   > into the shared fold first, then decide and ship the legacy-match
-  > removal, then migrate.
+  > removal, then migrate. The first of those three landed in that session
+  > (see the same 3A note) and was a user-facing bug fix in its own right;
+  > the second and third are untouched.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI

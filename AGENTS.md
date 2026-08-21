@@ -4650,7 +4650,30 @@ Once a root command genuinely clears the bar above, pick the right home:
   documented flag silently inert is worse than the gap. The ordering is
   therefore three slices, not one: thread `--compile-db-filter` into the
   shared fold (`buildsource/l2_seed.py`/`header_compile_context.py`), decide
-  and ship the legacy-match removal, then migrate the real run. One
+  and ship the legacy-match removal, then migrate the real run. **The first
+  of those three landed in the same session** — and it turned out to be a
+  user-facing bug in its own right, not merely migration plumbing:
+  `resolve_header_compile_context`'s fail-closed ambiguity message names
+  `--compile-db-filter` as a way to narrow the input, but the filter reached
+  only the legacy match, so a user who followed that advice got the identical
+  error back. Reproduced end to end (`dump --depth headers -H api.h
+  --build-info db.json --compile-db-filter a.cpp` over two TUs disagreeing on
+  an ABI-relevant `-D`) and fixed by threading `source_filter` through
+  `resolve_header_compile_context`/`l2_seed`/`perform_elf_dump`, with the
+  matching rules consolidated into one shared
+  `build_context.source_matches_filter` so the fold, the legacy match and the
+  ADR-039 collector cannot select different translation units for the same
+  filter. A filter matching nothing keeps every unit — the conservative
+  fallback the other two layers already applied. Tests:
+  `tests/test_compile_db_filter_scope.py` (the primitive's contract as
+  invariants, the three layers agreeing, the resolver, and a real
+  `g++`+clang `dump` proving the guarded field is parsed in or out according
+  to which TU the filter names; the end-to-end cases confirmed to fail
+  pre-fix). Still open in that first slice: the *typed* half —
+  `InputSpec.compile_db_filter` plus the CLI's own
+  L2-filtered/L3-unfiltered refusal mirrored into
+  `resolve_dump_request`, which is where the resolved collect mode is known
+  (see that field's replacement comment in `api_types.py`). One
   environmental fact independently rules out doing it in that session: the
   *default* header backend is castxml, and no working castxml was
   obtainable — a hand-assembled conda-forge 0.7.0 build segfaults inside

@@ -61,7 +61,6 @@ from __future__ import annotations
 import json
 import re
 import shlex
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -242,25 +241,23 @@ def _compile_entry_matches(entry: dict[str, object], pattern: str) -> bool:
     matches an absolute-``file`` entry (Codex review #498). Without resolving the
     relative ``file`` first, an absolute filter would always miss, the collector
     would fall back to all entries, and the guard macro defined only by the
-    selected TU would be intersected away."""
+    selected TU would be intersected away.
+
+    Routed through ``build_context.source_matches_filter`` rather than keeping
+    its own copy of those rules: three layers now narrow a compile database by
+    this same filter, and a filter that selects different translation units in
+    one layer than another is exactly the disagreement this predicate exists to
+    prevent (see that function's own docstring). Only the raw-dict field
+    extraction is this function's business."""
+    from .build_context import source_matches_filter
+
     file = entry.get("file")
     if not isinstance(file, str):
         return False
     directory = entry.get("directory")
-    path = Path(file)
-    if not path.is_absolute() and isinstance(directory, str):
-        path = Path(directory) / path  # resolve like build_context.CompileEntry
-    if fnmatch(str(path), pattern):
-        return True
-    if isinstance(directory, str):
-        try:
-            return fnmatch(str(path.relative_to(directory)), pattern)
-        except ValueError:
-            pass  # file not under directory — fall through to CWD-relative
-    try:
-        return fnmatch(str(path.relative_to(Path.cwd())), pattern)
-    except ValueError:
-        return False
+    return source_matches_filter(
+        file, directory if isinstance(directory, str) else None, pattern
+    )
 
 
 def defines_from_compile_db(
