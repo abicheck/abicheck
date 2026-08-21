@@ -42,10 +42,13 @@ from scripts.check_ai_readiness import Findings, check_cli_contract  # noqa: E40
 
 
 def test_no_tier_skip() -> None:
-    """No ``abicheck/cli*.py`` module calls Tier-1 ``checker.compare`` directly.
+    """No ``abicheck/cli*.py`` module calls a Tier-1 core entry point
+    (``checker.compare``, ``dumper.dump``, ``service.resolve_input``) directly
+    outside the reviewed ``CLI_CONTRACT_ALLOWLIST``.
 
-    Front-ends must route through ``service.run_compare`` /
-    ``service.compare_snapshots`` (ADR-037 D1/D10.1).
+    Front-ends must route through the Tier-2 service layer (ADR-037 D1/D10.1;
+    the latter two extend the identical rule per Phase 0 item 2 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md).
     """
     findings = Findings()
     check_cli_contract(findings)
@@ -127,6 +130,598 @@ def test_service_compare_call_is_not_flagged(
     findings = gate.Findings()
     gate.check_cli_contract(findings)
     assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+# ── Phase 0 item 2 of the convergence plan: `dumper.dump` / `service.resolve_input`
+#    extend the identical Tier-1 rule ─────────────────────────────────────────
+
+_EXTRA_TIER1_VIOLATION_CASES: list[pytest.ParameterSet] = [
+    pytest.param(
+        "cli_dumps_directly.py",
+        "from .dumper import dump\ndef go(a):\n    return dump(a)\n",
+        id="dumper-dump-direct-import",
+    ),
+    pytest.param(
+        "cli_dumps_aliased.py",
+        "from . import dumper as core\ndef go(a):\n    return core.dump(a)\n",
+        id="dumper-dump-aliased-module-call",
+    ),
+    pytest.param(
+        "cli_resolves_directly.py",
+        "from .service import resolve_input\ndef go(a):\n    return resolve_input(a)\n",
+        id="service-resolve-input-direct-import",
+    ),
+    pytest.param(
+        "cli_resolves_aliased.py",
+        "from . import service as svc\ndef go(a):\n    return svc.resolve_input(a)\n",
+        id="service-resolve-input-aliased-module-call",
+    ),
+    pytest.param(
+        "cli_dumps_qualified.py",
+        "import abicheck.dumper\ndef go(a):\n    return abicheck.dumper.dump(a)\n",
+        id="dumper-dump-unaliased-qualified-call",
+    ),
+    pytest.param(
+        "cli_resolves_qualified.py",
+        "import abicheck.service\ndef go(a):\n    return abicheck.service.resolve_input(a)\n",
+        id="service-resolve-input-unaliased-qualified-call",
+    ),
+    pytest.param(
+        "cli_resolves_package_alias.py",
+        "import abicheck as abi\nimport abicheck.service\n"
+        "def go(a):\n    return abi.service.resolve_input(a)\n",
+        id="service-resolve-input-package-alias-qualified-call",
+    ),
+    pytest.param(
+        "cli_resolves_package_alias_from_import.py",
+        "import abicheck as abi\nfrom abicheck import service\n"
+        "def go(a):\n    return abi.service.resolve_input(a)\n",
+        id="service-resolve-input-package-alias-from-import-qualified-call",
+    ),
+]
+
+
+@pytest.mark.parametrize("filename, source", _EXTRA_TIER1_VIOLATION_CASES)
+def test_gate_flags_extra_tier1_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    source: str,
+) -> None:
+    """`dumper.dump`/`service.resolve_input` are caught the same way
+    `checker.compare` already is, by direct import and by aliased module call."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / filename).write_text(source)
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert filename in errors[0]
+
+
+def test_nested_frontend_single_dot_relative_import_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`compat/cli.py` lives one package below the top level, so its own
+    single-dot relative import (`from .service import ...`) names a
+    *sibling* within `abicheck.compat`, not abicheck's own top-level
+    `service` module — it must not be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    compat = pkg / "compat"
+    compat.mkdir()
+    (compat / "cli.py").write_text(
+        "from .service import resolve_input\ndef go(a):\n    return resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_relative_import_of_a_module_named_abicheck_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`from .abicheck import service` is a *relative* import (level 1) that
+    resolves to `abicheck.abicheck.service`, not the package root — it must
+    not be mistaken for the absolute `from abicheck import service` form."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_weird.py").write_text(
+        "from .abicheck import service\ndef go(a):\n    return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_nested_frontend_correctly_leveled_relative_import_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The converse of the case above: `compat/cli.py` reaching abicheck's
+    own top-level `service` module needs *two* dots (`from ..service import
+    ...`), and that correctly-leveled import must still be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    compat = pkg / "compat"
+    compat.mkdir()
+    (compat / "cli.py").write_text(
+        "from ..service import resolve_input\ndef go(a):\n    return resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "compat/cli.py" in errors[0]
+
+
+def test_service_resolve_input_call_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Routing through `service_input_resolution.resolve_side_snapshot` must
+    NOT be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_ok.py").write_text(
+        "from .service_input_resolution import resolve_side_snapshot\n"
+        "def go(a):\n"
+        "    return resolve_side_snapshot(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_cli_resolve_own_wrapper_is_exempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cli_resolve.py` is the sanctioned CLI-side wrapper over
+    `service.resolve_input` (see its module docstring) — its own call must not
+    be flagged, even though every other `cli*.py` module is checked."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+@pytest.mark.parametrize(
+    "filename, source",
+    [
+        pytest.param(
+            "cli_unrelated_importfrom.py",
+            "from vendor.service import resolve_input\n"
+            "def go(a):\n"
+            "    return resolve_input(a)\n",
+            id="unrelated-importfrom-suffix-collision",
+        ),
+        pytest.param(
+            "cli_unrelated_import.py",
+            "import vendor.service\n"
+            "def go(a):\n"
+            "    return vendor.service.resolve_input(a)\n",
+            id="unrelated-import-suffix-collision",
+        ),
+        pytest.param(
+            "cli_bare_importfrom.py",
+            "from service import resolve_input\ndef go(a):\n    return resolve_input(a)\n",
+            id="bare-absolute-importfrom-collision",
+        ),
+        pytest.param(
+            "cli_bare_import.py",
+            "import service\ndef go(a):\n    return service.resolve_input(a)\n",
+            id="bare-absolute-import-collision",
+        ),
+    ],
+)
+def test_unrelated_module_with_matching_suffix_is_not_flagged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    source: str,
+) -> None:
+    """A third-party module that merely *ends* in a target module's name
+    (``vendor.service``) must not be mistaken for abicheck's own module."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / filename).write_text(source)
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert not any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_cli_resolve_exemption_is_scoped_to_the_wrapper_function(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `cli_resolve.py` exemption covers only calls inside
+    `_resolve_input()` itself — a *different* function in the same module
+    bypassing `service.resolve_input()` directly must still be flagged."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+        "\n"
+        "def _other_bypass(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:7" in errors[0]
+
+
+def test_cli_resolve_exemption_ignores_same_named_class_method(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-named `_resolve_input` *method* on a class is not the
+    documented module-level wrapper — a bypass inside it must still be
+    flagged, not silently inherit the module-level exemption."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+        "\n"
+        "class Foo:\n"
+        "    def _resolve_input(self, a):\n"
+        "        from . import service\n"
+        "        return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:8" in errors[0]
+
+
+def test_cli_resolve_exemption_ignores_nested_function_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bypass placed inside a *nested* function defined within the
+    module-level `_resolve_input()` wrapper is not part of the wrapper's
+    own scope — it must still be flagged, not silently inherit the
+    exemption via a full `ast.walk` into the nested `def`."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    def bypass():\n"
+        "        return service.resolve_input(a)\n"
+        "    return bypass()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:4" in errors[0]
+
+
+def test_cli_resolve_exemption_ignores_nested_lambda_bypass_sharing_a_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bypass inside a nested *lambda*'s body, invoked immediately on the
+    same physical line as its own IIFE call, must still be flagged — a
+    line-only membership check would wrongly exempt it because the outer
+    lambda-invocation `Call` (correctly recorded by
+    `_iter_calls_in_own_scope`, since it belongs to the wrapper's own scope)
+    shares a `lineno` with the inner, pruned bypass call (Codex review)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return (lambda: service.resolve_input(a))()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:3" in errors[0]
+
+
+def test_cli_resolve_exemption_ignores_default_argument_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bypass inside a default-argument *expression* on the wrapper's own
+    signature executes once, in the *enclosing* (module) scope at
+    def-time — not inside the wrapper's own runtime scope — so it must
+    still be flagged, not silently inherit the exemption merely because it
+    lexically sits inside the `FunctionDef` node (Codex review)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "from . import service\n"
+        "\n"
+        "\n"
+        'def _resolve_input(a=service.resolve_input("bypass")):\n'
+        "    return a\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:4" in errors[0]
+
+
+def test_cli_resolve_exemption_covers_nested_definitions_own_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opposite of the default-argument case above: a call inside a
+    default-argument expression on a function *nested* inside the wrapper
+    executes immediately in the *wrapper's own* scope (at the point the
+    nested `def` statement itself runs), not inside the nested function's
+    own body — so it must be exempt, not flagged, even though the nested
+    definition's *body* is still correctly pruned (Codex review: pruning
+    a nested definition wholesale wrongly flagged this as a violation)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    def inner(x=service.resolve_input(a)):\n"
+        "        return x\n"
+        "    return inner()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert errors == []
+
+
+def test_cli_resolve_exemption_covers_nested_definitions_return_annotation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same principle as the default-argument case above, for the other
+    definition-head expression that runs eagerly in the enclosing scope: a
+    nested function's own `-> T` return annotation. It executes in the
+    *wrapper's* own scope at the point the nested `def` statement runs, not
+    inside the nested function's own body, so it must be exempt too (Codex
+    review: `_definition_head_parts` included `node.args` but not
+    `node.returns`, so this shape was wrongly flagged)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    def inner() -> service.resolve_input(a):\n"
+        "        return None\n"
+        "    return inner()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert errors == []
+
+
+def test_cli_resolve_exemption_ignores_comprehension_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A comprehension/generator expression introduces its own implicit
+    scope in CPython — a call in its result expression (here, a generator
+    expression's `elt`) executes inside *that* scope, not the wrapper's
+    own, so it must still be flagged (Codex review: only explicit
+    def/class/lambda were treated as nested scopes, so
+    `next(service.resolve_input(x) for x in paths)` nested inside the
+    wrapper was wrongly exempted)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(paths):\n"
+        "    from . import service\n"
+        "    return next(service.resolve_input(x) for x in paths)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:3" in errors[0]
+
+
+def test_cli_resolve_exemption_covers_comprehensions_outermost_iterable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opposite of the comprehension case above: only a comprehension's
+    *outermost* `for` clause's iterable is evaluated eagerly in the
+    enclosing scope (documented CPython behavior) — a call there is a
+    genuine wrapper-scope call and must stay exempt."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return [x for x in service.resolve_input(a)]\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert errors == []
+
+
+def test_cli_resolve_exemption_ignores_bypass_in_nested_comprehension_iterable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A head part can itself be scope-defining: an outer comprehension's
+    outermost iterable is itself another comprehension
+    (`[x for x in [service.resolve_input(y) for y in xs]]`), and the
+    *inner* comprehension's own result expression is not the outer
+    comprehension's enclosing-scope iterable — it's the inner
+    comprehension's own scope — so it must still be flagged (Codex
+    review: recursing into a head part via the top-level entry point
+    bypassed the pruning check that only fires on an ordinary child,
+    letting a scope-defining head part's own body inherit the
+    exemption)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(xs):\n"
+        "    from . import service\n"
+        "    return [x for x in [service.resolve_input(y) for y in xs]]\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:3" in errors[0]
+
+
+def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two calls to the same Tier-1 target on one line (`(dump(a), dump(b))`)
+    must each need their own reviewed allowlist entry — allowlisting the
+    first must not silently exempt the second."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_dup.py").write_text(
+        "from .dumper import dump\ndef go(a, b):\n    return (dump(a), dump(b))\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    # Only the first call's exact site is allowlisted.
+    monkeypatch.setattr(
+        gate,
+        "CLI_CONTRACT_ALLOWLIST",
+        frozenset({"abicheck/cli_dup.py:3:12:dumper.dump"}),
+    )
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_dup.py:3:21" in errors[0]
+
+
+def test_cli_contract_allowlist_entries_are_real_violations() -> None:
+    """Every `CLI_CONTRACT_ALLOWLIST` entry must still name a genuine Tier-1
+    call site *for its own recorded target* in the real tree — otherwise the
+    allowlist rots into a rubber stamp for a call that was already fixed or
+    removed, silently starts covering a *different* Tier-1 violation that
+    happens to land on the same line, or silently starts covering a
+    *second* call to the same target on that line (the key includes the
+    column offset specifically so this can be verified, not just that some
+    finding exists at that `path:lineno`)."""
+    import re
+
+    import scripts.check_ai_readiness as gate
+
+    findings = gate.Findings()
+    original = gate.CLI_CONTRACT_ALLOWLIST
+    try:
+        gate.CLI_CONTRACT_ALLOWLIST = frozenset()
+        gate.check_cli_contract(findings)
+    finally:
+        gate.CLI_CONTRACT_ALLOWLIST = original
+    pattern = re.compile(r"^([^:]+:\d+:\d+): front-end calls Tier-1 `([^`]+)` ")
+    flagged_sites: set[str] = set()
+    for c, m in findings.errors:
+        if c != "cli-contract":
+            continue
+        match = pattern.match(m)
+        if match is not None:
+            flagged_sites.add(f"{match.group(1)}:{match.group(2)}")
+    stale = original - flagged_sites
+    assert not stale, (
+        f"allowlist entries no longer correspond to a real violation for "
+        f"their own recorded target: {stale}"
+    )
 
 
 # ── D10.2: shared-decorator coverage (ADR-037 D3 / G22 Phase 2) ──────────────

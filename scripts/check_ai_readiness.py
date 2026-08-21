@@ -149,16 +149,21 @@ ERROR_LINES = 2000
 # WARN on every run, so the debt stays visible rather than invisible.
 #
 # `check_ai_readiness.py` itself is the one entry that isn't pre-existing
-# debt this change merely discovered — the checks added in this same commit
-# pushed it over 2000 lines. It stays here rather than being split because
-# its largest self-contained block (`check_cli_contract` and its ~15 private
+# debt this change merely discovered — the checks added in the commit that
+# introduced `engine-cli-boundary` pushed it over 2000 lines, and PR #813's
+# `cli-contract` extension (`dumper.dump`/`service.resolve_input`, plus the
+# `_dotted_path`/`_importfrom_names_module`/`_relative_import_level_for_source`
+# helpers their false-positive/false-negative fixes needed) grew it further
+# still. It stays here rather than being split because its largest
+# self-contained block (`check_cli_contract` and its now ~20 private
 # helpers, ADR-037 D10) is exactly what `tests/test_cli_contract.py`
 # monkeypatches by module-level name (e.g. `gate._VERDICT_CMD_MODULES`)
 # before calling `gate.check_cli_contract(...)` — moving that block to a
 # sibling module would make `check_cli_contract` read a *different* module's
 # globals than the ones the monkeypatch rebinds, silently breaking those
 # tests' ability to patch the very state they're asserting against. That
-# split needs its own pass that also updates the test file, not this one.
+# split needs its own pass that also updates the test file, not one folded
+# reactively into an unrelated correctness fix under continued review.
 LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
     {
         "scripts/benchmark_comparison.py",
@@ -2106,69 +2111,420 @@ def check_banned_imports(f: Findings) -> None:
 # Check: CLI interface contract (ADR-037 D10.1)
 # ---------------------------------------------------------------------------
 
-# Tier-1 core entry points a front-end must never call directly — it must route
-# through the Tier-2 service layer (``service.run_compare`` /
-# ``service.compare_snapshots``). ADR-037 D1/D10.1.
-_TIER1_CORE_FUNCS: frozenset[str] = frozenset({"compare"})
+# Tier-1 core entry points a front-end must never call directly — each maps
+# the module defining it to the function name(s) and the guidance a
+# violation should carry. ADR-037 D1/D10.1 covers ``checker.compare``;
+# ``dumper.dump``/``service.resolve_input`` extend the identical rule per
+# Phase 0 item 2 of
+# docs/contribute/plans/duplication-and-convergence-assessment.md — a
+# front-end reaching any of the three bypasses the one shared
+# resolve/execute path the rest of that plan is converging on.
+#
+# Known, pre-existing limitation (not introduced by the extension to three
+# targets — the original single-target ``checker.compare`` check already had
+# this exact shape): binding detection is file-wide and lexically
+# scope-blind. A local parameter or nested function that happens to *shadow*
+# an imported Tier-1 name (e.g. a function parameter literally named
+# ``resolve_input``) and is then called would be misread as the imported
+# Tier-1 function. No real call site in this codebase does this today (the
+# `test_no_tier_skip` real-repo run stays at 0 findings), and doing so would
+# itself already draw a `ruff` shadowing/redefinition warning — a full
+# lexical-scope-aware rewrite of this AST walk is a disproportionate
+# response to a theoretical, not-observed risk and is left as a documented
+# residual gap rather than attempted reactively here.
+_TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
+    (
+        "checker",
+        frozenset({"compare"}),
+        "route through `service.run_compare` / `service.compare_snapshots`",
+    ),
+    (
+        "dumper",
+        frozenset({"dump"}),
+        "route through `service.run_dump` / `service_dump_pipeline.run_dump_request`",
+    ),
+    (
+        "service",
+        frozenset({"resolve_input"}),
+        "route through `service_input_resolution.resolve_side_snapshot` "
+        "(or `cli_resolve._resolve_input`, its CLI-side wrapper)",
+    ),
+)
 
-# ``"<rel-path>:<lineno>"`` call sites deliberately exempted, each needing a
-# reason in review. Empty by design — a new exemption is a reviewed decision,
-# not an accident (mirrors the INTENTIONAL_SUBSET philosophy of D10.2).
-CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset()
+#: Modules whose ``_resolve_input()`` function is exempted from the
+#: ``service.resolve_input`` entry above: ``cli_resolve.py``'s own
+#: ``_resolve_input()`` *is* the CLI's sanctioned, framework-aware wrapper
+#: over ``service.resolve_input`` (see its module docstring) — the same role
+#: ``service.py`` itself plays for ``checker.compare``. The exemption is
+#: scoped to calls inside that one function
+#: (``_resolve_input_wrapper_call_sites``), not the whole module — a
+#: *different* function added later to the same file must still route
+#: through it rather than bypassing the rule directly.
+_RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
+
+# ``"<rel-path>:<lineno>:<col_offset>:<module>.<func>"`` call sites
+# deliberately exempted, each needing a reason in review. The target
+# identity and the call's own column are both part of the key — not just
+# `path:lineno` — so replacing an allowlisted call with a *different*
+# Tier-1 violation on the same line, or adding a second call to the *same*
+# target on that line (e.g. `(dump(a), dump(b))`), cannot silently inherit
+# the exemption; each direct Tier-1 call needs its own reviewed entry. The
+# freshness test below depends on this to actually verify the reviewed
+# call is still there, not just that *some* finding exists at that site.
+# Pre-populated with the pre-existing, already-documented
+# `dumper.dump`/`service.resolve_input` direct-call sites Phase 1 of the
+# same plan names as duplication to converge
+# (`cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`,
+# `cli_scan_baseline`'s baseline resolution) — a new entry beyond these
+# needs the same reviewed sign-off (mirrors the INTENTIONAL_SUBSET
+# philosophy of D10.2).
+CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
+        # rather than through `service_dump_pipeline.run_dump_request` —
+        # tracked as Phase 1 item 1 of the convergence plan.
+        "abicheck/cli_dump_helpers.py:1641:19:dumper.dump",
+        # Standalone application-compatibility (P0 item 6): dumps both
+        # sides directly rather than through any of the other paths.
+        "abicheck/appcompat.py:1599:15:dumper.dump",
+        "abicheck/appcompat.py:1608:15:dumper.dump",
+        # Scan baseline resolution (P0 item 4's baseline half): calls
+        # `service.resolve_input()` directly rather than through
+        # `service_input_resolution.resolve_side_snapshot`.
+        "abicheck/cli_scan_baseline.py:1119:19:service.resolve_input",
+        # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
+        # frontend and engine path"): its own parallel engine path calls
+        # both `dumper.dump()` and `checker.compare()` directly.
+        "abicheck/compat/cli.py:313:15:dumper.dump",
+        "abicheck/compat/cli.py:970:17:checker.compare",
+        "abicheck/compat/cli.py:1154:11:dumper.dump",
+    }
+)
 
 
-def _checker_compare_bindings(tree: ast.Module) -> set[str]:
-    """Return the local names bound to ``checker.compare`` via import in *tree*.
+def _relative_import_level_for_source(path: Path) -> int:
+    """The ``ImportFrom.level`` a module at *path* must use to reach
+    abicheck's own top-level package via a relative import.
 
-    Handles ``from .checker import compare`` and ``... import compare as X`` at
+    Python's relative-import level counts dots from the *importing*
+    module's own containing package, not from a fixed depth: a top-level
+    module (``abicheck/cli.py``) reaches ``abicheck`` with a single dot
+    (``from . import checker``, level 1), while a module one package
+    deeper (``abicheck/compat/cli.py``, whose own package is
+    ``abicheck.compat``) needs two (``from .. import checker``, level 2) —
+    a single dot there resolves to ``abicheck.compat.checker`` instead, a
+    different module entirely.
+    """
+    depth = len(path.resolve().relative_to(PKG.resolve()).parent.parts)
+    return depth + 1
+
+
+def _importfrom_names_module(
+    dotted: str, level: int, module: str, required_level: int
+) -> bool:
+    """True if an ``ImportFrom(module=dotted, level=level)`` genuinely names
+    abicheck's own top-level ``<module>`` — a relative ``.{module}`` at
+    exactly *required_level* dots (see ``_relative_import_level_for_source``
+    — a *different* level names a different, sibling module even when the
+    trailing spelling matches) or an absolute ``abicheck.{module}`` — not an
+    unrelated module that merely *ends* in or *is spelled* the same bare
+    name (``from vendor.service import resolve_input`` and a bare ``from
+    service import resolve_input`` must not be mistaken for abicheck's own
+    ``service`` module; a real front-end module here always spells its own
+    sibling either relatively or through the ``abicheck.`` prefix, never as
+    a bare top-level name).
+    """
+    if level >= 1:
+        return level == required_level and dotted == module
+    return dotted == f"abicheck.{module}"
+
+
+def _import_names_module(dotted: str, module: str) -> bool:
+    """True if a plain ``import <dotted>`` genuinely names abicheck's own
+    top-level ``<module>`` (``abicheck.<module>`` only — never a bare
+    ``<module>``), for the identical reason as ``_importfrom_names_module``
+    above."""
+    return dotted == f"abicheck.{module}"
+
+
+def _tier1_func_bindings(
+    tree: ast.Module, module: str, funcs: frozenset[str], required_level: int
+) -> set[str]:
+    """Return the local names bound to one of *funcs* via a direct import of
+    *module*'s function(s) in *tree*.
+
+    Handles ``from .<module> import <func>`` and ``... import <func> as X`` at
     module or function scope, so a lazily-imported alias is caught too.
+    *required_level* is the source file's own relative-import depth — see
+    ``_relative_import_level_for_source``.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.ImportFrom)
             and node.module is not None
-            and node.module.split(".")[-1] == "checker"
+            and _importfrom_names_module(
+                node.module, node.level, module, required_level
+            )
         ):
             for alias in node.names:
-                if alias.name in _TIER1_CORE_FUNCS:
+                if alias.name in funcs:
                     names.add(alias.asname or alias.name)
     return names
 
 
-def _checker_module_bindings(tree: ast.Module) -> set[str]:
-    """Return local names bound to the ``checker`` *module* itself.
+def _dotted_path(node: ast.expr) -> str | None:
+    """The full dotted-attribute spelling of a ``Name``/``Attribute`` chain
+    (``abicheck.service`` for ``abicheck.service``'s AST), or ``None`` if
+    *node* is not a plain dotted chain (a call result, a subscript, ...)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_path(node.value)
+        return None if base is None else f"{base}.{node.attr}"
+    return None
 
-    Catches ``from . import checker [as X]`` / ``from abicheck import checker
-    [as X]`` and ``import abicheck.checker as X``, so an aliased
-    ``core.compare(...)`` call is recognised, not just the literal
-    ``checker.compare(...)``.
+
+def _tier1_package_aliases(tree: ast.Module) -> set[str]:
+    """Every local name bound to the ``abicheck`` top-level package object
+    itself — ``import abicheck`` binds ``abicheck``, ``import abicheck as
+    abi`` binds ``abi``. Used to recognize a qualified Tier-1 call reached
+    through a package-level alias (``abi.service.resolve_input(...)``), not
+    just the literal ``abicheck`` spelling (Codex review: only the bare name
+    was tracked, so an aliased-package spelling silently bypassed the gate).
+    """
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "abicheck":
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _tier1_module_bindings(
+    tree: ast.Module, module: str, required_level: int
+) -> set[str]:
+    """Return every spelling *tree* could call ``<module>.<func>(...)``
+    through: local names bound to *module* itself, plus the full dotted path
+    the submodule is reachable through off every name bound to the
+    ``abicheck`` package object itself (the bare ``abicheck`` name, and any
+    ``import abicheck as X`` alias — see ``_tier1_package_aliases``).
+
+    Catches ``from . import <module> [as X]``, ``from abicheck import
+    <module> [as X]``, and ``import abicheck.<module> [as X]`` alike, so an
+    aliased ``core.<func>(...)`` call is recognised — and so is
+    ``abicheck.<module>.<func>(...)`` *and* ``<pkg_alias>.<module>.<func>(...)``
+    for any package alias, regardless of *which* of the three import forms
+    actually loaded the submodule (Codex review: an earlier version only
+    granted this for the unaliased ``import abicheck.<module>`` spelling,
+    so ``import abicheck as abi`` combined with a separately-aliased
+    ``from abicheck import service`` still bypassed the gate — but Python
+    binds the submodule onto the package object as a side effect of *any*
+    of the three import forms, whether or not that statement's own local
+    binding is aliased, so every one of them must grant the same package-
+    alias reachability) — not just a call through a name bound directly to
+    *module*. *required_level* is the source file's own relative-import
+    depth (see ``_relative_import_level_for_source``): a bare ``from .
+    import <module>`` only names the top-level abicheck module at exactly
+    that level, since a nested front end's single dot names a *sibling*
+    within its own subpackage instead.
     """
     names: set[str] = set()
+    submodule_imported = False
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            # ``from . import checker`` (module is None) or ``from abicheck import checker``.
-            if node.module is None or node.module.split(".")[-1] == "abicheck":
+            # ``from . import <module>`` (module is None, level must match
+            # this source's own depth) or an *absolute* ``from abicheck
+            # import <module>`` (level 0 — a relative ``from .abicheck
+            # import <module>`` is a different module, `abicheck.abicheck`,
+            # not the package root) — not an unrelated ``from vendor import
+            # <module>``-shaped import, and not a nested front end's own
+            # same-subpackage sibling.
+            if (node.module is None and node.level == required_level) or (
+                node.level == 0 and node.module == "abicheck"
+            ):
                 for alias in node.names:
-                    if alias.name == "checker":
+                    if alias.name == module:
+                        # This form loads `abicheck.<module>` and binds it
+                        # onto the package object regardless of whether the
+                        # *local* name is aliased (`as X`) -- so it grants
+                        # package-alias reachability the same as the
+                        # unaliased `import abicheck.<module>` form below.
                         names.add(alias.asname or alias.name)
+                        submodule_imported = True
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[-1] == "checker":
-                    # ``import abicheck.checker`` binds ``abicheck``; only an
-                    # explicit ``as X`` gives a usable ``X.compare`` call name.
+                if _import_names_module(alias.name, module):
+                    submodule_imported = True
                     if alias.asname:
                         names.add(alias.asname)
+                    else:
+                        # ``import abicheck.<module>`` binds only ``abicheck``;
+                        # the module itself stays reachable as the full
+                        # dotted path off it (``abicheck.<module>.<func>``).
+                        names.add(alias.name)
+    if submodule_imported:
+        # The submodule attribute lives on the package *object* -- every
+        # other name bound to that same object (a package-level alias)
+        # reaches it too, not just the literal ``abicheck`` spelling.
+        names.update(
+            f"{pkg_alias}.{module}" for pkg_alias in _tier1_package_aliases(tree)
+        )
     return names
 
 
+#: Every AST node shape that introduces its own implicit scope, distinct
+#: from its lexically-enclosing one — the ``def``/``class``/``lambda``
+#: trio, plus a comprehension/generator expression (``[x for x in ...]``),
+#: which CPython also compiles as a hidden nested scope (Codex review: the
+#: comprehension case was missing, so ``next(service.resolve_input(x) for x
+#: in paths)`` nested inside the wrapper was wrongly exempted).
+_SCOPE_DEFINING_TYPES: tuple[type[ast.AST], ...] = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+def _definition_head_parts(node: ast.AST) -> list[ast.AST]:
+    """The parts of a scope-defining node that execute in its *enclosing*
+    scope, right when the node itself is evaluated — decorators,
+    default-argument expressions, the return annotation, base-class/keyword
+    expressions (class), and — for a comprehension — only the *outermost*
+    ``for`` clause's iterable (the one Python expression a comprehension
+    evaluates eagerly in the enclosing scope; every other clause, condition,
+    and the result expression itself run inside the comprehension's own
+    scope). Never the node's own body/return-expression, which is the *new*
+    scope it introduces.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        # `node.returns` (the `-> T` annotation) is, like a default-argument
+        # expression, evaluated in the enclosing scope at def-time, not the
+        # scope the definition introduces (Codex review: only `node.args`
+        # was included, so a nested definition's return annotation calling a
+        # Tier-1 target was wrongly flagged instead of recognized as running
+        # in the enclosing wrapper's own scope). `None` when unannotated.
+        parts: list[ast.AST] = [*node.decorator_list, node.args]
+        if node.returns is not None:
+            parts.append(node.returns)
+        return parts
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases, *node.keywords]
+    if isinstance(node, ast.Lambda):
+        return [node.args]
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        return [node.generators[0].iter] if node.generators else []
+    return []
+
+
+def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
+    """Yield every ``Call`` lexically inside *node*'s own scope, without
+    descending into a *nested* function/class/lambda definition's own body
+    — a call there belongs to that nested scope, not to *node*'s, and must
+    not be silently swept in as if it were (Codex review: a bypass placed
+    inside a nested ``def`` within the sanctioned wrapper previously
+    inherited the wrapper's own exemption via a full ``ast.walk``). A
+    nested definition's *head* (:func:`_definition_head_parts`) is walked
+    though, not skipped wholesale — those expressions run immediately in
+    *this* scope (Codex review: ``def inner(x=service.resolve_input(a))``
+    nested inside the wrapper was wrongly flagged).
+
+    For a ``FunctionDef``/``AsyncFunctionDef`` passed directly (the only
+    shape a caller passes at the top level), only ``node.body`` is this
+    scope — its own head is the *enclosing* (module) scope, not this one,
+    and is deliberately excluded the same way a nested definition's own
+    head is *included* for the opposite reason (Codex review: a call in
+    the top-level wrapper's own default expression was swept in as
+    exempt). Applying that special case *inside* this function, not by
+    having a caller pass ``node.body`` statements one at a time, matters:
+    the pruning check below only fires when a scope-defining node is
+    discovered as a *child* during recursion — calling this function
+    directly on a *nested* ``def`` would bypass it entirely. The actual
+    per-child walk is :func:`_iter_calls_in_children`, reused for a head
+    part's own recursion too — a head part can itself be scope-defining
+    (e.g. a comprehension nested inside another comprehension's outermost
+    iterable), and it must get the identical pruning treatment an ordinary
+    body statement gets, not the naive top-level entry (Codex review: that
+    naive entry skipped the pruning check for exactly this shape).
+    """
+    children: Iterable[ast.AST] = (
+        node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        else ast.iter_child_nodes(node)
+    )
+    yield from _iter_calls_in_children(children)
+
+
+def _iter_calls_in_children(children: Iterable[ast.AST]) -> Iterable[ast.Call]:
+    """The shared per-child walk behind :func:`_iter_calls_in_own_scope`:
+    yield a ``Call`` child directly, and for a scope-defining child recurse
+    only into its own head parts (never its body); everything else
+    descends normally. Used both for a node's ordinary children and for a
+    scope-defining child's own head parts, so a head part that is itself
+    scope-defining is pruned the same way either shape is reached.
+    """
+    for child in children:
+        if isinstance(child, ast.Call):
+            yield child
+        if isinstance(child, _SCOPE_DEFINING_TYPES):
+            yield from _iter_calls_in_children(_definition_head_parts(child))
+            continue
+        yield from _iter_calls_in_children(ast.iter_child_nodes(child))
+
+
+def _resolve_input_wrapper_call_sites(tree: ast.Module) -> frozenset[tuple[int, int]]:
+    """``(lineno, col_offset)`` of every ``Call`` inside the *module-level*
+    ``_resolve_input()``'s own scope — the only call sites the
+    ``service.resolve_input`` rule may exempt in a module listed in
+    ``_RESOLVE_INPUT_WRAPPER_MODULES``.
+
+    Looks only at ``tree.body`` (top-level statements) to find the wrapper
+    itself — a same-named method on a class, or a same-named function
+    nested inside a different one, is not the reviewed, documented wrapper
+    — and, once found, walks only its own lexical scope
+    (:func:`_iter_calls_in_own_scope`), not a full ``ast.walk``, so a call
+    inside a *nested* function or class defined within the wrapper does not
+    silently inherit its exemption either.
+
+    Keyed by the full ``(lineno, col_offset)`` position, not bare ``lineno``
+    (Codex review: a nested-scope bypass on the *same line* as an
+    exempt outer call — e.g. ``return (lambda: service.resolve_input(a))()``
+    — was itself correctly pruned by :func:`_iter_calls_in_own_scope`, but
+    the outer call's own line number was still recorded, and a line-only
+    membership check let the inner call inherit that exemption purely from
+    sharing a line, not from being the reviewed site).
+
+    :func:`_iter_calls_in_own_scope` itself excludes a default-argument
+    expression (``def _resolve_input(a=service.resolve_input(path)):``),
+    which executes once in the *enclosing* scope at def-time, not inside
+    the wrapper's own runtime scope (Codex review) — see its docstring.
+    """
+    sites: set[tuple[int, int]] = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "_resolve_input":
+            sites.update(
+                (call.lineno, call.col_offset)
+                for call in _iter_calls_in_own_scope(node)
+            )
+    return frozenset(sites)
+
+
 def _iter_cli_contract_sources() -> Iterable[Path]:
-    """The front-end modules the contract covers: every ``cli*.py`` and the
-    consumer-side ``appcompat.py`` (a verdict-emitting front-end too). The MCP
+    """The front-end modules the contract covers: every ``cli*.py``, the
+    consumer-side ``appcompat.py`` (a verdict-emitting front-end too), and
+    ``compat/cli.py`` (the ABICC-compatible CLI wrapper — a *nested* front
+    end `PKG.glob("cli*.py")` alone would miss, per Phase 0 item 2 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md). The MCP
     server was removed; agent integrations route through these same
     front ends (CLI or the typed Python API) rather than a separate tier."""
     yield from PKG.glob("cli*.py")
-    for extra in ("appcompat.py",):
+    for extra in ("appcompat.py", "compat/cli.py"):
         path = PKG / extra
         if path.is_file():
             yield path
@@ -2330,15 +2686,19 @@ def _check_one_default_per_flag(f: Findings) -> None:
 
 def check_cli_contract(f: Findings) -> None:
     """ERROR if a front-end module calls a Tier-1 core entry point
-    (``checker.compare``) directly instead of routing through the Tier-2 service.
+    (``checker.compare``, ``dumper.dump``, ``service.resolve_input``) directly
+    instead of routing through the Tier-2 service.
 
     Covers every ``abicheck/cli*.py`` and ``abicheck/appcompat.py``. ADR-037
-    D1/D10.1: front-ends are thin adapters; one classification path is what keeps
-    ``compare`` / ``compare-release`` / ``appcompat`` from drifting apart
-    (the ``scope_public`` default divergence the ADR documents). Importing a
-    ``checker`` *type* for annotations or result-rendering stays legal — the gate
-    keys on the *call expression*, not the import statement. Both a direct
-    ``compare`` import and an aliased ``checker``-module call are detected.
+    D1/D10.1: front-ends are thin adapters; one classification/resolution path
+    is what keeps ``compare`` / ``compare-release`` / ``appcompat`` from
+    drifting apart (the ``scope_public`` default divergence the ADR documents)
+    — the same reasoning Phase 0 item 2 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md extends to
+    ``dumper.dump``/``service.resolve_input``. Importing a target module's
+    *type* for annotations or result-rendering stays legal — the gate keys on
+    the *call expression*, not the import statement. Both a direct function
+    import and an aliased module-attribute call are detected for each target.
     """
     for path in sorted(_iter_cli_contract_sources()):
         rel = _rel(path)
@@ -2346,25 +2706,49 @@ def check_cli_contract(f: Findings) -> None:
             tree = ast.parse(_read(path), filename=rel)
         except SyntaxError:
             continue
-        bound = _checker_compare_bindings(tree)
-        checker_modules = _checker_module_bindings(tree)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            is_tier1 = (isinstance(func, ast.Name) and func.id in bound) or (
-                isinstance(func, ast.Attribute)
-                and func.attr in _TIER1_CORE_FUNCS
-                and isinstance(func.value, ast.Name)
-                and func.value.id in checker_modules
-            )
-            if is_tier1 and f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
-                f.err(
-                    "cli-contract",
-                    f"{rel}:{node.lineno}: front-end calls Tier-1 `checker.compare` "
-                    "directly; route through `service.run_compare` / "
-                    "`service.compare_snapshots` (ADR-037 D1/D10.1)",
+        is_wrapper_module = path.stem in _RESOLVE_INPUT_WRAPPER_MODULES
+        # Only the reviewed wrapper *call*, inside `_resolve_input()` itself,
+        # is exempt — not every `service.resolve_input` call anywhere else in
+        # the same module, which would let a future bypass elsewhere in this
+        # file accumulate unnoticed.
+        wrapper_call_sites = (
+            _resolve_input_wrapper_call_sites(tree)
+            if is_wrapper_module
+            else frozenset()
+        )
+        required_level = _relative_import_level_for_source(path)
+        for module, funcs, guidance in _TIER1_TARGETS:
+            bound = _tier1_func_bindings(tree, module, funcs, required_level)
+            target_modules = _tier1_module_bindings(tree, module, required_level)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                is_tier1 = (isinstance(func, ast.Name) and func.id in bound) or (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in funcs
+                    and _dotted_path(func.value) in target_modules
                 )
+                if not is_tier1:
+                    continue
+                if (
+                    module == "service"
+                    and (
+                        node.lineno,
+                        node.col_offset,
+                    )
+                    in wrapper_call_sites
+                ):
+                    continue
+                called = func.attr if isinstance(func, ast.Attribute) else func.id
+                site_key = f"{rel}:{node.lineno}:{node.col_offset}:{module}.{called}"
+                if site_key not in CLI_CONTRACT_ALLOWLIST:
+                    f.err(
+                        "cli-contract",
+                        f"{rel}:{node.lineno}:{node.col_offset}: front-end calls "
+                        f"Tier-1 `{module}.{called}` directly; {guidance} "
+                        "(ADR-037 D1/D10.1)",
+                    )
     # D10.2 shared-decorator coverage + D10.4 one-default-per-flag (ADR-037 D3).
     _check_decorator_coverage(f)
     _check_one_default_per_flag(f)
