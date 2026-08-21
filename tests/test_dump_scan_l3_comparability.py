@@ -92,6 +92,7 @@ coverage.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -133,18 +134,36 @@ def _have_frontend(ast_frontend: str) -> bool:
 # coverage should fail loudly rather than being masked here.
 _SCAN_KNOWN_DIVERGENT_FRONTENDS: frozenset[str] = frozenset({"castxml"})
 
+# The exact, already-diagnosed finding-kind set for the L4-extractor
+# divergence -- an *exact* set match, not "these are present among
+# possibly others" (Codex review: a substring-only check would still
+# xfail past an unrelated additional risk finding riding alongside the
+# known two, silently hiding a real regression).
+_KNOWN_L4_EXTRACTOR_DIVERGENCE_KINDS = frozenset(
+    {"source_fact_coverage_incomplete", "source_binary_provenance_mismatch"}
+)
+_RISK_LINE_RE = re.compile(r"^\s*\[risk\]\s+(\S+):", re.MULTILINE)
 
-def _is_known_l4_extractor_divergence(output: str) -> bool:
-    """The exact, already-diagnosed signature: a RISK verdict from the two
-    L4-replay-specific reason codes ``run_scan_core``'s own comment already
-    attributes to the clang-vs-castxml candidate/baseline extractor
-    mismatch -- never a broader "any non-NO_CHANGE verdict" check, so an
-    unrelated regression still surfaces as a genuine, uncaught failure."""
+
+def _is_known_l4_extractor_divergence_text(output: str) -> bool:
+    """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK`` and
+    the set of ``[risk] <kind>:`` lines must equal exactly the known
+    two-kind set -- no more, no fewer."""
+    if "COMPATIBLE_WITH_RISK" not in output:
+        return False
     return (
-        "COMPATIBLE_WITH_RISK" in output
-        and "source_fact_coverage_incomplete" in output
-        and "source_binary_provenance_mismatch" in output
+        frozenset(_RISK_LINE_RE.findall(output)) == _KNOWN_L4_EXTRACTOR_DIVERGENCE_KINDS
     )
+
+
+def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
+    """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK`` and
+    the set of ``changes[].kind`` must equal exactly the known two-kind
+    set -- no more, no fewer."""
+    if report.get("verdict") != "COMPATIBLE_WITH_RISK":
+        return False
+    kinds = frozenset(c.get("kind") for c in report.get("changes", []))
+    return kinds == _KNOWN_L4_EXTRACTOR_DIVERGENCE_KINDS
 
 
 def _build_library(
@@ -345,7 +364,7 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
     assert scan_result.exit_code == 0, scan_result.output
 
     if ast_frontend in _SCAN_KNOWN_DIVERGENT_FRONTENDS:
-        if _is_known_l4_extractor_divergence(scan_result.output):
+        if _is_known_l4_extractor_divergence_text(scan_result.output):
             pytest.xfail(
                 f"{ast_frontend}: known scan-candidate-L4-extractor-always-"
                 "clang divergence (see this module's own docstring)"
@@ -353,12 +372,13 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
         pytest.fail(
             f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
             "but the previously-diagnosed failure signature "
-            "(COMPATIBLE_WITH_RISK naming source_fact_coverage_incomplete "
-            "and source_binary_provenance_mismatch) did not reproduce. "
-            "Either the underlying gap has closed -- remove this frontend "
-            "from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update this module's "
-            "docstring -- or a different failure occurred and needs its "
-            f"own investigation. output={scan_result.output!r}"
+            "(COMPATIBLE_WITH_RISK naming exactly "
+            "source_fact_coverage_incomplete and "
+            "source_binary_provenance_mismatch, no other risk finding) did "
+            "not reproduce. Either the underlying gap has closed -- remove "
+            "this frontend from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update "
+            "this module's docstring -- or a different failure occurred "
+            f"and needs its own investigation. output={scan_result.output!r}"
         )
     assert "Verdict: NO_CHANGE" in scan_result.output, scan_result.output
 
@@ -447,7 +467,7 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
     assert diff.get("reason") is None, diff.get("reason")
 
     if ast_frontend in _SCAN_KNOWN_DIVERGENT_FRONTENDS:
-        if _is_known_l4_extractor_divergence(json.dumps(report)):
+        if _is_known_l4_extractor_divergence_report(report):
             pytest.xfail(
                 f"{ast_frontend}: known scan-candidate-L4-extractor-always-"
                 "clang divergence (see this module's own docstring)"
@@ -455,10 +475,12 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
         pytest.fail(
             f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
             "but the previously-diagnosed failure signature "
-            "(COMPATIBLE_WITH_RISK naming source_fact_coverage_incomplete "
-            "and source_binary_provenance_mismatch) did not reproduce. "
-            "Either the underlying gap has closed -- remove this frontend "
-            "from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update this module's "
-            f"docstring -- or a different failure occurred. report={report!r}"
+            "(COMPATIBLE_WITH_RISK naming exactly "
+            "source_fact_coverage_incomplete and "
+            "source_binary_provenance_mismatch, no other change) did not "
+            "reproduce. Either the underlying gap has closed -- remove "
+            "this frontend from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update "
+            f"this module's docstring -- or a different failure occurred. "
+            f"report={report!r}"
         )
     assert report.get("verdict") == "NO_CHANGE", report
