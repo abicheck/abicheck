@@ -445,6 +445,34 @@ def test_cli_resolve_exemption_ignores_nested_function_bypass(
     assert "cli_resolve.py:4" in errors[0]
 
 
+def test_cli_resolve_exemption_ignores_nested_lambda_bypass_sharing_a_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bypass inside a nested *lambda*'s body, invoked immediately on the
+    same physical line as its own IIFE call, must still be flagged — a
+    line-only membership check would wrongly exempt it because the outer
+    lambda-invocation `Call` (correctly recorded by
+    `_iter_calls_in_own_scope`, since it belongs to the wrapper's own scope)
+    shares a `lineno` with the inner, pruned bypass call (Codex review)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return (lambda: service.resolve_input(a))()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:3" in errors[0]
+
+
 def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

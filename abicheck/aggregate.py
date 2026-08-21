@@ -1380,16 +1380,10 @@ class _LoadedReport:
     #: a run without ``--require-complete-analysis`` never floors its exit
     #: on this axis, so ``0`` is the honest default rather than a fallback.
     analysis_assurance_exit: int = 0
-    #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
-    #: assessment.md ("every effective evaluation carries a digest"): read
+    #: Phase 0 item 6 ("every effective evaluation carries a digest"): read
     #: straight off the per-target report's own ``effective_config_digest``
-    #: (``add_effective_config_digest``, ``reporter_contract_blocks.py``) —
-    #: never recomputed here, since this aggregate holds none of the
-    #: ``DiffResult``/``SeverityConfig`` evidence that digest is derived
-    #: from, only the already-written report dict. ``None`` for every report
-    #: that carries none — a pre-digest report, or one written with
-    #: ``include_exit_decision=False`` (``compat check``'s own reports,
-    #: which intentionally omit the digest — see that call site's docstring)
+    #: — never recomputed here. ``None`` for a report that carries none (a
+    #: pre-digest report, or one written with ``include_exit_decision=False``
     #: — same fail-open default as the coverage/assurance fields above.
     effective_config_digest: str | None = None
 
@@ -1491,22 +1485,28 @@ def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
     return 0
 
 
+#: Same shape ``effective_config_digest()`` always produces, and the
+#: aggregate schema's own pattern -- validated, not trusted, since this
+#: reads an on-disk report this module doesn't control the writer of
+#: (Codex review: a malformed value passed through could make `aggregate
+#: --format json` fail its own published schema).
+_EFFECTIVE_CONFIG_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
 def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
     """The report's own ``effective_config_digest`` (Phase 0 item 6 of
     docs/contribute/plans/duplication-and-convergence-assessment.md).
 
-    A ``compare``/release report carries this at the document root, but a
-    *scan* report nests its whole baseline summary under ``diff`` (or
-    ``report.diff``) -- the exact same document-shape distinction
-    :func:`_analysis_assurance_exit` above already has to account for, so
-    this reuses the identical :func:`contract_coverage_blocks` traversal
-    rather than a second, independently-written nested lookup (Codex
-    review: reading only the document root produced ``None`` for every
-    scan report).
+    Reuses :func:`contract_coverage_blocks`'s shape-aware traversal (a
+    ``compare``/release report carries this at the document root; a
+    *scan* report nests it under ``diff``/``report.diff`` -- the same
+    distinction :func:`_analysis_assurance_exit` already accounts for)
+    rather than a second, root-only lookup. A value not matching
+    :data:`_EFFECTIVE_CONFIG_DIGEST_RE` reads as absent, not passed through.
     """
     for block in contract_coverage_blocks(data):
         raw = block.get("effective_config_digest")
-        if isinstance(raw, str):
+        if isinstance(raw, str) and _EFFECTIVE_CONFIG_DIGEST_RE.match(raw):
             return raw
     return None
 

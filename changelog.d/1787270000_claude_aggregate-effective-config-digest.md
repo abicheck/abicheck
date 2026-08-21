@@ -11,4 +11,9 @@
   unavailable target, or one written with `include_exit_decision=False`,
   e.g. `compat check`'s own reports) — no change to any existing field.
   `AGGREGATE_SCHEMA_VERSION` bumped `1.6` -> `1.7` to publish the new field
-  in `abicheck/schemas/aggregate_report.schema.json`.
+  in `abicheck/schemas/aggregate_report.schema.json`. A per-target report's
+  digest is validated against the schema's own `^sha256:[0-9a-f]{64}$`
+  pattern before being carried through — a malformed value (a hand-edited
+  or pre-digest report) reads as absent rather than passed through, so
+  `aggregate --format json` can never emit output that fails its own
+  published schema.

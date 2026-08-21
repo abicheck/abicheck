@@ -2157,7 +2157,7 @@ _TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
 #: over ``service.resolve_input`` (see its module docstring) — the same role
 #: ``service.py`` itself plays for ``checker.compare``. The exemption is
 #: scoped to calls inside that one function
-#: (``_resolve_input_wrapper_call_lines``), not the whole module — a
+#: (``_resolve_input_wrapper_call_sites``), not the whole module — a
 #: *different* function added later to the same file must still route
 #: through it rather than bypassing the rule directly.
 _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
@@ -2351,9 +2351,9 @@ def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
         yield from _iter_calls_in_own_scope(child)
 
 
-def _resolve_input_wrapper_call_lines(tree: ast.Module) -> frozenset[int]:
-    """Line numbers of every ``Call`` inside the *module-level*
-    ``_resolve_input()``'s own scope — the only lines the
+def _resolve_input_wrapper_call_sites(tree: ast.Module) -> frozenset[tuple[int, int]]:
+    """``(lineno, col_offset)`` of every ``Call`` inside the *module-level*
+    ``_resolve_input()``'s own scope — the only call sites the
     ``service.resolve_input`` rule may exempt in a module listed in
     ``_RESOLVE_INPUT_WRAPPER_MODULES``.
 
@@ -2364,12 +2364,23 @@ def _resolve_input_wrapper_call_lines(tree: ast.Module) -> frozenset[int]:
     (:func:`_iter_calls_in_own_scope`), not a full ``ast.walk``, so a call
     inside a *nested* function or class defined within the wrapper does not
     silently inherit its exemption either.
+
+    Keyed by the full ``(lineno, col_offset)`` position, not bare ``lineno``
+    (Codex review: a nested-scope bypass on the *same line* as an
+    exempt outer call — e.g. ``return (lambda: service.resolve_input(a))()``
+    — was itself correctly pruned by :func:`_iter_calls_in_own_scope`, but
+    the outer call's own line number was still recorded, and a line-only
+    membership check let the inner call inherit that exemption purely from
+    sharing a line, not from being the reviewed site).
     """
-    lines: set[int] = set()
+    sites: set[tuple[int, int]] = set()
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "_resolve_input":
-            lines.update(call.lineno for call in _iter_calls_in_own_scope(node))
-    return frozenset(lines)
+            sites.update(
+                (call.lineno, call.col_offset)
+                for call in _iter_calls_in_own_scope(node)
+            )
+    return frozenset(sites)
 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
@@ -2568,8 +2579,8 @@ def check_cli_contract(f: Findings) -> None:
         # is exempt — not every `service.resolve_input` call anywhere else in
         # the same module, which would let a future bypass elsewhere in this
         # file accumulate unnoticed.
-        wrapper_call_lines = (
-            _resolve_input_wrapper_call_lines(tree)
+        wrapper_call_sites = (
+            _resolve_input_wrapper_call_sites(tree)
             if is_wrapper_module
             else frozenset()
         )
@@ -2588,7 +2599,14 @@ def check_cli_contract(f: Findings) -> None:
                 )
                 if not is_tier1:
                     continue
-                if module == "service" and node.lineno in wrapper_call_lines:
+                if (
+                    module == "service"
+                    and (
+                        node.lineno,
+                        node.col_offset,
+                    )
+                    in wrapper_call_sites
+                ):
                     continue
                 called = func.attr if isinstance(func, ast.Attribute) else func.id
                 site_key = f"{rel}:{node.lineno}:{node.col_offset}:{module}.{called}"
