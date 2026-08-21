@@ -1,0 +1,729 @@
+{
+  "library": "liblib.so",
+  "version": "2025.2",
+  "functions": [
+    {
+      "name": "get_version",
+      "mangled": "get_version",
+      "return_type": "int",
+      "params": [],
+      "visibility": "public",
+      "is_virtual": false,
+      "is_noexcept": false,
+      "is_extern_c": true,
+      "vtable_index": null,
+      "source_location": "/tmp/build-fx1/new/lib.h:1",
+      "is_static": false,
+      "is_const": false,
+      "is_volatile": false,
+      "is_pure_virtual": false,
+      "is_deleted": false,
+      "deleted_from_dwarf": false,
+      "is_inline": false,
+      "access": "public",
+      "return_pointer_depth": 0,
+      "elf_visibility": "default",
+      "ref_qualifier": "",
+      "is_explicit": null,
+      "is_hidden_friend": false,
+      "source_header": "/tmp/build-fx1/new/lib.h",
+      "origin": "public_header",
+      "is_variadic": false,
+      "contract_attributes": [],
+      "exception_spec": "",
+      "deprecated": null,
+      "is_override": null,
+      "hidden_friend_owner": null,
+      "elf_binding": "global"
+    }
+  ],
+  "variables": [],
+  "types": [],
+  "elf": {
+    "soname": "",
+    "needed": [],
+    "rpath": "",
+    "runpath": "",
+    "versions_defined": [],
+    "versions_required": {},
+    "symbols": [
+      {
+        "name": "get_version",
+        "binding": "global",
+        "sym_type": "func",
+        "size": 15,
+        "version": "",
+        "is_default": true,
+        "visibility": "default",
+        "origin_lib": null,
+        "value_alignment": 1
+      }
+    ],
+    "imports": [
+      {
+        "name": "__cxa_finalize",
+        "binding": "weak",
+        "sym_type": "notype",
+        "version": "",
+        "is_default": true,
+        "version_soname": ""
+      },
+      {
+        "name": "_ITM_registerTMCloneTable",
+        "binding": "weak",
+        "sym_type": "notype",
+        "version": "",
+        "is_default": true,
+        "version_soname": ""
+      },
+      {
+        "name": "_ITM_deregisterTMCloneTable",
+        "binding": "weak",
+        "sym_type": "notype",
+        "version": "",
+        "is_default": true,
+        "version_soname": ""
+      },
+      {
+        "name": "__gmon_start__",
+        "binding": "weak",
+        "sym_type": "notype",
+        "version": "",
+        "is_default": true,
+        "version_soname": ""
+      }
+    ],
+    "interpreter": "",
+    "ei_data": "LSB",
+    "min_kernel_version": "",
+    "dynamic_flags": [],
+    "has_init": true,
+    "has_fini": true,
+    "has_executable_stack": false,
+    "relro": "partial",
+    "bind_now": false,
+    "is_pie": false,
+    "has_stack_canary": false,
+    "has_fortify_source": false,
+    "has_writable_executable_segment": false,
+    "is_symbolic": false,
+    "has_textrel": false,
+    "pointer_size": 8,
+    "machine": "EM_X86_64",
+    "elf_class": 64,
+    "osabi": "ELFOSABI_SYSV",
+    "e_flags": 0,
+    "abi_flags": [],
+    "has_static_tls": false,
+    "has_tls_symbols": false,
+    "gnu_properties": [
+      "IBT",
+      "SHSTK"
+    ],
+    "has_dt_relr": false,
+    "hash_styles": [
+      "gnu"
+    ]
+  },
+  "pe": null,
+  "macho": null,
+  "dwarf": {
+    "structs": {},
+    "enums": {},
+    "base_types": {},
+    "has_dwarf": false
+  },
+  "dwarf_advanced": {
+    "has_dwarf": false,
+    "target_arch": "",
+    "toolchain": {
+      "producer_string": "",
+      "compiler": "",
+      "version": "",
+      "abi_flags": [],
+      "vector_abi_flags": [],
+      "wchar_flags": []
+    },
+    "calling_conventions": {},
+    "value_abi_traits": {},
+    "return_value_sizes": {},
+    "return_memory_classified": [],
+    "packed_structs": [],
+    "all_struct_names": [],
+    "frame_registers": {},
+    "callee_saved_regs": {}
+  },
+  "sycl": null,
+  "python_ext": null,
+  "kabi": null,
+  "python_api": null,
+  "numpy_capi": {
+    "consumes_array_api": false,
+    "consumes_ufunc_api": false,
+    "capi_target_version": null
+  },
+  "enums": [],
+  "typedefs": {},
+  "constants": {},
+  "elf_only_mode": false,
+  "from_headers": true,
+  "ast_producer": "clang",
+  "ast_toolchain": {
+    "producer": "clang",
+    "selected": "/usr/bin/clang++",
+    "realpath": "/usr/lib/llvm-18/bin/clang",
+    "mtime_ns": "1716798380000000000",
+    "size": "140592",
+    "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+    "target_triple": "x86_64-pc-linux-gnu",
+    "compiler_selected": "/usr/bin/clang++",
+    "compiler_realpath": "/usr/lib/llvm-18/bin/clang",
+    "compiler_mtime_ns": "1716798380000000000",
+    "compiler_size": "140592",
+    "compiler_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "compiler_version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+    "compiler_target_triple": "x86_64-pc-linux-gnu",
+    "abi_dialect": "gnu"
+  },
+  "ast_fallback_reason": "castxml-unsupported-version",
+  "ast_toolchain_supported": null,
+  "ast_toolchain_unsupported_reasons": [],
+  "frontend_context_kind": null,
+  "ast_resolved_standard": null,
+  "ast_cplusplus_macro": null,
+  "ast_compile_args": [],
+  "ast_sysroot": null,
+  "dwarf_layout_coherence": "unavailable",
+  "dwarf_layout_coherence_mismatches": [],
+  "fact_provenance": {},
+  "header_cv_facts_reliable": true,
+  "clang_deprecation_facts_reliable": true,
+  "clang_field_initializer_facts_reliable": true,
+  "clang_vtable_facts_reliable": true,
+  "clang_restrict_facts_reliable": true,
+  "clang_va_list_facts_reliable": true,
+  "castxml_var_access_facts_reliable": true,
+  "platform": "elf",
+  "language_profile": null,
+  "scope_fallback": null,
+  "dependency_info": null,
+  "git_commit": null,
+  "git_tag": null,
+  "created_at": "2026-08-20T21:55:29.367425+00:00",
+  "build_id": null,
+  "build_mode": null,
+  "source_path": "/tmp/build-fx1/new/liblib.so",
+  "source_mtime": 1787262927.9661388,
+  "source_mtime_epoch": false,
+  "source_size": 15112,
+  "build_source_pack": null,
+  "build_source": {
+    "manifest": {
+      "build_source_pack_version": 1,
+      "created_at": "",
+      "source_root": {
+        "path_redacted": true,
+        "repo_hash": ""
+      },
+      "inputs": {},
+      "extractors": [],
+      "artifacts": [],
+      "coverage": [
+        {
+          "layer": "L3_build",
+          "status": "not_collected",
+          "confidence": "unknown",
+          "detail": "",
+          "elapsed_s": 0.0,
+          "requested_roots": [],
+          "resolved_roots": [],
+          "transitive_targets": null,
+          "compile_units": null,
+          "link_units": null
+        },
+        {
+          "layer": "L4_source_abi",
+          "status": "not_collected",
+          "confidence": "unknown",
+          "detail": "",
+          "elapsed_s": 0.0,
+          "requested_roots": [],
+          "resolved_roots": [],
+          "transitive_targets": null,
+          "compile_units": null,
+          "link_units": null
+        },
+        {
+          "layer": "L5_source_graph",
+          "status": "present",
+          "confidence": "reduced",
+          "detail": "",
+          "elapsed_s": 0.0,
+          "requested_roots": [],
+          "resolved_roots": [],
+          "transitive_targets": null,
+          "compile_units": null,
+          "link_units": null
+        }
+      ],
+      "redaction": {}
+    },
+    "source_graph": {
+      "schema_version": 2,
+      "graph_id": "sha256:1bf4bb0176e96a1467a3b2aacd9d57c8bcb5f017260668841461e230bae2b5ba",
+      "coverage": {
+        "targets": 0,
+        "compile_units": 0,
+        "source_decls": 1,
+        "binary_symbol_mappings": 0,
+        "include_edges": {
+          "collected": true,
+          "count": 0
+        },
+        "call_edges": {
+          "collected": false,
+          "count": 0
+        },
+        "type_edges": {
+          "collected": true,
+          "count": 4
+        },
+        "reference_edges": {
+          "collected": false,
+          "count": 0
+        },
+        "node_kinds": {
+          "header": 2,
+          "record_type": 8,
+          "source_decl": 1
+        },
+        "edge_kinds": {
+          "SOURCE_DECLARES": 1,
+          "TYPE_HAS_FIELD_TYPE": 4
+        }
+      },
+      "nodes": [
+        {
+          "id": "header://new/lib.h",
+          "kind": "header",
+          "label": "new/lib.h",
+          "attrs": {
+            "visibility": "public_header"
+          },
+          "provenance": "header_ast_l2",
+          "confidence": "high",
+          "facts": [
+            {
+              "producer": "header_ast_l2",
+              "confidence": "high",
+              "attrs": {
+                "visibility": "public_header"
+              }
+            }
+          ],
+          "resolved": {
+            "visibility": "public_header"
+          },
+          "conflicts": []
+        },
+        {
+          "id": "decl://get_version",
+          "kind": "source_decl",
+          "label": "get_version",
+          "attrs": {
+            "visibility": "public_header"
+          },
+          "provenance": "header_ast_l2",
+          "confidence": "high",
+          "facts": [
+            {
+              "producer": "header_ast_l2",
+              "confidence": "high",
+              "attrs": {
+                "visibility": "public_header"
+              }
+            }
+          ],
+          "resolved": {
+            "visibility": "public_header"
+          },
+          "conflicts": []
+        },
+        {
+          "id": "header:///tmp/build-fx1/new/lib.h",
+          "kind": "header",
+          "label": "/tmp/build-fx1/new/lib.h",
+          "attrs": {
+            "visibility": "public_header"
+          },
+          "provenance": "header_ast_l2",
+          "confidence": "high",
+          "facts": [
+            {
+              "producer": "header_ast_l2",
+              "confidence": "high",
+              "attrs": {
+                "visibility": "public_header"
+              }
+            }
+          ],
+          "resolved": {
+            "visibility": "public_header"
+          },
+          "conflicts": []
+        },
+        {
+          "id": "type://__int128_t",
+          "kind": "record_type",
+          "label": "__int128_t",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://__int128",
+          "kind": "record_type",
+          "label": "__int128",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://__uint128_t",
+          "kind": "record_type",
+          "label": "__uint128_t",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://unsigned __int128",
+          "kind": "record_type",
+          "label": "unsigned __int128",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://__NSConstantString",
+          "kind": "record_type",
+          "label": "__NSConstantString",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://__NSConstantString_tag",
+          "kind": "record_type",
+          "label": "__NSConstantString_tag",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://__builtin_va_list",
+          "kind": "record_type",
+          "label": "__builtin_va_list",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        },
+        {
+          "id": "type://__va_list_tag",
+          "kind": "record_type",
+          "label": "__va_list_tag",
+          "attrs": {},
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": []
+        }
+      ],
+      "edges": [
+        {
+          "edge": "SOURCE_DECLARES",
+          "src": "header:///tmp/build-fx1/new/lib.h",
+          "dst": "decl://get_version",
+          "provenance": "header_ast_l2",
+          "confidence": "high",
+          "attrs": {},
+          "facts": [
+            {
+              "producer": "header_ast_l2",
+              "confidence": "high",
+              "attrs": {}
+            }
+          ],
+          "resolved": {},
+          "conflicts": [],
+          "occurrences": []
+        },
+        {
+          "edge": "TYPE_HAS_FIELD_TYPE",
+          "src": "type://__int128_t",
+          "dst": "type://__int128",
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "attrs": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {
+                "role": "alias",
+                "resolution": "unresolved"
+              }
+            }
+          ],
+          "resolved": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "conflicts": [],
+          "occurrences": []
+        },
+        {
+          "edge": "TYPE_HAS_FIELD_TYPE",
+          "src": "type://__uint128_t",
+          "dst": "type://unsigned __int128",
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "attrs": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {
+                "role": "alias",
+                "resolution": "unresolved"
+              }
+            }
+          ],
+          "resolved": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "conflicts": [],
+          "occurrences": []
+        },
+        {
+          "edge": "TYPE_HAS_FIELD_TYPE",
+          "src": "type://__NSConstantString",
+          "dst": "type://__NSConstantString_tag",
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "attrs": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {
+                "role": "alias",
+                "resolution": "unresolved"
+              }
+            }
+          ],
+          "resolved": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "conflicts": [],
+          "occurrences": []
+        },
+        {
+          "edge": "TYPE_HAS_FIELD_TYPE",
+          "src": "type://__builtin_va_list",
+          "dst": "type://__va_list_tag",
+          "provenance": "type_graph",
+          "confidence": "reduced",
+          "attrs": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "facts": [
+            {
+              "producer": "type_graph",
+              "confidence": "reduced",
+              "attrs": {
+                "role": "alias",
+                "resolution": "unresolved"
+              }
+            }
+          ],
+          "resolved": {
+            "role": "alias",
+            "resolution": "unresolved"
+          },
+          "conflicts": [],
+          "occurrences": []
+        }
+      ],
+      "indexes": {
+        "by_target": {},
+        "by_file": {},
+        "by_binary_symbol": {},
+        "by_source_decl": {
+          "decl://get_version": [
+            "header:///tmp/build-fx1/new/lib.h"
+          ]
+        }
+      },
+      "external_graph_refs": [],
+      "extractor_passes": {
+        "header_call_graph": true,
+        "header_type_graph": true,
+        "header_type_graph:TYPE_INHERITS:base": true,
+        "header_type_graph:TYPE_HAS_FIELD_TYPE:field": true,
+        "header_type_graph:TYPE_HAS_FIELD_TYPE:alias": true,
+        "header_type_graph:TYPE_HAS_FIELD_TYPE:enum_underlying": true,
+        "header_type_graph:TYPE_HAS_FIELD_TYPE:template_param": true,
+        "header_type_graph:TYPE_HAS_FIELD_TYPE:default_template_arg": true,
+        "header_type_graph:DECL_HAS_TYPE:var": true,
+        "header_type_graph:DECL_HAS_TYPE:return": true,
+        "header_type_graph:DECL_HAS_TYPE:param": true,
+        "header_type_graph:DECL_HAS_TYPE:template_param": true,
+        "header_type_graph:DECL_HAS_TYPE:default_template_arg": true,
+        "header_type_graph:DECL_REFERENCES_DECL:ref": true,
+        "header_include_graph": true
+      },
+      "narrowed_passes": {},
+      "narrowed_scope": {},
+      "degraded_passes": {}
+    }
+  },
+  "parsed_with_build_context": false,
+  "build_context_defines": [],
+  "conditional_fields": {},
+  "contract": {
+    "profile_fingerprint": "sha256:724ed6138cd929be0c83f185597f71f8d2776b36aa65232b4e4b0b742b4039a8",
+    "scope_fingerprint": "sha256:0758e2c146f837acd76eb608384b65c91d5b9ae0701d4297fb099008342e6798",
+    "profile_fields": {
+      "compiler_family": "clang",
+      "compiler_version": "[\"clang\", \"Ubuntu clang version 18.1.3 (1ubuntu1)\\nTarget: x86_64-pc-linux-gnu\\nThread model: posix\\nInstalledDir: /usr/bin\", \"Ubuntu clang version 18.1.3 (1ubuntu1)\\nTarget: x86_64-pc-linux-gnu\\nThread model: posix\\nInstalledDir: /usr/bin\"]",
+      "abi_dialect": "gnu",
+      "language_standard": "",
+      "target_triple": "",
+      "pointer_width": "",
+      "endianness": "",
+      "macro_ops": "[]",
+      "pass_through_flags": "[]",
+      "include_sequence": "[\"0:hdrs:<single-header>\"]",
+      "header_sequence": "[\"<single-header>\"]",
+      "frontend_context_kind": ""
+    },
+    "scope_fields": {
+      "headers": "[\"<single-header>\"]",
+      "public_header_dirs": "[]",
+      "translation_units": "[]"
+    }
+  },
+  "dependency_scope": "full",
+  "typedefs_qualified": {},
+  "schema_version": 25,
+  "dump_provenance": {
+    "requested_depth": null,
+    "effective_depth": "headers",
+    "degraded": false,
+    "frontend": "clang",
+    "ast_toolchain": {
+      "producer": "clang",
+      "selected": "/usr/bin/clang++",
+      "realpath": "/usr/lib/llvm-18/bin/clang",
+      "mtime_ns": "1716798380000000000",
+      "size": "140592",
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+      "target_triple": "x86_64-pc-linux-gnu",
+      "compiler_selected": "/usr/bin/clang++",
+      "compiler_realpath": "/usr/lib/llvm-18/bin/clang",
+      "compiler_mtime_ns": "1716798380000000000",
+      "compiler_size": "140592",
+      "compiler_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "compiler_version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+      "compiler_target_triple": "x86_64-pc-linux-gnu",
+      "abi_dialect": "gnu"
+    },
+    "ast_fallback_reason": "castxml-unsupported-version",
+    "source_scope": null
+  }
+}

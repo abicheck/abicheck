@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "A",
+  "digest": "sha256:7724211295f324e947787878ca19991abb1b81ac1e3c8db539d273b50371628e",
+  "expected": {
+    "kinds": [
+      "type_size_changed"
+    ],
+    "min_evidence": "L1",
+    "resolved_from": "examples/ground_truth.json",
+    "verdict": "BREAKING"
+  },
+  "inputs": "examples/case07_struct_layout",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We changed a struct that appears in our public headers. Is that safe for already-compiled callers?",
+  "roots": [
+    "agent-evals/skills/scenarios.yaml",
+    "examples/case07_struct_layout",
+    "examples/ground_truth.json"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

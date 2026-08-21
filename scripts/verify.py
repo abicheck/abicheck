@@ -418,6 +418,36 @@ STEPS: tuple[Step, ...] = (
         description="Skill-eval evidence is fresh, every hash maps to a skill, every observed input is hashed (G37 D6)",
     ),
     Step(
+        # Same generated-artifact contract as skill-eval-pack above, for the
+        # Harbor task battery it derives from: a scenario/fixture change that
+        # doesn't also regenerate agent-evals/skills/harbor/tasks/ leaves the
+        # committed tasks describing a stale corpus.
+        "harbor-tasks",
+        _pyscript("scripts/gen_harbor_tasks.py", "--check"),
+        frozenset({PR, FULL}),
+        description="agent-evals/skills/harbor/tasks/ matches its generator",
+    ),
+    Step(
+        # harbor-tasks above only re-derives the tree structurally -- it
+        # never asks whether the result is actually a *valid* Harbor task.
+        # `harbor` needs Python >=3.12 and is not a repository dependency
+        # (it exists to validate output *for* Harbor, not to be one), so
+        # this is FULL-only, gated on the module being importable, same
+        # shape as docs-build's `_need_modules("mkdocs")` above.
+        "harbor-schema",
+        _py(
+            "pytest",
+            "tests/test_gen_harbor_tasks.py",
+            "-k",
+            "TestHarborSchemaValidation",
+            "--tb=short",
+        ),
+        frozenset({FULL}),
+        env={"ABICHECK_MIN_EXECUTED": "1"},
+        precondition=_need_modules("harbor"),
+        description="Generated Harbor tasks validate against the real harbor package's Task/TaskConfig schema",
+    ),
+    Step(
         # FULL only, NOT PR: this step's precondition depends on origin/main
         # being locally resolvable, which is a checkout-topology fact (shallow
         # clone, detached HEAD, a fresh CI checkout without an explicit

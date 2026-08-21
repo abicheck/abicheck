@@ -11,6 +11,10 @@
       "description": "compare's own ordinal vocabulary, or null for a pair the agent judges not comparable. Never a green/not-green boolean, which would erase the ABI-vs-source distinction the skills exist to make.",
       "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
     },
+    "full_verdict": {
+      "description": "Set only when verdict is the scoped answer to a --used-by/--required-symbol(s) run: the same run's library-wide verdict, mirroring the report's own verdict/full_verdict pair (shared/consumer-scoping.md). Omitted entirely for an unscoped comparison — there is no second, wider answer to report.",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+    },
     "evidence": {
       "type": "array",
       "items": {"type": "integer", "minimum": 0},

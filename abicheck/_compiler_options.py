@@ -279,6 +279,31 @@ def has_explicit_std(
     ``cli_helpers_compare.py``/``service_compare_evidence.py``/
     ``service_scan.py`` re-verified against the new signature -- a genuine,
     cross-cutting change, not a follow-up to one caller.
+
+    A second, independent known gap (Codex review on PR #816, fresh
+    evidence, not fixed here): a compiler response file (``gcc_option_tokens
+    = ("@flags.rsp",)``) whose *own* contents select ``-std=...`` is
+    entirely invisible here -- this function only ever looks at the literal
+    ``@flags.rsp`` token, never the file it names. A caller forwarding an
+    explicit standard exclusively through a response file therefore reads
+    as "no explicit standard" here, the same false-negative shape as the
+    ``-ansi`` gap above, and it feeds the same consumer:
+    ``dumper_toolchain._stamp_ast_parser`` stamps
+    ``ast_toolchain["language_standard_explicit"] = "0"`` from this
+    function's answer, which ``comparability.
+    _language_standard_content_divergence_corroborated`` then trusts as
+    proof neither side pinned a standard explicitly -- so two sides whose
+    response files select genuinely different standards could still be
+    waived as a purely content-driven mode divergence. Expanding a response
+    file safely needs the same trust-boundary care this codebase already
+    applies to ``@file`` expansion elsewhere (see
+    ``depfile_args_from_argv``'s ``trusted_root`` parameter and its own
+    "Known gaps" entry in ``AGENTS.md``) -- resolving *this* file relative
+    to *which* directory, and refusing to read outside it, is a real design
+    question this function's two-argument, filesystem-free signature has no
+    way to answer today. A correct fix needs that trust boundary threaded
+    into this function's signature and re-verified at every call site named
+    above, not a same-PR patch under continued review pressure.
     """
     if gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options):
         return True

@@ -145,6 +145,10 @@ def validate(claim: dict) -> str | None:
     verdict = claim.get("verdict")
     if verdict is not None and verdict not in VERDICT_ORDER:
         return f"verdict {verdict!r} is outside the vocabulary"
+    if "full_verdict" in claim:
+        full_verdict = claim["full_verdict"]
+        if full_verdict is not None and full_verdict not in VERDICT_ORDER:
+            return f"full_verdict {full_verdict!r} is outside the vocabulary"
     if "confident" not in claim or not isinstance(claim["confident"], bool):
         return "confident is missing or not a boolean"
     if "evidence" not in claim:
