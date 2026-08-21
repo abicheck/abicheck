@@ -27,7 +27,7 @@ levels correlate, and exactly where each one goes blind.**
     command reference with recipes.
 
 > For the *framing* (why a change is only a "break" if it breaks a promise)
-> read [ABI/API Handling](abi-api-handling.md). **This page is the worked
+> read [ABI/API Compatibility](abi-api-handling.md). **This page is the worked
 > example that makes the model stick.**
 
 ---
@@ -503,7 +503,7 @@ rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 The source scan reaches a *different* set of changes — macros, bodies, build
 flags, hygiene, cross-source conflicts — not a "better" version of the artifact
 scan. It is additive, not a replacement. To enable it on a real project, see the
-[source scan on the ABI/API Handling page](abi-api-handling.md#going-deeper-than-artifacts-the-source-scan)
+[source scan on the ABI/API Compatibility page](abi-api-handling.md#going-deeper-than-artifacts-the-source-scan)
 and the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
 
 ---

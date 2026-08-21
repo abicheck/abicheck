@@ -141,10 +141,10 @@ expensive to silently break.
   enforces this). Exceptions: per-case `examples/*.md` pages are linked from
   the encyclopedia indexes instead of the nav, and this `AGENTS.md`/
   `CLAUDE.md` are excluded from the published site via `exclude_docs`.
-- The docs tell a two-track story: an **educational track** (ABI/API Handling
-  tab — understanding the problem) and a **tool track** (User Guide → Concepts
-  → Reference — using and understanding abicheck). Within each track, order
-  pages simple → advanced.
+- The docs tell a two-track story: an **educational track** (ABI/API
+  Compatibility tab — understanding the problem) and a **tool track** (User
+  Guide → Concepts → Reference — using and understanding abicheck). Within
+  each track, order pages simple → advanced.
 - Use relative links (`../use/x.md`), not absolute URLs.
 - Prefer pulling from `--help` output rather than hand-rolling CLI
   tables — use the same wording the user sees.

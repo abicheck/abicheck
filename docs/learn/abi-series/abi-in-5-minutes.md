@@ -46,7 +46,7 @@ writes the wrong bytes. The result is a crash, or worse, quietly corrupted data.
 
 ## API vs ABI, in one sentence each
 
-> **Full definitions:** [ABI/API Handling](../abi-api-handling.md) is the
+> **Full definitions:** [ABI/API Compatibility](../abi-api-handling.md) is the
 > canonical page for these terms; the two bullets below are the deliberately
 > compressed, one-sentence version this five-minute on-ramp needs.
 

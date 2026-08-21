@@ -32,7 +32,7 @@ It complements two neighbouring pages:
 
 ## ABI vs API, and where "layout" sits
 
-> **Full definitions:** [ABI/API Handling](abi-api-handling.md) is the
+> **Full definitions:** [ABI/API Compatibility](abi-api-handling.md) is the
 > canonical page for what these terms mean generally; the two bullets below
 > are the *layout-specific* restatement this page needs to talk about class
 > objects specifically.
