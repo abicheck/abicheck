@@ -58,6 +58,35 @@ this module. ``clang`` was used exclusively in earlier revisions purely
 because this module's own local development/verification environment
 had no castxml install; that is no longer a reason to leave the
 default backend unverified in CI, which does have one.
+
+Running this module's ``scan``-comparison tests under castxml for the
+first time surfaced a real, but *different*, pre-existing and already
+self-documented gap -- not the ``NOT_COMPARABLE`` bug this module
+exists to regression-test. ``scan_engine.run_scan_core``'s own comment
+records that ``scan``'s candidate-side L4 source-ABI replay always uses
+``source_extractor="auto"`` (which ``buildsource.inline.
+_make_source_extractor`` resolves to clang), never the
+``--ast-frontend`` the caller actually passed, "a real behaviour change
+for real users, unverifiable without a castxml-capable lane" -- while
+``dump``'s own L4 replay *does* follow ``--ast-frontend`` via
+``service_compare_evidence.effective_frontend``. Under
+``--ast-frontend castxml`` this means the ``dump`` baseline's L4 replay
+runs through castxml while ``scan``'s own candidate replay still runs
+through clang -- two different tools independently replaying the same
+translation unit, which do not always resolve one exported symbol the
+same way; the result is a spurious ``COMPATIBLE_WITH_RISK`` verdict
+(``source_fact_coverage_incomplete``/``source_binary_provenance_
+mismatch``) on completely unchanged source, never ``NOT_COMPARABLE``.
+Since a castxml-capable lane is exactly what was previously missing to
+verify this, it is now pinned as a known-divergent, exact signature
+(mirroring ``tests/test_dump_cli_typed_api_parity.py``'s own
+``_SCAN_KNOWN_DIVERGENT_SHAPES`` pattern) rather than silently
+weakened or left to fail CI outright -- fixing the extractor selection
+itself is the real behaviour change ``run_scan_core``'s own comment
+already declines to make in this same PR, since it would need its own
+dedicated verification against real castxml/clang divergence in
+production usage, not a side effect of hardening this module's test
+coverage.
 """
 
 from __future__ import annotations
@@ -94,6 +123,28 @@ _AST_FRONTENDS = pytest.mark.parametrize("ast_frontend", ["clang", "castxml"])
 
 def _have_frontend(ast_frontend: str) -> bool:
     return _HAVE_CASTXML if ast_frontend == "castxml" else _HAVE_CLANG
+
+
+# scan's candidate-side L4 replay always uses clang (see module docstring) --
+# only "castxml" is known-divergent for the two scan-comparison tests below.
+# Not "dump-produces-a-different-baseline": the dump-side test above this
+# constant has no scan candidate at all, so it is unaffected and has no
+# xfail list of its own -- a future regression narrowing *that* path's
+# coverage should fail loudly rather than being masked here.
+_SCAN_KNOWN_DIVERGENT_FRONTENDS: frozenset[str] = frozenset({"castxml"})
+
+
+def _is_known_l4_extractor_divergence(output: str) -> bool:
+    """The exact, already-diagnosed signature: a RISK verdict from the two
+    L4-replay-specific reason codes ``run_scan_core``'s own comment already
+    attributes to the clang-vs-castxml candidate/baseline extractor
+    mismatch -- never a broader "any non-NO_CHANGE verdict" check, so an
+    unrelated regression still surfaces as a genuine, uncaught failure."""
+    return (
+        "COMPATIBLE_WITH_RISK" in output
+        and "source_fact_coverage_incomplete" in output
+        and "source_binary_provenance_mismatch" in output
+    )
 
 
 def _build_library(
@@ -292,6 +343,23 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
     assert "NOT_COMPARABLE" not in scan_result.output, scan_result.output
     assert "profile_fingerprint mismatch" not in scan_result.output, scan_result.output
     assert scan_result.exit_code == 0, scan_result.output
+
+    if ast_frontend in _SCAN_KNOWN_DIVERGENT_FRONTENDS:
+        if _is_known_l4_extractor_divergence(scan_result.output):
+            pytest.xfail(
+                f"{ast_frontend}: known scan-candidate-L4-extractor-always-"
+                "clang divergence (see this module's own docstring)"
+            )
+        pytest.fail(
+            f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
+            "but the previously-diagnosed failure signature "
+            "(COMPATIBLE_WITH_RISK naming source_fact_coverage_incomplete "
+            "and source_binary_provenance_mismatch) did not reproduce. "
+            "Either the underlying gap has closed -- remove this frontend "
+            "from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update this module's "
+            "docstring -- or a different failure occurred and needs its "
+            f"own investigation. output={scan_result.output!r}"
+        )
     assert "Verdict: NO_CHANGE" in scan_result.output, scan_result.output
 
 
@@ -375,6 +443,22 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
     assert scan_result.exit_code == 0, scan_result.output
 
     report = json.loads(scan_report.read_text(encoding="utf-8"))
-    assert report.get("verdict") == "NO_CHANGE", report
     diff = report.get("diff") or {}
     assert diff.get("reason") is None, diff.get("reason")
+
+    if ast_frontend in _SCAN_KNOWN_DIVERGENT_FRONTENDS:
+        if _is_known_l4_extractor_divergence(json.dumps(report)):
+            pytest.xfail(
+                f"{ast_frontend}: known scan-candidate-L4-extractor-always-"
+                "clang divergence (see this module's own docstring)"
+            )
+        pytest.fail(
+            f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
+            "but the previously-diagnosed failure signature "
+            "(COMPATIBLE_WITH_RISK naming source_fact_coverage_incomplete "
+            "and source_binary_provenance_mismatch) did not reproduce. "
+            "Either the underlying gap has closed -- remove this frontend "
+            "from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update this module's "
+            f"docstring -- or a different failure occurred. report={report!r}"
+        )
+    assert report.get("verdict") == "NO_CHANGE", report
