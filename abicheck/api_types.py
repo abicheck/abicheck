@@ -170,6 +170,21 @@ class InputSpec:
     # (D4) would have silently dropped that guard, so it is request surface,
     # not an MCP-local wrapper concern.
     follow_linker_scripts: bool = True
+    # PR C (CLI cleanup phase two, typed dump/scan convergence) deliberately
+    # does *not* add a `compile_db_filter` field here mirroring `dump
+    # --compile-db-filter`. This pipeline's own L2 header-AST context
+    # (`_seeded_includes_and_compile_context`, the P0.3 L3->L2 fold) has no
+    # filter concept and always resolves from the *whole*, unfiltered compile
+    # database -- unlike the native `dump` CLI, which threads its filter into
+    # its own, structurally different L2 mechanism too
+    # (`cli_helpers_compare._resolve_build_context_flags`). Exposing a field
+    # here that could only ever be combined with a resolvable compile
+    # database by raising (never by actually narrowing the ADR-039
+    # collector's scan) would be a field with no successful use -- see the
+    # plan doc's PR C status notes; a real implementation needs the filter
+    # threaded into the shared L2 fold itself, a separate feature addition to
+    # `buildsource/l2_seed.py`/`header_compile_context.py` (Codex review,
+    # PR #809).
 
     @classmethod
     def of(
