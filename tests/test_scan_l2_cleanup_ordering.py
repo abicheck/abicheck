@@ -39,12 +39,19 @@ def _stub_snapshot() -> AbiSnapshot:
     """
     return AbiSnapshot(library="lib.so", version="1.0")
 
+
 #: Keyword names shared verbatim between seed_includes_and_fold_compile_context's
 #: own signature and CompileContext's fields -- one place to update if either
 #: gains a field, instead of three hand-copied constructors (CodeRabbit review).
 _CC_FIELDS = (
-    "gcc_path", "gcc_prefix", "gcc_options", "gcc_option_tokens",
-    "sysroot", "nostdinc", "frontend", "frontend_context",
+    "gcc_path",
+    "gcc_prefix",
+    "gcc_options",
+    "gcc_option_tokens",
+    "sysroot",
+    "nostdinc",
+    "frontend",
+    "frontend_context",
 )
 
 
@@ -158,11 +165,23 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
     src = tmp_path / "widget.cpp"
     src.write_text('#include "widget.h"\n', encoding="utf-8")
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{
-            "directory": str(tmp_path),
-            "file": str(src),
-            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20", "-DFOO=1"],
-        }]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": [
+                        "c++",
+                        "-c",
+                        str(src),
+                        "-o",
+                        "out.o",
+                        "-std=c++20",
+                        "-DFOO=1",
+                    ],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -212,11 +231,15 @@ def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
     src = tmp_path / "widget.cpp"
     src.write_text('#include "widget.h"\n', encoding="utf-8")
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{
-            "directory": str(tmp_path),
-            "file": str(src),
-            "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20"],
-        }]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": ["c++", "-c", str(src), "-o", "out.o", "-std=c++20"],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -324,8 +347,15 @@ def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp
     monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
 
     _build_new_snapshot(
+        # Empty `headers` (PR 3A, dump/scan L4 root-set convergence): this
+        # test's subject is `public_headers`/`public_header_dirs`'s own
+        # expansion, and `headers` now separately contributes to the same L4
+        # set (see `_build_new_snapshot`'s own comment) -- a nonexistent
+        # placeholder path here would make `expand_public_header_inputs`'s
+        # best-effort expansion degrade to a raw pass-through for everything,
+        # not just isolate the one axis this test means to pin.
         binary=tmp_path / "lib.so",
-        headers=[tmp_path / "h.h"],
+        headers=[],
         includes=[],
         sources=tmp_path,
         collect_mode="build",
@@ -344,6 +374,58 @@ def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp
         str(pub_dir / "api.h"),
     }
     assert embed_kwargs["public_header_dirs"] == (str(pub_dir),)
+
+
+def test_scan_candidate_widens_l4_roots_with_a_lone_header_file(monkeypatch, tmp_path):
+    """A lone ``-H`` *file* with no directory reaches L4 replay even though it
+    does not activate L2/crosscheck-origin provenance (PR 3A, dump/scan L4
+    root-set convergence).
+
+    ``cli_scan_baseline._public_provenance_set`` deliberately returns
+    ``([], [])`` for exactly this shape (a lone file can't establish a public
+    directory boundary), so a real ``scan --against`` a real ``dump``
+    baseline for such a project silently degraded L4 source-ABI replay to
+    zero matched declarations while the dump-produced baseline (whose
+    write-time embed derives its own roots via the more permissive
+    ``split_public_header_inputs``, same as ``compare``'s implicit-dump
+    operand) matched normally -- producing a spurious
+    ``source_decl_binary_symbol_mismatch``/``source_to_binary_mapping_changed``
+    RISK finding on an otherwise-unchanged library purely from this L2-vs-L4
+    asymmetry. Reproduced end to end in
+    ``tests/test_dump_scan_l3_comparability.py``; this pins the mechanism
+    directly. Confirmed to fail against the pre-fix ``_build_new_snapshot``
+    (``embed_kwargs["public_headers"]`` was empty).
+    """
+    lone_header = tmp_path / "widget.h"
+    lone_header.write_text("struct Widget { int x; };\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
+    )
+
+    embed_kwargs: dict = {}
+
+    def fake_embed(*args, **kwargs):
+        embed_kwargs.update(kwargs)
+
+    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[lone_header],
+        includes=[],
+        sources=tmp_path,
+        collect_mode="build",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+        # The narrow, `_public_provenance_set`-derived set for this shape --
+        # empty, since a lone file establishes no directory boundary.
+        public_headers=[],
+        public_header_dirs=[],
+    )
+
+    assert embed_kwargs["public_headers"] == (str(lone_header),)
 
 
 def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_path):

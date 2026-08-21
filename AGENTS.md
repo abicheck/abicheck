@@ -4879,6 +4879,60 @@ Once a root command genuinely clears the bar above, pick the right home:
   scenario — a real, if currently latent, data-model gap, not a one-line
   fix to this one predicate.
 
+  **A real regression caught post-merge by CI on this same branch
+  (2026-08-21), traced to the `fb688cb` dump-side fix above interacting
+  with a *pre-existing*, differently-scoped `scan` default — a live
+  `tests/test_dump_scan_l3_comparability.py` end-to-end test (added on
+  `main` by an unrelated, earlier PR) went from passing to failing the
+  moment this branch merged the base back in, `git bisect`-isolated to
+  exactly the dump-side write-time-embed fix.** That fix made `dump`'s
+  written baseline correctly link its L4 declarations to the binary's
+  exported symbols for a project whose only `-H` input is a lone header
+  *file* (no directory, no `--public-header-dir`) — but `scan`'s own
+  candidate resolution, unchanged by that fix, still derives its L4
+  `public_header_roots` from `cli_scan_baseline._public_provenance_set`,
+  which *deliberately* returns an empty root set for exactly that shape (a
+  lone file cannot establish a public directory boundary — a real,
+  separately pinned contract, `test_lone_file_does_not_activate`, unrelated
+  to and predating this PR). Before the dump-side fix, both sides degraded
+  to zero L4 matches symmetrically, so nothing was ever reported; after it,
+  only the dump baseline matched, and the asymmetry itself read as a real
+  `source_decl_binary_symbol_mismatch`/`source_to_binary_mapping_changed`
+  RISK finding on an *unchanged* library. Confirmed base-red-negative (the
+  identical test passes on plain `main`) and confirmed *not* a
+  merge-interaction artifact (it already reproduces on this branch's own
+  tip before merging `main` back in) before attempting a fix. Considered
+  and rejected: widening `_public_provenance_set` itself (would also
+  silently flip the L2/crosscheck-origin classification — and its skip/
+  present status for `exported_not_public`/`private_header_leak`/etc. —
+  every other `scan` invocation of this shape already relies on, a far
+  broader behavior change than this fix needs, and it would break that
+  helper's own pinned unit test). Fixed narrowly instead:
+  `service_input_resolution.embed_side_build_source` gained
+  `l4_public_headers`/`l4_public_header_dirs`, an override pair for *that
+  one call's* root set, defaulted to the existing `public_headers`/
+  `public_header_dirs` for every pre-existing caller (so `compare`/`dump`'s
+  typed pipeline are bit-for-bit unaffected). `scan_engine.
+  _build_new_snapshot` now computes a second, wider root set via the same
+  `split_public_header_inputs` `dump`'s own fix already uses (unioned with
+  the narrower, provenance-derived set, not replacing it — an explicit
+  `--public-header-dir` must still reach L4 even when it isn't itself
+  derivable from the raw `-H` list) and passes it through this new
+  parameter — L2/crosscheck-origin classification is completely untouched.
+  Regression coverage: a new direct unit test on `_build_new_snapshot`
+  itself, `tests/test_scan_l2_cleanup_ordering.py::
+  test_scan_candidate_widens_l4_roots_with_a_lone_header_file` (confirmed
+  to fail against the pre-fix code), alongside restoring the pre-existing
+  end-to-end integration test to green. One sibling, pre-existing test
+  (`test_scan_candidate_expands_public_header_dirs_before_embed`) used a
+  nonexistent placeholder `-H` path purely as an unrelated fixture detail;
+  once `headers` started contributing to the same L4 set, that placeholder
+  made `expand_public_header_inputs`'s best-effort expansion degrade to a
+  raw pass-through for *everything* (a real, if narrow, generalization of
+  that same best-effort-degrades-on-any-missing-path behavior) — fixed by
+  emptying that test's own `headers` list, since its actual subject is
+  `public_headers`/`public_header_dirs`'s own expansion, not `headers`'s.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

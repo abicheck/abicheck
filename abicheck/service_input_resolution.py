@@ -610,6 +610,8 @@ def _resolve_side_snapshot_impl(
     source_extractor: str | None = None,
     expand_public_header_roots: bool = False,
     source_frontend_from_folded_context: bool = False,
+    l4_public_headers: list[Path] | None = None,
+    l4_public_header_dirs: list[Path] | None = None,
 ) -> SideResolution:
     """The real implementation behind :func:`resolve_side_snapshot`.
 
@@ -631,12 +633,15 @@ def _resolve_side_snapshot_impl(
     passes ``True`` (the CLI, once its own trust gate has already decided
     the query is authorized) opts into running one.
 
-    Six further parameters exist so ``scan``'s candidate resolution could be
+    Eight further parameters exist so ``scan``'s candidate resolution could be
     migrated onto this one primitive *without changing any of its own
     behaviour* (PR 3A). Each defaults to what this function did before, so
-    ``compare``/``dump``'s typed pipelines are bit-for-bit unaffected; four are
+    ``compare``/``dump``'s typed pipelines are bit-for-bit unaffected; six are
     forwarded straight to :func:`embed_side_build_source`, whose docstring
-    explains each. The two that are this function's own:
+    explains each (including *l4_public_headers*/*l4_public_header_dirs* --
+    the L4-only public-root override that closes the scan-vs-dump L4
+    root-set asymmetry that same docstring documents). The two that are this
+    function's own:
 
     * *seed_collect_mode* — the collect mode handed to the L2 include/compile
       seed. ``None`` keeps the pinned ``"off"``: a Tier-2 API call must never
@@ -817,8 +822,7 @@ def _resolve_side_snapshot_impl(
             evidence.headers,
             build_info=side.build_info,
             live_elf_parse=(
-                snap.elf is not None
-                and service.sniff_text_format(side_path) != "json"
+                snap.elf is not None and service.sniff_text_format(side_path) != "json"
             ),
             user_gcc_option_tokens=(
                 side.compile.gcc_option_tokens if side.compile else ()
@@ -865,6 +869,8 @@ def _resolve_side_snapshot_impl(
                     compile_ctx if source_frontend_from_folded_context else None
                 ),
                 expand_public_header_roots=expand_public_header_roots,
+                l4_public_headers=l4_public_headers,
+                l4_public_header_dirs=l4_public_header_dirs,
             )
     finally:
         # Backstop only. The real drain happens in the nested `finally` around
@@ -912,6 +918,8 @@ def embed_side_build_source(
     source_extractor: str | None = None,
     source_frontend_compile: CompileContext | None = None,
     expand_public_header_roots: bool = False,
+    l4_public_headers: list[Path] | None = None,
+    l4_public_header_dirs: list[Path] | None = None,
 ) -> None:
     """Embed one side's inline L3-L5 build/source evidence into *snap*.
 
@@ -978,6 +986,30 @@ def embed_side_build_source(
       single-sample mirror promotion for a directory root (a change switching
       ``scan`` to the raw shape was landed and reverted for exactly that
       regression — see the plan's 2026-08-20 note).
+    * *l4_public_headers*/*l4_public_header_dirs* — an override root set for
+      *this call's* ``embed_build_source`` invocation only, when the caller's
+      L2-facing *public_headers*/*public_header_dirs* need to stay narrower
+      than what L4 replay should classify against. ``scan`` needs exactly
+      this split: its L2/crosscheck-origin provenance
+      (``cli_scan_baseline._public_provenance_set``) deliberately does not
+      activate for a lone ``-H`` *file* with no accompanying directory (a
+      single header cannot establish a public directory boundary — see that
+      function's own docstring, and its pinned
+      ``test_lone_file_does_not_activate``), so changing that default to fix
+      L4 would also silently flip the origin/crosscheck-skip behavior every
+      other scan already relies on. But ``dump``'s write-time embed and
+      ``compare``'s implicit-dump operand both derive their public-header
+      roots via the more permissive ``split_public_header_inputs`` (every
+      ``-H`` file/dir is a root, no directory required) — so a `dump`
+      baseline for a lone-``-H``-file project correctly links its L4
+      declarations to binary symbols while a `scan --against` candidate for
+      the identical project silently degrades to zero matches, producing a
+      spurious ``source_decl_binary_symbol_mismatch``/
+      ``source_to_binary_mapping_changed`` RISK finding on an unchanged
+      library purely from this L2-vs-L4 root-set asymmetry (reproduced
+      end-to-end; PR 3A review). Defaults to ``None`` (use
+      *public_headers*/*public_header_dirs* unchanged, exactly as before this
+      parameter existed) for every pre-existing caller.
     """
     import click
 
@@ -992,14 +1024,22 @@ def embed_side_build_source(
         source_frontend_compile if source_frontend_compile is not None else ctx
     )
     manifest_roots = dump_manifest_public_roots(evidence.dump_manifest)
+    embed_headers = (
+        l4_public_headers if l4_public_headers is not None else public_headers
+    )
+    embed_header_dirs = (
+        l4_public_header_dirs
+        if l4_public_header_dirs is not None
+        else public_header_dirs
+    )
     if expand_public_header_roots:
         embedded_public_headers: tuple[str, ...] = tuple(
             expand_public_header_inputs(
-                [*public_headers, *public_header_dirs, *manifest_roots]
+                [*embed_headers, *embed_header_dirs, *manifest_roots]
             )
         )
     else:
-        embedded_public_headers = tuple(str(p) for p in public_headers)
+        embedded_public_headers = tuple(str(p) for p in embed_headers)
     try:
         embed_build_source(
             snap,
@@ -1034,7 +1074,7 @@ def embed_side_build_source(
                 exclude_cl_style=False,
             ),
             public_headers=embedded_public_headers,
-            public_header_dirs=tuple(str(p) for p in public_header_dirs)
+            public_header_dirs=tuple(str(p) for p in embed_header_dirs)
             + tuple(str(p) for p in manifest_roots),
             defer_cleanup=defer_cleanup,
             quiet=True,

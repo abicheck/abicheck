@@ -280,8 +280,37 @@ def _build_new_snapshot(
     """
     from .api_types import InputSpec
     from .errors import AbicheckError
+    from .header_utils import split_public_header_inputs
     from .service_compare_evidence import SideEvidence
     from .service_input_resolution import _resolve_side_snapshot_impl
+
+    # L4 replay's own public-header roots, kept deliberately WIDER than the
+    # L2/crosscheck-origin provenance set (`public_headers`/`public_header_dirs`
+    # above -- `_public_provenance_set`'s deliberate "a lone -H file doesn't
+    # establish a directory boundary" default, unchanged here). `dump`'s
+    # write-time embed and `compare`'s implicit-dump operand both derive their
+    # public-header roots via this same, more permissive
+    # `split_public_header_inputs` (every `-H` file/dir is a root, no
+    # directory required) -- without matching that for L4 specifically, a
+    # `dump`-produced baseline for a lone-`-H`-file project correctly links
+    # its L4 declarations to binary symbols while `scan`'s own candidate
+    # degrades to zero matches, producing a spurious
+    # source_decl_binary_symbol_mismatch/source_to_binary_mapping_changed RISK
+    # finding on an *unchanged* library purely from this L2-vs-L4 root-set
+    # asymmetry (reproduced end-to-end; see
+    # `service_input_resolution.embed_side_build_source`'s own
+    # `l4_public_headers` docstring paragraph for the full account).
+    _l4_split_files, _l4_split_dirs = split_public_header_inputs(list(headers))
+    # Union with the caller's own `public_headers`/`public_header_dirs` (the
+    # narrower, `_public_provenance_set`-derived set already computed for
+    # L2/crosscheck-origin purposes), deduped, rather than *replacing* it --
+    # an explicit `--public-header-dir` (or a file `_public_provenance_set`
+    # already promoted alongside an activating directory) must still reach
+    # L4 even when it isn't itself derivable from the raw `headers` list.
+    _l4_header_files = list(dict.fromkeys([*_l4_split_files, *(public_headers or ())]))
+    _l4_header_dirs = list(
+        dict.fromkeys([*_l4_split_dirs, *(public_header_dirs or ())])
+    )
 
     side = InputSpec(
         path=binary,
@@ -398,6 +427,14 @@ def _build_new_snapshot(
             # fold can fill in a matched MSVC/clang-cl driver the caller did
             # not name.
             source_frontend_from_folded_context=True,
+            # See this function's own comment above computing
+            # _l4_header_files/_l4_header_dirs: L4 replay's root set stays
+            # wider than L2/crosscheck-origin provenance, matching dump's/
+            # compare's own derivation, so scan doesn't silently degrade to
+            # zero L4-matched symbols relative to a dump baseline of the
+            # identical project.
+            l4_public_headers=_l4_header_files,
+            l4_public_header_dirs=_l4_header_dirs,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -1341,9 +1378,7 @@ def run_scan_core(
                     # actually evaluated. Both normalize to `source`, the
                     # rung this class's own docstring already says they are.
                     requested_depth=(
-                        public_depth_value(eff_depth_enum)
-                        if pinned_explicit
-                        else None
+                        public_depth_value(eff_depth_enum) if pinned_explicit else None
                     ),
                 )
         except deadline.DeadlineExceeded as exc:
