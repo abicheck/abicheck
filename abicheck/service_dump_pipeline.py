@@ -314,7 +314,11 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
     )
     side = request.input
-    fmt = service.detect_binary_format(side.path)
+    # `None` for a source-only dump (`InputSpec.path is None`, PR 3A blocker 5):
+    # there is no native artifact to sniff a format from. `validate()` above
+    # already required real `sources`/`build_info` for that shape, so this is
+    # the binary-less request, not a missing-input mistake.
+    fmt = service.detect_binary_format(side.path) if side.path is not None else None
     debug_format = _sce.normalized_debug_format(request)
     _sce.reject_debug_format_for_binaries(debug_format, (("input", fmt),))
 
@@ -422,6 +426,24 @@ def execute_dump_request(
 
     request = resolved.request
     side = request.input
+    if side.path is None:
+        # PR 3A blocker 5: `InputSpec.path` was widened to `Path | None` so a
+        # source-only dump is *expressible* as a typed request (which is what
+        # lets `dump_cmd` build one `DumpRequest` covering both of its
+        # branches, and lets `--dry-run` resolve one). Executing that shape is
+        # a genuinely different pipeline -- `cli_buildsource.dump_source_only`
+        # collects L3-L5 into an otherwise empty snapshot with no
+        # `resolve_input` call at all -- and routing it through here is its own
+        # slice, not part of making the model able to say it. Fail loudly and
+        # specifically rather than with an `AttributeError` from deep inside
+        # extraction.
+        raise ValidationError(
+            "executing a binary-less (source-only) DumpRequest is not wired "
+            "into execute_dump_request yet -- resolve_dump_request() supports "
+            "it (that is what `dump --dry-run` needs), but producing the "
+            "snapshot is still cli_buildsource.dump_source_only's own "
+            "pipeline. Supply InputSpec.path, or use the `dump` CLI."
+        )
 
     resolution = _resolve_side_snapshot_impl(
         side,

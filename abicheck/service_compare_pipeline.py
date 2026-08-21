@@ -62,7 +62,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, CompareResult, InputSpec
+from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
 from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
@@ -290,8 +290,11 @@ def resolve_compare_request(
     header_backend = (
         frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
     )
-    old_fmt = service.detect_binary_format(request.old.path)
-    new_fmt = service.detect_binary_format(request.new.path)
+    # `validate()` above already rejected a `None` path on either side of a
+    # comparison (`_path_required_errors(..., source_only_allowed=False)`);
+    # `required_path` is the one place that narrowing is spelled.
+    old_fmt = service.detect_binary_format(required_path(request.old, "old"))
+    new_fmt = service.detect_binary_format(required_path(request.new, "new"))
     debug_format = _sce.normalized_debug_format(request)
     _sce.reject_debug_format_for_non_elf(debug_format, old_fmt, new_fmt)
 
@@ -468,8 +471,8 @@ def classify_compare_pair(
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
-    result.old_metadata = service.collect_metadata(request.old.path)
-    result.new_metadata = service.collect_metadata(request.new.path)
+    result.old_metadata = service.collect_metadata(required_path(request.old, "old"))
+    result.new_metadata = service.collect_metadata(required_path(request.new, "new"))
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
     # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`

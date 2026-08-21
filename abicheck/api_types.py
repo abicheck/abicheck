@@ -119,7 +119,18 @@ class InputSpec:
     coerces ``str`` to ``Path`` and ``None`` lists to empty tuples).
     """
 
-    path: Path
+    # `None` means "no native artifact on this side" -- the source-only dump
+    # shape (`abicheck dump --sources ./tree` with no SO_PATH), which
+    # `DumpRequest` accepts and `CompareRequest` does not (a comparison always
+    # has two artifacts/snapshots to compare). Widened from a required `Path`
+    # by CLI cleanup phase two's PR 3A blocker 5: `dump_cmd` cannot build one
+    # `DumpRequest` covering *both* of its branches while this field cannot
+    # express the branch it dispatches on. A pure widening -- `Path | None`
+    # accepts everything `Path` did -- so no existing caller changes; which
+    # requests may leave it `None` is enforced per request type, in
+    # `_path_required_errors` (called from both `validation_errors`), not at
+    # each of the ~7 call sites that dereference it.
+    path: Path | None
     headers: tuple[Path, ...] = ()
     includes: tuple[Path, ...] = ()
     version: str = ""
@@ -189,7 +200,7 @@ class InputSpec:
     @classmethod
     def of(
         cls,
-        path: Path | str,
+        path: Path | str | None = None,
         *,
         headers: Iterable[Path | str] | None = None,
         includes: Iterable[Path | str] | None = None,
@@ -207,7 +218,7 @@ class InputSpec:
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
-            path=Path(path),
+            path=Path(path) if path is not None else None,
             headers=_path_tuple(headers),
             includes=_path_tuple(includes),
             version=version,
@@ -309,6 +320,57 @@ def frontend_context_errors(frontend_context: str) -> list[str]:
     if frontend_context.lower() in FRONTEND_CONTEXTS:
         return []
     return [_frontend_context_message(frontend_context)]
+
+
+def required_path(side: InputSpec, label: str) -> Path:
+    """*side*'s ``path``, narrowed — the accessor for a code path that needs one.
+
+    ``InputSpec.path`` is ``Path | None`` (PR 3A blocker 5, so a source-only
+    ``dump`` is expressible), but most consumers run only after a
+    ``validate()`` that already rejected ``None`` for their request type. This
+    is the one place that narrowing is spelled, so a genuinely-unreachable
+    ``None`` surfaces as this module's own ``ValidationError`` rather than an
+    ``AttributeError`` from deep inside extraction.
+    """
+    if side.path is None:
+        raise ValidationError(
+            f"the {label} side needs a path (a binary or a snapshot file)"
+        )
+    return side.path
+
+
+def _path_required_errors(
+    label: str, side: InputSpec, *, source_only_allowed: bool
+) -> list[str]:
+    """``InputSpec.path`` is optional in the type, but not in every request.
+
+    CLI cleanup phase two, PR 3A blocker 5. ``path`` was widened to
+    ``Path | None`` so a source-only ``dump`` (``--sources ./tree`` with no
+    SO_PATH) can be expressed as a real :class:`DumpRequest`; that shape is
+    meaningless for a two-sided :class:`CompareRequest`, which always has two
+    artifacts/snapshots to compare. Rather than let every consumer defend
+    itself, the rule is stated once here and applied from both request types'
+    ``validation_errors()`` — so a ``None`` path that is *not* a legitimate
+    source-only dump fails as a usage error up front, before anything
+    dereferences it.
+
+    *source_only_allowed* is the per-request-type half: ``True`` for
+    :class:`DumpRequest` (which still requires real source/build evidence to
+    make a binary-less snapshot out of — mirroring ``cli_buildsource.
+    dump_source_only``'s own "a bare dump errors clearly here"), ``False`` for
+    :class:`CompareRequest`.
+    """
+    if side.path is not None:
+        return []
+    if not source_only_allowed:
+        return [f"the {label} side needs a path (a binary or a snapshot file)"]
+    if not (side.sources or side.build_info):
+        return [
+            f"the {label} side has no path and no sources/build_info: a "
+            "binary-less (source-only) dump needs at least one of "
+            "sources/build_info to have anything to extract"
+        ]
+    return []
 
 
 def _side_errors(label: str, side: InputSpec) -> list[str]:
@@ -640,6 +702,7 @@ class CompareRequest:
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
         for label, side in (("old", self.old), ("new", self.new)):
+            errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
         return errors
 
@@ -754,6 +817,7 @@ class DumpRequest:
         errors += _debug_format_errors(self.debug_format)
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
+        errors += _path_required_errors("input", self.input, source_only_allowed=True)
         errors += _side_errors("input", self.input)
         return errors
 
@@ -841,4 +905,5 @@ __all__ = [
     "OutputSpec",
     "frontend_context_errors",
     "frontend_value_errors",
+    "required_path",
 ]

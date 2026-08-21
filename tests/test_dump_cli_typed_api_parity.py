@@ -512,3 +512,13 @@ def test_compare_implicit_dump_against_real_dump_baseline_is_comparable(
         compare_result.output,
     )
     assert compare_result.exit_code == 0, (shape_name, compare_result.output)
+
+
+# Collect-mode parity (`dump`'s CLI --depth resolver vs. the typed
+# `DumpRequest` path, CLI cleanup phase two PR 3A blocker 5 sub-issue 2) lives
+# in `tests/test_dump_collect_mode_parity.py`, NOT here, even though it is the
+# same "CLI and typed API must agree" question this module is named for: every
+# test in this module is `pytest.mark.integration` and skips without a real
+# castxml/g++ toolchain, while that parity check is pure resolution logic that
+# must gate the default fast/PR unit lane. Splitting it out is what makes it an
+# actual gate rather than a test that skips wherever it matters.

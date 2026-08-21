@@ -354,28 +354,32 @@ class TestRunDumpRequest:
                 DumpRequest(input=InputSpec(path=snap_path), debug_format="dwarf")
             )
 
-    def test_collect_mode_inferred_from_build_info(
+    def test_collect_mode_with_build_info_matches_the_dump_cli(
         self, tmp_path: Path, snap_path: Path
     ):
-        """``depth`` omitted, ``build_info`` set → the "build" collect mode.
-
-        Asserted against the shared resolver rather than through a real
-        extraction: the inference is the behaviour, the extractor is not.
-        """
+        """``depth`` omitted, ``build_info`` set → the ``dump`` CLI's own
+        default (PR 3A blocker 5 sub-issue 2; see
+        ``tests/test_dump_collect_mode_parity.py`` for the full grid and why
+        the CLI's default is the canonical one)."""
         from abicheck.service_compare_evidence import resolve_dump_request_evidence
 
         evidence = resolve_dump_request_evidence(
             DumpRequest(input=InputSpec(path=snap_path, build_info=tmp_path))
         )
-        assert evidence.collect_mode != "off"
+        assert evidence.collect_mode == "source-target"
 
-    def test_collect_mode_off_without_any_evidence(self, snap_path: Path):
+    def test_collect_mode_without_any_evidence_matches_the_dump_cli(
+        self, snap_path: Path
+    ):
+        """No inputs at all still resolves the ``dump`` CLI's fixed default
+        (PR 3A blocker 5 sub-issue 2; unobservable either way, since nothing
+        is embedded without ``sources``/``build_info``)."""
         from abicheck.service_compare_evidence import resolve_dump_request_evidence
 
         evidence = resolve_dump_request_evidence(
             DumpRequest(input=InputSpec(path=snap_path))
         )
-        assert evidence.collect_mode == "off"
+        assert evidence.collect_mode == "source-target"
 
     def test_no_pair_wide_dialect_override_for_a_lone_dump(
         self, snap_path: Path, tmp_path: Path

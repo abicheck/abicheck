@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SideEvidence",
     "collect_mode_for",
+    "dump_collect_mode_for",
     "effective_frontend",
     "normalized_debug_format",
     "reject_debug_format_for_binaries",
@@ -136,6 +137,37 @@ def collect_mode_for(depth: str | None, *sides: InputSpec) -> str:
     if any(side.build_info for side in sides):
         return _resolve_depth_collect_mode("build", "off")
     return "off"
+
+
+def dump_collect_mode_for(depth: str | None) -> str:
+    """The build-source collect mode a *dump* resolves ``depth`` to.
+
+    Deliberately **not** :func:`collect_mode_for` (CLI cleanup phase two, PR 3A
+    blocker 5, sub-issue 2). That function mirrors ``compare``'s own rule
+    (``cli_compare_helpers._resolve_compare_collect_mode``): omitted depth is
+    *inferred* from whichever inputs were supplied, defaulting to ``"off"``.
+    The ``dump`` CLI has always resolved omitted depth differently — one fixed
+    default, ``"source-target"``, regardless of inputs
+    (``cli_dump_helpers.resolve_dump_collect_context``'s
+    ``resolve_dump_depth(depth, "source-target")``) — and the two genuinely
+    disagreed for one measurable input shape: ``--build-info`` with no
+    ``--depth`` resolved to ``"source-target"`` on the CLI and ``"build"``
+    through the typed path, so the same invocation attempted L4 replay in one
+    front end and stopped at L3 in the other.
+
+    The CLI's default is canonical: it is the older, documented, tested
+    behaviour, and changing it would silently stop a ``dump --build-info
+    <pack>`` at L3 that reaches L4 today. So the typed ``dump`` path resolves
+    through this function instead, mirroring ``resolve_dump_depth`` exactly.
+    Pinned by ``tests/test_dump_cli_typed_api_parity.py``'s
+    ``TestCollectModeParity``, which enumerates every
+    ``(depth, sources-given, build_info-given)`` combination against the real
+    CLI resolver.
+
+    ``compare`` is untouched — :func:`collect_mode_for` keeps its own rule,
+    which is correct for its own front end.
+    """
+    return _resolve_depth_collect_mode(depth, "source-target")
 
 
 def _headers(side: InputSpec, depth: str | None) -> list[Path]:
@@ -291,7 +323,7 @@ def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
     return resolve_side_evidence(
         request.input,
         depth=request.depth,
-        collect_mode=collect_mode_for(request.depth, request.input),
+        collect_mode=dump_collect_mode_for(request.depth),
         pair_compile=None,
         frontend_context=request.frontend_context.lower(),
     )

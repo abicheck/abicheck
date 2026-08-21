@@ -462,6 +462,14 @@ def _resolve_side_snapshot_impl(
     the query is authorized) opts into running one.
     """
     from . import service
+    from .api_types import required_path
+
+    # `InputSpec.path` is `Path | None` since PR 3A blocker 5 (so a source-only
+    # dump is expressible), but this function resolves a *native artifact* --
+    # every request type that reaches here has already rejected a `None` path
+    # in `validate()`, and a binary-less dump is `cli_buildsource.
+    # dump_source_only`'s pipeline, not this one. Narrowed once, up front.
+    side_path = required_path(side, "input")
 
     # PR C (typed dump/scan convergence): the include-dir seed and the P0.3
     # L3->L2 compile-context fold are resolved together, in one L3
@@ -525,7 +533,7 @@ def _resolve_side_snapshot_impl(
         # scratch) reads through those seeded dirs.
         try:
             snap = service.resolve_input(
-                side.path,
+                side_path,
                 evidence.headers,
                 includes,
                 side.version,
@@ -601,7 +609,7 @@ def _resolve_side_snapshot_impl(
             build_info=side.build_info,
             live_elf_parse=(
                 snap.elf is not None
-                and service.sniff_text_format(side.path) != "json"
+                and service.sniff_text_format(side_path) != "json"
             ),
             user_gcc_option_tokens=(
                 side.compile.gcc_option_tokens if side.compile else ()
