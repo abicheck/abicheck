@@ -121,6 +121,24 @@ def _sequence(value: object, *, what: str) -> Sequence[Any]:
     return value
 
 
+def _bool(value: object, *, what: str, default: bool) -> bool:
+    """Decode a JSON boolean, rejecting anything merely truthy.
+
+    A bare ``bool(value)`` accepts any JSON value at all -- including the
+    string ``"false"``, a non-empty string that is truthy in Python despite
+    spelling the opposite of what it decodes to -- silently coercing it to
+    ``True`` rather than rejecting the malformed payload the way every other
+    strict decoder in this module does (Codex review, PR #817: this is
+    exactly the check ``GateConfig.__post_init__`` itself already performs
+    on construction, which a loose coercion here would bypass).
+    """
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise TypeError(f"{what} must be a JSON boolean, not {value!r}.")
+    return value
+
+
 # --------------------------------------------------------------------------
 # Small value types.
 # --------------------------------------------------------------------------
@@ -307,7 +325,10 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
             },
             "require_complete_analysis": config.gate.require_complete_analysis,
             "scope": (
-                {"kind": config.gate.scope.kind, "targets": list(config.gate.scope.targets)}
+                {
+                    "kind": config.gate.scope.kind,
+                    "targets": list(config.gate.scope.targets),
+                }
                 if config.gate.scope is not None
                 else None
             ),
@@ -436,8 +457,10 @@ def resolved_config_from_dict(
                 quality_issues=SeverityLevel(severity.get("quality_issues", "warning")),
                 addition=SeverityLevel(severity.get("addition", "info")),
             ),
-            require_complete_analysis=bool(
-                gate.get("require_complete_analysis", False)
+            require_complete_analysis=_bool(
+                gate.get("require_complete_analysis"),
+                what="gate.require_complete_analysis",
+                default=False,
             ),
             scope=_gate_scope_from_dict(gate.get("scope")),
         ),

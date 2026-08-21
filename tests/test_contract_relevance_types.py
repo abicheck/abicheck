@@ -180,13 +180,15 @@ class TestContractReasonCodes:
 class TestSchemaVersionStrategy:
     def test_each_counter_pins_its_current_value(self):
         # Not "they all start at one" any more: `IDENTITY_ALGORITHM_VERSION`
-        # has since bumped on its own (the qualified-typedef tail fix changed
-        # the produced type graph without changing any block's shape), which
-        # is the whole point of keeping four counters. Pin each one so a
-        # future change to a persisted format or algorithm has to state which
-        # concern it moved.
+        # bumped on its own (the qualified-typedef tail fix changed the
+        # produced type graph without changing any block's shape), and
+        # `EVALUATION_CONTEXT_SCHEMA_VERSION` bumped separately (GateConfig
+        # gained require_complete_analysis/scope, changing the persisted
+        # evaluation_context.gate shape) -- which is the whole point of
+        # keeping four counters. Pin each one so a future change to a
+        # persisted format or algorithm has to state which concern it moved.
         assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 1
-        assert EVALUATION_CONTEXT_SCHEMA_VERSION == 1
+        assert EVALUATION_CONTEXT_SCHEMA_VERSION == 2
         assert EVALUATOR_VERSION == 1
         assert IDENTITY_ALGORITHM_VERSION == 2
 

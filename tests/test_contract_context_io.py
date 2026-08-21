@@ -296,6 +296,32 @@ class TestResolvedConfigRoundTrip:
         with pytest.raises(TypeError):
             resolved_config_from_dict(["not", "a", "mapping"])
 
+    def test_gate_require_complete_analysis_rejects_truthy_non_bool(self) -> None:
+        # Codex review: a bare ``bool(...)`` coercion accepted any truthy
+        # JSON value -- including the string "false", which is truthy in
+        # Python despite spelling the opposite of what it decodes to --
+        # silently turning it into True instead of rejecting the malformed
+        # payload the way every other decoder in this module already does.
+        config = self._full_config()
+        raw = resolved_config_to_dict(config)
+        raw["gate"]["require_complete_analysis"] = "false"
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            resolved_config_from_dict(raw)
+
+    def test_gate_require_complete_analysis_absent_key_defaults_false(self) -> None:
+        config = dataclasses.replace(
+            self._full_config(),
+            gate=dataclasses.replace(
+                self._full_config().gate,
+                require_complete_analysis=False,
+                scope=None,
+            ),
+        )
+        raw = resolved_config_to_dict(config)
+        del raw["gate"]["require_complete_analysis"]
+        decoded = resolved_config_from_dict(raw)
+        assert decoded.gate.require_complete_analysis is False
+
 
 class TestResolvedContextContent:
     """What the persisted context says about the run that produced it."""
