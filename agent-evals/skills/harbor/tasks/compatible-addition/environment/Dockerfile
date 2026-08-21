@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=be1f9a4455829126ce75fd973d542730454e4c5f
-# ABICHECK_RUNTIME_DIGEST=3a668eb4b65a0cb03c7c02a626e5d61e8c9a0d65f13b03f92f734ee08f65d418
+ARG ABICHECK_REF=45d89b36db1c4ab9e3107767964658a71b686671
+# ABICHECK_RUNTIME_DIGEST=69bb57a4965c8cee8d1986604e5912a7020bb8fedc7b8f143e6a97fd6703ac35
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
 # staleness, independent of whether ABICHECK_REF above is still a
@@ -118,54 +118,64 @@ RUN mkdir -p /opt/skills \
 # not two isolated ones -- so anything answer-bearing left under
 # `/opt/abicheck-src` is readable by the very agent being evaluated on it
 # (Codex review, fresh evidence). `git clone` above pulls the *whole*
-# repository, which includes `agent-evals/skills/scenarios.yaml` and
-# `skill-eval-pack.json` (both carry every scenario's exact expected
-# verdict/uncertainty/full_verdict), every other task's own generated
-# `harbor/tasks/<id>/tests/scenario.json` (the identical ground truth this
-# very task's own `/tests/scenario.json` mount carries, just for every
-# sibling task too), the raw `fixtures/` sources some of which are
-# deliberately comment-annotated with the answer (see `agent-evals/skills/
-# CLAUDE.md`'s "The workspace must not contain the answer" section -- the
-# exact discipline this leaves undone for the Harbor path), and
-# `examples/ground_truth.json` (a Category A scenario's expected outcome is
-# *derived* from this file, so it's an equally direct leak for that
-# category). None of these are needed once the package is installed and the
-# shim/skill copies above have run -- only `agent-evals/skills/graders/`
-# (imported by `verify_run.py`) and `verify_run.py` itself are read again,
-# at verification time. Removed here, after every step that still needed
-# the full clone and before the workspace is populated, rather than by a
-# narrower `git sparse-checkout`: an allowlist of paths *not* to leak would
-# silently stop covering a new answer-bearing file added to this tree later
-# (a repeat of exactly this bug), where a denylist naming known-sensitive
-# paths degrades safely -- worst case it under-covers a genuinely new
-# category of leak, not silently re-opens this one.
+# repository -- source, history, and every test file -- and this repo's
+# ground truth for these 12 scenarios turns out not to live in one place:
+# `agent-evals/skills/scenarios.yaml`/`skill-eval-pack.json` and every
+# sibling task's own generated `harbor/tasks/<id>/tests/scenario.json`
+# carry it directly, `examples/ground_truth.json` derives a Category A
+# scenario's outcome, the raw `fixtures/` sources are sometimes
+# comment-annotated with the answer -- and, found only after a first pass
+# already removed all four of those, `tests/test_skill_eval_graders_
+# consumer_scoping.py`'s own hand-written unit-test fixtures independently
+# restate the same real scenario data (a real consumer name, its real
+# verdict/full_verdict pair) as example input for testing the *grader*,
+# with no reason anyone would have flagged it as "the corpus" (Codex
+# review, fresh evidence, second round).
 #
-# Deleting the working-tree copies alone is not enough, and shipped that
-# way once before this was caught: `/opt/abicheck-src/.git` is *also*
-# agent-visible for the whole trial, and it still holds every one of these
-# files' blobs in its object database regardless of what the working tree
-# looks like -- `git -C /opt/abicheck-src show HEAD:agent-evals/skills/
-# scenarios.yaml` (or `git log`/`git cat-file` against the same blob)
-# recovers the exact answer straight out of history even after the file
-# above is gone from disk (Codex review, fresh evidence, second round).
-# Nothing after this point needs git any further -- the version was
-# already patched directly in the installed package metadata (not derived
-# from a git tag/describe, no `setuptools_scm` in this repo), and no later
-# step in this file runs a `git` command -- so `.git` itself is removed
-# entirely, not selectively rewritten: pruning specific blobs out of a
-# repository's history is exactly the kind of fragile, easy-to-get-wrong
-# operation (`git filter-repo`/`BFG`, unavailable in this base image
-# anyway) that a full deletion sidesteps outright.
-RUN rm -rf /opt/abicheck-src/examples \
-    /opt/abicheck-src/agent-evals/skills/scenarios.yaml \
-    /opt/abicheck-src/agent-evals/skills/skill-eval-pack.json \
-    /opt/abicheck-src/agent-evals/skills/harbor/tasks \
-    /opt/abicheck-src/agent-evals/skills/fixtures \
-    /opt/abicheck-src/agent-evals/skills/pilot-results \
-    /opt/abicheck-src/agent-evals/skills/runners \
-    /opt/abicheck-src/agent-evals/skills/run_skill_eval.py \
-    /opt/abicheck-src/agent-evals/skills/grade_bundle.py \
-    /opt/abicheck-src/.git
+# A first version of this step named every one of those paths explicitly
+# -- a denylist -- reasoning that an allowlist "would silently stop
+# covering a new answer-bearing file added to this tree later." That
+# reasoning had it backwards, and the `tests/` finding above is the direct
+# proof: a denylist's failure mode is silent under-coverage (a file
+# nobody thought to list stays exposed, exactly what happened here),
+# while an allowlist's failure mode is loud (an unlisted file the build
+# actually needs is simply gone, and the image fails to build or the
+# task's own solve/verify steps fail immediately -- there is no way for a
+# genuinely-needed file to go silently missing). Replaced with the
+# allowlist Codex's own fix proposal (and the "PR B" pattern to expect
+# more of these, not fewer, matching the same corpus in a form nobody
+# anticipated) asked for directly: everything the built image still needs
+# after this point -- `abicheck/` itself (the installed package is
+# editable, so its source must stay on disk at this exact path for
+# imports to keep resolving), `agent-evals/skills/graders/` (imported by
+# `verify_run.py`), and `verify_run.py` itself -- is moved into a staging
+# directory, the entire original clone (`.git` included -- see below) is
+# discarded, and the staging directory takes its place. Nothing outside
+# that allowlist can survive this step by construction, regardless of
+# what it's named or which future PR adds it.
+#
+# `.git` needs the identical treatment for a distinct reason: deleting a
+# tracked file's working-tree copy does not remove it from history, and
+# `/opt/abicheck-src/.git` stayed present and agent-visible for the whole
+# trial in an earlier version of this same fix -- `git -C /opt/abicheck-
+# src show HEAD:agent-evals/skills/scenarios.yaml` (or `git log`/`git
+# cat-file` against the same blob) recovered the exact answer straight
+# out of history even after the working-tree file was gone (Codex review,
+# fresh evidence). The allowlist above already excludes `.git` by
+# omission -- nothing here moves it into staging -- so this is one
+# mechanism closing both leaks, not two. Nothing after this point needs
+# git any further: the version was already patched directly in the
+# installed package metadata (no `setuptools_scm`/git-tag-derived
+# versioning in this repo), and no later step runs a `git` command.
+RUN set -eux; \
+    cd /opt/abicheck-src; \
+    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \
+    mv abicheck /tmp/rt-keep/abicheck; \
+    mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \
+    mv agent-evals/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \
+    cd /; \
+    rm -rf /opt/abicheck-src; \
+    mv /tmp/rt-keep /opt/abicheck-src
 
 WORKDIR /workspace
 COPY workspace/ /workspace/

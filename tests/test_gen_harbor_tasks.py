@@ -158,64 +158,102 @@ class TestGeneratorCheck:
 
         assert before == after
 
-    def test_dockerfile_removes_answer_bearing_paths_from_the_agent_visible_clone(
-        self,
-    ):
+    def test_runtime_relevant_digest_covers_the_installed_skill_tree(self, tmp_path):
+        """`_dockerfile()` copies `.claude/skills/check-abi-compatibility`
+        into every image's `/opt/skills/` for a skill-arm trial -- it's the
+        treatment itself -- but it was missing from `_RUNTIME_RELEVANT_
+        PATHS` (Codex review, fresh evidence): editing only the skill's
+        content leaves `skill-eval-pack.json` untouched, so nothing in the
+        original list moved the digest either, and an already-committed
+        task kept baking in the stale skill while `--check` reported it as
+        current. Confirmed directly against the real repository before
+        this fix: appending content to the real, generated `SKILL.md` and
+        rerunning `gen_harbor_tasks.py --check` still reported "up to
+        date". Built against a synthetic tree, like the sibling
+        determinism test above, so this doesn't depend on the real skill's
+        current content."""
+        root = tmp_path / "src"
+        (root / "agent-evals" / "skills" / "graders").mkdir(parents=True)
+        (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
+        (root / "agent-evals" / "skills" / "harbor").mkdir(parents=True)
+        skill_dir = root / ".claude" / "skills" / "check-abi-compatibility"
+        skill_dir.mkdir(parents=True)
+        (root / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
+            "x = 1\n", encoding="utf-8"
+        )
+        (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+            "#!/bin/sh\n", encoding="utf-8"
+        )
+        (root / "agent-evals" / "skills" / "harbor" / "verify_run.py").write_text(
+            "pass\n", encoding="utf-8"
+        )
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text("original workflow content\n", encoding="utf-8")
+        before = gen._runtime_relevant_digest(root)
+
+        skill_md.write_text(
+            "original workflow content\nplus a real edit\n", encoding="utf-8"
+        )
+        after = gen._runtime_relevant_digest(root)
+
+        assert before != after
+
+    def test_dockerfile_reduces_the_agent_visible_clone_to_an_allowlist(self):
         """The agent and verifier phases share one container/filesystem for
         the whole trial -- a full `git clone` of this repository (what
         `_dockerfile()` does to obtain `abicheck` itself) hands the agent
         being evaluated ordinary shell access to every other task's own
-        ground truth (`scenarios.yaml`, `skill-eval-pack.json`, every
-        generated `harbor/tasks/<id>/tests/scenario.json`), the raw
-        (comment-annotated) `fixtures/` sources, and `examples/
-        ground_truth.json` (a Category A scenario's expected outcome is
-        *derived* from this file) unless those paths are explicitly removed
-        before the agent phase (Codex review, fresh evidence). Also pins
-        `.git` itself: deleting a file's working-tree copy alone leaves it
-        fully recoverable from history (`git show HEAD:<path>`,
-        `git log`/`cat-file` against the blob) as long as `/opt/
-        abicheck-src/.git` still exists -- reproduced this exact way against
-        a real repository (a fresh `git init` + commit + `rm` of the tracked
-        file, followed by a real `git show HEAD:<path>` still printing the
-        deleted content) before trusting the claim (Codex review, fresh
-        evidence, second round). Pinned as a content assertion on the
-        generated Dockerfile rather than an actual Docker build (no Docker
-        in this sandbox -- see `agent-evals/skills/harbor/CLAUDE.md`)."""
+        ground truth. A first version of this fix named each answer-bearing
+        path explicitly (a denylist) -- `scenarios.yaml`, `skill-eval-
+        pack.json`, `harbor/tasks/`, `fixtures/`, `examples/ground_truth.
+        json`, `.git` (recoverable history, not just the working tree) --
+        and a follow-up review found the denylist's own structural failure
+        mode: `tests/test_skill_eval_graders_consumer_scoping.py`'s
+        hand-written unit-test fixtures independently restate real scenario
+        data (a real consumer name, its real verdict/full_verdict pair) as
+        example input for testing the grader, and nobody had thought to
+        list it (Codex review, fresh evidence, second round). Replaced with
+        an allowlist: everything the built image still needs is moved into
+        a staging directory, the entire original clone (`.git` included) is
+        discarded, and staging takes its place -- so nothing not explicitly
+        named can survive, regardless of what it's called or which future
+        PR adds it. Pinned as a content assertion on the generated
+        Dockerfile rather than an actual Docker build (no Docker in this
+        sandbox -- see `agent-evals/skills/harbor/CLAUDE.md`)."""
         dockerfile = (
             TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
         ).read_text(encoding="utf-8")
-        # The `RUN rm -rf ...` statement is a single backslash-continued
-        # shell command -- isolate exactly its argument list, not the whole
-        # file, so this test can tell "removed" from "merely mentioned in a
-        # comment elsewhere".
-        start = dockerfile.index("RUN rm -rf ")
+        # The `RUN set -eux; cd /opt/abicheck-src; ...` statement is a
+        # single semicolon-joined shell command -- isolate exactly its body
+        # (there is an earlier, unrelated `RUN set -eux;` step for the
+        # version-metadata patch), not the whole file, so this test can
+        # tell "the real step" from "merely mentioned in a comment
+        # elsewhere".
+        start = dockerfile.index("RUN set -eux; \\\n    cd /opt/abicheck-src;")
         end = dockerfile.index("\n\n", start)
-        removal_block = dockerfile[start:end]
-        for answer_bearing_path in (
-            "/opt/abicheck-src/examples",
-            "/opt/abicheck-src/agent-evals/skills/scenarios.yaml",
-            "/opt/abicheck-src/agent-evals/skills/skill-eval-pack.json",
-            "/opt/abicheck-src/agent-evals/skills/harbor/tasks",
-            "/opt/abicheck-src/agent-evals/skills/fixtures",
-            "/opt/abicheck-src/agent-evals/skills/pilot-results",
-            "/opt/abicheck-src/.git",
-        ):
-            assert answer_bearing_path in removal_block, (
-                f"{answer_bearing_path} is not removed from the agent-visible "
-                "clone -- this is a real ground-truth leak, not a style nit"
-            )
-        # And the removal must not also delete what `verify_run.py` still
-        # needs at grading time -- this fix must not break its own
-        # dependency in the process of closing the leak. Neither path is
-        # ever explicitly copied out of the clone, so the only way this
-        # invariant can be violated is by naming either of them (or an
-        # ancestor directory of either) in the removal block.
-        assert "/opt/abicheck-src/agent-evals/skills/graders" not in removal_block
-        assert "/opt/abicheck-src/agent-evals/skills/harbor/verify_run.py" not in (
-            removal_block
+        cleanup_block = dockerfile[start:end]
+        # The whole original clone -- answer-bearing paths and everything
+        # else nobody has named yet -- must be discarded wholesale, not
+        # selectively pruned.
+        assert "rm -rf /opt/abicheck-src" in cleanup_block
+        assert "mv /tmp/rt-keep /opt/abicheck-src" in cleanup_block
+        # And exactly the allowlist -- nothing more -- must be staged
+        # before that wholesale discard: `abicheck/` (the editable install
+        # needs its source to persist at this exact path), the graders
+        # `verify_run.py` imports, and `verify_run.py` itself.
+        assert "mv abicheck /tmp/rt-keep/abicheck" in cleanup_block
+        assert (
+            "mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders"
+            in cleanup_block
         )
-        assert "/opt/abicheck-src/agent-evals\\" not in removal_block
-        assert "/opt/abicheck-src/agent-evals/skills\\" not in removal_block
+        assert (
+            "mv agent-evals/skills/harbor/verify_run.py "
+            "/tmp/rt-keep/agent-evals/skills/harbor/verify_run.py" in cleanup_block
+        )
+        # No other `mv ... /tmp/rt-keep/...` line may exist -- a fourth
+        # staged path would silently widen the allowlist without this test
+        # noticing unless it's counted explicitly.
+        assert cleanup_block.count("/tmp/rt-keep/") == 4  # mkdir -p + 3 mv targets
 
     def test_old_reachability_design_crashed_on_a_genuinely_unresolvable_ref(self):
         """Pins the actual failure the digest redesign replaced -- not
