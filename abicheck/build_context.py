@@ -759,31 +759,56 @@ def source_matches_filter(
     A redacted ``CompileUnit`` (``buildsource.redaction.RedactionPolicy``,
     ADR-032 D7) is a real, common caller shape this must not double-join:
     both ``source`` and ``directory`` have their shared home prefix replaced
-    with the same placeholder (``~`` by default), so a redacted *file* like
-    ``~/proj/a.cpp`` is *not* :meth:`Path.is_absolute` — the placeholder
-    isn't a root — but it is already anchored under the identically-redacted
-    *directory* (``~/proj``), not a bare relative name that needs joining.
-    Joining it anyway produced ``~/proj/~/proj/a.cpp`` (Codex review, P1),
-    silently matching nothing and falling back to "every compile unit
-    matches". Checked with :meth:`Path.is_relative_to`, which compares path
-    *segments* rather than the filesystem, so it works identically whether
-    *file* is a real relative name (``a.cpp`` is never relative to an
-    unrelated ``directory``, so the ordinary join path is unaffected) or an
-    already-directory-anchored redacted spelling.
+    with the same placeholder (``~`` by default, but caller-configurable —
+    ``home_replacements`` is an arbitrary ``{prefix: placeholder}`` map, and
+    this codebase has real callers using a non-``~`` placeholder), so a
+    redacted *file* like ``~/proj/a.cpp`` is *not* :meth:`Path.is_absolute`
+    — the placeholder isn't a root — but it is already anchored under the
+    identically-redacted *directory* (``~/proj``), not a bare relative name
+    that needs joining. Joining it anyway produced ``~/proj/~/proj/a.cpp``
+    (Codex review, P1), silently matching nothing and falling back to
+    "every compile unit matches".
+
+    That "already anchored" question turns out to have no reliable lexical
+    answer, though (Codex review, P2, fresh evidence): an *ordinary*
+    relative *file* that happens to share its leading segment with
+    *directory* — e.g. ``directory="build"``, ``file="build/a.cpp"``, no
+    redaction involved at all — is *exactly* as
+    :meth:`Path.is_relative_to`-true as the genuinely-redacted case, and
+    real ``CompileEntry``/compilation-database semantics still join it
+    unconditionally (``build/build/a.cpp``, not ``build/a.cpp``). A single
+    lexical check on *file* and *directory* alone cannot distinguish "this
+    prefix match is a redaction artifact" from "this prefix match is a
+    coincidence of ordinary naming" — the two inputs are structurally
+    identical. Rather than guess wrong in one direction or the other, both
+    interpretations are tested as candidate paths (the joined path, matching
+    real ``CompileEntry`` semantics, *and* the raw, unjoined *file*, matching
+    an already-anchored redacted spelling) and the pattern is checked against
+    every form of each. This can only ever *widen* what a filter selects
+    relative to picking one interpretation (a pattern that would have
+    matched under either reading still matches; one that matches under only
+    one reading now also matches) — never narrow it, so it cannot reintroduce
+    either the double-join false-negative or a symmetric coincidental-prefix
+    false-negative. A pattern that specifically distinguishes the join
+    boundary itself (rare — this needs the filter to name the intermediate
+    directory-vs-anchor structure, not just a filename or suffix) is the one
+    narrow case that can now match a translation unit a single "correct"
+    reading would have excluded; consistently true across all three call
+    sites sharing this function is what matters here, not a hypothetical
+    single ground truth this function cannot observe.
 
     A **redacted unit matched against an unredacted (real, absolute) filter**
-    is the sibling gap the segment-comparison fix above doesn't reach (Codex
-    review, P1, fresh evidence beyond the relative-filter case): a caller
-    running ``--compile-db-filter /home/u/proj/a.cpp`` against a redacted
-    compile database never matches, since ``~/proj/a.cpp`` and
-    ``/home/u/proj/a.cpp`` share no path segments to compare at all — the
-    ``is_relative_to`` check above can't help here, because *nothing* is a
-    relative prefix of the other; they're both anchors. Closed by expanding a
-    literal leading ``~``/``~user`` component (:func:`os.path.expanduser`,
-    the exact inverse of ``RedactionPolicy``'s default placeholder) on *file*,
-    *directory*, **and** *pattern* before anything else — so a real,
-    unredacted filter matches a redacted unit, and a filter a user
-    deliberately spells with ``~`` (their own shorthand for home, not
+    is a sibling gap (Codex review, P1, fresh evidence beyond the
+    relative-filter case): a caller running ``--compile-db-filter
+    /home/u/proj/a.cpp`` against a redacted compile database never matches,
+    since ``~/proj/a.cpp`` and ``/home/u/proj/a.cpp`` share no path segments
+    to compare at all — neither is a prefix of the other; they're both
+    anchors. Closed by expanding a literal leading ``~``/``~user`` component
+    (:func:`os.path.expanduser`, the exact inverse of ``RedactionPolicy``'s
+    *default* placeholder — this does not help a caller using a custom one)
+    on *file*, *directory*, **and** *pattern* before anything else — so a
+    real, unredacted filter matches a default-redacted unit, and a filter a
+    user deliberately spells with ``~`` (their own shorthand for home, not
     necessarily redaction-derived) still matches an unredacted unit. Only a
     literal leading ``~`` expands; an ordinary relative name (``a.cpp``,
     ``src/a.cpp``) or absolute path is untouched.
@@ -798,21 +823,29 @@ def source_matches_filter(
     pattern = _expand_leading_tilde(pattern)
 
     path = Path(file)
+    candidates = [path]
     if not path.is_absolute() and directory is not None:
-        directory_path = Path(directory)
-        if not path.is_relative_to(directory_path):
-            path = directory_path / path
-    if fnmatch(str(path), pattern):
-        return True
-    if directory is not None:
+        # Both readings are tested — see the docstring's "no reliable
+        # lexical answer" paragraph — rather than guessing via a prefix
+        # check that cannot distinguish a redaction artifact from an
+        # ordinary directory/file naming coincidence.
+        candidates.append(Path(directory) / path)
+
+    for candidate in candidates:
+        if fnmatch(str(candidate), pattern):
+            return True
+        if directory is not None:
+            try:
+                if fnmatch(str(candidate.relative_to(directory)), pattern):
+                    return True
+            except ValueError:
+                pass  # candidate is not under directory — try the next form
         try:
-            return fnmatch(str(path.relative_to(directory)), pattern)
+            if fnmatch(str(candidate.relative_to(Path.cwd())), pattern):
+                return True
         except ValueError:
-            pass  # file is not under directory — fall through to CWD-relative
-    try:
-        return fnmatch(str(path.relative_to(Path.cwd())), pattern)
-    except ValueError:
-        return False
+            pass
+    return False
 
 
 def _entry_matches_filter(entry: CompileEntry, pattern: str) -> bool:

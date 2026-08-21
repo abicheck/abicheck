@@ -126,6 +126,36 @@ class TestFilterUnitsBySourceContract:
             redacted
         ]
 
+    def test_an_ordinary_relative_file_sharing_the_directory_name_still_joins(
+        self,
+    ) -> None:
+        """Codex review, P2: a real ``CompileEntry`` semantics case, not a
+        redaction one -- ``directory="build"``, ``file="build/a.cpp"`` (no
+        redaction anywhere) is lexically indistinguishable from the
+        redacted ``directory="~/proj"``, ``file="~/proj/a.cpp"`` shape the
+        previous ``is_relative_to`` check was written for, but
+        ``CompileEntry.from_dict()`` still joins it unconditionally --
+        ``build/build/a.cpp``, not ``build/a.cpp``. Treating the coincidental
+        prefix as "already anchored" (skip the join) silently diverged from
+        that real semantics: a filter naming the correctly-joined spelling
+        matched nothing under the old code, only the un-joined one.
+        """
+        coincidence = _cu("build/a.cpp", directory="build")
+        other = _cu("build/b.cpp", directory="build")
+        # The join CompileEntry.from_dict() actually performs.
+        assert list(
+            filter_units_by_source([coincidence, other], "build/build/a.cpp")
+        ) == [coincidence]
+        assert list(
+            filter_units_by_source([coincidence, other], "*/build/a.cpp")
+        ) == [coincidence]
+        # The un-joined spelling still matches too (both readings are
+        # tested, since neither can be ruled out from the strings alone --
+        # see source_matches_filter's own docstring).
+        assert list(filter_units_by_source([coincidence, other], "build/a.cpp")) == [
+            coincidence
+        ]
+
     def test_a_redacted_unit_matches_an_unredacted_absolute_filter(self) -> None:
         """Codex review, P1 (fresh evidence beyond the relative-filter case):
         an absolute ``--compile-db-filter`` (what a user would actually type
