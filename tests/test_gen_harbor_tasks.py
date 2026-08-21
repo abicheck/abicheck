@@ -66,6 +66,30 @@ class TestGeneratorCheck:
         finally:
             stray.write_text(original, encoding="utf-8")
 
+    def test_check_survives_the_pinned_ref_moving(self, monkeypatch):
+        """A commit boundary always moves `git rev-parse HEAD` past whatever
+        was baked into the Dockerfile at generation time (the SHA is
+        necessarily computed *before* the commit that carries it exists) --
+        `--check` must not treat that expected drift as real drift. Real
+        regression: this failed on every commit after the tree was first
+        committed, caught by literally committing and re-running `--check`,
+        not by reasoning about it."""
+        monkeypatch.setattr(gen, "_abicheck_ref", lambda: "f" * 40)
+        assert gen.generate(check=True) is True
+
+    def test_check_still_catches_a_real_dockerfile_edit(self):
+        """The normalization above must not swallow a genuine content
+        change -- only the one line it's scoped to."""
+        stray = TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
+        original = stray.read_text(encoding="utf-8")
+        try:
+            stray.write_text(
+                original.replace("castxml", "castxml-evil"), encoding="utf-8"
+            )
+            assert gen.generate(check=True) is False
+        finally:
+            stray.write_text(original, encoding="utf-8")
+
     def test_regeneration_is_idempotent(self):
         before = {
             p.relative_to(TASKS_DIR): p.read_bytes()

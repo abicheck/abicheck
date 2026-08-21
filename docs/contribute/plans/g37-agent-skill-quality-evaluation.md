@@ -1094,13 +1094,19 @@ the scriptable targets rather than hand-maintained — one row
 (`native-binary-compatibility-review`) per target until a prototype skill is
 promoted, not all four.
 
-Harbor's own agent registry already includes Codex CLI and Gemini CLI
-adapters (confirmed by reading its source, not assumed) — the task battery
-above could in principle serve this phase directly instead of a hand-built
-second/third runner, once a real Harbor trial has actually been run at all
-(still zero, per the note above). **Not decided**: whether Phase 4 adopts
-Harbor for this or keeps the hand-built-runner design this phase already
-describes.
+**2026-08-21: decided, not merely possible.** Harbor was made the canonical
+evaluation surface (ADR-058's "Harbor made canonical" amendment) — this
+phase's own "Codex and Gemini CLI runners" line above is superseded by
+that decision, not a parallel option. Harbor's own agent registry already
+includes Codex CLI and Gemini CLI adapters (confirmed by reading its
+source, not assumed), so this phase's real content shrinks to running the
+existing `agent-evals/skills/harbor/tasks/` battery with `--agent codex`/
+`--agent gemini-cli` instead of building a second/third hand-written
+runner — once a real Harbor trial has been run at all (still zero; see
+`agent-evals/skills/harbor/CLAUDE.md`'s own "What executing this decision
+still needs"). Building a bespoke Codex/Gemini runner from here is now
+out of scope; extending the Harbor generator to a still-open corpus gap
+is in scope.
 
 ### Phase 5 — agent-benchmark integration, L3 *(M, separate repo)*
 

@@ -4,11 +4,17 @@
 third-party, general-purpose agent-evaluation framework — the successor to
 Terminal-Bench, from the same team. `tasks/` is a generated Harbor task
 battery, one task per `status: ready` scenario in `agent-evals/skills/
-scenarios.yaml`. This is **additive**, not a replacement: the existing
-harness (`runners/claude_code.py`, `graders/`, `scenarios.yaml`,
-`skill-eval-pack.json`) is unchanged and still the harness the committed
-pilot (`pilot-results/README.md`) ran on. See ADR-058's Harbor-migration
-amendment for the full decision record and what remains open.
+scenarios.yaml`.
+
+**This is now the canonical evaluation surface (2026-08-21, user-decided,
+ADR-058's Harbor-migration amendment).** `runners/claude_code.py` is kept,
+unchanged, only because it is what produced the one pilot that already
+exists (`pilot-results/README.md`) — it is historical/frozen, not the
+harness for new work. `graders/`, `scenarios.yaml`, and
+`skill-eval-pack.json` are shared infrastructure both surfaces read from
+and stay exactly as they are. See ADR-058's amendment for the full
+decision record and, importantly, what executing this decision still
+needs (below).
 
 ## Why this exists
 
@@ -81,10 +87,28 @@ pip install harbor
 # baseline (no skill):
 harbor run -a claude-code -m claude-sonnet-5 \
   -c agent-evals/skills/harbor/tasks/removed-export
-# skill arm:
+# skill arm -- either the task-baked path (already in the image at
+# /opt/skills/check-abi-compatibility):
 harbor run -a claude-code -m claude-sonnet-5 --ak skills_dir=/opt/skills \
   -c agent-evals/skills/harbor/tasks/removed-export
+# ...or Harbor's own dedicated flag, pointed straight at this repo (neither
+# spelling has been exercised against a real trial -- see the caveats above):
+harbor run -a claude-code -m claude-sonnet-5 \
+  --skill abicheck/abicheck:.claude/skills/check-abi-compatibility \
+  -c agent-evals/skills/harbor/tasks/removed-export
 ```
+
+## What executing this decision still needs
+
+Being the canonical surface does not mean fully operational yet — the
+Docker-dependent half is still unverified (see above), and none of the
+following exist yet: `harbor` as a real dev/CI dependency, a CI job that
+runs `harbor run`/`harbor check`, Docker-in-CI provisioning, or a second
+pilot run through Harbor to actually supersede the existing
+`pilot-results/README.md` numbers. Each is a real, separate piece of work,
+not a formality — the next session with Docker available should treat
+"run one real Harbor trial end to end" as the first thing to prove, before
+any of the above.
 
 ## What NOT to do
 
@@ -94,6 +118,7 @@ harbor run -a claude-code -m claude-sonnet-5 --ak skills_dir=/opt/skills \
   `environment/` — the agent's own workspace. That is the one invariant
   `tests/test_gen_harbor_tasks.py::TestTaskStructure::
   test_scenario_json_is_scoped_to_tests_not_environment` exists to pin.
-- Don't remove or start deprecating the existing `runners/claude_code.py`
-  harness on the strength of this directory existing — that decision is
-  explicitly not made by this migration; see the ADR amendment.
+- Don't hand-edit `runners/claude_code.py` for new behavior — it's frozen
+  (see its own module docstring). A real bug that would also make the
+  existing pilot's own numbers wrong is still worth fixing there; a new
+  feature belongs in the Harbor generator instead.

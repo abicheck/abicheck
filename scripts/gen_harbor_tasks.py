@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -252,8 +253,6 @@ def _readme_abicheck_command(fixture: Path) -> tuple[str, str, str] | None:
     scan`), in which case `_solve_sh` falls back to its unimplemented stub
     rather than guessing.
     """
-    import re
-
     readme = fixture / "README.md"
     if not readme.is_file():
         return None
@@ -447,6 +446,26 @@ def generate(check: bool = False) -> bool:
         return True
 
 
+_REF_LINE = re.compile(rb"^ARG ABICHECK_REF=[0-9a-f]{40}$", re.MULTILINE)
+
+
+def _normalize_pinned_ref(data: bytes) -> bytes:
+    """Blank out the one line that is *expected* to differ between any two
+    generations: the pinned commit SHA.
+
+    `--check`'s job is catching genuine template/logic drift, not "time
+    passed and HEAD moved" -- and it always will have moved by the time a
+    freshly-generated tree is compared against one that was itself
+    committed at an *earlier* HEAD (the committed tree's own commit
+    necessarily postdates the SHA baked into it, since the SHA is computed
+    before the commit that carries it exists). Without this normalization,
+    `--check` could never pass on any commit after the one that generated
+    the tree -- a real bug found by actually re-running `--check` after
+    editing an unrelated file, not a hypothetical.
+    """
+    return _REF_LINE.sub(b"ARG ABICHECK_REF=<normalized-for-diff>", data)
+
+
 def _diff_trees(committed: Path, generated: Path) -> list[str]:
     committed_files = {
         p.relative_to(committed) for p in committed.rglob("*") if p.is_file()
@@ -460,8 +479,8 @@ def _diff_trees(committed: Path, generated: Path) -> list[str]:
     for rel in sorted(generated_files - committed_files):
         diffs.append(f"only in generated tree: {rel}")
     for rel in sorted(committed_files & generated_files):
-        a = (committed / rel).read_bytes()
-        b = (generated / rel).read_bytes()
+        a = _normalize_pinned_ref((committed / rel).read_bytes())
+        b = _normalize_pinned_ref((generated / rel).read_bytes())
         if a != b:
             diffs.append(f"content differs: {rel}")
     return diffs

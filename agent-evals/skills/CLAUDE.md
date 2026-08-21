@@ -20,13 +20,17 @@ important, the harness confound (`--max-turns`) that limits how much weight
 they can bear today. **Still missing: the judged dimensions (4 and 5), the
 trigger corpus runner, and any committed evidence.**
 
-`harbor/` (ADR-058's Harbor-migration amendment) is a second, *additive*
-evaluation surface generated from the same `scenarios.yaml`/`skill-eval-
-pack.json` — a real, schema-validated [Harbor](https://www.harborframework.com)
-task per scenario, sharing the same deterministic graders unmodified. It does
-not replace anything above; see `harbor/CLAUDE.md` for what has and has not
-actually been verified (no Docker in this environment, so no real Harbor
-trial has run yet).
+**`harbor/` is now the canonical evaluation surface** (ADR-058's
+Harbor-migration amendment, decided 2026-08-21) — a real, schema-validated
+[Harbor](https://www.harborframework.com) task per scenario, generated
+from the same `scenarios.yaml`/`skill-eval-pack.json` and sharing the same
+deterministic graders unmodified. The two-arm runner above
+(`runners/claude_code.py`) is now historical/frozen: kept because it is
+what produced the one pilot that exists, not maintained for new work. See
+`harbor/CLAUDE.md` for what has and has not actually been verified (no
+Docker in this environment, so no real Harbor trial has run yet — being
+canonical is a decision about where new work goes, not a claim that
+Harbor execution itself is already proven end to end).
 
 | Path | Role |
 |------|------|
