@@ -119,7 +119,18 @@ class InputSpec:
     coerces ``str`` to ``Path`` and ``None`` lists to empty tuples).
     """
 
-    path: Path
+    # `None` means "no native artifact on this side" -- the source-only dump
+    # shape (`abicheck dump --sources ./tree` with no SO_PATH), which
+    # `DumpRequest` accepts and `CompareRequest` does not (a comparison always
+    # has two artifacts/snapshots to compare). Widened from a required `Path`
+    # by CLI cleanup phase two's PR 3A blocker 5: `dump_cmd` cannot build one
+    # `DumpRequest` covering *both* of its branches while this field cannot
+    # express the branch it dispatches on. A pure widening -- `Path | None`
+    # accepts everything `Path` did -- so no existing caller changes; which
+    # requests may leave it `None` is enforced per request type, in
+    # `_path_required_errors` (called from both `validation_errors`), not at
+    # each of the ~7 call sites that dereference it.
+    path: Path | None
     headers: tuple[Path, ...] = ()
     includes: tuple[Path, ...] = ()
     version: str = ""
@@ -185,11 +196,27 @@ class InputSpec:
     # threaded into the shared L2 fold itself, a separate feature addition to
     # `buildsource/l2_seed.py`/`header_compile_context.py` (Codex review,
     # PR #809).
+    #
+    # **That feature addition has since landed** (PR 3A investigation,
+    # 2026-08-21): `resolve_header_compile_context` takes a `source_filter`,
+    # `l2_seed` forwards it, and the ELF `dump` CLI threads its own
+    # `--compile-db-filter` through -- so a filter now genuinely narrows the
+    # fold rather than only the legacy match. The field is still deliberately
+    # absent here, for a *different*, remaining reason: adding it would let a
+    # typed caller reach the L2-filtered/L3-unfiltered snapshot shape the CLI
+    # refuses outright (`header_conditionals.compile_db_filter_scope_error`,
+    # which fires only when the resolved collect mode also *embeds* L3
+    # evidence). Closing that needs the same refusal mirrored into the typed
+    # request's own resolution -- `service_dump_pipeline.resolve_dump_request`
+    # is the right place, since only it knows the resolved collect mode --
+    # plus forwarding through `_seeded_includes_and_compile_context` and into
+    # `attach_build_context_for_parsed_headers`. One clearly-specified step,
+    # not an open-ended one.
 
     @classmethod
     def of(
         cls,
-        path: Path | str,
+        path: Path | str | None = None,
         *,
         headers: Iterable[Path | str] | None = None,
         includes: Iterable[Path | str] | None = None,
@@ -207,7 +234,7 @@ class InputSpec:
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
-            path=Path(path),
+            path=Path(path) if path is not None else None,
             headers=_path_tuple(headers),
             includes=_path_tuple(includes),
             version=version,
@@ -277,6 +304,37 @@ def _depth_errors(depth: str | None) -> list[str]:
     return [f"unsupported depth {depth!r}: choose from {allowed}"]
 
 
+def _resolved_collect_mode_errors(resolved_collect_mode: str | None) -> list[str]:
+    """Validate :attr:`DumpRequest.resolved_collect_mode` against the real
+    ADR-033 CI-mode vocabulary (Codex review).
+
+    Left unchecked, an unrecognized value (a typo, wrong casing, or an empty
+    string) would silently reach ``buildsource.source_replay.
+    collection_for_ci_mode``, whose own `.get(mode, ())` fallback treats *any*
+    unknown spelling as ``"off"`` -- omitting every requested build/source
+    evidence layer with no error at all, exactly the "reports invalid input
+    as if it were a deliberate no-op" failure mode this repo's own validation
+    convention (`_depth_errors`/`_debug_format_errors` above) exists to
+    prevent. Case-sensitive, deliberately unlike `_depth_errors`/
+    `_debug_format_errors`: this field is never user-typed on a command line
+    (it only ever carries a value another resolver already computed
+    verbatim, e.g. `service_compare_evidence.collect_mode_for`'s own return
+    value), so silently lowercasing it would paper over a real bug in the
+    caller rather than surface it.
+    """
+    if resolved_collect_mode is None:
+        return []
+    from .buildsource.source_replay import CI_MODE_TO_SCOPE
+
+    if resolved_collect_mode in CI_MODE_TO_SCOPE:
+        return []
+    allowed = ", ".join(sorted(CI_MODE_TO_SCOPE))
+    return [
+        f"unsupported resolved_collect_mode {resolved_collect_mode!r}: "
+        f"choose from {allowed}"
+    ]
+
+
 #: The two ``--frontend-context`` values (ADR-050 D3/D5). One tuple, so the
 #: request-level check and the per-side one below cannot drift -- and so a
 #: third caller inherits both the vocabulary and the message wording rather
@@ -309,6 +367,100 @@ def frontend_context_errors(frontend_context: str) -> list[str]:
     if frontend_context.lower() in FRONTEND_CONTEXTS:
         return []
     return [_frontend_context_message(frontend_context)]
+
+
+def required_path(side: InputSpec, label: str) -> Path:
+    """*side*'s ``path``, narrowed — the accessor for a code path that needs one.
+
+    ``InputSpec.path`` is ``Path | None`` (PR 3A blocker 5, so a source-only
+    ``dump`` is expressible), but most consumers run only after a
+    ``validate()`` that already rejected ``None`` for their request type. This
+    is the one place that narrowing is spelled, so a genuinely-unreachable
+    ``None`` surfaces as this module's own ``ValidationError`` rather than an
+    ``AttributeError`` from deep inside extraction.
+    """
+    if side.path is None:
+        raise ValidationError(
+            f"the {label} side needs a path (a binary or a snapshot file)"
+        )
+    return side.path
+
+
+def _path_required_errors(
+    label: str, side: InputSpec, *, source_only_allowed: bool
+) -> list[str]:
+    """``InputSpec.path`` is optional in the type, but not in every request.
+
+    CLI cleanup phase two, PR 3A blocker 5. ``path`` was widened to
+    ``Path | None`` so a source-only ``dump`` (``--sources ./tree`` with no
+    SO_PATH) can be expressed as a real :class:`DumpRequest`; that shape is
+    meaningless for a two-sided :class:`CompareRequest`, which always has two
+    artifacts/snapshots to compare. Rather than let every consumer defend
+    itself, the rule is stated once here and applied from both request types'
+    ``validation_errors()`` — so a ``None`` path that is *not* a legitimate
+    source-only dump fails as a usage error up front, before anything
+    dereferences it.
+
+    *source_only_allowed* is the per-request-type half: ``True`` for
+    :class:`DumpRequest` (which still requires *some* declared evidence to
+    make a binary-less snapshot out of — mirroring ``cli_buildsource.
+    dump_source_only``'s own "a bare dump errors clearly here"), ``False`` for
+    :class:`CompareRequest`.
+
+    ``dump_manifest`` counts as that evidence alongside ``sources``/
+    ``build_info``: ``abicheck dump --dump-manifest m.yaml`` with no SO_PATH
+    is a real, tested CLI shape (the manifest's own ``roots``/translation
+    units declare the surface), and an earlier revision of this check that
+    named only ``sources``/``build_info`` rejected it — caught by
+    ``tests/test_cli_dump_manifest.py``'s existing dry-run cases, which is
+    exactly the kind of "the model can't say what the CLI accepts" gap this
+    widening exists to close.
+    """
+    if side.path is not None:
+        return []
+    if not source_only_allowed:
+        return [f"the {label} side needs a path (a binary or a snapshot file)"]
+    if not (side.sources or side.build_info or side.dump_manifest is not None):
+        return [
+            f"the {label} side has no path and no sources/build_info/"
+            "dump_manifest: a binary-less dump needs at least one of them to "
+            "have anything to extract"
+        ]
+    return []
+
+
+def _source_only_binary_depth_errors(side: InputSpec, depth: str | None) -> list[str]:
+    """Mirror ``dump_cmd``'s own source-only + ``--depth binary`` rejection.
+
+    Codex review on #814: a source-only :class:`DumpRequest` (``path is
+    None``, allowed by ``_path_required_errors`` above) has no binary at all,
+    so ``--depth binary`` -- rank 0, the floor every other depth exceeds --
+    would be trivially "satisfied" for a completely empty snapshot
+    (``--depth binary`` resolves ``collect_mode`` to ``"off"``, skipping
+    L3-L5 embedding too). The CLI (``cli.py``'s ``so_path is None and depth
+    == "binary"`` check, right before its own ``--dry-run`` branch) already
+    raises a ``UsageError`` for this shape; without this check the typed
+    preflight silently approved an invocation the CLI treats as a hard
+    error, and ``resolve_dump_request()`` would go on to build a request
+    with nothing to report at all. Only fires for a genuinely path-less
+    side -- a binary dump with ``depth="binary"`` is the ordinary, valid
+    case this must not touch.
+
+    Compared case-insensitively (Codex review, fresh evidence): ``depth`` is
+    accepted case-insensitively everywhere else (``_depth_errors`` above,
+    ``resolve_dump_request_evidence``'s own ``.lower()``), so a caller
+    spelling ``depth="BINARY"`` previously slipped past this exact-string
+    comparison even though it resolves to the identical, still-illegal
+    source-only-binary shape once normalized.
+    """
+    if side.path is not None or (depth or "").lower() != "binary":
+        return []
+    return [
+        "--depth binary requires a native artifact (SO_PATH); a "
+        "source-only dump (--sources/--build-info with no SO_PATH) has "
+        "no binary to report and needs at least --depth build or "
+        "--depth source to produce any evidence."
+    ]
 
 
 def _side_errors(label: str, side: InputSpec) -> list[str]:
@@ -640,6 +792,7 @@ class CompareRequest:
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
         for label, side in (("old", self.old), ("new", self.new)):
+            errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
         return errors
 
@@ -732,6 +885,22 @@ class DumpRequest:
     # the same positional-caller-safety reason as `CompareRequest`'s own
     # field (Codex review).
     lang_explicit: bool = field(default=False, kw_only=True)
+    # An already-resolved collect mode, overriding what
+    # `service_compare_evidence.dump_collect_mode_for` would otherwise derive
+    # from `depth` alone (Codex review, PR 3A blocker 5). `compare`'s own
+    # implicit-dump path (`cli_compare_helpers._embed_inline_source_side`)
+    # resolves collect mode from the *pair* (`collect_mode_for`, a materially
+    # different rule from `dump`'s own default — see that function's own
+    # docstring) and forwards it into `dump_cmd`'s private
+    # `_resolved_collect_mode` hook so the real run doesn't re-derive a
+    # possibly-different mode from `depth` in isolation. Without this field,
+    # a `DumpRequest` built for that invocation (e.g. by `--dry-run`) could
+    # only record `depth`, and `resolve_dump_request()` would silently
+    # recompute a different collect mode than the one the real run actually
+    # uses — the exact "preview describes a run that never happened" hazard
+    # this whole request object exists to foreclose. `None` (the default)
+    # means "derive from `depth`", unchanged for every other caller.
+    resolved_collect_mode: str | None = field(default=None, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -753,7 +922,10 @@ class DumpRequest:
             errors.append(_ANDROID_NEEDS_SOURCES)
         errors += _debug_format_errors(self.debug_format)
         errors += _depth_errors(self.depth)
+        errors += _resolved_collect_mode_errors(self.resolved_collect_mode)
         errors += frontend_context_errors(self.frontend_context)
+        errors += _path_required_errors("input", self.input, source_only_allowed=True)
+        errors += _source_only_binary_depth_errors(self.input, self.depth)
         errors += _side_errors("input", self.input)
         return errors
 
@@ -841,4 +1013,5 @@ __all__ = [
     "OutputSpec",
     "frontend_context_errors",
     "frontend_value_errors",
+    "required_path",
 ]

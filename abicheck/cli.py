@@ -490,7 +490,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # a module that re-exports them"). That shim only serves *attribute*
     # access on the module (`cli._write_snapshot_output`); a bare name inside
     # this module needs a real import.
-    from .cli_buildsource import _write_snapshot_output as _write_snapshot_output_fn
+    from .cli_buildsource import (
+        _write_snapshot_output as _write_snapshot_output_fn,
+        resolve_dump_request_for_cli,
+    )
+    from .cli_dump_request import build_dump_request
     from .cli_options import warn_deprecated_header_graph_flags
     from .dry_run import emit_dry_run, reject_dry_run_with_output
 
@@ -642,8 +646,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # build, or source facts at all -- a baseline/CI consumer would read
     # that success as proof the requested rung is genuinely present. Checked
     # unconditionally, before the --dry-run branch, so both paths reject the
-    # same way (external review).
-    if so_path is None and depth == "binary":
+    # same way (external review). Compared case-insensitively (CodeRabbit
+    # review): `depth` here is already Click-normalized for a real CLI
+    # invocation, but this check's own logic is what `DumpRequest.
+    # validation_errors()`'s `_source_only_binary_depth_errors()` mirrors --
+    # keeping both case-insensitive avoids the two independently drifting.
+    if so_path is None and (depth or "").lower() == "binary":
         raise click.UsageError(
             "--depth binary requires a native artifact (SO_PATH); a "
             "source-only dump (--sources/--build-info with no SO_PATH) has "
@@ -675,6 +683,37 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         so_path, debug_format_opt, debug_format,
     )
 
+    # CLI cleanup phase two, PR 3A blocker 5: one `DumpRequest` describing this
+    # invocation, built from the CLI's *already-resolved* values (the
+    # `CompileContext` above, the frontend, the explicit-language decision) so
+    # the request records the run rather than forming a second opinion about
+    # it. See `cli_dump_request.py`'s own module docstring for why that
+    # direction matters.
+    #
+    # Built here, before the branch, rather than inside `if dry_run:` -- and
+    # only `--dry-run` consumes it today. That is deliberate and worth being
+    # plain about: the real ELF/PE/Mach-O run still executes through
+    # `perform_elf_dump`/`handle_non_elf_dump` below (three obstacles remain,
+    # recorded in the plan's PR 3A section), so this is the object that
+    # migration will build from, positioned where both branches can reach it
+    # rather than tucked inside the one that currently does.
+    _dump_request = build_dump_request(
+        so_path=so_path, headers=headers, includes=includes,
+        version=version, lang=lang, lang_explicit=lang_explicit,
+        header_backend=header_backend, compile_context=_cc,
+        frontend_context=frontend_context, depth=depth,
+        dwarf_only=dwarf_only, debug_format=effective_debug_format,
+        pdb_path=pdb_path, debug_roots=debug_roots,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        dump_manifest=parsed_dump_manifest,
+        sources=sources, build_info=build_info, build_targets=build_targets,
+        include_dependencies=include_dependencies,
+        follow_deps=follow_deps, search_paths=search_paths,
+        ld_library_path=ld_library_path,
+        include_labels=_resolved_include_labels,
+        resolved_collect_mode=_resolved_collect_mode,
+    )
+
     if dry_run:
         from .buildsource.inline import is_pack_dir
         from .cli_buildsource_helpers import _is_inputs_pack_dir
@@ -682,14 +721,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from .cli_dump_helpers import render_dump_dry_run
         from .cli_helpers_compare import dry_run_compile_db_matched
 
+        # The dry-run report is now rendered from a real `ResolvedDumpRequest`
+        # -- the resolve-only half of the same pipeline `run_dump_request`
+        # executes -- instead of from `dump_cmd`'s own hand-derived locals.
+        # `resolve_dump_request` runs no castxml/clang and writes nothing, so
+        # this stays inside `render_dump_dry_run`'s own "cheap, read-only
+        # resolution" contract.
+        _resolved = resolve_dump_request_for_cli(_dump_request)
         _dry_matched = dry_run_compile_db_matched(
             compile_db_path, None, headers, compile_db_filter,
         )
         _dry_result = render_dump_dry_run(
-            so_path=so_path, headers=headers, sources=sources,
+            so_path=so_path, headers=_resolved.headers, sources=sources,
             build_info=build_info, build_config=build_config,
-            depth=depth, collect_mode=collect_mode,
-            header_backend=header_backend, output=output,
+            depth=_resolved.requested_depth,
+            collect_mode=_resolved.collect_mode,
+            header_backend=_resolved.header_backend, output=output,
             snapshot_compression=snapshot_compression,
             has_compile_db=compile_db_path is not None,
             # External review: dry-run previously only checked bare -p/
@@ -834,6 +881,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         include_labels=_resolved_include_labels,
         include_dependencies=include_dependencies,
         snapshot_compression=snapshot_compression,
+        # CLI cleanup phase two, PR 3A: the legacy -p/--compile-db auto-match's
+        # own derived flags, already folded into effective_gcc_options above --
+        # forwarded so perform_elf_dump can unfold them when the P0.3 L3->L2
+        # fold resolves a context from the same --build-info database (the two
+        # would otherwise both apply, recording the same evidence twice).
+        legacy_build_context_flags=tuple(build_context_flags),
     )
 
 

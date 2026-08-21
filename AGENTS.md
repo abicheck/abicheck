@@ -497,10 +497,20 @@ Core pipeline (in order of data flow):
      which is why the now-removed MCP `abi_dump` tool historically sat at a
      five-argument subset of what `abicheck dump` accepts. Deliberately
      excludes the CLI's provenance/
-     presentation layer (`--dry-run` rendering, git/build-id stamping,
-     `fold_dump_provenance_into_json`); the native `dump` CLI does not build a
-     `DumpRequest` yet — see G33's Phase 5 note for what that migration needs
-     first
+     presentation layer (git/build-id stamping,
+     `fold_dump_provenance_into_json`). Since CLI cleanup phase two's PR 3A
+     the native `dump` CLI *does* build a real `DumpRequest`
+     (`cli_dump_request.py`) and `--dry-run` renders from
+     `resolve_dump_request`'s `ResolvedDumpRequest` — but the real ELF/PE/
+     Mach-O run still executes through `perform_elf_dump`/
+     `handle_non_elf_dump`, not `execute_dump_request`; see the "PR C" entry
+     under "Known gaps" for what that last step needs
+   - `cli_dump_request.py` — CLI cleanup phase two, PR 3A: `dump_cmd`'s ~30
+     Click parameters as one `DumpRequest`, plus the Tier-2-to-Click error
+     translation the boundary owes. Fed the CLI's *already-resolved* compile
+     context/frontend/language decision rather than re-deriving them, so the
+     resolved object records the run instead of forming a second opinion
+     about it
    - `stack_checker.py`, `stack_report.py`, `stack_html.py` — stack analysis
 9. **Build-source evidence (optional L3–L5 layers)** — `buildsource/` package
    (collect/merge/source-ABI replay/source graph; ADR-028…033). See
@@ -625,7 +635,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) — this file (`AGENTS.md`) is included in the generic sweep, same as `README.md`/`CLAUDE.md` |
-| `cli-contract` | ERROR | No front-end `cli*.py`/`appcompat.py`/`compat/cli.py` module calls a Tier-1 core entry point (`checker.compare`, `dumper.dump`, `service.resolve_input`) directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`, `service.run_dump`/`service_dump_pipeline.run_dump_request`, `service_input_resolution.resolve_side_snapshot`); ADR-037 D10.1, extended to the latter two per Phase 0 item 2 of `docs/contribute/plans/duplication-and-convergence-assessment.md` |
+| `cli-contract` | ERROR | No *unallowlisted* front-end `cli*.py`/`appcompat.py`/`compat/cli.py` module calls a Tier-1 core entry point (`checker.compare`, `dumper.dump`, `service.resolve_input`) directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`, `service.run_dump`/`service_dump_pipeline.run_dump_request`, `service_input_resolution.resolve_side_snapshot`); ADR-037 D10.1, extended to the latter two per Phase 0 item 2 of `docs/contribute/plans/duplication-and-convergence-assessment.md`. A small set of reviewed, line-pinned legacy exceptions remain permitted via `CLI_CONTRACT_ALLOWLIST` in `scripts/check_ai_readiness.py` — the gate rejects only a *new*, unlisted direct call |
 | `engine-cli-boundary` | ERROR | No engine-layer module (`scan_engine.py`, `service*.py`, `artifact_*.py`, `buildsource/**/*.py`) imports `click` or a `cli_*` sibling — the CLI is a frontend adapter over the engine, not the reverse. `ENGINE_CLI_BOUNDARY_ALLOWLIST` records today's pre-existing inversions (`scan_engine.py`'s own `click.ClickException`/lazy `cli_scan_baseline`/`cli_scan_helpers` imports, three `service*.py` modules' lazy `cli_*` imports, `buildsource/evidence_policy.py`'s `click`) the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does — a new site outside the allowlist fails outright; closing a listed one is Phase 1 of `docs/contribute/plans/duplication-and-convergence-assessment.md` |
 | `import-cycle-growth` | ERROR | No *unapproved* strongly-connected-component growth within `abicheck/` — not literally "no import cycles": a large, deliberately-baselined CLI-registration SCC already exists and is allowed (`IMPORT_CYCLE_ALLOWLIST`). The invariant is that no *new* module joins it and no *new* separate SCC forms; extending the allowlist to unblock a fresh cycle needs an ADR or explicit architectural sign-off, not a routine edit (CLAUDE.md "M1-3") |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
@@ -4438,6 +4448,490 @@ Once a root command genuinely clears the bar above, pick the right home:
   a real `DumpRequest`; a pair-aware scan-baseline primitive) remain fully
   open, unchanged from the notes above — see the plan doc's own PR 3A
   section for the identical, fuller account.
+
+  **Slice landed (2026-08-21): the ADR-039 collector gate is now one shared
+  function all three resolvers call, which closed a real dump-vs-scan
+  asymmetry nobody had named — and attempting blocker 5 next turned up three
+  concrete obstacles the notes above do not mention.** Re-reading the three
+  resolvers side by side found that `scan_engine._build_new_snapshot` never
+  ran the ADR-039 build-context collector **at all** (the ELF `dump` CLI
+  always had; the typed pipeline gained it in PR #809), so `scan --against`
+  a `dump`-produced baseline compared a candidate with no
+  `build_context_defines`/`conditional_fields` against a baseline carrying
+  both — and the reconciler could clear a context-free header-parse false
+  positive (a `#ifdef`-guarded record field the context-free parse pruned)
+  on the baseline side but not on the candidate's. Fixed at the gate rather
+  than by writing a fourth copy of it:
+  `header_conditionals.attach_build_context_for_parsed_headers` now owns the
+  compile-DB resolution (from an already-resolved path *or* from
+  `build_info`), the best-effort header expansion a directory `-H` entry
+  needs, the `snap.from_headers` check, and the caller-supplied
+  `live_elf_parse` answer; `perform_elf_dump`,
+  `_resolve_side_snapshot_impl`, and `_build_new_snapshot` all call it.
+  `perform_elf_dump` gains `from_headers` in the process — the same gate its
+  own sibling `parsed_with_build_context` stamp ten lines above already
+  applies, for the recorded reason that a `--dwarf-only` run explicitly
+  ignores `-H`. A latent ordering bug was fixed alongside:
+  `_resolve_side_snapshot_impl` drained the L2 seed's cleanups only *after*
+  `embed_side_build_source`, so an inferred build query's lock was still
+  held when the embed ran its own — the self-contention this entry's own
+  fifth finding records for the CLI resolvers. Unreachable today (the seed's
+  `collect_mode` is pinned `"off"`), fixed now because it springs on
+  whichever PR relaxes that pin, which is what migrating the CLI resolvers
+  means. Tests: `tests/test_scan_adr039_build_context.py` (7 cases; the
+  three positive ones confirmed to fail against the pre-fix
+  `scan_engine.py`) and `tests/test_typed_dump_request.py::
+  TestSeedCleanupsDrainBeforeTheEmbedStep` (confirmed to fail pre-fix).
+
+  **Blocker 5's three obstacles, each verified rather than assumed** (full
+  account in the plan doc's PR 3A section): (a) `InputSpec.path` is a
+  *required* field and `dump`'s source-only branch (`dump --sources ./tree`
+  with no SO_PATH) has no path, while `--dry-run` runs before that dispatch
+  — so "both branches build from one `DumpRequest`" is unreachable for that
+  shape until `InputSpec` can express "no binary", a public typed-API model
+  change reaching every consumer. (b) The two collect-mode resolvers
+  genuinely disagree, measured directly: they agree for *every* explicit
+  `--depth`, and the no-inputs case is unobservable, but **`--build-info`
+  with no `--depth` is `source-target` on the CLI
+  (`resolve_dump_collect_context`) and `build` through the typed path
+  (`collect_mode_for`)** — so taking the collect mode from
+  `resolve_dump_request` would silently stop a `dump --build-info <pack>`
+  at L3 that attempts L4 today. Which default is right is a product
+  decision, not a mechanical reconciliation. (c) The ELF `dump` CLI embeds
+  L3–L5 at *write* time (`cli_buildsource._write_snapshot_output`, together
+  with the G21.7 warning, the Flow-2 `--inputs` fold, the depth gate and
+  the provenance fold) while `execute_dump_request` embeds at *resolve*
+  time inside `_resolve_side_snapshot_impl` — routing the real run through
+  the typed executor **embeds twice**, re-running L4 replay, unless the
+  write path is restructured in the same change. Note what (b) implies for
+  a "just migrate the dry-run first" shortcut: it would report a collect
+  mode the real run does not use, which is worse than today's two
+  hand-synced implementations.
+
+  **One more verified divergence, not fixed:** `scan`'s
+  `embed_build_source` call passes no `extractor`, taking that function's
+  `"auto"` default, and `buildsource.inline._make_source_extractor` treats
+  anything but a literal `"castxml"` as clang — while every other resolver
+  passes `service_compare_evidence.effective_frontend(...)`, which resolves
+  `"auto"` to **castxml** (`dumper._resolve_header_backend`, no availability
+  fallback). So `dump --depth source` and `scan --depth source` over one
+  project at their defaults replay L4 through *different extractors*, and a
+  `scan --against` a `dump` baseline compares source-ABI facts from two
+  different tools — precisely what `effective_frontend`'s own docstring says
+  it exists to prevent. Making `scan` match would newly require castxml for
+  a scan that works with clang today: a real behavior change for real users,
+  unverifiable without a castxml-capable environment, so it needs its own
+  slice rather than a same-pass patch. **Re-checked 2026-08-21: castxml is
+  still absent from this environment, so this stays a documented gap rather
+  than a guessed fix.**
+
+  **Blockers 5 and 6 closed (2026-08-21, later the same day) — `dump_cmd`
+  now builds one real `DumpRequest`, and the pair-aware baseline rule lives
+  in one primitive. The real runs are deliberately still not migrated.**
+
+  *Blocker 5* was three sub-issues, each closed at the layer that had the
+  gap rather than at the call site that noticed it. (a) `InputSpec.path` is
+  now `Path | None` — a pure widening, so no existing caller changes — with
+  "which requests may leave it `None`" enforced once, per request type, in
+  `validation_errors()` (never for `CompareRequest`; for `DumpRequest` only
+  alongside real `sources`/`build_info`/`dump_manifest`), and
+  `api_types.required_path` as the single place the narrowing is spelled
+  rather than seven defensive call sites. The `dump_manifest` clause is
+  worth recording because it was found the right way round: a first revision
+  named only `sources`/`build_info` and broke `dump --dump-manifest
+  m.yaml --dry-run` (no SO_PATH), caught by the *existing*
+  `tests/test_cli_dump_manifest.py` — which is precisely the "the model
+  cannot express what the CLI accepts" gap the widening exists to close.
+  (b) The CLI-vs-typed collect-mode disagreement (`--build-info` with no
+  `--depth`: `source-target` on the CLI, `build` through the typed path)
+  is resolved in favour of the CLI's older, documented default, via a new
+  `service_compare_evidence.dump_collect_mode_for`. `collect_mode_for` is
+  **unchanged** — `compare`'s own front end genuinely infers omitted depth
+  from its inputs, which is a different question, and changing it would have
+  been the easy wrong fix. Pinned by
+  `tests/test_dump_collect_mode_parity.py` against the *real* CLI resolver
+  over the whole `(depth, sources, build_info)` grid. (c) The write-time
+  embed is now idempotent: `cli_buildsource.build_source_already_satisfies`,
+  stated through the same `_missing_requested_evidence_layers` the
+  neighbouring G21.7 warning already trusts, so the guard and the warning
+  cannot disagree about what "satisfied" means; its `pack is None -> []`
+  case is deliberately *not* satisfaction, which is what keeps it a no-op
+  for today's CLI (`tests/test_dump_embed_idempotence.py`, including an
+  `integration` end-to-end count proving one real `dump --depth source`
+  embeds exactly once).
+
+  With those closed, `abicheck/cli_dump_request.py` builds one `DumpRequest`
+  from `dump_cmd`'s parameters and `--dry-run` renders from a real
+  `ResolvedDumpRequest`. **The half-migration hazard the plan names — "a
+  preview built from one resolver describing an execution built from another
+  is worse than two hand-synced implementations, since it looks
+  authoritative without being connected to what actually runs" — is answered
+  structurally, not asserted.** The request is fed the CLI's
+  *already-resolved* values (compile context, frontend, explicit-language
+  decision) rather than re-deriving them, so it records the run; and the
+  fields the pipeline *does* derive independently are pinned equal to the
+  CLI's own by `tests/test_dump_request_from_cli.py::
+  TestResolvedRequestAgreesWithTheCliLocals`. Sub-issue (b) was a
+  prerequisite for exactly that: without it the preview would have reported
+  a collect mode the real run does not use. One user-visible consequence,
+  stated rather than left to be discovered: `DumpRequest.validate()`
+  front-runs `dumper.dump()`'s own runtime rejection of `--dump-manifest`
+  combined with `-I`, so that combination is now a usage error in the dry
+  run too — inside the dry-run contract, which permits usage errors.
+
+  *Blocker 6* is `service_input_resolution.BaselineReuseContext` /
+  `resolve_baseline_compile_context`: the "may the candidate's folded
+  context also parse the baseline" rule, extracted from the four-clause
+  boolean inline in `scan_engine.run_scan_core` that the twelfth, thirteenth
+  and fifteenth findings above each had to correct in turn. `run_scan_core`
+  calls it today; `_resolve_side_snapshot_impl` accepts the same object as
+  an **optional** `baseline_reuse_hint` and reports the identical answer on
+  `SideResolution.baseline_compile_context`, so the migration that finally
+  routes `_build_new_snapshot` through the shared resolver inherits the rule
+  instead of reimplementing it a fourth time. Deliberately an opt-in hint,
+  not a widening of `resolve_side_snapshot`'s single-input contract — a
+  caller that passes none is bit-for-bit unaffected. Given that correction
+  history, it is tested as a primitive rather than only through `scan`
+  (`tests/test_baseline_reuse_context.py`), per this file's own
+  "Primitive-level property tests" guidance: the contract as invariants,
+  the resolver-agrees-with-its-own-predicate property, and a pin that
+  include *order* matters (search order is first-match-wins, so a "compare
+  as sets" simplification has to argue with a test rather than pass
+  silently).
+
+  **Still open, unchanged:** neither real run routes through the shared
+  pipeline. `dump` executes through `perform_elf_dump`/
+  `handle_non_elf_dump` and `scan`'s candidate through `service.
+  resolve_input`/`embed_build_source` directly. What blocks each is now
+  concrete rather than open-ended — the ADR-039 collector's CLI-only inputs
+  (`--compile-db-filter`, the raw `effective_compile_db`) need typed-API
+  representation, and `_write_snapshot_output`'s provenance/`--inputs`/
+  depth-gate sequence needs reordering around a resolve-time embed — but
+  each is its own slice. PR 3C (removing `dump --build-query`/
+  `--build-compile-db`) therefore stays blocked, per the plan's own ordering
+  rule: moving those inputs into config while two resolvers still interpret
+  that config independently is the exact failure the three-way split exists
+  to prevent.
+
+  **Both real-run migrations attempted and stopped (2026-08-21, later
+  session) — and the reason is now measured rather than reasoned about,
+  which changes what "still open" means here.** The paragraph above says the
+  two resolvers are structurally separate. Comparing the written `dump` CLI
+  snapshot against `execute_dump_request`'s, field by field, over a real
+  `g++` build and a real clang L2 parse, shows they *already produce
+  non-comparable snapshots* for the same library from the same evidence:
+  everything agrees except the extraction contract, where the CLI records
+  `macro_ops` as `[["D","FOO=1"],["D","FOO=1"]]` against the typed path's
+  one entry, and `include_sequence` as `[]` against the typed path's one
+  slot. `scope_fingerprint` agrees; `profile_fingerprint` therefore differs
+  in exactly those two shapes. Both trace to one mechanism — the
+  `dump` CLI runs the legacy `-p`/`--compile-db` auto-match
+  (`cli_helpers_compare._resolve_build_context_flags`, merged into
+  `effective_gcc_options`) *in addition to* the P0.3 L3→L2 fold whenever
+  both are fed by the same `--build-info` compile database. The duplicate
+  `-D` is that overlap recorded twice; the empty `include_sequence` is the
+  legacy match supplying `-I<dep>` as explicit context *before* the L2 seed
+  runs, so `seed_l2_includes` correctly declines to seed it and the
+  directory reaches the parse through `gcc_option_tokens`, which contributes
+  no `declared_includes` slot — the sole source `include_sequence`
+  tokenizes. This is the `dump`-vs-typed-API half of the same "third,
+  deeper mechanism" the L3→L2-fold entry above already records for
+  `dump`-vs-`scan`.
+
+  **Why that stops the migration rather than motivating it.** Routing the
+  real run through `execute_dump_request` drops the legacy match, so the
+  migration does not merely need the two prerequisites named above — it
+  *forces* the design decision the L3→L2-fold entry says is open. Dropping
+  the legacy match is arguably right (the fold is strictly richer:
+  per-header matching, ambiguity checking, include paths, forced includes),
+  but it makes `dump --compile-db-filter` inert, and `InputSpec`
+  deliberately carries no `compile_db_filter` field — one was added and
+  removed in the same review round for having no successful execution path
+  (see that field's replacement comment in `api_types.py`). Making a
+  documented flag silently inert is worse than the gap. The ordering is
+  therefore three slices, not one: thread `--compile-db-filter` into the
+  shared fold (`buildsource/l2_seed.py`/`header_compile_context.py`), decide
+  and ship the legacy-match removal, then migrate the real run. **The first
+  of those three landed in the same session** — and it turned out to be a
+  user-facing bug in its own right, not merely migration plumbing:
+  `resolve_header_compile_context`'s fail-closed ambiguity message names
+  `--compile-db-filter` as a way to narrow the input, but the filter reached
+  only the legacy match, so a user who followed that advice got the identical
+  error back. Reproduced end to end (`dump --depth headers -H api.h
+  --build-info db.json --compile-db-filter a.cpp` over two TUs disagreeing on
+  an ABI-relevant `-D`) and fixed by threading `source_filter` through
+  `resolve_header_compile_context`/`l2_seed`/`perform_elf_dump`, with the
+  matching rules consolidated into one shared
+  `build_context.source_matches_filter` so the fold, the legacy match and the
+  ADR-039 collector cannot select different translation units for the same
+  filter. A filter matching nothing keeps every unit — the conservative
+  fallback the other two layers already applied. Tests:
+  `tests/test_compile_db_filter_scope.py` (the primitive's contract as
+  invariants, the three layers agreeing, the resolver, and a real
+  `g++`+clang `dump` proving the guarded field is parsed in or out according
+  to which TU the filter names; the end-to-end cases confirmed to fail
+  pre-fix). Still open in that first slice: the *typed* half —
+  `InputSpec.compile_db_filter` plus the CLI's own
+  L2-filtered/L3-unfiltered refusal mirrored into
+  `resolve_dump_request`, which is where the resolved collect mode is known
+  (see that field's replacement comment in `api_types.py`). One
+  environmental fact independently rules out attempting the *migration
+  itself* in that session, whatever order the three slices land in: the
+  *default* header backend is castxml, and no working castxml was
+  obtainable — a hand-assembled conda-forge 0.7.0 build segfaults inside
+  `clang::ParseAST` on any input — so every measurement above is
+  clang-backend only, and migrating the real `dump` run while able to
+  exercise only the non-default backend is not a verified change.
+
+  **The `scan` side is four items, not the two named above, and three of
+  them are behaviour changes rather than missing plumbing** (read against
+  `_resolve_side_snapshot_impl` line by line): (1) the L4 extractor default,
+  unchanged and still castxml-blocked; (2) the `public_headers` expansion
+  shape, where the shared wrapper's raw pass-through is the one already
+  reverted for regressing `clang_public_roots._equivalent_public_roots_for_
+  unit`; (3) the seed's collect mode — `_seeded_includes_and_compile_
+  context` pins `collect_mode="off"` so a Tier-2 primitive never executes a
+  build system as a side effect, while `_build_new_snapshot` passes scan's
+  real one, so routing through the shared primitive silently removes scan's
+  ability to run the zero-config inferred build query in its seed; and (4)
+  `defer_cleanup`, which `embed_side_build_source` has no parameter for —
+  the only purely additive item of the four. Each of (1)–(3) could become an
+  opt-in parameter the way `symbols_only`/`allow_build_query`/
+  `changed_paths` already are, which is what a future slice should do;
+  reproducing a dozen parameter behaviours exactly on the hot path of every
+  `scan`, with the integration lane only partly executable, is the rewrite
+  shape this area's review history keeps punishing.
+
+  **What landed instead:** `tests/test_dump_cli_typed_api_parity.py::
+  test_dump_cli_and_typed_api_agree_on_extraction_contract`. Its sibling
+  compares `ast_compile_args` through `split_compile_args`'
+  semantics-preserving normalization, which is the right lens for "did both
+  paths reach the same compile" and structurally blind to both divergences
+  above — `profile_fingerprint` hashes the recorded fields *as recorded*, so
+  a difference normalization hides is still a comparability failure. The two
+  known-divergent (shape, field) pairs are encoded the same conditional-xfail
+  way `_SCAN_KNOWN_DIVERGENT_SHAPES` already is: the exact diagnosed
+  signature reproduces, or the test fails outright, so "the gap closed"
+  fails as loudly as "a new field diverged" and the mapping cannot go stale
+  silently. Verified in both directions.
+
+  **The two divergences that test recorded are closed, `scan`'s candidate
+  resolver is migrated, and the measurement itself turned up a second, larger
+  bug (2026-08-21, later session). The `dump` real run is still not migrated —
+  the reason is now two items, not open-ended.**
+
+  *The legacy-match overlap.* The design decision the entry above left open is
+  made: **when the P0.3 fold resolves a compile context for the headers being
+  parsed, it is the sole source of compile-database-derived context**, and the
+  legacy `-p`/`--compile-db` auto-match's own derived flags are unfolded rather
+  than stacked on top of it. When the fold does not apply (no `--build-info`,
+  or a header no compile unit matches) the legacy match still runs and still
+  applies — only the overlap is dropped. The worry that ranked this second —
+  that dropping the legacy match makes `--compile-db-filter` inert — no longer
+  holds: the filter reaches the shared fold too, since the preceding slice
+  threaded `source_filter` through `seed_includes_and_fold_compile_context`/
+  `resolve_header_compile_context`. Where the conditional goes is the load-
+  bearing part: `dump_cmd` merges the legacy flags into `effective_gcc_options`
+  *before* calling `perform_elf_dump`, so that function now takes them
+  separately (`legacy_build_context_flags`) and hands the fold the caller's
+  *own* `--gcc-options` string as its explicit context. Presenting the legacy
+  result to the fold as though it were an explicit user choice is precisely
+  what recorded the same `-D` twice and routed a derived `-I` through
+  `gcc_option_tokens` instead of `declared_includes`. User-visible result, not
+  only a fingerprint tidy-up: `scan --against` a real `dump` baseline for the
+  extra-`-I` shape goes from **exit 6, `NOT_COMPARABLE ... differing fields:
+  include_sequence`** to exit 0 for an unchanged library.
+
+  *`scan`'s candidate resolver.* `scan_engine._build_new_snapshot` now builds
+  an `InputSpec`/`SideEvidence` and calls `_resolve_side_snapshot_impl`,
+  returning its `SideResolution`; `run_scan_core` hands the
+  `BaselineReuseContext` in at resolve time and reads
+  `SideResolution.baseline_compile_context` rather than recomputing it. The L2
+  seed, the `parsed_with_build_context` stamp, the ADR-039 collector gate, the
+  drain-before-embed ordering and the pair-aware baseline rule are inherited
+  from one implementation instead of written twice — each of which had already
+  needed its own separate correction on this path (findings 8/12/13/15 above,
+  and the round where `scan` turned out never to run the ADR-039 collector at
+  all). The four documented divergences are preserved as **opt-in parameters**
+  on the shared primitive, which is what the plan said a future slice should
+  do: `seed_collect_mode`, `seed_lang_explicit`, `defer_cleanup`,
+  `source_extractor`, `expand_public_header_roots`, `source_frontend_compile`.
+  The L4 extractor default therefore stays a documented gap — matching the
+  other resolvers would newly require castxml for a `scan --depth source` that
+  works with clang today, and castxml is still absent here. Equivalence was
+  measured, not argued: candidate snapshot, effective includes, effective
+  compile context and deferred-cleanup count, over three real build shapes ×
+  three collect modes, identical before and after apart from wall-clock
+  timestamps and the build-source pack's own content hash.
+  `test_scan_engine_calls_the_shared_resolver` was a source-text match on
+  `run_scan_core`; it is replaced by two behavioural pins through a real
+  `scan --against`.
+
+  *The second bug, found by the verification bar rather than by a report.*
+  Extending the parity measurement from the extraction contract to the *whole*
+  snapshot showed the two paths disagreeing on the L3–L5 payload, and not
+  cosmetically: the `dump` CLI recorded `0/2 symbols matched`,
+  `reachable_declarations=0`, `fact_family_states: empty-confirmed` where the
+  typed path recorded `1/2` matched and a real `source_decl_to_binary_symbol`
+  mapping. `cli_buildsource._write_snapshot_output`'s own `embed_build_source`
+  call passed **no** `public_headers`/`public_header_dirs`, so L4 replay ran
+  with an empty `public_header_roots` set — every declaration classifies
+  private and nothing links. Nothing fails: the layer is present and the
+  coverage row honestly says "partial", so every L4-derived source-ABI finding
+  was simply inert for a `dump`-produced baseline. Fixed on both the ELF and
+  PE/Mach-O paths. With it, the `dump` CLI's written snapshot and
+  `execute_dump_request`'s agree on every field except wall-clock timings and
+  the CLI's own provenance layer (`git_commit`, `version`).
+
+  **What still blocks the `dump` real-run migration — two items, both real.**
+  Blocker 4 (post-processing hooks) is closed on measurement, not just on
+  reading: `service.run_dump`'s ELF branch already runs every pass
+  `perform_elf_dump` does (SYCL, `python_ext`, `python_api`, `numpy_capi`, the
+  G31 header graph, the G28 clang-layout attach), the ADR-039 collector runs
+  inside `_resolve_side_snapshot_impl`, and the whole-snapshot comparison shows
+  no difference in any field those produce. What remains: (1)
+  **`--compile-db-filter` would go inert** — `InputSpec` deliberately carries
+  no `compile_db_filter`, so the shared path cannot narrow the fold or the
+  ADR-039 collector the way the native CLI does, and making a documented flag
+  silently do nothing is worse than the gap; the step is specified (add the
+  field, thread it into `_seeded_includes_and_compile_context` and
+  `attach_build_context_for_parsed_headers`, mirror the CLI's
+  L2-filtered/L3-unfiltered refusal into `resolve_dump_request`) but is its own
+  slice. (2) **The default backend is still unexercisable here** —
+  `--ast-frontend` defaults to castxml, none is available (re-checked), so
+  every measurement above is clang-only, and migrating the real `dump` run
+  while able to exercise only the non-default backend is not a verified change.
+  PR 3C stays blocked, per the plan's own ordering rule.
+
+  **A real regression the scan-migration paragraph above introduced, found
+  by Codex review and fixed the same session (2026-08-21): `scan --config
+  <path>` silently lost the config's own *passive* settings whenever the
+  config declared no `build.query` — the common case, not an edge one.**
+  `_resolve_side_snapshot_impl`'s shared `build_config`/`build_query` gate
+  (`_gated_build_query_inputs`) blanket-nulls `build_config` unless
+  `allow_build_query` is exactly `True`, a default sized for `dump`/
+  `compare`'s typed API (no CLI-side consent step of its own, so mere
+  presence cannot be trusted). Migrating `scan`'s candidate resolution onto
+  this same primitive routed it through that gate too — but `scan`'s own
+  consent gate, `cli_scan_helpers.resolve_effective_allow_query` (ADR-037
+  D4 "level-implies-query"), only ever answers `True` when the config
+  *itself* declares an executable `build.query` key AND an explicitly-pinned
+  deep evidence level; it was never meant to answer whether the config may
+  be *read* at all. `build_config`'s own query field is already, correctly,
+  gated downstream regardless of this local gate — `collect_inline_pack`'s
+  presence-based `build_config_trusted_for_query`, computed independently by
+  both of this gate's callers (`l2_seed._resolve_l2_seed_pack_args`,
+  `cli_buildsource.embed_build_source`) since before this migration existed.
+  Confirmed against scan's own pre-migration source (commit `c3f6add`):
+  `build_config` was always forwarded ungated to both
+  `seed_includes_and_fold_compile_context` and `embed_build_source`,
+  trusting exactly that downstream gate; `allow_build_query` was a separate,
+  already-documented-dead-in-the-`True`-direction parameter that never
+  gated `build_config`'s presence at all. Fixed with a new opt-in parameter,
+  `build_config_locally_trusted` (threaded through `_gated_build_query_
+  inputs`, `_seeded_includes_and_compile_context`, and
+  `_resolve_side_snapshot_impl`), defaulting `False` so `dump`/`compare`'s
+  typed-API contract is completely unchanged; `scan_engine.
+  _build_new_snapshot` passes `True`, restoring its exact pre-migration
+  behavior. `build_query` — the bare, always-executable command string, with
+  no downstream gate of its own — stays fully gated by `allow_build_query`
+  regardless of this flag either way. Regression coverage:
+  `tests/test_gated_build_query_inputs.py` (primitive-level tests on the
+  gate itself, plus one end-to-end test on `scan_engine._build_new_snapshot`
+  proving `build_config` survives even when `allow_build_query` is falsy;
+  5 of 8 cases confirmed to fail against the pre-fix gate).
+
+  **A build-source pack's replay *scope* (`"changed"` vs `"target"`) is not
+  recorded anywhere, so the write-time idempotence guard cannot distinguish
+  them — investigated (CodeRabbit review), not fixed; currently unreachable
+  by any real caller, which is why this stayed a documented gap rather than
+  a same-session patch.** `_missing_requested_evidence_layers()` maps an
+  ADR-033 collect mode to its expected *layer set* (`CI_MODE_TO_LAYERS`) and
+  checks only whether each layer's embedded payload is non-empty — it never
+  reads `collection_for_ci_mode()`'s other return value, the replay scope.
+  `source-changed` (only affected TUs replayed) and `source-target` (the
+  full target) map to the *identical* layer set `("L3", "L4", "L5")`, so in
+  principle a pack built under `source-changed` — non-empty because *some*
+  TUs were affected — could read as satisfying a later `source-target`
+  request through `build_source_already_satisfies()`, the write-time
+  check-before-embed guard PR 3A blocker 5 sub-issue 3 added (see above).
+  Traced why this is not reachable today: that function has exactly one
+  caller (`_write_snapshot_output`'s guard), which runs on `snap.build_
+  source` *before* any embedding has happened for the current `dump`
+  invocation — the only other `snap.build_source = ...` assignment anywhere
+  in the codebase is `embed_build_source()`'s own, which this guard exists
+  to gate — so `snap.build_source` is always `None` entering the guard for
+  the one real caller, and the function is unconditionally a no-op today
+  exactly as its own docstring already states. It exists for the *future*
+  migration that routes `dump`'s real execution through
+  `execute_dump_request` (still blocked, see above); in that migration both
+  the resolve-time and write-time embeds would receive the *same* resolved
+  `collect_mode` for one invocation, not two different ones, so this
+  specific scope mismatch doesn't arise from that path either. The deeper
+  gap the finding surfaces is real independent of this predicate, though:
+  `BuildSourceManifest` has no field recording replay scope at all —
+  `pack.manifest.inputs` (`buildsource/inline.py`) only ever records
+  `{"sources", "build_info", "collected"}`, never `"changed"` vs `"target"`.
+  A correct fix needs a new manifest field threaded through every
+  pack-producing call site (`collect_inline_pack` and its Bazel/compile-DB
+  siblings) plus a scope-aware read in `_missing_requested_evidence_
+  layers`, with its own regression coverage for a genuine scope-narrowing
+  scenario — a real, if currently latent, data-model gap, not a one-line
+  fix to this one predicate.
+
+  **A real regression caught post-merge by CI on this same branch
+  (2026-08-21), traced to the `fb688cb` dump-side fix above interacting
+  with a *pre-existing*, differently-scoped `scan` default — a live
+  `tests/test_dump_scan_l3_comparability.py` end-to-end test (added on
+  `main` by an unrelated, earlier PR) went from passing to failing the
+  moment this branch merged the base back in, `git bisect`-isolated to
+  exactly the dump-side write-time-embed fix.** That fix made `dump`'s
+  written baseline correctly link its L4 declarations to the binary's
+  exported symbols for a project whose only `-H` input is a lone header
+  *file* (no directory, no `--public-header-dir`) — but `scan`'s own
+  candidate resolution, unchanged by that fix, still derives its L4
+  `public_header_roots` from `cli_scan_baseline._public_provenance_set`,
+  which *deliberately* returns an empty root set for exactly that shape (a
+  lone file cannot establish a public directory boundary — a real,
+  separately pinned contract, `test_lone_file_does_not_activate`, unrelated
+  to and predating this PR). Before the dump-side fix, both sides degraded
+  to zero L4 matches symmetrically, so nothing was ever reported; after it,
+  only the dump baseline matched, and the asymmetry itself read as a real
+  `source_decl_binary_symbol_mismatch`/`source_to_binary_mapping_changed`
+  RISK finding on an *unchanged* library. Confirmed base-red-negative (the
+  identical test passes on plain `main`) and confirmed *not* a
+  merge-interaction artifact (it already reproduces on this branch's own
+  tip before merging `main` back in) before attempting a fix. Considered
+  and rejected: widening `_public_provenance_set` itself (would also
+  silently flip the L2/crosscheck-origin classification — and its skip/
+  present status for `exported_not_public`/`private_header_leak`/etc. —
+  every other `scan` invocation of this shape already relies on, a far
+  broader behavior change than this fix needs, and it would break that
+  helper's own pinned unit test). Fixed narrowly instead:
+  `service_input_resolution.embed_side_build_source` gained
+  `l4_public_headers`/`l4_public_header_dirs`, an override pair for *that
+  one call's* root set, defaulted to the existing `public_headers`/
+  `public_header_dirs` for every pre-existing caller (so `compare`/`dump`'s
+  typed pipeline are bit-for-bit unaffected). `scan_engine.
+  _build_new_snapshot` now computes a second, wider root set via the same
+  `split_public_header_inputs` `dump`'s own fix already uses (unioned with
+  the narrower, provenance-derived set, not replacing it — an explicit
+  `--public-header-dir` must still reach L4 even when it isn't itself
+  derivable from the raw `-H` list) and passes it through this new
+  parameter — L2/crosscheck-origin classification is completely untouched.
+  Regression coverage: a new direct unit test on `_build_new_snapshot`
+  itself, `tests/test_scan_l2_cleanup_ordering.py::
+  test_scan_candidate_widens_l4_roots_with_a_lone_header_file` (confirmed
+  to fail against the pre-fix code), alongside restoring the pre-existing
+  end-to-end integration test to green. One sibling, pre-existing test
+  (`test_scan_candidate_expands_public_header_dirs_before_embed`) used a
+  nonexistent placeholder `-H` path purely as an unrelated fixture detail;
+  once `headers` started contributing to the same L4 set, that placeholder
+  made `expand_public_header_inputs`'s best-effort expansion degrade to a
+  raw pass-through for *everything* (a real, if narrow, generalization of
+  that same best-effort-degrades-on-any-missing-path behavior) — fixed by
+  emptying that test's own `headers` list, since its actual subject is
+  `public_headers`/`public_header_dirs`'s own expansion, not `headers`'s.
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode

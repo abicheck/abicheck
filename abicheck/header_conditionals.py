@@ -61,7 +61,6 @@ from __future__ import annotations
 import json
 import re
 import shlex
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -242,25 +241,23 @@ def _compile_entry_matches(entry: dict[str, object], pattern: str) -> bool:
     matches an absolute-``file`` entry (Codex review #498). Without resolving the
     relative ``file`` first, an absolute filter would always miss, the collector
     would fall back to all entries, and the guard macro defined only by the
-    selected TU would be intersected away."""
+    selected TU would be intersected away.
+
+    Routed through ``build_context.source_matches_filter`` rather than keeping
+    its own copy of those rules: three layers now narrow a compile database by
+    this same filter, and a filter that selects different translation units in
+    one layer than another is exactly the disagreement this predicate exists to
+    prevent (see that function's own docstring). Only the raw-dict field
+    extraction is this function's business."""
+    from .build_context import source_matches_filter
+
     file = entry.get("file")
     if not isinstance(file, str):
         return False
     directory = entry.get("directory")
-    path = Path(file)
-    if not path.is_absolute() and isinstance(directory, str):
-        path = Path(directory) / path  # resolve like build_context.CompileEntry
-    if fnmatch(str(path), pattern):
-        return True
-    if isinstance(directory, str):
-        try:
-            return fnmatch(str(path.relative_to(directory)), pattern)
-        except ValueError:
-            pass  # file not under directory — fall through to CWD-relative
-    try:
-        return fnmatch(str(path.relative_to(Path.cwd())), pattern)
-    except ValueError:
-        return False
+    return source_matches_filter(
+        file, directory if isinstance(directory, str) else None, pattern
+    )
 
 
 def defines_from_compile_db(
@@ -1073,3 +1070,130 @@ def attach_build_context(
         snap.build_context_defines = bc_defines
     if bc_conditional:
         snap.conditional_fields = bc_conditional
+
+
+def expand_collector_headers(headers: Iterable[Path]) -> list[Path]:
+    """The header *files* the ADR-039 collector should scan, best-effort.
+
+    A caller's header list may still hold a directory entry -- exactly what
+    ``service.resolve_input``/``_dump_elf`` expands internally before parsing,
+    for the native-binary dispatch. The collector reads each entry with
+    ``Path(path).read_text(...)``, which raises ``OSError`` for a directory and
+    is silently skipped, so passing the raw, unexpanded list leaves
+    ``conditional_fields`` empty for the common directory-header-input case
+    even though headers were genuinely parsed.
+
+    Deliberately **not** ``header_utils.expand_header_inputs``: that is the
+    strict, *raising* expander, correct only where every entry is known to
+    exist because a live header-AST parse is about to read it. A side resolved
+    from an already-serialized JSON snapshot carries ``headers`` for provenance
+    tagging alone -- entries that need not exist on this filesystem at all --
+    and the strict expander raises ``ValidationError`` for those (confirmed
+    against a real snapshot-file compare). This mirrors
+    :func:`collect_build_context`'s own "an unreadable header is skipped, never
+    abort the dump" contract instead: anything that is neither a file nor a
+    directory here is dropped, never raised on.
+    """
+    from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+    from .header_utils import iter_directory_headers
+
+    out: list[Path] = []
+    for header in headers:
+        if header.is_file():
+            out.append(header)
+        elif header.is_dir():
+            out.extend(iter_directory_headers(header, PRUNED_HEADER_DIR_SEGMENTS))
+    return out
+
+
+def attach_build_context_for_parsed_headers(
+    snap: AbiSnapshot,
+    headers: Iterable[Path],
+    *,
+    live_elf_parse: bool,
+    compile_db: Path | None = None,
+    build_info: Path | None = None,
+    user_gcc_option_tokens: Iterable[str] = (),
+    user_gcc_options: str | None = None,
+    source_filter: str | None = None,
+) -> bool:
+    """Run the ADR-039 collector for one resolved input, when it applies.
+
+    The one shared implementation of "should this input's snapshot carry
+    build-context evidence, and from which compile database" -- CLI cleanup
+    phase two, PR 3A (dump/scan resolver convergence). Three independent
+    resolvers reach the collector today
+    (:func:`~abicheck.cli_dump_helpers.perform_elf_dump`, the typed pipeline's
+    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`, and
+    :func:`~abicheck.scan_engine._build_new_snapshot`); before this helper each
+    gate was hand-written, which is how ``scan`` ended up as the one candidate
+    resolver that never collected ADR-039 evidence at all while a ``dump``
+    baseline it was compared against always did.
+
+    Returns whether the collector actually ran. Every gate is a real one, and
+    each is recorded here rather than at three call sites:
+
+    * A compile database must be resolvable -- either supplied directly as
+      *compile_db* (the ELF ``dump`` CLI already resolved one) or named by
+      *build_info* (:func:`compile_db_from_build_info`; a pack or a Bazel
+      jsonproto routes through a different adapter and yields ``None``).
+      *compile_db* wins when both are given.
+    * At least one header must survive :func:`expand_collector_headers`. The
+      collector has nothing to scan otherwise -- a headerless ``--build-info``
+      run is an ordinary L3-only dump, and ``--depth binary`` clears the header
+      list outright.
+    * ``snap.from_headers`` must be true -- a ``--dwarf-only`` run explicitly
+      ignores ``-H``, so a database matching the *requested* headers is not
+      evidence about a snapshot that never parsed them. This is the same gate
+      the sibling ``AbiSnapshot.parsed_with_build_context`` stamp already
+      applies at all three of these call sites.
+    * *live_elf_parse* must be true -- the caller's own answer to "did a live
+      **ELF** header parse actually produce this snapshot", which only it can
+      give because only it knows its own dispatch. Two distinct things are
+      folded into it deliberately, since each call site establishes them
+      differently:
+
+      - *ELF*: the ADR-039 collector is an established ELF-only mechanism (the
+        PE/Mach-O ``dump`` path never calls it), so a non-ELF snapshot must not
+        gain build-context evidence here and then silently disagree with the
+        native path. The ELF ``dump`` CLI knows this from its own
+        ``binary_fmt == "elf"`` dispatch; the typed pipeline and ``scan`` read
+        ``snap.elf is not None`` instead -- the model's own *post*-resolution
+        signal, deliberately not a pre-resolution format sniff, because a GNU
+        ld linker script (the conventional development ``libfoo.so`` symlink)
+        sniffs as neither ELF nor anything else yet resolves to a genuine ELF
+        snapshot once followed.
+      - *live*: ``snap.elf is not None`` alone is **not** sufficient for a
+        caller whose input may be an already-serialized snapshot. A *loaded*
+        JSON snapshot round-trips its ``elf``/``from_headers`` fields exactly
+        as saved, so the identical signal fires for an input that never touched
+        the header parser; running the collector there would scan the *current*
+        filesystem and overwrite the loaded snapshot's own recorded evidence
+        with something unrelated. The typed pipeline and ``scan`` both add
+        ``service.sniff_text_format(path) != "json"``, the exact predicate
+        ``resolve_input`` itself branches on.
+
+    *user_gcc_option_tokens*/*user_gcc_options* must be the caller's **own,
+    pre-fold** explicit flags -- never the P0.3 L3->L2 fold's derived result.
+    See :func:`user_define_flags`' own docstring: the auto-derived,
+    per-header-matched build context must not be unioned snapshot-wide, which
+    is exactly what feeding the folded tokens back in would do.
+    """
+    if not live_elf_parse or not snap.from_headers:
+        return False
+    collector_headers = expand_collector_headers(headers)
+    if not collector_headers:
+        return False
+    compile_db_path = compile_db or compile_db_from_build_info(
+        build_info, tuple(collector_headers)
+    )
+    if compile_db_path is None:
+        return False
+    attach_build_context(
+        snap,
+        compile_db_path,
+        collector_headers,
+        user_define_flags(tuple(user_gcc_option_tokens), user_gcc_options),
+        source_filter=source_filter,
+    )
+    return True

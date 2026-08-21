@@ -1374,6 +1374,521 @@ pipelines a fourth time.
   > `scan --build-query` flag, if ever added, needs its own trust-gate
   > design at that point (mirroring `dump`'s), not a preemptive parameter
   > added now.
+  >
+  > **Slice landed (2026-08-21): `scan`'s candidate resolver now reaches the
+  > ADR-039 build-context collector, through the one shared gate all three
+  > resolvers use — plus three newly-verified blockers on `dump_cmd`'s own
+  > `DumpRequest` migration (blocker 5) that none of the notes above had
+  > named.**
+  >
+  > *What landed.* PR #809 gave the typed pipeline the ADR-039 collector and
+  > noted it did not migrate `perform_elf_dump`. Re-reading the three
+  > resolvers side by side to plan that migration surfaced something the
+  > note above had not: `scan_engine._build_new_snapshot` never ran the
+  > collector **at all**. So `scan --against` a `dump`-produced baseline
+  > compared a candidate carrying no `build_context_defines`/
+  > `conditional_fields` against a baseline carrying both — and the ADR-039
+  > reconciler, whose whole job is clearing a context-free header-parse
+  > false positive (a `#ifdef`-guarded record field the context-free parse
+  > pruned), could do that on the baseline side and not on the candidate's.
+  > A real dump-vs-scan asymmetry, produced by exactly the mechanism this
+  > section exists to close: three resolvers each hand-writing the same
+  > gate.
+  >
+  > Fixed at the gate rather than by writing a fourth copy of it.
+  > `header_conditionals.attach_build_context_for_parsed_headers` now owns
+  > the whole decision — compile-DB resolution (from an already-resolved
+  > path *or* from `build_info`), the best-effort header expansion a
+  > directory `-H` entry needs, the `snap.from_headers` check, and the
+  > caller-supplied `live_elf_parse` answer — and `perform_elf_dump`, the
+  > typed `_resolve_side_snapshot_impl`, and `_build_new_snapshot` all call
+  > it. `perform_elf_dump` gains one gate in the process (`from_headers`),
+  > which is the same one its own sibling `parsed_with_build_context` stamp
+  > ten lines above already applies, with the same recorded reason: a
+  > `--dwarf-only` run explicitly ignores `-H`, so a database matching the
+  > *requested* headers is not evidence about a snapshot that never parsed
+  > them. Tests: `tests/test_scan_adr039_build_context.py` (7 cases —
+  > collection, directory expansion, the "pre-fold flags only" invariant,
+  > and the four skip gates; the three positive ones confirmed to fail
+  > against the pre-fix `scan_engine.py`).
+  >
+  > A latent ordering bug in `_resolve_side_snapshot_impl` was fixed
+  > alongside it: it drained the L2 seed's cleanups only *after*
+  > `embed_side_build_source`, so an inferred build query's exclusive lock
+  > was still held when the embed step ran its own inferred query — the
+  > in-process self-contention (up to a 600s timeout) that
+  > `_build_new_snapshot` already avoids, and that the fifth finding on the
+  > root `AGENTS.md`'s L3→L2-fold entry records for the CLI resolvers.
+  > Unreachable today (`_seeded_includes_and_compile_context` pins the
+  > seed's own `collect_mode="off"`, so no current caller can run an
+  > inferred query there and the cleanup list is always empty), which is
+  > precisely why it needed fixing now rather than a bug report later: it
+  > springs on whichever PR relaxes that pin, which is what migrating the
+  > CLI resolvers means. Pinned by
+  > `tests/test_typed_dump_request.py::TestSeedCleanupsDrainBeforeTheEmbedStep`
+  > (confirmed to fail pre-fix).
+  >
+  > *Blocker 5 (`dump_cmd` builds a real `DumpRequest`) — three concrete
+  > obstacles, each verified against the code or empirically, none of them
+  > named in the notes above.* The re-investigation note from 2026-08-19
+  > correctly established that `dump_cmd` has no `DumpRequest` to resolve
+  > and that both branches must migrate together. What it did not establish
+  > is what specifically breaks when you try:
+  >
+  > 1. **`InputSpec.path` is a required field, and `dump`'s source-only
+  >    branch has no path.** `dump --sources ./tree -o out.json` (SO_PATH
+  >    omitted) is a supported, tested invocation, and `dump_cmd` dispatches
+  >    it to `cli_buildsource.dump_source_only` — but the `--dry-run` branch
+  >    runs *before* that dispatch, so "both branches build from the same
+  >    `DumpRequest`" cannot hold for this shape at all until `InputSpec`
+  >    can express "no binary". Making `path` optional is a public typed-API
+  >    model change reaching every `InputSpec` consumer
+  >    (`resolve_input`/`compare`/`scan`/the MCP-era callers), not a step
+  >    inside `dump_cmd`.
+  > 2. **The CLI and typed collect-mode resolvers genuinely disagree, and
+  >    not only in a vacuous case.** `cli_dump_helpers.resolve_dump_collect_
+  >    context` resolves an omitted `--depth` to `resolve_dump_depth(None,
+  >    "source-target")`; `service_compare_evidence.collect_mode_for`
+  >    resolves the same omission by *inferring from the inputs*. Measured
+  >    directly rather than reasoned about: for every explicit `--depth` the
+  >    two agree exactly (`binary`/`headers` → `off`, `build` → `build`,
+  >    `source` → `source-target`), and with nothing supplied the difference
+  >    (`source-target` vs `off`) is unobservable, since neither the embed
+  >    step nor the L2 seed does anything without `sources`/`build_info`.
+  >    But **`--build-info` with no `--depth` resolves to `source-target`
+  >    on the CLI and `build` through the typed path** — so a `dump
+  >    --build-info <pack> -H api.h` that attempts L4 source replay today
+  >    would silently stop at L3 the moment `dump_cmd` starts taking its
+  >    collect mode from `resolve_dump_request`. That is a real regression
+  >    for a real shape, and choosing between the two defaults is a product
+  >    decision (is `--build-info` alone a request for source evidence?),
+  >    not a mechanical reconciliation — it has to be made, and shipped,
+  >    before the migration can use the typed resolver's answer.
+  > 3. **The ELF `dump` CLI embeds L3–L5 at *write* time; the typed executor
+  >    embeds at *resolve* time.** `perform_elf_dump` finishes by calling
+  >    `write_snapshot_output` → `cli_buildsource._write_snapshot_output`,
+  >    and it is *there* that `embed_build_source` runs — together with the
+  >    G21.7 missing-evidence-layer warning, the Flow-2 `--inputs` pack
+  >    fold, the depth gate and the provenance fold.
+  >    `execute_dump_request` embeds much earlier, inside
+  >    `_resolve_side_snapshot_impl`, before the dependency walk and the
+  >    depth floor. Routing `dump_cmd`'s real run through
+  >    `execute_dump_request` therefore does not merely reorder the embed —
+  >    it **embeds twice**, re-running L4 source replay, unless
+  >    `_write_snapshot_output` is simultaneously taught to skip an embed
+  >    that already happened. That is a restructuring of the write path, a
+  >    fourth pipeline this section had not counted.
+  >
+  > Together these say something sharper than "blocker 5 is open": a
+  > migration that moved only the `--dry-run` branch would be *actively
+  > misleading* for the `--build-info` shape in (2), reporting a collect
+  > mode the real run does not use — the exact "a preview built from one
+  > resolver describing an execution built from another" failure the
+  > 2026-08-19 note warns against, now with a concrete instance rather than
+  > a general worry.
+  >
+  > *One more verified divergence, adjacent to this section's goal and
+  > recorded so the next pass does not have to rediscover it.* `scan`'s
+  > `embed_build_source` call passes no `extractor` at all, taking that
+  > function's `"auto"` default — and `buildsource.inline._make_source_
+  > extractor` treats anything that is not literally `"castxml"` as clang.
+  > Every other resolver passes `service_compare_evidence.effective_
+  > frontend(...)`, which resolves `"auto"` through `dumper._resolve_header_
+  > backend` to **castxml**. So `dump --depth source` and `scan --depth
+  > source` over the same project, both at their defaults, replay L4 through
+  > *different extractors*, and a `scan --against` a `dump` baseline
+  > compares source-ABI facts produced by two different tools —
+  > `effective_frontend`'s own docstring says it exists to stop exactly this.
+  > **Not fixed here**: making `scan` match would newly require castxml for
+  > a `scan --depth source` that works with clang today (`_resolve_header_
+  > backend` resolves `"auto"` to castxml unconditionally — there is no
+  > availability fallback), so it is a real behavior change for real users,
+  > and it cannot be verified in an environment without castxml. It needs
+  > its own slice with a castxml-capable lane, not a same-pass patch.
+
+  > **Slice landed (2026-08-21, later the same day): blocker 5's three
+  > sub-issues closed, `dump_cmd` now builds one real `DumpRequest`, and
+  > blocker 6 has its narrow extension point. The real ELF/PE/Mach-O run is
+  > deliberately NOT migrated — see "what this does not close" below.**
+  >
+  > *Blocker 5, sub-issue (a) — `InputSpec.path`.* Widened to `Path | None`,
+  > a pure widening (it accepts everything `Path` did), so `dump`'s
+  > source-only branch is expressible. Which requests may leave it `None` is
+  > enforced per request type in `validation_errors()` — never for
+  > `CompareRequest`, and for `DumpRequest` only alongside real
+  > `sources`/`build_info`/`dump_manifest` — rather than defended at each of
+  > the seven call sites that dereference it; `api_types.required_path` is
+  > the single place the narrowing is spelled. `resolve_dump_request()`
+  > resolves the pathless shape (which is what `--dry-run` needs);
+  > `execute_dump_request()` raises a specific `ValidationError` for it,
+  > since producing a binary-less snapshot is still
+  > `cli_buildsource.dump_source_only`'s own pipeline. **The
+  > `dump_manifest` half was found by the existing tests, not by design**:
+  > a first revision named only `sources`/`build_info` and broke
+  > `dump --dump-manifest m.yaml --dry-run` (no SO_PATH), which
+  > `tests/test_cli_dump_manifest.py` already covered — precisely the "the
+  > model cannot say what the CLI accepts" gap this widening exists to
+  > close, caught in the right direction.
+  >
+  > *Sub-issue (b) — the collect-mode disagreement.* Resolved in favour of
+  > the CLI's `source-target` default, as this section's own measurement
+  > called for. The typed `dump` path now goes through a new
+  > `service_compare_evidence.dump_collect_mode_for`, a mirror of
+  > `cli_dump_helpers.resolve_dump_depth`'s rule; `collect_mode_for` is
+  > **unchanged** and still serves `compare`, whose own front end genuinely
+  > infers omitted depth from its inputs. Pinned by
+  > `tests/test_dump_collect_mode_parity.py`, which enumerates the whole
+  > `(depth, sources-given, build_info-given)` grid against the *real* CLI
+  > resolver rather than a restatement of its rule. Deliberately a separate
+  > module from `tests/test_dump_cli_typed_api_parity.py` despite asking the
+  > same class of question: every test there is `integration`-marked and
+  > skips without castxml, so the pin would not have gated the lane it
+  > matters in.
+  >
+  > *Sub-issue (c) — the double embed.* `cli_buildsource.
+  > build_source_already_satisfies` is the check-before-embed guard, stated
+  > through the same `_missing_requested_evidence_layers` the neighbouring
+  > G21.7 fail-loud warning already trusts, so the guard and the warning
+  > cannot disagree about what "satisfied" means. Its `pack is None -> []`
+  > case is explicitly *not* satisfaction, which is what keeps it a no-op
+  > for today's CLI. Tests: `tests/test_dump_embed_idempotence.py` —
+  > the predicate's answers, the guard's skip/no-skip/still-embed
+  > directions, and an `integration`-marked end-to-end count proving one
+  > real `dump --depth source` performs exactly one embed.
+  >
+  > *The `DumpRequest` itself.* `abicheck/cli_dump_request.py` (its own
+  > sibling module: `cli.py` is 1800+ lines and `cli_dump_helpers.py` is at
+  > the 2000-line hard cap) builds one request from `dump_cmd`'s parameters,
+  > and the `--dry-run` branch now renders from a real `ResolvedDumpRequest`
+  > (`resolved.headers`/`collect_mode`/`header_backend`) instead of
+  > `dump_cmd`'s own locals. **The half-migration hazard this section names
+  > — "a preview built from one resolver describing an execution built from
+  > another is worse than two hand-synced implementations" — is answered in
+  > two ways, not waved at.** First, the request is fed the CLI's
+  > *already-resolved* values (the resolved `CompileContext`, the resolved
+  > frontend, the resolved explicit-language decision) rather than
+  > re-deriving them, so it records the run instead of forming a parallel
+  > opinion about it. Second, the fields `resolve_dump_request` *does*
+  > derive independently are pinned equal to the CLI's own by
+  > `tests/test_dump_request_from_cli.py::
+  > TestResolvedRequestAgreesWithTheCliLocals`, across every `--depth` and
+  > both frontends — so a divergence fails a test rather than surfacing as a
+  > dry-run report describing a run that never happened. Sub-issue (b) was a
+  > prerequisite for exactly this: without it the preview would have
+  > reported a collect mode the real run does not use.
+  >
+  > `resolve_dump_request_for_cli` translates the Tier-2 `ValidationError`
+  > into a Click `UsageError` at the boundary. One user-visible consequence,
+  > stated rather than discovered later: `DumpRequest.validate()`
+  > front-runs a check `dumper.dump()` already performs at *runtime* — a
+  > `--dump-manifest` combined with `-I`/`--include`, two conflicting
+  > declared surfaces — so that combination now reports a usage error in the
+  > dry run too instead of dry-running clean and failing during extraction.
+  > That stays inside the dry-run contract ("never raises on anything but a
+  > usage error") because it is precisely a usage error.
+  >
+  > *Blocker 6.* `service_input_resolution.BaselineReuseContext` /
+  > `resolve_baseline_compile_context` is the pair-shaped rule, extracted
+  > from the four-clause boolean that was inline in
+  > `scan_engine.run_scan_core` and that the root `AGENTS.md`'s
+  > L3->L2-fold entry records three review rounds correcting (findings 12,
+  > 13, 15). `run_scan_core` calls it today;
+  > `_resolve_side_snapshot_impl` accepts the same object as an optional
+  > `baseline_reuse_hint` and reports the identical answer on
+  > `SideResolution.baseline_compile_context` — so the migration that
+  > finally routes `_build_new_snapshot` through the shared resolver
+  > inherits the rule rather than reimplementing it. Deliberately an
+  > **opt-in hint**, per this section's own decision not to widen
+  > `resolve_side_snapshot`'s general single-input contract: a caller that
+  > passes none is bit-for-bit unaffected. Tested as a primitive
+  > (`tests/test_baseline_reuse_context.py`), per AGENTS.md's
+  > "Primitive-level property tests" guidance — which is exactly what a rule
+  > with that correction history calls for — including the invariant that
+  > the resolver never disagrees with its own predicate, and a pin that
+  > include *order* matters (search order is first-match-wins, so a
+  > "compare as sets" simplification has to argue with a test).
+  >
+  > **What this does not close, stated plainly.** The real ELF/PE/Mach-O
+  > `dump` run still executes through `perform_elf_dump`/
+  > `handle_non_elf_dump`, not through `execute_dump_request`. Sub-issue
+  > (c) removes the double-embed hazard from that migration's path, and the
+  > `DumpRequest` is the object it would build from, but the migration
+  > itself needs the ADR-039 collector's CLI-only inputs
+  > (`--compile-db-filter`, the raw `effective_compile_db`) to have typed-API
+  > representation, and the write-time provenance/`--inputs`/depth-gate
+  > sequence in `cli_buildsource._write_snapshot_output` to be reordered
+  > around a resolve-time embed. Likewise `scan_engine._build_new_snapshot`
+  > still calls `service.resolve_input`/`embed_build_source` directly; the
+  > hint parameter makes that migration safe, it does not perform it. Two
+  > divergences remain open and unchanged: the `public_headers` expansion
+  > shape (deliberately kept expanded — see the 2026-08-20 note above for
+  > the regression a "simplification" caused) and the L4 extractor default
+  > (`scan` takes `embed_build_source`'s `"auto"` -> clang while every other
+  > resolver passes `effective_frontend`, which resolves `"auto"` to
+  > castxml). **castxml was re-checked for in this session's environment and
+  > is still absent**, so the extractor divergence stays a documented gap
+  > rather than a guessed fix, exactly as the 2026-08-21 note above
+  > requires.
+
+  > **Investigated (2026-08-21, later session): both real-run migrations
+  > attempted and stopped, with the reason measured rather than reasoned
+  > about for the first time. One guard landed; no production code changed.**
+  >
+  > *The `dump` real-run migration.* The note above lists two prerequisites
+  > (typed representation for the ADR-039 collector's CLI-only inputs; the
+  > write-time embed reordered). Both are real. What the note did not carry
+  > is what the migration would actually *change about the snapshot*, which
+  > is the bar it has to clear. Measured field-by-field, against a real
+  > `g++` build and a real clang L2 parse, comparing the written `dump` CLI
+  > snapshot with `execute_dump_request`'s over the same three build shapes
+  > this section's own parity module already uses:
+  >
+  > * Everything outside the extraction contract agrees, apart from the
+  >   CLI's own presentation/provenance layer (`created_at`,
+  >   `dump_provenance`, `version`) and the build-source pack's timestamped
+  >   content hash — all of which stay in the CLI by design.
+  > * `contract.profile_fields` agrees exactly for a plain build. For a
+  >   build with a `-D`, the CLI records `macro_ops` as
+  >   `[["D","FOO=1"],["D","FOO=1"]]` where every other path records one
+  >   entry. For a build with an extra `-I<dep>`, the CLI records
+  >   `include_sequence` as `[]` where every other path records one slot.
+  > * `scope_fingerprint` agrees in every case; `profile_fingerprint`
+  >   therefore differs in exactly the two cases above.
+  >
+  > Both trace to one mechanism, and it is the one this plan's own
+  > `AGENTS.md` counterpart already names as an open design decision: the
+  > `dump` CLI runs the legacy `-p`/`--compile-db` auto-match
+  > (`cli_helpers_compare._resolve_build_context_flags`, merged into
+  > `effective_gcc_options`) *in addition to* the P0.3 L3→L2 fold whenever
+  > both are fed by the same `--build-info` compile database. The duplicate
+  > `-D` is that overlap recorded twice; the empty `include_sequence` is the
+  > legacy match putting `-I<dep>` into explicit context *before* the L2
+  > seed runs, so `seed_l2_includes` correctly declines to seed a directory
+  > explicit context already supplies and the dir reaches the parse through
+  > `gcc_option_tokens` — which contributes no `declared_includes` slot,
+  > the sole source `include_sequence` tokenizes.
+  >
+  > So the migration does not merely need the two prerequisites above; it
+  > *forces* that design decision, because routing the real run through
+  > `execute_dump_request` drops the legacy match. Dropping it is arguably
+  > right (the fold is strictly richer: per-header matching, ambiguity
+  > checking, include paths, forced includes) — but it makes
+  > `dump --compile-db-filter` inert, since the shared fold has no filter
+  > concept, and `InputSpec` deliberately carries no `compile_db_filter`
+  > field: one was added in PR #809 and removed the same review round for
+  > having no successful execution path. Making a documented flag silently
+  > inert is a worse outcome than the gap. **The correct ordering is
+  > therefore: thread `--compile-db-filter` into the shared fold
+  > (`buildsource/l2_seed.py` / `header_compile_context.py`, exactly what
+  > `InputSpec`'s own comment already specifies), decide and ship the
+  > legacy-match removal, and only then migrate the real run.** Three
+  > slices, not one.
+  >
+  > **The first of the three landed in this session, and it is a user-facing
+  > bug fix on its own terms, not only migration plumbing.**
+  > `resolve_header_compile_context` fails closed when one public header is
+  > compiled under two ABI-relevant contexts, and its message names
+  > `--compile-db-filter` as a way to narrow the input — but the filter
+  > reached only the legacy match, so the fold still saw every unit and a
+  > user who followed that advice got the identical error back, with no
+  > remedy short of hand-writing a pre-filtered `compile_commands.json`.
+  > Reproduced end to end (`dump --depth headers -H api.h --build-info
+  > db.json --compile-db-filter a.cpp`, two TUs disagreeing on an
+  > ABI-relevant `-D`) and fixed: `resolve_header_compile_context` takes a
+  > `source_filter`, `l2_seed` forwards it, and `perform_elf_dump` threads
+  > the CLI's own flag through. The matching rules are consolidated into one
+  > `build_context.source_matches_filter`, so the fold, the legacy match and
+  > the ADR-039 collector cannot select different translation units for one
+  > filter; a filter matching nothing keeps every unit, the conservative
+  > fallback the other two layers already applied. Tests:
+  > `tests/test_compile_db_filter_scope.py` — the primitive's contract as
+  > invariants, the three layers agreeing, the resolver, and a real
+  > `g++`+clang `dump` asserting the guarded field is parsed in or out
+  > according to *which* TU the filter names (the end-to-end cases confirmed
+  > to fail pre-fix). Still open in this slice: the typed half —
+  > `InputSpec.compile_db_filter` plus the CLI's own
+  > L2-filtered/L3-unfiltered refusal
+  > (`header_conditionals.compile_db_filter_scope_error`) mirrored into
+  > `resolve_dump_request`, the only place that knows the resolved collect
+  > mode. That is one clearly-specified step; see the field's replacement
+  > comment in `api_types.py`.
+  >
+  > One environmental fact that independently rules out doing it in that
+  > session: **the default header backend is castxml, and no working
+  > castxml was obtainable there.** A conda-forge 0.7.0 build was assembled
+  > by hand and segfaults inside `clang::ParseAST` on any input, so every
+  > measurement above is clang-backend only. Migrating the real `dump` run
+  > while able to exercise only the non-default backend is not a verified
+  > change.
+  >
+  > *The `scan` real-run migration.* `_build_new_snapshot` still calls
+  > `service.resolve_input`/`embed_build_source` directly. Re-read against
+  > `_resolve_side_snapshot_impl` line by line, the gap is four items, not
+  > the two this section had named — and three of them are behaviour
+  > changes, not missing plumbing:
+  >
+  > 1. **L4 extractor default** — unchanged from the note above, and
+  >    castxml was re-checked for and is still effectively unavailable, so
+  >    this stays documented rather than guessed at.
+  > 2. **`public_headers` expansion shape** — `_build_new_snapshot` expands,
+  >    `embed_side_build_source` passes through raw; the 2026-08-20 note
+  >    above records the regression a "simplification" to the raw shape
+  >    caused, so routing scan through the shared wrapper reintroduces it.
+  > 3. **Seed collect mode** — `_seeded_includes_and_compile_context` pins
+  >    `collect_mode="off"` (a Tier-2 primitive must never execute a build
+  >    system as a side effect), while `_build_new_snapshot` passes scan's
+  >    real collect mode, so scan *can* run the zero-config inferred build
+  >    query in its seed today. Routing through the shared primitive
+  >    silently removes that, losing build-derived include seeding for a
+  >    source tree with no compile database.
+  > 4. **`defer_cleanup`** — `embed_side_build_source` has no such
+  >    parameter, and scan hands its embed cleanups to the caller. Purely
+  >    additive, and the only one of the four that is.
+  >
+  > Each of 1–3 could be expressed as an opt-in parameter on the shared
+  > primitive, the way `symbols_only`/`allow_build_query`/`changed_paths`
+  > already are — that is a legitimate design, and it is what a future slice
+  > should do. It was not done here because reproducing roughly a dozen
+  > parameter behaviours exactly, on the hot path of every `scan`, with the
+  > integration lane only partly executable, is precisely the rewrite shape
+  > this area's own review history keeps punishing.
+  >
+  > *What landed instead.* `tests/test_dump_cli_typed_api_parity.py::
+  > test_dump_cli_and_typed_api_agree_on_extraction_contract` — the raw
+  > extraction-contract counterpart of that module's existing
+  > `ast_compile_args` parity test, which deliberately compares through
+  > `split_compile_args`' semantics-preserving normalization and therefore
+  > cannot see either divergence above. `profile_fingerprint` hashes the
+  > recorded fields as-recorded, so a difference normalization hides is
+  > still a comparability failure. The two known-divergent (shape, field)
+  > pairs are encoded the same conditional-xfail way
+  > `_SCAN_KNOWN_DIVERGENT_SHAPES` already is: the exact diagnosed
+  > signature reproduces, or the test fails outright — so "the gap closed"
+  > fails as loudly as "a new field diverged", and the mapping cannot go
+  > stale silently. Verified in both directions (a deliberately wrong
+  > mapping fails).
+
+  > **Slice landed (2026-08-21, later session): the measured divergence above
+  > is closed, `scan`'s candidate resolver is migrated, and two further real
+  > bugs were found by the measurement itself. The `dump` real run is still
+  > NOT migrated — see "what still blocks it" at the end.**
+  >
+  > *The legacy-match overlap (the note immediately above this one).* The
+  > decision that note left open — which of the two mechanisms owns a matched
+  > compile database — is made: **when the P0.3 fold resolves a compile context
+  > for the headers being parsed, it is the sole source of
+  > compile-database-derived context, and the legacy `-p`/`--compile-db`
+  > auto-match's own derived flags are unfolded rather than stacked on top of
+  > it.** When the fold does not apply (no `--build-info`, or a header no
+  > compile unit matches) the legacy match still runs and still applies, so
+  > only the overlap is dropped. `--compile-db-filter` does **not** go inert
+  > with it — the concern that made this note rank the removal second: the
+  > filter reaches the shared fold too, since the previous slice threaded
+  > `source_filter` through `seed_includes_and_fold_compile_context`/
+  > `resolve_header_compile_context`, so the ordering that note called for was
+  > already satisfied by the time this landed.
+  >
+  > Mechanically it is one conditional, and where it goes matters: the legacy
+  > flags are already merged into `effective_gcc_options` by `dump_cmd` before
+  > `perform_elf_dump` is called, so `perform_elf_dump` now takes them
+  > separately (`legacy_build_context_flags`) and passes the caller's *own*
+  > `--gcc-options` string to the fold as its explicit context. Presenting the
+  > legacy result to the fold as though it were an explicit user choice is
+  > exactly what recorded the same `-D` twice and pushed a derived `-I` through
+  > `gcc_option_tokens` instead of `declared_includes`.
+  >
+  > Measured after: `macro_ops`, `include_sequence`, `scope_fingerprint` and
+  > `profile_fingerprint` agree across all three build shapes, and — the
+  > user-visible half — `scan --against` a real `dump` baseline for the
+  > `extra-include-dir` shape goes from **exit 6, `NOT_COMPARABLE ... differing
+  > fields: include_sequence`** to exit 0 for an unchanged library.
+  > `_CONTRACT_KNOWN_DIVERGENT_FIELDS` and `_SCAN_KNOWN_DIVERGENT_SHAPES` are
+  > both empty; the conditional-xfail mechanism stays for the next divergence.
+  >
+  > *`scan`'s candidate resolver is migrated.* `scan_engine._build_new_snapshot`
+  > builds an `InputSpec`/`SideEvidence` and calls
+  > `service_input_resolution._resolve_side_snapshot_impl`, returning its
+  > `SideResolution`; `run_scan_core` hands the `BaselineReuseContext` in at
+  > resolve time and *reads* `SideResolution.baseline_compile_context` instead
+  > of recomputing one from the values it got back. The L2 seed, the
+  > `parsed_with_build_context` stamp, the ADR-039 collector gate, the
+  > drain-before-embed ordering and the pair-aware baseline rule are now
+  > inherited from one implementation rather than hand-written twice.
+  >
+  > The four divergences this section enumerated are preserved as **opt-in
+  > parameters on the shared primitive**, which is what this note said a future
+  > slice should do: `seed_collect_mode` (scan's real collect mode, so the
+  > zero-config inferred query still seeds includes for a compile-DB-less
+  > tree — every other caller keeps the Tier-2 pin), `seed_lang_explicit`
+  > (scan's `lang == "c"` seed guard, which does not apply to the parse),
+  > `defer_cleanup`, `source_extractor` (`"auto"` → clang), and
+  > `expand_public_header_roots` + `source_frontend_compile`. The L4 extractor
+  > default therefore stays exactly as documented — closing it would newly
+  > require castxml for a `scan --depth source` that works with clang today,
+  > and castxml is still unavailable here.
+  >
+  > `expand_public_header_inputs` moved to `service_scan.py` so the engine-layer
+  > resolver can reach it without an engine-imports-CLI edge;
+  > `cli_scan_baseline._expand_public_headers` is a thin delegate. The migration
+  > *removed* an `ENGINE_CLI_BOUNDARY_ALLOWLIST` entry (`scan_engine.py`'s
+  > `cli_buildsource` import) and dropped `scan_engine.py` back below the
+  > 1500-line soft limit.
+  >
+  > Equivalence was measured rather than argued: the candidate snapshot, the
+  > effective includes, the effective compile context and the deferred-cleanup
+  > count, for three real build shapes × three collect modes, are identical
+  > before and after — apart from wall-clock timestamps and the build-source
+  > pack's own content hash. `test_scan_engine_calls_the_shared_resolver` was a
+  > source-text match on `run_scan_core`; it is replaced by two behavioural pins
+  > through a real `scan --against` (the hint carries the *resolved* old-side
+  > scopes; a sentinel answer from the resolution is what reaches the baseline
+  > parse, which nothing but forwarding can produce).
+  >
+  > *A second real bug, found by the item-1 verification bar rather than by a
+  > report.* Extending the parity measurement from the extraction contract to
+  > the *whole* snapshot showed the two paths disagreeing on the L3–L5 payload,
+  > and not cosmetically: the `dump` CLI recorded `0/2 symbols matched`,
+  > `reachable_declarations=0`, `fact_family_states: empty-confirmed` where the
+  > typed path recorded `1/2` matched and a real
+  > `source_decl_to_binary_symbol` mapping. Cause:
+  > `_write_snapshot_output`'s own `embed_build_source` call passed **no**
+  > `public_headers`/`public_header_dirs`, so L4 replay ran with an empty
+  > `public_header_roots` set — every declaration classifies private and nothing
+  > links. The layer is present and the coverage row honestly reports "partial",
+  > so nothing fails; every L4-derived source-ABI finding is simply inert for a
+  > `dump`-produced baseline. Fixed on both the ELF and PE/Mach-O paths. With
+  > that, the `dump` CLI's written snapshot and `execute_dump_request`'s agree
+  > on every field except wall-clock timings and the CLI's own provenance layer
+  > (`git_commit`, `version`).
+  >
+  > **What still blocks routing `dump_cmd`'s real run through
+  > `execute_dump_request` — narrowed to two items, both real.** Blocker 4 is
+  > closed on measurement, not just on reading: `service.run_dump`'s ELF branch
+  > already runs every post-processing pass `perform_elf_dump` does (SYCL,
+  > `python_ext`, `python_api`, `numpy_capi`, the G31 header graph, the G28
+  > clang-layout attach), the ADR-039 collector now runs inside
+  > `_resolve_side_snapshot_impl`, and the whole-snapshot comparison above shows
+  > no difference in any field those produce. What remains:
+  >
+  > 1. **`--compile-db-filter` would go inert.** `InputSpec` deliberately
+  >    carries no `compile_db_filter` (see its own replacement comment), so the
+  >    shared path cannot narrow the fold or the ADR-039 collector the way the
+  >    native `dump` CLI does. Making a documented flag silently do nothing is
+  >    worse than the gap. The step is clearly specified — add the field, thread
+  >    it into `_seeded_includes_and_compile_context` (whose primitive already
+  >    takes a `source_filter`) and into
+  >    `attach_build_context_for_parsed_headers`, and mirror the CLI's own
+  >    L2-filtered/L3-unfiltered refusal into `resolve_dump_request`, the only
+  >    place that knows the resolved collect mode — but it is its own slice.
+  > 2. **The default backend is still unexercisable here.** `--ast-frontend`
+  >    defaults to castxml and no working castxml is available in this
+  >    environment (re-checked), so every measurement above is clang-backend
+  >    only. Migrating the real `dump` run while able to exercise only the
+  >    non-default backend is not a verified change, and this section has said
+  >    so since the previous session.
+  >
+  > PR 3C therefore stays blocked, per this section's own ordering rule.
+
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
@@ -1437,6 +1952,65 @@ pipelines a fourth time.
   `.abicheck.yml` build input used for a `dump` baseline and a
   `scan --against` candidate needs one interpreter, not two, before the flags
   that configure it are removed.
+
+  > **Status (2026-08-21): still blocked — but on a materially shorter list
+  > than this note carried earlier the same day.** Blocker 5's three
+  > sub-issues and blocker 6 are now closed (see the second 2026-08-21 note
+  > in the 3A sub-section above): `InputSpec.path` expresses the source-only
+  > branch, the two collect-mode resolvers agree and are pinned by a
+  > grid test, the write-time embed is idempotent, `dump_cmd` builds one
+  > real `DumpRequest` that `--dry-run` renders from, and the pair-aware
+  > baseline-reuse rule lives in one shared primitive with an opt-in hook on
+  > the shared resolver.
+  >
+  > **What still blocks the removal**, restated precisely because "3A is not
+  > done" is now too coarse to act on:
+  >
+  > 1. **Neither real run routes through the shared pipeline yet.** The ELF/
+  >    PE/Mach-O `dump` executes through `perform_elf_dump`/
+  >    `handle_non_elf_dump`, and `scan`'s candidate through
+  >    `service.resolve_input`/`embed_build_source` directly. This is the
+  >    condition 3C's own ordering rule actually names — "a `.abicheck.yml`
+  >    build input used for a `dump` baseline and a `scan --against`
+  >    candidate needs one interpreter, not two" — and two interpreters is
+  >    still what exists. The prerequisites for closing it are now concrete
+  >    rather than open-ended: typed-API representation for the ADR-039
+  >    collector's CLI-only inputs (`--compile-db-filter`, the raw
+  >    `effective_compile_db`), and reordering
+  >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
+  >    around a resolve-time embed.
+  > 2. **The L4 extractor default still diverges** between `scan` (clang, via
+  >    `embed_build_source`'s `"auto"`) and `dump`/`compare` (castxml, via
+  >    `effective_frontend`). Removing the flags does not cause this, but it
+  >    is a live "two interpreters of one config" instance, and it remains
+  >    unverifiable without castxml — re-checked and still absent in the
+  >    2026-08-21 environment.
+  > 3. **Prerequisite 3's own remaining `-H`-directory gap**, below, is
+  >    unchanged.
+  >
+  > Deliberately *not* forced through on the strength of blocker 5/6 being
+  > closed: the flags' removal moves their inputs into config, and doing that
+  > while two resolvers still interpret that config independently is the
+  > exact failure this whole section was split into three slices to avoid.
+  >
+  > **Re-confirmed (2026-08-21, later session), with item 1 now measured
+  > rather than asserted.** Both real-run migrations were attempted and
+  > stopped; see the "Investigated (2026-08-21, later session)" note in the
+  > 3A sub-section for the field-by-field evidence. The short version, as it
+  > bears on this removal: the two interpreters do not merely *risk*
+  > disagreeing about a `.abicheck.yml` build input — they demonstrably
+  > already disagree about a `--build-info` one, recording a different
+  > `contract.profile_fields.macro_ops` and `include_sequence` (and
+  > therefore a different `profile_fingerprint`) for the same library from
+  > the same evidence. Removing the flags in that state would move
+  > `build.query`/`build.compile_db` into config while leaving two
+  > interpreters that are *known* to produce non-comparable snapshots,
+  > which is strictly worse than the ordering rule already forbids. Item 1
+  > additionally now has a stated sub-ordering: thread `--compile-db-filter`
+  > into the shared fold first, then decide and ship the legacy-match
+  > removal, then migrate. The first of those three landed in that session
+  > (see the same 3A note) and was a user-facing bug fix in its own right;
+  > the second and third are untouched.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
