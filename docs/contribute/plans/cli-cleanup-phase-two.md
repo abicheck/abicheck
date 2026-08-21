@@ -1630,6 +1630,115 @@ pipelines a fourth time.
   > rather than a guessed fix, exactly as the 2026-08-21 note above
   > requires.
 
+  > **Investigated (2026-08-21, later session): both real-run migrations
+  > attempted and stopped, with the reason measured rather than reasoned
+  > about for the first time. One guard landed; no production code changed.**
+  >
+  > *The `dump` real-run migration.* The note above lists two prerequisites
+  > (typed representation for the ADR-039 collector's CLI-only inputs; the
+  > write-time embed reordered). Both are real. What the note did not carry
+  > is what the migration would actually *change about the snapshot*, which
+  > is the bar it has to clear. Measured field-by-field, against a real
+  > `g++` build and a real clang L2 parse, comparing the written `dump` CLI
+  > snapshot with `execute_dump_request`'s over the same three build shapes
+  > this section's own parity module already uses:
+  >
+  > * Everything outside the extraction contract agrees, apart from the
+  >   CLI's own presentation/provenance layer (`created_at`,
+  >   `dump_provenance`, `version`) and the build-source pack's timestamped
+  >   content hash — all of which stay in the CLI by design.
+  > * `contract.profile_fields` agrees exactly for a plain build. For a
+  >   build with a `-D`, the CLI records `macro_ops` as
+  >   `[["D","FOO=1"],["D","FOO=1"]]` where every other path records one
+  >   entry. For a build with an extra `-I<dep>`, the CLI records
+  >   `include_sequence` as `[]` where every other path records one slot.
+  > * `scope_fingerprint` agrees in every case; `profile_fingerprint`
+  >   therefore differs in exactly the two cases above.
+  >
+  > Both trace to one mechanism, and it is the one this plan's own
+  > `AGENTS.md` counterpart already names as an open design decision: the
+  > `dump` CLI runs the legacy `-p`/`--compile-db` auto-match
+  > (`cli_helpers_compare._resolve_build_context_flags`, merged into
+  > `effective_gcc_options`) *in addition to* the P0.3 L3→L2 fold whenever
+  > both are fed by the same `--build-info` compile database. The duplicate
+  > `-D` is that overlap recorded twice; the empty `include_sequence` is the
+  > legacy match putting `-I<dep>` into explicit context *before* the L2
+  > seed runs, so `seed_l2_includes` correctly declines to seed a directory
+  > explicit context already supplies and the dir reaches the parse through
+  > `gcc_option_tokens` — which contributes no `declared_includes` slot,
+  > the sole source `include_sequence` tokenizes.
+  >
+  > So the migration does not merely need the two prerequisites above; it
+  > *forces* that design decision, because routing the real run through
+  > `execute_dump_request` drops the legacy match. Dropping it is arguably
+  > right (the fold is strictly richer: per-header matching, ambiguity
+  > checking, include paths, forced includes) — but it makes
+  > `dump --compile-db-filter` inert, since the shared fold has no filter
+  > concept, and `InputSpec` deliberately carries no `compile_db_filter`
+  > field: one was added in PR #809 and removed the same review round for
+  > having no successful execution path. Making a documented flag silently
+  > inert is a worse outcome than the gap. **The correct ordering is
+  > therefore: thread `--compile-db-filter` into the shared fold
+  > (`buildsource/l2_seed.py` / `header_compile_context.py`, exactly what
+  > `InputSpec`'s own comment already specifies), decide and ship the
+  > legacy-match removal, and only then migrate the real run.** Three
+  > slices, not one.
+  >
+  > One environmental fact that independently rules out doing it in that
+  > session: **the default header backend is castxml, and no working
+  > castxml was obtainable there.** A conda-forge 0.7.0 build was assembled
+  > by hand and segfaults inside `clang::ParseAST` on any input, so every
+  > measurement above is clang-backend only. Migrating the real `dump` run
+  > while able to exercise only the non-default backend is not a verified
+  > change.
+  >
+  > *The `scan` real-run migration.* `_build_new_snapshot` still calls
+  > `service.resolve_input`/`embed_build_source` directly. Re-read against
+  > `_resolve_side_snapshot_impl` line by line, the gap is four items, not
+  > the two this section had named — and three of them are behaviour
+  > changes, not missing plumbing:
+  >
+  > 1. **L4 extractor default** — unchanged from the note above, and
+  >    castxml was re-checked for and is still effectively unavailable, so
+  >    this stays documented rather than guessed at.
+  > 2. **`public_headers` expansion shape** — `_build_new_snapshot` expands,
+  >    `embed_side_build_source` passes through raw; the 2026-08-20 note
+  >    above records the regression a "simplification" to the raw shape
+  >    caused, so routing scan through the shared wrapper reintroduces it.
+  > 3. **Seed collect mode** — `_seeded_includes_and_compile_context` pins
+  >    `collect_mode="off"` (a Tier-2 primitive must never execute a build
+  >    system as a side effect), while `_build_new_snapshot` passes scan's
+  >    real collect mode, so scan *can* run the zero-config inferred build
+  >    query in its seed today. Routing through the shared primitive
+  >    silently removes that, losing build-derived include seeding for a
+  >    source tree with no compile database.
+  > 4. **`defer_cleanup`** — `embed_side_build_source` has no such
+  >    parameter, and scan hands its embed cleanups to the caller. Purely
+  >    additive, and the only one of the four that is.
+  >
+  > Each of 1–3 could be expressed as an opt-in parameter on the shared
+  > primitive, the way `symbols_only`/`allow_build_query`/`changed_paths`
+  > already are — that is a legitimate design, and it is what a future slice
+  > should do. It was not done here because reproducing roughly a dozen
+  > parameter behaviours exactly, on the hot path of every `scan`, with the
+  > integration lane only partly executable, is precisely the rewrite shape
+  > this area's own review history keeps punishing.
+  >
+  > *What landed instead.* `tests/test_dump_cli_typed_api_parity.py::
+  > test_dump_cli_and_typed_api_agree_on_extraction_contract` — the raw
+  > extraction-contract counterpart of that module's existing
+  > `ast_compile_args` parity test, which deliberately compares through
+  > `split_compile_args`' semantics-preserving normalization and therefore
+  > cannot see either divergence above. `profile_fingerprint` hashes the
+  > recorded fields as-recorded, so a difference normalization hides is
+  > still a comparability failure. The two known-divergent (shape, field)
+  > pairs are encoded the same conditional-xfail way
+  > `_SCAN_KNOWN_DIVERGENT_SHAPES` already is: the exact diagnosed
+  > signature reproduces, or the test fails outright — so "the gap closed"
+  > fails as loudly as "a new field diverged", and the mapping cannot go
+  > stale silently. Verified in both directions (a deliberately wrong
+  > mapping fails).
+
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from
@@ -1733,6 +1842,23 @@ pipelines a fourth time.
   > closed: the flags' removal moves their inputs into config, and doing that
   > while two resolvers still interpret that config independently is the
   > exact failure this whole section was split into three slices to avoid.
+  >
+  > **Re-confirmed (2026-08-21, later session), with item 1 now measured
+  > rather than asserted.** Both real-run migrations were attempted and
+  > stopped; see the "Investigated (2026-08-21, later session)" note in the
+  > 3A sub-section for the field-by-field evidence. The short version, as it
+  > bears on this removal: the two interpreters do not merely *risk*
+  > disagreeing about a `.abicheck.yml` build input — they demonstrably
+  > already disagree about a `--build-info` one, recording a different
+  > `contract.profile_fields.macro_ops` and `include_sequence` (and
+  > therefore a different `profile_fingerprint`) for the same library from
+  > the same evidence. Removing the flags in that state would move
+  > `build.query`/`build.compile_db` into config while leaving two
+  > interpreters that are *known* to produce non-comparable snapshots,
+  > which is strictly worse than the ordering rule already forbids. Item 1
+  > additionally now has a stated sub-ordering: thread `--compile-db-filter`
+  > into the shared fold first, then decide and ship the legacy-match
+  > removal, then migrate.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
