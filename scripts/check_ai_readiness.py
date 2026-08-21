@@ -2331,14 +2331,18 @@ def _tier1_module_bindings(
 
 
 def _resolve_input_wrapper_call_lines(tree: ast.Module) -> frozenset[int]:
-    """Line numbers of every ``Call`` inside ``_resolve_input()``'s own body —
-    the only lines the ``service.resolve_input`` rule may exempt in a module
-    listed in ``_RESOLVE_INPUT_WRAPPER_MODULES``. Scoped to just this one
-    function (not the whole module) so a *different* function added later to
-    the same file cannot silently bypass the rule too.
+    """Line numbers of every ``Call`` inside the *module-level*
+    ``_resolve_input()``'s own body — the only lines the
+    ``service.resolve_input`` rule may exempt in a module listed in
+    ``_RESOLVE_INPUT_WRAPPER_MODULES``.
+
+    Looks only at ``tree.body`` (top-level statements), not a full
+    ``ast.walk`` — a same-named method on a class, or a same-named function
+    nested inside a different one, is not the reviewed, documented wrapper
+    and must not silently inherit its exemption.
     """
     lines: set[int] = set()
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "_resolve_input":
             for call in ast.walk(node):
                 if isinstance(call, ast.Call):

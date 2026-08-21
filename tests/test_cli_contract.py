@@ -387,6 +387,36 @@ def test_cli_resolve_exemption_is_scoped_to_the_wrapper_function(
     assert "cli_resolve.py:7" in errors[0]
 
 
+def test_cli_resolve_exemption_ignores_same_named_class_method(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-named `_resolve_input` *method* on a class is not the
+    documented module-level wrapper — a bypass inside it must still be
+    flagged, not silently inherit the module-level exemption."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return service.resolve_input(a)\n"
+        "\n"
+        "class Foo:\n"
+        "    def _resolve_input(self, a):\n"
+        "        from . import service\n"
+        "        return service.resolve_input(a)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:8" in errors[0]
+
+
 def test_cli_contract_allowlist_entries_are_real_violations() -> None:
     """Every `CLI_CONTRACT_ALLOWLIST` entry must still name a genuine Tier-1
     call site *for its own recorded target* in the real tree — otherwise the
