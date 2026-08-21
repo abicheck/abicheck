@@ -59,6 +59,7 @@ topics:
       - use/tool-modes.md
       - learn/architecture.md
       - skills-src/shared/evidence-and-depth.md
+      - learn/assurance-methods.md
 
   verdicts:
     canonical_page: learn/verdicts.md

@@ -9,6 +9,7 @@ summarizes:
   - data-wire-compatibility
   - ownership-and-lifetime
   - concurrency-and-initialization
+  - evidence-model
 lifecycle: active
 generated: false
 ---
@@ -72,17 +73,19 @@ different":
    contract-specific method (ASan or TSan, chosen by what the change touches)
    covers structurally different failure classes with each addition, not
    diminishing returns on the same one.
-3. **None of this replaces static checking — it's additive.** Static
-   artifact/header diffing is the only method in this table that is
-   *exhaustive over the evidence it was given* — every declaration and
-   symbol in the captured snapshot is compared, without needing a
-   hand-written test to exercise the right path first. That's narrower than
-   "exhaustive over the shipped ABI/API surface": the
+3. **None of this replaces static checking — it's additive.** abicheck
+   itself is the only method in this table that is *exhaustive over the
+   evidence it was given* — every declaration and symbol in the captured
+   snapshot is compared, without needing a hand-written test to exercise the
+   right path first. That's narrower than "exhaustive over the shipped
+   ABI/API surface": a run limited to artifact/header evidence (L0-L2) has
+   the real, structural blind spots the
    [detectability matrix](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
-   this same page opens by citing lists real, structural blind spots even
-   with full evidence (macro values, inline/template bodies, uninstantiated
-   templates), and incomplete debug info or headers narrows it further
-   still. The other methods are necessarily *sampling* on top of that —
+   this same page opens by citing lists — macro values, inline/template
+   bodies, uninstantiated templates — which is exactly what build/source
+   evidence (L3/L4) exists to close, per the row above; incomplete debug
+   info or headers narrows even the L0-L2 picture further still. The other
+   methods are necessarily *sampling* on top of whichever tier you ran —
    a golden test proves the scenarios it encodes, an ASan run proves the
    lifecycle it exercises. Losing the systematic layer to "we have
    behavioral tests" reopens exactly the blind spot
