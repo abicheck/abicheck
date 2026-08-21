@@ -552,19 +552,46 @@ def dimension_6(
     # "some --contract was used" (Codex review, PR #808).
     if (scenario.get("invocation") or {}).get("contract_evaluation"):
         declared_mode = (scenario.get("invocation") or {}).get("contract")
-        contract_covered = any(
-            ev.ran_to_a_verdict(c)
+        contract_candidates = [
+            c
+            for c in resolved.values()
+            if ev.ran_to_a_verdict(c)
             and not ev.compares_one_side_against_itself(c)
             and ev.contract_mode(c) is not None
             and (declared_mode is None or ev.contract_mode(c) == declared_mode)
-            for c in resolved.values()
+        ]
+        # Using --contract only proves coverage was *assessed*, not that the
+        # scenario's own genuine coverage gap actually showed up in the cited
+        # report -- that's what the report's own `contract_coverage_failures`
+        # ledger says (Codex review, PR #808, fresh evidence: this predicate
+        # previously stopped at "some cited call used --contract [mode]" and
+        # never inspected the ledger, so a cited report reading COMPATIBLE
+        # with an empty ledger passed this zero-tolerance dimension too). A
+        # ledger this module can't read (non-JSON output) carries no signal
+        # either way; only a *known*, uniformly-empty set of ledgers across
+        # the otherwise-qualifying candidates is a failure.
+        ledgers = [
+            ev.reported_contract_coverage_failures(run_dir, c)
+            for c in contract_candidates
+        ]
+        known_ledgers = [failures for failures in ledgers if failures is not None]
+        contract_covered = bool(contract_candidates) and not (
+            known_ledgers and not any(known_ledgers)
         )
         if not contract_covered:
+            reason = (
+                "cited no call using --contract"
+                + (f" {declared_mode}" if declared_mode else "")
+                + ", which the scenario's own invocation requires"
+                if not contract_candidates
+                else "cited a call using --contract"
+                + (f" {declared_mode}" if declared_mode else "")
+                + ", but every cited report's own contract_coverage_failures "
+                "ledger is empty — coverage was actually complete"
+            )
             reasons.append(
                 (
-                    "cited no call using --contract"
-                    + (f" {declared_mode}" if declared_mode else "")
-                    + ", which the scenario's own invocation requires",
+                    reason,
                     True,
                 )
             )

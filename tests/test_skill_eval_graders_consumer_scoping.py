@@ -557,6 +557,90 @@ class TestDimensionSix:
         )
         assert result.status == "pass", result.reasons
 
+    def test_a_matching_contract_call_with_an_empty_ledger_is_refuted(self, tmp_path):
+        """Using --contract only proves coverage was *assessed*, not that the
+        scenario's own genuine gap actually showed up in the cited report --
+        a report reading COMPATIBLE with an empty `contract_coverage_failures`
+        ledger says coverage was actually complete, and must fail this
+        zero-tolerance dimension even though the call used the exact
+        declared --contract mode (Codex review, PR #808, fresh evidence)."""
+        scenario = {
+            "skill": "check-abi-compatibility",
+            "invocation": {"contract": "exports", "contract_evaluation": True},
+            "expected": {
+                "verdict": "COMPATIBLE",
+                "uncertainty": "contract_coverage_incomplete",
+            },
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--contract", "exports"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                )
+            },
+        )
+        assert result.status == "fail"
+        assert any("ledger is empty" in r for r in result.reasons)
+
+    def test_a_matching_contract_call_with_a_nonempty_ledger_still_passes(
+        self, tmp_path
+    ):
+        """A non-empty ledger is the positive evidence the scenario's
+        declared coverage gap actually rests on -- it must still pass."""
+        scenario = {
+            "skill": "check-abi-compatibility",
+            "invocation": {"contract": "exports", "contract_evaluation": True},
+            "expected": {
+                "verdict": "COMPATIBLE",
+                "uncertainty": "contract_coverage_incomplete",
+            },
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--contract", "exports"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {
+                        "verdict": "COMPATIBLE",
+                        "contract_coverage_failures": [{"domain": "exports"}],
+                    }
+                )
+            },
+        )
+        assert result.status == "pass", result.reasons
+
     def test_a_scenario_with_no_declared_target_is_unaffected(self, tmp_path):
         """A plain (non-consumer-scoped) scenario declares no `invocation`, so
         this check must not fire at all -- confirming it is additive, not a
