@@ -681,7 +681,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # `CompileContext` above, the frontend, the explicit-language decision) so
     # the request records the run rather than forming a second opinion about
     # it. See `cli_dump_request.py`'s own module docstring for why that
-    # direction matters, and for what still executes outside it.
+    # direction matters.
+    #
+    # Built here, before the branch, rather than inside `if dry_run:` -- and
+    # only `--dry-run` consumes it today. That is deliberate and worth being
+    # plain about: the real ELF/PE/Mach-O run still executes through
+    # `perform_elf_dump`/`handle_non_elf_dump` below (three obstacles remain,
+    # recorded in the plan's PR 3A section), so this is the object that
+    # migration will build from, positioned where both branches can reach it
+    # rather than tucked inside the one that currently does.
     _dump_request = build_dump_request(
         so_path=so_path, headers=headers, includes=includes,
         version=version, lang=lang, lang_explicit=lang_explicit,
