@@ -4,6 +4,11 @@ audience:
   - library-maintainer
   - ci-owner
 level: intermediate
+summarizes:
+  - behavioral-compatibility
+  - data-wire-compatibility
+  - ownership-and-lifetime
+  - concurrency-and-initialization
 lifecycle: active
 generated: false
 ---
@@ -35,13 +40,13 @@ for naming which kind of compatibility you're promising in the first place).
 
 | Method | What it proves | What it does *not* prove |
 |---|---|---|
-| **Static artifact/header diff** (abicheck itself) | The shipped ABI facts and the declared source API held — everything [Detecting Breaks](abi-series/08-detection.md) covers | Anything about how a consumer actually uses the library, or what the code *does* at runtime |
+| **Static artifact/header/source diff** (abicheck itself, across whichever evidence tiers you give it) | The shipped ABI facts, the declared source API, and — only with build/source evidence attached (L3/L4) — the source-only facts (macro values, inline/template bodies) that a header-only run cannot see; everything [Detecting Breaks](abi-series/08-detection.md) covers, gated by which tier you fed it | Anything about how a consumer actually uses the library, or what the code *does* at runtime |
 | **Consumer rebuild test** | Source compatibility for the specific consumer(s) rebuilt — their code still compiles and links against the new headers | Binary compatibility for a consumer that doesn't rebuild; code paths the consumer's own build doesn't exercise |
 | **Binary-swap test** (an old, already-built consumer run against the new library) | Backward *binary* compatibility for that consumer's actual, exercised usage — the promise a prebuilt-consumer release most needs to keep | Code paths the consumer binary doesn't call; says nothing about a *different* consumer's usage |
 | **Reverse swap** (a new consumer built and run against the *old* library) | Forward/downgrade compatibility — relevant when an older library build is still shipped or pinned longer than the newest consumer | Same exercised-paths limit as binary-swap, in the other direction |
 | **Host × plugin version matrix** | The two-sided contract a plugin/host relationship depends on, across the version combinations you actually support ([Plugin Systems](../use/plugin-systems.md), [Consumer Models](consumer-models.md)) | Any combination outside the matrix — an unlisted host/plugin pair is unverified, not verified-compatible |
 | **Oldest-supported-OS/runtime load test** | The deployment floor: does the binary even load and link on the oldest target you claim to support ([Dependency & Runtime Floors](dependency-floors.md)) | Correctness beyond "it loaded" — a clean load is necessary, not sufficient |
-| **Golden / differential output tests** | General output/semantic behavioral compatibility for the specific scenarios the fixtures cover — the one method here aimed at behaviour broadly, rather than one specific contract (lifetime, concurrency, wire format) the way the rows below it are | Any scenario the fixture set doesn't exercise; a passing suite is a statement about coverage, not universal correctness |
+| **Golden / differential output tests** | General [output/semantic behavioral compatibility](behavioral-compatibility.md) for the specific scenarios the fixtures cover — the one method here aimed at behaviour broadly, rather than one specific contract (lifetime, concurrency, wire format) the way the rows below it are | Any scenario the fixture set doesn't exercise; a passing suite is a statement about coverage, not universal correctness |
 | **Old-reader/new-writer and new-reader/old-writer fixture tests** | Wire, storage, and serialization-format compatibility — the [data/wire dimension](data-wire-compatibility.md) static ABI/API checking cannot see at all | Schema paths or field combinations the fixtures don't exercise |
 | **ASan-instrumented lifecycle tests** | [Ownership/lifetime contract](ownership-and-lifetime.md) violations across the library boundary — double-free, use-after-free, cross-allocator frees | Only what the exercised lifecycle actually triggers; an untested destruction order stays unverified |
 | **TSan / stress / reentrancy tests** | [Concurrency and initialization contract](concurrency-and-initialization.md) violations — data races, unsafe reentrancy, ordering assumptions | Requires a workload that actually contends; a single-threaded run through the same suite proves nothing about the concurrency contract |
