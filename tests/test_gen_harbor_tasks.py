@@ -159,6 +159,48 @@ class TestGeneratorCheck:
 
         assert before == after
 
+    def test_runtime_relevant_digest_detects_a_genuine_crlf_edit(self, tmp_path):
+        """`_runtime_relevant_digest` must NOT normalize line endings away --
+        an earlier revision collapsed CRLF to LF before hashing to paper
+        over a real platform-dependence bug (a Windows checkout of these
+        paths, absent .gitattributes, CRLF-translated them), and that
+        normalization also silently hid a genuine CRLF-introducing edit to
+        a runtime-relevant file, which could break a shebang in the real
+        built image (Codex review, fresh evidence). The platform-dependence
+        is now closed at its source instead (.gitattributes pins these
+        paths to `text eol=lf`, and `_write_lf` forces LF when this
+        generator itself runs on Windows) -- see that helper's own
+        docstring -- so this digest is free to stay sensitive to a real
+        byte-level change of any kind, line endings included."""
+        root = tmp_path / "src"
+        for sub in ("graders", "shim", "harbor"):
+            (root / "agent-evals" / "skills" / sub).mkdir(parents=True)
+        target = root / "agent-evals" / "skills" / "harbor" / "verify_run.py"
+        target.write_bytes(b"import sys\nprint(sys.argv)\n")
+        (root / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
+            "x = 1\n", encoding="utf-8"
+        )
+        (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+            "#!/bin/sh\n", encoding="utf-8"
+        )
+        before = gen._runtime_relevant_digest(root)
+
+        target.write_bytes(target.read_bytes().replace(b"\n", b"\r\n"))
+        after = gen._runtime_relevant_digest(root)
+
+        assert before != after
+
+    def test_write_lf_forces_lf_regardless_of_content(self, tmp_path):
+        """`_write_lf` is what keeps this generator's own output
+        byte-identical across platforms -- plain `write_text()` uses
+        `newline=None`, which on Windows would translate every `\\n` in
+        the content to `\\r\\n` on write, independent of git entirely.
+        Exercised directly since none of `generate()`'s own callers run
+        on an actual Windows host in this suite."""
+        target = tmp_path / "out.txt"
+        gen._write_lf(target, "line one\nline two\n")
+        assert target.read_bytes() == b"line one\nline two\n"
+
     def test_runtime_relevant_digest_does_not_track_the_skill_tree(self, tmp_path):
         """`.claude/skills/check-abi-compatibility` is deliberately absent
         from `_RUNTIME_RELEVANT_PATHS` -- an earlier round added it because

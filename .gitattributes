@@ -1,0 +1,37 @@
+# Runtime-relevant source paths for agent-evals/skills/harbor/'s generated
+# Harbor task battery (scripts/gen_harbor_tasks.py). Pinned to LF so a
+# checkout on a platform whose git defaults to CRLF translation (e.g.
+# GitHub's windows-latest runners) can never diverge from what was
+# committed -- paired with gen_harbor_tasks.py's own _write_lf() helper,
+# which forces the identical LF bytes when the generator itself runs on
+# Windows. Together these keep _runtime_relevant_digest() and _diff_trees()
+# byte-for-byte platform-independent without needing to normalize away a
+# real content change at hash/compare time (see gen_harbor_tasks.py's
+# _runtime_relevant_digest() docstring for the full history: an earlier
+# revision normalized CRLF->LF at hash time instead, which also silently
+# hid a genuine CRLF-introducing edit to a runtime-relevant file).
+agent-evals/skills/graders/*.py text eol=lf
+agent-evals/skills/shim/abicheck text eol=lf
+agent-evals/skills/harbor/verify_run.py text eol=lf
+agent-evals/skills/harbor/tasks/**/*.md text eol=lf
+agent-evals/skills/harbor/tasks/**/*.toml text eol=lf
+agent-evals/skills/harbor/tasks/**/*.json text eol=lf
+agent-evals/skills/harbor/tasks/**/*.sh text eol=lf
+agent-evals/skills/harbor/tasks/**/*.c text eol=lf
+agent-evals/skills/harbor/tasks/**/*.h text eol=lf
+agent-evals/skills/harbor/tasks/**/*.cc text eol=lf
+agent-evals/skills/harbor/tasks/**/*.cpp text eol=lf
+agent-evals/skills/harbor/tasks/**/*.cxx text eol=lf
+agent-evals/skills/harbor/tasks/**/*.hpp text eol=lf
+agent-evals/skills/harbor/tasks/**/*.hh text eol=lf
+agent-evals/skills/harbor/tasks/**/Dockerfile text eol=lf
+agent-evals/skills/harbor/tasks/**/*.so binary
+
+# The same fixture sources these generated tasks copy from -- kept
+# consistent so a fresh regeneration (which reads these fixtures) matches
+# the already-committed generated tree regardless of checkout platform.
+agent-evals/skills/fixtures/**/*.c text eol=lf
+agent-evals/skills/fixtures/**/*.h text eol=lf
+agent-evals/skills/fixtures/**/*.json text eol=lf
+agent-evals/skills/fixtures/**/*.md text eol=lf
+agent-evals/skills/fixtures/**/*.so binary
