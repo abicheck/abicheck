@@ -1003,6 +1003,49 @@ def compile_db_from_build_info(
     return db if db.is_file() and sniff_build_info_format(db) == "compile_db" else None
 
 
+def compile_db_for_filter_scope_check(
+    build_info: Path | None,
+    sources: Path | None,
+    headers: tuple[Path, ...],
+) -> Path | None:
+    """The compile database ``compile_db_filter_scope_error`` should check
+    against -- covering both ways the L3->L2 fold can resolve one, not only
+    an explicit ``--build-info`` (Codex review, fresh evidence).
+
+    ``compile_db_from_build_info`` alone under-covers this: when no
+    ``--build-info`` is given but ``--sources`` names a tree containing an
+    auto-discovered ``compile_commands.json``
+    (``buildsource.inline._autodiscover_compile_db`` -- the identical P4
+    strategy ``seed_includes_and_fold_compile_context``'s own fold and
+    ``embed_build_source``'s L3 collection *both* already use to find one
+    from ``sources`` alone), the fold still narrows the L2 header parse by
+    ``compile_db_filter`` while the L3 embed collects the same
+    auto-discovered database unfiltered -- the exact filtered-L2/
+    unfiltered-L3 mismatch this whole scope guard exists to reject, just
+    reached without ``--build-info`` at all. Reproduced directly: a real
+    ``g++``-compiled two-TU project resolved with ``sources`` only (no
+    ``build_info``) and a filter narrowing the L2 parse to one TU still
+    embedded both TUs' compile units as L3 evidence.
+
+    Deliberately **not** folded into ``compile_db_from_build_info`` itself
+    -- that function's result also drives ``dump``'s own legacy ``-p``
+    auto-match (``cli.py``'s ``effective_compile_db``), which is
+    intentionally ``--build-info``-only, and widening it here would widen
+    that unrelated mechanism too.
+
+    ``None`` when neither source names a usable compile database, or when
+    *headers* is empty (mirrors ``compile_db_from_build_info``: no L2
+    header parse to narrow means nothing for the filter to be inconsistent
+    with).
+    """
+    explicit = compile_db_from_build_info(build_info, headers)
+    if explicit is not None or not headers:
+        return explicit
+    from .buildsource.inline import _autodiscover_compile_db
+
+    return _autodiscover_compile_db(sources)
+
+
 def compile_db_filter_scope_error(
     compile_db_filter: str | None,
     compile_db_path: Path | None,

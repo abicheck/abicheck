@@ -396,17 +396,27 @@ def reject_compile_db_filter_scope_mismatch(
     resulting snapshot carries build facts for translation units the header
     parse never saw (Codex review — `resolve_dump_request`'s own guard,
     landed first, covered `DumpRequest` alone).
+
+    Resolves the checked compile database via
+    ``header_conditionals.compile_db_for_filter_scope_check`` -- not the
+    narrower ``compile_db_from_build_info`` -- so a side whose database is
+    only auto-discovered from ``sources`` (no explicit ``build_info`` at
+    all) is covered too (Codex review, fresh evidence: the fold and the L3
+    embed both resolve that same auto-discovered database independently,
+    so the identical mismatch reproduces with no ``build_info`` in play).
     """
     from .errors import ValidationError
     from .header_conditionals import (
         compile_db_filter_scope_error,
-        compile_db_from_build_info,
+        compile_db_for_filter_scope_check,
     )
 
     for label, side, evidence in sides:
         error = compile_db_filter_scope_error(
             side.compile_db_filter,
-            compile_db_from_build_info(side.build_info, tuple(evidence.headers)),
+            compile_db_for_filter_scope_check(
+                side.build_info, side.sources, tuple(evidence.headers)
+            ),
             evidence.collect_mode,
         )
         if error is not None:

@@ -623,3 +623,133 @@ class TestCompareRequestAppliesTheSameScopeGuard:
         )
         pair = resolve_compare_request(request)
         assert pair.old is not None and pair.new is not None
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
+    """Codex review, P1 (a fresh round on the same slice): the scope guard
+    resolved the checked compile database via
+    ``compile_db_from_build_info`` alone -- ``--build-info``-only -- so a
+    request giving only ``sources`` (no ``build_info`` at all) could still
+    reach the exact filtered-L2/unfiltered-L3 mismatch uncaught: the P0.3
+    fold and ``embed_build_source``'s L3 collection both independently
+    auto-discover the same ``compile_commands.json`` under ``sources``
+    (``buildsource.inline._autodiscover_compile_db``, the same strategy
+    both already use with no explicit ``--build-info``), but only the fold
+    honors ``compile_db_filter``. Reproduced directly before the fix: a
+    real two-TU project resolved with ``sources`` only, filtered to one TU
+    at L2, still embedded *both* TUs' compile units as L3 evidence
+    (`BuildEvidence.compile_units` had length 2).
+
+    This is not a regression introduced by the typed-API slice -- the
+    native CLI's own pre-existing `compile_db_path = compile_db_from_
+    build_info(build_info, headers)` had the identical gap: before this
+    fix, the CLI-path test below silently succeeded (exit 0) instead of
+    rejecting the mismatch, since the CLI's own scope check used the same
+    narrow, `--build-info`-only resolution. Fixed once, in the shared
+    `header_conditionals.compile_db_for_filter_scope_check`, consumed by
+    both the CLI and the typed pipelines' guard.
+    """
+
+    def test_cli_rejects_a_sources_only_scope_mismatch(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--sources",
+                str(header.parent),
+                "--depth",
+                "build",
+                "--ast-frontend",
+                "clang",
+                "--compile-db-filter",
+                "a.cpp",
+                "-o",
+                str(tmp_path / "out.json"),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "L2 header parse only" in result.output
+
+    def test_dump_request_rejects_a_sources_only_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                sources=header.parent,
+                compile_db_filter="a.cpp",
+            ),
+            frontend="clang",
+            depth="build",
+        )
+        with pytest.raises(ValidationError, match="input: .*L2 header parse only"):
+            resolve_dump_request(request)
+
+    def test_compare_request_rejects_a_sources_only_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=header.parent,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="build")
+        with pytest.raises(ValidationError, match="old: .*L2 header parse only"):
+            resolve_compare_request(request)
+
+    def test_no_filter_sources_only_is_unaffected_by_the_guard(
+        self, tmp_path: Path
+    ) -> None:
+        """No filter -> the guard itself never fires for this shape either
+        (a downstream real ambiguity error from the same project's two
+        conflicting TUs is a separate, pre-existing failure mode -- see
+        `test_unfiltered_still_fails_closed_on_the_real_ambiguity` -- and
+        `resolve_dump_request` never reaches the fold at all, only
+        `execute_dump_request` does, so it cannot surface here)."""
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = DumpRequest(
+            input=InputSpec(path=so_path, headers=(header,), sources=header.parent),
+            frontend="clang",
+            depth="build",
+        )
+        resolved = resolve_dump_request(request)
+        assert resolved.collect_mode == "build"

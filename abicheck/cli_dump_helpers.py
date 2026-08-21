@@ -129,6 +129,7 @@ class _WriteSnapshotOutput(Protocol):
 # (Codex review, PR #809).
 _HEADER_CONDITIONALS_REEXPORTS: dict[str, str] = {
     "compile_db_from_build_info": "compile_db_from_build_info",
+    "compile_db_for_filter_scope_check": "compile_db_for_filter_scope_check",
     "compile_db_filter_scope_error": "compile_db_filter_scope_error",
     "_attach_build_context": "attach_build_context",
     "_user_define_flags": "user_define_flags",
