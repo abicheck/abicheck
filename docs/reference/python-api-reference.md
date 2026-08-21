@@ -132,7 +132,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 
 | Field | Type | Default |
 |---|---|---|
-| `path` | `Path` | *(required)* |
+| `path` | `Path \| None` | *(required)* |
 | `headers` | `tuple[Path, ...]` | `()` |
 | `includes` | `tuple[Path, ...]` | `()` |
 | `version` | `str` | `''` |
