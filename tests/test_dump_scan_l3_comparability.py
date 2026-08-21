@@ -229,3 +229,79 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
     assert "profile_fingerprint mismatch" not in scan_result.output, scan_result.output
     assert scan_result.exit_code == 0, scan_result.output
     assert "Verdict: NO_CHANGE" in scan_result.output, scan_result.output
+
+
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
+    tmp_path: Path,
+) -> None:
+    """The exact CLI invocation shape from the bug report: a side-prefixed
+    ``-H new=PATH`` header, an explicit ``--lang c++``, an explicit
+    ``--policy strict_abi``, and JSON output -- not just the bare
+    ``-H PATH``/default-policy shape the sibling test above already covers.
+
+    None of those extra flags should matter to whether the P0.3 L3->L2 fold
+    reconciles ``dump``'s and ``scan``'s compile contexts, but the original
+    report used exactly this combination, so it is pinned directly rather
+    than trusted to be equivalent to the simpler sibling test.
+    """
+    so_path, header, compile_db = _build_library(tmp_path)
+    baseline = tmp_path / "baseline.json"
+
+    dump_result = CliRunner().invoke(
+        main,
+        [
+            "dump",
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "-o",
+            str(baseline),
+        ],
+    )
+    assert dump_result.exit_code == 0, dump_result.output
+
+    scan_report = tmp_path / "scan-report.json"
+    scan_result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(so_path),
+            "-H",
+            f"new={header}",
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--against",
+            str(baseline),
+            "--lang",
+            "c++",
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "--policy",
+            "strict_abi",
+            "--format",
+            "json",
+            "-o",
+            str(scan_report),
+        ],
+    )
+    assert scan_result.exit_code == 0, scan_result.output
+
+    report = json.loads(scan_report.read_text(encoding="utf-8"))
+    assert report.get("verdict") == "NO_CHANGE", report
+    diff = report.get("diff") or {}
+    assert diff.get("reason") is None, diff.get("reason")
