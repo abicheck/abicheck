@@ -8,8 +8,18 @@
   "additionalProperties": false,
   "properties": {
     "verdict": {
-      "description": "compare's own ordinal vocabulary, or null for a pair the agent judges not comparable. Never a green/not-green boolean, which would erase the ABI-vs-source distinction the skills exist to make.",
+      "description": "compare's own ordinal vocabulary, or null for a pair the agent judges not comparable. Never a green/not-green boolean, which would erase the ABI-vs-source distinction the skills exist to make. This is the raw tool-level result — see `decision` for the customer-facing outcome built on top of it.",
       "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+    },
+    "decision": {
+      "description": "Optional customer-facing outcome, in the vocabulary check-abi-compatibility's own SKILL.md reports (its 'Step 10' decision table). Distinct from `verdict` on purpose: `verdict` is the raw tool ordinal, `decision` is what the skill promises to hand back to a user, and the two do not collapse to the same thing whenever `confident` is false or evidence fell short of what the question needed — e.g. a raw COMPATIBLE verdict reached on evidence too shallow for the question is `NOT_VERIFIED`, not `VERIFIED_COMPATIBLE`. Optional for now so existing recorded runs and scenario expectations, none of which carry it, stay valid; when present it is checked against `verdict`/`confident` for consistency (grader: dimensions.py, `_decision_matches_claim`).",
+      "enum": [
+        "VERIFIED_COMPATIBLE",
+        "COMPATIBLE_WITH_DEPLOYMENT_RISK",
+        "SOURCE_BREAK",
+        "BINARY_BREAK",
+        "NOT_VERIFIED"
+      ]
     },
     "full_verdict": {
       "description": "Set only when verdict is the scoped answer to a --used-by/--required-symbol(s) run: the same run's library-wide verdict, mirroring the report's own verdict/full_verdict pair (shared/consumer-scoping.md). Omitted entirely for an unscoped comparison — there is no second, wider answer to report.",

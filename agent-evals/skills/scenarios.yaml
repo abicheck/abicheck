@@ -243,3 +243,33 @@ scenarios:
     prompt: >-
       We only added a new function this release. Confirm nothing else changed
       for existing consumers.
+
+  - id: constant-value-changed
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: >-
+      source-only API break — a changed public constant's value has no
+      exported symbol to break, so a binary-only view sees nothing; only
+      header-depth evidence catches it, and the right answer is "recompile
+      required," not "binary break"
+    case: case124_header_constant_value_changed
+    prompt: >-
+      We changed the value of a public constant in our headers — no function
+      signatures moved. Can existing binaries keep running against the new
+      library as-is, or do they need to be rebuilt?
+
+  - id: runtime-floor-raised
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: >-
+      COMPATIBLE_WITH_RISK — a function keeps its mangled symbol (not a
+      linkage break) but dropping its noexcept guarantee raises the
+      library's minimum required libstdc++ version, a deployment risk
+      distinct from either a clean pass or an outright break
+    case: case15_noexcept_change
+    prompt: >-
+      We removed the noexcept guarantee from a function that now throws
+      internally. The symbol itself didn't change. Is this release still
+      safe to deploy for people already running the old library?

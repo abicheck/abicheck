@@ -186,12 +186,16 @@ def _dependency_source(side: InputSpec, fmt: str | None) -> Path | None:
     """
     from .binary_utils import detect_binary_format, resolve_linker_script
 
+    if side.path is None:
+        # A source-only dump (`InputSpec.path is None`, PR 3A blocker 5) has no
+        # native artifact at all, so there is nothing to walk dependencies of.
+        return None
     if fmt == "elf":
         return side.path
     if not side.follow_linker_scripts:
         return None
 
-    current = side.path
+    current: Path = side.path
     seen = {current.resolve()}
     while True:
         target, is_script = resolve_linker_script(current)

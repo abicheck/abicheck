@@ -743,9 +743,8 @@ class TestReadmeCommandParsing:
         )
         result = gen._readme_abicheck_command(case)
         assert result is not None
-        block, old, new = result
-        assert old == "libfoo_v1.so"
-        assert new == "libfoo_v2.so"
+        block, run_line = result
+        assert run_line == "abicheck compare libfoo_v1.so libfoo_v2.so"
         assert "abicheck compare" in block
 
     def test_none_when_the_section_is_absent(self, tmp_path):
@@ -764,6 +763,35 @@ class TestReadmeCommandParsing:
             encoding="utf-8",
         )
         assert gen._readme_abicheck_command(case) is None
+
+    def test_a_line_continued_command_with_extra_flags_and_an_env_prefix(
+        self, tmp_path
+    ):
+        """case124's own shape: an env-var prefix, and trailing flags the
+        verdict actually depends on (--header), wrapped across a
+        backslash-continued line -- the exact shape the bare-form-only
+        parser this test class used to pin could not read at all (regressed
+        to the Category-B "no reference solution" stub for a real Category A
+        scenario)."""
+        case = tmp_path / "case"
+        case.mkdir()
+        (case / "README.md").write_text(
+            "# Case\n\n## abicheck command\n\n```bash\n"
+            "g++ -shared -fPIC -g v1.cpp -o libaudio_v1.so\n"
+            "g++ -shared -fPIC -g v2.cpp -o libaudio_v2.so\n"
+            "ABICHECK_AST_FRONTEND=clang abicheck compare libaudio_v1.so libaudio_v2.so \\\n"
+            "    --header old=v1.h --header new=v2.h\n"
+            "```\n",
+            encoding="utf-8",
+        )
+        result = gen._readme_abicheck_command(case)
+        assert result is not None
+        block, run_line = result
+        assert run_line == (
+            "ABICHECK_AST_FRONTEND=clang abicheck compare libaudio_v1.so "
+            "libaudio_v2.so --header old=v1.h --header new=v2.h"
+        )
+        assert "g++ -shared" in block
 
 
 @_SKIP_ON_WINDOWS
@@ -1005,6 +1033,8 @@ class TestSolveScriptsEndToEnd:
             "enum-value-change",
             "struct-layout-drift",
             "vtable-change",
+            "constant-value-changed",
+            "runtime-floor-raised",
         ],
     )
     def test_reference_solution_grades_correct(self, tmp_path, scenario_id):

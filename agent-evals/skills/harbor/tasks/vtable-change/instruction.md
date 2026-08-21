@@ -19,6 +19,12 @@ If you scoped a comparison to a named consumer or plugin host (e.g. with
 vocabulary as `verdict`) — the two answer different questions and can
 legitimately differ. Omit `full_verdict` entirely for an unscoped comparison.
 
+Optionally, also add `"decision"` — one of `VERIFIED_COMPATIBLE`,
+`COMPATIBLE_WITH_DEPLOYMENT_RISK`, `SOURCE_BREAK`, `BINARY_BREAK`, or
+`NOT_VERIFIED` — the customer-facing outcome, if you are reporting one (this
+is the vocabulary a compatibility-review skill's own final decision uses; it
+must agree with `verdict`/`confident`, not merely restate the raw verdict).
+
 This trial is graded from files, not from chat: before you finish, write
 your reply's fenced ```json block above verbatim to the file
 `/workspace/final.md` as your last action (a heredoc or your file-write tool

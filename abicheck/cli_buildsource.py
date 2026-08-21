@@ -73,7 +73,9 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
 )
 
 if TYPE_CHECKING:
+    from .api_types import DumpRequest
     from .model import AbiSnapshot
+    from .service_dump_pipeline import ResolvedDumpRequest
 
 
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
@@ -494,6 +496,43 @@ def _missing_requested_evidence_layers(
     return missing
 
 
+def build_source_already_satisfies(
+    snap: AbiSnapshot, collect_mode: str
+) -> bool:
+    """True when *snap* already carries every layer *collect_mode* asks for.
+
+    The idempotence predicate behind :func:`_write_snapshot_output`'s
+    check-before-embed guard (CLI cleanup phase two, PR 3A blocker 5,
+    sub-issue 3). The ``dump`` CLI embeds L3-L5 at *write* time, while the
+    typed pipeline (``service_dump_pipeline.execute_dump_request`` →
+    ``service_input_resolution._resolve_side_snapshot_impl``) embeds at
+    *resolve* time — so any future migration that routes the real ``dump`` run
+    through the typed executor would otherwise embed twice, re-running L4
+    source-ABI replay (a real compiler invocation per translation unit, not a
+    cheap recomputation) and overwriting the pack the first embed produced.
+
+    Stated in this module's own existing vocabulary rather than a second depth
+    ladder: :func:`_missing_requested_evidence_layers` already answers "which
+    layers did *collect_mode* ask for that this pack does not have", and it is
+    the same function the G21.7 fail-loud warning below already trusts, so the
+    guard and the warning cannot disagree about what "satisfied" means. Its
+    ``pack is None -> []`` case is *not* satisfaction (nothing was embedded at
+    all), hence the explicit ``build_source is not None`` half — without it a
+    bare snapshot would read as already-complete and skip the embed entirely.
+
+    ``collect_mode="off"`` with a pack present is deliberately treated as
+    satisfied: nothing was requested, so re-running the embed could only
+    replace an existing pack with a weaker one.
+
+    A no-op for every caller that exists today — nothing in the ``dump`` CLI
+    populates ``build_source`` before the write step — which is exactly what
+    makes it safe to land ahead of the migration it exists for.
+    """
+    if snap.build_source is None:
+        return False
+    return not _missing_requested_evidence_layers(snap.build_source, collect_mode)
+
+
 def _classify_missing_layers(
     pack: BuildSourcePack | None, missing: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -542,6 +581,8 @@ def _write_snapshot_output(
     header_roots: tuple[Path, ...] = (),
     clang_bin: str = "clang",
     snapshot_compression: str = "auto",
+    public_headers: tuple[Path, ...] = (),
+    public_header_dirs: tuple[Path, ...] = (),
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -570,6 +611,22 @@ def _write_snapshot_output(
     those roots (or lives under one) is never treated as a dependency just because it
     happens to sit under a system prefix (e.g. an installed library dumped via its real
     ``/usr/include`` path).
+
+    *public_headers*/*public_header_dirs* are this dump's own public-header
+    roots, forwarded to ``embed_build_source`` as ``public_header_roots`` --
+    what L4 source-ABI replay classifies a declaration's declaring header as
+    public or private against. Without them the replay runs with an *empty*
+    root set, so every declaration classifies private and the linked surface
+    reaches nothing: measured on a real ``dump lib.so -H api.h --sources .
+    --build-info db.json --depth source``, the written snapshot recorded ``0/2
+    symbols matched``, ``reachable_declarations=0`` and ``fact_family_states:
+    empty-confirmed`` where the identical inputs through ``compare``'s
+    implicit-dump operand or the typed ``DumpRequest`` API record ``1/2``
+    matched and a real ``source_decl_to_binary_symbol`` mapping. The layer was
+    present and honestly reported "partial", but every L4-derived finding was
+    silently inert for a ``dump``-produced baseline. Found while measuring
+    whole-snapshot parity between this write path and ``execute_dump_request``
+    for CLI cleanup phase two's PR 3A -- see the plan's own note.
     """
     from .cli_dump_helpers import (
         check_requested_depth_satisfied,
@@ -578,7 +635,13 @@ def _write_snapshot_output(
     )
     from .serialization import snapshot_to_dict
 
-    if build_info is not None or sources is not None:
+    if (build_info is not None or sources is not None) and not (
+        # PR 3A blocker 5, sub-issue 3: check before embedding. See
+        # `build_source_already_satisfies`' own docstring -- a snapshot that
+        # already carries every layer this collect mode asks for must not have
+        # L4 source-ABI replay run over it a second time.
+        build_source_already_satisfies(snap, collect_mode)
+    ):
         from .cli_buildsource import embed_build_source
         embed_build_source(
             snap, build_info, sources,
@@ -587,6 +650,8 @@ def _write_snapshot_output(
             build_query=build_query, build_compile_db=build_compile_db,
             build_targets=build_targets,
             extractor=extractor, clang_bin=clang_bin,
+            public_headers=tuple(str(p) for p in public_headers),
+            public_header_dirs=tuple(str(p) for p in public_header_dirs),
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so
         # prominently instead of leaving it buried in the coverage rows. Permissive
@@ -661,6 +726,42 @@ def _write_snapshot_output(
         import json
 
         click.echo(json.dumps(payload, indent=2))
+
+
+def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
+    """:func:`~abicheck.service_dump_pipeline.resolve_dump_request`, with the
+    CLI's error contract.
+
+    The Tier-2 pipeline signals a bad request as
+    :class:`~abicheck.errors.ValidationError`; a Click front end owes the user
+    a ``UsageError`` (exit 64) instead. Translated here, at the boundary,
+    rather than inside the pipeline — the same Tier-1/Tier-2 separation
+    ``embed_side_build_source`` observes in the other direction.
+
+    Worth being explicit about what this can newly reject on the ``--dry-run``
+    path, since that path's own contract is "never raises on anything but a
+    usage error": :meth:`DumpRequest.validate` front-runs a check
+    ``dumper.dump()`` already performs at *runtime* — a ``--dump-manifest``
+    combined with ``-I``/``--include``, which declares two conflicting public
+    surfaces. That combination previously dry-ran as a clean report and then
+    failed during the real extraction. Reporting it as a usage error in both
+    places is a strictly better answer, and it stays inside the dry-run
+    contract because it is precisely a usage error.
+
+    Lives here, not in `cli_dump_request.py` (which builds the `DumpRequest`
+    this consumes), so that leaf module stays a leaf: this function's own
+    `service_dump_pipeline` import is the one edge that needs a module
+    already inside the by-design CLI-registration SCC
+    (`IMPORT_CYCLE_ALLOWLIST` in `scripts/check_ai_readiness.py`), which
+    `cli_buildsource` already is.
+    """
+    from .errors import ValidationError
+    from .service_dump_pipeline import resolve_dump_request
+
+    try:
+        return resolve_dump_request(request)
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 # ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────

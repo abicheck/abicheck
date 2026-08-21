@@ -200,6 +200,40 @@ def _expand_header_directories(headers: Sequence[Path]) -> list[Path]:
     return out
 
 
+def filter_units_by_source(
+    compile_units: Sequence[CompileUnit], source_filter: str | None
+) -> Sequence[CompileUnit]:
+    """Narrow *compile_units* to those whose own source matches *source_filter*.
+
+    ``dump --compile-db-filter``'s glob, applied here so the P0.3 L3→L2 fold
+    scopes to the same translation units the legacy ``-p`` auto-match and the
+    ADR-039 collector already do. Matching is
+    :func:`abicheck.build_context.source_matches_filter`'s -- the one shared
+    definition, so the three layers cannot select different units for the same
+    filter.
+
+    Returns *compile_units* unchanged for a ``None``/empty filter (every
+    pre-existing caller) **and for a filter that matches nothing**: the second
+    is the same conservative fallback ``build_context._filter_entries_by_glob``
+    and ``header_conditionals.collect_build_context`` already apply, and the
+    reasoning transfers unchanged -- a glob matching no TU is much more likely
+    a typo than a request to discard all real build evidence, and this
+    function's caller treats "no units" as "no L3 evidence at all", which would
+    silently drop a fold that was working before the filter was added.
+    """
+    if not source_filter:
+        return compile_units
+    from ..build_context import source_matches_filter
+
+    matched = [
+        cu
+        for cu in compile_units
+        if cu.source
+        and source_matches_filter(cu.source, cu.directory or None, source_filter)
+    ]
+    return matched or compile_units
+
+
 def _matching_compile_units(
     compile_units: Sequence[CompileUnit], headers: Sequence[Path]
 ) -> list[CompileUnit]:
@@ -1252,6 +1286,7 @@ def resolve_header_compile_context(
     explicit: CompileContext | None = None,
     lang: str | None = None,
     lang_explicit: bool = False,
+    source_filter: str | None = None,
 ) -> HeaderCompileContextResolution:
     """Resolve a single L2 :class:`CompileContext` from L3 ``CompileUnit`` facts.
 
@@ -1346,6 +1381,28 @@ def resolve_header_compile_context(
     already resolved -- via either spelling -- must not raise
     ``HeaderCompileContextAmbiguousError``.
 
+    *source_filter* is ``dump --compile-db-filter``'s glob, narrowing the
+    compile units considered *before* header matching — the caller's own,
+    explicit answer to "which translation unit's context does this header
+    belong to". Threading it here is what makes the ambiguity message below
+    actionable: that message names ``--compile-db-filter`` as one of the ways
+    to narrow the input, but until this parameter existed the filter reached
+    only the legacy ``-p`` auto-match and this function still saw every unit,
+    so a user who followed the advice got the identical error back (reproduced
+    end to end: ``dump --depth headers -H api.h --build-info db.json
+    --compile-db-filter a.cpp`` over two TUs disagreeing on an ABI-relevant
+    ``-D``). ``None`` (every pre-existing caller) is a no-op.
+
+    Matching semantics are ``build_context.source_matches_filter``'s, shared
+    rather than re-implemented so the filter cannot select one set of units
+    here and a different set in the ADR-039 collector. An **empty** match
+    keeps every unit, the same conservative rule
+    ``build_context._filter_entries_by_glob`` and
+    ``header_conditionals.collect_build_context`` already apply: a filter that
+    matches nothing is far more likely a mistyped glob than a genuine request
+    for no build evidence at all, and silently discarding real L3 evidence for
+    it would be the worse failure.
+
     Raises :class:`~abicheck.errors.HeaderCompileContextAmbiguousError` when
     two or more of the matched ``CompileUnit``s disagree on an ABI-relevant
     field the caller has not already pinned via *explicit* — the one case
@@ -1354,8 +1411,9 @@ def resolve_header_compile_context(
     """
     if build_evidence is None or not build_evidence.compile_units or not headers:
         return _EMPTY_RESOLUTION
+    units = filter_units_by_source(build_evidence.compile_units, source_filter)
     resolved_headers = _expand_header_directories([Path(h) for h in headers])
-    matched = _matching_compile_units(build_evidence.compile_units, resolved_headers)
+    matched = _matching_compile_units(units, resolved_headers)
     if not matched:
         return _EMPTY_RESOLUTION
 

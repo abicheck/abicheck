@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for :mod:`abicheck.artifact_plan` — Phase 1 (Milestone A) of the
-duplication-and-convergence plan's ``ResolvedArtifactPlan`` primitive."""
+"""Tests for :mod:`abicheck.artifact_plan` — Phase 1 (Milestones A and B) of
+the duplication-and-convergence plan's ``ResolvedArtifactPlan`` primitive."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
@@ -192,8 +194,6 @@ def test_default_construction_leaves_resolved_facts_none() -> None:
 
 
 def test_resolved_facts_are_stored_verbatim() -> None:
-    from pathlib import Path
-
     plan = ResolvedArtifactPlan(
         binary_format="elf",
         lang="c++",
@@ -224,3 +224,56 @@ def test_resolved_facts_do_not_interfere_with_cleanup_ownership() -> None:
     with ResolvedArtifactPlan(binary_format="elf") as plan:
         plan.pending_cleanups.append(lambda: calls.append("a"))
     assert calls == ["a"]
+
+
+# --------------------------------------------------------------------------
+# Milestone B: resolve_dump_request() wiring
+# --------------------------------------------------------------------------
+#
+# A separate section (not tests/test_typed_dump_request.py, where this test
+# would otherwise belong topically) because that file is already at its
+# 2000-line AI-readiness hard cap -- see AGENTS.md's file-size gate.
+
+
+@pytest.fixture()
+def snap_path(tmp_path: Path) -> Path:
+    from abicheck.model import AbiSnapshot, Function
+    from abicheck.serialization import snapshot_to_json
+
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        functions=[Function(name="foo", mangled="foo", return_type="void", params=[])],
+    )
+    p = tmp_path / "lib.abi.json"
+    p.write_text(snapshot_to_json(snap), encoding="utf-8")
+    return p
+
+
+def test_resolve_dump_request_attaches_a_matching_artifact_plan(
+    snap_path: Path,
+) -> None:
+    """Dedup-and-convergence plan, Phase 1 item 1 'Milestone B': the
+    resolved-fact fields resolve_dump_request already computes must also
+    land on the general ResolvedArtifactPlan it attaches, verbatim -- not a
+    second, independently-derived copy that could drift."""
+    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service_dump_pipeline import resolve_dump_request
+
+    resolved = resolve_dump_request(
+        DumpRequest(input=InputSpec(path=snap_path, headers=()))
+    )
+    plan = resolved.artifact_plan
+    assert isinstance(plan, ResolvedArtifactPlan)
+    assert plan.binary_format == resolved.fmt
+    assert plan.lang == resolved.lang
+    assert plan.header_backend == resolved.header_backend
+    assert plan.effective_header_backend == resolved.effective_header_backend
+    assert plan.requested_depth == resolved.requested_depth
+    assert plan.collect_mode == resolved.collect_mode
+    assert plan.public_headers == resolved.public_headers
+    assert plan.public_header_dirs == resolved.public_header_dirs
+    # Resolution allocates no resource today (the L3->L2 fold stays inside
+    # execute -- see artifact_plan.py's own module docstring), so the
+    # attached plan must start with nothing to clean up.
+    assert plan.pending_cleanups == []

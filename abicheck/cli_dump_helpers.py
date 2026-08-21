@@ -25,19 +25,33 @@ import click
 
 from . import dumper_cache
 from .artifact_plan import ResolvedArtifactPlan
+
+# `resolve_dump_depth`/`resolve_dump_collect_context` moved to
+# `cli_dump_depth.py`, purely to stay under the AI-readiness 2000-line hard
+# cap (see that module's own docstring). Re-exported here (the `as`-aliased
+# form ruff/mypy both recognize as an explicit re-export, not an unused
+# import) so every pre-existing `from .cli_dump_helpers import
+# resolve_dump_depth`/`resolve_dump_collect_context` -- `cli_compare_helpers.
+# py` calls the former directly -- keeps resolving unchanged. A real, eager
+# import rather than the lazy `__getattr__` shim below: a dynamic
+# module-level `__getattr__` is opaque to mypy at a *call* site, unlike the
+# four names in that shim, which nothing outside this module calls as a
+# function. No cycle risk: `cli_dump_depth.py` imports only
+# `.buildsource.scan_levels`/`click`.
+from .cli_dump_depth import (
+    resolve_dump_collect_context as resolve_dump_collect_context,
+    resolve_dump_depth as resolve_dump_depth,
+)
 from .dumper import dump
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
 
-# `_attach_build_context`/`_user_define_flags` are called directly below by
-# `perform_elf_dump` (not just re-exported for a caller elsewhere), so this
-# static edge to `header_conditionals` is structurally required regardless of
-# re-export strategy -- unlike the two names in the lazy `__getattr__` shim
-# further down, which `perform_elf_dump` never calls itself.
-from .header_conditionals import (
-    attach_build_context as _attach_build_context,
-    user_define_flags as _user_define_flags,
-)
+# `attach_build_context_for_parsed_headers` is called directly below by
+# `perform_elf_dump`, so this static edge to `header_conditionals` (a verified
+# leaf module) is structurally required regardless of re-export strategy --
+# unlike the four names in the lazy `__getattr__` shim further down, which
+# nothing in this module calls itself.
+from .header_conditionals import attach_build_context_for_parsed_headers
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -91,38 +105,41 @@ class _WriteSnapshotOutput(Protocol):
         header_roots: tuple[Path, ...] = ...,
         clang_bin: str = ...,
         snapshot_compression: str = ...,
+        public_headers: tuple[Path, ...] = ...,
+        public_header_dirs: tuple[Path, ...] = ...,
     ) -> None: ...
 
 
-# `_user_define_flags`/`_attach_build_context` (used below by `perform_elf_dump`)
-# are now `header_conditionals.user_define_flags`/`attach_build_context`,
-# imported above under their original private names — see that module for the
-# ADR-039 collection logic and why it moved (PR C, CLI cleanup phase two).
-
 # ── Back-compat re-export shim (lazy, per AGENTS.md's moved-helper
 #    convention) ────────────────────────────────────────────────────────────
-# `compile_db_from_build_info`/`compile_db_filter_scope_error` moved to
-# `header_conditionals.py` alongside `_attach_build_context`/
-# `_user_define_flags` above -- but unlike those two, nothing in this module
-# calls either of these itself (confirmed by grep: no `compile_db_from_
-# build_info(`/`compile_db_filter_scope_error(` call site here). They exist
-# only so `from .cli_dump_helpers import compile_db_from_build_info,
-# compile_db_filter_scope_error` (cli.py) and existing tests keep working
-# unchanged. A static re-export here would be an eager dependency edge this
-# module has no other reason to carry for these two names, so this
-# module-level `__getattr__` (PEP 562) resolves them lazily via
-# `importlib.import_module` instead -- mirroring the identical shim at the
-# tail of `cli_buildsource.py` (Codex review, PR #809).
-_HEADER_CONDITIONALS_REEXPORTS = frozenset(
-    {"compile_db_from_build_info", "compile_db_filter_scope_error"}
-)
+# All four of these live in `header_conditionals.py` (see that module for the
+# ADR-039 collection logic and why it moved -- PR C, CLI cleanup phase two) and
+# nothing in this module calls any of them itself. `attach_build_context`/
+# `user_define_flags` joined this shim in PR 3A: `perform_elf_dump` used to
+# call both directly (a structurally required static edge), but now reaches
+# them only through `attach_build_context_for_parsed_headers` -- the one shared
+# ADR-039 gate this call site, the typed pipeline's
+# `_resolve_side_snapshot_impl`, and `scan_engine._build_new_snapshot` all use.
+# They stay reachable under their original private names purely so
+# `from .cli_dump_helpers import ...` (cli.py) and existing tests keep working
+# unchanged. A static re-export would be an eager dependency edge this module
+# has no other reason to carry for these names, so this module-level
+# `__getattr__` (PEP 562) resolves them lazily via `importlib.import_module`
+# instead -- mirroring the identical shim at the tail of `cli_buildsource.py`
+# (Codex review, PR #809).
+_HEADER_CONDITIONALS_REEXPORTS: dict[str, str] = {
+    "compile_db_from_build_info": "compile_db_from_build_info",
+    "compile_db_filter_scope_error": "compile_db_filter_scope_error",
+    "_attach_build_context": "attach_build_context",
+    "_user_define_flags": "user_define_flags",
+}
 
 
 def __getattr__(name: str) -> Any:
-    if name in _HEADER_CONDITIONALS_REEXPORTS:
+    if (target := _HEADER_CONDITIONALS_REEXPORTS.get(name)) is not None:
         import importlib
 
-        return getattr(importlib.import_module("abicheck.header_conditionals"), name)
+        return getattr(importlib.import_module("abicheck.header_conditionals"), target)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -162,41 +179,6 @@ def check_dump_debug_format_error(
         )
     return None
 
-
-def resolve_dump_depth(
-    depth: str | None,
-    default_mode: str,
-) -> str:
-    """Resolve the ``--depth`` dial into the internal collect-mode value.
-
-    ``--depth`` is the friendly evidence-depth dial (same vocabulary as
-    ``scan --depth``: binary/headers/build/source); it expands to the
-    underlying ADR-033 collect mode via the shared ``scan_levels`` mapping so the
-    commands stay consistent. When no depth preset is supplied, the command's
-    *default_mode* is returned (``dump`` embeds at ``source-target``;
-    ``compare`` reads at ``off``).
-    """
-    from .buildsource.scan_levels import (
-        EvidenceDepth,
-        SourceScope,
-        depth_to_method,
-        level_to_collect_mode,
-    )
-
-    if depth is None:
-        return default_mode
-    evidence_depth = EvidenceDepth(depth)
-    method = depth_to_method(evidence_depth)
-    if method is None:
-        # headers/binary depth reaches no source method (L2 is intrinsic) --
-        # collect nothing.
-        return "off"
-    # dump/compare always resolve --depth source at target scope (ADR-043 D3):
-    # the fix for the zero-TU defect where an explicit deep depth without a
-    # change seed silently selected no translation units.
-    return level_to_collect_mode(
-        method, evidence_depth, source_scope=SourceScope.TARGET
-    )
 
 
 def evidence_depth_label(
@@ -1292,66 +1274,13 @@ def handle_non_elf_dump(
             exclude_cl_style=False,
         ),
         snapshot_compression=snapshot_compression,
+        # L4 replay classifies declarations against these roots; with none it
+        # classifies everything private and links nothing (measurement in
+        # `_write_snapshot_output`'s own docstring).
+        public_headers=tuple(public_headers),
+        public_header_dirs=tuple(public_header_dirs),
     )
 
-
-def resolve_dump_collect_context(
-    depth: str | None,
-    resolved_collect_mode: str | None,
-    sources: Path | None,
-    build_info: Path | None,
-    headers: tuple[Path, ...],
-    inputs_pack: Path | None = None,
-) -> tuple[str, tuple[Path, ...]]:
-    """Resolve the --depth preset into the internal collect mode for a dump.
-
-    Returns the ``(collect_mode, headers)`` pair the caller should proceed
-    with — ``--depth binary`` suppresses the L2 header AST (and, with it, the
-    compile database the caller derives from ``--build-info``), and an
-    explicitly-requested deep depth without a source tree / build context
-    warns loudly (G21.7-style fail-loud).
-    """
-    # Resolve the --depth preset into the internal collect mode before any dump
-    # path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the same
-    # evidence depth (G21.1). With no preset, dump embeds at "source-target".
-    # ``compare``'s inline source-tree embed already resolved the mode and hands
-    # it over via the private _resolved_collect_mode hook so we don't re-derive a
-    # different default here (Codex review).
-    if (
-        resolved_collect_mode is not None
-    ):  # pragma: no cover - only via compare's inline embed (integration)
-        collect_mode = resolved_collect_mode
-    else:
-        collect_mode = resolve_dump_depth(depth, "source-target")
-    # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
-    # A compile DB only feeds the header parse, and the caller derives it from
-    # these headers, so dropping them drops it too.
-    if depth == "binary":
-        headers = ()
-
-    # An *explicitly* requested deep evidence depth (--depth) collects nothing
-    # without a source tree / build context: _write_snapshot_output only embeds
-    # when --sources/--build-info is given. Warn loudly rather than silently
-    # writing an L0-L2 snapshot for an explicitly-requested deep depth (Codex
-    # review). The bare default (collect_mode "source-target" with no flag) stays
-    # silent -- embedding is a no-op there by design. G21.7-style fail-loud (a
-    # warning, not an error).
-    depth_requested = depth is not None
-    if (
-        depth_requested
-        and collect_mode != "off"
-        and sources is None
-        and build_info is None
-        and inputs_pack is None
-    ):
-        click.echo(
-            f"Warning: evidence depth '{collect_mode}' was requested but no "
-            "--sources/--build-info/--inputs was given; the snapshot will carry "
-            "only L0-L2 data (no build/source/graph facts). Pass --sources, "
-            "--build-info, or --inputs, or use --depth headers for an L2-only dump.",
-            err=True,
-        )
-    return collect_mode, headers
 
 
 def resolve_dump_compile_context(
@@ -1450,6 +1379,7 @@ def perform_elf_dump(
     include_dependencies: bool = False,
     snapshot_compression: str = "auto",
     lang_explicit: bool = False,
+    legacy_build_context_flags: tuple[str, ...] = (),
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -1496,6 +1426,31 @@ def perform_elf_dump(
     from whether any castxml flags were derived (a genuinely matched TU with
     no ABI-relevant flags to forward is still real build-context evidence,
     not an absent one — Codex review, second finding on this signal).
+
+    ``legacy_build_context_flags`` (CLI cleanup phase two, PR 3A): the *first*
+    element of that same ``_resolve_build_context_flags`` call -- the castxml
+    flags the legacy ``-p``/``--compile-db`` auto-match derived, which
+    ``dump_cmd`` has already folded into ``effective_gcc_options`` via
+    ``_merge_gcc_options``. Passed here (rather than only their merged
+    result) so this function can *unfold* them for the one case where they
+    are not merely redundant but actively wrong: the legacy match and the
+    P0.3 L3->L2 fold below are fed by the **same** ``--build-info`` compile
+    database, so when the fold resolves a context for these headers, the
+    legacy match's own derivation is a second, unwanted copy of the same
+    evidence. Measured, not assumed (see the plan's PR 3A section for the
+    full account): the duplicate showed up as ``macro_ops`` recording the
+    same ``-D`` twice where every other resolver records it once, and as an
+    empty ``include_sequence`` where every other resolver records a real
+    slot -- the legacy match supplies ``-I<dep>`` as *explicit* context
+    before the L2 seed runs, so ``seed_l2_includes`` (correctly) declines to
+    seed a directory explicit context already provides, and the directory
+    reaches the parse through ``gcc_option_tokens``, which contributes no
+    ``declared_includes`` slot. Both make a ``dump``-written snapshot's
+    ``profile_fingerprint`` differ from the one every other path produces
+    from the identical evidence, which a ``scan --against`` correctly
+    refuses. When the fold does **not** apply (no ``--build-info``, or a
+    header the fold could not match), the legacy match still runs and still
+    applies, exactly as before -- only the overlap is dropped.
 
     ``include_dependencies`` (``dump --include-system-declarations``): by default,
     ``write_snapshot_output`` excludes toolchain/system-header declarations
@@ -1587,6 +1542,17 @@ def perform_elf_dump(
     # that reassignment folds the derived flags in before this variable is
     # read again. Captured here, before any L3 reassignment.
     _user_gcc_option_tokens = gcc_option_tokens
+    # CLI cleanup phase two, PR 3A: the explicit context the P0.3 fold below
+    # merges over is the caller's OWN --gcc-options string, never the legacy
+    # -p/--compile-db auto-match's derived flags already folded into
+    # effective_gcc_options -- both read the same --build-info database, so
+    # presenting the legacy result to the fold as an explicit user choice is
+    # what recorded the same evidence twice (see the `legacy_build_context_
+    # flags` docstring paragraph above). Identical to effective_gcc_options
+    # whenever the legacy match derived nothing.
+    _fold_explicit_gcc_options = (
+        user_gcc_options if legacy_build_context_flags else effective_gcc_options
+    )
     # Phase 1 (dedup-and-convergence plan) Milestone A: the two try blocks
     # below share one `ResolvedArtifactPlan` session spanning from the L2
     # seed's own resource allocation through the whole post-dump pipeline --
@@ -1626,7 +1592,7 @@ def perform_elf_dump(
             # is kept. `deferred` excluded (Codex review): already implied
             # by these tokens when non-empty, and including it would wrongly
             # rank it ahead of L3-derived includes -- appended back below.
-            gcc_options=effective_gcc_options,
+            gcc_options=_fold_explicit_gcc_options,
             gcc_option_tokens=tuple(gcc_option_tokens),
             sysroot=sysroot,
             nostdinc=nostdinc,
@@ -1639,6 +1605,19 @@ def perform_elf_dump(
             lang=lang,
             lang_explicit=lang_explicit,
             pending_cleanups=_artifact_plan.pending_cleanups,
+            # `--compile-db-filter`'s own glob: the caller's explicit answer
+            # to "which translation unit's context does this header belong
+            # to". Until this was threaded, the filter reached only the
+            # legacy `-p` auto-match, so the P0.3 fold still saw every
+            # compile unit -- and a header compiled under two ABI-relevant
+            # contexts raised HeaderCompileContextAmbiguousError whose own
+            # message names `--compile-db-filter` as the way to narrow the
+            # input, which the user had already done. Reproduced end to end
+            # before the fix; see `resolve_header_compile_context`'s own
+            # `source_filter` docstring. `handle_non_elf_dump` (PE/Mach-O)
+            # gets no equivalent: `dump_cmd` never threads the filter there,
+            # so there is nothing to forward.
+            source_filter=compile_db_filter,
         )
         if l3_context_applied:
             gcc_path = l3_effective_ctx.gcc_path
@@ -1732,26 +1711,54 @@ def perform_elf_dump(
         # record fields, so the reconciler can clear a context-free header-parse false
         # positive (a guarded field the context-free castxml parse pruned). Best-effort
         # and additive: absent/empty on a plain context-free dump.
-        if effective_compile_db and resolved_headers:
-            # Augment the sound per-command compile-DB intersection with the user's
-            # *global* flags only: the repeatable ``--compiler-option`` tokens and the
-            # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
-            # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
-            # review #498). We deliberately do NOT feed ``effective_gcc_options``,
-            # which also carries the *first* resolved header's auto-derived build
-            # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
-            # active for every scanned header. The P0.3 L3->L2 fold's own derived
-            # flags are excluded for the identical reason: ``_user_gcc_option_tokens``
-            # is captured before the fold's ``l3_context_applied`` reassignment, so a
-            # per-header-matched compile unit's own ``-D``/``-U`` never leaks into this
-            # snapshot-wide harvest either (Codex review).
-            _attach_build_context(
-                snap,
-                effective_compile_db,
-                resolved_headers,
-                _user_define_flags(_user_gcc_option_tokens, user_gcc_options),
-                source_filter=compile_db_filter,
-            )
+        #
+        # Routed through the one shared gate every resolver now uses (CLI
+        # cleanup phase two, PR 3A -- dump/scan resolver convergence): this
+        # call site, the typed pipeline's ``_resolve_side_snapshot_impl``, and
+        # ``scan_engine._build_new_snapshot`` each hand-wrote their own version
+        # of "does this input have build context", which is how ``scan`` ended
+        # up never collecting any. See
+        # :func:`~abicheck.header_conditionals.attach_build_context_for_parsed_headers`
+        # for each gate and its reason. One of them is new *here*, and it
+        # matches what this same function already does one stanza above for the
+        # sibling ``parsed_with_build_context`` stamp: ``snap.from_headers``. A
+        # ``--dwarf-only`` run explicitly ignores ``-H`` (``dumper.
+        # _try_dwarf_snapshot`` warns "ignoring provided headers" and leaves
+        # ``from_headers`` False), so a database matching the *requested*
+        # headers is not evidence about a snapshot that never parsed them --
+        # exactly the reasoning already recorded for the stamp above, and the
+        # way ``handle_non_elf_dump`` gates its own.
+        #
+        # ``_user_gcc_option_tokens``/``user_gcc_options`` are the user's own
+        # *global* flags only: the repeatable ``--compiler-option`` tokens and
+        # the ``-D``/``-U`` in the ``--gcc-options`` string. A user
+        # ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex review
+        # #498). We deliberately do NOT feed ``effective_gcc_options``, which
+        # also carries the *first* resolved header's auto-derived build context
+        # — unioning that snapshot-wide would mark one TU's ``-DKEEP`` active
+        # for every scanned header. The P0.3 L3->L2 fold's own derived flags
+        # are excluded for the identical reason: ``_user_gcc_option_tokens`` is
+        # captured before the fold's ``l3_context_applied`` reassignment, so a
+        # per-header-matched compile unit's own ``-D``/``-U`` never leaks into
+        # this snapshot-wide harvest either (Codex review).
+        #
+        # ``live_elf_parse=True`` unconditionally, and ``effective_compile_db``
+        # passed rather than re-resolved: ``dump_cmd`` reached this function
+        # only after ``_normalize_binary_input`` classified ``so_path`` as a
+        # real ELF binary (never a loaded JSON snapshot, the other half that
+        # gate excludes), and it already resolved the compile database from
+        # ``--build-info`` through the very same
+        # ``compile_db_from_build_info`` -- so re-deriving it here would only
+        # risk the two disagreeing.
+        attach_build_context_for_parsed_headers(
+            snap,
+            resolved_headers,
+            compile_db=effective_compile_db,
+            live_elf_parse=True,
+            user_gcc_option_tokens=_user_gcc_option_tokens,
+            user_gcc_options=user_gcc_options,
+            source_filter=compile_db_filter,
+        )
 
         # G14: recognise a CPython extension module and attach its metadata so the
         # written snapshot carries the abi3 / imported-C-API surface. The ELF `dump`
@@ -1917,4 +1924,9 @@ def perform_elf_dump(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
         snapshot_compression=snapshot_compression,
+        # L4 replay classifies declarations against these roots; with none it
+        # classifies everything private and links nothing (measurement in
+        # `_write_snapshot_output`'s own docstring).
+        public_headers=tuple(public_headers),
+        public_header_dirs=tuple(public_header_dirs),
     )

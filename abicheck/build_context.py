@@ -732,26 +732,162 @@ class BuildContext:
         return bool(self.define_conflicts) or len(self.standard_variants) > 1
 
 
+def source_matches_filter(
+    file: str | Path, directory: str | Path | None, pattern: str
+) -> bool:
+    """Whether a translation unit's *file* matches a ``source_filter`` glob.
+
+    The one definition of what ``--compile-db-filter`` means, shared by every
+    layer that narrows a compile database by it — this module's own
+    :class:`CompileEntry` scan, ``header_conditionals``' raw-dict scan for the
+    ADR-039 collector, and ``buildsource.header_compile_context``'s
+    :class:`~abicheck.buildsource.adapters.base.CompileUnit` scan for the P0.3
+    L3→L2 fold. Three layers had (or would have had) their own copy of this
+    predicate; the same shape has already drifted silently once in this
+    codebase (the MSVC-driver vocabulary, third finding on the root
+    ``AGENTS.md``'s forced-include entry), and a filter that selects different
+    translation units in the L2 fold than in the collector is exactly the kind
+    of disagreement that produces a snapshot describing two builds at once.
+
+    A **relative** *file* is resolved against *directory* first (matching how
+    :class:`CompileEntry` stores ``directory / file``), then the pattern is
+    tested against the absolute path, the directory-relative path, and the
+    CWD-relative path — so an absolute filter matches a relative-``file``
+    entry and a relative ``src/libfoo/**`` filter matches an absolute-``file``
+    entry.
+
+    A redacted ``CompileUnit`` (``buildsource.redaction.RedactionPolicy``,
+    ADR-032 D7) is a real, common caller shape this must not double-join:
+    both ``source`` and ``directory`` have their shared home prefix replaced
+    with the same placeholder (``~`` by default, but caller-configurable —
+    ``home_replacements`` is an arbitrary ``{prefix: placeholder}`` map, and
+    this codebase has real callers using a non-``~`` placeholder), so a
+    redacted *file* like ``~/proj/a.cpp`` is *not* :meth:`Path.is_absolute`
+    — the placeholder isn't a root — but it is already anchored under the
+    identically-redacted *directory* (``~/proj``), not a bare relative name
+    that needs joining. Joining it anyway produced ``~/proj/~/proj/a.cpp``
+    (Codex review, P1), silently matching nothing and falling back to
+    "every compile unit matches".
+
+    That "already anchored" question turns out to have no reliable lexical
+    answer, though (Codex review, P2, fresh evidence): an *ordinary*
+    relative *file* that happens to share its leading segment with
+    *directory* — e.g. ``directory="build"``, ``file="build/a.cpp"``, no
+    redaction involved at all — is *exactly* as
+    :meth:`Path.is_relative_to`-true as the genuinely-redacted case, and
+    real ``CompileEntry``/compilation-database semantics still join it
+    unconditionally (``build/build/a.cpp``, not ``build/a.cpp``). A single
+    lexical check on *file* and *directory* alone cannot distinguish "this
+    prefix match is a redaction artifact" from "this prefix match is a
+    coincidence of ordinary naming" — the two inputs are structurally
+    identical. Rather than guess wrong in one direction or the other, both
+    interpretations are tested as candidate paths (the joined path, matching
+    real ``CompileEntry`` semantics, *and* the raw, unjoined *file*, matching
+    an already-anchored redacted spelling) and the pattern is checked against
+    every form of each. This can only ever *widen* what a filter selects
+    relative to picking one interpretation (a pattern that would have
+    matched under either reading still matches; one that matches under only
+    one reading now also matches) — never narrow it, so it cannot reintroduce
+    either the double-join false-negative or a symmetric coincidental-prefix
+    false-negative. A pattern that specifically distinguishes the join
+    boundary itself (rare — this needs the filter to name the intermediate
+    directory-vs-anchor structure, not just a filename or suffix) is the one
+    narrow case that can now match a translation unit a single "correct"
+    reading would have excluded; consistently true across all three call
+    sites sharing this function is what matters here, not a hypothetical
+    single ground truth this function cannot observe.
+
+    A **redacted unit matched against an unredacted (real, absolute) filter**
+    is a sibling gap (Codex review, P1, fresh evidence beyond the
+    relative-filter case): a caller running ``--compile-db-filter
+    /home/u/proj/a.cpp`` against a redacted compile database never matches,
+    since ``~/proj/a.cpp`` and ``/home/u/proj/a.cpp`` share no path segments
+    to compare at all — neither is a prefix of the other; they're both
+    anchors. Closed by expanding a literal leading ``~``/``~user`` component
+    (:func:`os.path.expanduser`, the exact inverse of ``RedactionPolicy``'s
+    *default* placeholder — this does not help a caller using a custom one)
+    on *file*, *directory*, **and** *pattern* before anything else — so a
+    real, unredacted filter matches a default-redacted unit, and a filter a
+    user deliberately spells with ``~`` (their own shorthand for home, not
+    necessarily redaction-derived) still matches an unredacted unit. Only a
+    literal leading ``~`` expands; an ordinary relative name (``a.cpp``,
+    ``src/a.cpp``) or absolute path is untouched.
+
+    A **relative *directory*** (Codex review, P1, fresh evidence): real
+    ``compile_commands.json`` entries always give ``directory`` absolute
+    (mandatory per the Clang compilation-database spec), but this function
+    does not enforce that, and a caller can hand it a relative one. The
+    joined candidate above then stays relative too, so it can never match
+    an absolute ``--compile-db-filter`` — the spelling a user would
+    naturally supply, and the one ``CompileEntry.from_dict()`` itself
+    resolves to before this scan runs. Closed the same way as every other
+    candidate-shape gap here: the CWD-resolved absolute form of any
+    relative candidate is tested as one more reading, never in place of the
+    relative ones.
+    """
+
+    def _expand_leading_tilde(value: str) -> str:
+        return os.path.expanduser(value) if value.startswith("~") else value
+
+    file = _expand_leading_tilde(str(file))
+    if directory is not None:
+        directory = _expand_leading_tilde(str(directory))
+    pattern = _expand_leading_tilde(pattern)
+
+    path = Path(file)
+    candidates = [path]
+    if not path.is_absolute() and directory is not None:
+        # Both readings are tested — see the docstring's "no reliable
+        # lexical answer" paragraph — rather than guessing via a prefix
+        # check that cannot distinguish a redaction artifact from an
+        # ordinary directory/file naming coincidence.
+        candidates.append(Path(directory) / path)
+
+    for candidate in list(candidates):
+        # A *relative* candidate resolved against the CWD (Codex review, P1,
+        # fresh evidence): when `directory` itself is relative (real
+        # compile_commands.json entries always give it absolute per the
+        # Clang compilation-database spec, but this function does not
+        # enforce that — nothing rejects a non-conformant relative one), the
+        # joined candidate above stays relative too, so it can never match
+        # an absolute `--compile-db-filter` (the spelling a user would
+        # naturally supply, and the one `CompileEntry.from_dict()` itself
+        # resolves to before the L2/legacy layers inspect it — those layers
+        # therefore select only the requested TU while this raw scan falls
+        # back to "every entry matches", exactly the over-broad failure mode
+        # every earlier fix in this function's history closed for a
+        # different candidate shape). Adding the CWD-resolved absolute form
+        # as one more candidate is the same "test another interpretation,
+        # never remove one" widening this function's docstring already
+        # commits to — it can only let an absolute filter additionally
+        # match, never suppress an existing match.
+        if not candidate.is_absolute():
+            candidates.append(Path.cwd() / candidate)
+
+    for candidate in candidates:
+        if fnmatch(str(candidate), pattern):
+            return True
+        if directory is not None:
+            try:
+                if fnmatch(str(candidate.relative_to(directory)), pattern):
+                    return True
+            except ValueError:
+                pass  # candidate is not under directory — try the next form
+        try:
+            if fnmatch(str(candidate.relative_to(Path.cwd())), pattern):
+                return True
+        except ValueError:
+            pass
+    return False
+
+
 def _entry_matches_filter(entry: CompileEntry, pattern: str) -> bool:
     """Test if a compile entry matches a source_filter glob pattern.
 
-    Tests the pattern against the absolute path and also against the
-    path relative to the entry's compilation directory, so that relative
-    patterns like ``src/libfoo/**`` work as documented.
+    A thin caller of :func:`source_matches_filter` — see that function for the
+    matching rules and for why they live in one place.
     """
-    abs_str = str(entry.file)
-    if fnmatch(abs_str, pattern):
-        return True
-    # Also test against relative path (from the entry's build directory)
-    try:
-        rel_str = str(entry.file.relative_to(entry.directory))
-    except ValueError:
-        # file is not under directory — try CWD-relative too
-        try:
-            rel_str = str(entry.file.relative_to(Path.cwd()))
-        except ValueError:
-            return False
-    return fnmatch(rel_str, pattern)
+    return source_matches_filter(entry.file, entry.directory, pattern)
 
 
 def load_compile_db(path: Path) -> list[CompileEntry]:

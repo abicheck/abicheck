@@ -125,6 +125,37 @@
       "skill": "check-abi-compatibility",
       "status": "ready"
     },
+    "constant-value-changed": {
+      "affects": [
+        "check-abi-compatibility"
+      ],
+      "architectures": [],
+      "category": "A",
+      "digest": "sha256:37c3dacf5ab0c31a9987a3494072ed41fab4c298bae6ff6a076c97e5de30693c",
+      "expected": {
+        "kinds": [
+          "constant_changed"
+        ],
+        "min_evidence": "L2",
+        "resolved_from": "examples/ground_truth.json",
+        "verdict": "API_BREAK"
+      },
+      "inputs": "examples/case124_header_constant_value_changed",
+      "invocation": {},
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "prompt": "We changed the value of a public constant in our headers \u2014 no function signatures moved. Can existing binaries keep running against the new library as-is, or do they need to be rebuilt?",
+      "roots": [
+        "agent-evals/skills/scenarios.yaml",
+        "examples/case124_header_constant_value_changed",
+        "examples/ground_truth.json"
+      ],
+      "skill": "check-abi-compatibility",
+      "status": "ready"
+    },
     "consumer-actually-affected": {
       "affects": [
         "check-abi-compatibility"
@@ -357,6 +388,35 @@
       "skill": "check-abi-compatibility",
       "status": "ready"
     },
+    "runtime-floor-raised": {
+      "affects": [
+        "check-abi-compatibility"
+      ],
+      "architectures": [],
+      "category": "A",
+      "digest": "sha256:f8e02c4347cba855225cc6e8710400493d2859866747e7d8e365ec64ca91d1dc",
+      "expected": {
+        "kinds": [
+          "runtime_floor_raised"
+        ],
+        "min_evidence": "L0",
+        "resolved_from": "examples/ground_truth.json",
+        "verdict": "COMPATIBLE_WITH_RISK"
+      },
+      "inputs": "examples/case15_noexcept_change",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "We removed the noexcept guarantee from a function that now throws internally. The symbol itself didn't change. Is this release still safe to deploy for people already running the old library?",
+      "roots": [
+        "agent-evals/skills/scenarios.yaml",
+        "examples/case15_noexcept_change",
+        "examples/ground_truth.json"
+      ],
+      "skill": "check-abi-compatibility",
+      "status": "ready"
+    },
     "struct-layout-drift": {
       "affects": [
         "check-abi-compatibility"
@@ -421,7 +481,7 @@
       "affects": [
         "check-abi-compatibility"
       ],
-      "digest": "sha256:7d4c213f999289fea05d48a91e9f9703cc8c30f11f80b653fc130be1ff7cd9f2",
+      "digest": "sha256:f70011ab33b719b96932530adb3e02e28bd910be9b6635669709917ed02f6158",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -462,7 +522,7 @@
       "roots": [
         ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:7fb8c9a3cfefc73f809cace7bef3c72d8d05e70073380586613885b2234e8d15"
+      "tree": "sha256:e68d98c537e0047eb8dc1e35291964718936466d4393ad73effe7e88d6b4e0e3"
     }
   }
 }
