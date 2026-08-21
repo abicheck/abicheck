@@ -532,6 +532,60 @@ def test_cli_resolve_exemption_covers_nested_definitions_own_head(
     assert errors == []
 
 
+def test_cli_resolve_exemption_ignores_comprehension_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A comprehension/generator expression introduces its own implicit
+    scope in CPython — a call in its result expression (here, a generator
+    expression's `elt`) executes inside *that* scope, not the wrapper's
+    own, so it must still be flagged (Codex review: only explicit
+    def/class/lambda were treated as nested scopes, so
+    `next(service.resolve_input(x) for x in paths)` nested inside the
+    wrapper was wrongly exempted)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(paths):\n"
+        "    from . import service\n"
+        "    return next(service.resolve_input(x) for x in paths)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:3" in errors[0]
+
+
+def test_cli_resolve_exemption_covers_comprehensions_outermost_iterable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opposite of the comprehension case above: only a comprehension's
+    *outermost* `for` clause's iterable is evaluated eagerly in the
+    enclosing scope (documented CPython behavior) — a call there is a
+    genuine wrapper-scope call and must stay exempt."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    return [x for x in service.resolve_input(a)]\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert errors == []
+
+
 def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -2333,12 +2333,34 @@ def _tier1_module_bindings(
     return names
 
 
+#: Every AST node shape that introduces its own implicit scope, distinct
+#: from its lexically-enclosing one — the ``def``/``class``/``lambda``
+#: trio, plus a comprehension/generator expression (``[x for x in ...]``),
+#: which CPython also compiles as a hidden nested scope (Codex review: the
+#: comprehension case was missing, so ``next(service.resolve_input(x) for x
+#: in paths)`` nested inside the wrapper was wrongly exempted).
+_SCOPE_DEFINING_TYPES: tuple[type[ast.AST], ...] = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
 def _definition_head_parts(node: ast.AST) -> list[ast.AST]:
     """The parts of a scope-defining node that execute in its *enclosing*
-    scope, right when the definition statement itself runs — decorators,
-    default-argument expressions, and (for a class) base-class/keyword
-    expressions — never the node's own body/return-expression, which is
-    the *new* scope it introduces.
+    scope, right when the node itself is evaluated — decorators,
+    default-argument expressions, base-class/keyword expressions (class),
+    and — for a comprehension — only the *outermost* ``for`` clause's
+    iterable (the one Python expression a comprehension evaluates eagerly
+    in the enclosing scope; every other clause, condition, and the
+    result expression itself run inside the comprehension's own scope).
+    Never the node's own body/return-expression, which is the *new* scope
+    it introduces.
     """
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return [*node.decorator_list, node.args]
@@ -2346,6 +2368,8 @@ def _definition_head_parts(node: ast.AST) -> list[ast.AST]:
         return [*node.decorator_list, *node.bases, *node.keywords]
     if isinstance(node, ast.Lambda):
         return [node.args]
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        return [node.generators[0].iter] if node.generators else []
     return []
 
 
@@ -2381,9 +2405,7 @@ def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
     for child in children:
         if isinstance(child, ast.Call):
             yield child
-        if isinstance(
-            child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
-        ):
+        if isinstance(child, _SCOPE_DEFINING_TYPES):
             for head_part in _definition_head_parts(child):
                 if isinstance(head_part, ast.Call):
                     yield head_part
